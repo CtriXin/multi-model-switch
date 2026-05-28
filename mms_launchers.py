@@ -945,14 +945,26 @@ def _rescue_bridge_kwargs():
     }
 
 
-def _selected_mms_config_root(env):
+def _merged_config_root_env(env):
     merged_env = dict(os.environ)
     if isinstance(env, dict):
         merged_env.update({str(key): str(value) for key, value in env.items() if value is not None})
+        if "XDG_CONFIG_HOME" not in env and any(key in env for key in ("HOME", "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME")):
+            merged_env.pop("XDG_CONFIG_HOME", None)
+    return merged_env
+
+
+def _selected_mms_config_root(env):
+    merged_env = _merged_config_root_env(env)
     try:
         return _resolve_mms_config_dir(merged_env)
     except Exception:
         return _real_user_path(".config", "mms")
+
+
+def _config_root_is_explicit(env):
+    merged_env = _merged_config_root_env(env)
+    return bool(str(merged_env.get("MMS_CONFIG_ROOT") or merged_env.get("MMS_CONFIG_DIR") or "").strip())
 
 
 def _inject_rescue_launch_env(env):
@@ -1350,7 +1362,8 @@ def _build_home_context(env, runtime, cli_name):
     account_home = _normalize_path(runtime.get("home_dir") or "")
     xdg_config_home = _normalize_path(env.get("XDG_CONFIG_HOME") or "")
     gemini_cli_home = _normalize_path(env.get("GEMINI_CLI_HOME") or "")
-    config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
+    config_root = _normalize_path(_selected_mms_config_root(env))
+    config_root_explicit = _config_root_is_explicit(env)
     expected_session_home = auth_mode == "oauth" and (
         cli_name == "claude"
         or (cli_name in {"codex", "agy"} and effective_home and effective_home != real_home)
@@ -1368,6 +1381,7 @@ def _build_home_context(env, runtime, cli_name):
         "gemini_cli_home": gemini_cli_home,
         "xdg_config_home": xdg_config_home,
         "config_root": config_root,
+        "config_root_explicit": config_root_explicit,
         "net_mode": _runtime_net_mode(runtime),
         "dns_mode": _runtime_dns_mode(runtime),
         "locale": locale_value,
@@ -1400,7 +1414,12 @@ def _validate_home_context_or_exit(context):
         _block("无法解析真实 HOME")
 
     if auth_mode != "oauth":
-        if effective_home and real_home and not _path_is_within(config_root, real_home):
+        if (
+            effective_home
+            and real_home
+            and not context.get("config_root_explicit")
+            and not _path_is_within(config_root, real_home)
+        ):
             _block(f"config_root 异常：{config_root}")
         return context
 

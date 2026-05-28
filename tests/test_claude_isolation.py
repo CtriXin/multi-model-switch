@@ -268,6 +268,61 @@ def test_rescue_launch_env_preserves_explicit_rescue_root(monkeypatch, tmp_path)
     assert env["MMS_RESCUE_CONFIG_ROOT"] == str(explicit_rescue_root)
 
 
+def test_home_context_reports_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "outside-preview-root"
+    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+
+    env = {
+        "HOME": str(gateway_home),
+        "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+        "MMS_REAL_HOME": str(real_home),
+        "REAL_HOME": str(real_home),
+        "ORIGINAL_HOME": str(real_home),
+        "MMS_CONFIG_ROOT": str(preview_root),
+    }
+
+    context = mms_launchers._build_home_context(env, {"auth_mode": "api_key"}, "codex")
+    validated = mms_launchers._validate_home_context_or_exit(context)
+
+    assert context["config_root"] == str(preview_root)
+    assert context["config_root_explicit"] is True
+    assert validated["config_root"] == str(preview_root)
+    assert context["config_root"] != str(stable_root)
+
+
+def test_home_context_defaults_to_stable_root_without_explicit_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+
+    context = mms_launchers._build_home_context(
+        {
+            "HOME": str(gateway_home),
+            "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+            "ORIGINAL_HOME": str(real_home),
+        },
+        {"auth_mode": "api_key"},
+        "codex",
+    )
+
+    assert context["config_root"] == str(stable_root)
+    assert context["config_root_explicit"] is False
+
+
 def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     real_home = tmp_path / "real-home"
