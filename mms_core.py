@@ -895,40 +895,27 @@ def _about_status_snapshot(force_update=False):
 
 
 def _short_update_status_label(status):
-    status = str(status or "").strip()
-    if not status:
-        return ""
-    if status.startswith(_L("有新版", "update available")):
-        return _L("有新版", "update available")
-    if status.startswith(_L("高于 latest", "newer than latest")):
-        return _L("高于 latest", "newer than latest")
-    return status
+    from mms_command_tools import short_update_status_label
+
+    return short_update_status_label(status, localize=_L)
 
 
 def _format_cli_about_line(cli_status):
-    current = str(cli_status.get("version") or cli_status.get("label") or "").strip()
-    status = _short_update_status_label(cli_status.get("status"))
-    status_suffix = f" · {status}" if status else ""
-    return f"{current}{status_suffix}".strip() or "-"
+    from mms_command_tools import format_cli_about_line
+
+    return format_cli_about_line(cli_status, localize=_L)
 
 
 def _format_about_latest_value(status):
-    latest = str((status or {}).get("latest") or "").strip()
-    return latest or _L("未检查", "not checked")
+    from mms_command_tools import format_about_latest_value
+
+    return format_about_latest_value(status, localize=_L)
 
 
 def _about_check_error_summary(error_text):
-    raw = str(error_text or "").strip()
-    if not raw:
-        return ""
-    lower = raw.lower()
-    if "ssl" in lower or "handshake" in lower:
-        return _L("MMS latest 检查失败：SSL handshake，可稍后重试", "MMS latest check failed: SSL handshake; retry later")
-    if "timed out" in lower or "timeout" in lower:
-        return _L("MMS latest 检查超时，可稍后重试", "MMS latest check timed out; retry later")
-    if len(raw) > 72:
-        raw = raw[:69].rstrip() + "..."
-    return raw
+    from mms_command_tools import about_check_error_summary
+
+    return about_check_error_summary(error_text, localize=_L)
 
 
 def _mms_upgrade_shell_command(*, include_clis=False):
@@ -948,10 +935,9 @@ def _cli_upgrade_shell_command(cli_name):
 
 
 def _print_about_version_summary(about_snapshot):
-    title, info_lines, _actions = _about_tui_payload(about_snapshot)
-    console.print(f"[cyan]{title}[/cyan]")
-    for label, value in info_lines:
-        console.print(f"[cyan]{label}[/cyan] {value}")
+    from mms_command_tools import display_about_version_summary
+
+    return display_about_version_summary(about_snapshot, payload_builder=_about_tui_payload, console=console)
 
 
 def _run_about_upgrade(*, target="mms", include_clis=False):
@@ -5078,48 +5064,16 @@ def _registry_doctor_report_payload(status):
 
 def _about_tui_payload(about_snapshot):
     """Build localized About status/actions for the Settings detail page."""
-    about_snapshot = about_snapshot if isinstance(about_snapshot, dict) else {}
-    version_info = about_snapshot.get("version_info") if isinstance(about_snapshot.get("version_info"), dict) else {}
-    mms_status = about_snapshot.get("mms") if isinstance(about_snapshot.get("mms"), dict) else {}
-    clis = about_snapshot.get("clis") if isinstance(about_snapshot.get("clis"), dict) else {}
-    codex_status = clis.get("codex") if isinstance(clis.get("codex"), dict) else {}
-    claude_status = clis.get("claude") if isinstance(clis.get("claude"), dict) else {}
-    info_lines = [
-        ("MMS", f"{mms_status.get('current') or version_info.get('release') or 'dev'} · {mms_status.get('status') or '-'}"),
-        (_L("MMS 最新", "MMS latest"), mms_status.get("latest") or _L("未检查", "not checked")),
-        ("Codex", _format_cli_about_line(codex_status)),
-        (_L("Codex 最新", "Codex latest"), _format_about_latest_value(codex_status)),
-        ("Claude", _format_cli_about_line(claude_status)),
-        (_L("Claude 最新", "Claude latest"), _format_about_latest_value(claude_status)),
-        ("Git", f"{version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}"),
-        (_L("安装", "Install"), f"{version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}"),
-        ("Config", CONFIG_PATH),
-    ]
-    if mms_status.get("last_error"):
-        info_lines.append((_L("检查错误", "Check error"), _about_check_error_summary(mms_status.get("last_error"))))
-    actions = [("refresh_versions", _L("刷新版本检查", "Refresh Version Check"))]
-    if mms_status.get("outdated"):
-        actions.append(("upgrade_mms", _L("升级 MMS", "Upgrade MMS")))
-    if codex_status.get("outdated"):
-        actions.append(("upgrade_codex_cli", _L("升级 Codex CLI", "Upgrade Codex CLI")))
-    if claude_status.get("outdated"):
-        actions.append(("upgrade_claude_cli", _L("升级 Claude CLI", "Upgrade Claude CLI")))
-    actions.append(("back", _L("返回", "Back")))
-    return _L("关于 / About", "About"), info_lines, actions
+    from mms_command_tools import about_tui_payload
+
+    return about_tui_payload(about_snapshot, config_path=CONFIG_PATH, localize=_L)
 
 
 def _snapshot_guard_tui_payload():
     """Build localized Snapshot Guard status/actions for the Settings detail page."""
-    info_lines = [
-        (_L("用途", "Purpose"), _L("检查/接受 MMS config drift", "Inspect / accept MMS config drift")),
-        ("CLI", f"{current_command()} guard status / accept"),
-    ]
-    actions = [
-        ("status", _L("查看当前 Snapshot 状态", "Status")),
-        ("accept", _L("接受当前 Snapshot", "Accept Current Snapshot")),
-        ("back", _L("返回", "Back")),
-    ]
-    return _L("启动快照 / Snapshot Guard", "Snapshot Guard"), info_lines, actions
+    from mms_command_tools import snapshot_guard_tui_payload
+
+    return snapshot_guard_tui_payload(command_name=current_command(), localize=_L)
 
 
 def _display_runtime_usage(runtime_kind, runtime_id, title):

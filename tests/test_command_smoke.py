@@ -401,6 +401,65 @@ def test_registry_report_payload_helpers_preserve_compact_outputs():
     assert doctor_note == ""
 
 
+def test_about_and_snapshot_payload_helpers_preserve_version_actions():
+    import mms_command_tools
+
+    localize = lambda zh, en: zh
+    title, info_lines, actions = mms_command_tools.about_tui_payload(
+        {
+            "version_info": {
+                "release": "v9.9.9",
+                "git_branch": "main",
+                "git_commit": "abc123",
+                "install_channel": "latest-tag",
+                "source": "install.sh",
+            },
+            "mms": {
+                "current": "v9.9.9",
+                "latest": "v9.9.10",
+                "status": "有新版 v9.9.10",
+                "outdated": True,
+                "last_error": "SSL handshake failed",
+            },
+            "clis": {
+                "codex": {
+                    "label": "codex-cli 0.132.0",
+                    "latest": "0.133.0",
+                    "status": "有新版 0.133.0",
+                    "outdated": True,
+                },
+                "claude": {"label": "2.1.148 (Claude Code)", "latest": "", "status": "最新"},
+            },
+        },
+        config_path="/tmp/mms/config.toml",
+        localize=localize,
+    )
+    guard_title, guard_info, guard_actions = mms_command_tools.snapshot_guard_tui_payload(
+        command_name="mmg",
+        localize=localize,
+    )
+    console = _CollectingConsole()
+    mms_command_tools.display_about_version_summary(
+        {"mms": {"current": "dev", "status": "最新"}},
+        payload_builder=lambda snapshot: ("关于 / About", [("MMS", snapshot["mms"]["current"])], [("back", "返回")]),
+        console=console,
+    )
+
+    assert title == "关于 / About"
+    assert ("MMS", "v9.9.9 · 有新版 v9.9.10") in info_lines
+    assert ("Codex", "codex-cli 0.132.0 · 有新版") in info_lines
+    assert ("Claude 最新", "未检查") in info_lines
+    assert ("Config", "/tmp/mms/config.toml") in info_lines
+    assert ("检查错误", "MMS latest 检查失败：SSL handshake，可稍后重试") in info_lines
+    assert ("upgrade_mms", "升级 MMS") in actions
+    assert ("upgrade_codex_cli", "升级 Codex CLI") in actions
+    assert ("upgrade_claude_cli", "升级 Claude CLI") not in actions
+    assert guard_title == "启动快照 / Snapshot Guard"
+    assert ("CLI", "mmg guard status / accept") in guard_info
+    assert guard_actions == [("status", "查看当前 Snapshot 状态"), ("accept", "接受当前 Snapshot"), ("back", "返回")]
+    assert console.items == ["[cyan]关于 / About[/cyan]", "[cyan]MMS[/cyan] dev"]
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

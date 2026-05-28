@@ -448,6 +448,94 @@ def registry_doctor_report_payload(status, *, localize):
     return localize("Registry Doctor / 状态", "Registry Doctor / Status"), rows, ""
 
 
+def short_update_status_label(status, *, localize):
+    status = str(status or "").strip()
+    if not status:
+        return ""
+    if status.startswith(localize("有新版", "update available")):
+        return localize("有新版", "update available")
+    if status.startswith(localize("高于 latest", "newer than latest")):
+        return localize("高于 latest", "newer than latest")
+    return status
+
+
+def format_cli_about_line(cli_status, *, localize):
+    current = str(cli_status.get("version") or cli_status.get("label") or "").strip()
+    status = short_update_status_label(cli_status.get("status"), localize=localize)
+    status_suffix = f" · {status}" if status else ""
+    return f"{current}{status_suffix}".strip() or "-"
+
+
+def format_about_latest_value(status, *, localize):
+    latest = str((status or {}).get("latest") or "").strip()
+    return latest or localize("未检查", "not checked")
+
+
+def about_check_error_summary(error_text, *, localize):
+    raw = str(error_text or "").strip()
+    if not raw:
+        return ""
+    lower = raw.lower()
+    if "ssl" in lower or "handshake" in lower:
+        return localize("MMS latest 检查失败：SSL handshake，可稍后重试", "MMS latest check failed: SSL handshake; retry later")
+    if "timed out" in lower or "timeout" in lower:
+        return localize("MMS latest 检查超时，可稍后重试", "MMS latest check timed out; retry later")
+    if len(raw) > 72:
+        raw = raw[:69].rstrip() + "..."
+    return raw
+
+
+def about_tui_payload(about_snapshot, *, config_path, localize):
+    about_snapshot = about_snapshot if isinstance(about_snapshot, dict) else {}
+    version_info = about_snapshot.get("version_info") if isinstance(about_snapshot.get("version_info"), dict) else {}
+    mms_status = about_snapshot.get("mms") if isinstance(about_snapshot.get("mms"), dict) else {}
+    clis = about_snapshot.get("clis") if isinstance(about_snapshot.get("clis"), dict) else {}
+    codex_status = clis.get("codex") if isinstance(clis.get("codex"), dict) else {}
+    claude_status = clis.get("claude") if isinstance(clis.get("claude"), dict) else {}
+    info_lines = [
+        ("MMS", f"{mms_status.get('current') or version_info.get('release') or 'dev'} · {mms_status.get('status') or '-'}"),
+        (localize("MMS 最新", "MMS latest"), mms_status.get("latest") or localize("未检查", "not checked")),
+        ("Codex", format_cli_about_line(codex_status, localize=localize)),
+        (localize("Codex 最新", "Codex latest"), format_about_latest_value(codex_status, localize=localize)),
+        ("Claude", format_cli_about_line(claude_status, localize=localize)),
+        (localize("Claude 最新", "Claude latest"), format_about_latest_value(claude_status, localize=localize)),
+        ("Git", f"{version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}"),
+        (localize("安装", "Install"), f"{version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}"),
+        ("Config", config_path),
+    ]
+    if mms_status.get("last_error"):
+        info_lines.append((localize("检查错误", "Check error"), about_check_error_summary(mms_status.get("last_error"), localize=localize)))
+    actions = [("refresh_versions", localize("刷新版本检查", "Refresh Version Check"))]
+    if mms_status.get("outdated"):
+        actions.append(("upgrade_mms", localize("升级 MMS", "Upgrade MMS")))
+    if codex_status.get("outdated"):
+        actions.append(("upgrade_codex_cli", localize("升级 Codex CLI", "Upgrade Codex CLI")))
+    if claude_status.get("outdated"):
+        actions.append(("upgrade_claude_cli", localize("升级 Claude CLI", "Upgrade Claude CLI")))
+    actions.append(("back", localize("返回", "Back")))
+    return localize("关于 / About", "About"), info_lines, actions
+
+
+def snapshot_guard_tui_payload(*, command_name, localize):
+    info_lines = [
+        (localize("用途", "Purpose"), localize("检查/接受 MMS config drift", "Inspect / accept MMS config drift")),
+        ("CLI", f"{command_name} guard status / accept"),
+    ]
+    actions = [
+        ("status", localize("查看当前 Snapshot 状态", "Status")),
+        ("accept", localize("接受当前 Snapshot", "Accept Current Snapshot")),
+        ("back", localize("返回", "Back")),
+    ]
+    return localize("启动快照 / Snapshot Guard", "Snapshot Guard"), info_lines, actions
+
+
+def display_about_version_summary(about_snapshot, *, payload_builder, console):
+    title, info_lines, _actions = payload_builder(about_snapshot)
+    console.print(f"[cyan]{title}[/cyan]")
+    for label, value in info_lines:
+        console.print(f"[cyan]{label}[/cyan] {value}")
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"
