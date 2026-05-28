@@ -1842,6 +1842,31 @@ def test_runtime_source_selection_helpers_preserve_sort_defaults_and_trace_ids()
     assert mms_command_tools.trace_runtime_account_id({"id": "codex-main", "auth_mode": "oauth"}) == "codex-main"
     assert mms_command_tools.trace_runtime_account_id({"id": "bridge", "auth_mode": "oauth_bridge", "bridge_account_id": "acct"}) == "acct"
     assert mms_command_tools.trace_runtime_bridge({"auth_mode": "oauth_bridge", "bridge_url": "http://bridge"}) == "http://bridge"
+    assert mms_command_tools.runtime_source_kind_label({"runtime_kind": "opencode_profile"}) == "OpenCode"
+    assert mms_command_tools.runtime_source_kind_label({"runtime_kind": "broker"}) == "Broker"
+    assert mms_command_tools.runtime_source_kind_label({"auth_mode": "oauth_bridge"}) == "官方桥接"
+    assert mms_command_tools.runtime_source_kind_label({"auth_mode": "oauth"}) == "官方"
+    trace_calls = []
+    mms_command_tools.trace_runtime_choice(
+        "runtime resolve",
+        {"id": "bridge", "auth_mode": "oauth_bridge", "bridge_account_id": "acct", "bridge_url": "http://bridge"},
+        launch_cli="claude",
+        choice="Bridge",
+        trace_record=lambda source, **payload: trace_calls.append((source, payload)),
+    )
+    assert trace_calls == [
+        (
+            "runtime resolve",
+            {
+                "cli": "claude",
+                "provider": "",
+                "account": "acct",
+                "bridge": "http://bridge",
+                "runtime": "oauth_bridge",
+                "choice": "Bridge",
+            },
+        )
+    ]
 
 
 def test_env_command_renders_and_writes_export_file(tmp_path):

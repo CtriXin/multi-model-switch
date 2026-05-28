@@ -2831,6 +2831,43 @@ def trace_runtime_bridge(runtime):
     return str(runtime.get("bridge_url") or runtime.get("base_url") or "").strip()
 
 
+def runtime_source_kind_label(runtime):
+    if not runtime:
+        return "网关"
+    if runtime.get("runtime_kind") == "opencode_profile":
+        return "OpenCode"
+    auth_mode = runtime.get("auth_mode")
+    if auth_mode == "broker_profile" or runtime.get("runtime_kind") == "broker":
+        return "Broker"
+    if auth_mode == "oauth_bridge":
+        return "官方桥接"
+    if auth_mode == "oauth":
+        return "官方"
+    return "网关"
+
+
+def trace_runtime_choice(
+    source,
+    runtime,
+    *,
+    launch_cli=None,
+    choice=None,
+    trace_record,
+    trace_runtime_provider_id=trace_runtime_provider_id,
+    trace_runtime_account_id=trace_runtime_account_id,
+    trace_runtime_bridge=trace_runtime_bridge,
+):
+    payload = {
+        "cli": launch_cli,
+        "provider": trace_runtime_provider_id(runtime),
+        "account": trace_runtime_account_id(runtime),
+        "bridge": trace_runtime_bridge(runtime),
+        "runtime": runtime.get("auth_mode") if isinstance(runtime, dict) else None,
+        "choice": choice,
+    }
+    trace_record(source, **payload)
+
+
 def http_status_is_success(value):
     try:
         status_code = int(str(value or "").strip())

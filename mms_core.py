@@ -2723,15 +2723,18 @@ def _trace_runtime_bridge(runtime):
 def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
     if not _trace_enabled:
         return
-    payload = {
-        "cli": launch_cli,
-        "provider": _trace_runtime_provider_id(runtime),
-        "account": _trace_runtime_account_id(runtime),
-        "bridge": _trace_runtime_bridge(runtime),
-        "runtime": runtime.get("auth_mode") if isinstance(runtime, dict) else None,
-        "choice": choice,
-    }
-    _trace_record(source, **payload)
+    from mms_command_tools import trace_runtime_choice
+
+    return trace_runtime_choice(
+        source,
+        runtime,
+        launch_cli=launch_cli,
+        choice=choice,
+        trace_record=_trace_record,
+        trace_runtime_provider_id=_trace_runtime_provider_id,
+        trace_runtime_account_id=_trace_runtime_account_id,
+        trace_runtime_bridge=_trace_runtime_bridge,
+    )
 
 
 def _trace_source_for(field, value):
@@ -6128,18 +6131,9 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model
 
 
 def _runtime_source_kind_label(runtime):
-    if not runtime:
-        return "网关"
-    if runtime.get("runtime_kind") == "opencode_profile":
-        return "OpenCode"
-    auth_mode = runtime.get("auth_mode")
-    if auth_mode == "broker_profile" or runtime.get("runtime_kind") == "broker":
-        return "Broker"
-    if auth_mode == "oauth_bridge":
-        return "官方桥接"
-    if auth_mode == "oauth":
-        return "官方"
-    return "网关"
+    from mms_command_tools import runtime_source_kind_label
+
+    return runtime_source_kind_label(runtime)
 
 
 def _choose_runtime_source(
