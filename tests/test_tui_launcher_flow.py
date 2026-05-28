@@ -46,6 +46,7 @@ from mms_tui_launcher_flow import (
     run_confirm_tui_prompt,
     safe_tui_call,
     selected_model_launch_context,
+    show_rescue_no_packets_report,
 )
 
 
@@ -1952,6 +1953,26 @@ def test_apply_rescue_demo_packet_action_writes_reports_and_pauses() -> None:
         ("write", "/repo"),
         ("payload", payload),
         ("report", ("title", [("artifact", "demo")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_show_rescue_no_packets_report_prints_error_and_pauses() -> None:
+    calls = []
+
+    result = show_rescue_no_packets_report(
+        localize=lambda zh, _en: f"zh:{zh}",
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [
+        (
+            "report",
+            ("zh:没有 rescue packet", [("zh:状态", "zh:当前没有可查看记录")]),
+            {"ok": False},
+        ),
         ("pause", "按 Enter 返回设置"),
     ]
 

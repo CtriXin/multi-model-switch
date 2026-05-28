@@ -1144,6 +1144,21 @@ def apply_rescue_demo_packet_action(
     return {"status": "continue", "payload": payload}
 
 
+def show_rescue_no_packets_report(
+    *,
+    localize,
+    print_settings_result_report,
+    pause_after_tui_report,
+):
+    print_settings_result_report(
+        localize("没有 rescue packet", "No rescue packet"),
+        [(localize("状态", "Status"), localize("当前没有可查看记录", "No records available"))],
+        ok=False,
+    )
+    pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue"}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

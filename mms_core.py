@@ -5214,12 +5214,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if landing_action != "view_packets":
                     continue
                 if not rescue_events:
-                    _print_settings_result_report(
-                        _L("没有 rescue packet", "No rescue packet"),
-                        [(_L("状态", "Status"), _L("当前没有可查看记录", "No records available"))],
-                        ok=False,
+                    tui_flow.show_rescue_no_packets_report(
+                        localize=_L,
+                        print_settings_result_report=_print_settings_result_report,
+                        pause_after_tui_report=_pause_after_tui_report,
                     )
-                    _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 selected_rescue = tui_flow.safe_tui_call(select_rescue_event_tui, rescue_events)
                 if selected_rescue == "__interrupt__":
