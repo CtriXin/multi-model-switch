@@ -2545,6 +2545,63 @@ def aggregate_provider_models(
     return aggregated
 
 
+def filter_models_for_display(models, role, recommend, *, categorize_models, normalize_user_role, mode_recommended):
+    categorized = categorize_models(models)
+    flat = []
+    for category, category_models in categorized.items():
+        for model_name in category_models:
+            flat.append((model_name, category))
+    if normalize_user_role(role) == mode_recommended and recommend:
+        allowed = set(recommend)
+        flat = [(model_name, category) for model_name, category in flat if model_name in allowed]
+    return flat
+
+
+def group_models_for_custom(models, role, recommend, *, filter_models_for_display, infer_model_family):
+    grouped = {}
+    order = []
+    for model_name, _ in filter_models_for_display(models, role, recommend):
+        family, _ = infer_model_family(model_name)
+        if family not in grouped:
+            grouped[family] = []
+            order.append(family)
+        grouped[family].append(model_name)
+    return [(family, grouped[family]) for family in order]
+
+
+def group_models_by_family_and_provider(
+    aggregated_models,
+    role,
+    recommend,
+    *,
+    filter_models_for_display,
+    infer_model_family,
+):
+    plain_models = [entry["model"] for entry in aggregated_models]
+    allowed = {
+        model_name for model_name, _ in filter_models_for_display(plain_models, role, recommend)
+    }
+
+    family_order = []
+    family_providers = {}
+    for entry in aggregated_models:
+        model_name = entry["model"]
+        if model_name not in allowed:
+            continue
+        family, _ = infer_model_family(model_name)
+        provider_key = f"{entry['provider_name']}||{entry['provider_id']}"
+
+        if family not in family_providers:
+            family_providers[family] = {}
+            family_order.append(family)
+        providers = family_providers[family]
+        providers.setdefault(provider_key, [])
+        if model_name not in providers[provider_key]:
+            providers[provider_key].append(model_name)
+
+    return [(family, dict(family_providers[family])) for family in family_order]
+
+
 def build_model_families_for_cli(
     cfg,
     cli_name,

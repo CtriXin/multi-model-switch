@@ -5583,73 +5583,40 @@ def display_models(models, role=MODE_ALL, recommend=None):
 
 
 def _filter_models_for_display(models, role=MODE_ALL, recommend=None):
-    categorized = categorize_models(models)
-    flat = []
-    for cat, cat_models in categorized.items():
-        for model_name in cat_models:
-            flat.append((model_name, cat))
-    if normalize_user_role(role) == MODE_RECOMMENDED and recommend:
-        allowed = set(recommend)
-        flat = [(model_name, cat) for model_name, cat in flat if model_name in allowed]
-    return flat
+    from mms_command_tools import filter_models_for_display
+
+    return filter_models_for_display(
+        models,
+        role,
+        recommend,
+        categorize_models=categorize_models,
+        normalize_user_role=normalize_user_role,
+        mode_recommended=MODE_RECOMMENDED,
+    )
 
 
 def _group_models_for_custom(models, role=MODE_ALL, recommend=None):
-    grouped = {}
-    order = []
-    for model_name, _ in _filter_models_for_display(models, role, recommend):
-        family, _ = _infer_model_family(model_name)
-        if family not in grouped:
-            grouped[family] = []
-            order.append(family)
-        grouped[family].append(model_name)
-    return [(family, grouped[family]) for family in order]
+    from mms_command_tools import group_models_for_custom
+
+    return group_models_for_custom(
+        models,
+        role,
+        recommend,
+        filter_models_for_display=_filter_models_for_display,
+        infer_model_family=_infer_model_family,
+    )
 
 
 def _group_models_by_family_and_provider(aggregated_models, role=MODE_ALL, recommend=None):
-    """将聚合模型按 family → provider → models 分组。
+    from mms_command_tools import group_models_by_family_and_provider
 
-    Args:
-        aggregated_models: _aggregate_provider_models 返回的 List[dict]
-        role: 角色过滤
-        recommend: 推荐模型列表
-
-    Returns:
-        List[Tuple[str, Dict[str, List[str]]]]:
-        [(family_name, {provider_label: [model_names]}), ...]
-    """
-    plain_models = [entry["model"] for entry in aggregated_models]
-    allowed = set()
-    for model_name, _ in _filter_models_for_display(plain_models, role, recommend):
-        allowed.add(model_name)
-
-    family_order = []
-    family_providers = {}
-    for entry in aggregated_models:
-        model_name = entry["model"]
-        if model_name not in allowed:
-            continue
-        family, _ = _infer_model_family(model_name)
-        provider_label = entry["provider_name"]
-        provider_id = entry["provider_id"]
-        key = f"{provider_label}||{provider_id}"
-
-        if family not in family_providers:
-            family_providers[family] = {}
-            family_order.append(family)
-        providers = family_providers[family]
-        if key not in providers:
-            providers[key] = []
-        if model_name not in providers[key]:
-            providers[key].append(model_name)
-
-    result = []
-    for family in family_order:
-        provider_map = {}
-        for key, models in family_providers[family].items():
-            provider_map[key] = models
-        result.append((family, provider_map))
-    return result
+    return group_models_by_family_and_provider(
+        aggregated_models,
+        role,
+        recommend,
+        filter_models_for_display=_filter_models_for_display,
+        infer_model_family=_infer_model_family,
+    )
 
 
 def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tui=False, cfg=None, default_provider=None, default_models=None):

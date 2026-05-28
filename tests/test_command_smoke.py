@@ -1611,6 +1611,58 @@ def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
     ]
 
 
+def test_model_display_grouping_helpers_preserve_recommend_and_provider_dedupe():
+    import mms_command_tools
+
+    def categorize(models):
+        buckets = {"GPT 系": [], "Qwen 系": []}
+        for model in models:
+            buckets["Qwen 系" if "qwen" in model else "GPT 系"].append(model)
+        return {key: value for key, value in buckets.items() if value}
+
+    def normalize_role(role):
+        return "recommended" if role == "recommended" else "all"
+
+    def infer_family(model_name):
+        return ("Qwen", "国产") if "qwen" in model_name else ("GPT", "GPT")
+
+    filter_helper = lambda models, role, recommend: mms_command_tools.filter_models_for_display(
+        models,
+        role,
+        recommend,
+        categorize_models=categorize,
+        normalize_user_role=normalize_role,
+        mode_recommended="recommended",
+    )
+
+    assert filter_helper(["gpt-5.5", "qwen3.6-plus"], "recommended", ["qwen3.6-plus"]) == [
+        ("qwen3.6-plus", "Qwen 系")
+    ]
+    assert mms_command_tools.group_models_for_custom(
+        ["gpt-5.5", "qwen3.6-plus"],
+        "all",
+        [],
+        filter_models_for_display=filter_helper,
+        infer_model_family=infer_family,
+    ) == [("GPT", ["gpt-5.5"]), ("Qwen", ["qwen3.6-plus"])]
+
+    grouped = mms_command_tools.group_models_by_family_and_provider(
+        [
+            {"model": "gpt-5.5", "provider_id": "relay-a", "provider_name": "Relay A"},
+            {"model": "gpt-5.5", "provider_id": "relay-a", "provider_name": "Relay A"},
+            {"model": "qwen3.6-plus", "provider_id": "relay-b", "provider_name": "Relay B"},
+        ],
+        "recommended",
+        ["gpt-5.5", "qwen3.6-plus"],
+        filter_models_for_display=filter_helper,
+        infer_model_family=infer_family,
+    )
+    assert grouped == [
+        ("GPT", {"Relay A||relay-a": ["gpt-5.5"]}),
+        ("Qwen", {"Relay B||relay-b": ["qwen3.6-plus"]}),
+    ]
+
+
 def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
     import mms_command_tools
 
