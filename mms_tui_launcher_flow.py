@@ -1353,6 +1353,34 @@ def resolve_rescue_action_fallback_model(
     return fallback_model
 
 
+def apply_rescue_default_from_action(
+    cfg,
+    action,
+    default_fallback,
+    *,
+    apply_rescue_default_action,
+    ensure_rich,
+    prompt_cls,
+):
+    fallback_model = resolve_rescue_action_fallback_model(
+        action,
+        prefix="default::",
+        prompt_label="全局默认 fallback model",
+        prompt_default=default_fallback.get("model") or "",
+        ensure_rich=ensure_rich,
+        prompt_cls=prompt_cls,
+    )
+    if not fallback_model:
+        return {"status": "continue", "cfg": cfg, "fallback_model": "", "applied": False}
+    result = apply_rescue_default_action(fallback_model)
+    return {
+        "status": "continue",
+        "cfg": result["cfg"],
+        "fallback_model": fallback_model,
+        "applied": True,
+    }
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

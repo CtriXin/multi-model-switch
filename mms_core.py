@@ -5172,16 +5172,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     continue
                 landing_action = landing_result["action"]
                 if str(landing_action or "").startswith("default::") or landing_action == "manual_default":
-                    fallback_model = tui_flow.resolve_rescue_action_fallback_model(
+                    current_cfg = tui_flow.apply_rescue_default_from_action(
+                        current_cfg,
                         landing_action,
-                        prefix="default::",
-                        prompt_label="全局默认 fallback model",
-                        prompt_default=default_fallback.get("model") or "",
+                        default_fallback,
+                        apply_rescue_default_action=_apply_rescue_default_action,
                         ensure_rich=_ensure_rich,
                         prompt_cls=Prompt,
-                    )
-                    if fallback_model:
-                        current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
+                    )["cfg"]
                     continue
                 if landing_action == "choose_route_default":
                     from mms_tui import select_model_tui
@@ -5310,16 +5308,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                             pause_after_tui_report=_pause_after_tui_report,
                         )
                 elif str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
-                    fallback_model = tui_flow.resolve_rescue_action_fallback_model(
+                    current_cfg = tui_flow.apply_rescue_default_from_action(
+                        current_cfg,
                         rescue_action,
-                        prefix="default::",
-                        prompt_label="全局默认 fallback model",
-                        prompt_default=default_fallback.get("model") or "",
+                        default_fallback,
+                        apply_rescue_default_action=_apply_rescue_default_action,
                         ensure_rich=_ensure_rich,
                         prompt_cls=Prompt,
-                    )
-                    if fallback_model:
-                        current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
+                    )["cfg"]
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
 

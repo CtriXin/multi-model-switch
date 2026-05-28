@@ -6,6 +6,7 @@ from mms_tui_launcher_flow import (
     apply_confirm_runtime_preferences,
     apply_launch_runtime_preferences,
     apply_opencode_profile_for_launch,
+    apply_rescue_default_from_action,
     apply_rescue_default_fallback_action,
     apply_rescue_demo_packet_action,
     apply_rescue_hot_fallback_toggle_action,
@@ -2299,6 +2300,60 @@ def test_resolve_rescue_action_fallback_model_prompts_and_strips_default() -> No
     )
 
     assert result == "fallback-model"
+    assert calls == [
+        ("ensure",),
+        ("ask", "全局默认 fallback model", "old-default"),
+    ]
+
+
+def test_apply_rescue_default_from_action_applies_embedded_model() -> None:
+    calls = []
+    cfg = {"rescue": {}}
+    updated_cfg = {"rescue": {"fallback_model": "fallback-model"}}
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            raise AssertionError("unused")
+
+    result = apply_rescue_default_from_action(
+        cfg,
+        "default::fallback-model",
+        {"model": "old-default"},
+        apply_rescue_default_action=lambda model: calls.append(("apply", model)) or {"cfg": updated_cfg},
+        ensure_rich=lambda: calls.append(("ensure",)),
+        prompt_cls=Prompt,
+    )
+
+    assert result == {
+        "status": "continue",
+        "cfg": updated_cfg,
+        "fallback_model": "fallback-model",
+        "applied": True,
+    }
+    assert calls == [("apply", "fallback-model")]
+
+
+def test_apply_rescue_default_from_action_skips_empty_prompt() -> None:
+    calls = []
+    cfg = {"rescue": {}}
+
+    class Prompt:
+        @staticmethod
+        def ask(label, *, default):
+            calls.append(("ask", label, default))
+            return "  "
+
+    result = apply_rescue_default_from_action(
+        cfg,
+        "manual_default",
+        {"model": "old-default"},
+        apply_rescue_default_action=lambda _model: (_ for _ in ()).throw(AssertionError("unused")),
+        ensure_rich=lambda: calls.append(("ensure",)),
+        prompt_cls=Prompt,
+    )
+
+    assert result == {"status": "continue", "cfg": cfg, "fallback_model": "", "applied": False}
     assert calls == [
         ("ensure",),
         ("ask", "全局默认 fallback model", "old-default"),
