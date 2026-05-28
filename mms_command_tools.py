@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 
@@ -94,6 +95,77 @@ def extract_global_lang(argv, *, normalize_language):
         cleaned.append(item)
         idx += 1
     return cleaned, lang
+
+
+def snapshot_proxy_fingerprint(proxy_url):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return "direct"
+    parsed = urlparse(proxy_url)
+    scheme = parsed.scheme or "proxy"
+    host = parsed.hostname or "unknown"
+    port = f":{parsed.port}" if parsed.port else ""
+    auth = "+auth" if parsed.username or parsed.password else ""
+    return f"{scheme}://{host}{port}{auth}"
+
+
+def snapshot_cli_state(home_dir, cli_name):
+    home_dir = os.path.expanduser(str(home_dir or "").strip())
+    if not home_dir:
+        return []
+    if cli_name == "claude":
+        return [
+            os.path.join(home_dir, ".claude", "settings.json"),
+        ]
+    if cli_name == "codex":
+        return [
+            os.path.join(home_dir, ".codex", "auth.json"),
+            os.path.join(home_dir, ".codex", "config.toml"),
+        ]
+    if cli_name == "gemini":
+        return [
+            os.path.join(home_dir, ".gemini", "settings.json"),
+            os.path.join(home_dir, ".gemini", ".env"),
+        ]
+    if cli_name == "agy":
+        return [
+            os.path.join(home_dir, ".gemini", "antigravity-cli", "settings.json"),
+        ]
+    return []
+
+
+def normalize_claude_state_snapshot_payload(data):
+    data = data if isinstance(data, dict) else {}
+    oauth_account = data.get("oauthAccount") if isinstance(data.get("oauthAccount"), dict) else {}
+    return {
+        "userID": str(data.get("userID") or "").strip(),
+        "oauthAccount": {
+            "accountUuid": str(oauth_account.get("accountUuid") or "").strip(),
+            "emailAddress": str(oauth_account.get("emailAddress") or "").strip(),
+            "organizationUuid": str(oauth_account.get("organizationUuid") or "").strip(),
+            "billingType": str(oauth_account.get("billingType") or "").strip(),
+            "displayName": str(oauth_account.get("displayName") or "").strip(),
+            "organizationRole": str(oauth_account.get("organizationRole") or "").strip(),
+            "workspaceRole": str(oauth_account.get("workspaceRole") or "").strip(),
+            "organizationName": str(oauth_account.get("organizationName") or "").strip(),
+        },
+    }
+
+
+def normalize_claude_settings_snapshot_payload(data, *, session_env_keys):
+    data = dict(data) if isinstance(data, dict) else {}
+    env_data = data.get("env")
+    if isinstance(env_data, dict):
+        cleaned_env = {
+            key: value
+            for key, value in env_data.items()
+            if str(key or "").strip() not in session_env_keys
+        }
+        if cleaned_env:
+            data["env"] = cleaned_env
+        else:
+            data.pop("env", None)
+    return data
 
 
 def load_json_file(path, default):

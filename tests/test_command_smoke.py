@@ -123,6 +123,52 @@ def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeyp
     assert mms_core._extract_global_lang(["--lang", "zh", "codex"]) == (["codex"], "zh")
 
 
+def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
+    import mms_command_tools
+    import mms_core
+
+    assert mms_command_tools.snapshot_proxy_fingerprint("") == "direct"
+    assert (
+        mms_command_tools.snapshot_proxy_fingerprint("http://user:pass@proxy.local:8080")
+        == "http://proxy.local:8080+auth"
+    )
+
+    home_dir = str(tmp_path / "home")
+    assert mms_command_tools.snapshot_cli_state(home_dir, "codex") == [
+        str(tmp_path / "home" / ".codex" / "auth.json"),
+        str(tmp_path / "home" / ".codex" / "config.toml"),
+    ]
+    assert mms_core._snapshot_cli_state(home_dir, "claude") == [
+        str(tmp_path / "home" / ".claude" / "settings.json"),
+    ]
+
+    state_payload = mms_command_tools.normalize_claude_state_snapshot_payload(
+        {
+            "userID": " user-1 ",
+            "oauthAccount": {
+                "accountUuid": " account-1 ",
+                "emailAddress": "me@example.com",
+                "token": "ignored",
+            },
+            "sessionToken": "ignored",
+        }
+    )
+    assert state_payload["userID"] == "user-1"
+    assert state_payload["oauthAccount"]["accountUuid"] == "account-1"
+    assert state_payload["oauthAccount"]["emailAddress"] == "me@example.com"
+    assert "token" not in state_payload["oauthAccount"]
+    assert mms_core._normalize_claude_state_snapshot_payload(None)["userID"] == ""
+
+    settings_payload = mms_command_tools.normalize_claude_settings_snapshot_payload(
+        {"env": {"HTTP_PROXY": "http://proxy", "CUSTOM_FLAG": "1"}, "theme": "dark"},
+        session_env_keys={"HTTP_PROXY"},
+    )
+    assert settings_payload == {"env": {"CUSTOM_FLAG": "1"}, "theme": "dark"}
+    assert mms_core._normalize_claude_settings_snapshot_payload(
+        {"env": {"HTTP_PROXY": "http://proxy", "NO_PROXY": "localhost"}}
+    ) == {}
+
+
 def test_usage_main_initializes_rich_before_render(monkeypatch):
     import mms_account_state
     import mms_usage
