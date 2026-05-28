@@ -973,14 +973,13 @@ def _normalize_positive_seconds(value, default, minimum=1):
 
 
 def _default_provider():
-    return {
-        "id": DEFAULT_PROVIDER_ID,
-        "name": "Default Gateway",
-        "protocols": list(DEFAULT_PROVIDER_PROTOCOLS),
-        "supported_clis": list(PROVIDER_CAPABLE_CLIS),
-        "enabled": True,
-        "role": "auto",
-    }
+    from mms_command_tools import default_provider
+
+    return default_provider(
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        default_provider_protocols=DEFAULT_PROVIDER_PROTOCOLS,
+        provider_capable_clis=PROVIDER_CAPABLE_CLIS,
+    )
 
 
 def _normalize_supported_clis(value, protocols=None):
@@ -1415,45 +1414,20 @@ def _provider_env_value(provider_id, field):
 
 
 def _normalize_provider(provider):
-    merged = dict(_default_provider())
-    merged.update(provider)
-    merged.pop("cost_level", None)
-    merged.pop("daily_budget", None)
-    merged["id"] = str(merged.get("id") or DEFAULT_PROVIDER_ID).strip() or DEFAULT_PROVIDER_ID
-    merged["name"] = str(merged.get("name") or merged["id"]).strip() or merged["id"]
+    from mms_command_tools import normalize_provider
 
-    protocols = merged.get("protocols", DEFAULT_PROVIDER_PROTOCOLS)
-    if isinstance(protocols, str):
-        protocols = [protocols]
-    merged["protocols"] = [str(item).strip() for item in protocols if str(item).strip()]
-    if not merged["protocols"]:
-        merged["protocols"] = list(DEFAULT_PROVIDER_PROTOCOLS)
-
-    merged["supported_clis"] = _normalize_supported_clis(
-        merged.get("supported_clis", PROVIDER_CAPABLE_CLIS),
-        protocols=merged["protocols"],
+    return normalize_provider(
+        provider,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        default_provider_protocols=DEFAULT_PROVIDER_PROTOCOLS,
+        provider_capable_clis=PROVIDER_CAPABLE_CLIS,
+        default_priority=DEFAULT_PRIORITY,
+        model_families=MODEL_FAMILIES,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        claude_1m_valid_modes=VALID_CLAUDE_1M_MODES,
+        cli_names=CLI_NAMES,
+        legacy_provider_cli_aliases=LEGACY_PROVIDER_CLI_ALIASES,
     )
-    if not merged["supported_clis"]:
-        merged["supported_clis"] = list(PROVIDER_CAPABLE_CLIS)
-
-    merged["enabled"] = bool(merged.get("enabled", True))
-    merged["priority"] = _normalize_priority(merged.get("priority", DEFAULT_PRIORITY))
-    merged["family_priority_overrides"] = _normalize_family_priority_overrides(
-        merged.get("family_priority_overrides", {})
-    )
-    merged["claude_1m_mode"] = _normalize_claude_1m_mode(merged.get("claude_1m_mode", "auto"))
-    merged["proxy"] = str(merged.get("proxy", "")).strip()
-    merged["no_proxy"] = str(merged.get("no_proxy", "")).strip()
-    merged["timezone"] = _normalize_timezone_name(merged.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE)
-    merged["force_ipv4"] = _runtime_force_ipv4(merged)
-    merged["note"] = str(merged.get("note", "")).strip()
-    merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
-    merged["default_anthropic_base_url"] = str(merged.get("default_anthropic_base_url", "")).strip().rstrip("/")
-    merged["fallback_models"] = _normalize_model_id_list(merged.get("fallback_models", []))
-    merged["extra_models"] = _normalize_model_id_list(merged.get("extra_models", []))
-    merged["hidden_models"] = _normalize_model_id_list(merged.get("hidden_models", []))
-    merged["models_endpoint"] = _normalize_models_endpoint(merged.get("models_endpoint", "/models"))
-    return merged
 
 
 def _ensure_provider_config(cfg):

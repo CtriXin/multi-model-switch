@@ -1502,6 +1502,17 @@ def normalize_positive_seconds(value, default, minimum=1):
     return max(minimum, parsed)
 
 
+def default_provider(*, default_provider_id, default_provider_protocols, provider_capable_clis):
+    return {
+        "id": default_provider_id,
+        "name": "Default Gateway",
+        "protocols": list(default_provider_protocols),
+        "supported_clis": list(provider_capable_clis),
+        "enabled": True,
+        "role": "auto",
+    }
+
+
 def normalize_priority(value, *, default_priority):
     try:
         return max(1, int(value))
@@ -1551,6 +1562,73 @@ def normalize_timezone_name(value, *, default):
         except Exception:
             timezone_name = default
     return timezone_name
+
+
+def normalize_provider(
+    provider,
+    *,
+    default_provider_id,
+    default_provider_protocols,
+    provider_capable_clis,
+    default_priority,
+    model_families,
+    default_account_timezone,
+    claude_1m_valid_modes,
+    cli_names,
+    legacy_provider_cli_aliases,
+):
+    merged = dict(
+        default_provider(
+            default_provider_id=default_provider_id,
+            default_provider_protocols=default_provider_protocols,
+            provider_capable_clis=provider_capable_clis,
+        )
+    )
+    merged.update(provider)
+    merged.pop("cost_level", None)
+    merged.pop("daily_budget", None)
+    merged["id"] = str(merged.get("id") or default_provider_id).strip() or default_provider_id
+    merged["name"] = str(merged.get("name") or merged["id"]).strip() or merged["id"]
+
+    protocols = merged.get("protocols", default_provider_protocols)
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    merged["protocols"] = [str(item).strip() for item in protocols if str(item).strip()]
+    if not merged["protocols"]:
+        merged["protocols"] = list(default_provider_protocols)
+
+    merged["supported_clis"] = normalize_supported_clis(
+        merged.get("supported_clis", provider_capable_clis),
+        protocols=merged["protocols"],
+        cli_names=cli_names,
+        legacy_provider_cli_aliases=legacy_provider_cli_aliases,
+    )
+    if not merged["supported_clis"]:
+        merged["supported_clis"] = list(provider_capable_clis)
+
+    merged["enabled"] = bool(merged.get("enabled", True))
+    merged["priority"] = normalize_priority(merged.get("priority", default_priority), default_priority=default_priority)
+    merged["family_priority_overrides"] = normalize_family_priority_overrides(
+        merged.get("family_priority_overrides", {}),
+        model_families=model_families,
+        default_priority=default_priority,
+    )
+    merged["claude_1m_mode"] = normalize_claude_1m_mode(
+        merged.get("claude_1m_mode", "auto"),
+        valid_modes=claude_1m_valid_modes,
+    )
+    merged["proxy"] = str(merged.get("proxy", "")).strip()
+    merged["no_proxy"] = str(merged.get("no_proxy", "")).strip()
+    merged["timezone"] = normalize_timezone_name(merged.get("timezone"), default=default_account_timezone)
+    merged["force_ipv4"] = runtime_force_ipv4(merged)
+    merged["note"] = str(merged.get("note", "")).strip()
+    merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
+    merged["default_anthropic_base_url"] = str(merged.get("default_anthropic_base_url", "")).strip().rstrip("/")
+    merged["fallback_models"] = normalize_model_id_list(merged.get("fallback_models", []))
+    merged["extra_models"] = normalize_model_id_list(merged.get("extra_models", []))
+    merged["hidden_models"] = normalize_model_id_list(merged.get("hidden_models", []))
+    merged["models_endpoint"] = normalize_models_endpoint(merged.get("models_endpoint", "/models"))
+    return merged
 
 
 def normalize_account_id(account_id):

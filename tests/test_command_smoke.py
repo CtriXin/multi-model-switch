@@ -1099,6 +1099,78 @@ def test_runtime_priority_and_supported_cli_helpers_preserve_normalization():
     assert mms_command_tools.normalize_positive_seconds("bad", 30, minimum=5) == 30
 
 
+def test_provider_normalization_helpers_preserve_default_and_cleanup_semantics():
+    import mms_command_tools
+
+    model_families = [{"family": "GPT"}, {"family": "Claude"}]
+    defaults = {
+        "default_provider_id": "default",
+        "default_provider_protocols": ["openai_chat_completions", "anthropic_messages"],
+        "provider_capable_clis": ["claude", "codex"],
+        "default_priority": 50,
+        "model_families": model_families,
+        "default_account_timezone": "Asia/Singapore",
+        "claude_1m_valid_modes": {"auto", "enable", "disable"},
+        "cli_names": ["claude", "codex", "opencode"],
+        "legacy_provider_cli_aliases": {"provider", "gateway"},
+    }
+
+    default_provider = mms_command_tools.default_provider(
+        default_provider_id="default",
+        default_provider_protocols=["openai_chat_completions"],
+        provider_capable_clis=["codex"],
+    )
+    assert default_provider == {
+        "id": "default",
+        "name": "Default Gateway",
+        "protocols": ["openai_chat_completions"],
+        "supported_clis": ["codex"],
+        "enabled": True,
+        "role": "auto",
+    }
+
+    normalized = mms_command_tools.normalize_provider(
+        {
+            "id": " relay ",
+            "name": "",
+            "protocols": "anthropic_messages",
+            "supported_clis": "provider",
+            "priority": "0",
+            "family_priority_overrides": {"gpt": "7", "unknown": "9"},
+            "claude_1m_mode": "enabled",
+            "timezone": "Bad/Timezone",
+            "force_ipv4": "enabled",
+            "fallback_models": "gpt-5.5, gpt-5.5, claude-sonnet",
+            "extra_models": [" extra ", "", "extra"],
+            "hidden_models": ["hidden", "hidden"],
+            "models_endpoint": "v1/models",
+            "default_openai_base_url": "https://relay.example/v1/",
+            "default_anthropic_base_url": "https://relay.example/anthropic/",
+            "cost_level": "legacy",
+            "daily_budget": 1,
+        },
+        **defaults,
+    )
+
+    assert normalized["id"] == "relay"
+    assert normalized["name"] == "relay"
+    assert normalized["protocols"] == ["anthropic_messages"]
+    assert normalized["supported_clis"] == ["claude"]
+    assert normalized["priority"] == 1
+    assert normalized["family_priority_overrides"] == {"GPT": 7}
+    assert normalized["claude_1m_mode"] == "enable"
+    assert normalized["timezone"] == "Asia/Singapore"
+    assert normalized["force_ipv4"] is True
+    assert normalized["fallback_models"] == ["gpt-5.5", "claude-sonnet"]
+    assert normalized["extra_models"] == ["extra"]
+    assert normalized["hidden_models"] == ["hidden"]
+    assert normalized["models_endpoint"] == "/v1/models"
+    assert normalized["default_openai_base_url"] == "https://relay.example/v1"
+    assert normalized["default_anthropic_base_url"] == "https://relay.example/anthropic"
+    assert "cost_level" not in normalized
+    assert "daily_budget" not in normalized
+
+
 def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     import mms_command_tools
 
