@@ -2521,6 +2521,28 @@ def test_provider_credentials_save_helper_preserves_file_shape_and_refresh(tmp_p
     assert refresh_calls == ["refresh", "refresh"]
 
 
+def test_api_credentials_helpers_preserve_default_provider_delegation():
+    import mms_command_tools
+
+    save_calls = []
+    assert mms_command_tools.load_api_credentials(
+        default_provider_id="default",
+        load_provider_credentials=lambda provider_id: {
+            "provider": provider_id,
+            "base_url": "https://default.example/v1",
+            "api_key": "default-key",
+        },
+    ) == ("https://default.example/v1", "default-key")
+
+    mms_command_tools.save_api_credentials(
+        "https://default.example/v1",
+        "default-key",
+        default_provider_id="default",
+        save_provider_credentials=lambda *args: save_calls.append(args),
+    )
+    assert save_calls == [("default", "https://default.example/v1", "default-key")]
+
+
 def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     import pytest
 

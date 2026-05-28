@@ -2379,12 +2379,23 @@ def save_provider_credentials(provider_id, base_url, api_key, openai_base_url=""
 
 
 def load_api_credentials():
-    provider_creds = load_provider_credentials(DEFAULT_PROVIDER_ID)
-    return provider_creds["base_url"], provider_creds["api_key"]
+    from mms_command_tools import load_api_credentials as load_api_credentials_helper
+
+    return load_api_credentials_helper(
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        load_provider_credentials=load_provider_credentials,
+    )
 
 
 def save_api_credentials(base_url, api_key):
-    save_provider_credentials(DEFAULT_PROVIDER_ID, base_url, api_key)
+    from mms_command_tools import save_api_credentials as save_api_credentials_helper
+
+    return save_api_credentials_helper(
+        base_url,
+        api_key,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        save_provider_credentials=save_provider_credentials,
+    )
 
 
 def resolve_provider_context(cfg, provider_id=None):

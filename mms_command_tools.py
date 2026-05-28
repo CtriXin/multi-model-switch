@@ -3452,6 +3452,15 @@ def save_provider_credentials(
     trigger_routes_export_after_credentials_write()
 
 
+def load_api_credentials(*, default_provider_id, load_provider_credentials):
+    provider_creds = load_provider_credentials(default_provider_id)
+    return provider_creds["base_url"], provider_creds["api_key"]
+
+
+def save_api_credentials(base_url, api_key, *, default_provider_id, save_provider_credentials):
+    return save_provider_credentials(default_provider_id, base_url, api_key)
+
+
 def provider_env_value(provider_id, field, *, default_provider_id, environ=None):
     environ = os.environ if environ is None else environ
     return environ.get(provider_env_name(provider_id, field, default_provider_id=default_provider_id), "").strip()
