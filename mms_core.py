@@ -4075,25 +4075,23 @@ _PROBE_ASYNC_LAST = {}
 
 
 def _probe_async_refresh_after(cfg=None):
-    if isinstance(cfg, dict):
-        cache_cfg = cfg.get("cache", {})
-        if isinstance(cache_cfg, dict):
-            return _normalize_positive_seconds(
-                cache_cfg.get("probe_async_refresh_after_sec", _PROBE_ASYNC_REFRESH_AFTER),
-                _PROBE_ASYNC_REFRESH_AFTER,
-            )
-    return _PROBE_ASYNC_REFRESH_AFTER
+    from mms_command_tools import probe_async_refresh_after
+
+    return probe_async_refresh_after(
+        cfg,
+        default=_PROBE_ASYNC_REFRESH_AFTER,
+        normalize_positive_seconds=_normalize_positive_seconds,
+    )
 
 
 def _probe_async_min_interval(cfg=None):
-    if isinstance(cfg, dict):
-        cache_cfg = cfg.get("cache", {})
-        if isinstance(cache_cfg, dict):
-            return _normalize_positive_seconds(
-                cache_cfg.get("probe_async_min_interval_sec", _PROBE_ASYNC_MIN_INTERVAL),
-                _PROBE_ASYNC_MIN_INTERVAL,
-            )
-    return _PROBE_ASYNC_MIN_INTERVAL
+    from mms_command_tools import probe_async_min_interval
+
+    return probe_async_min_interval(
+        cfg,
+        default=_PROBE_ASYNC_MIN_INTERVAL,
+        normalize_positive_seconds=_normalize_positive_seconds,
+    )
 
 
 def _probe_file_cache_path(provider_id):

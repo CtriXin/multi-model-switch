@@ -4677,6 +4677,28 @@ def normalize_cache_config(
     return new_cfg, True
 
 
+def probe_async_refresh_after(cfg, *, default, normalize_positive_seconds=normalize_positive_seconds):
+    if isinstance(cfg, dict):
+        cache_cfg = cfg.get("cache", {})
+        if isinstance(cache_cfg, dict):
+            return normalize_positive_seconds(
+                cache_cfg.get("probe_async_refresh_after_sec", default),
+                default,
+            )
+    return default
+
+
+def probe_async_min_interval(cfg, *, default, normalize_positive_seconds=normalize_positive_seconds):
+    if isinstance(cfg, dict):
+        cache_cfg = cfg.get("cache", {})
+        if isinstance(cache_cfg, dict):
+            return normalize_positive_seconds(
+                cache_cfg.get("probe_async_min_interval_sec", default),
+                default,
+            )
+    return default
+
+
 def snapshot_diff_lines(previous_snapshot, current_snapshot, *, is_snapshot_ignored_file):
     diffs = []
     previous_snapshot = previous_snapshot if isinstance(previous_snapshot, dict) else {}

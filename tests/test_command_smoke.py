@@ -7834,6 +7834,27 @@ def test_config_normalization_helpers_preserve_legacy_shapes():
     assert wrapped_cache_cfg["cache"]["probe_async_refresh_after_sec"] > 0
 
 
+def test_probe_async_interval_helpers_preserve_defaults_and_normalization(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    assert mms_command_tools.probe_async_refresh_after(
+        {"cache": {"probe_async_refresh_after_sec": "0"}},
+        default=1800,
+    ) == 1
+    assert mms_command_tools.probe_async_min_interval(
+        {"cache": {"probe_async_min_interval_sec": "bad"}},
+        default=300,
+    ) == 300
+    assert mms_command_tools.probe_async_refresh_after({"cache": "bad"}, default=1800) == 1800
+    assert mms_command_tools.probe_async_min_interval(None, default=300) == 300
+
+    monkeypatch.setattr(mms_core, "_PROBE_ASYNC_REFRESH_AFTER", 1800)
+    monkeypatch.setattr(mms_core, "_PROBE_ASYNC_MIN_INTERVAL", 300)
+    assert mms_core._probe_async_refresh_after({"cache": {"probe_async_refresh_after_sec": "0"}}) == 1
+    assert mms_core._probe_async_min_interval({"cache": {"probe_async_min_interval_sec": "bad"}}) == 300
+
+
 def test_snapshot_diff_lines_reports_guard_drift_without_ignored_files():
     import mms_command_tools
 
