@@ -453,6 +453,39 @@ def test_usage_routes_export_trigger_preserves_throttle_running_and_async_reset(
     assert state["running"] is False
 
 
+def test_backup_config_tree_preserves_real_home_backup_layout(tmp_path):
+    import os
+
+    import mms_command_tools
+
+    real_home = tmp_path / "real-home"
+    primary_config = tmp_path / "active-config"
+    primary_config.mkdir()
+    (primary_config / "config.toml").write_text("provider = {}\n", encoding="utf-8")
+
+    backup_dir = mms_command_tools.backup_config_tree(
+        "provider-rename",
+        resolve_real_user_home=lambda: str(real_home),
+        primary_config_dir=str(primary_config),
+        local_now_slug=lambda: "20260529-010203",
+    )
+
+    expected_dir = real_home / ".config" / "mms-backups" / "provider-rename-20260529-010203"
+    assert backup_dir == str(expected_dir)
+    assert (expected_dir / "active-config" / "config.toml").read_text(encoding="utf-8") == "provider = {}\n"
+
+    calls = []
+    missing_dir = mms_command_tools.backup_config_tree(
+        "config-migrate",
+        resolve_real_user_home=lambda: str(real_home),
+        primary_config_dir=str(tmp_path / "missing-config"),
+        local_now_slug=lambda: "20260529-010204",
+        copytree=lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    assert missing_dir == os.path.join(str(real_home), ".config", "mms-backups", "config-migrate-20260529-010204")
+    assert calls == []
+
+
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 

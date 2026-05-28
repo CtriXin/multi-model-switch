@@ -860,6 +860,30 @@ def trigger_routes_export_after_usage_write(
     ).start()
 
 
+def backup_config_tree(
+    label,
+    *,
+    resolve_real_user_home,
+    primary_config_dir,
+    local_now_slug,
+    makedirs=os.makedirs,
+    path_exists=os.path.exists,
+    copytree=shutil.copytree,
+):
+    backup_root = os.path.join(resolve_real_user_home(), ".config", "mms-backups")
+    makedirs(backup_root, exist_ok=True)
+    backup_dir = os.path.join(backup_root, f"{label}-{local_now_slug()}")
+    makedirs(backup_dir, exist_ok=True)
+    if path_exists(primary_config_dir):
+        copytree(
+            primary_config_dir,
+            os.path.join(backup_dir, os.path.basename(primary_config_dir)),
+            symlinks=True,
+            ignore_dangling_symlinks=True,
+        )
+    return backup_dir
+
+
 def confirm_guard_accept_from_tui(
     cfg,
     *,

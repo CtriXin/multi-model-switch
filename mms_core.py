@@ -2136,18 +2136,14 @@ def _trigger_routes_export_after_credentials_write():
 
 
 def _backup_config_tree(label):
-    backup_root = os.path.join(resolve_real_user_home(), ".config", "mms-backups")
-    os.makedirs(backup_root, exist_ok=True)
-    backup_dir = os.path.join(backup_root, f"{label}-{_local_now_slug()}")
-    os.makedirs(backup_dir, exist_ok=True)
-    if os.path.exists(PRIMARY_CONFIG_DIR):
-        shutil.copytree(
-            PRIMARY_CONFIG_DIR,
-            os.path.join(backup_dir, os.path.basename(PRIMARY_CONFIG_DIR)),
-            symlinks=True,
-            ignore_dangling_symlinks=True,
-        )
-    return backup_dir
+    from mms_command_tools import backup_config_tree
+
+    return backup_config_tree(
+        label,
+        resolve_real_user_home=resolve_real_user_home,
+        primary_config_dir=PRIMARY_CONFIG_DIR,
+        local_now_slug=_local_now_slug,
+    )
 
 
 def _runtime_usage_key(runtime, cli_name):
