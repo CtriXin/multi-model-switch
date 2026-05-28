@@ -3724,9 +3724,16 @@ def _settings_result_tui_payload(title, rows, note="", *, ok=True):
 
 def _select_settings_result_tui(title, rows, note="", *, ok=True):
     from mms_tui import select_channel_action_tui
+    from mms_command_tools import select_settings_result_tui
 
-    tui_title, info_lines, actions = _settings_result_tui_payload(title, rows, note, ok=ok)
-    return select_channel_action_tui(tui_title, info_lines, actions)
+    return select_settings_result_tui(
+        title,
+        rows,
+        note,
+        ok=ok,
+        settings_result_tui_payload=_settings_result_tui_payload,
+        select_channel_action_tui=select_channel_action_tui,
+    )
 
 
 def _print_settings_result_report(title, rows, note="", *, ok=True):

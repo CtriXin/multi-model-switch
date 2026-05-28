@@ -478,6 +478,35 @@ def test_settings_result_tui_available_preserves_env_and_tty_checks():
     ) is False
 
 
+def test_select_settings_result_tui_uses_payload_builder_and_selector():
+    import mms_command_tools
+
+    calls = []
+
+    def payload_builder(title, rows, note="", *, ok=True):
+        calls.append(("payload", title, list(rows), note, ok))
+        return "✓ done", [("状态", "成功")], [("back", "返回")]
+
+    def selector(title, info_lines, actions):
+        calls.append(("selector", title, info_lines, actions))
+        return "back"
+
+    selected = mms_command_tools.select_settings_result_tui(
+        "done",
+        [("Key", "value")],
+        "note",
+        ok=True,
+        settings_result_tui_payload=payload_builder,
+        select_channel_action_tui=selector,
+    )
+
+    assert selected == "back"
+    assert calls == [
+        ("payload", "done", [("Key", "value")], "note", True),
+        ("selector", "✓ done", [("状态", "成功")], [("back", "返回")]),
+    ]
+
+
 def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     import mms_command_tools
 

@@ -140,6 +140,11 @@ def settings_result_tui_available(*, env=None, stdin=None, stdout=None):
         return False
 
 
+def select_settings_result_tui(title, rows, note="", *, ok=True, settings_result_tui_payload, select_channel_action_tui):
+    tui_title, info_lines, actions = settings_result_tui_payload(title, rows, note, ok=ok)
+    return select_channel_action_tui(tui_title, info_lines, actions)
+
+
 def display_settings_result_report(title, rows, note="", *, ok=True, console):
     color = "green" if ok else "red"
     prefix = "✓ " if ok else "✗ "
