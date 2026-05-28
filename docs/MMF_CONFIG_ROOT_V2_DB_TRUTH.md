@@ -452,6 +452,8 @@ Current Stage 4a implementation:
 - Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB and `secret_backend`, generated bundle, and legacy compatibility files are not written in this slice.
 - If candidate write fails after backup, the preview DB is restored from the pre-write backup.
 - `publish-preview` now prefers the latest preview route candidate, including `registry-v2-save-candidate`, and reuses matching DB candidate policy/profile revisions when generating the latest-approved bundle.
+- WebUI has a preview-only `写入预览 DB + 发布` action backed by `/api/registry-v2/apply`. It requires the confirmation phrase `写入预览DB`, refuses stable roots, writes DB candidates, publishes `generated/model-registry.latest-approved.json`, and verifies hashes.
+- This WebUI preview action does not call legacy `/api/save`, does not write `config.toml` / `credentials.sh` / `model-policy.json`, and does not write secret backend yet.
 - WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after publish/verify rollback is wired.
 
 ### Stage 5 - Router Export From DB

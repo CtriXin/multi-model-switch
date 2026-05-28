@@ -146,6 +146,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "candidate routes" in html
     assert "missing keys" in html
     assert "registry_v2_save_plan" in html
+    assert "applyV2Preview" in html
+    assert "/api/registry-v2/apply" in html
+    assert "写入预览DB" in html
     assert "renderStatus();renderSourceStatus();" in html
     assert "card span8 provider-editor" in html
     assert ".provider-editor{position:sticky" in html
@@ -676,6 +679,72 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
     assert any(path.name == "model-policy.json.bak" for path in bak_paths)
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_blocks_stable_root(tmp_path):
+    config_root = tmp_path / "mms"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_root / "config.toml"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "stable_root_human_only" in result["errors"]
+    assert not config_root.exists()
+
+
+def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    credentials_path = config_root / "credentials.sh"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    router_path = config_root / "generated" / "model-routes.json"
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    router = json.loads(router_path.read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert result["schema"] == "mms.setup_web.registry_v2_apply_result.v1"
+    assert result["status"] == "verified"
+    assert result["candidate"]["route_candidates"]["provider_route_count"] == 2
+    assert result["publish"]["preview_source"] == "registry-v2-save-candidate"
+    assert result["verify"]["verified"] is True
+    assert router["source"] == "registry-preview-v2-save-candidate"
+    assert router["routes"]["gpt-5.5"]["primary"]["secret_ref"] == "pending-webui:demo:api_key"
+    assert router["routes"]["gpt-5.5"]["primary"]["api_key"] == ""
+    assert manifest_path.exists()
+    assert not config_path.exists()
+    assert not credentials_path.exists()
+    assert "sk-super-secret-value" not in encoded
+    assert "sk-super-secret-value" not in router_path.read_text(encoding="utf-8")
+
+
+def test_config_web_registry_v2_apply_requires_explicit_preview_confirmation(tmp_path):
+    config_root = tmp_path / "mms-next"
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        _draft_payload(),
+        config_path=str(config_root / "config.toml"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "确认" in result["errors"][0]
+    assert not config_root.exists()
 
 
 def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):

@@ -1637,6 +1637,76 @@ def apply_config_plan(
     }
 
 
+def apply_registry_v2_preview_plan(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    if not _truthy(payload.get("confirm_v2_preview"), False):
+        return {"ok": False, "errors": ["写入预览 DB 前必须勾选确认。"], "status": "blocked"}
+    if _safe_text(payload.get("confirm_phrase")) != "写入预览DB":
+        return {"ok": False, "errors": ["确认文字必须输入：写入预览DB"], "status": "blocked"}
+    plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path)
+    if not plan.get("ok"):
+        return {
+            "ok": False,
+            "errors": plan.get("errors") or [],
+            "warnings": plan.get("warnings") or [],
+            "status": "blocked",
+            "plan": _sanitize_for_output(plan),
+        }
+    v2_plan = plan.get("registry_v2_save_plan") if isinstance(plan.get("registry_v2_save_plan"), dict) else {}
+    blocked_reasons = [str(item) for item in (v2_plan.get("blocked_reasons") or []) if str(item or "").strip()]
+    if blocked_reasons:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "blocked",
+            "errors": blocked_reasons,
+            "registry_v2_save_plan": v2_plan,
+        }
+
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle
+
+        candidate = apply_registry_v2_save_candidate(
+            config_dir=config_root or None,
+            config_payload=plan.get("config") if isinstance(plan.get("config"), dict) else {},
+            policy_payload=plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {},
+            credential_updates=[item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)],
+            apply=True,
+            command_name="mms-config-web",
+        )
+        publish = publish_preview_bundle(config_dir=config_root or None)
+        verify = verify_approved_bundle(config_dir=config_root or None)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "registry_v2_save_plan": v2_plan,
+        }
+
+    verified = bool(verify.get("verified"))
+    return {
+        "ok": verified,
+        "schema": "mms.setup_web.registry_v2_apply_result.v1",
+        "status": "verified" if verified else "failed_verify",
+        "summary": plan.get("summary") or {},
+        "warnings": plan.get("warnings") or [],
+        "paths": plan.get("paths") or {},
+        "registry_v2_save_plan": v2_plan,
+        "candidate": _sanitize_for_output(candidate),
+        "publish": _sanitize_for_output(publish),
+        "verify": _sanitize_for_output(verify),
+    }
+
+
 def _provider_from_payload(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     provider_payload = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
@@ -1851,7 +1921,7 @@ _HTML_PAGE = r"""<!doctype html>
     <section class="panel" data-section="test"><h2>模型测试</h2><p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p><div class="grid"><div class="card span5"><label>测试通道</label><select id="testProvider"></select><label>测试模型</label><select id="testModel"></select><label>协议</label><select id="testProtocol"><option value="auto">auto</option><option value="anthropic_messages">anthropic_messages</option><option value="openai_chat_completions">openai_chat_completions</option></select><label>Prompt</label><textarea id="testPrompt">只回复 pong</textarea><div class="btns"><button id="testModelBtn">Ping 模型</button><button id="chatTestBtn" class="secondary">Simple chat</button></div></div><div class="card span7"><div class="result" id="testResult">暂无测试结果</div></div></div></section>
     <section class="panel" data-section="fallback"><h2>Fallback 设置</h2><p>这里会写入 config.toml 的 [rescue] 和 [vision_sidecar]，用于失败交接和 text-only 模型的图片 sidecar。</p><div class="grid"><div class="card span6"><h3>Rescue fallback</h3><label>fallback_model</label><input id="rescueModel" placeholder="deepseek-v4-flash"><label>fallback_cli</label><select id="rescueCli"><option value="">不指定</option><option>codex</option><option>claude</option><option>opencode</option><option>agy</option></select><div class="check" style="margin-top:10px"><input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span></div></div><div class="card span6"><h3>Vision sidecar</h3><div class="check"><input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span></div><label>provider_id</label><select id="visionProvider"></select><label>model</label><select id="visionModel"></select><p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为“当前配置值”。</p><label>候选列表</label><div id="visionCandidates" class="grid"></div><div class="btns"><button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button></div></div></div></section>
     <section class="panel" data-section="runtime"><h2>运行默认值</h2><p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p><div class="grid"><div class="card span5"><label>preferred CLI</label><select id="preferredCli"><option>opencode</option><option>codex</option><option>claude</option><option>agy</option></select><label>coding preset model（可选）</label><input id="codingModel" placeholder="gpt-5.5"></div><div class="card span7"><label>OpenCode default profile</label><select id="opencodeProfile"><option>agent</option><option>omo</option><option>raw</option></select><p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p></div><div class="card span12"><h3>OpenCode Agent Roster</h3><p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p><div class="oc-summary" id="opencodeOverrideSummary"></div><div class="oc-order-note">Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。</div><details class="oc-advanced" id="opencodeAdvanced"><summary>Advanced: OpenCode per-agent roster</summary><div class="filterbar" id="opencodeAgentFilters"></div><div class="table-wrap"><table id="opencodeAgents"></table></div></details></div></div></section>
-    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。真正写入时会使用 MMS audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="saveBtn" class="danger">确认保存</button></div><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意写入配置</span></div><label style="margin-top:12px">输入确认文字：保存配置</label><input id="confirmPhrase" placeholder="保存配置"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
+    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。真正写入时会使用 MMS audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button><button id="saveBtn" class="danger">确认保存</button></div><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span></div><label style="margin-top:12px">输入确认文字：保存配置 / 写入预览DB</label><input id="confirmPhrase" placeholder="保存配置 或 写入预览DB"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"><p class="muted">Preview DB 按钮只写当前 MMS_CONFIG_ROOT 的 DB candidate + generated bundle；stable root 会被阻止。</p></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
     <section class="panel" data-section="refs"><h2>本地参考</h2><p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p><div class="grid" id="refsGrid"></div></section>
   </main>
 </div>
@@ -1930,6 +2000,7 @@ $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,registry_v2_save_plan:data.registry_v2_save_plan,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
+$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'预览 DB 已写入并发布':'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 $('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:#b42318">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
@@ -1964,6 +2035,10 @@ class ConfigWebApp:
                 plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
                 self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
             return result
+
+    def registry_v2_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return apply_registry_v2_preview_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
 
     def provider_test(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -2040,6 +2115,10 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/save":
                 result = app.save(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/registry-v2/apply":
+                result = app.registry_v2_apply(payload)
                 self._send(*_json_response(result, status=200 if result.get("ok") else 400))
                 return
             self._send(404, b"not found\n", "text/plain; charset=utf-8")
