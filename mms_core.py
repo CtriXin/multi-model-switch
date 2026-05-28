@@ -2117,28 +2117,20 @@ def _load_usage_stats():
 
 
 def _load_usage_stats_from_path(usage_path):
-    if not os.path.exists(usage_path):
-        return {"sources": {}}
-    try:
-        with open(usage_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            data.setdefault("sources", {})
-            return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {"sources": {}}
+    from mms_command_tools import load_usage_stats_from_path
+
+    return load_usage_stats_from_path(usage_path)
 
 
 def _write_usage_stats_locked(usage_path, data):
-    _ensure_mms_config_guard_files(_config_write_target_path())
-    os.makedirs(os.path.dirname(usage_path), exist_ok=True)
-    tmp_path = usage_path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(tmp_path, usage_path)
-    os.chmod(usage_path, 0o600)
+    from mms_command_tools import write_usage_stats_locked
+
+    return write_usage_stats_locked(
+        usage_path,
+        data,
+        ensure_mms_config_guard_files=_ensure_mms_config_guard_files,
+        config_write_target_path=_config_write_target_path,
+    )
 
 
 def _save_usage_stats(data):

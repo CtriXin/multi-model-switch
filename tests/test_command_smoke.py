@@ -272,6 +272,44 @@ def test_preference_and_override_load_helpers_preserve_merge_warning_and_sanitiz
     assert mms_command_tools.local_now_slug(now_func=lambda: datetime(2026, 5, 28, 23, 20, 32)) == "20260528-232032"
 
 
+def test_usage_stats_file_helpers_preserve_defaults_secure_write_and_guard(tmp_path):
+    import json
+    import stat
+
+    import mms_command_tools
+
+    missing_path = tmp_path / "missing.json"
+    assert mms_command_tools.load_usage_stats_from_path(str(missing_path)) == {"sources": {}}
+
+    list_path = tmp_path / "list.json"
+    list_path.write_text("[1, 2, 3]", encoding="utf-8")
+    assert mms_command_tools.load_usage_stats_from_path(str(list_path)) == {"sources": {}}
+
+    broken_path = tmp_path / "broken.json"
+    broken_path.write_text("{bad", encoding="utf-8")
+    assert mms_command_tools.load_usage_stats_from_path(str(broken_path)) == {"sources": {}}
+
+    stats_path = tmp_path / "usage.json"
+    stats_path.write_text('{"models": {"codex": 1}}', encoding="utf-8")
+    loaded = mms_command_tools.load_usage_stats_from_path(str(stats_path))
+    assert loaded == {"models": {"codex": 1}, "sources": {}}
+
+    guard_calls = []
+    target_path = tmp_path / "config.toml"
+    mms_command_tools.write_usage_stats_locked(
+        str(tmp_path / "state" / "usage.json"),
+        {"message": "中文", "sources": {"codex": {}}},
+        ensure_mms_config_guard_files=lambda path: guard_calls.append(path),
+        config_write_target_path=lambda: str(target_path),
+    )
+    written_path = tmp_path / "state" / "usage.json"
+    assert guard_calls == [str(target_path)]
+    assert json.loads(written_path.read_text(encoding="utf-8")) == {"message": "中文", "sources": {"codex": {}}}
+    assert "中文" in written_path.read_text(encoding="utf-8")
+    assert not (tmp_path / "state" / "usage.json.tmp").exists()
+    assert stat.S_IMODE(written_path.stat().st_mode) == 0o600
+
+
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 
