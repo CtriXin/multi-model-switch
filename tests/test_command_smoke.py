@@ -2205,6 +2205,194 @@ def test_run_recovery_action_preserves_dispatch_and_callbacks():
     assert "已跳过模型校验" in console.items[-1]
 
 
+def test_ensure_models_ready_helper_preserves_probe_and_recovery_flow():
+    import pytest
+
+    import mms_command_tools
+
+    class FakeStdin:
+        def __init__(self, tty):
+            self.tty = tty
+
+        def isatty(self):
+            return self.tty
+
+    cfg = {"cfg": True}
+    provider = {"id": "relay"}
+    console = _CollectingConsole()
+    calls = []
+
+    assert mms_command_tools.ensure_models_ready(
+        cfg,
+        provider,
+        probe_models_for_startup=lambda *args, **kwargs: calls.append(("startup", args, kwargs))
+        or {"models": ["gpt-5.5"]},
+        stdin=FakeStdin(False),
+        console=console,
+        config_command_hint=lambda: "mmg config api.edit",
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        model_validation_findings=lambda *_args: calls.append("unexpected-findings"),
+        build_model_recovery_actions=lambda *_args: calls.append("unexpected-actions"),
+        pick_recovery_actions=lambda *_args: calls.append("unexpected-pick"),
+        run_recovery_action=lambda *_args: calls.append("unexpected-run"),
+        probe_cache={},
+        probe_file_cache_path=lambda provider_id: f"/tmp/{provider_id}.json",
+        remove_file=lambda path: calls.append(("remove", path)),
+        probe_models=lambda *_args, **_kwargs: calls.append("unexpected-probe"),
+        default_provider_id="default",
+    ) == (provider, ["gpt-5.5"])
+    assert calls == [("startup", (cfg, provider), {"emit_output": True})]
+
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.ensure_models_ready(
+            cfg,
+            provider,
+            probe_models_for_startup=lambda *_args, **_kwargs: {"models": []},
+            stdin=FakeStdin(False),
+            console=console,
+            config_command_hint=lambda: "mmg config api.edit",
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+            model_validation_findings=lambda *_args: calls.append("unexpected-findings"),
+            build_model_recovery_actions=lambda *_args: calls.append("unexpected-actions"),
+            pick_recovery_actions=lambda *_args: calls.append("unexpected-pick"),
+            run_recovery_action=lambda *_args: calls.append("unexpected-run"),
+            probe_cache={},
+            probe_file_cache_path=lambda provider_id: f"/tmp/{provider_id}.json",
+            remove_file=lambda path: calls.append(("remove", path)),
+            probe_models=lambda *_args, **_kwargs: calls.append("unexpected-probe"),
+            default_provider_id="default",
+        )
+    assert exc_info.value.code == 1
+    assert console.items[-1] == "[red]模型校验失败，请执行 mmg config api.edit 后重试[/red]"
+
+    fixed_provider = {"id": "fixed"}
+    probe_cache = {"fixed": ("old", {"models": ["old"]})}
+    calls.clear()
+    assert mms_command_tools.ensure_models_ready(
+        cfg,
+        provider,
+        probe_models_for_startup=lambda *args, **kwargs: calls.append(("startup", args, kwargs))
+        or {"models": []},
+        stdin=FakeStdin(True),
+        console=console,
+        config_command_hint=lambda: "mmg config api.edit",
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        model_validation_findings=lambda received_provider, probe: calls.append(("findings", received_provider, probe))
+        or [{"title": "bad", "summary": "empty"}],
+        build_model_recovery_actions=lambda received_cfg, received_provider, probe: calls.append(
+            ("actions", received_cfg, received_provider, probe)
+        )
+        or [{"id": "edit"}, {"id": "details"}],
+        pick_recovery_actions=lambda findings, actions: calls.append(("pick", findings, actions)) or ["edit"],
+        run_recovery_action=lambda received_cfg, received_provider, probe, action_id: calls.append(
+            ("run", received_cfg, received_provider, probe, action_id)
+        )
+        or (fixed_provider, False),
+        probe_cache=probe_cache,
+        probe_file_cache_path=lambda provider_id: f"/tmp/{provider_id}.json",
+        remove_file=lambda path: calls.append(("remove", path)),
+        probe_models=lambda received_provider, **kwargs: calls.append(("probe", received_provider, kwargs))
+        or {"models": ["gpt-5.4"]},
+        default_provider_id="default",
+    ) == (fixed_provider, ["gpt-5.4"])
+    assert probe_cache == {}
+    assert calls == [
+        ("startup", (cfg, provider), {"emit_output": True}),
+        ("findings", provider, {"models": []}),
+        ("actions", cfg, provider, {"models": []}),
+        ("pick", [{"title": "bad", "summary": "empty"}], [{"id": "edit"}, {"id": "details"}]),
+        ("run", cfg, provider, {"models": []}, "edit"),
+        ("remove", "/tmp/fixed.json"),
+        ("probe", fixed_provider, {"emit_output": True}),
+    ]
+
+    assert mms_command_tools.ensure_models_ready(
+        cfg,
+        provider,
+        probe_models_for_startup=lambda *_args, **_kwargs: {"models": []},
+        stdin=FakeStdin(True),
+        console=console,
+        config_command_hint=lambda: "mmg config api.edit",
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        model_validation_findings=lambda *_args: [],
+        build_model_recovery_actions=lambda *_args: [{"id": "continue_without_validation"}],
+        pick_recovery_actions=lambda *_args: ["continue_without_validation"],
+        run_recovery_action=lambda *_args: (provider, True),
+        probe_cache={},
+        probe_file_cache_path=lambda provider_id: f"/tmp/{provider_id}.json",
+        remove_file=lambda path: calls.append(("unexpected-remove", path)),
+        probe_models=lambda *_args, **_kwargs: calls.append("unexpected-probe"),
+        default_provider_id="default",
+    ) == (provider, [])
+
+
+def test_ensure_models_ready_wrapper_preserves_core_callbacks(monkeypatch):
+    import mms_core
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    cfg = {"cfg": True}
+    provider = {"id": "relay"}
+    fixed_provider = {"id": "fixed"}
+    calls = []
+    console = _CollectingConsole()
+
+    monkeypatch.setattr(mms_core, "_PROBE_CACHE", {"fixed": ("old", {"models": ["old"]})})
+    monkeypatch.setattr(mms_core.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(mms_core, "console", console)
+    monkeypatch.setattr(
+        mms_core,
+        "_probe_models_for_startup",
+        lambda *args, **kwargs: calls.append(("startup", args, kwargs)) or {"models": []},
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_model_validation_findings",
+        lambda received_provider, probe: calls.append(("findings", received_provider, probe)) or [{"title": "bad"}],
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_build_model_recovery_actions",
+        lambda received_cfg, received_provider, probe: calls.append(("actions", received_cfg, received_provider, probe))
+        or [{"id": "edit"}],
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_pick_recovery_actions",
+        lambda findings, actions: calls.append(("pick", findings, actions)) or ["edit"],
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_run_recovery_action",
+        lambda received_cfg, received_provider, probe, action_id: calls.append(
+            ("run", received_cfg, received_provider, probe, action_id)
+        )
+        or (fixed_provider, False),
+    )
+    monkeypatch.setattr(mms_core, "_probe_file_cache_path", lambda provider_id: f"/tmp/{provider_id}.json")
+    monkeypatch.setattr(mms_core.os, "remove", lambda path: calls.append(("remove", path)))
+    monkeypatch.setattr(
+        mms_core,
+        "_probe_models",
+        lambda received_provider, **kwargs: calls.append(("probe", received_provider, kwargs))
+        or {"models": ["gpt-5.4"]},
+    )
+
+    assert mms_core.ensure_models_ready(cfg, provider) == (fixed_provider, ["gpt-5.4"])
+    assert mms_core._PROBE_CACHE == {}
+    assert calls == [
+        ("startup", (cfg, provider), {"emit_output": True}),
+        ("findings", provider, {"models": []}),
+        ("actions", cfg, provider, {"models": []}),
+        ("pick", [{"title": "bad"}], [{"id": "edit"}]),
+        ("run", cfg, provider, {"models": []}, "edit"),
+        ("remove", "/tmp/fixed.json"),
+        ("probe", fixed_provider, {"emit_output": True}),
+    ]
+
+
 def test_rescue_report_payload_helpers_preserve_safe_local_outputs():
     import mms_command_tools
 

@@ -1545,6 +1545,57 @@ def run_recovery_action(
     return provider, False
 
 
+def ensure_models_ready(
+    cfg,
+    provider,
+    *,
+    probe_models_for_startup,
+    stdin,
+    console,
+    config_command_hint,
+    exit_func,
+    model_validation_findings,
+    build_model_recovery_actions,
+    pick_recovery_actions,
+    run_recovery_action,
+    probe_cache,
+    probe_file_cache_path,
+    remove_file,
+    probe_models,
+    default_provider_id,
+):
+    probe = probe_models_for_startup(cfg, provider, emit_output=True)
+    models = probe.get("models")
+    if models:
+        return provider, models
+
+    if not stdin.isatty():
+        console.print(f"[red]模型校验失败，请执行 {config_command_hint()} 后重试[/red]")
+        exit_func(1)
+
+    while True:
+        findings = model_validation_findings(provider, probe)
+        actions = build_model_recovery_actions(cfg, provider, probe)
+        selected_ids = pick_recovery_actions(findings, actions)
+        if not selected_ids:
+            exit_func(1)
+        ordered_actions = [item for item in actions if item["id"] in selected_ids]
+        for action in ordered_actions:
+            provider, skip_validation = run_recovery_action(cfg, provider, probe, action["id"])
+            if skip_validation:
+                return provider, []
+            provider_id = provider.get("id", default_provider_id)
+            probe_cache.pop(provider_id, None)
+            try:
+                remove_file(probe_file_cache_path(provider_id))
+            except OSError:
+                pass
+            probe = probe_models(provider, emit_output=True)
+            models = probe.get("models")
+            if models:
+                return provider, models
+
+
 def rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False, localize):
     if cleared:
         return (

@@ -4558,36 +4558,26 @@ def setup_wizard(ui_language=None):
 # ── Model Fetching ──────────────────────────────────────
 
 def ensure_models_ready(cfg, provider):
-    probe = _probe_models_for_startup(cfg, provider, emit_output=True)
-    models = probe.get("models")
-    if models:
-        return provider, models
+    from mms_command_tools import ensure_models_ready as ensure_models_ready_helper
 
-    if not sys.stdin.isatty():
-        console.print(f"[red]模型校验失败，请执行 {config_command_hint()} 后重试[/red]")
-        sys.exit(1)
-
-    while True:
-        findings = _model_validation_findings(provider, probe)
-        actions = _build_model_recovery_actions(cfg, provider, probe)
-        selected_ids = _pick_recovery_actions(findings, actions)
-        if not selected_ids:
-            sys.exit(1)
-        ordered_actions = [item for item in actions if item["id"] in selected_ids]
-        for action in ordered_actions:
-            provider, skip_validation = _run_recovery_action(cfg, provider, probe, action["id"])
-            if skip_validation:
-                return provider, []
-            # recovery 后清除缓存，强制重新探测
-            _PROBE_CACHE.pop(provider.get("id", DEFAULT_PROVIDER_ID), None)
-            try:
-                os.remove(_probe_file_cache_path(provider.get("id", DEFAULT_PROVIDER_ID)))
-            except OSError:
-                pass
-            probe = _probe_models(provider, emit_output=True)
-            models = probe.get("models")
-            if models:
-                return provider, models
+    return ensure_models_ready_helper(
+        cfg,
+        provider,
+        probe_models_for_startup=_probe_models_for_startup,
+        stdin=sys.stdin,
+        console=console,
+        config_command_hint=config_command_hint,
+        exit_func=sys.exit,
+        model_validation_findings=_model_validation_findings,
+        build_model_recovery_actions=_build_model_recovery_actions,
+        pick_recovery_actions=_pick_recovery_actions,
+        run_recovery_action=_run_recovery_action,
+        probe_cache=_PROBE_CACHE,
+        probe_file_cache_path=_probe_file_cache_path,
+        remove_file=os.remove,
+        probe_models=_probe_models,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+    )
 
 
 def categorize_models(models):
