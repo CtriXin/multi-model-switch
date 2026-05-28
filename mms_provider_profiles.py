@@ -12,7 +12,7 @@ import os
 from functools import lru_cache
 from typing import Any
 
-from mms_state_io import resolve_mms_config_dir
+from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
 
 _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 _BUILTIN_PROFILE_PATH = os.path.join(_REPO_ROOT, "config", "provider-profiles.json")
@@ -48,6 +48,11 @@ def _deep_merge(base: Any, override: Any) -> Any:
 def _load_latest_approved_profiles(config_dir: str) -> tuple[dict[str, Any], bool]:
     manifest_path = os.path.join(config_dir, "generated", "model-registry.latest-approved.json")
     if not os.path.exists(manifest_path):
+        try:
+            if mms_config_root_mode(config_dir) == "preview":
+                return {}, True
+        except Exception:
+            pass
         return {}, False
     try:
         import mms_registry
