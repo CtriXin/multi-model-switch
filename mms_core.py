@@ -1160,24 +1160,15 @@ def _runtime_with_priority(runtime, *, model_name="", family_name=""):
 
 
 def _normalize_claude_1m_mode(value, default="auto"):
-    raw = str(value or "").strip().lower()
-    if raw in {"", "inherit", "default", "auto"}:
-        return default if default in VALID_CLAUDE_1M_MODES else "auto"
-    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
-        return "enable"
-    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
-        return "disable"
-    return default if default in VALID_CLAUDE_1M_MODES else "auto"
+    from mms_command_tools import normalize_claude_1m_mode
+
+    return normalize_claude_1m_mode(value, default=default, valid_modes=VALID_CLAUDE_1M_MODES)
 
 
 def _normalize_timezone_name(value, default=DEFAULT_ACCOUNT_TIMEZONE):
-    timezone_name = str(value or "").strip() or default
-    if timezone_name:
-        try:
-            ZoneInfo(timezone_name)
-        except Exception:
-            timezone_name = default
-    return timezone_name
+    from mms_command_tools import normalize_timezone_name
+
+    return normalize_timezone_name(value, default=default)
 
 
 _ANTHROPIC_OFFICIAL_HOSTS = (
@@ -1268,15 +1259,9 @@ def _runtime_httpx_kwargs(runtime, *, target_url=""):
 
 
 def _runtime_force_ipv4(runtime):
-    raw = False if not isinstance(runtime, dict) else runtime.get("force_ipv4", False)
-    if isinstance(raw, bool):
-        return raw
-    value = str(raw or "").strip().lower()
-    if value in {"0", "false", "no", "off", "disable", "disabled"}:
-        return False
-    if value in {"1", "true", "yes", "on", "enable", "enabled", ""}:
-        return True
-    return False
+    from mms_command_tools import runtime_force_ipv4
+
+    return runtime_force_ipv4(runtime)
 
 
 def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False, **kwargs):
@@ -1422,9 +1407,9 @@ def _prompt_validated_timezone(current_timezone="", *, wizard=False):
 
 
 def _normalize_account_id(account_id):
-    value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
-    value = value.strip("-_")
-    return value or "account"
+    from mms_command_tools import normalize_account_id
+
+    return normalize_account_id(account_id)
 
 
 def _wizard_prompt(label, default="", password=False, required=False):

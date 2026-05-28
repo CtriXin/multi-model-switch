@@ -693,6 +693,27 @@ def test_runtime_priority_and_supported_cli_helpers_preserve_normalization():
     assert mms_command_tools.normalize_family_priority_overrides([], model_families=model_families, default_priority=50) == {}
 
 
+def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
+    import mms_command_tools
+
+    valid_modes = {"auto", "enable", "disable"}
+    assert mms_command_tools.normalize_claude_1m_mode("", default="auto", valid_modes=valid_modes) == "auto"
+    assert mms_command_tools.normalize_claude_1m_mode("enabled", default="auto", valid_modes=valid_modes) == "enable"
+    assert mms_command_tools.normalize_claude_1m_mode("off", default="auto", valid_modes=valid_modes) == "disable"
+    assert mms_command_tools.normalize_claude_1m_mode("bad", default="enable", valid_modes=valid_modes) == "enable"
+    assert mms_command_tools.normalize_claude_1m_mode("bad", default="unknown", valid_modes=valid_modes) == "auto"
+    assert mms_command_tools.normalize_timezone_name("Asia/Singapore", default="UTC") == "Asia/Singapore"
+    assert mms_command_tools.normalize_timezone_name("Bad/Timezone", default="UTC") == "UTC"
+    assert mms_command_tools.normalize_timezone_name("", default="Asia/Shanghai") == "Asia/Shanghai"
+    assert mms_command_tools.normalize_account_id(" Claude Main! ") == "claude-main"
+    assert mms_command_tools.normalize_account_id("!!!") == "account"
+    assert mms_command_tools.runtime_force_ipv4({"force_ipv4": True}) is True
+    assert mms_command_tools.runtime_force_ipv4({"force_ipv4": "enabled"}) is True
+    assert mms_command_tools.runtime_force_ipv4({"force_ipv4": "off"}) is False
+    assert mms_command_tools.runtime_force_ipv4({"force_ipv4": "surprise"}) is False
+    assert mms_command_tools.runtime_force_ipv4(None) is False
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

@@ -7,6 +7,7 @@ import os
 import shlex
 import subprocess
 import sys
+from zoneinfo import ZoneInfo
 
 
 CONFIG_HELP_TOPICS = {
@@ -927,6 +928,45 @@ def normalize_family_priority_overrides(value, *, model_families, default_priori
             continue
         normalized[canonical] = normalize_priority(priority, default_priority=default_priority)
     return normalized
+
+
+def normalize_claude_1m_mode(value, *, default="auto", valid_modes):
+    raw = str(value or "").strip().lower()
+    if raw in {"", "inherit", "default", "auto"}:
+        return default if default in valid_modes else "auto"
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return "enable"
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return "disable"
+    return default if default in valid_modes else "auto"
+
+
+def normalize_timezone_name(value, *, default):
+    timezone_name = str(value or "").strip() or default
+    if timezone_name:
+        try:
+            ZoneInfo(timezone_name)
+        except Exception:
+            timezone_name = default
+    return timezone_name
+
+
+def normalize_account_id(account_id):
+    value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
+    value = value.strip("-_")
+    return value or "account"
+
+
+def runtime_force_ipv4(runtime):
+    raw = False if not isinstance(runtime, dict) else runtime.get("force_ipv4", False)
+    if isinstance(raw, bool):
+        return raw
+    value = str(raw or "").strip().lower()
+    if value in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if value in {"1", "true", "yes", "on", "enable", "enabled", ""}:
+        return True
+    return False
 
 
 def mask_key(value):
