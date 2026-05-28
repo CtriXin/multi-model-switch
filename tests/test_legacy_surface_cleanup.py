@@ -597,7 +597,8 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert actions[1] == ("consumer_bundle_status", "查看 Consumer Bundle")
     assert actions[2] == ("registry_v2_save_plan", "查看 v2 Save Plan")
     assert actions[3] == ("config_v2_promotion_plan", "查看 Promote Plan")
-    assert actions[4] == ("preview_doctor", "运行 Preview Doctor")
+    assert actions[4] == ("config_v2_release_readiness", "查看 4.0 Readiness")
+    assert actions[5] == ("preview_doctor", "运行 Preview Doctor")
     assert report_title == "Model Source Status"
     assert ("Legacy 冲突", 2) in rows
     assert ("Legacy 候选状态", "not_imported") in rows
@@ -739,6 +740,46 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("下一步", "Human gate: review promotion plan") in promotion_rows
     assert "human gate" in promotion_note
     assert "不写 stable root" in promotion_note
+
+    readiness_title, readiness_rows, readiness_note = mms_core._config_v2_release_readiness_report_payload(
+        {
+            "result": "READY_FOR_4_0_HUMAN_GATE",
+            "status": "human_gate",
+            "release_complete": False,
+            "ready_for_human_gate": True,
+            "human_gate_required": True,
+            "completion_blocker": "stable_promotion_human_gate",
+            "config_root": "/tmp/mms-next",
+            "stable_config_root": "/tmp/mms",
+            "requirements": [
+                {"id": "preview_root_selected", "ok": True},
+                {"id": "consumer_bundle_verified", "ok": True},
+            ],
+            "blocked_requirements": [],
+            "promotion_plan": {
+                "status": "human_gate",
+                "apply_enabled": False,
+                "blocked_reasons": ["stable_root_human_only", "promotion_apply_not_implemented"],
+            },
+            "next_action": {"label": "Human gate: review promotion plan", "command": "./mmf promote --json"},
+        }
+    )
+
+    assert readiness_title == "Config v2 Release Readiness"
+    assert ("结果", "READY_FOR_4_0_HUMAN_GATE") in readiness_rows
+    assert ("状态", "human_gate") in readiness_rows
+    assert ("Release complete", "no") in readiness_rows
+    assert ("Ready for human gate", "yes") in readiness_rows
+    assert ("Human gate required", "yes") in readiness_rows
+    assert ("完成阻塞", "stable_promotion_human_gate") in readiness_rows
+    assert ("Preview root", "/tmp/mms-next") in readiness_rows
+    assert ("Stable root", "/tmp/mms") in readiness_rows
+    assert ("Requirements", "2/2 ok") in readiness_rows
+    assert ("Blocked requirements", "-") in readiness_rows
+    assert ("Promotion apply", "no") in readiness_rows
+    assert ("下一步", "Human gate: review promotion plan") in readiness_rows
+    assert "只读审计" in readiness_note
+    assert "不改 Claude config" in readiness_note
 
     doctor_title, doctor_rows, doctor_note = mms_core._preview_doctor_report_payload(
         {

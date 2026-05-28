@@ -408,9 +408,10 @@ Current Stage 3a implementation:
 - CLI: `mms config doctor [--json]` / `mmf config doctor [--json]` exposes the read-only preview readiness doctor under the `config` entry.
 - WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, legacy candidate import counts, and latest-approved bundle status.
 - WebUI: `/api/state` also includes `consumer_bundle_status`, and the first panel shows the downstream consumer entrypoint, component revisions, file count, and consumer rules so Hive/Pilot/Ant/Mobius cutover can verify one source without reading SQLite.
+- WebUI: `/api/state` also includes `config_v2_release_readiness`, and the first panel shows whether automated 4.0/config-v2 checks reached `READY_FOR_4_0_HUMAN_GATE`, while keeping `release_complete=false` until stable promotion is human-approved.
 - WebUI: `/api/plan` includes a read-only `registry_v2_save_plan` that shows the DB backup -> candidate revision -> secret backend -> publish -> verify -> rollback sequence. The plan itself is read-only; writes require the preview-gated WebUI `写入预览 DB + 发布` action or `mms/mmf config apply-plan --apply --confirm-preview-apply`.
 - WebUI: the save preview now labels `webui-plan.json` as a redacted review artifact and exposes download/copy helpers. Downloaded plan JSON does not include plaintext API keys; when a credential update is part of the draft, the preferred apply path is the WebUI button so the plaintext key stays inside the single POST and preview secret backend write path.
-- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes read-only `查看 Consumer Bundle`, `查看 v2 Save Plan`, and `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
+- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes read-only `查看 Consumer Bundle`, `查看 v2 Save Plan`, `查看 Promote Plan`, `查看 4.0 Readiness`, and `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
 - Stable-root WebUI Save behavior is not changed; preview-root legacy save is blocked and users are directed to the DB-truth preview apply path.
 
 Current preview init implementation:
@@ -588,6 +589,8 @@ Current Stage 8c release readiness audit:
 - It aggregates preview root mode, preview doctor/check runtime readiness, verified latest-approved consumer bundle, public README/runbook terms, and the stable promotion plan.
 - A successful audit returns `READY_FOR_4_0_HUMAN_GATE`, `ready_for_human_gate=true`, `release_complete=false`, `human_gate_required=true`, and `completion_blocker=stable_promotion_human_gate`.
 - The command intentionally does not prove final migration completion; it proves that automated checks reached the stable human gate without writing stable root, preview root, DB, generated bundle, secret backend, or Claude config.
+- WebUI now surfaces the same audit in `/api/state` and the Model Source panel as `4.0 Release Readiness`, including blocked requirements, next action, and the stable-promotion human gate.
+- TUI Settings -> `模型真源 / Registry Truth` now includes `查看 4.0 Readiness`, a read-only report for the same audit; it does not write stable root, DB, generated bundles, secret backend, or Claude config.
 
 ## Future LMs Must Not Forget
 

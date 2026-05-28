@@ -96,6 +96,16 @@ def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
     assert promotion["stable_backup_plan"]["would_create_backup"] is False
     assert promotion["bundle_comparison"]["preview"]["verified"] is False
     assert "stable_root_human_only" in promotion["blocked_reasons"]
+    readiness = snapshot["config_v2_release_readiness"]
+    assert readiness["schema"] == "mms.config_v2_release_readiness.v1"
+    assert readiness["read_only"] is True
+    assert readiness["release_complete"] is False
+    assert readiness["ready_for_human_gate"] is False
+    assert readiness["human_gate_required"] is True
+    assert readiness["completion_blocker"] == "stable_promotion_human_gate"
+    assert readiness["config_root"] == str(config_root)
+    assert "preview_runtime_ready" in readiness["blocked_requirements"]
+    assert "consumer_bundle_verified" in readiness["blocked_requirements"]
     assert not (config_root / "registry").exists()
 
 
@@ -177,6 +187,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Consumer Bundle" in html
     assert "Promotion Plan / Human Gate" in html
     assert "config_v2_promotion_plan" in html
+    assert "4.0 Release Readiness" in html
+    assert "config_v2_release_readiness" in html
+    assert "release_complete 仍为 false" in html
+    assert "stable promotion human gate" in html
+    assert "blocked requirements" in html
     assert "stable backup + bundle comparison" in html
     assert "apply 仍停在 human gate" in html
     assert "不读 SQLite" in html
