@@ -2364,6 +2364,163 @@ def test_env_file_helpers_preserve_shell_parsing_and_paths(tmp_path):
     }
 
 
+def test_provider_credentials_load_helper_preserves_env_file_legacy_precedence(tmp_path):
+    import mms_command_tools
+
+    credentials_path = tmp_path / "credentials.sh"
+    credentials_path.write_text(
+        "\n".join(
+            [
+                "export MMS_PROVIDER_DEFAULT_BASE_URL='https://file.default/v1/'",
+                "export MMS_PROVIDER_DEFAULT_API_KEY='file-default-key'",
+                "export MMS_PROVIDER_DEFAULT_OPENAI_BASE_URL='https://file.openai/v1/'",
+                "export MMS_PROVIDER_DEFAULT_ANTHROPIC_BASE_URL='https://file.anthropic/'",
+                "export MMS_PROVIDER_DEFAULT_OPENAI_API_KEY='file-openai-key'",
+                "export MMS_API_BASE_URL='https://legacy-file.default/v1'",
+                "export MMS_API_KEY='legacy-file-key'",
+                "export MMS_PROVIDER_RELAY_BASE_URL='https://file.relay/v1/'",
+                "export MMS_PROVIDER_RELAY_API_KEY='file-relay-key'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    legacy_config_path = tmp_path / "config.toml"
+    legacy_config_path.write_text("[api]\nbase_url = 'https://legacy.config/v1/'\napi_key = 'legacy-config-key'\n", encoding="utf-8")
+
+    provider_env_name = lambda provider_id, suffix: mms_command_tools.provider_env_name(
+        provider_id,
+        suffix,
+        default_provider_id="default",
+    )
+    env_creds = mms_command_tools.load_provider_credentials(
+        "default",
+        default_provider_id="default",
+        provider_env_name=provider_env_name,
+        api_url_env_name="MMS_API_BASE_URL",
+        api_key_env_name="MMS_API_KEY",
+        credentials_paths=(str(credentials_path),),
+        load_env_file=mms_command_tools.load_env_file,
+        active_config_path=lambda: str(legacy_config_path),
+        environ={
+            "MMS_PROVIDER_DEFAULT_BASE_URL": "https://env.default/v1/ ",
+            "MMS_PROVIDER_DEFAULT_API_KEY": " env-key ",
+            "MMS_PROVIDER_DEFAULT_OPENAI_API_KEY": " env-openai-key ",
+        },
+    )
+    assert env_creds == {
+        "base_url": "https://env.default/v1",
+        "openai_base_url": "https://file.openai/v1",
+        "anthropic_base_url": "https://file.anthropic",
+        "api_key": "env-key",
+        "openai_api_key": "env-openai-key",
+    }
+
+    legacy_creds = mms_command_tools.load_provider_credentials(
+        "default",
+        default_provider_id="default",
+        provider_env_name=provider_env_name,
+        api_url_env_name="MMS_API_BASE_URL",
+        api_key_env_name="MMS_API_KEY",
+        credentials_paths=(str(tmp_path / "missing.sh"),),
+        load_env_file=mms_command_tools.load_env_file,
+        active_config_path=lambda: str(legacy_config_path),
+        environ={},
+    )
+    assert legacy_creds["base_url"] == "https://legacy.config/v1"
+    assert legacy_creds["api_key"] == "legacy-config-key"
+
+    relay_creds = mms_command_tools.load_provider_credentials(
+        "relay",
+        default_provider_id="default",
+        provider_env_name=provider_env_name,
+        api_url_env_name="MMS_API_BASE_URL",
+        api_key_env_name="MMS_API_KEY",
+        credentials_paths=(str(credentials_path),),
+        load_env_file=mms_command_tools.load_env_file,
+        active_config_path=lambda: str(legacy_config_path),
+        environ={},
+    )
+    assert relay_creds["base_url"] == "https://file.relay/v1"
+    assert relay_creds["api_key"] == "file-relay-key"
+
+
+def test_provider_credentials_save_helper_preserves_file_shape_and_refresh(tmp_path):
+    import stat
+
+    import mms_command_tools
+
+    credentials_path = tmp_path / "credentials.sh"
+    credentials_path.write_text(
+        "\n".join(
+            [
+                "export KEEP='1'",
+                "export MMS_PROVIDER_DEFAULT_OPENAI_BASE_URL='https://old.openai/v1'",
+                "export MMS_PROVIDER_DEFAULT_ANTHROPIC_BASE_URL='https://old.anthropic'",
+                "export MMS_PROVIDER_DEFAULT_OPENAI_API_KEY='old-openai-key'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    refresh_calls = []
+    provider_env_name = lambda provider_id, suffix: mms_command_tools.provider_env_name(
+        provider_id,
+        suffix,
+        default_provider_id="default",
+    )
+
+    mms_command_tools.save_provider_credentials(
+        "default",
+        "https://new.default/v1/",
+        "new-key",
+        openai_base_url="",
+        anthropic_base_url="https://new.anthropic/",
+        openai_api_key=None,
+        config_dir=str(tmp_path / "config"),
+        credentials_path=str(credentials_path),
+        provider_env_name=provider_env_name,
+        default_provider_id="default",
+        api_url_env_name="MMS_API_BASE_URL",
+        api_key_env_name="MMS_API_KEY",
+        load_env_file=mms_command_tools.load_env_file,
+        shell_quote=mms_command_tools.shell_quote,
+        trigger_routes_export_after_credentials_write=lambda: refresh_calls.append("refresh"),
+    )
+
+    text = credentials_path.read_text(encoding="utf-8")
+    assert "export KEEP='1'" in text
+    assert "export MMS_PROVIDER_DEFAULT_BASE_URL='https://new.default/v1'" in text
+    assert "export MMS_PROVIDER_DEFAULT_API_KEY='new-key'" in text
+    assert "export MMS_PROVIDER_DEFAULT_ANTHROPIC_BASE_URL='https://new.anthropic'" in text
+    assert "MMS_PROVIDER_DEFAULT_OPENAI_BASE_URL" not in text
+    assert "MMS_PROVIDER_DEFAULT_OPENAI_API_KEY" not in text
+    assert "export MMS_API_BASE_URL='https://new.default/v1'" in text
+    assert "export MMS_API_KEY='new-key'" in text
+    assert refresh_calls == ["refresh"]
+    assert stat.S_IMODE(credentials_path.stat().st_mode) == 0o600
+
+    mms_command_tools.save_provider_credentials(
+        "relay",
+        "https://relay.example/v1",
+        "relay-key",
+        openai_base_url="https://relay-openai.example/v1",
+        openai_api_key="relay-openai-key",
+        config_dir=str(tmp_path / "config"),
+        credentials_path=str(credentials_path),
+        provider_env_name=provider_env_name,
+        default_provider_id="default",
+        api_url_env_name="MMS_API_BASE_URL",
+        api_key_env_name="MMS_API_KEY",
+        load_env_file=mms_command_tools.load_env_file,
+        shell_quote=mms_command_tools.shell_quote,
+        trigger_routes_export_after_credentials_write=lambda: refresh_calls.append("refresh"),
+    )
+    text = credentials_path.read_text(encoding="utf-8")
+    assert "export MMS_PROVIDER_RELAY_OPENAI_BASE_URL='https://relay-openai.example/v1'" in text
+    assert "export MMS_PROVIDER_RELAY_OPENAI_API_KEY='relay-openai-key'" in text
+    assert text.count("export MMS_API_BASE_URL=") == 1
+    assert refresh_calls == ["refresh", "refresh"]
+
+
 def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     import pytest
 
