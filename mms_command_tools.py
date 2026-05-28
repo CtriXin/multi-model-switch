@@ -2742,6 +2742,33 @@ def provider_candidates(
     return candidates
 
 
+def provider_effective_models(
+    provider,
+    cached_models,
+    cfg=None,
+    *,
+    schedule_probe_refresh,
+    apply_provider_model_patch,
+):
+    if cached_models is None:
+        if provider.get("models_endpoint") == "manual":
+            base_models = list(provider.get("fallback_models") or [])
+            base_source = "manual"
+        else:
+            schedule_probe_refresh(provider, cfg, reason="cache_miss")
+            base_models = list(provider.get("fallback_models") or [])
+            base_source = "fallback" if base_models else "remote"
+    else:
+        base_models = list(cached_models or [])
+        base_source = "remote"
+
+    patched = apply_provider_model_patch(
+        provider,
+        {"raw_models": base_models, "models": base_models, "base_source": base_source},
+    )
+    return list(patched.get("models") or [])
+
+
 def is_installed_mms_layout(
     module_path,
     *,

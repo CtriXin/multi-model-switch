@@ -3913,6 +3913,57 @@ def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
     ]
     assert cache_calls == [("relay-a", True), ("relay-b", True)]
 
+    refresh_calls = []
+    patch_calls = []
+
+    def apply_patch(provider, payload):
+        patch_calls.append((provider["id"], payload))
+        return {**payload, "models": payload["models"] + provider.get("extra_models", [])}
+
+    assert mms_command_tools.provider_effective_models(
+        {"id": "manual", "models_endpoint": "manual", "fallback_models": ("manual-model",), "extra_models": ["extra"]},
+        None,
+        {"cfg": True},
+        schedule_probe_refresh=lambda provider, cfg, reason: refresh_calls.append((provider["id"], cfg, reason)),
+        apply_provider_model_patch=apply_patch,
+    ) == ["manual-model", "extra"]
+    assert refresh_calls == []
+    assert patch_calls[-1] == (
+        "manual",
+        {"raw_models": ["manual-model"], "models": ["manual-model"], "base_source": "manual"},
+    )
+    assert mms_command_tools.provider_effective_models(
+        {"id": "fallback", "fallback_models": ["fallback-model"]},
+        None,
+        {"cfg": True},
+        schedule_probe_refresh=lambda provider, cfg, reason: refresh_calls.append((provider["id"], cfg, reason)),
+        apply_provider_model_patch=apply_patch,
+    ) == ["fallback-model"]
+    assert refresh_calls == [("fallback", {"cfg": True}, "cache_miss")]
+    assert patch_calls[-1] == (
+        "fallback",
+        {"raw_models": ["fallback-model"], "models": ["fallback-model"], "base_source": "fallback"},
+    )
+    assert mms_command_tools.provider_effective_models(
+        {"id": "remote"},
+        None,
+        {},
+        schedule_probe_refresh=lambda provider, cfg, reason: refresh_calls.append((provider["id"], cfg, reason)),
+        apply_provider_model_patch=apply_patch,
+    ) == []
+    assert patch_calls[-1] == ("remote", {"raw_models": [], "models": [], "base_source": "remote"})
+    assert mms_command_tools.provider_effective_models(
+        {"id": "cached"},
+        ("cached-model",),
+        {},
+        schedule_probe_refresh=lambda provider, cfg, reason: refresh_calls.append(("unexpected", provider["id"], reason)),
+        apply_provider_model_patch=apply_patch,
+    ) == ["cached-model"]
+    assert patch_calls[-1] == (
+        "cached",
+        {"raw_models": ["cached-model"], "models": ["cached-model"], "base_source": "remote"},
+    )
+
     providers = [
         {
             "id": "relay-a",

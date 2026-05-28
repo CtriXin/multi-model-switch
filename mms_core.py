@@ -5120,25 +5120,15 @@ def _provider_models_for_cli(cli_name, models):
 
 
 def _provider_effective_models(provider, cached_models, cfg=None):
-    if cached_models is None:
-        if provider.get("models_endpoint") == "manual":
-            base_models = list(provider.get("fallback_models") or [])
-            base_source = "manual"
-        else:
-            _schedule_probe_refresh(provider, cfg, reason="cache_miss")
-            # Cold-cache startup must not hide user-configured model families while
-            # the remote /models probe refreshes in the background.
-            base_models = list(provider.get("fallback_models") or [])
-            base_source = "fallback" if base_models else "remote"
-    else:
-        base_models = list(cached_models or [])
-        base_source = "remote"
+    from mms_command_tools import provider_effective_models
 
-    patched = _apply_provider_model_patch(
+    return provider_effective_models(
         provider,
-        {"raw_models": base_models, "models": base_models, "base_source": base_source},
+        cached_models,
+        cfg,
+        schedule_probe_refresh=_schedule_probe_refresh,
+        apply_provider_model_patch=_apply_provider_model_patch,
     )
-    return list(patched.get("models") or [])
 
 
 def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models):
