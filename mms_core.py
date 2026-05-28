@@ -9751,12 +9751,9 @@ def _parse_openrouter_extension_args(args_rest):
 
 
 def _display_openrouter_extension_help():
-    command = current_command()
-    console.print(f"[bold]{command} config extension.openrouter[/bold] — OpenRouter 可选扩展")
-    console.print(f"  {command} config extension.openrouter add")
-    console.print(f"  {command} config extension.openrouter status [provider_id] [--limit N] [--json]")
-    console.print(f"  {command} config extension.openrouter models [provider_id] [--limit N] [--json]")
-    console.print("[dim]status/models 默认不写真实 MMS 配置；add 会进入交互式 provider 接入。[/dim]")
+    from mms_command_tools import display_openrouter_extension_help
+
+    return display_openrouter_extension_help(current_command(), console=console)
 
 
 def _openrouter_extension_provider(cfg, provider_id=""):
@@ -9775,73 +9772,31 @@ def _openrouter_extension_provider(cfg, provider_id=""):
 
 
 def _display_openrouter_model_rows(title, rows, *, limit):
+    from mms_command_tools import display_openrouter_model_rows
+
     _ensure_rich()
-    table = Table(title=title, show_lines=False)
-    table.add_column("模型", style="cyan")
-    table.add_column("原始来源", style="green")
-    table.add_column("免费", style="yellow", width=6)
-    table.add_column("输入", style="magenta")
-    table.add_column("输出", style="magenta")
-    table.add_column("Context", justify="right")
-    shown = list(rows or [])[: int(limit)]
-    for item in shown:
-        table.add_row(
-            str(item.get("id") or ""),
-            str(item.get("origin") or ""),
-            "yes" if item.get("is_free") else "no",
-            ",".join(item.get("input_modalities") or []),
-            ",".join(item.get("output_modalities") or []),
-            str(item.get("context_length") or ""),
-        )
-    console.print(table)
-    if len(rows or []) > len(shown):
-        console.print(f"[dim]仅展示前 {len(shown)} / {len(rows)} 个；可加 --limit 调整。[/dim]")
+    return display_openrouter_model_rows(title, rows, limit=limit, table_cls=Table, console=console)
 
 
 def _display_openrouter_video_rows(rows, *, limit):
+    from mms_command_tools import display_openrouter_video_rows
+
     _ensure_rich()
-    table = Table(title="OpenRouter Video 模型", show_lines=False)
-    table.add_column("模型", style="cyan")
-    table.add_column("原始来源", style="green")
-    table.add_column("分辨率", style="yellow")
-    table.add_column("时长", style="magenta")
-    shown = list(rows or [])[: int(limit)]
-    for item in shown:
-        table.add_row(
-            str(item.get("id") or ""),
-            str(item.get("origin") or ""),
-            ",".join(str(value) for value in item.get("supported_resolutions") or []),
-            ",".join(str(value) for value in item.get("supported_durations") or []),
-        )
-    console.print(table)
-    if len(rows or []) > len(shown):
-        console.print(f"[dim]仅展示前 {len(shown)} / {len(rows)} 个；可加 --limit 调整。[/dim]")
+    return display_openrouter_video_rows(rows, limit=limit, table_cls=Table, console=console)
 
 
 def _display_openrouter_extension_summary(summary, *, provider_label="", limit=12, show_models=False):
+    from mms_command_tools import display_openrouter_extension_summary
+
     _ensure_rich()
-    account = summary.get("account") or {}
-    counts = summary.get("counts") or {}
-    requests = summary.get("requests") or {}
-    table = Table(title="OpenRouter Extension", show_lines=True)
-    table.add_column("项目", style="cyan")
-    table.add_column("值", style="green")
-    table.add_row("provider/key", provider_label or "env/public")
-    table.add_row("account tier", f"{account.get('tier')} ({account.get('reason')})")
-    table.add_row("model source", str(summary.get("model_source") or "-"))
-    table.add_row("visible text", str(counts.get("visible_text", 0)))
-    table.add_row("image/video", f"{'on' if summary.get('image_enabled') else 'off'} / {'on' if summary.get('video_enabled') else 'off'}")
-    table.add_row("requests", ", ".join(f"{key}:{value.get('status')}" for key, value in requests.items()))
-    console.print(table)
-    if summary.get("free_only"):
-        console.print("[yellow]当前按 free-only 策略展示：只列免费文本模型，隐藏 OpenRouter Image / Video。[/yellow]")
-    if not show_models:
-        return
-    _display_openrouter_model_rows("OpenRouter Text 模型", summary.get("text_models") or [], limit=limit)
-    if summary.get("image_enabled"):
-        _display_openrouter_model_rows("OpenRouter Image 模型", summary.get("image_models") or [], limit=limit)
-    if summary.get("video_enabled"):
-        _display_openrouter_video_rows(summary.get("video_models") or [], limit=limit)
+    return display_openrouter_extension_summary(
+        summary,
+        provider_label=provider_label,
+        limit=limit,
+        show_models=show_models,
+        table_cls=Table,
+        console=console,
+    )
 
 
 def _handle_openrouter_extension_config(cfg, args_rest):

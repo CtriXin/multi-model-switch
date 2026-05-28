@@ -3,6 +3,8 @@ from __future__ import annotations
 
 class _FakeTable:
     def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
         self.rows = []
 
     def add_column(self, *args, **kwargs):
@@ -1064,6 +1066,81 @@ def test_provider_model_table_display_renders_speed_and_sources():
     assert "手工补充模型: custom-model" in text
     assert "已隐藏模型: hidden-model" in text
     assert "原始模型数: 3" in text
+
+
+def test_openrouter_extension_display_helpers_render_summary_and_limits():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    rows = [
+        {
+            "id": "free/model",
+            "origin": "openrouter",
+            "is_free": True,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "context_length": 128000,
+        },
+        {
+            "id": "paid/model",
+            "origin": "openrouter",
+            "is_free": False,
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["text"],
+            "context_length": 200000,
+        },
+    ]
+
+    mms_command_tools.display_openrouter_extension_help("mmg", console=console)
+    assert "mmg config extension.openrouter add" in "\n".join(str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.display_openrouter_model_rows(
+        "OpenRouter Text 模型",
+        rows,
+        limit=1,
+        table_cls=_FakeTable,
+        console=console,
+    )
+    text_table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert text_table.kwargs["title"] == "OpenRouter Text 模型"
+    assert text_table.rows[0][0] == ("free/model", "openrouter", "yes", "text", "text", "128000")
+    assert any("仅展示前 1 / 2 个" in str(item) for item in console.items)
+
+    console.items.clear()
+    summary = {
+        "account": {"tier": "paid", "reason": "key"},
+        "counts": {"visible_text": 2},
+        "requests": {"models": {"status": "ok"}},
+        "model_source": "api",
+        "image_enabled": True,
+        "video_enabled": True,
+        "free_only": True,
+        "text_models": rows,
+        "image_models": [{"id": "img/model", "origin": "openrouter", "is_free": False}],
+        "video_models": [
+            {
+                "id": "video/model",
+                "origin": "openrouter",
+                "supported_resolutions": ["720p"],
+                "supported_durations": [5, 10],
+            }
+        ],
+    }
+    mms_command_tools.display_openrouter_extension_summary(
+        summary,
+        provider_label="provider/openrouter",
+        limit=1,
+        show_models=True,
+        table_cls=_FakeTable,
+        console=console,
+    )
+    tables = [item for item in console.items if isinstance(item, _FakeTable)]
+    assert tables[0].rows[0][0] == ("provider/key", "provider/openrouter")
+    assert tables[0].rows[4][0] == ("image/video", "on / on")
+    assert tables[0].rows[5][0] == ("requests", "models:ok")
+    assert tables[-1].rows[0][0] == ("video/model", "openrouter", "720p", "5,10")
+    assert any("free-only" in str(item) for item in console.items)
 
 
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
