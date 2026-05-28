@@ -2088,32 +2088,27 @@ def _trigger_routes_export_after_usage_write():
     This keeps model-routes.json reasonably fresh for file readers such as Hive
     without blocking the foreground launch path on a full export.
     """
-    global _USAGE_ROUTES_EXPORT_RUNNING, _USAGE_ROUTES_EXPORT_LAST_STARTED_AT
+    from mms_command_tools import trigger_routes_export_after_usage_write
 
-    now = time.monotonic()
-    with _USAGE_ROUTES_EXPORT_LOCK:
-        if _USAGE_ROUTES_EXPORT_RUNNING:
-            return
-        if now - _USAGE_ROUTES_EXPORT_LAST_STARTED_AT < _USAGE_ROUTES_EXPORT_MIN_INTERVAL_SEC:
-            return
-        _USAGE_ROUTES_EXPORT_RUNNING = True
-        _USAGE_ROUTES_EXPORT_LAST_STARTED_AT = now
-
-    def _run():
+    def set_running(value):
         global _USAGE_ROUTES_EXPORT_RUNNING
-        try:
-            _refresh_routes_export_for_hive(force=True, quiet=True)
-        except Exception:
-            pass
-        finally:
-            with _USAGE_ROUTES_EXPORT_LOCK:
-                _USAGE_ROUTES_EXPORT_RUNNING = False
+        _USAGE_ROUTES_EXPORT_RUNNING = bool(value)
 
-    threading.Thread(
-        target=_run,
-        daemon=True,
-        name="mms-usage-routes-export",
-    ).start()
+    def set_last_started_at(value):
+        global _USAGE_ROUTES_EXPORT_LAST_STARTED_AT
+        _USAGE_ROUTES_EXPORT_LAST_STARTED_AT = value
+
+    return trigger_routes_export_after_usage_write(
+        lock=_USAGE_ROUTES_EXPORT_LOCK,
+        is_running=lambda: _USAGE_ROUTES_EXPORT_RUNNING,
+        set_running=set_running,
+        get_last_started_at=lambda: _USAGE_ROUTES_EXPORT_LAST_STARTED_AT,
+        set_last_started_at=set_last_started_at,
+        min_interval_sec=_USAGE_ROUTES_EXPORT_MIN_INTERVAL_SEC,
+        refresh_routes_export_for_hive=_refresh_routes_export_for_hive,
+        thread_cls=threading.Thread,
+        monotonic=time.monotonic,
+    )
 
 
 def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False):

@@ -371,6 +371,88 @@ def test_usage_stats_file_helpers_preserve_defaults_secure_write_and_guard(tmp_p
     assert stat.S_IMODE(written_path.stat().st_mode) == 0o600
 
 
+def test_usage_routes_export_trigger_preserves_throttle_running_and_async_reset():
+    import mms_command_tools
+
+    class Lock:
+        def __init__(self):
+            self.entries = 0
+
+        def __enter__(self):
+            self.entries += 1
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    state = {"running": False, "last": 100.0}
+    lock = Lock()
+    threads = []
+    refresh_calls = []
+
+    class Thread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            threads.append(self)
+
+        def start(self):
+            self.started = True
+
+    def trigger(now):
+        return mms_command_tools.trigger_routes_export_after_usage_write(
+            lock=lock,
+            is_running=lambda: state["running"],
+            set_running=lambda value: state.__setitem__("running", value),
+            get_last_started_at=lambda: state["last"],
+            set_last_started_at=lambda value: state.__setitem__("last", value),
+            min_interval_sec=15.0,
+            refresh_routes_export_for_hive=lambda **kwargs: refresh_calls.append(kwargs),
+            thread_cls=Thread,
+            monotonic=lambda: now,
+        )
+
+    state["running"] = True
+    trigger(200.0)
+    assert threads == []
+    assert state == {"running": True, "last": 100.0}
+
+    state["running"] = False
+    trigger(110.0)
+    assert threads == []
+    assert state == {"running": False, "last": 100.0}
+
+    trigger(120.0)
+    assert state == {"running": True, "last": 120.0}
+    assert len(threads) == 1
+    assert threads[0].kwargs["daemon"] is True
+    assert threads[0].kwargs["name"] == "mms-usage-routes-export"
+    assert getattr(threads[0], "started", False) is True
+    threads[0].kwargs["target"]()
+    assert refresh_calls == [{"force": True, "quiet": True}]
+    assert state["running"] is False
+    assert lock.entries >= 2
+
+    def failing_refresh(**_kwargs):
+        raise RuntimeError("export failed")
+
+    threads.clear()
+    state["last"] = 0.0
+    mms_command_tools.trigger_routes_export_after_usage_write(
+        lock=lock,
+        is_running=lambda: state["running"],
+        set_running=lambda value: state.__setitem__("running", value),
+        get_last_started_at=lambda: state["last"],
+        set_last_started_at=lambda value: state.__setitem__("last", value),
+        min_interval_sec=15.0,
+        refresh_routes_export_for_hive=failing_refresh,
+        thread_cls=Thread,
+        monotonic=lambda: 200.0,
+    )
+    assert state["running"] is True
+    threads[0].kwargs["target"]()
+    assert state["running"] is False
+
+
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 

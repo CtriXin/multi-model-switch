@@ -823,6 +823,43 @@ def write_usage_stats_locked(
     chmod(usage_path, 0o600)
 
 
+def trigger_routes_export_after_usage_write(
+    *,
+    lock,
+    is_running,
+    set_running,
+    get_last_started_at,
+    set_last_started_at,
+    min_interval_sec,
+    refresh_routes_export_for_hive,
+    thread_cls,
+    monotonic,
+):
+    now = monotonic()
+    with lock:
+        if is_running():
+            return
+        if now - get_last_started_at() < min_interval_sec:
+            return
+        set_running(True)
+        set_last_started_at(now)
+
+    def _run():
+        try:
+            refresh_routes_export_for_hive(force=True, quiet=True)
+        except Exception:
+            pass
+        finally:
+            with lock:
+                set_running(False)
+
+    thread_cls(
+        target=_run,
+        daemon=True,
+        name="mms-usage-routes-export",
+    ).start()
+
+
 def confirm_guard_accept_from_tui(
     cfg,
     *,
