@@ -1001,18 +1001,18 @@ def _prompt_validated_proxy_fields(current_proxy="", current_no_proxy="", *, wiz
 
 
 def _prompt_validated_timezone(current_timezone="", *, wizard=False):
-    prompt_fn = _wizard_prompt if wizard else Prompt.ask
-    label = _L(
-        f"启动时区（默认 {DEFAULT_ACCOUNT_TIMEZONE}）",
-        f"Launch timezone (default {DEFAULT_ACCOUNT_TIMEZONE})",
+    from mms_command_tools import prompt_validated_timezone
+
+    return prompt_validated_timezone(
+        current_timezone,
+        wizard=wizard,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        wizard_prompt=_wizard_prompt,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        localize=_L,
+        zone_info_cls=ZoneInfo,
+        console=console,
     )
-    while True:
-        timezone_name = prompt_fn(label, default=current_timezone or DEFAULT_ACCOUNT_TIMEZONE).strip()
-        try:
-            ZoneInfo(timezone_name)
-            return timezone_name
-        except Exception:
-            console.print(f"[red]无效时区: {timezone_name}[/red]")
 
 
 def _normalize_account_id(account_id):

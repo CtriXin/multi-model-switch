@@ -5342,6 +5342,40 @@ def test_prompt_validated_proxy_fields_helper_and_wrapper_preserve_retry_confirm
     )
 
 
+def test_prompt_validated_timezone_helper_and_wrapper_preserve_retry_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    console = _CollectingConsole()
+    prompts = iter(["Bad/Timezone", "Asia/Singapore"])
+    seen = []
+
+    def zone_info(name):
+        seen.append(name)
+        if name == "Bad/Timezone":
+            raise ValueError("bad")
+        return object()
+
+    assert mms_command_tools.prompt_validated_timezone(
+        "Bad/Timezone",
+        default_account_timezone="Asia/Singapore",
+        wizard=False,
+        wizard_prompt=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("wizard prompt not expected")),
+        prompt_ask=lambda *args, **kwargs: next(prompts),
+        localize=lambda zh, _en: zh,
+        zone_info_cls=zone_info,
+        console=console,
+    ) == "Asia/Singapore"
+    assert seen == ["Bad/Timezone", "Asia/Singapore"]
+    assert console.items == ["[red]无效时区: Bad/Timezone[/red]"]
+
+    monkeypatch.setattr(mms_core, "_wizard_prompt", lambda *_args, **_kwargs: "UTC")
+    monkeypatch.setattr(mms_core, "_L", lambda zh, _en: zh)
+    monkeypatch.setattr(mms_core, "ZoneInfo", lambda name: object())
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+    assert mms_core._prompt_validated_timezone(wizard=True) == "UTC"
+
+
 def test_account_normalization_helpers_preserve_oauth_profile_shape(tmp_path):
     import mms_command_tools
 

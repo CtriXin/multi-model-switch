@@ -5350,6 +5350,31 @@ def prompt_validated_proxy_fields(
         return proxy, no_proxy
 
 
+def prompt_validated_timezone(
+    current_timezone="",
+    *,
+    wizard=False,
+    default_account_timezone,
+    wizard_prompt,
+    prompt_ask,
+    localize,
+    zone_info_cls,
+    console,
+):
+    prompt_fn = wizard_prompt if wizard else prompt_ask
+    label = localize(
+        f"启动时区（默认 {default_account_timezone}）",
+        f"Launch timezone (default {default_account_timezone})",
+    )
+    while True:
+        timezone_name = prompt_fn(label, default=current_timezone or default_account_timezone).strip()
+        try:
+            zone_info_cls(timezone_name)
+            return timezone_name
+        except Exception:
+            console.print(f"[red]无效时区: {timezone_name}[/red]")
+
+
 def parse_semver_tag(tag):
     value = str(tag or "").strip()
     if not value.startswith("v"):
