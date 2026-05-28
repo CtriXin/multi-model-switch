@@ -133,6 +133,105 @@ def display_settings_result_report(title, rows, note="", *, ok=True, console):
         console.print(f"[dim]{note}[/dim]")
 
 
+def model_validation_findings(provider, probe, *, provider_label):
+    findings = []
+    error_kind = probe.get("error_kind")
+    provider_name = provider_label(provider)
+    if error_kind == "protocol_unsupported":
+        findings.append({
+            "severity": "high",
+            "title": "当前 provider 不支持模型探测",
+            "summary": f"{provider_name} 没有声明 openai_chat_completions，无法访问 /v1/models。",
+        })
+    elif error_kind in {"missing_credentials", "missing_base_url", "missing_api_key"}:
+        findings.append({
+            "severity": "high",
+            "title": "当前 provider 凭据不完整",
+            "summary": f"{provider_name} 还缺少地址或 Key，无法验证可用模型。",
+        })
+    elif error_kind == "empty_models":
+        findings.append({
+            "severity": "medium",
+            "title": "接口连通，但没有拿到模型列表",
+            "summary": f"{provider_name} 返回了空列表，可能是账号权限或网关映射问题。",
+        })
+    elif error_kind == "missing_httpx":
+        findings.append({
+            "severity": "high",
+            "title": "本地缺少依赖",
+            "summary": "当前环境缺少 httpx，暂时无法做模型探测。",
+        })
+    else:
+        findings.append({
+            "severity": "high",
+            "title": "模型校验失败",
+            "summary": probe.get("error") or f"{provider_name} 暂时无法拉取模型列表。",
+        })
+    if provider.get("id"):
+        findings.append({
+            "severity": "low",
+            "title": "可以跳过校验继续",
+            "summary": "预设和直接 CLI 启动仍然可以继续使用，但模型浏览会受限。",
+        })
+    return findings
+
+
+def rank_recovery_actions(actions):
+    return sorted(
+        actions,
+        key=lambda item: (
+            item.get("priority", 999),
+            0 if item.get("recommended") else 1,
+            item.get("title", ""),
+        ),
+    )
+
+
+def build_model_recovery_actions(cfg, provider, probe, *, provider_map):
+    providers = provider_map(cfg)
+    active_provider_id = provider.get("id")
+    actions = [
+        {
+            "id": "edit_credentials",
+            "title": "重新输入地址和 Key",
+            "summary": "修复当前 provider 的地址或认证信息。",
+            "priority": 10,
+            "recommended": probe.get("error_kind") != "protocol_unsupported",
+        },
+        {
+            "id": "show_details",
+            "title": "查看详细错误",
+            "summary": "展开本次校验的 provider、协议和错误明细。",
+            "priority": 20,
+            "recommended": False,
+        },
+        {
+            "id": "continue_without_validation",
+            "title": "跳过校验并继续",
+            "summary": "继续使用预设或直接 CLI 启动，但不会有模型浏览列表。",
+            "priority": 30,
+            "recommended": False,
+        },
+    ]
+    if len(providers) > 1:
+        actions.insert(
+            1,
+            {
+                "id": "switch_provider",
+                "title": "切换到其他 provider",
+                "summary": f"当前可切到其他已配置 provider，避免卡在 {active_provider_id}。",
+                "priority": 12,
+                "recommended": probe.get("error_kind") == "protocol_unsupported",
+            },
+        )
+    return rank_recovery_actions(actions)
+
+
+def display_model_probe_details(probe, *, panel_cls, console):
+    lines = [f"- {line}" for line in probe.get("details", [])]
+    console.print(panel_cls("\n".join(lines), title="校验详情", border_style="yellow"))
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"

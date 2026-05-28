@@ -209,6 +209,48 @@ def test_settings_result_display_helpers_format_payload_and_fallback_report():
     ]
 
 
+def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
+    import mms_command_tools
+
+    provider = {"id": "relay", "name": "Relay"}
+    probe = {"error_kind": "protocol_unsupported", "details": ["provider: Relay", "error: unsupported"]}
+
+    findings = mms_command_tools.model_validation_findings(
+        provider,
+        probe,
+        provider_label=lambda item: item["name"],
+    )
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["title"] == "当前 provider 不支持模型探测"
+    assert "Relay 没有声明" in findings[0]["summary"]
+    assert findings[-1]["severity"] == "low"
+
+    actions = mms_command_tools.build_model_recovery_actions(
+        {"providers": [{"id": "relay"}, {"id": "backup"}]},
+        provider,
+        probe,
+        provider_map=lambda cfg: {item["id"]: item for item in cfg["providers"]},
+    )
+    assert [item["id"] for item in actions] == [
+        "edit_credentials",
+        "switch_provider",
+        "show_details",
+        "continue_without_validation",
+    ]
+    assert actions[1]["recommended"] is True
+
+    class FakePanel:
+        def __init__(self, body, **kwargs):
+            self.body = body
+            self.kwargs = kwargs
+
+    console = _CollectingConsole()
+    mms_command_tools.display_model_probe_details(probe, panel_cls=FakePanel, console=console)
+    panel = console.items[0]
+    assert panel.body == "- provider: Relay\n- error: unsupported"
+    assert panel.kwargs == {"title": "校验详情", "border_style": "yellow"}
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
