@@ -2761,6 +2761,48 @@ def test_runtime_priority_and_supported_cli_helpers_preserve_normalization():
         default_priority=50,
     ) == {"GPT": 9, "Claude": 1}
     assert mms_command_tools.normalize_family_priority_overrides([], model_families=model_families, default_priority=50) == {}
+    priority_runtime = {"priority": "7", "family_priority_overrides": {"GPT": "11"}}
+    priority_kwargs = {
+        "canonical_model_family": lambda value: mms_command_tools.canonical_model_family(value, model_families=model_families),
+        "normalize_priority": lambda value: mms_command_tools.normalize_priority(value, default_priority=50),
+        "default_priority": 50,
+    }
+    assert mms_command_tools.runtime_priority_for_family(priority_runtime, "gpt", **priority_kwargs) == 11
+    assert mms_command_tools.runtime_priority_for_family(priority_runtime, "Claude", **priority_kwargs) == 7
+    assert mms_command_tools.runtime_priority_for_family("bad", "GPT", **priority_kwargs) == 50
+    assert mms_command_tools.runtime_priority_for_model(
+        priority_runtime,
+        "gpt-5.5",
+        infer_model_family=lambda model_name: ("GPT", "GPT 系") if model_name.startswith("gpt-") else ("", ""),
+        runtime_priority_for_family=lambda runtime, family: mms_command_tools.runtime_priority_for_family(
+            runtime,
+            family,
+            **priority_kwargs,
+        ),
+    ) == 11
+    prioritized = mms_command_tools.runtime_with_priority(
+        priority_runtime,
+        model_name="gpt-5.5",
+        canonical_model_family=priority_kwargs["canonical_model_family"],
+        infer_model_family=lambda model_name: ("GPT", "GPT 系") if model_name.startswith("gpt-") else ("", ""),
+        runtime_priority_for_family=lambda runtime, family: mms_command_tools.runtime_priority_for_family(
+            runtime,
+            family,
+            **priority_kwargs,
+        ),
+        normalize_priority=priority_kwargs["normalize_priority"],
+        default_priority=50,
+    )
+    assert prioritized == {"priority": 11, "family_priority_overrides": {"GPT": "11"}, "priority_family": "GPT"}
+    assert priority_runtime == {"priority": "7", "family_priority_overrides": {"GPT": "11"}}
+    assert mms_command_tools.runtime_with_priority(
+        "bad",
+        canonical_model_family=priority_kwargs["canonical_model_family"],
+        infer_model_family=lambda _model_name: ("", ""),
+        runtime_priority_for_family=lambda runtime, family: 99,
+        normalize_priority=priority_kwargs["normalize_priority"],
+        default_priority=50,
+    ) == "bad"
     assert mms_command_tools.normalize_role("PRIMARY", valid_roles={"primary", "auto", "fallback"}) == "primary"
     assert mms_command_tools.normalize_role("bad", valid_roles={"primary", "auto", "fallback"}) == "auto"
     assert mms_command_tools.normalize_positive_seconds("0", 30, minimum=5) == 5

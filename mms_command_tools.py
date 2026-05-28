@@ -3039,6 +3039,61 @@ def normalize_family_priority_overrides(value, *, model_families, default_priori
     return normalized
 
 
+def runtime_priority_for_family(
+    runtime,
+    family_name,
+    *,
+    canonical_model_family,
+    normalize_priority,
+    default_priority,
+):
+    canonical = canonical_model_family(family_name)
+    overrides = runtime.get("family_priority_overrides", {}) if isinstance(runtime, dict) else {}
+    if canonical and isinstance(overrides, dict) and canonical in overrides:
+        return normalize_priority(overrides.get(canonical))
+    if isinstance(runtime, dict):
+        return normalize_priority(runtime.get("priority", default_priority))
+    return default_priority
+
+
+def runtime_priority_for_model(
+    runtime,
+    model_name,
+    *,
+    infer_model_family,
+    runtime_priority_for_family,
+):
+    family_name, _ = infer_model_family(model_name)
+    return runtime_priority_for_family(runtime, family_name)
+
+
+def runtime_with_priority(
+    runtime,
+    *,
+    model_name="",
+    family_name="",
+    canonical_model_family,
+    infer_model_family,
+    runtime_priority_for_family,
+    normalize_priority,
+    default_priority,
+):
+    if not isinstance(runtime, dict):
+        return runtime
+    canonical_family = canonical_model_family(family_name)
+    if not canonical_family and model_name:
+        canonical_family, _ = infer_model_family(model_name)
+    merged = dict(runtime)
+    merged["priority"] = (
+        runtime_priority_for_family(runtime, canonical_family)
+        if canonical_family
+        else normalize_priority(runtime.get("priority", default_priority))
+    )
+    if canonical_family:
+        merged["priority_family"] = canonical_family
+    return merged
+
+
 def normalize_claude_1m_mode(value, *, default="auto", valid_modes):
     raw = str(value or "").strip().lower()
     if raw in {"", "inherit", "default", "auto"}:
