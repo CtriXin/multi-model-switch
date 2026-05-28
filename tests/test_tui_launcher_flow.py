@@ -37,6 +37,7 @@ from mms_tui_launcher_flow import (
     handle_tui_registry_settings_action,
     handle_tui_routes_export_settings_action,
     handle_tui_rescue_settings_action,
+    handle_tui_settings_action,
     handle_rescue_packet_action,
     handle_tui_selected_model_action,
     handle_tui_submodel_action,
@@ -1982,6 +1983,144 @@ def test_select_tui_settings_action_returns_action_continue_or_interrupt() -> No
     assert select_tui_settings_action(
         select_settings_tui=lambda: (_ for _ in ()).throw(KeyboardInterrupt),
     ) == {"status": "interrupt", "action": None}
+
+
+def _settings_action_deps(**overrides):
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    deps = {
+        "select_settings_tui": unused,
+        "select_channel_action_tui": unused,
+        "select_language_tui": unused,
+        "select_rescue_event_tui": unused,
+        "select_provider_mgmt_tui": unused,
+        "save_config": unused,
+        "probe_cache": {},
+        "ensure_provider_credentials": unused,
+        "probe_models": unused,
+        "provider_mgmt_export_model_routes_loader": unused,
+        "routes_export_loader": unused,
+        "registry_cli_loader": unused,
+        "registry_truth_tui_payload": unused,
+        "print_settings_error_report": unused,
+        "print_settings_result_report": unused,
+        "registry_report_payloads": {},
+        "pause_after_tui_report": unused,
+        "localize": lambda zh, _en: zh,
+        "about_status_snapshot": unused,
+        "about_tui_payload": unused,
+        "run_about_upgrade": unused,
+        "snapshot_guard_tui_payload": unused,
+        "handle_guard_command": unused,
+        "confirm_guard_accept_from_tui": unused,
+        "run_account_mgmt_tui": unused,
+        "rescue_tools_loader": unused,
+        "rescue_default_fallback": unused,
+        "rescue_hot_fallback_enabled_cfg": unused,
+        "rescue_route_fallback_model_candidates": unused,
+        "latest_rescue_hot_fallback_event": unused,
+        "rescue_landing_tui_payload": unused,
+        "set_rescue_default_fallback": unused,
+        "rescue_default_fallback_report_payload": unused,
+        "select_model_tui_loader": unused,
+        "set_rescue_hot_fallback_enabled": unused,
+        "rescue_hot_fallback_toggle_report_payload": unused,
+        "rescue_demo_packet_report_payload": unused,
+        "rescue_fallback_model_candidates": unused,
+        "rescue_handover_report_payload": unused,
+        "rescue_paths_report_payload": unused,
+        "console": object(),
+        "ensure_rich": unused,
+        "prompt_cls": type("Prompt", (), {"ask": staticmethod(unused)}),
+        "set_language": unused,
+    }
+    deps.update(overrides)
+    return deps
+
+
+def test_handle_tui_settings_action_handles_interrupt_and_cancel() -> None:
+    cfg = {"providers": []}
+
+    assert handle_tui_settings_action(
+        cfg,
+        "/repo",
+        **_settings_action_deps(select_settings_tui=lambda: (_ for _ in ()).throw(KeyboardInterrupt)),
+    ) == {"status": "interrupt", "cfg": cfg, "changed": False}
+
+    assert handle_tui_settings_action(
+        cfg,
+        "/repo",
+        **_settings_action_deps(select_settings_tui=lambda: None),
+    ) == {"status": "continue", "cfg": cfg, "changed": False}
+
+
+def test_handle_tui_settings_action_dispatches_provider_mgmt_changed() -> None:
+    calls = []
+    cfg = {"providers": [{"id": "p1", "role": "auto", "priority": 10}]}
+    probe_cache = {"stale": True}
+    refreshed_provider = {"id": "p1"}
+
+    result = handle_tui_settings_action(
+        cfg,
+        "/repo",
+        **_settings_action_deps(
+            select_settings_tui=lambda: "provider_mgmt",
+            select_provider_mgmt_tui=lambda providers: calls.append(("select_provider", providers)) or [{"id": "p1", "role": "primary", "priority": 99}],
+            save_config=lambda cfg_arg: calls.append(("save", cfg_arg.copy())),
+            probe_cache=probe_cache,
+            ensure_provider_credentials=lambda cfg_arg: calls.append(("ensure", cfg_arg)) or refreshed_provider,
+            probe_models=lambda provider, *, emit_output: calls.append(("probe", provider, emit_output)) or {"models": ["m1"]},
+            provider_mgmt_export_model_routes_loader=lambda: (lambda cfg_arg, *, force: calls.append(("export", cfg_arg, force))),
+        ),
+    )
+
+    assert result == {
+        "status": "continue",
+        "cfg": cfg,
+        "changed": True,
+        "current_provider": refreshed_provider,
+        "default_models": ["m1"],
+        "families_dirty": True,
+    }
+    assert cfg["providers"] == [{"id": "p1", "role": "primary", "priority": 99}]
+    assert probe_cache == {}
+    assert calls == [
+        ("select_provider", [{"id": "p1", "role": "primary", "priority": 99}]),
+        ("save", {"providers": [{"id": "p1", "role": "primary", "priority": 99}]}),
+        ("ensure", cfg),
+        ("probe", refreshed_provider, False),
+        ("export", cfg, True),
+    ]
+
+
+def test_handle_tui_settings_action_language_change_does_not_refresh_runtime() -> None:
+    calls = []
+    cfg = {"ui": {}}
+
+    result = handle_tui_settings_action(
+        cfg,
+        "/repo",
+        **_settings_action_deps(
+            select_settings_tui=lambda: "language",
+            select_language_tui=lambda: calls.append(("select_language",)) or "en",
+            save_config=lambda cfg_arg: calls.append(("save", cfg_arg.copy())),
+            set_language=lambda lang: calls.append(("set_language", lang)),
+        ),
+    )
+
+    assert result == {
+        "status": "continue",
+        "cfg": cfg,
+        "changed": False,
+        "settings_changed": True,
+    }
+    assert cfg == {"ui": {"language": "en"}}
+    assert calls == [
+        ("select_language",),
+        ("save", {"ui": {"language": "en"}}),
+        ("set_language", "en"),
+    ]
 
 
 def test_apply_rescue_hot_fallback_toggle_action_saves_reports_and_pauses() -> None:

@@ -836,6 +836,202 @@ def select_tui_settings_action(*, select_settings_tui):
     return {"status": "action", "action": settings_action}
 
 
+def load_registry_cli_tools():
+    from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
+
+    return {
+        "diff_openrouter_catalog": diff_openrouter_catalog,
+        "fetch_openrouter_catalog": fetch_openrouter_catalog,
+        "publish_approved_bundle": publish_approved_bundle,
+        "refresh_source_snapshots": refresh_source_snapshots,
+        "registry_status": registry_status,
+        "scheduled_refresh": scheduled_refresh,
+        "source_freshness": source_freshness,
+        "verify_approved_bundle": verify_approved_bundle,
+    }
+
+
+def load_rescue_tools():
+    from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
+
+    return {
+        "list_rescue_events": list_rescue_events,
+        "write_demo_rescue_packet": write_demo_rescue_packet,
+        "write_fallback_handover": write_fallback_handover,
+    }
+
+
+def load_select_model_tui():
+    from mms_tui import select_model_tui
+
+    return select_model_tui
+
+
+def handle_tui_settings_action(
+    cfg,
+    repo_root,
+    *,
+    select_settings_tui,
+    select_channel_action_tui,
+    select_language_tui,
+    select_rescue_event_tui,
+    select_provider_mgmt_tui,
+    save_config,
+    probe_cache,
+    ensure_provider_credentials,
+    probe_models,
+    provider_mgmt_export_model_routes_loader,
+    routes_export_loader,
+    registry_cli_loader,
+    registry_truth_tui_payload,
+    print_settings_error_report,
+    print_settings_result_report,
+    registry_report_payloads,
+    pause_after_tui_report,
+    localize,
+    about_status_snapshot,
+    about_tui_payload,
+    run_about_upgrade,
+    snapshot_guard_tui_payload,
+    handle_guard_command,
+    confirm_guard_accept_from_tui,
+    run_account_mgmt_tui,
+    rescue_tools_loader,
+    rescue_default_fallback,
+    rescue_hot_fallback_enabled_cfg,
+    rescue_route_fallback_model_candidates,
+    latest_rescue_hot_fallback_event,
+    rescue_landing_tui_payload,
+    set_rescue_default_fallback,
+    rescue_default_fallback_report_payload,
+    select_model_tui_loader,
+    set_rescue_hot_fallback_enabled,
+    rescue_hot_fallback_toggle_report_payload,
+    rescue_demo_packet_report_payload,
+    rescue_fallback_model_candidates,
+    rescue_handover_report_payload,
+    rescue_paths_report_payload,
+    console,
+    ensure_rich,
+    prompt_cls,
+    set_language,
+):
+    settings_result = select_tui_settings_action(
+        select_settings_tui=select_settings_tui,
+    )
+    if settings_result["status"] == "interrupt":
+        return {"status": "interrupt", "cfg": cfg, "changed": False}
+    if settings_result["status"] != "action":
+        return {"status": "continue", "cfg": cfg, "changed": False}
+
+    settings_action = settings_result["action"]
+    if settings_action == "provider_mgmt":
+        provider_mgmt_result = handle_tui_provider_mgmt_settings_action(
+            cfg,
+            select_provider_mgmt_tui=select_provider_mgmt_tui,
+            save_config=save_config,
+            probe_cache=probe_cache,
+            ensure_provider_credentials=ensure_provider_credentials,
+            probe_models=probe_models,
+            export_model_routes_loader=provider_mgmt_export_model_routes_loader,
+        )
+        return {"cfg": cfg, **provider_mgmt_result}
+    if settings_action == "language":
+        language_result = handle_tui_language_settings_action(
+            cfg,
+            select_language_tui=select_language_tui,
+            save_config=save_config,
+            set_language=set_language,
+        )
+        return {
+            "status": language_result["status"],
+            "cfg": cfg,
+            "changed": False,
+            "settings_changed": language_result.get("changed", False),
+        }
+    if settings_action == "routes_export":
+        result = handle_tui_routes_export_settings_action(
+            cfg,
+            export_model_routes_loader=routes_export_loader,
+            console=console,
+        )
+        return {"cfg": cfg, **result}
+    if settings_action == "registry":
+        registry_result = handle_tui_registry_settings_action(
+            registry_cli_loader=registry_cli_loader,
+            registry_truth_tui_payload=registry_truth_tui_payload,
+            select_channel_action_tui=select_channel_action_tui,
+            print_settings_error_report=print_settings_error_report,
+            print_settings_result_report=print_settings_result_report,
+            registry_report_payloads=registry_report_payloads,
+            pause_after_tui_report=pause_after_tui_report,
+            localize=localize,
+        )
+        return {"cfg": cfg, **registry_result}
+    if settings_action == "about":
+        about_result = handle_tui_about_settings_action(
+            about_status_snapshot=about_status_snapshot,
+            about_tui_payload=about_tui_payload,
+            select_channel_action_tui=select_channel_action_tui,
+            run_about_upgrade=run_about_upgrade,
+            pause_after_tui_report=pause_after_tui_report,
+            console=console,
+        )
+        return {"cfg": cfg, **about_result}
+    if settings_action == "guard":
+        guard_result = handle_tui_guard_settings_action(
+            cfg,
+            snapshot_guard_tui_payload=snapshot_guard_tui_payload,
+            select_channel_action_tui=select_channel_action_tui,
+            handle_guard_command=handle_guard_command,
+            confirm_guard_accept_from_tui=confirm_guard_accept_from_tui,
+            pause_after_tui_report=pause_after_tui_report,
+            console=console,
+        )
+        return {"cfg": cfg, **guard_result}
+    if settings_action == "account_mgmt":
+        result = handle_tui_account_mgmt_settings_action(
+            cfg,
+            run_account_mgmt_tui=run_account_mgmt_tui,
+        )
+        return {"cfg": cfg, **result}
+    if settings_action == "rescue":
+        rescue_tools = rescue_tools_loader()
+        rescue_result = handle_tui_rescue_settings_action(
+            cfg,
+            repo_root,
+            rescue_default_fallback=rescue_default_fallback,
+            rescue_hot_fallback_enabled_cfg=rescue_hot_fallback_enabled_cfg,
+            rescue_route_fallback_model_candidates=rescue_route_fallback_model_candidates,
+            list_rescue_events=rescue_tools["list_rescue_events"],
+            latest_rescue_hot_fallback_event=latest_rescue_hot_fallback_event,
+            rescue_landing_tui_payload=rescue_landing_tui_payload,
+            select_channel_action_tui=select_channel_action_tui,
+            set_rescue_default_fallback=set_rescue_default_fallback,
+            save_config=save_config,
+            rescue_default_fallback_report_payload=rescue_default_fallback_report_payload,
+            print_settings_result_report=print_settings_result_report,
+            pause_after_tui_report=pause_after_tui_report,
+            select_model_tui_loader=select_model_tui_loader,
+            set_rescue_hot_fallback_enabled=set_rescue_hot_fallback_enabled,
+            rescue_hot_fallback_toggle_report_payload=rescue_hot_fallback_toggle_report_payload,
+            write_demo_rescue_packet=rescue_tools["write_demo_rescue_packet"],
+            rescue_demo_packet_report_payload=rescue_demo_packet_report_payload,
+            localize=localize,
+            select_rescue_event_tui=select_rescue_event_tui,
+            rescue_fallback_model_candidates=rescue_fallback_model_candidates,
+            write_fallback_handover=rescue_tools["write_fallback_handover"],
+            rescue_handover_report_payload=rescue_handover_report_payload,
+            rescue_paths_report_payload=rescue_paths_report_payload,
+            console=console,
+            print_settings_error_report=print_settings_error_report,
+            ensure_rich=ensure_rich,
+            prompt_cls=prompt_cls,
+        )
+        return rescue_result
+    return {"status": "continue", "cfg": cfg, "changed": False}
+
+
 def handle_tui_provider_mgmt_settings_action(
     cfg,
     *,

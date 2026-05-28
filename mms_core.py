@@ -5028,153 +5028,73 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 select_settings_tui,
                 select_provider_mgmt_tui,
             )
-            settings_result = tui_flow.select_tui_settings_action(
+
+            settings_result = tui_flow.handle_tui_settings_action(
+                current_cfg,
+                os.getcwd(),
                 select_settings_tui=select_settings_tui,
+                select_channel_action_tui=select_channel_action_tui,
+                select_language_tui=select_language_tui,
+                select_rescue_event_tui=select_rescue_event_tui,
+                select_provider_mgmt_tui=select_provider_mgmt_tui,
+                save_config=save_config,
+                probe_cache=_PROBE_CACHE,
+                ensure_provider_credentials=ensure_provider_credentials,
+                probe_models=_probe_models,
+                provider_mgmt_export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
+                routes_export_loader=lambda: (
+                    lambda router: (router.MODEL_ROUTES_PATH, router.export_model_routes)
+                )(__import__("mms_router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])),
+                registry_cli_loader=tui_flow.load_registry_cli_tools,
+                registry_truth_tui_payload=_registry_truth_tui_payload,
+                print_settings_error_report=_print_settings_error_report,
+                print_settings_result_report=_print_settings_result_report,
+                registry_report_payloads={
+                    "source_staleness": _registry_source_staleness_report_payload,
+                    "refresh_sources": _registry_refresh_sources_report_payload,
+                    "scheduled_refresh": _registry_scheduled_refresh_report_payload,
+                    "openrouter_fetch": _registry_openrouter_fetch_report_payload,
+                    "openrouter_diff": _registry_openrouter_diff_report_payload,
+                    "publish_approved": _registry_publish_approved_report_payload,
+                    "verify_approved": _registry_verify_approved_report_payload,
+                    "doctor": _registry_doctor_report_payload,
+                },
+                pause_after_tui_report=_pause_after_tui_report,
+                localize=_L,
+                about_status_snapshot=_about_status_snapshot,
+                about_tui_payload=_about_tui_payload,
+                run_about_upgrade=_run_about_upgrade,
+                snapshot_guard_tui_payload=_snapshot_guard_tui_payload,
+                handle_guard_command=handle_guard_command,
+                confirm_guard_accept_from_tui=_confirm_guard_accept_from_tui,
+                run_account_mgmt_tui=_run_account_mgmt_tui,
+                rescue_tools_loader=tui_flow.load_rescue_tools,
+                rescue_default_fallback=_rescue_default_fallback,
+                rescue_hot_fallback_enabled_cfg=_rescue_hot_fallback_enabled_cfg,
+                rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
+                latest_rescue_hot_fallback_event=_latest_rescue_hot_fallback_event,
+                rescue_landing_tui_payload=_rescue_landing_tui_payload,
+                set_rescue_default_fallback=_set_rescue_default_fallback,
+                rescue_default_fallback_report_payload=_rescue_default_fallback_report_payload,
+                select_model_tui_loader=tui_flow.load_select_model_tui,
+                set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
+                rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
+                rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
+                rescue_fallback_model_candidates=_rescue_fallback_model_candidates,
+                rescue_handover_report_payload=_rescue_handover_report_payload,
+                rescue_paths_report_payload=_rescue_paths_report_payload,
+                console=console,
+                ensure_rich=_ensure_rich,
+                prompt_cls=Prompt,
+                set_language=set_language,
             )
+            current_cfg = settings_result["cfg"]
             if settings_result["status"] == "interrupt":
                 return True
-            if settings_result["status"] != "action":
-                continue
-            settings_action = settings_result["action"]
-            if settings_action == "provider_mgmt":
-                provider_mgmt_result = tui_flow.handle_tui_provider_mgmt_settings_action(
-                    current_cfg,
-                    select_provider_mgmt_tui=select_provider_mgmt_tui,
-                    save_config=save_config,
-                    probe_cache=_PROBE_CACHE,
-                    ensure_provider_credentials=ensure_provider_credentials,
-                    probe_models=_probe_models,
-                    export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
-                )
-                if provider_mgmt_result["status"] == "interrupt":
-                    return True
-                if provider_mgmt_result.get("changed"):
-                    current_provider = provider_mgmt_result["current_provider"]
-                    default_models = provider_mgmt_result["default_models"]
-                    _families_dirty = provider_mgmt_result["families_dirty"]
-            elif settings_action == "language":
-                language_result = tui_flow.handle_tui_language_settings_action(
-                    current_cfg,
-                    select_language_tui=select_language_tui,
-                    save_config=save_config,
-                    set_language=set_language,
-                )
-                if language_result["status"] == "interrupt":
-                    return True
-            elif settings_action == "routes_export":
-                tui_flow.handle_tui_routes_export_settings_action(
-                    current_cfg,
-                    export_model_routes_loader=lambda: (
-                        lambda router: (router.MODEL_ROUTES_PATH, router.export_model_routes)
-                    )(__import__("mms_router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])),
-                    console=console,
-                )
-            elif settings_action == "registry":
-                def _registry_cli_loader():
-                    from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
-
-                    return {
-                        "diff_openrouter_catalog": diff_openrouter_catalog,
-                        "fetch_openrouter_catalog": fetch_openrouter_catalog,
-                        "publish_approved_bundle": publish_approved_bundle,
-                        "refresh_source_snapshots": refresh_source_snapshots,
-                        "registry_status": registry_status,
-                        "scheduled_refresh": scheduled_refresh,
-                        "source_freshness": source_freshness,
-                        "verify_approved_bundle": verify_approved_bundle,
-                    }
-
-                registry_result = tui_flow.handle_tui_registry_settings_action(
-                    registry_cli_loader=_registry_cli_loader,
-                    registry_truth_tui_payload=_registry_truth_tui_payload,
-                    select_channel_action_tui=select_channel_action_tui,
-                    print_settings_error_report=_print_settings_error_report,
-                    print_settings_result_report=_print_settings_result_report,
-                    registry_report_payloads={
-                        "source_staleness": _registry_source_staleness_report_payload,
-                        "refresh_sources": _registry_refresh_sources_report_payload,
-                        "scheduled_refresh": _registry_scheduled_refresh_report_payload,
-                        "openrouter_fetch": _registry_openrouter_fetch_report_payload,
-                        "openrouter_diff": _registry_openrouter_diff_report_payload,
-                        "publish_approved": _registry_publish_approved_report_payload,
-                        "verify_approved": _registry_verify_approved_report_payload,
-                        "doctor": _registry_doctor_report_payload,
-                    },
-                    pause_after_tui_report=_pause_after_tui_report,
-                    localize=_L,
-                )
-                if registry_result["status"] == "interrupt":
-                    return True
-            elif settings_action == "about":
-                about_result = tui_flow.handle_tui_about_settings_action(
-                    about_status_snapshot=_about_status_snapshot,
-                    about_tui_payload=_about_tui_payload,
-                    select_channel_action_tui=select_channel_action_tui,
-                    run_about_upgrade=_run_about_upgrade,
-                    pause_after_tui_report=_pause_after_tui_report,
-                    console=console,
-                )
-                if about_result["status"] == "interrupt":
-                    return True
-            elif settings_action == "guard":
-                guard_result = tui_flow.handle_tui_guard_settings_action(
-                    current_cfg,
-                    snapshot_guard_tui_payload=_snapshot_guard_tui_payload,
-                    select_channel_action_tui=select_channel_action_tui,
-                    handle_guard_command=handle_guard_command,
-                    confirm_guard_accept_from_tui=_confirm_guard_accept_from_tui,
-                    pause_after_tui_report=_pause_after_tui_report,
-                    console=console,
-                )
-                if guard_result["status"] == "interrupt":
-                    return True
-            elif settings_action == "account_mgmt":
-                tui_flow.handle_tui_account_mgmt_settings_action(
-                    current_cfg,
-                    run_account_mgmt_tui=_run_account_mgmt_tui,
-                )
-            elif settings_action == "rescue":
-                from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
-
-                def _select_model_tui_loader():
-                    from mms_tui import select_model_tui
-
-                    return select_model_tui
-
-                rescue_settings = tui_flow.handle_tui_rescue_settings_action(
-                    current_cfg,
-                    os.getcwd(),
-                    rescue_default_fallback=_rescue_default_fallback,
-                    rescue_hot_fallback_enabled_cfg=_rescue_hot_fallback_enabled_cfg,
-                    rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
-                    list_rescue_events=list_rescue_events,
-                    latest_rescue_hot_fallback_event=_latest_rescue_hot_fallback_event,
-                    rescue_landing_tui_payload=_rescue_landing_tui_payload,
-                    select_channel_action_tui=select_channel_action_tui,
-                    set_rescue_default_fallback=_set_rescue_default_fallback,
-                    save_config=save_config,
-                    rescue_default_fallback_report_payload=_rescue_default_fallback_report_payload,
-                    print_settings_result_report=_print_settings_result_report,
-                    pause_after_tui_report=_pause_after_tui_report,
-                    select_model_tui_loader=_select_model_tui_loader,
-                    set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
-                    rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
-                    write_demo_rescue_packet=write_demo_rescue_packet,
-                    rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
-                    localize=_L,
-                    select_rescue_event_tui=select_rescue_event_tui,
-                    rescue_fallback_model_candidates=_rescue_fallback_model_candidates,
-                    write_fallback_handover=write_fallback_handover,
-                    rescue_handover_report_payload=_rescue_handover_report_payload,
-                    rescue_paths_report_payload=_rescue_paths_report_payload,
-                    console=console,
-                    print_settings_error_report=_print_settings_error_report,
-                    ensure_rich=_ensure_rich,
-                    prompt_cls=Prompt,
-                )
-                current_cfg = rescue_settings["cfg"]
-                if rescue_settings["status"] == "interrupt":
-                    return True
+            if settings_result.get("changed"):
+                current_provider = settings_result["current_provider"]
+                default_models = settings_result["default_models"]
+                _families_dirty = settings_result["families_dirty"]
             continue
 
         # ── 上次使用 ──
