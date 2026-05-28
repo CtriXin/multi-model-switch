@@ -46,13 +46,13 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`xmem` 和 Web automation bundle（`weber` 路由器 + `web-access` 登录态 Chrome + `agent-browser` headless）；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
 - Caveman 默认改为 `lite`，保留完整句子但去掉 filler；需要更强压缩时仍可用 `/caveman full`
-- silent hook policy：Caveman / Map / RTK 避免 noisy hook stdout；Claude/Codex hook 只输出合法 compact JSON
+- quiet hook policy：MMS-managed Claude/Codex session 默认不再挂 SessionStart/UserPrompt probe；保留的 hook 只用于 guard、closeout 或显式启用的 pack
 - session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；Codex Caveman 尽量保留已信任 hook 顺序
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
 - 可选 xmem installer pack：`--install-xmem` 安装通用 xmem CLI/skill，`--xmem-ref` 可固定来源版本，`--dry-run` 可预览安装/setup 计划且不写文件
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
 
-MMS 会内建通用版 `xmem` skill 和静默 session-start/session-end hook。hook 只有在用户配置了 `xmem` CLI/source 时才注册/同步当前项目；如果本机没有 `xmem` CLI 就 fail-open 静默跳过。durable summaries 留在用户自己的 xmem sources 里，不写进 MMS 本身。公开版 xmem onboarding 保持低侵入：可选安装器会创建 `~/.xmem`、注册 HOME 下浅层 git roots，但不会写 repo-local `.xmem`，直到用户或 agent 在具体项目里运行 `xmem setup`。
+MMS 会内建通用版 `xmem` skill 和静默 session closeout hook；默认不再挂 `xmem` SessionStart sync 或 UserPrompt gateway probe。agent 需要 recall 时显式调用 `xmem` skill/CLI 即可。closeout hook 只有在用户配置了 `xmem` CLI/source 时才运行；如果本机没有 `xmem` CLI 就 fail-open 静默跳过。durable summaries 留在用户自己的 xmem sources 里，不写进 MMS 本身。公开版 xmem onboarding 保持低侵入：可选安装器会创建 `~/.xmem`、注册 HOME 下浅层 git roots，但不会写 repo-local `.xmem`，直到用户或 agent 在具体项目里运行 `xmem setup`。
 
 ## 安装 / 升级
 
@@ -239,12 +239,12 @@ MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 | `xmem` | `~/.mms/vendor` 内建 | 通用跨项目 memory / truth-index skill；只有配置了 `xmem` CLI/source 才真正 active |
 | Web automation bundle | `~/.mms/vendor` 内建 | `weber` 负责路由，`web-access` 连接登录态 Chrome，`agent-browser` 负责轻量 headless |
 | `Caveman` | `~/.mms/vendor` 内建 | 低 token 沟通模式；只有偏好或启动确认页启用后才 active |
-| `NSR` | 内建 hooks，默认开启 | active goal continuation hooks；不写全局 hooks/config |
+| `NSR` | 内建 hooks，默认开启 | active goal continuation hooks；默认不挂 startup/prompt hook |
 | `ECC` | MMS-managed 可选包 | Claude engineering workflow / rules / quality hooks |
 | `OMC` | MMS-managed 可选包 | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | 已安装时检测 | 规划和开源贡献入口 |
 
-启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。Passive skills（`token-saver`、`TOON`、`xmem`、`web-access`、`weber`、`agent-browser`）在 MMS-launched session 中自然可用。`NSR` 对 MMS-managed Claude/Codex session 默认开启，但仍是 session-local，可在启动确认页关闭，或用 `nsr_mode = "disable"` 关闭。更重的 active behavior packs（`ECC`、`OMC`）仍需要显式选择。OpenCode 会拿到 session-local Caveman / token-saver / TOON / xmem / web-access / weber skills；如果本机有 `rtk`，也会通过 session-local plugin 目录注入静默 RTK plugin。
+启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。Passive skills（`token-saver`、`TOON`、`xmem`、`web-access`、`weber`、`agent-browser`）在 MMS-launched session 中自然可用。`NSR` 对 MMS-managed Claude/Codex session 默认开启，但默认 hook 面只覆盖 tool/compact/closeout 事件，可在启动确认页关闭，或用 `nsr_mode = "disable"` 关闭。更重的 active behavior packs（`ECC`、`OMC`）仍需要显式选择。OpenCode 会拿到 session-local Caveman / token-saver / TOON / xmem / web-access / weber skills；如果本机有 `rtk`，也会通过 session-local plugin 目录注入静默 RTK plugin。
 
 ## 可选安装包
 
@@ -268,7 +268,7 @@ bash install.sh --install-ops-env-safe
 
 `--install-map` 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；它让 Claude 在进入 repo 时更快理解目录和文件结构。这是全局 Claude hook，可用 `--map-ref` 固定版本。
 
-`--install-codegraph` 会通过 npm 安装 CodeGraph CLI/MCP；它提供 symbol search、callers/callees 和代码上下文检索。MMS session 会内建静默的 CodeGraph auto-register hook：git repo 没有 `.codegraph/` 时执行 `codegraph init <repo>` + `codegraph index <repo>`；已有 `.codegraph/` 时执行 `codegraph sync <repo>`。可用 `--codegraph-package` 覆盖 npm 包规格。需要立刻初始化全部 repo 时，也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
+`--install-codegraph` 会通过 npm 安装 CodeGraph CLI/MCP；它提供 symbol search、callers/callees 和代码上下文检索。MMS 默认不再给 CodeGraph 挂 SessionStart auto-register hook，需要某个 repo 时显式运行索引。可用 `--codegraph-package` 覆盖 npm 包规格。需要立刻初始化全部 repo 时，也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
 
 `--install-read-once` 会安装 Claude Read 省 token hooks；同一个 session 内重复读取未变化文件时给提示，文件变化后优先给 diff。它自动生效，不需要用户记命令。
 

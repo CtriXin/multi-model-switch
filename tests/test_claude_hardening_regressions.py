@@ -278,7 +278,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
     assert mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK not in commands
 
 
-def test_build_claude_session_settings_adds_codegraph_auto_index_hook(monkeypatch):
+def test_build_claude_session_settings_keeps_codegraph_auto_index_opt_in(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
@@ -290,16 +290,14 @@ def test_build_claude_session_settings_adds_codegraph_auto_index_hook(monkeypatc
     result = mms_launchers._build_claude_session_settings({})
     hooks = [
         hook
-        for group in result["hooks"]["SessionStart"]
+        for group in result["hooks"].get("SessionStart", [])
         for hook in group["hooks"]
         if hook.get("type") == "command"
     ]
 
-    codegraph_hook = next(
-        hook for hook in hooks if hook["command"] == mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK
-    )
-    assert codegraph_hook["timeout"] == 20
-    assert codegraph_hook["statusMessage"] == "Syncing CodeGraph"
+    assert mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK not in [
+        hook["command"] for hook in hooks
+    ]
 
 
 def test_resolve_hive_root_prefers_installed_hive_home_for_installed_mms(monkeypatch, tmp_path):
@@ -664,7 +662,7 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     ]
     disabled_user_prompt = [
         item["command"]
-        for group in disabled["hooks"]["UserPromptSubmit"]
+        for group in disabled["hooks"].get("UserPromptSubmit", [])
         for item in group["hooks"]
     ]
     disabled_stop = [
@@ -673,8 +671,8 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in disabled_session_start
-    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK in disabled_session_start
-    assert disabled_user_prompt == [mms_launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK]
+    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK not in disabled_session_start
+    assert disabled_user_prompt == []
     assert disabled_stop == [
         mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
         mms_launchers._XMEM_SESSION_END_HOOK,
@@ -691,7 +689,7 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     ]
     user_prompt_commands = [
         item["command"]
-        for group in enabled["hooks"]["UserPromptSubmit"]
+        for group in enabled["hooks"].get("UserPromptSubmit", [])
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in session_start_commands
@@ -700,7 +698,7 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert "CAVEMAN_HOOK_COMPACT=1" in caveman_activate_commands[0]
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_activate_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_activate_commands[0]
-    assert f'node "{caveman_root / "hooks" / "caveman-mode-tracker.js"}"' in user_prompt_commands
+    assert user_prompt_commands == []
 
 
 def test_filter_claude_session_hooks_drops_stale_managed_stop_hook(tmp_path):
@@ -875,7 +873,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in disabled_commands
-    assert mms_launchers._XMEM_SESSION_START_HOOK in disabled_commands
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in disabled_commands
     assert "PreToolUse" not in disabled["hooks"]
 
     enabled = mms_launchers._build_codex_session_hooks(
@@ -893,7 +891,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert len(caveman_commands) == 1
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
-    assert mms_launchers._XMEM_SESSION_START_HOOK in enabled_commands
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in enabled_commands
     assert "PreToolUse" not in enabled["hooks"]
 
 
@@ -944,7 +942,6 @@ def test_build_codex_session_hooks_replaces_inherited_compact_caveman_with_sessi
             'CLAUDE_CONFIG_DIR="$HOME/.codex" '
             f'node "{caveman_root / "hooks" / "caveman-activate.js"}"'
         ),
-        mms_launchers._XMEM_SESSION_START_HOOK,
     ]
     assert compact_command not in session_commands
     assert stale_echo_command not in session_commands
@@ -1035,6 +1032,16 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
         for group in enabled_hooks["Stop"]
         for item in group["hooks"]
     ]
+    assert mms_launchers._NSR_CLAUDE_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("SessionStart", [])
+        for item in group.get("hooks", [])
+    ]
+    assert mms_launchers._NSR_CLAUDE_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("UserPromptSubmit", [])
+        for item in group.get("hooks", [])
+    ]
     assert not any("/tmp/nsr-claude-hook.sh" == command or "looop" in command for command in enabled_commands)
 
 
@@ -1080,6 +1087,16 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
         item["command"]
         for group in enabled_hooks["Stop"]
         for item in group["hooks"]
+    ]
+    assert mms_launchers._NSR_CODEX_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("SessionStart", [])
+        for item in group.get("hooks", [])
+    ]
+    assert mms_launchers._NSR_CODEX_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("UserPromptSubmit", [])
+        for item in group.get("hooks", [])
     ]
     assert not any("/tmp/nsr-codex-hook.sh" == command or "bugloop" in command for command in enabled_commands)
 
@@ -2275,7 +2292,7 @@ def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(mo
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in disabled_commands
-    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK in disabled_commands
+    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK not in disabled_commands
     assert "CLAUDE_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_HOOK_PROFILE" not in disabled["env"]

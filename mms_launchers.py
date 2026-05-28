@@ -2951,12 +2951,6 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     )
     hooks_data = _append_command_hook(
         hooks_data,
-        "SessionStart",
-        _CLAUDE_BRAINKEEPER_SESSION_START_HOOK,
-        matcher="",
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
         "Stop",
         _CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
         matcher="",
@@ -2968,35 +2962,6 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
         matcher="",
         timeout=10,
         status_message="Closing xmem",
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK,
-        matcher="",
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _XMEM_GATEWAY_HOOK,
-        matcher="",
-        timeout=10,
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
-        "SessionStart",
-        _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK,
-        matcher="",
-        timeout=20,
-        status_message="Syncing CodeGraph",
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
-        "SessionStart",
-        _XMEM_SESSION_START_HOOK,
-        matcher="",
-        timeout=10,
-        status_message="Syncing xmem",
     )
     hooks_data = _append_command_hook(
         hooks_data,
@@ -4012,8 +3977,6 @@ def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     if not enable_nsr or not _nsr_available_for_cli("claude"):
         return hooks_data
     for event_name, matcher in (
-        ("SessionStart", "startup|resume|clear|compact"),
-        ("UserPromptSubmit", ""),
         ("PermissionRequest", "*"),
         ("PreToolUse", "*"),
         ("PostToolUse", "*"),
@@ -4037,8 +4000,6 @@ def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
     if not enable_nsr or not _nsr_available_for_cli("codex"):
         return hooks_data
     for event_name, matcher in (
-        ("SessionStart", "startup|resume"),
-        ("UserPromptSubmit", ""),
         ("PermissionRequest", "*"),
         ("PreToolUse", "*"),
         ("PostToolUse", "*"),
@@ -4070,13 +4031,6 @@ def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
         _caveman_claude_activate_command(caveman_root),
         timeout=5,
         status_message="Loading caveman mode...",
-    )
-    hooks_data = _append_shell_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _caveman_claude_tracker_command(caveman_root),
-        timeout=5,
-        status_message="Tracking caveman mode...",
     )
     return hooks_data
 
@@ -4135,26 +4089,11 @@ def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_
     hooks_data = _configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
     hooks_data = _append_shell_command_hook(
         hooks_data,
-        "SessionStart",
-        _XMEM_SESSION_START_HOOK,
-        matcher="startup|resume",
-        timeout=10,
-        status_message="Syncing xmem",
-    )
-    hooks_data = _append_shell_command_hook(
-        hooks_data,
         "Stop",
         _XMEM_SESSION_END_HOOK,
         matcher="",
         timeout=10,
         status_message="Closing xmem",
-    )
-    hooks_data = _append_shell_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _XMEM_GATEWAY_HOOK,
-        matcher="",
-        timeout=10,
     )
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _filter_missing_managed_hook_commands(hooks_data)

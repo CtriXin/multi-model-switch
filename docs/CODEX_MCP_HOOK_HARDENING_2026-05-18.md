@@ -142,7 +142,7 @@ Result:
 - `npm run build --if-present` passed.
 - `git diff --check` passed.
 - Local projection confirmed inherited `codegraph` became an absolute NVM binary path when available.
-- Local projection confirmed Codex `SessionStart` order keeps Map/Caveman stable and no longer inherits Looop/bugloop hooks by default. CodeGraph auto-register remains a Claude session hook: uninitialized git repos run init/index, initialized repos sync.
+- Local projection confirmed Codex `SessionStart` order keeps Map/Caveman stable and no longer inherits Looop/bugloop hooks by default. Later hook-noise hardening made CodeGraph auto-register opt-in instead of a default Claude session hook.
 
 ## Regression Tests Added
 

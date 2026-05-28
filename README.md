@@ -46,13 +46,13 @@ Key changes in this generation:
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
 - bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `xmem`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
 - Caveman now defaults to `lite`, keeping full sentences while still removing filler; `/caveman full` remains available for stronger compression
-- silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
+- quiet hook policy: MMS-managed Claude/Codex sessions avoid default SessionStart/UserPrompt probes; remaining hooks are guard, closeout, or explicitly enabled pack hooks
 - session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
 - optional xmem installer pack: `--install-xmem` installs the generic xmem CLI/skill, `--xmem-ref` can pin the source ref, and `--dry-run` previews the install/setup plan without writing files
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
-MMS also bundles the generic `xmem` skill plus silent session-start/session-end hooks. Newer sessions add a silent `xmem gateway` prompt probe in dry-run telemetry mode so MMS can learn when compact memory would have helped without changing agent context yet. These hooks only register/sync/probe when an `xmem` CLI is configured; if the CLI is absent they fail open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
+MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It no longer adds default `xmem` SessionStart sync or UserPrompt gateway probes; agents can call the `xmem` skill/CLI explicitly when a task needs recall. The closeout hook only runs when an `xmem` CLI is configured; if the CLI is absent it fails open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
 
 ## Install Or Upgrade
 
@@ -241,12 +241,12 @@ MMS can expose capabilities per session without writing global hooks/config.
 | `xmem` | bundled in `~/.mms/vendor` | generic cross-project memory / truth-index skill; only active when an `xmem` CLI/source is configured |
 | Web automation bundle | bundled in `~/.mms/vendor` | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
 | `Caveman` | bundled in `~/.mms/vendor` | compact communication mode; only active when enabled by preference or launch confirmation |
-| `NSR` | built-in hooks, default on | session-local continuation hooks for active NSR goals; no global hooks/config writes |
+| `NSR` | built-in hooks, default on | session-local continuation hooks for active NSR goals; no default startup or prompt hook |
 | `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
 | `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is enabled by default for MMS-managed Claude/Codex sessions, but remains session-local and can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is enabled by default for MMS-managed Claude/Codex sessions, but its default hook surface is limited to tool/compact/closeout events and can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists.
 
 ## Optional Installer Packs
 
@@ -270,7 +270,7 @@ Add `--dry-run` to preview the install plan without writing files, for example `
 
 `--install-map` installs the project-structure Map and enables the Claude SessionStart auto-index hook. It helps Claude orient in a repo faster by refreshing a lightweight directory/file map. This is a global Claude hook; use `--map-ref` to pin the version.
 
-`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS sessions include a quiet CodeGraph auto-register hook: in a git repo without `.codegraph/`, it runs `codegraph init <repo>` then `codegraph index <repo>`; when `.codegraph/` already exists, it runs `codegraph sync <repo>`. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
+`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS no longer adds a default SessionStart auto-register hook for CodeGraph; run indexing explicitly when a repo needs it. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
 
 `--install-read-once` installs Claude Read token-saving hooks. Within one session it warns on repeated reads of unchanged files and prefers diffs after edits. It works automatically; users do not need to remember a command.
 

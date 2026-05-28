@@ -54,7 +54,7 @@ def test_overlay_xmem_session_entries_respects_disabled_skill(monkeypatch, tmp_p
     assert not (parent_dir / "skills" / "xmem").exists()
 
 
-def test_mms_claude_hooks_include_xmem_session_start():
+def test_mms_claude_hooks_do_not_start_xmem_by_default():
     hooks = mms_launchers._merge_mms_session_hooks({})
     commands = [
         hook.get("command")
@@ -62,7 +62,7 @@ def test_mms_claude_hooks_include_xmem_session_start():
         for hook in group.get("hooks", [])
     ]
 
-    assert mms_launchers._XMEM_SESSION_START_HOOK in commands
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in commands
 
 
 def test_mms_claude_hooks_include_xmem_session_end():
@@ -76,7 +76,7 @@ def test_mms_claude_hooks_include_xmem_session_end():
     assert mms_launchers._XMEM_SESSION_END_HOOK in commands
 
 
-def test_mms_claude_hooks_include_xmem_gateway_probe():
+def test_mms_claude_hooks_do_not_probe_xmem_on_prompt_by_default():
     hooks = mms_launchers._merge_mms_session_hooks({})
     commands = [
         hook.get("command")
@@ -84,10 +84,10 @@ def test_mms_claude_hooks_include_xmem_gateway_probe():
         for hook in group.get("hooks", [])
     ]
 
-    assert mms_launchers._XMEM_GATEWAY_HOOK in commands
+    assert mms_launchers._XMEM_GATEWAY_HOOK not in commands
 
 
-def test_codex_hooks_include_xmem_session_start():
+def test_codex_hooks_do_not_start_xmem_by_default():
     payload = mms_launchers._build_codex_session_hooks({})
     commands = [
         hook.get("command")
@@ -95,7 +95,7 @@ def test_codex_hooks_include_xmem_session_start():
         for hook in group.get("hooks", [])
     ]
 
-    assert mms_launchers._XMEM_SESSION_START_HOOK in commands
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in commands
 
 
 def test_codex_hooks_include_xmem_session_end():
@@ -109,7 +109,7 @@ def test_codex_hooks_include_xmem_session_end():
     assert mms_launchers._XMEM_SESSION_END_HOOK in commands
 
 
-def test_codex_hooks_include_xmem_gateway_probe():
+def test_codex_hooks_do_not_probe_xmem_on_prompt_by_default():
     payload = mms_launchers._build_codex_session_hooks({})
     commands = [
         hook.get("command")
@@ -117,7 +117,7 @@ def test_codex_hooks_include_xmem_gateway_probe():
         for hook in group.get("hooks", [])
     ]
 
-    assert mms_launchers._XMEM_GATEWAY_HOOK in commands
+    assert mms_launchers._XMEM_GATEWAY_HOOK not in commands
 
 
 def test_disabling_xmem_skill_removes_xmem_hooks():
