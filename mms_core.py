@@ -8576,64 +8576,28 @@ def _resolve_resume_runtime_and_model(
 
 
 def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, lang_override=None):
-    parser = argparse.ArgumentParser(
-        prog=f"{current_command()} resume",
-        description="通过 Codex/Claude session id 一键恢复 MMS 托管会话",
+    from mms_command_tools import handle_resume_command as handle_resume_command_impl
+
+    return handle_resume_command_impl(
+        argv,
+        preloaded_command_cfg=preloaded_command_cfg,
+        bootstrap_cfg=bootstrap_cfg,
+        lang_override=lang_override,
+        command_name=current_command(),
+        resolve_resume_target=_resolve_resume_target,
+        load_config=load_config,
+        setup_wizard=setup_wizard,
+        resolve_ui_language=_resolve_ui_language,
+        apply_local_overrides=apply_local_overrides,
+        set_language=set_language,
+        ensure_provider_credentials=ensure_provider_credentials,
+        ensure_models_ready=ensure_models_ready,
+        resolve_resume_runtime_and_model=_resolve_resume_runtime_and_model,
+        launch_with_tracking=_launch_with_tracking,
+        path_isdir=os.path.isdir,
+        chdir=os.chdir,
+        console=console,
     )
-    parser.add_argument("session_ref", help="session id、前缀，或 codex:<id> / claude:<id>")
-    parser.add_argument("prompt", nargs="*", help="恢复后追加给 CLI 的可选 prompt；若 prompt 以 -- 开头请先写 --")
-    parser.add_argument("--cli", choices=["auto", "codex", "claude"], default="auto", help="强制指定恢复目标 CLI")
-    parser.add_argument("--provider", help="临时指定 provider")
-    parser.add_argument("--account", help="临时指定官方账号档案")
-    parser.add_argument("--model", help="临时指定恢复时使用的模型")
-    parser.add_argument("--once", action="store_true", help="以一次性会话模式启动底层 CLI")
-    args = parser.parse_intermixed_args(argv)
-
-    if args.account and args.provider:
-        parser.error("--account 和 --provider 不能同时使用")
-
-    cli, session_id, session_record, error = _resolve_resume_target(args.session_ref, args.cli)
-    if error:
-        console.print(f"[red]{error}[/red]")
-        raise SystemExit(1)
-    if cli not in {"codex", "claude"} or not session_id:
-        console.print(f"[red]无法识别 session: {args.session_ref}[/red]")
-        raise SystemExit(1)
-
-    user_cfg = preloaded_command_cfg or bootstrap_cfg or load_config()
-    if user_cfg is None:
-        user_cfg = setup_wizard(_resolve_ui_language(None, lang_override))
-    cfg = apply_local_overrides(user_cfg)
-    set_language(_resolve_ui_language(cfg, lang_override))
-
-    default_provider = ensure_provider_credentials(cfg)
-    default_provider, models_cache = ensure_models_ready(cfg, default_provider)
-    runtime, _cli_models, launch_cli_name, model_info = _resolve_resume_runtime_and_model(
-        cfg,
-        cli,
-        args,
-        default_provider,
-        models_cache,
-        session_record,
-    )
-    if runtime is None:
-        console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
-        raise SystemExit(1)
-    if launch_cli_name != cli:
-        console.print(f"[red]resume 只支持原 CLI 恢复，当前解析为 {launch_cli_name}[/red]")
-        raise SystemExit(1)
-    if cli == "claude":
-        project_path = str((session_record or {}).get("project_path") or (session_record or {}).get("cwd") or "").strip()
-        if project_path and os.path.isdir(project_path):
-            os.chdir(project_path)
-        extra_args = ["--resume", session_id] + list(args.prompt or [])
-    else:
-        extra_args = ["resume", session_id] + list(args.prompt or [])
-
-    source = "未写入 MMS index，交给 Codex 原生 resume 校验" if (session_record or {}).get("_unindexed") else "MMS index"
-    console.print(f"[cyan]恢复 {cli} session:[/cyan] {session_id}")
-    console.print(f"[dim]来源: {source}[/dim]")
-    _launch_with_tracking(cli, model_info, runtime, once=bool(args.once), extra_args=extra_args)
 
 
 def handle_cache_command(argv):

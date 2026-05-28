@@ -82,6 +82,67 @@ def test_resume_model_and_uuid_helpers_preserve_preference_order():
     assert mms_command_tools.session_resume_model(None) == ""
 
 
+def test_command_tools_handle_resume_command_preserves_parse_and_launch_flow():
+    import mms_command_tools
+
+    captured = {}
+    console = _FakeConsole()
+
+    def resolve_runtime(cfg, cli, args, default_provider, default_models, session_record):
+        captured["runtime_args"] = {
+            "cfg": cfg,
+            "cli": cli,
+            "model": args.model,
+            "provider": default_provider,
+            "models": default_models,
+            "session_record": session_record,
+        }
+        return (
+            {"id": "provider-a", "runtime_kind": "provider", "auth_mode": "api_key"},
+            default_models,
+            cli,
+            {"model": args.model},
+        )
+
+    mms_command_tools.handle_resume_command(
+        ["codex-session", "--model", "gpt-5.4", "--once", "continue"],
+        preloaded_command_cfg={"recommend": {"models": ["gpt-5.5"]}},
+        command_name="mmg",
+        resolve_resume_target=lambda session_ref, cli_hint="auto": (
+            "codex",
+            session_ref,
+            {"id": session_ref},
+            None,
+        ),
+        load_config=lambda: {"unexpected": True},
+        setup_wizard=lambda language: {"wizard": language},
+        resolve_ui_language=lambda cfg=None, cli_override=None: "zh-CN",
+        apply_local_overrides=lambda cfg: {**cfg, "overridden": True},
+        set_language=lambda language: captured.setdefault("language", language),
+        ensure_provider_credentials=lambda cfg: {"id": "provider-a"},
+        ensure_models_ready=lambda cfg, provider: (provider, [{"model": "gpt-5.5"}, {"model": "gpt-5.4"}]),
+        resolve_resume_runtime_and_model=resolve_runtime,
+        launch_with_tracking=lambda cli, model_info, runtime, once=False, extra_args=None: captured.update(
+            {
+                "launch": (cli, model_info, runtime, once, extra_args),
+            }
+        ),
+        console=console,
+    )
+
+    assert captured["language"] == "zh-CN"
+    assert captured["runtime_args"]["cfg"]["overridden"] is True
+    assert captured["runtime_args"]["model"] == "gpt-5.4"
+    assert captured["launch"] == (
+        "codex",
+        {"model": "gpt-5.4"},
+        {"id": "provider-a", "runtime_kind": "provider", "auth_mode": "api_key"},
+        True,
+        ["resume", "codex-session", "continue"],
+    )
+    assert any("恢复 codex session" in item for item in console.items)
+
+
 def test_resolve_codex_resume_ref_from_bounded_index(monkeypatch, tmp_path):
     import mms_core
 
