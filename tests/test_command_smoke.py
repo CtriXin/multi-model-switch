@@ -339,6 +339,30 @@ def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_confi
         console=console,
     ) == profiles[1]
     assert any("请输入有效编号" in str(item) for item in console.items)
+    console.items.clear()
+    launch_calls = []
+    assert mms_command_tools.launch_broker_experiment_interactive(
+        {"cfg": True},
+        "claude",
+        select_broker_profile_interactive=lambda cfg, cli_name: None,
+        run_broker_profile_interactive=lambda cfg, profile_id: launch_calls.append((cfg, profile_id)) or 0,
+        console=console,
+    ) is False
+    assert launch_calls == []
+    assert mms_command_tools.launch_broker_experiment_interactive(
+        {"cfg": True},
+        "claude",
+        select_broker_profile_interactive=lambda cfg, cli_name: {
+            "id": "remote",
+            "name": "Remote",
+            "device_id": "dev",
+            "workspace_id": "ws",
+        },
+        run_broker_profile_interactive=lambda cfg, profile_id: launch_calls.append((cfg, profile_id)) or 9,
+        console=console,
+    ) is True
+    assert launch_calls == [({"cfg": True}, "remote")]
+    assert any("退出码 9" in str(item) for item in console.items)
 
     seen = []
 

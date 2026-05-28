@@ -6599,19 +6599,15 @@ def _select_broker_profile_interactive(cfg, cli_name):
 
 
 def _launch_broker_experiment_interactive(cfg, cli_name):
-    profile = _select_broker_profile_interactive(cfg, cli_name)
-    if profile is None:
-        return False
+    from mms_command_tools import launch_broker_experiment_interactive
 
-    console.print(
-        f"[cyan]Broker experiment[/cyan] -> {profile['name']} "
-        f"[dim]({profile['device_id']}/{profile['workspace_id']})[/dim]"
+    return launch_broker_experiment_interactive(
+        cfg,
+        cli_name,
+        select_broker_profile_interactive=_select_broker_profile_interactive,
+        run_broker_profile_interactive=run_broker_profile_interactive,
+        console=console,
     )
-    console.print("[dim]支持续最近 / 新开 / 切换旧会话；默认直接回车续最近。[/dim]")
-    exit_code = run_broker_profile_interactive(cfg, profile["id"])
-    if exit_code != 0:
-        console.print(f"[red]broker experiment 启动失败，退出码 {exit_code}[/red]")
-    return True
 
 
 # ── CLI Selection (fallback) ───────────────────────────
