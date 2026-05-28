@@ -463,6 +463,78 @@ def resolve_load_balance_launch_context(
     return model_info, runtime, cli_name, ""
 
 
+def handle_tui_load_balance_action(
+    cfg,
+    cli_name,
+    current_provider,
+    default_models,
+    families_detail,
+    *,
+    account_id=None,
+    provider_id=None,
+    select_load_balance_tui,
+    load_balance_profiles,
+    default_load_balance_profile_name,
+    build_provider_options_map,
+    trace_record,
+    save_lb_history,
+    resolve_lb_slot_provider,
+    resolve_best_provider,
+    choose_runtime_source,
+    trace_runtime_choice,
+):
+    all_models, cli_families, lb_profiles, lb_default_profile, lb_prov_opts = load_balance_tui_payload(
+        cfg,
+        cli_name,
+        current_provider,
+        default_models,
+        families_detail,
+        load_balance_profiles=load_balance_profiles,
+        default_load_balance_profile_name=default_load_balance_profile_name,
+        build_provider_options_map=build_provider_options_map,
+    )
+    lb_result = safe_tui_call(
+        select_load_balance_tui,
+        available_models=all_models or None,
+        families_detail=cli_families,
+        provider_options_map=lb_prov_opts,
+        profiles=lb_profiles,
+        default_profile=lb_default_profile,
+    )
+    if lb_result == "__interrupt__":
+        return {"status": "interrupt"}
+    if lb_result is None:
+        return {"status": "continue"}
+
+    slot_provider_ids = load_balance_slot_provider_ids(lb_result)
+    model_info, runtime, selected_cli, error = resolve_load_balance_launch_context(
+        cfg,
+        cli_name,
+        lb_result,
+        current_provider,
+        default_models,
+        slot_provider_ids,
+        account_id=account_id,
+        provider_id=provider_id,
+        trace_record=trace_record,
+        save_lb_history=save_lb_history,
+        resolve_lb_slot_provider=resolve_lb_slot_provider,
+        resolve_best_provider=resolve_best_provider,
+        choose_runtime_source=choose_runtime_source,
+        trace_runtime_choice=trace_runtime_choice,
+    )
+    if error:
+        return {"status": "continue", "message": error}
+    if runtime is None:
+        return {"status": "continue", "message": f"{selected_cli} 没有可用 provider 承载负载模式"}
+    return {
+        "status": "launch",
+        "model_info": model_info,
+        "runtime": runtime,
+        "cli": selected_cli,
+    }
+
+
 def last_used_model_info(action_data):
     return (
         action_data.get("model_info")

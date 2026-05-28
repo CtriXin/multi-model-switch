@@ -9883,39 +9883,18 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # ── 负载模式 ──
         if action_type == "load_balance":
 
-            all_models, cli_families, lb_profiles, lb_default_profile, lb_prov_opts = tui_flow.load_balance_tui_payload(
+            lb_action = tui_flow.handle_tui_load_balance_action(
                 current_cfg,
                 cli,
                 current_provider,
                 default_models,
                 families_detail,
+                account_id=account_id,
+                provider_id=provider_id,
+                select_load_balance_tui=select_load_balance_tui,
                 load_balance_profiles=_load_balance_profiles,
                 default_load_balance_profile_name=_default_load_balance_profile_name,
                 build_provider_options_map=_build_provider_options_map,
-            )
-            lb_result = tui_flow.safe_tui_call(
-                select_load_balance_tui,
-                available_models=all_models or None,
-                families_detail=cli_families,
-                provider_options_map=lb_prov_opts,
-                profiles=lb_profiles,
-                default_profile=lb_default_profile,
-            )
-            if lb_result == "__interrupt__":
-                return True
-            if lb_result is None:
-                continue
-            slot_provider_ids = tui_flow.load_balance_slot_provider_ids(lb_result)
-
-            model_info, runtime_runtime, cli, lb_error = tui_flow.resolve_load_balance_launch_context(
-                current_cfg,
-                cli,
-                lb_result,
-                current_provider,
-                default_models,
-                slot_provider_ids,
-                account_id=account_id,
-                provider_id=provider_id,
                 trace_record=_trace_record,
                 save_lb_history=save_lb_history,
                 resolve_lb_slot_provider=_resolve_lb_slot_provider,
@@ -9923,12 +9902,15 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 choose_runtime_source=_choose_runtime_source,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if lb_error:
-                console.print(f"[yellow]{lb_error}[/yellow]")
+            if lb_action["status"] == "interrupt":
+                return True
+            if lb_action.get("message"):
+                console.print(f"[yellow]{lb_action['message']}[/yellow]")
+            if lb_action["status"] != "launch":
                 continue
-            if runtime_runtime is None:
-                console.print(f"[yellow]{cli} 没有可用 provider 承载负载模式[/yellow]")
-                continue
+            model_info = lb_action["model_info"]
+            runtime_runtime = lb_action["runtime"]
+            cli = lb_action["cli"]
 
             # 止血：暂时禁用跨 provider slot 切换，避免展示层和执行层 provider 漂移。
             # fall through to confirm below
