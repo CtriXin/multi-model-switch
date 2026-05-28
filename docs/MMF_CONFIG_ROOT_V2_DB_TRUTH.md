@@ -448,6 +448,7 @@ Current bridge rescue consumer implementation:
 - `review-launch` uses verified latest-approved Router routes when an explicit config root is selected (`mmf` / `MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`); invalid manifests fail closed instead of falling through to legacy provider config. Without an explicit root, legacy `mms` review-launch behavior remains unchanged.
 - Project/session store helpers derive their default root from the selected MMS config root, so `mmf` preview sessions keep project state under `<MMS_CONFIG_ROOT>/projects` instead of stable `~/.config/mms/projects`.
 - Launcher runtime/cache/usage auxiliary paths derive from the selected config root, preventing preview sessions from reading or writing stable-root `runtime/`, `health_check.json`, `cache/anthropic_base_urls.json`, or `usage.json` by default.
+- Local runtime telemetry helpers now follow the selected config root for local `usage.json`, `speed-stats.json`, `health-cache.json`, and `events/`, so preview sessions do not bleed runtime state into stable root by default.
 - Rescue hot fallback now checks `<config_root>/generated/model-registry.latest-approved.json` before reading generated/root `model-routes.json`.
 - If the manifest exists, rescue fallback only uses the verified Router payload; invalid or hash-mismatched manifests fail closed for that fallback lookup instead of silently using unverified generated routes.
 - If the manifest is missing, default behavior remains legacy-compatible and reads generated/root route files in the previous order.

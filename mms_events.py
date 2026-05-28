@@ -3,7 +3,7 @@ mms_events.py — Unified runtime event schema and file-based event emitter.
 
 Provides a minimal event bus for tracking model execution lifecycle
 (queued, started, streaming, fallback, retrying, done, failed).
-Events are persisted to ~/.config/mms/events/ as both an atomically-written
+Events are persisted under the selected MMS config root as both an atomically-written
 latest.json and daily JSONL append logs, with automatic 7-day cleanup.
 """
 
@@ -14,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+
+from mms_state_io import resolve_mms_config_dir
 
 
 class EventType(str, Enum):
@@ -26,14 +28,30 @@ class EventType(str, Enum):
     FAILED = "failed"
 
 
-EVENT_DIR = Path.home() / ".config" / "mms" / "events"
+DEFAULT_EVENT_DIR = Path(resolve_mms_config_dir()) / "events"
+EVENT_DIR = DEFAULT_EVENT_DIR
 LATEST_PATH = EVENT_DIR / "latest.json"
 _RETENTION_DAYS = 7
 _LOCK = threading.Lock()
 
 
+def _event_dir() -> Path:
+    configured = Path(EVENT_DIR)
+    if configured != DEFAULT_EVENT_DIR:
+        return configured
+    return Path(resolve_mms_config_dir()) / "events"
+
+
+def _latest_path() -> Path:
+    configured = Path(LATEST_PATH)
+    default_path = DEFAULT_EVENT_DIR / "latest.json"
+    if configured != default_path:
+        return configured
+    return _event_dir() / "latest.json"
+
+
 def _ensure_dir():
-    EVENT_DIR.mkdir(parents=True, exist_ok=True)
+    _event_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _iso_now() -> str:
@@ -41,11 +59,11 @@ def _iso_now() -> str:
 
 
 def _daily_path() -> Path:
-    return EVENT_DIR / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
+    return _event_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
 
 
 def _atomic_write_json(path: Path, data: dict):
-    _ensure_dir()
+    path.parent.mkdir(parents=True, exist_ok=True)
     try:
         fd = NamedTemporaryFile(
             dir=path.parent, mode="w", suffix=".tmp",
@@ -63,7 +81,7 @@ def _atomic_write_json(path: Path, data: dict):
 def _cleanup_old_logs():
     _ensure_dir()
     cutoff = datetime.now(timezone.utc) - timedelta(days=_RETENTION_DAYS)
-    for f in EVENT_DIR.glob("*.jsonl"):
+    for f in _event_dir().glob("*.jsonl"):
         stem = f.stem
         try:
             file_date = datetime.strptime(stem, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -100,7 +118,7 @@ def emit_event(
     event = _make_event(type, model, run_id=run_id, task_id=task_id, note=note)
     with _LOCK:
         _ensure_dir()
-        _atomic_write_json(LATEST_PATH, event)
+        _atomic_write_json(_latest_path(), event)
         daily = _daily_path()
         with daily.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -115,10 +133,11 @@ def emit_event(
 
 
 def get_latest_event() -> dict | None:
-    if not LATEST_PATH.is_file():
+    latest_path = _latest_path()
+    if not latest_path.is_file():
         return None
     try:
-        text = LATEST_PATH.read_text(encoding="utf-8").strip()
+        text = latest_path.read_text(encoding="utf-8").strip()
         if not text:
             return None
         return json.loads(text)

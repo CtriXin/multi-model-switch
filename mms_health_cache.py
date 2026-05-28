@@ -2,7 +2,7 @@
 
 Aggregates existing speed-stats data into per-model health records
 with status (ok/slow/degraded/blocked) and latency_bucket (fast/medium/slow).
-Uses in-memory cache backed by an optional JSON file at ~/.config/mms/health-cache.json.
+Uses in-memory cache backed by an optional JSON file under the selected MMS config root.
 No network probes — purely reads data already collected by mms_speed_stats.
 """
 
@@ -15,32 +15,51 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mms_state_io import resolve_mms_config_dir
 from mms_speed_stats import get_speed_entry
 
 
-def _real_home() -> str:
-    """Resolve real user home, respecting MMS_REAL_HOME for gateway sessions."""
-    for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
-        v = os.environ.get(key, "").strip()
-        if v:
-            return v
-    return os.path.expanduser("~")
-
-
-HEALTH_CACHE_DIR = Path(_real_home()) / ".config" / "mms"
+DEFAULT_HEALTH_CACHE_DIR = Path(resolve_mms_config_dir())
+HEALTH_CACHE_DIR = DEFAULT_HEALTH_CACHE_DIR
 _REAL_SPEED_STATS_PATH = HEALTH_CACHE_DIR / "speed-stats.json"
+HEALTH_CACHE_PATH = HEALTH_CACHE_DIR / "health-cache.json"
+
+
+def _health_cache_dir() -> Path:
+    configured = Path(HEALTH_CACHE_DIR)
+    if configured != DEFAULT_HEALTH_CACHE_DIR:
+        return configured
+    return Path(resolve_mms_config_dir())
+
+
+def _speed_stats_path() -> Path:
+    configured = Path(_REAL_SPEED_STATS_PATH)
+    default_path = DEFAULT_HEALTH_CACHE_DIR / "speed-stats.json"
+    if configured != default_path:
+        return configured
+    return _health_cache_dir() / "speed-stats.json"
+
+
+def _health_cache_path() -> Path:
+    configured = Path(HEALTH_CACHE_PATH)
+    default_path = DEFAULT_HEALTH_CACHE_DIR / "health-cache.json"
+    if configured != default_path:
+        return configured
+    return _health_cache_dir() / "health-cache.json"
 
 
 def _load_speed_stats_real() -> dict:
-    """Load speed-stats from real user home, bypassing gateway $HOME redirect."""
-    if not _REAL_SPEED_STATS_PATH.exists():
+    """Load speed-stats from the selected MMS config root."""
+    path = _speed_stats_path()
+    if not path.exists():
         return {}
     try:
-        data = json.loads(_REAL_SPEED_STATS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
-HEALTH_CACHE_PATH = HEALTH_CACHE_DIR / "health-cache.json"
+
+
 CACHE_TTL_MS = 30000
 
 _OK_TTFB_MAX = 3000
@@ -159,17 +178,19 @@ def _persist_cache() -> None:
         "built_at": _cache_built_at,
         "ttl_ms": CACHE_TTL_MS,
     }
-    HEALTH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _health_cache_path()
+    cache_dir = cache_path.parent
+    cache_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
-        prefix=HEALTH_CACHE_PATH.name + ".",
+        prefix=cache_path.name + ".",
         suffix=".tmp",
-        dir=str(HEALTH_CACHE_DIR),
+        dir=str(cache_dir),
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
-        os.replace(tmp_path, HEALTH_CACHE_PATH)
+        os.replace(tmp_path, cache_path)
     finally:
         if os.path.exists(tmp_path):
             try:

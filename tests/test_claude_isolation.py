@@ -116,6 +116,7 @@ def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monk
     gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "16593"
     gateway_home.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(real_home / ".config"))
     monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     monkeypatch.setenv("REAL_HOME", str(real_home))
     monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
@@ -268,6 +269,141 @@ def test_launcher_runtime_aux_paths_use_selected_config_root(monkeypatch, tmp_pa
         monkeypatch.delenv("REAL_HOME", raising=False)
         monkeypatch.delenv("ORIGINAL_HOME", raising=False)
         importlib.reload(mms_launchers)
+
+
+def test_usage_local_stats_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_usage
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (stable_root / "usage.json").write_text('{"sources":{"stable":{}}}', encoding="utf-8")
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_usage)
+    try:
+        assert reloaded._active_usage_path() is None
+        (preview_root / "usage.json").write_text('{"sources":{"preview":{}}}', encoding="utf-8")
+        assert reloaded._active_usage_path() == str(preview_root / "usage.json")
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_usage)
+
+
+def test_speed_stats_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_speed_stats
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_speed_stats)
+    try:
+        reloaded.record_model_speed(
+            "preview-model",
+            ttfb_ms=123,
+            provider={"id": "preview-provider", "base_url": "https://preview.example/v1"},
+        )
+        assert (preview_root / "speed-stats.json").exists()
+        assert not (stable_root / "speed-stats.json").exists()
+        assert reloaded._speed_stats_path() == preview_root / "speed-stats.json"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_speed_stats)
+
+
+def test_health_cache_uses_selected_config_root(monkeypatch, tmp_path):
+    import mms_health_cache
+    import mms_speed_stats
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (preview_root / "speed-stats.json").write_text(
+        json.dumps(
+            {
+                "preview-model": {
+                    "ttfb_avg_ms": 800,
+                    "samples": 3,
+                    "last_updated": datetime.now().astimezone().isoformat(),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded_speed = importlib.reload(mms_speed_stats)
+    reloaded_health = importlib.reload(mms_health_cache)
+    try:
+        reloaded_health.refresh_health_cache()
+        assert (preview_root / "health-cache.json").exists()
+        assert not (stable_root / "health-cache.json").exists()
+        assert reloaded_health._speed_stats_path() == preview_root / "speed-stats.json"
+        assert reloaded_speed._speed_stats_path() == preview_root / "speed-stats.json"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_speed_stats)
+        importlib.reload(mms_health_cache)
+
+
+def test_runtime_events_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_events
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setitem(
+        sys.modules,
+        "gbrain_memory_hook",
+        SimpleNamespace(ingest_mms_event=lambda _event: None),
+    )
+
+    reloaded = importlib.reload(mms_events)
+    try:
+        reloaded.emit_event("started", "preview-model")
+        assert (preview_root / "events" / "latest.json").exists()
+        assert not (stable_root / "events" / "latest.json").exists()
+        assert reloaded.get_latest_event()["model"] == "preview-model"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_events)
 
 
 def test_rescue_launch_env_uses_selected_config_root(monkeypatch, tmp_path):

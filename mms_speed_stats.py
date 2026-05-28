@@ -16,8 +16,10 @@ try:
 except ImportError:  # pragma: no cover - not expected on macOS/Linux
     fcntl = None
 
+from mms_state_io import resolve_mms_config_dir
 
-PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms"))
+DEFAULT_PRIMARY_CONFIG_DIR = Path(resolve_mms_config_dir())
+PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR
 SPEED_STATS_PATH = PRIMARY_CONFIG_DIR / "speed-stats.json"
 SPEED_STATS_LOCK_PATH = PRIMARY_CONFIG_DIR / "speed-stats.lock"
 ALPHA = 0.2
@@ -26,6 +28,29 @@ STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 SCHEMA_VERSION = 2
 
 _PROCESS_LOCK = threading.Lock()
+
+
+def _selected_config_dir() -> Path:
+    configured = Path(PRIMARY_CONFIG_DIR)
+    if configured != DEFAULT_PRIMARY_CONFIG_DIR:
+        return configured
+    return Path(resolve_mms_config_dir())
+
+
+def _speed_stats_path() -> Path:
+    configured = Path(SPEED_STATS_PATH)
+    default_path = DEFAULT_PRIMARY_CONFIG_DIR / "speed-stats.json"
+    if configured != default_path:
+        return configured
+    return _selected_config_dir() / "speed-stats.json"
+
+
+def _speed_stats_lock_path() -> Path:
+    configured = Path(SPEED_STATS_LOCK_PATH)
+    default_path = DEFAULT_PRIMARY_CONFIG_DIR / "speed-stats.lock"
+    if configured != default_path:
+        return configured
+    return _selected_config_dir() / "speed-stats.lock"
 
 
 def _utc_now() -> str:
@@ -75,10 +100,11 @@ def _clone_json(data):
 
 
 def _load_stats_unlocked() -> dict:
-    if not SPEED_STATS_PATH.exists():
+    path = _speed_stats_path()
+    if not path.exists():
         return {}
     try:
-        data = json.loads(SPEED_STATS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -103,8 +129,9 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
 @contextmanager
 def _locked_stats():
     with _PROCESS_LOCK:
-        PRIMARY_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SPEED_STATS_LOCK_PATH, "a+", encoding="utf-8") as lock_file:
+        lock_path = _speed_stats_lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
             if fcntl is not None:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
@@ -441,4 +468,4 @@ def record_model_speed(
             updated["tps_samples"] = tps_samples + 1
 
         provider_models[normalized] = updated
-        _atomic_write_json(SPEED_STATS_PATH, _rebuild_compat_views(stats, touch=True))
+        _atomic_write_json(_speed_stats_path(), _rebuild_compat_views(stats, touch=True))
