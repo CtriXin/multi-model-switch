@@ -310,6 +310,53 @@ def test_launcher_entry_and_model_info_helpers_preserve_filtering_rules():
     assert mms_command_tools.preset_model_info(None) == {}
 
 
+def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_config_precedence():
+    import mms_command_tools
+
+    assert mms_command_tools.available_broker_profiles_for_cli({}, "claude") == []
+    assert mms_command_tools.broker_enabled_by_cli({}, ["claude", "codex"]) == {
+        "claude": False,
+        "codex": False,
+    }
+    assert mms_command_tools.broker_enabled_by_cli(
+        {"broker": True},
+        ["claude", "codex"],
+        available_broker_profiles_for_cli=lambda _cfg, cli_name: [{"id": "remote"}] if cli_name == "claude" else [],
+    ) == {"claude": True, "codex": False}
+    profiles = [
+        {"id": "a", "device_id": "dev-a", "workspace_id": "ws-a", "broker_base_url": "http://a"},
+        {"id": "b", "device_id": "dev-b", "workspace_id": "ws-b", "remote_service_label": "remote-b"},
+    ]
+    prompts = iter(["bad", "2"])
+    console = _CollectingConsole()
+    assert mms_command_tools.select_broker_profile_interactive(
+        {},
+        "claude",
+        available_broker_profiles_for_cli=lambda _cfg, _cli_name: profiles,
+        ensure_rich=lambda: None,
+        table_cls=_FakeTable,
+        prompt_ask=lambda *args, **kwargs: next(prompts),
+        console=console,
+    ) == profiles[1]
+    assert any("请输入有效编号" in str(item) for item in console.items)
+
+    seen = []
+
+    def profile_selection(raw):
+        seen.append(raw)
+        return {"profile": raw or "default"}
+
+    assert mms_command_tools.opencode_default_profile_from_config(
+        {"opencode": {"profile": "lite", "default_profile": "agent"}},
+        opencode_profile_selection=profile_selection,
+    ) == {"profile": "agent"}
+    assert mms_command_tools.opencode_default_profile_from_config(
+        {},
+        opencode_profile_selection=profile_selection,
+    ) == {"profile": "default"}
+    assert seen == ["agent", None]
+
+
 def test_launch_trace_formatter_preserves_sources_and_override_chain():
     import mms_command_tools
 

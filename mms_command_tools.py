@@ -2802,6 +2802,66 @@ def preset_model_info(preset, *, excluded_keys=frozenset({"cli", "provider", "ac
     return {key: value for key, value in preset.items() if key not in excluded_keys}
 
 
+def available_broker_profiles_for_cli(_cfg, _cli_name):
+    return []
+
+
+def broker_enabled_by_cli(cfg, cli_names, *, available_broker_profiles_for_cli=available_broker_profiles_for_cli):
+    return {
+        cli_name: bool(available_broker_profiles_for_cli(cfg, cli_name))
+        for cli_name in (cli_names or [])
+    }
+
+
+def select_broker_profile_interactive(
+    cfg,
+    cli_name,
+    *,
+    available_broker_profiles_for_cli,
+    ensure_rich,
+    table_cls,
+    prompt_ask,
+    console,
+):
+    profiles = available_broker_profiles_for_cli(cfg, cli_name)
+    if not profiles:
+        return None
+    if len(profiles) == 1:
+        return profiles[0]
+
+    ensure_rich()
+    table = table_cls(title="Broker Experiment", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("ID", style="green")
+    table.add_column("设备/工作区", style="yellow")
+    table.add_column("Broker", style="blue")
+    table.add_column("Remote", style="magenta")
+    for idx, profile in enumerate(profiles, 1):
+        table.add_row(
+            str(idx),
+            str(profile.get("id", "")),
+            f"{profile.get('device_id', '-')}/{profile.get('workspace_id', '-')}",
+            str(profile.get("broker_base_url") or "-"),
+            str(profile.get("remote_service_label") or profile.get("remote_service_base_url") or "-"),
+        )
+    console.print(table)
+
+    while True:
+        raw = prompt_ask("选择 broker profile，直接回车取消", default="").strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            picked = int(raw)
+            if 1 <= picked <= len(profiles):
+                return profiles[picked - 1]
+        console.print("[yellow]请输入有效编号[/yellow]")
+
+
+def opencode_default_profile_from_config(cfg, *, opencode_profile_selection):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    return opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile"))
+
+
 def usage_key(runtime_kind, cli_name, runtime_id):
     return f"{runtime_kind}:{cli_name}:{runtime_id}"
 

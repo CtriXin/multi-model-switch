@@ -6310,8 +6310,12 @@ def _select_opencode_profile(use_tui=False):
 
 
 def _opencode_default_profile_from_config(cfg):
-    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
-    return _opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile"))
+    from mms_command_tools import opencode_default_profile_from_config
+
+    return opencode_default_profile_from_config(
+        cfg,
+        opencode_profile_selection=_opencode_profile_selection,
+    )
 
 
 def _opencode_default_model_rank(model_name):
@@ -6565,50 +6569,33 @@ def _infer_preset_auth_mode(preset):
 
 
 def _available_broker_profiles_for_cli(cfg, cli_name):
-    # 止血：TUI 暂时不再暴露 broker profile。
-    return []
+    from mms_command_tools import available_broker_profiles_for_cli
+
+    return available_broker_profiles_for_cli(cfg, cli_name)
 
 
 def _broker_enabled_by_cli(cfg, cli_names):
-    return {
-        cli_name: bool(_available_broker_profiles_for_cli(cfg, cli_name))
-        for cli_name in (cli_names or [])
-    }
+    from mms_command_tools import broker_enabled_by_cli
+
+    return broker_enabled_by_cli(
+        cfg,
+        cli_names,
+        available_broker_profiles_for_cli=_available_broker_profiles_for_cli,
+    )
 
 
 def _select_broker_profile_interactive(cfg, cli_name):
-    profiles = _available_broker_profiles_for_cli(cfg, cli_name)
-    if not profiles:
-        return None
-    if len(profiles) == 1:
-        return profiles[0]
+    from mms_command_tools import select_broker_profile_interactive
 
-    _ensure_rich()
-    table = Table(title="Broker Experiment", show_lines=True)
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("ID", style="green")
-    table.add_column("设备/工作区", style="yellow")
-    table.add_column("Broker", style="blue")
-    table.add_column("Remote", style="magenta")
-    for idx, profile in enumerate(profiles, 1):
-        table.add_row(
-            str(idx),
-            str(profile.get("id", "")),
-            f"{profile.get('device_id', '-')}/{profile.get('workspace_id', '-')}",
-            str(profile.get("broker_base_url") or "-"),
-            str(profile.get("remote_service_label") or profile.get("remote_service_base_url") or "-"),
-        )
-    console.print(table)
-
-    while True:
-        raw = Prompt.ask("选择 broker profile，直接回车取消", default="").strip()
-        if not raw:
-            return None
-        if raw.isdigit():
-            picked = int(raw)
-            if 1 <= picked <= len(profiles):
-                return profiles[picked - 1]
-        console.print("[yellow]请输入有效编号[/yellow]")
+    return select_broker_profile_interactive(
+        cfg,
+        cli_name,
+        available_broker_profiles_for_cli=_available_broker_profiles_for_cli,
+        ensure_rich=_ensure_rich,
+        table_cls=lambda *args, **kwargs: Table(*args, **kwargs),
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        console=console,
+    )
 
 
 def _launch_broker_experiment_interactive(cfg, cli_name):
