@@ -640,6 +640,18 @@ def test_registry_result_payloads_are_chinese_first_and_compact() -> None:
     assert mms_core._compact_tui_report_value("x" * 120, max_len=20) == "x" * 19 + "…"
 
 
+def test_rescue_fallback_report_points_to_latest_approved_router() -> None:
+    import mms_core
+
+    _title, rows, _note = mms_core._rescue_default_fallback_report_payload(
+        "fallback-model",
+        hot_fallback_enabled=True,
+    )
+
+    assert ("生效方式", "bridge failure -> latest-approved Router") in rows
+    assert all("model-routes.json" not in str(value) for _label, value in rows)
+
+
 def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     import mms_core
     import mms_i18n

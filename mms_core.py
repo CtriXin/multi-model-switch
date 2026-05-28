@@ -5479,7 +5479,7 @@ def _rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallbac
             ("Model", model or "-"),
             ("Hot fallback", _L("开启", "on") if hot_fallback_enabled else _L("关闭", "off")),
             (_L("保存位置", "saved at"), "[rescue].fallback_model"),
-            (_L("生效方式", "applies"), "bridge failure -> model-routes.json"),
+            (_L("生效方式", "applies"), "bridge failure -> latest-approved Router"),
             (_L("安全边界", "safety"), "no global OAuth"),
         ],
         (
