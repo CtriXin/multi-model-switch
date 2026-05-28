@@ -176,6 +176,7 @@ def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path:
 
 
 def test_rescue_default_fallback_config_roundtrip() -> None:
+    import mms_command_tools
     import mms_core
 
     cfg: dict = {}
@@ -198,6 +199,16 @@ def test_rescue_default_fallback_config_roundtrip() -> None:
     assert mms_core._rescue_default_fallback(cfg) == {"model": "", "cli": ""}
     assert mms_core._rescue_hot_fallback_enabled_cfg(cfg) is False
     assert "enable_hot_fallback" not in cfg["rescue"]
+
+    tool_cfg = {"rescue": {"default_fallback_model": "legacy-model", "default_fallback_cli": "codex"}}
+    assert mms_command_tools.rescue_default_fallback(tool_cfg) == {"model": "legacy-model", "cli": "codex"}
+    tool_cfg = mms_command_tools.set_rescue_default_fallback(tool_cfg, model="new-model", cli="claude")
+    assert tool_cfg["rescue"]["fallback_model"] == "new-model"
+    assert tool_cfg["rescue"]["fallback_cli"] == "claude"
+    assert "default_fallback_model" not in tool_cfg["rescue"]
+    tool_cfg, applied = mms_command_tools.set_rescue_hot_fallback_enabled(tool_cfg, enabled=True)
+    assert applied is True
+    assert mms_command_tools.rescue_hot_fallback_enabled_cfg(tool_cfg) is True
 
 
 def test_rescue_landing_prioritizes_fallback_settings_without_packets() -> None:

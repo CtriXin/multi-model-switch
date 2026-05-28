@@ -3643,50 +3643,27 @@ def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
 
 
 def _rescue_default_fallback(cfg):
-    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
-    return {
-        "model": str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip(),
-        "cli": str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip(),
-    }
+    from mms_command_tools import rescue_default_fallback
+
+    return rescue_default_fallback(cfg)
 
 
 def _rescue_hot_fallback_enabled_cfg(cfg):
-    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
-    return bool(_pref_bool(rescue_cfg.get("hot_fallback_enabled", rescue_cfg.get("enable_hot_fallback"))))
+    from mms_command_tools import rescue_hot_fallback_enabled_cfg
+
+    return rescue_hot_fallback_enabled_cfg(cfg, pref_bool=_pref_bool)
 
 
 def _set_rescue_default_fallback(cfg, *, model="", cli=""):
-    cfg = cfg if isinstance(cfg, dict) else {}
-    rescue_cfg = cfg.setdefault("rescue", {})
-    model = str(model or "").strip()
-    cli = str(cli or "").strip()
-    for legacy_key in ("default_fallback_model", "default_fallback_cli"):
-        rescue_cfg.pop(legacy_key, None)
-    if model:
-        rescue_cfg["fallback_model"] = model
-        if cli:
-            rescue_cfg["fallback_cli"] = cli
-        else:
-            rescue_cfg.pop("fallback_cli", None)
-    else:
-        rescue_cfg.pop("fallback_model", None)
-        rescue_cfg.pop("fallback_cli", None)
-        rescue_cfg.pop("hot_fallback_enabled", None)
-        rescue_cfg.pop("enable_hot_fallback", None)
-    return cfg
+    from mms_command_tools import set_rescue_default_fallback
+
+    return set_rescue_default_fallback(cfg, model=model, cli=cli)
 
 
 def _set_rescue_hot_fallback_enabled(cfg, enabled=False):
-    cfg = cfg if isinstance(cfg, dict) else {}
-    rescue_cfg = cfg.setdefault("rescue", {})
-    has_model = bool(str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip())
-    if not has_model:
-        rescue_cfg.pop("hot_fallback_enabled", None)
-        rescue_cfg.pop("enable_hot_fallback", None)
-        return cfg, False
-    rescue_cfg.pop("enable_hot_fallback", None)
-    rescue_cfg["hot_fallback_enabled"] = bool(enabled)
-    return cfg, bool(enabled)
+    from mms_command_tools import set_rescue_hot_fallback_enabled
+
+    return set_rescue_hot_fallback_enabled(cfg, enabled=enabled)
 
 
 def _latest_rescue_hot_fallback_event():

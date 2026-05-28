@@ -393,6 +393,54 @@ def rescue_fallback_model_candidates(
     return [item["model"] for item in ordered[: max(int(limit or 1), 1)]]
 
 
+def rescue_default_fallback(cfg):
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
+    return {
+        "model": str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip(),
+        "cli": str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip(),
+    }
+
+
+def rescue_hot_fallback_enabled_cfg(cfg, *, pref_bool=None):
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
+    pref_bool_fn = pref_bool or globals()["pref_bool"]
+    return bool(pref_bool_fn(rescue_cfg.get("hot_fallback_enabled", rescue_cfg.get("enable_hot_fallback"))))
+
+
+def set_rescue_default_fallback(cfg, *, model="", cli=""):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    rescue_cfg = cfg.setdefault("rescue", {})
+    model = str(model or "").strip()
+    cli = str(cli or "").strip()
+    for legacy_key in ("default_fallback_model", "default_fallback_cli"):
+        rescue_cfg.pop(legacy_key, None)
+    if model:
+        rescue_cfg["fallback_model"] = model
+        if cli:
+            rescue_cfg["fallback_cli"] = cli
+        else:
+            rescue_cfg.pop("fallback_cli", None)
+    else:
+        rescue_cfg.pop("fallback_model", None)
+        rescue_cfg.pop("fallback_cli", None)
+        rescue_cfg.pop("hot_fallback_enabled", None)
+        rescue_cfg.pop("enable_hot_fallback", None)
+    return cfg
+
+
+def set_rescue_hot_fallback_enabled(cfg, enabled=False):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    rescue_cfg = cfg.setdefault("rescue", {})
+    has_model = bool(str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip())
+    if not has_model:
+        rescue_cfg.pop("hot_fallback_enabled", None)
+        rescue_cfg.pop("enable_hot_fallback", None)
+        return cfg, False
+    rescue_cfg.pop("enable_hot_fallback", None)
+    rescue_cfg["hot_fallback_enabled"] = bool(enabled)
+    return cfg, bool(enabled)
+
+
 def rescue_demo_packet_report_payload(payload, *, localize):
     payload = payload if isinstance(payload, dict) else {}
     artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
