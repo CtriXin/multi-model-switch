@@ -437,36 +437,15 @@ def _compare_semver_text(current, latest):
 
 
 def _detect_cli_version(command_name):
-    command = str(command_name or "").strip()
-    if not command:
-        return {"installed": False, "label": _L("未安装", "not installed"), "version": "", "path": ""}
-    path = shutil.which(command)
-    if not path:
-        return {"installed": False, "label": _L("未安装", "not installed"), "version": "", "path": ""}
-    try:
-        result = subprocess.run(
-            [path, "--version"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=3,
-            check=False,
-        )
-    except Exception as exc:
-        return {
-            "installed": True,
-            "label": _L(f"读取失败: {exc}", f"version failed: {exc}"),
-            "version": "",
-            "path": path,
-        }
-    raw = str(result.stdout or "").strip().splitlines()
-    label = raw[0].strip() if raw else (path if result.returncode == 0 else _L("读取失败", "version failed"))
-    return {
-        "installed": True,
-        "label": label,
-        "version": _extract_semver_text(label),
-        "path": path,
-    }
+    from mms_command_tools import detect_cli_version
+
+    return detect_cli_version(
+        command_name,
+        which=shutil.which,
+        subprocess_run=subprocess.run,
+        extract_semver_text=_extract_semver_text,
+        localize=_L,
+    )
 
 
 def _fetch_npm_package_latest_version(package_name):

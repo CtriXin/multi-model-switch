@@ -2758,6 +2758,39 @@ def compare_semver_text(current, latest):
     return 0
 
 
+def detect_cli_version(command_name, *, which, subprocess_run, extract_semver_text, localize):
+    command = str(command_name or "").strip()
+    if not command:
+        return {"installed": False, "label": localize("未安装", "not installed"), "version": "", "path": ""}
+    path = which(command)
+    if not path:
+        return {"installed": False, "label": localize("未安装", "not installed"), "version": "", "path": ""}
+    try:
+        result = subprocess_run(
+            [path, "--version"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=3,
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "installed": True,
+            "label": localize(f"读取失败: {exc}", f"version failed: {exc}"),
+            "version": "",
+            "path": path,
+        }
+    raw = str(result.stdout or "").strip().splitlines()
+    label = raw[0].strip() if raw else (path if result.returncode == 0 else localize("读取失败", "version failed"))
+    return {
+        "installed": True,
+        "label": label,
+        "version": extract_semver_text(label),
+        "path": path,
+    }
+
+
 def semver_tag_gap(installed_version, known_tags, latest_tag=""):
     installed_version = str(installed_version or "").strip()
     tags = normalize_semver_tags(known_tags)

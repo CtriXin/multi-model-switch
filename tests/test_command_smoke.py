@@ -2038,6 +2038,54 @@ def test_semver_and_http_status_helpers_preserve_update_semantics():
     assert mms_command_tools.http_status_is_success("bad") is False
 
 
+def test_detect_cli_version_preserves_missing_success_and_failure_paths():
+    import mms_command_tools
+
+    class Result:
+        stdout = "codex-cli 0.132.0\nextra"
+        returncode = 0
+
+    calls = []
+    missing = mms_command_tools.detect_cli_version(
+        "",
+        which=lambda command: (_ for _ in ()).throw(AssertionError("should not resolve")),
+        subprocess_run=lambda *args, **kwargs: Result(),
+        extract_semver_text=mms_command_tools.extract_semver_text,
+        localize=lambda zh, en: zh,
+    )
+    assert missing == {"installed": False, "label": "未安装", "version": "", "path": ""}
+
+    success = mms_command_tools.detect_cli_version(
+        "codex",
+        which=lambda command: "/usr/local/bin/codex",
+        subprocess_run=lambda *args, **kwargs: calls.append((args, kwargs)) or Result(),
+        extract_semver_text=mms_command_tools.extract_semver_text,
+        localize=lambda zh, en: zh,
+    )
+    assert success == {
+        "installed": True,
+        "label": "codex-cli 0.132.0",
+        "version": "0.132.0",
+        "path": "/usr/local/bin/codex",
+    }
+    assert calls[0][0][0] == ["/usr/local/bin/codex", "--version"]
+    assert calls[0][1]["stdout"] == mms_command_tools.subprocess.PIPE
+
+    failed = mms_command_tools.detect_cli_version(
+        "codex",
+        which=lambda command: "/usr/local/bin/codex",
+        subprocess_run=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+        extract_semver_text=mms_command_tools.extract_semver_text,
+        localize=lambda zh, en: zh,
+    )
+    assert failed == {
+        "installed": True,
+        "label": "读取失败: boom",
+        "version": "",
+        "path": "/usr/local/bin/codex",
+    }
+
+
 def test_update_status_helpers_preserve_install_and_about_status_semantics():
     import mms_command_tools
 
