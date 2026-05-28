@@ -3501,73 +3501,21 @@ def _pick_manual_models(models):
 
 
 def _warm_model_request(provider, model_name):
-    model_name = str(model_name or "").strip()
-    if not model_name:
-        return False, "empty model"
-    _ensure_httpx()
-    if httpx is None:
-        return False, "缺少 httpx"
+    from mms_command_tools import warm_model_request
 
-    protocols = provider.get("protocols", [])
-    api_key = provider.get("api_key", "")
-    openai_api_key = provider.get("openai_api_key") or api_key
-    timeout = 30
-    if not api_key and not openai_api_key:
-        return False, "缺少 API Key"
+    def resolve_anthropic_base_url(provider, *, probe_model):
+        from mms_launchers import _resolve_anthropic_base_url
+        return _resolve_anthropic_base_url(provider, probe_model=probe_model)
 
-    use_anthropic = "anthropic_messages" in protocols and "claude" in model_name.lower()
-    try:
-        if use_anthropic:
-            from mms_launchers import _resolve_anthropic_base_url
-
-            base_url, _method = _resolve_anthropic_base_url(provider, probe_model=model_name)
-            if not base_url:
-                return False, "无法解析 Anthropic 地址"
-            response = _runtime_httpx_request(
-                "POST",
-                f"{base_url.rstrip('/')}/v1/messages",
-                runtime=provider,
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model_name,
-                    "max_tokens": 1,
-                    "messages": [{"role": "user", "content": "warmup"}],
-                },
-                timeout=timeout,
-            )
-        else:
-            base_url = _provider_openai_base_url(provider)
-            if not base_url:
-                return False, "缺少 OpenAI 地址"
-            response = _runtime_httpx_request(
-                "POST",
-                f"{base_url.rstrip('/')}/chat/completions",
-                runtime=provider,
-                headers={
-                    "Authorization": f"Bearer {openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model_name,
-                    "messages": [{"role": "user", "content": "warmup"}],
-                    "max_tokens": 1,
-                    "temperature": 0,
-                    "stream": False,
-                },
-                timeout=timeout,
-            )
-        if response.status_code >= 400:
-            detail = response.text.strip().replace("\n", " ")
-            if len(detail) > 120:
-                detail = detail[:117] + "..."
-            return False, f"HTTP {response.status_code}: {detail or 'request failed'}"
-        return True, "ok"
-    except Exception as exc:
-        return False, str(exc)
+    return warm_model_request(
+        provider,
+        model_name,
+        ensure_httpx=_ensure_httpx,
+        get_httpx=lambda: httpx,
+        resolve_anthropic_base_url=resolve_anthropic_base_url,
+        runtime_httpx_request=_runtime_httpx_request,
+        provider_openai_base_url=_provider_openai_base_url,
+    )
 
 
 def handle_warm_command(cfg, argv):

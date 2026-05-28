@@ -5634,6 +5634,92 @@ def test_warm_command_small_helpers_preserve_delegation(monkeypatch):
     assert calls == [({"id": "core-relay"}, {"emit_output": True})]
 
 
+def test_warm_model_request_helper_and_wrapper_preserve_request_shapes(monkeypatch):
+    from types import SimpleNamespace
+
+    import mms_command_tools
+    import mms_core
+
+    assert mms_command_tools.warm_model_request(
+        {"api_key": "sk"},
+        "",
+        ensure_httpx=lambda: (_ for _ in ()).throw(AssertionError("ensure not expected")),
+        get_httpx=lambda: object(),
+        resolve_anthropic_base_url=lambda *_args, **_kwargs: ("", ""),
+        runtime_httpx_request=lambda *_args, **_kwargs: None,
+        provider_openai_base_url=lambda provider: "https://openai.example/v1",
+    ) == (False, "empty model")
+    assert mms_command_tools.warm_model_request(
+        {"api_key": "sk"},
+        "gpt-5.5",
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: None,
+        resolve_anthropic_base_url=lambda *_args, **_kwargs: ("", ""),
+        runtime_httpx_request=lambda *_args, **_kwargs: None,
+        provider_openai_base_url=lambda provider: "https://openai.example/v1",
+    ) == (False, "缺少 httpx")
+    assert mms_command_tools.warm_model_request(
+        {},
+        "gpt-5.5",
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: object(),
+        resolve_anthropic_base_url=lambda *_args, **_kwargs: ("", ""),
+        runtime_httpx_request=lambda *_args, **_kwargs: None,
+        provider_openai_base_url=lambda provider: "https://openai.example/v1",
+    ) == (False, "缺少 API Key")
+
+    requests = []
+    provider = {
+        "id": "relay",
+        "api_key": "sk-anthropic",
+        "openai_api_key": "sk-openai",
+        "protocols": ["openai_chat_completions"],
+    }
+    assert mms_command_tools.warm_model_request(
+        provider,
+        "gpt-5.5",
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: object(),
+        resolve_anthropic_base_url=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("anthropic not expected")),
+        runtime_httpx_request=lambda *args, **kwargs: requests.append((args, kwargs)) or SimpleNamespace(status_code=200, text=""),
+        provider_openai_base_url=lambda current: "https://openai.example/v1/",
+    ) == (True, "ok")
+    assert requests[0][0] == ("POST", "https://openai.example/v1/chat/completions")
+    assert requests[0][1]["headers"]["Authorization"] == "Bearer sk-openai"
+    assert requests[0][1]["json"]["model"] == "gpt-5.5"
+    assert requests[0][1]["timeout"] == 30
+
+    requests.clear()
+    provider["protocols"] = ["anthropic_messages", "openai_chat_completions"]
+    assert mms_command_tools.warm_model_request(
+        provider,
+        "claude-sonnet-4-6",
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: object(),
+        resolve_anthropic_base_url=lambda current, **kwargs: requests.append(("resolve", current, kwargs)) or ("https://anthropic.example/base/", "profile"),
+        runtime_httpx_request=lambda *args, **kwargs: requests.append((args, kwargs)) or SimpleNamespace(status_code=429, text="line1\nline2"),
+        provider_openai_base_url=lambda current: "https://openai.example/v1",
+    ) == (False, "HTTP 429: line1 line2")
+    assert requests[0] == ("resolve", provider, {"probe_model": "claude-sonnet-4-6"})
+    assert requests[1][0] == ("POST", "https://anthropic.example/base/v1/messages")
+    assert requests[1][1]["headers"]["x-api-key"] == "sk-anthropic"
+
+    monkeypatch.setattr(mms_core, "_ensure_httpx", lambda: None)
+    monkeypatch.setattr(mms_core, "httpx", object())
+    monkeypatch.setattr(mms_core, "_provider_openai_base_url", lambda current: "https://core-openai.example/v1")
+    monkeypatch.setattr(
+        mms_core,
+        "_runtime_httpx_request",
+        lambda *args, **kwargs: requests.append((args, kwargs)) or SimpleNamespace(status_code=200, text=""),
+    )
+    requests.clear()
+    assert mms_core._warm_model_request({"api_key": "sk", "protocols": ["openai_chat_completions"]}, "gpt-5.5") == (
+        True,
+        "ok",
+    )
+    assert requests[0][0] == ("POST", "https://core-openai.example/v1/chat/completions")
+
+
 def test_availability_helpers_preserve_cache_warning_and_cli_check(monkeypatch):
     import mms_command_tools
     import mms_core
