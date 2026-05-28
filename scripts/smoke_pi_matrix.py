@@ -67,6 +67,12 @@ def parse_args() -> argparse.Namespace:
         help="Per-case timeout in seconds.",
     )
     parser.add_argument(
+        "--attempts",
+        type=int,
+        default=1,
+        help="Run each provider/model case this many times and aggregate the result.",
+    )
+    parser.add_argument(
         "--max-cases",
         type=int,
         default=0,
@@ -81,6 +87,16 @@ def parse_args() -> argparse.Namespace:
         "--list-cases",
         action="store_true",
         help="List matched provider/model cases without executing them.",
+    )
+    parser.add_argument(
+        "--include-blocked",
+        action="store_true",
+        help="Include Pi-blocked provider/model pairs so recovery can be rechecked.",
+    )
+    parser.add_argument(
+        "--blocked-only",
+        action="store_true",
+        help="Run only currently Pi-blocked provider/model pairs. Implies --include-blocked.",
     )
     return parser.parse_args()
 
@@ -113,10 +129,21 @@ def summarize_results(results: list[dict]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def write_report(path: Path, prompt: str, results: list[dict]) -> None:
+def write_report(
+    path: Path,
+    prompt: str,
+    results: list[dict],
+    *,
+    attempts: int,
+    include_blocked: bool,
+    blocked_only: bool,
+) -> None:
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "prompt": prompt,
+        "attempts_per_case": attempts,
+        "include_blocked": include_blocked,
+        "blocked_only": blocked_only,
         "summary": summarize_results(results),
         "results": results,
     }
@@ -192,12 +219,83 @@ def temporary_real_home(real_home: str):
                 os.environ[key] = value
 
 
+@contextmanager
+def temporarily_unblock_case(runtime: dict, model_name: str, *, enabled: bool):
+    if not enabled:
+        yield
+        return
+    runtime = runtime if isinstance(runtime, dict) else {}
+    provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip().lower()
+    model_key = mms_launchers._pi_normalize_model_key(model_name)
+    original = mms_launchers._pi_model_block_reason
+
+    def _patched(candidate_runtime, candidate_model):
+        candidate_runtime = candidate_runtime if isinstance(candidate_runtime, dict) else {}
+        candidate_provider = str(
+            candidate_runtime.get("id") or candidate_runtime.get("provider_id") or ""
+        ).strip().lower()
+        candidate_model_key = mms_launchers._pi_normalize_model_key(candidate_model)
+        if candidate_provider == provider_id and candidate_model_key == model_key:
+            return ""
+        return original(candidate_runtime, candidate_model)
+
+    mms_launchers._pi_model_block_reason = _patched
+    try:
+        yield
+    finally:
+        mms_launchers._pi_model_block_reason = original
+
+
+def case_models(
+    runtime: dict,
+    *,
+    include_blocked: bool,
+    blocked_only: bool,
+) -> list[dict]:
+    if not include_blocked and not blocked_only:
+        return [
+            {
+                "model": str(model_name or "").strip(),
+                "surface": "exposed",
+                "blocked_reason": "",
+            }
+            for model_name in mms_launchers._pi_exposed_model_names(runtime)
+            if str(model_name or "").strip()
+        ]
+
+    rows: list[dict] = []
+    seen = set()
+    for model_name in mms_launchers._pi_runtime_model_names(runtime):
+        text = str(model_name or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        if not mms_launchers._pi_model_supported(text):
+            continue
+        blocked_reason = str(mms_launchers._pi_model_block_reason(runtime, text) or "").strip()
+        if blocked_reason and not include_blocked:
+            continue
+        if blocked_only and not blocked_reason:
+            continue
+        rows.append(
+            {
+                "model": text,
+                "surface": "blocked" if blocked_reason else "exposed",
+                "blocked_reason": blocked_reason,
+            }
+        )
+    return rows
+
+
 def build_cases(
     cfg: dict,
     provider_filters: set[str],
     model_filters: list[str],
-) -> list[tuple[str, dict, list[str]]]:
-    cases: list[tuple[str, dict, list[str]]] = []
+    *,
+    include_blocked: bool,
+    blocked_only: bool,
+) -> list[dict]:
+    cases: list[dict] = []
     for provider in cfg.get("providers") or []:
         if not isinstance(provider, dict):
             continue
@@ -208,15 +306,30 @@ def build_cases(
             continue
         runtime = mms_core.resolve_provider_context(cfg, provider_id)
         try:
-            models = list(mms_launchers._pi_exposed_model_names(runtime))
+            model_rows = case_models(
+                runtime,
+                include_blocked=include_blocked,
+                blocked_only=blocked_only,
+            )
         except Exception as exc:
             runtime["_pi_probe_error"] = str(exc)
-            models = []
+            model_rows = []
         if model_filters:
-            models = [text for text in models if any(token in text.lower() for token in model_filters)]
-        if not models:
+            model_rows = [
+                row for row in model_rows if any(token in row["model"].lower() for token in model_filters)
+            ]
+        if not model_rows:
             continue
-        cases.append((provider_id, runtime, models))
+        for row in model_rows:
+            cases.append(
+                {
+                    "provider": provider_id,
+                    "runtime": runtime,
+                    "model": row["model"],
+                    "surface": row["surface"],
+                    "blocked_reason": row["blocked_reason"],
+                }
+            )
     return cases
 
 
@@ -227,13 +340,19 @@ def run_case(
     prompt: str,
     timeout_sec: int,
     accepted_text: set[str],
+    blocked_reason: str = "",
 ) -> dict:
     started = time.monotonic()
     provider_name = str(runtime.get("name") or provider_id).strip() or provider_id
     with tempfile.TemporaryDirectory(prefix=f"mms-pi-live-{provider_id}-") as temp_home:
         try:
             with temporary_real_home(temp_home):
-                exports = mms_launchers.get_export_env("pi", runtime, model_info={"model": model_name})
+                with temporarily_unblock_case(
+                    runtime,
+                    model_name,
+                    enabled=bool(str(blocked_reason or "").strip()),
+                ):
+                    exports = mms_launchers.get_export_env("pi", runtime, model_info={"model": model_name})
             env = os.environ.copy()
             env.update(exports)
             if "PATH" in exports:
@@ -318,29 +437,73 @@ def run_case(
     }
 
 
+def aggregate_attempts(attempt_results: list[dict]) -> dict:
+    if not attempt_results:
+        return {}
+    statuses = [str(row.get("status") or "unknown") for row in attempt_results]
+    pass_count = sum(1 for status in statuses if status == "pass")
+    attempt_count = len(attempt_results)
+    if pass_count == attempt_count:
+        final_status = "pass"
+    elif pass_count:
+        final_status = "flaky"
+    elif len(set(statuses)) == 1:
+        final_status = statuses[0]
+    else:
+        final_status = "mixed_fail"
+
+    chosen = dict(attempt_results[-1])
+    if final_status == "pass":
+        chosen = dict(attempt_results[-1])
+    elif final_status == "flaky":
+        first_pass = next((row for row in attempt_results if row.get("status") == "pass"), {})
+        first_fail = next((row for row in attempt_results if row.get("status") != "pass"), {})
+        if first_pass and not chosen.get("content"):
+            chosen["content"] = first_pass.get("content", "")
+        if first_fail and not chosen.get("errorMessage"):
+            chosen["errorMessage"] = first_fail.get("errorMessage") or first_fail.get("content") or ""
+
+    chosen["status"] = final_status
+    chosen["attempt_count"] = attempt_count
+    chosen["pass_count"] = pass_count
+    chosen["pass_rate"] = round(pass_count / attempt_count, 3) if attempt_count else 0.0
+    chosen["attempt_statuses"] = statuses
+    chosen["attempts"] = attempt_results
+    return chosen
+
+
 def main() -> int:
     args = parse_args()
+    if args.attempts < 1:
+        raise SystemExit("--attempts must be >= 1")
+    include_blocked = bool(args.include_blocked or args.blocked_only)
+    blocked_only = bool(args.blocked_only)
     output_path = Path(args.output).expanduser().resolve()
     provider_filters = {item.strip() for item in split_csv(args.provider)}
     model_filters = [item.lower() for item in split_csv(args.model)]
     accepted_text = set(split_csv(args.accept_text) or DEFAULT_ACCEPT_TEXT)
 
     cfg = mms_core.load_runtime_config()
-    provider_cases = build_cases(cfg, provider_filters, model_filters)
-    flat_cases: list[tuple[str, dict, str]] = []
-    for provider_id, runtime, models in provider_cases:
-        if not models:
-            flat_cases.append((provider_id, runtime, ""))
-            continue
-        for model_name in models:
-            flat_cases.append((provider_id, runtime, model_name))
+    flat_cases = build_cases(
+        cfg,
+        provider_filters,
+        model_filters,
+        include_blocked=include_blocked,
+        blocked_only=blocked_only,
+    )
 
     if args.max_cases > 0:
         flat_cases = flat_cases[: args.max_cases]
 
     if args.list_cases:
-        for provider_id, _runtime, model_name in flat_cases:
-            print(f"{provider_id}\t{model_name or '<no-models>'}")
+        for row in flat_cases:
+            if include_blocked:
+                print(
+                    f"{row['provider']}\t{row['model'] or '<no-models>'}\t"
+                    f"{row['surface']}\t{row['blocked_reason']}"
+                )
+            else:
+                print(f"{row['provider']}\t{row['model'] or '<no-models>'}")
         return 0
 
     results = load_existing_results(output_path) if args.resume else []
@@ -348,29 +511,52 @@ def main() -> int:
 
     total = len(flat_cases)
     executed = 0
-    for index, (provider_id, runtime, model_name) in enumerate(flat_cases, start=1):
+    for index, row in enumerate(flat_cases, start=1):
+        provider_id = row["provider"]
+        runtime = row["runtime"]
+        model_name = row["model"]
         case_key = (provider_id, model_name)
         if args.resume and case_key in seen:
             print(f"[{index}/{total}] skip {provider_id} {model_name or '<no-models>'}")
             continue
 
-        result = run_case(
-            provider_id=provider_id,
-            runtime=runtime,
-            model_name=model_name,
-            prompt=args.prompt,
-            timeout_sec=args.timeout,
-            accepted_text=accepted_text,
-        )
+        attempt_results = []
+        for attempt_index in range(1, args.attempts + 1):
+            result = run_case(
+                provider_id=provider_id,
+                runtime=runtime,
+                model_name=model_name,
+                prompt=args.prompt,
+                timeout_sec=args.timeout,
+                accepted_text=accepted_text,
+                blocked_reason=row["blocked_reason"],
+            )
+            result["attempt"] = attempt_index
+            attempt_results.append(result)
+        result = aggregate_attempts(attempt_results)
+        result["surface"] = row["surface"]
+        result["blocked_reason"] = row["blocked_reason"]
         results.append(result)
         seen.add(case_key)
         executed += 1
-        write_report(output_path, args.prompt, results)
+        write_report(
+            output_path,
+            args.prompt,
+            results,
+            attempts=args.attempts,
+            include_blocked=include_blocked,
+            blocked_only=blocked_only,
+        )
+        attempt_note = ""
+        if result.get("attempt_count", 1) > 1:
+            attempt_note = f" ({result.get('pass_count', 0)}/{result.get('attempt_count', 1)} pass)"
         print(
             f"[{index}/{total}] {result['status']:<17} "
             f"{provider_id} {model_name or '<no-models>'} "
-            f"{result['elapsed_sec']:.2f}s"
+            f"{result['elapsed_sec']:.2f}s{attempt_note}"
         )
+        if result.get("blocked_reason"):
+            print(f"  blocked: {result['blocked_reason']}")
         if result.get("errorMessage"):
             print(f"  error: {result['errorMessage']}")
         elif result.get("content") and result["status"] != "pass":

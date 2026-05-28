@@ -89,6 +89,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert captured["cmd"] == ["pi", "--provider", "mms-relay-a", "--model", "gpt-5.4", "--thinking", "off"]
     assert captured["once"] is True
     assert captured["env"]["MMS_PI_BIN"] == "/tmp/pi-wrapper"
+    assert captured["env"]["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
 
     models_path = real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
@@ -133,6 +134,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     )
 
     assert exports["MMS_PI_BIN"] == "/tmp/pi-wrapper"
+    assert exports["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
     models_path = real_home / ".config" / "mms" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-b"]
@@ -177,6 +179,7 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
     )
 
     assert exports["MMS_PI_BIN"] == "/tmp/pi-wrapper"
+    assert exports["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
     models_path = Path(exports["MMS_PI_MODELS_JSON"])
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-c"]
@@ -496,6 +499,7 @@ def test_pi_anthropic_local_thinking_alias_uses_wire_model_id(monkeypatch, tmp_p
             "models": ["claude-opus-4-6-thinking", "claude-opus-4-6"],
         },
     )
+    monkeypatch.setattr(mms_launchers, "_pi_model_block_reason", lambda runtime, model_name: "")
 
     exports = mms_launchers.get_export_env(
         "pi",
@@ -665,6 +669,33 @@ def test_pi_skips_runtime_blocked_models(monkeypatch, tmp_path):
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
     assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low"]
+
+
+def test_pi_exposed_model_names_filter_flaky_antigravity_opus(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {
+            "models": ["claude-opus-4-6-thinking", "claude-opus-4-6", "claude-sonnet-4-6"],
+        },
+    )
+
+    models = mms_launchers._pi_exposed_model_names(
+        {
+            "id": "us-cpa-local-antigravity",
+            "name": "Antigravity",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-antigravity",
+            "anthropic_base_url": "https://relay.example.com/v1",
+            "protocols": ["anthropic_messages"],
+            "supported_clis": ["pi"],
+        }
+    )
+
+    assert models == ["claude-sonnet-4-6"]
 
 
 def test_pi_rejects_selected_runtime_blocked_model(monkeypatch):

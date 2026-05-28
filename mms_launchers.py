@@ -10634,6 +10634,10 @@ def _pi_wrapper_path():
     return ""
 
 
+def _pi_npx_cache_dir():
+    return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
+
+
 def _pi_provider_ref(runtime):
     runtime = runtime if isinstance(runtime, dict) else {}
     return f"mms-{_opencode_config_slug(runtime.get('id') or runtime.get('name'), 'provider')}"
@@ -10753,19 +10757,30 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
         "anthropic/claude-opus-4.7": "2026-05-28 live Pi smoke returned key-limit 403 on this relay",
     },
     "us-cpa-local-antigravity": {
+        "claude-opus-4-6": "2026-05-28 stability recheck was mixed (3 pass / 2 request_fail across 5 attempts), so Pi keeps this relay fail-closed",
+        "claude-opus-4-6-thinking": "2026-05-28 stability recheck was mixed (4 pass / 1 request_fail across 5 attempts), so Pi keeps this relay fail-closed",
         "gemini-3-pro-high": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
         "gemini-3-pro-low": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
     },
     "us-cpa-local-codex": {
-        "gpt-5.3-codex": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
-        "gpt-5.3-codex-spark": "2026-05-28 stability recheck was mixed (4 pass / 2 request_fail across reruns), so Pi keeps this relay fail-closed",
-        "gpt-5.4": "2026-05-28 current-surface rerun returned 401 token invalidated on this relay",
-        "gpt-5.4-mini": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
-        "gpt-5.5": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
+        "gpt-5.3-codex": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
+        "gpt-5.3-codex-spark": "2026-05-28 targeted recheck passed 6/6, but the broader current-surface rerun still hit 401 token invalidated on this relay, so Pi keeps it fail-closed",
+        "gpt-5.4": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
+        "gpt-5.4-mini": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
+        "gpt-5.5": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
     },
     "xin": {
-        "gpt-5.3-codex": "2026-05-28 live Pi smoke returned upstream 402 internal server error on this relay",
-        "gpt-5.4": "2026-05-28 live Pi smoke returned upstream 402 internal server error on this relay",
+        "anthropic/claude-opus-4.6": "2026-05-28 current-surface rerun returned region-blocked 403 on this relay",
+        "anthropic/claude-opus-4.7": "2026-05-28 current-surface rerun returned region-blocked 403 on this relay",
+        "claude-opus-4-6": "2026-05-28 current-surface rerun returned model_not_found / no available distributor on this relay",
+        "claude-opus-4-6-thinking": "2026-05-28 current-surface rerun returned upstream 500 on this relay",
+        "claude-sonnet-4-6": "2026-05-28 current-surface rerun returned upstream 500 on this relay",
+        "gemini-3-flash-agent(high)": "2026-05-28 current-surface rerun returned upstream 500 on this relay",
+        "gemini-3-flash-agent(low)": "2026-05-28 current-surface rerun returned upstream 500 on this relay",
+        "gemini-3-flash-agent(medium)": "2026-05-28 current-surface rerun returned upstream 500 on this relay",
+        "gemini-3.1-flash-lite": "2026-05-28 current-surface rerun returned upstream 500 on this relay",
+        "gemini-3.1-pro-low": "2026-05-28 current-surface rerun returned upstream 500 on this relay",
+        "gpt-5.3-codex": "2026-05-28 blocked-only recheck stayed request_fail across 3 attempts; relay returned no available distributor for this model",
     },
 }
 
@@ -11388,6 +11403,7 @@ def _pi_gateway_env(runtime, model_info=None):
     env["PI_TELEMETRY"] = "0"
     env["MMS_PI_MODELS_JSON"] = models_path
     env["MMS_PI_PROVIDER"] = provider_ref
+    env["MMS_PI_NPX_CACHE"] = _pi_npx_cache_dir()
     wrapper_path = _pi_wrapper_path()
     if wrapper_path:
         env["MMS_PI_BIN"] = wrapper_path
@@ -11427,6 +11443,7 @@ def _pi_provider_export_env(runtime, model):
         "PI_TELEMETRY": "0",
         "MMS_PI_MODELS_JSON": models_path,
         "MMS_PI_PROVIDER": selected_provider_ref,
+        "MMS_PI_NPX_CACHE": _pi_npx_cache_dir(),
     }
     wrapper_path = _pi_wrapper_path()
     if wrapper_path:
