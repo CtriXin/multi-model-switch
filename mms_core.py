@@ -3279,141 +3279,31 @@ def _pause_after_tui_report(prompt_text="按 Enter 返回"):
 
 
 def _manage_provider_models(cfg, provider_id):
-    _ensure_rich()
-    changed = False
-    current_cfg = cfg
-    while True:
-        provider = resolve_provider_context(current_cfg, provider_id)
-        probe = _probe_models(provider, emit_output=False)
-        model_count = len(probe.get("models") or [])
-        extra_count = len(provider.get("extra_models", []) or [])
-        hidden_count = len(provider.get("hidden_models", []) or [])
+    from mms_command_tools import manage_provider_models
 
-        info_lines = [
-            ("通道", provider.get("name", provider_id)),
-            ("模型列表地址", provider.get("models_endpoint", "/models")),
-            ("来源", _model_source_label(probe.get("base_source", "remote"))),
-            ("模型数", str(model_count)),
-            ("补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
-        ]
-        actions = [
-            ("1", "查看当前模型列表"),
-            ("2", "刷新远端模型列表"),
-            ("3", "添加补充模型"),
-            ("4", "隐藏模型"),
-            ("5", "移除补充/取消隐藏"),
-            ("6", "恢复默认模型补丁"),
-            ("7", "编辑模型列表接口"),
-            ("8", "返回"),
-        ]
+    def select_action_tui(title, info_lines, actions):
+        from mms_tui import select_channel_action_tui
+        return select_channel_action_tui(title, info_lines, actions)
 
-        choice = None
-        if _use_tui():
-            try:
-                from mms_tui import select_channel_action_tui
-                choice = select_channel_action_tui(f"模型管理 · {provider.get('name', provider_id)}", info_lines, actions)
-            except (ImportError, Exception):
-                pass
-        if choice is None and not _use_tui():
-            _ensure_rich()
-            console.print(Panel(
-                "\n".join(f"[bold]{l}:[/bold]  {v}" for l, v in info_lines),
-                title="模型管理", border_style="cyan",
-            ))
-            for aid, alabel in actions:
-                console.print(f"  {aid}. {alabel}")
-            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="8")
-        if choice is None:
-            return current_cfg, changed
-        if choice == "1":
-            if _use_tui():
-                try:
-                    console.clear()
-                except Exception:
-                    pass
-            _display_provider_model_table(provider, probe)
-            if _use_tui():
-                _pause_after_tui_report("按 Enter 返回模型管理")
-            continue
-        if choice == "2":
-            probe = _probe_models(provider, emit_output=True, force_refresh=True)
-            console.print(f"[green]✓ 已刷新远端模型列表，共 {len(probe.get('models') or [])} 个模型[/green]")
-            changed = True
-            continue
-        if choice == "3":
-            raw = Prompt.ask("输入要补充的模型 ID（逗号分隔）", default="")
-            additions = _normalize_model_id_list(raw)
-            if not additions:
-                console.print("[yellow]没有输入有效模型，已取消[/yellow]")
-                continue
-            next_extra = _normalize_model_id_list((provider.get("extra_models") or []) + additions)
-            next_hidden = [item for item in provider.get("hidden_models", []) if item not in additions]
-            current_cfg = _update_provider_model_overrides(
-                current_cfg,
-                provider_id,
-                extra_models=next_extra,
-                hidden_models=next_hidden,
-            )
-            console.print(f"[green]✓ 已补充模型: {', '.join(additions)}[/green]")
-            changed = True
-            continue
-        if choice == "4":
-            raw = Prompt.ask("输入要隐藏的模型 ID（逗号分隔）", default="")
-            hidden = _normalize_model_id_list(raw)
-            if not hidden:
-                console.print("[yellow]没有输入有效模型，已取消[/yellow]")
-                continue
-            next_extra = [item for item in provider.get("extra_models", []) if item not in hidden]
-            next_hidden = _normalize_model_id_list((provider.get("hidden_models") or []) + hidden)
-            current_cfg = _update_provider_model_overrides(
-                current_cfg,
-                provider_id,
-                extra_models=next_extra,
-                hidden_models=next_hidden,
-            )
-            console.print(f"[green]✓ 已隐藏模型: {', '.join(hidden)}[/green]")
-            changed = True
-            continue
-        if choice == "5":
-            raw = Prompt.ask("输入要移除的模型 ID（会同时从 extra/hidden 里清理，逗号分隔）", default="")
-            removals = set(_normalize_model_id_list(raw))
-            if not removals:
-                console.print("[yellow]没有输入有效模型，已取消[/yellow]")
-                continue
-            next_extra = [item for item in provider.get("extra_models", []) if item not in removals]
-            next_hidden = [item for item in provider.get("hidden_models", []) if item not in removals]
-            current_cfg = _update_provider_model_overrides(
-                current_cfg,
-                provider_id,
-                extra_models=next_extra,
-                hidden_models=next_hidden,
-            )
-            console.print(f"[green]✓ 已移除模型补丁: {', '.join(sorted(removals))}[/green]")
-            changed = True
-            continue
-        if choice == "6":
-            current_cfg = _update_provider_model_overrides(
-                current_cfg,
-                provider_id,
-                extra_models=[],
-                hidden_models=[],
-            )
-            console.print("[green]✓ 已恢复默认模型补丁[/green]")
-            changed = True
-            continue
-        if choice == "7":
-            new_endpoint = _normalize_models_endpoint(
-                Prompt.ask("模型列表接口路径（输入 manual 表示仅用手工模型）", default=provider.get("models_endpoint", "/models"))
-            )
-            current_cfg = _update_provider_model_overrides(
-                current_cfg,
-                provider_id,
-                models_endpoint=new_endpoint,
-            )
-            console.print(f"[green]✓ 已更新模型列表接口: {new_endpoint}[/green]")
-            changed = True
-            continue
-        return current_cfg, changed
+    return manage_provider_models(
+        cfg,
+        provider_id,
+        ensure_rich=_ensure_rich,
+        resolve_provider_context=resolve_provider_context,
+        probe_models=_probe_models,
+        model_source_label=_model_source_label,
+        use_tui=_use_tui,
+        select_channel_action_tui=select_action_tui,
+        clear_console=console.clear,
+        display_provider_model_table=_display_provider_model_table,
+        pause_after_tui_report=_pause_after_tui_report,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        normalize_model_id_list=_normalize_model_id_list,
+        normalize_models_endpoint=_normalize_models_endpoint,
+        update_provider_model_overrides=_update_provider_model_overrides,
+        panel_cls=Panel,
+        console=console,
+    )
 
 
 def _select_provider_for_models(cfg):

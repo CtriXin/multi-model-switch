@@ -9510,6 +9510,107 @@ def test_update_provider_model_overrides_preserves_patch_normalize_and_cache_inv
     assert normalized == []
 
 
+def test_manage_provider_models_preserves_fallback_actions_and_tui_display():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    cfg = {
+        "providers": [
+            {
+                "id": "relay",
+                "name": "Relay",
+                "models_endpoint": "/models",
+                "extra_models": ["old-extra"],
+                "hidden_models": ["old-hidden"],
+            }
+        ]
+    }
+    prompts = iter([
+        "3", "new-a, new-b",
+        "4", "hide-a",
+        "5", "new-a, hide-a",
+        "6",
+        "7", "manual",
+        "8",
+    ])
+    updates = []
+    probe_calls = []
+
+    def resolve_provider_context(current_cfg, provider_id):
+        return next(item for item in current_cfg["providers"] if item["id"] == provider_id)
+
+    def probe_models(provider, **kwargs):
+        probe_calls.append((provider["id"], kwargs))
+        return {"models": ["gpt-5.5"], "base_source": "remote"}
+
+    def update_provider_model_overrides(current_cfg, provider_id, **kwargs):
+        updates.append(kwargs)
+        next_cfg = {"providers": [dict(item) for item in current_cfg["providers"]]}
+        provider = next(item for item in next_cfg["providers"] if item["id"] == provider_id)
+        for key, value in kwargs.items():
+            if value is not None:
+                provider[key] = value
+        return next_cfg
+
+    result_cfg, changed = mms_command_tools.manage_provider_models(
+        cfg,
+        "relay",
+        ensure_rich=lambda: None,
+        resolve_provider_context=resolve_provider_context,
+        probe_models=probe_models,
+        model_source_label=lambda source: f"src:{source}",
+        use_tui=lambda: False,
+        select_channel_action_tui=lambda *_args: "unexpected",
+        clear_console=lambda: None,
+        display_provider_model_table=lambda *_args: None,
+        pause_after_tui_report=lambda *_args: None,
+        prompt_ask=lambda *_args, **_kwargs: next(prompts),
+        update_provider_model_overrides=update_provider_model_overrides,
+        panel_cls=lambda content, **kwargs: ("panel", content, kwargs),
+        console=console,
+    )
+
+    assert changed is True
+    assert result_cfg["providers"][0]["extra_models"] == []
+    assert result_cfg["providers"][0]["hidden_models"] == []
+    assert result_cfg["providers"][0]["models_endpoint"] == "manual"
+    assert updates == [
+        {"extra_models": ["old-extra", "new-a", "new-b"], "hidden_models": ["old-hidden"]},
+        {"extra_models": ["old-extra", "new-a", "new-b"], "hidden_models": ["old-hidden", "hide-a"]},
+        {"extra_models": ["old-extra", "new-b"], "hidden_models": ["old-hidden"]},
+        {"extra_models": [], "hidden_models": []},
+        {"models_endpoint": "manual"},
+    ]
+    assert all(call == ("relay", {"emit_output": False}) for call in probe_calls)
+    assert any(item == "[green]✓ 已更新模型列表接口: manual[/green]" for item in console.items)
+
+    tui_calls = []
+    tui_choices = iter(["1", None])
+    result_cfg, changed = mms_command_tools.manage_provider_models(
+        cfg,
+        "relay",
+        ensure_rich=lambda: tui_calls.append("rich"),
+        resolve_provider_context=resolve_provider_context,
+        probe_models=probe_models,
+        model_source_label=lambda source: source,
+        use_tui=lambda: True,
+        select_channel_action_tui=lambda title, info, actions: tui_calls.append((title, info, actions)) or next(tui_choices),
+        clear_console=lambda: tui_calls.append("clear"),
+        display_provider_model_table=lambda provider, probe: tui_calls.append(("display", provider["id"], probe["models"])),
+        pause_after_tui_report=lambda prompt: tui_calls.append(("pause", prompt)),
+        prompt_ask=lambda *_args, **_kwargs: "unexpected",
+        update_provider_model_overrides=update_provider_model_overrides,
+        panel_cls=lambda content, **kwargs: ("panel", content, kwargs),
+        console=console,
+    )
+    assert result_cfg is cfg
+    assert changed is False
+    assert tui_calls[0] == "rich"
+    assert tui_calls[2] == "clear"
+    assert tui_calls[3] == ("display", "relay", ["gpt-5.5"])
+    assert tui_calls[4] == ("pause", "按 Enter 返回模型管理")
+
+
 def test_provider_edit_remove_handlers_preserve_validation_refresh_and_default_cleanup():
     import mms_command_tools
 
