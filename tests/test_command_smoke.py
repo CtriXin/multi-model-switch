@@ -3471,6 +3471,51 @@ def test_provider_model_table_display_renders_speed_and_sources():
     assert "原始模型数: 3" in text
 
 
+def test_openrouter_extension_arg_and_provider_helpers_preserve_detection_rules():
+    import mms_command_tools
+
+    assert mms_command_tools.provider_looks_openrouter({"id": "relay", "base_url": "https://openrouter.ai/api/v1"})
+    assert mms_command_tools.provider_looks_openrouter({"provider_profile": "openrouter"})
+    assert not mms_command_tools.provider_looks_openrouter({"id": "relay", "base_url": "https://example.com/v1"})
+    assert not mms_command_tools.provider_looks_openrouter(None)
+
+    cfg = {
+        "providers": [
+            {"id": "or", "name": "OpenRouter"},
+            {"id": "plain", "name": "Plain"},
+            {"id": "fallback", "base_url": "https://openrouter.example/v1"},
+        ]
+    }
+    calls = []
+
+    def resolve_provider_context(_cfg, provider_id):
+        calls.append(provider_id)
+        if provider_id == "fallback":
+            raise RuntimeError("missing credentials")
+        return {"id": provider_id, "resolved": True}
+
+    assert mms_command_tools.openrouter_provider_candidates(
+        cfg,
+        resolve_provider_context=resolve_provider_context,
+    ) == [
+        {"id": "or", "resolved": True},
+        {"id": "fallback", "base_url": "https://openrouter.example/v1"},
+    ]
+    assert calls == ["or", "fallback"]
+
+    assert mms_command_tools.parse_openrouter_extension_args(
+        ["list", "or", "--limit", "0", "--assume-paid", "--json"]
+    ) == {
+        "action": "models",
+        "provider_id": "or",
+        "limit": 1,
+        "assume_paid": True,
+        "json": True,
+    }
+    assert mms_command_tools.parse_openrouter_extension_args(["help"])["action"] == "help"
+    assert mms_command_tools.parse_openrouter_extension_args(["models", "--limit", "bad"])["limit"] == 12
+
+
 def test_openrouter_extension_display_helpers_render_summary_and_limits():
     import mms_command_tools
 

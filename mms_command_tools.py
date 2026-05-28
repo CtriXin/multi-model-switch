@@ -2801,6 +2801,78 @@ def preset_model_info(preset, *, excluded_keys=frozenset({"cli", "provider", "ac
     return {key: value for key, value in preset.items() if key not in excluded_keys}
 
 
+def provider_looks_openrouter(provider):
+    if not isinstance(provider, dict):
+        return False
+    fields = [
+        provider.get("id"),
+        provider.get("name"),
+        provider.get("provider_profile"),
+        provider.get("profile"),
+        provider.get("extension"),
+        provider.get("base_url"),
+        provider.get("openai_base_url"),
+        provider.get("default_openai_base_url"),
+    ]
+    return any("openrouter" in str(item or "").lower() for item in fields)
+
+
+def openrouter_provider_candidates(
+    cfg,
+    *,
+    provider_looks_openrouter=provider_looks_openrouter,
+    resolve_provider_context,
+):
+    providers = []
+    for item in cfg.get("providers", []):
+        if not provider_looks_openrouter(item):
+            continue
+        try:
+            providers.append(resolve_provider_context(cfg, item.get("id")))
+        except Exception:
+            providers.append(item)
+    return providers
+
+
+def parse_openrouter_extension_args(args_rest):
+    args = list(args_rest or [])
+    action = "status"
+    provider_id = ""
+    limit = 12
+    assume_paid = False
+    json_output = False
+    if args and not args[0].startswith("-"):
+        action = args.pop(0).strip().lower() or "status"
+    if args and not args[0].startswith("-"):
+        provider_id = args.pop(0).strip()
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token in {"--limit", "-n"} and idx + 1 < len(args):
+            try:
+                limit = max(1, int(args[idx + 1]))
+            except ValueError:
+                limit = 12
+            idx += 2
+            continue
+        if token == "--assume-paid":
+            assume_paid = True
+        elif token == "--json":
+            json_output = True
+        idx += 1
+    if action in {"ls", "list"}:
+        action = "models"
+    if action in {"-h", "--help", "help"}:
+        action = "help"
+    return {
+        "action": action,
+        "provider_id": provider_id,
+        "limit": limit,
+        "assume_paid": assume_paid,
+        "json": json_output,
+    }
+
+
 def parse_usage_timestamp(value):
     raw = str(value or "").strip()
     if not raw:

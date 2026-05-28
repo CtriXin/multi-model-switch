@@ -7949,70 +7949,25 @@ def _handle_provider_credentials_config(cfg, args_rest):
 
 
 def _provider_looks_openrouter(provider):
-    if not isinstance(provider, dict):
-        return False
-    fields = [
-        provider.get("id"),
-        provider.get("name"),
-        provider.get("provider_profile"),
-        provider.get("profile"),
-        provider.get("extension"),
-        provider.get("base_url"),
-        provider.get("openai_base_url"),
-        provider.get("default_openai_base_url"),
-    ]
-    return any("openrouter" in str(item or "").lower() for item in fields)
+    from mms_command_tools import provider_looks_openrouter
+
+    return provider_looks_openrouter(provider)
 
 
 def _openrouter_provider_candidates(cfg):
-    providers = []
-    for item in cfg.get("providers", []):
-        if not _provider_looks_openrouter(item):
-            continue
-        try:
-            providers.append(resolve_provider_context(cfg, item.get("id")))
-        except Exception:
-            providers.append(item)
-    return providers
+    from mms_command_tools import openrouter_provider_candidates
+
+    return openrouter_provider_candidates(
+        cfg,
+        provider_looks_openrouter=_provider_looks_openrouter,
+        resolve_provider_context=resolve_provider_context,
+    )
 
 
 def _parse_openrouter_extension_args(args_rest):
-    args = list(args_rest or [])
-    action = "status"
-    provider_id = ""
-    limit = 12
-    assume_paid = False
-    json_output = False
-    if args and not args[0].startswith("-"):
-        action = args.pop(0).strip().lower() or "status"
-    if args and not args[0].startswith("-"):
-        provider_id = args.pop(0).strip()
-    idx = 0
-    while idx < len(args):
-        token = args[idx]
-        if token in {"--limit", "-n"} and idx + 1 < len(args):
-            try:
-                limit = max(1, int(args[idx + 1]))
-            except ValueError:
-                limit = 12
-            idx += 2
-            continue
-        if token == "--assume-paid":
-            assume_paid = True
-        elif token == "--json":
-            json_output = True
-        idx += 1
-    if action in {"ls", "list"}:
-        action = "models"
-    if action in {"-h", "--help", "help"}:
-        action = "help"
-    return {
-        "action": action,
-        "provider_id": provider_id,
-        "limit": limit,
-        "assume_paid": assume_paid,
-        "json": json_output,
-    }
+    from mms_command_tools import parse_openrouter_extension_args
+
+    return parse_openrouter_extension_args(args_rest)
 
 
 def _display_openrouter_extension_help():
