@@ -122,6 +122,7 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "single preview rebuild command `mmf preview prepare --from ~/.config/mms --json`",
         "if keys are missing too, the command includes `--include-secrets`",
         "Ready-state watchdog hints use the concrete selected config root instead of `$MMS_CONFIG_ROOT`",
+        "`mms config doctor --strict-exit`",
         "`--dry-run` is read-only for watchdog persistence",
         "`latest_approved_invalid`",
         "every route leaf has an `anthropic_base_url` or `openai_base_url`",

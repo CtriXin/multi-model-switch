@@ -2116,6 +2116,52 @@ def test_mmf_config_doctor_strict_exit_matches_preview_doctor(tmp_path: Path) ->
     assert "sk-config-doctor-strict-secret" not in combined
 
 
+def test_mms_config_doctor_strict_exit_matches_preview_doctor(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-mms-config-doctor-strict-secret")
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mms preview")
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    not_ready = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "doctor", "--strict-exit", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    not_ready_payload = json.loads(not_ready.stdout)
+    assert not_ready.returncode == 2
+    assert not_ready_payload["status"] == "verified_not_runtime_ready"
+    assert not_ready_payload["ready"] is False
+
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mms preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    ready = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "doctor", "--strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert ready.returncode == 0
+    assert "result=READY" in ready.stdout
+    assert "ready=True" in ready.stdout
+    combined = not_ready.stdout + not_ready.stderr + ready.stdout + ready.stderr
+    assert "sk-mms-config-doctor-strict-secret" not in combined
+
+
 def test_mmf_preview_prepare_wrapper_runs_full_preview_flow_without_secrets(tmp_path: Path) -> None:
     source_dir = tmp_path / "mms"
     target_dir = tmp_path / "mms-next"
