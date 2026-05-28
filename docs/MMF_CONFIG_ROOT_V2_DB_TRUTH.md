@@ -523,6 +523,22 @@ Current TUI/settings boundary:
 - Keep strict evidence requirements.
 - Current cutover runbook lives at `docs/DOWNSTREAM_CONSUMER_BUNDLE_RUNBOOK.md`; it defines the manifest/hash verifier, fail-closed cases, secret redaction rule, and artifact evidence checklist before touching external repos.
 
+Current Stage 7 implementation status:
+
+| Consumer | Branch | Commit | Status |
+|---|---|---|---|
+| Ant | `feat/mms-bundle-consumer` | `705aaba` | Reads verified latest-approved Router/Lineup/Policy/Profile under selected v2 root; missing/invalid/hash-mismatched bundles fail closed; transport evidence records `mms:latest-approved:<bundle_revision>`. |
+| Pilot | `feat/mms-bundle-consumer` | `73f3634` | Uses verified generated bundle paths for route/policy/lineup defaults, records non-secret bundle metadata, and preserves legacy behavior when no v2 root is selected. |
+| Hive | `feat/mms-bundle-consumer` | `b290a95` | Routes, provider profile overlays, discuss config, model proxy, and SDK evidence consume the selected verified bundle and fail closed on invalid selected roots. |
+| Moebius | `feat/mms-bundle-consumer` | `906c699` | `setup_health`, `public_live_smoke`, and `public_slot_invoke` consume the verified bundle under selected v2 roots and preserve legacy behavior when no bundle root is selected. |
+
+Stage 7 safety status:
+
+- No downstream slice writes stable `/Users/xin/.config/mms/**` or preview `/Users/xin/.config/mms-next/**`.
+- No downstream slice reads SQLite directly.
+- No downstream slice introduces global OAuth fallback.
+- Real preview-root verification was read-only against `/Users/xin/.config/mms-next/generated/model-registry.latest-approved.json`.
+
 ### Stage 8 - Promotion / Public Version
 
 - Add `mms migrate config-v2` / `mmf promote` flow.
