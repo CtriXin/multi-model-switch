@@ -263,8 +263,6 @@ def _runtime_locale_env(runtime=None):
     raw_locale = (
         str(runtime.get("locale") or "").strip()
         or str(os.environ.get("MMS_LOCALE") or "").strip()
-        or str(os.environ.get("LC_ALL") or "").strip()
-        or str(os.environ.get("LANG") or "").strip()
     )
     normalized_lang = normalize_language(
         str(runtime.get("language") or "").strip()
