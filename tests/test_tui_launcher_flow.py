@@ -36,6 +36,7 @@ from mms_tui_launcher_flow import (
     handle_tui_profile_action,
     handle_tui_registry_settings_action,
     handle_tui_routes_export_settings_action,
+    handle_rescue_packet_action,
     handle_tui_selected_model_action,
     handle_tui_submodel_action,
     handle_rescue_landing_action,
@@ -2674,6 +2675,189 @@ def test_create_rescue_handover_from_route_selection_skips_empty_selection() -> 
         "applied": False,
     }
     assert calls == [("select", ["route-model"], "选择 fallback handover model")]
+
+
+def test_handle_rescue_packet_action_show_paths_keeps_cfg_and_reports() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "old"}}
+    selected_rescue = {"artifact_markdown": "/tmp/rescue.md"}
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    result = handle_rescue_packet_action(
+        cfg,
+        selected_rescue,
+        "show_paths",
+        {"model": "old"},
+        [],
+        select_model_tui_loader=unused,
+        apply_rescue_default_action=unused,
+        write_fallback_handover=unused,
+        rescue_handover_report_payload=unused,
+        rescue_paths_report_payload=lambda rescue: calls.append(("payload", rescue)) or ("paths", [("md", rescue["artifact_markdown"])]),
+        localize=lambda zh, _en: zh,
+        console=object(),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        print_settings_error_report=unused,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        ensure_rich=unused,
+        prompt_cls=type("Prompt", (), {"ask": staticmethod(unused)}),
+    )
+
+    assert result == {"status": "continue", "cfg": cfg, "result": {"status": "continue"}}
+    assert calls == [
+        ("payload", selected_rescue),
+        ("report", ("paths", [("md", "/tmp/rescue.md")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_handle_rescue_packet_action_applies_default_and_clear() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "old"}}
+    default_cfg = {"rescue": {"fallback_model": "new"}}
+    cleared_cfg = {"rescue": {}}
+
+    def apply_default(model, *, cleared=False):
+        calls.append(("apply", model, cleared))
+        return {"cfg": cleared_cfg if cleared else default_cfg}
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    common = {
+        "select_model_tui_loader": unused,
+        "apply_rescue_default_action": apply_default,
+        "write_fallback_handover": unused,
+        "rescue_handover_report_payload": unused,
+        "rescue_paths_report_payload": unused,
+        "localize": lambda zh, _en: zh,
+        "console": object(),
+        "print_settings_result_report": unused,
+        "print_settings_error_report": unused,
+        "pause_after_tui_report": unused,
+        "ensure_rich": lambda: calls.append(("ensure",)),
+        "prompt_cls": type("Prompt", (), {"ask": staticmethod(unused)}),
+    }
+
+    assert handle_rescue_packet_action(
+        cfg,
+        {"failed_model": "gpt-5.5"},
+        "default::new",
+        {"model": "old"},
+        [],
+        **common,
+    ) == {
+        "status": "continue",
+        "cfg": default_cfg,
+        "result": {
+            "status": "continue",
+            "cfg": default_cfg,
+            "fallback_model": "new",
+            "applied": True,
+        },
+    }
+
+    assert handle_rescue_packet_action(
+        cfg,
+        {"failed_model": "gpt-5.5"},
+        "clear_default",
+        {"model": "old"},
+        [],
+        **common,
+    ) == {
+        "status": "continue",
+        "cfg": cleared_cfg,
+        "result": {"status": "continue", "cfg": cleared_cfg, "cleared": True},
+    }
+    assert calls == [
+        ("apply", "new", False),
+        ("apply", "", True),
+    ]
+
+
+def test_handle_rescue_packet_action_choose_route_handover_writes_report() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "old"}}
+    selected_rescue = {"failed_model": "gpt-5.5"}
+    handover = {"path": "/tmp/handover.md"}
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    def select_model_tui_loader():
+        calls.append(("loader",))
+        return lambda candidates, *, title: calls.append(("select", candidates, title)) or "route-model"
+
+    result = handle_rescue_packet_action(
+        cfg,
+        selected_rescue,
+        "choose_route_handover",
+        {"model": "old"},
+        ["route-model"],
+        select_model_tui_loader=select_model_tui_loader,
+        apply_rescue_default_action=unused,
+        write_fallback_handover=lambda rescue, *, fallback_model: calls.append(("write", rescue, fallback_model)) or handover,
+        rescue_handover_report_payload=lambda payload, model: calls.append(("payload", payload, model)) or ("handover", [("model", model)]),
+        rescue_paths_report_payload=unused,
+        localize=lambda zh, _en: zh,
+        console=object(),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        print_settings_error_report=unused,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        ensure_rich=unused,
+        prompt_cls=type("Prompt", (), {"ask": staticmethod(unused)}),
+    )
+
+    assert result == {
+        "status": "continue",
+        "cfg": cfg,
+        "result": {
+            "status": "continue",
+            "handover": handover,
+            "error": None,
+            "fallback_model": "route-model",
+            "applied": True,
+        },
+    }
+    assert calls == [
+        ("loader",),
+        ("select", ["route-model"], "选择 fallback handover model"),
+        ("write", selected_rescue, "route-model"),
+        ("payload", handover, "route-model"),
+        ("report", ("handover", [("model", "route-model")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_handle_rescue_packet_action_unknown_is_noop() -> None:
+    cfg = {"rescue": {"fallback_model": "old"}}
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    result = handle_rescue_packet_action(
+        cfg,
+        {"failed_model": "gpt-5.5"},
+        "back",
+        {"model": "old"},
+        [],
+        select_model_tui_loader=unused,
+        apply_rescue_default_action=unused,
+        write_fallback_handover=unused,
+        rescue_handover_report_payload=unused,
+        rescue_paths_report_payload=unused,
+        localize=lambda zh, _en: zh,
+        console=object(),
+        print_settings_result_report=unused,
+        print_settings_error_report=unused,
+        pause_after_tui_report=unused,
+        ensure_rich=unused,
+        prompt_cls=type("Prompt", (), {"ask": staticmethod(unused)}),
+    )
+
+    assert result == {"status": "continue", "cfg": cfg, "result": None}
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

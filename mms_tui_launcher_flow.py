@@ -1560,6 +1560,99 @@ def create_rescue_handover_from_route_selection(
     }
 
 
+def handle_rescue_packet_action(
+    cfg,
+    selected_rescue,
+    rescue_action,
+    default_fallback,
+    route_fallback_candidates,
+    *,
+    select_model_tui_loader,
+    apply_rescue_default_action,
+    write_fallback_handover,
+    rescue_handover_report_payload,
+    rescue_paths_report_payload,
+    localize,
+    console,
+    print_settings_result_report,
+    print_settings_error_report,
+    pause_after_tui_report,
+    ensure_rich,
+    prompt_cls,
+):
+    if rescue_action == "view_md":
+        result = handle_rescue_view_markdown_action(
+            selected_rescue,
+            localize=localize,
+            console=console,
+            print_settings_error_report=print_settings_error_report,
+            pause_after_tui_report=pause_after_tui_report,
+        )
+        return {"status": "continue", "cfg": cfg, "result": result}
+    if rescue_action == "show_paths":
+        result = show_rescue_paths_action(
+            selected_rescue,
+            rescue_paths_report_payload=rescue_paths_report_payload,
+            print_settings_result_report=print_settings_result_report,
+            pause_after_tui_report=pause_after_tui_report,
+        )
+        return {"status": "continue", "cfg": cfg, "result": result}
+    if str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
+        result = create_rescue_handover_from_action(
+            selected_rescue,
+            rescue_action,
+            write_fallback_handover=write_fallback_handover,
+            rescue_handover_report_payload=rescue_handover_report_payload,
+            localize=localize,
+            print_settings_result_report=print_settings_result_report,
+            print_settings_error_report=print_settings_error_report,
+            pause_after_tui_report=pause_after_tui_report,
+            ensure_rich=ensure_rich,
+            prompt_cls=prompt_cls,
+        )
+        return {"status": "continue", "cfg": cfg, "result": result}
+    if rescue_action == "choose_route_handover":
+        result = create_rescue_handover_from_route_selection(
+            selected_rescue,
+            route_fallback_candidates,
+            "选择 fallback handover model",
+            select_model_tui=select_model_tui_loader(),
+            write_fallback_handover=write_fallback_handover,
+            rescue_handover_report_payload=rescue_handover_report_payload,
+            localize=localize,
+            print_settings_result_report=print_settings_result_report,
+            print_settings_error_report=print_settings_error_report,
+            pause_after_tui_report=pause_after_tui_report,
+        )
+        return {"status": "continue", "cfg": cfg, "result": result}
+    if str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
+        result = apply_rescue_default_from_action(
+            cfg,
+            rescue_action,
+            default_fallback,
+            apply_rescue_default_action=apply_rescue_default_action,
+            ensure_rich=ensure_rich,
+            prompt_cls=prompt_cls,
+        )
+        return {"status": "continue", "cfg": result["cfg"], "result": result}
+    if rescue_action == "choose_route_default":
+        result = apply_rescue_default_from_route_selection(
+            cfg,
+            route_fallback_candidates,
+            "选择全局默认 fallback model",
+            select_model_tui=select_model_tui_loader(),
+            apply_rescue_default_action=apply_rescue_default_action,
+        )
+        return {"status": "continue", "cfg": result["cfg"], "result": result}
+    if rescue_action == "clear_default":
+        result = apply_rescue_clear_default_action(
+            cfg,
+            apply_rescue_default_action=apply_rescue_default_action,
+        )
+        return {"status": "continue", "cfg": result["cfg"], "result": result}
+    return {"status": "continue", "cfg": cfg, "result": None}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

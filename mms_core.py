@@ -5233,73 +5233,26 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if rescue_result["status"] != "action":
                     continue
                 rescue_action = rescue_result["action"]
-                if rescue_action == "view_md":
-                    tui_flow.handle_rescue_view_markdown_action(
-                        selected_rescue,
-                        localize=_L,
-                        console=console,
-                        print_settings_error_report=_print_settings_error_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                    )
-                elif rescue_action == "show_paths":
-                    tui_flow.show_rescue_paths_action(
-                        selected_rescue,
-                        rescue_paths_report_payload=_rescue_paths_report_payload,
-                        print_settings_result_report=_print_settings_result_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                    )
-                elif str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
-                    tui_flow.create_rescue_handover_from_action(
-                        selected_rescue,
-                        rescue_action,
-                        write_fallback_handover=write_fallback_handover,
-                        rescue_handover_report_payload=_rescue_handover_report_payload,
-                        localize=_L,
-                        print_settings_result_report=_print_settings_result_report,
-                        print_settings_error_report=_print_settings_error_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                        ensure_rich=_ensure_rich,
-                        prompt_cls=Prompt,
-                    )
-                elif rescue_action == "choose_route_handover":
-                    from mms_tui import select_model_tui
-
-                    tui_flow.create_rescue_handover_from_route_selection(
-                        selected_rescue,
-                        route_fallback_candidates,
-                        "选择 fallback handover model",
-                        select_model_tui=select_model_tui,
-                        write_fallback_handover=write_fallback_handover,
-                        rescue_handover_report_payload=_rescue_handover_report_payload,
-                        localize=_L,
-                        print_settings_result_report=_print_settings_result_report,
-                        print_settings_error_report=_print_settings_error_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                    )
-                elif str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
-                    current_cfg = tui_flow.apply_rescue_default_from_action(
-                        current_cfg,
-                        rescue_action,
-                        default_fallback,
-                        apply_rescue_default_action=_apply_rescue_default_action,
-                        ensure_rich=_ensure_rich,
-                        prompt_cls=Prompt,
-                    )["cfg"]
-                elif rescue_action == "choose_route_default":
-                    from mms_tui import select_model_tui
-
-                    current_cfg = tui_flow.apply_rescue_default_from_route_selection(
-                        current_cfg,
-                        route_fallback_candidates,
-                        "选择全局默认 fallback model",
-                        select_model_tui=select_model_tui,
-                        apply_rescue_default_action=_apply_rescue_default_action,
-                    )["cfg"]
-                elif rescue_action == "clear_default":
-                    current_cfg = tui_flow.apply_rescue_clear_default_action(
-                        current_cfg,
-                        apply_rescue_default_action=_apply_rescue_default_action,
-                    )["cfg"]
+                packet_dispatch = tui_flow.handle_rescue_packet_action(
+                    current_cfg,
+                    selected_rescue,
+                    rescue_action,
+                    default_fallback,
+                    route_fallback_candidates,
+                    select_model_tui_loader=_select_model_tui_loader,
+                    apply_rescue_default_action=_apply_rescue_default_action,
+                    write_fallback_handover=write_fallback_handover,
+                    rescue_handover_report_payload=_rescue_handover_report_payload,
+                    rescue_paths_report_payload=_rescue_paths_report_payload,
+                    localize=_L,
+                    console=console,
+                    print_settings_result_report=_print_settings_result_report,
+                    print_settings_error_report=_print_settings_error_report,
+                    pause_after_tui_report=_pause_after_tui_report,
+                    ensure_rich=_ensure_rich,
+                    prompt_cls=Prompt,
+                )
+                current_cfg = packet_dispatch["cfg"]
             continue
 
         # ── 上次使用 ──
