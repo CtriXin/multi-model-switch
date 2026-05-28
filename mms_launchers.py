@@ -93,6 +93,7 @@ from mms_opencode_session import (
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
+    _model_supports_vision,
     _probe_models,
     _runtime_force_ipv4,
     _runtime_httpx_request,
@@ -100,6 +101,7 @@ from mms_core import (
     load_config,
     preference_asset_root,
 )
+from mms_capability_resolver import resolve_model_capabilities
 from mms_fake_upstream import (
     ensure_local_proxy as _ensure_fake_upstream_proxy,
     fake_proxy_probe as _fake_proxy_probe,
@@ -108,7 +110,7 @@ from mms_fake_upstream import (
 )
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
-from mms_provider_profiles import profile_context_window
+from mms_provider_profiles import profile_context_window, resolve_provider_profile
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
@@ -10637,56 +10639,451 @@ def _pi_provider_ref(runtime):
     return f"mms-{_opencode_config_slug(runtime.get('id') or runtime.get('name'), 'provider')}"
 
 
-def _pi_selected_api(runtime):
+_PI_ADAPTIVE_CLAUDE_MODELS = {
+    "claude-opus-4-6",
+    "claude-opus-4.6",
+    "claude-opus-4-7",
+    "claude-opus-4.7",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4.6",
+}
+
+_PI_OPENAI_PROFILE_COMPAT = {
+    "dashscope-openai": {
+        "thinkingFormat": "qwen",
+    },
+    "deepseek": {
+        "requiresReasoningContentOnAssistantMessages": True,
+        "thinkingFormat": "deepseek",
+    },
+    "glm": {
+        "supportsDeveloperRole": False,
+        "thinkingFormat": "zai",
+    },
+    "kimi-code": {
+        "supportsStore": False,
+        "supportsDeveloperRole": False,
+        "supportsReasoningEffort": False,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": False,
+    },
+    "mimo": {
+        "requiresReasoningContentOnAssistantMessages": True,
+        "thinkingFormat": "deepseek",
+    },
+    "mimo-openai": {
+        "requiresReasoningContentOnAssistantMessages": True,
+        "thinkingFormat": "deepseek",
+    },
+    "qwen-chat-template": {
+        "thinkingFormat": "qwen-chat-template",
+    },
+}
+
+_PI_CAPABILITY_REFERENCE_PATH = (
+    Path(__file__).resolve().parent
+    / "docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json"
+)
+
+_PI_MODEL_MAX_TOKENS_HINTS = {
+    "deepseek-v4-flash": 384000,
+    "deepseek-v4-pro": 384000,
+    "k2.6": 32768,
+    "k2.6-code-preview": 32768,
+    "kimi-for-coding": 32768,
+    "kimi-k2.6": 32768,
+    "kimi-k2.6-code-preview": 32768,
+    "mimo-v2-flash": 65536,
+    "mimo-v2-pro": 131072,
+    "mimo-v2.5": 131072,
+    "mimo-v2.5-pro": 131072,
+    "mimo-v2.5-pro[1m]": 131072,
+    "mimo-v2.5[1m]": 131072,
+    "qwen3.5-plus": 65536,
+    "qwen3.6-plus": 65536,
+}
+
+_PI_CAPABILITY_REFERENCE_CACHE = None
+_PI_CAPABILITY_REFERENCE_INDEX = None
+
+
+def _pi_normalize_model_key(value):
+    model_key = str(value or "").strip().lower()
+    if "/" in model_key:
+        model_key = model_key.rsplit("/", 1)[-1]
+    return model_key
+
+
+def _pi_reference_payload():
+    global _PI_CAPABILITY_REFERENCE_CACHE
+    if _PI_CAPABILITY_REFERENCE_CACHE is not None:
+        return _PI_CAPABILITY_REFERENCE_CACHE
+    try:
+        payload = json.loads(_PI_CAPABILITY_REFERENCE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        payload = {}
+    _PI_CAPABILITY_REFERENCE_CACHE = payload if isinstance(payload, dict) else {}
+    return _PI_CAPABILITY_REFERENCE_CACHE
+
+
+def _pi_reference_model_row(model_name):
+    global _PI_CAPABILITY_REFERENCE_INDEX
+    if _PI_CAPABILITY_REFERENCE_INDEX is None:
+        indexed = {}
+        rows = _pi_reference_payload().get("models")
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for key in (
+                    "alias",
+                    "model",
+                    "model_name",
+                    "model_id",
+                    "routed_model_id",
+                    "canonical_model_id",
+                    "openrouter_model_id",
+                ):
+                    model_key = _pi_normalize_model_key(row.get(key))
+                    if model_key and model_key not in indexed:
+                        indexed[model_key] = row
+        _PI_CAPABILITY_REFERENCE_INDEX = indexed
+    return (_PI_CAPABILITY_REFERENCE_INDEX or {}).get(_pi_normalize_model_key(model_name), {})
+
+
+def _pi_first_positive_int(payload, *keys):
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        try:
+            value = int(payload.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def _pi_hint_max_tokens(model_name):
+    normalized = _pi_normalize_model_key(model_name)
+    direct = _PI_MODEL_MAX_TOKENS_HINTS.get(normalized)
+    if direct:
+        return direct
+    for key, value in _PI_MODEL_MAX_TOKENS_HINTS.items():
+        if normalized.startswith(key):
+            return value
+    return None
+
+
+def _pi_model_capabilities(runtime, model_name):
     runtime = runtime if isinstance(runtime, dict) else {}
-    protocols = _provider_protocols(runtime)
-    anthropic_url = str(_anthropic_base_url(runtime) or "").strip()
-    openai_url = str(_openai_base_url(runtime) or "").strip()
-    if anthropic_url and "anthropic_messages" in protocols:
-        return "anthropic-messages", anthropic_url
-    if openai_url and "openai_chat_completions" in protocols:
-        return "openai-completions", openai_url
-    if anthropic_url:
-        return "anthropic-messages", anthropic_url
-    if openai_url:
-        return "openai-completions", openai_url
-    return "", ""
+    provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip()
+    base_url = str(_openai_base_url(runtime) or _anthropic_base_url(runtime) or "").strip()
+    profile_id = _pi_profile_id(runtime, model_name, base_url=base_url)
+    caps = resolve_model_capabilities(
+        model_name,
+        runtime=runtime,
+        provider_id=provider_id,
+        base_url=base_url,
+        profile_id=profile_id,
+    )
+
+    needs_reference = any(
+        caps.get("sources", {}).get(field) == "conservative_fallback"
+        for field in ("context_window_tokens", "max_output_tokens", "supports_thinking")
+    )
+    if needs_reference:
+        reference_caps = resolve_model_capabilities(
+            model_name,
+            runtime=runtime,
+            provider_id=provider_id,
+            base_url=base_url,
+            profile_id=profile_id,
+            approved_facts=_pi_reference_payload(),
+        )
+        for field in (
+            "context_window_tokens",
+            "max_output_tokens",
+            "supports_thinking",
+            "thinking_control",
+            "expected_protocol",
+            "protocol_hints",
+        ):
+            if caps.get("sources", {}).get(field) != "conservative_fallback":
+                continue
+            if reference_caps.get("sources", {}).get(field) != "approved_facts":
+                continue
+            caps[field] = copy.deepcopy(reference_caps.get(field))
+            caps.setdefault("sources", {})[field] = "pi_reference_fallback"
+
+    reference_row = _pi_reference_model_row(model_name)
+    if caps.get("sources", {}).get("context_window_tokens") == "conservative_fallback":
+        reference_context = _pi_first_positive_int(
+            reference_row,
+            "official_context_window_tokens",
+            "provider_top_context_window_tokens",
+            "provider_context_window_tokens",
+            "current_mms_context_window_tokens",
+        )
+        if reference_context:
+            caps["context_window_tokens"] = reference_context
+            caps["sources"]["context_window_tokens"] = "pi_reference_fallback"
+
+    if caps.get("sources", {}).get("max_output_tokens") == "conservative_fallback":
+        reference_max = _pi_first_positive_int(
+            reference_row,
+            "official_max_output_tokens",
+            "provider_top_max_output_tokens",
+        )
+        if reference_max:
+            caps["max_output_tokens"] = reference_max
+            caps["sources"]["max_output_tokens"] = "pi_reference_fallback"
+
+    if caps.get("sources", {}).get("max_output_tokens") == "conservative_fallback":
+        hinted_max = _pi_hint_max_tokens(model_name)
+        if hinted_max:
+            caps["max_output_tokens"] = hinted_max
+            caps["sources"]["max_output_tokens"] = "pi_builtin_hint"
+    return caps
+
+
+def _pi_protocol_variant(runtime, protocol):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    protocol_name = str(protocol or "").strip()
+    if protocol_name == "anthropic_messages":
+        base_url = str(_anthropic_base_url(runtime) or "").strip()
+        if base_url:
+            return {
+                "protocol": "anthropic_messages",
+                "api": "anthropic-messages",
+                "base_url": base_url,
+                "label": "Anthropic",
+            }
+        return None
+    if protocol_name == "openai_chat_completions":
+        base_url = str(_openai_base_url(runtime) or "").strip()
+        if base_url:
+            return {
+                "protocol": "openai_chat_completions",
+                "api": "openai-completions",
+                "base_url": base_url,
+                "label": "OpenAI",
+            }
+        return None
+    return None
+
+
+def _pi_protocol_variants(runtime):
+    variants = []
+    for protocol in ("anthropic_messages", "openai_chat_completions"):
+        variant = _pi_protocol_variant(runtime, protocol)
+        if variant:
+            variants.append(variant)
+    return variants
+
+
+def _pi_runtime_model_names(runtime, selected_model=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    names = []
+    seen = set()
+
+    def _add(value):
+        text = str(value or "").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        names.append(text)
+
+    _add(selected_model)
+    _add(runtime.get("model"))
+
+    probe_result = runtime.get("_launch_prefetched_probe")
+    if probe_result is None:
+        try:
+            probe_result = _probe_models(runtime, emit_output=False)
+        except Exception:
+            probe_result = {}
+        runtime["_launch_prefetched_probe"] = probe_result
+
+    for item in (probe_result or {}).get("models") or []:
+        _add(item)
+    return names
+
+
+def _pi_profile_id(runtime, model_name, base_url=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    profile_id, _profile = resolve_provider_profile(
+        runtime=runtime,
+        provider_id=str(runtime.get("id") or runtime.get("provider_id") or "").strip(),
+        base_url=str(base_url or _openai_base_url(runtime) or _anthropic_base_url(runtime) or "").strip(),
+        model_name=model_name,
+        profile_id=str(runtime.get("provider_profile") or runtime.get("profile") or "").strip(),
+    )
+    return str(profile_id or "").strip()
+
+
+def _pi_pick_protocol(runtime, model_name):
+    variants = _pi_protocol_variants(runtime)
+    if not variants:
+        raise RuntimeError("Pi runtime requires either an Anthropic or OpenAI base URL")
+    available = {item["protocol"] for item in variants}
+    variant_by_protocol = {item["protocol"]: item for item in variants}
+    caps = _pi_model_capabilities(runtime, model_name)
+    hints = caps.get("protocol_hints") if isinstance(caps.get("protocol_hints"), dict) else {}
+    preferred = str(hints.get("preferred_protocol") or "").strip()
+    if preferred == "responses" and "openai_chat_completions" in available:
+        return variant_by_protocol["openai_chat_completions"], caps
+    if preferred in available:
+        return variant_by_protocol[preferred], caps
+    for protocol_name in hints.get("protocols") or []:
+        if protocol_name == "responses" and "openai_chat_completions" in available:
+            return variant_by_protocol["openai_chat_completions"], caps
+        if protocol_name in available:
+            return variant_by_protocol[protocol_name], caps
+    if "anthropic_messages" in available:
+        return variant_by_protocol["anthropic_messages"], caps
+    return variants[0], caps
+
+
+def _pi_provider_compat(profile_id, protocol):
+    if str(protocol or "").strip() != "openai_chat_completions":
+        return {}
+    compat = _PI_OPENAI_PROFILE_COMPAT.get(str(profile_id or "").strip(), {})
+    return copy.deepcopy(compat) if compat else {}
+
+
+def _pi_model_compat(model_name, protocol):
+    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    compat = {}
+    if str(protocol or "").strip() == "anthropic_messages" and normalized in _PI_ADAPTIVE_CLAUDE_MODELS:
+        compat["forceAdaptiveThinking"] = True
+    return compat
+
+
+def _pi_model_thinking_level_map(profile_id, protocol, model_name, caps):
+    if str(protocol or "").strip() != "openai_chat_completions":
+        return {}
+    if str(profile_id or "").strip() != "deepseek":
+        return {}
+    if not bool(caps.get("supports_thinking")):
+        return {}
+    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    if not normalized.startswith("deepseek"):
+        return {}
+    return {
+        "minimal": None,
+        "low": None,
+        "medium": None,
+        "high": "high",
+        "xhigh": "max",
+    }
+
+
+def _pi_model_entry(runtime, model_name):
+    variant, caps = _pi_pick_protocol(runtime, model_name)
+    profile_id = _pi_profile_id(runtime, model_name, base_url=variant["base_url"])
+    entry = {
+        "id": model_name,
+        "name": model_name,
+        "input": ["text", "image"] if _model_supports_vision(model_name) else ["text"],
+        "contextWindow": int(caps.get("context_window_tokens") or 128000),
+        "maxTokens": int(caps.get("max_output_tokens") or 16384),
+    }
+    if bool(caps.get("supports_thinking")):
+        entry["reasoning"] = True
+    thinking_level_map = _pi_model_thinking_level_map(profile_id, variant["protocol"], model_name, caps)
+    if thinking_level_map:
+        entry["thinkingLevelMap"] = thinking_level_map
+    model_compat = _pi_model_compat(model_name, variant["protocol"])
+    if model_compat:
+        entry["compat"] = model_compat
+    return {
+        "model": entry,
+        "protocol": variant["protocol"],
+        "api": variant["api"],
+        "base_url": variant["base_url"],
+        "provider_compat": _pi_provider_compat(profile_id, variant["protocol"]),
+        "provider_label": variant["label"],
+    }
+
+
+def _pi_group_provider_ref(base_ref, providers_meta, group_index):
+    if len(providers_meta) == 1:
+        return base_ref
+    meta = providers_meta[group_index]
+    protocol_slug = "anthropic" if meta["protocol"] == "anthropic_messages" else "openai"
+    compat_slug = _opencode_config_slug(meta["compat_slug"], "compat")
+    if compat_slug == "default":
+        return f"{base_ref}-{protocol_slug}"
+    return f"{base_ref}-{protocol_slug}-{compat_slug}"
 
 
 def _pi_build_models_payload(runtime, model_name):
     runtime = runtime if isinstance(runtime, dict) else {}
-    api_kind, base_url = _pi_selected_api(runtime)
-    if not api_kind or not base_url:
-        raise RuntimeError("Pi runtime requires either an Anthropic or OpenAI base URL")
-    provider_ref = _pi_provider_ref(runtime)
     model = str(model_name or _resolve_model(runtime) or "").strip()
     if not model:
         raise RuntimeError("Pi runtime requires a selected model")
-    provider_payload = {
-        "name": str(runtime.get("name") or runtime.get("id") or provider_ref).strip() or provider_ref,
-        "baseUrl": base_url,
-        "api": api_kind,
-        "apiKey": str(runtime.get("openai_api_key") or runtime.get("api_key") or "").strip(),
-        "models": [
-            {
-                "id": model,
-                "name": model,
+    model_names = _pi_runtime_model_names(runtime, selected_model=model)
+    if not model_names:
+        raise RuntimeError("Pi runtime requires at least one available model")
+
+    base_ref = _pi_provider_ref(runtime)
+    base_name = str(runtime.get("name") or runtime.get("id") or base_ref).strip() or base_ref
+    api_key = str(runtime.get("openai_api_key") or runtime.get("api_key") or "").strip()
+    groups = []
+    groups_by_key = {}
+    selected_group_key = None
+
+    for model_name_item in model_names:
+        resolved = _pi_model_entry(runtime, model_name_item)
+        provider_compat = resolved["provider_compat"] if isinstance(resolved["provider_compat"], dict) else {}
+        compat_key = json.dumps(provider_compat, sort_keys=True, ensure_ascii=True)
+        group_key = (resolved["protocol"], compat_key)
+        group = groups_by_key.get(group_key)
+        if group is None:
+            group = {
+                "protocol": resolved["protocol"],
+                "api": resolved["api"],
+                "base_url": resolved["base_url"],
+                "provider_compat": provider_compat,
+                "compat_slug": "default" if not provider_compat else compat_key,
+                "models": [],
             }
-        ],
-    }
-    if api_kind == "openai-completions" and str(runtime.get("provider_profile") or runtime.get("profile") or "").strip():
-        # Pi defaults are usually fine, but some MMS routes rely on provider quirks.
-        # Keep the first smoke slice conservative and avoid guessing provider-specific compat flags here.
-        provider_payload.setdefault("compat", {})
-    return {"providers": {provider_ref: provider_payload}}
+            groups_by_key[group_key] = group
+            groups.append(group)
+        group["models"].append(resolved["model"])
+        if model_name_item == model:
+            selected_group_key = group_key
+
+    providers = {}
+    selected_provider_ref = ""
+    for index, group in enumerate(groups):
+        provider_ref = _pi_group_provider_ref(base_ref, groups, index)
+        if selected_group_key == (group["protocol"], json.dumps(group["provider_compat"], sort_keys=True, ensure_ascii=True)):
+            selected_provider_ref = provider_ref
+        provider_name = base_name if len(groups) == 1 else f"{base_name} · {group['api']}"
+        payload = {
+            "name": provider_name,
+            "baseUrl": group["base_url"],
+            "api": group["api"],
+            "apiKey": api_key,
+            "models": group["models"],
+        }
+        if group["provider_compat"]:
+            payload["compat"] = group["provider_compat"]
+        providers[provider_ref] = payload
+
+    if not selected_provider_ref:
+        selected_provider_ref = next(iter(providers.keys()), base_ref)
+    return {"providers": providers}, selected_provider_ref
 
 
 def _write_pi_models_config(agent_dir, runtime, model_name):
-    payload = _pi_build_models_payload(runtime, model_name)
+    payload, provider_ref = _pi_build_models_payload(runtime, model_name)
     models_path = os.path.join(agent_dir, "models.json")
     os.makedirs(agent_dir, exist_ok=True)
     atomic_write_text(models_path, json.dumps(payload, indent=2) + "\n", mode=0o600)
-    return models_path
+    return models_path, provider_ref
 
 
 def _pi_gateway_env(runtime, model_info=None):
@@ -10712,12 +11109,13 @@ def _pi_gateway_env(runtime, model_info=None):
 
     agent_dir = os.path.join(session_home, ".pi", "agent")
     session_dir = os.path.join(agent_dir, "sessions")
-    models_path = _write_pi_models_config(agent_dir, runtime, model)
+    models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     os.makedirs(session_dir, exist_ok=True)
     env["PI_CODING_AGENT_DIR"] = agent_dir
     env["PI_CODING_AGENT_SESSION_DIR"] = session_dir
     env["PI_TELEMETRY"] = "0"
     env["MMS_PI_MODELS_JSON"] = models_path
+    env["MMS_PI_PROVIDER"] = provider_ref
     wrapper_path = _pi_wrapper_path()
     if wrapper_path:
         env["MMS_PI_BIN"] = wrapper_path
@@ -10749,13 +11147,14 @@ def _pi_provider_export_env(runtime, model):
     model_ref = _opencode_config_slug(model or runtime.get("model"), "model")
     agent_dir = _real_user_path(".config", "mms", "pi-gateway", "exports", f"{provider_ref}-{model_ref}", "agent")
     session_dir = os.path.join(agent_dir, "sessions")
-    models_path = _write_pi_models_config(agent_dir, runtime, model)
+    models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     os.makedirs(session_dir, exist_ok=True)
     exports = {
         "PI_CODING_AGENT_DIR": agent_dir,
         "PI_CODING_AGENT_SESSION_DIR": session_dir,
         "PI_TELEMETRY": "0",
         "MMS_PI_MODELS_JSON": models_path,
+        "MMS_PI_PROVIDER": selected_provider_ref,
     }
     wrapper_path = _pi_wrapper_path()
     if wrapper_path:
@@ -10772,7 +11171,7 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
 
     model = _resolve_model(model_info)
     env = _pi_gateway_env(runtime, model_info=model_info)
-    provider_ref = _pi_provider_ref(runtime)
+    provider_ref = str(env.get("MMS_PI_PROVIDER") or _pi_provider_ref(runtime)).strip()
     cmd = ["pi", "--provider", provider_ref]
     if model:
         cmd += ["--model", model]

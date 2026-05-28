@@ -198,11 +198,12 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
-    assert "function providerEntries()" in html
-    assert "a.p.enabled?-1:1" in html
-    assert "renderProviderList();renderTestSelectors();" in html
-    assert "通道修改已暂存，生成保存预览后再写入" in html
+
+
+def test_config_web_allows_pi_in_supported_clis():
+    assert "pi" in mms_config_web._ALLOWED_CLIS
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():

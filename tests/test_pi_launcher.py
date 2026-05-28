@@ -62,6 +62,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4", "gpt-5.5"]})
     monkeypatch.setattr(mms_launchers.os, "getpid", lambda: 4242)
 
     def fake_exec(cmd, env, once, **_kwargs):
@@ -96,6 +97,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert provider["baseUrl"] == "https://relay.example.com/v1"
     assert provider["apiKey"] == "sk-openai"
     assert provider["models"][0]["id"] == "gpt-5.4"
+    assert provider["models"][1]["id"] == "gpt-5.5"
 
 
 def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_path):
@@ -109,6 +111,11 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
         lambda *parts: str(real_home.joinpath(*parts)),
     )
     monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["claude-sonnet-4-6", "claude-opus-4-7"]},
+    )
 
     exports = mms_launchers.get_export_env(
         "pi",
@@ -132,6 +139,12 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert provider["api"] == "anthropic-messages"
     assert provider["baseUrl"] == "https://relay.example.com/anthropic"
     assert provider["models"][0]["id"] == "claude-sonnet-4-6"
+    assert provider["models"][1]["id"] == "claude-opus-4-7"
+    assert provider["models"][0]["reasoning"] is True
+    assert provider["models"][0]["contextWindow"] == 1_000_000
+    assert provider["models"][0]["maxTokens"] == 64_000
+    assert provider["models"][0]["compat"] == {"forceAdaptiveThinking": True}
+    assert provider["models"][1]["compat"] == {"forceAdaptiveThinking": True}
 
 
 def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monkeypatch, tmp_path):
@@ -145,6 +158,7 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
         lambda *parts: str(real_home.joinpath(*parts)),
     )
     monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4", "gpt-5.5"]})
 
     exports = mms_launchers.get_export_env(
         "pi",
@@ -167,6 +181,144 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
     provider = payload["providers"]["mms-relay-c"]
     assert provider["api"] == "openai-completions"
     assert provider["models"][0]["id"] == "gpt-5.4"
+    assert provider["models"][1]["id"] == "gpt-5.5"
+
+
+def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["qwen3.6-plus", "gpt-5.4"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "NewAPI Tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com/v1",
+            "anthropic_base_url": "https://relay.example.com/anthropic",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "pi"],
+        },
+        model_info={"model": "qwen3.6-plus"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    assert set(payload["providers"]) == {
+        "mms-newapi-personal-tokyo-anthropic",
+        "mms-newapi-personal-tokyo-openai",
+    }
+    assert exports["MMS_PI_PROVIDER"] == "mms-newapi-personal-tokyo-anthropic"
+    anthropic_models = payload["providers"]["mms-newapi-personal-tokyo-anthropic"]["models"]
+    openai_models = payload["providers"]["mms-newapi-personal-tokyo-openai"]["models"]
+    assert [item["id"] for item in anthropic_models] == ["qwen3.6-plus"]
+    assert [item["id"] for item in openai_models] == ["gpt-5.4"]
+    assert anthropic_models[0]["reasoning"] is True
+    assert anthropic_models[0]["contextWindow"] == 1_000_000
+    assert anthropic_models[0]["maxTokens"] == 65_536
+    assert openai_models[0]["maxTokens"] == 128_000
+
+
+def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["deepseek-v4-pro"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "deepseek-direct",
+            "name": "DeepSeek Direct",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-deepseek",
+            "openai_base_url": "https://api.deepseek.com",
+            "protocols": ["openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "deepseek-v4-pro"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"]["mms-deepseek-direct"]
+    assert provider["compat"] == {
+        "requiresReasoningContentOnAssistantMessages": True,
+        "thinkingFormat": "deepseek",
+    }
+    assert provider["models"][0]["maxTokens"] == 384_000
+    assert provider["models"][0]["thinkingLevelMap"] == {
+        "minimal": None,
+        "low": None,
+        "medium": None,
+        "high": "high",
+        "xhigh": "max",
+    }
+
+
+def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["kimi-for-coding"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "kimi-direct",
+            "name": "Kimi Direct",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-kimi",
+            "openai_base_url": "https://api.kimi.com/coding/v1",
+            "anthropic_base_url": "https://api.kimi.com/coding",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "kimi-for-coding"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["models"][0]["id"] == "kimi-for-coding"
+    assert provider["models"][0]["contextWindow"] == 262_144
+    assert provider["models"][0]["maxTokens"] == 32_768
 
 
 def test_preset_export_runtime_passes_pi_model_info(monkeypatch):

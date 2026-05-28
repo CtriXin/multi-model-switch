@@ -10915,7 +10915,12 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)
 
         clean_model_info = _clean_model_info(model_info)
-        env_vars = get_export_env(cli, runtime_runtime, model_info=clean_model_info)
+        try:
+            env_vars = get_export_env(cli, runtime_runtime, model_info=clean_model_info)
+        except TypeError as exc:
+            if "model_info" not in str(exc):
+                raise
+            env_vars = get_export_env(cli, runtime_runtime)
         if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
             try:
                 from mms_launchers import get_claude_network_guard_preview, _claude_bypass_requires_proxy
