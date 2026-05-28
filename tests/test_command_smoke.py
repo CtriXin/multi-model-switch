@@ -8323,6 +8323,111 @@ def test_runtime_source_selection_helpers_preserve_sort_defaults_and_trace_ids()
     ]
 
 
+def test_choose_runtime_source_helper_preserves_override_default_and_interactive_paths():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    trace_calls = []
+    preference_calls = []
+
+    def with_preferences(cfg, runtime, launch_cli):
+        preference_calls.append((cfg, runtime["id"], launch_cli))
+        return {**runtime, "preferred_for": launch_cli}
+
+    runtime, models, cli = mms_command_tools.choose_runtime_source(
+        {"cfg": True},
+        "opencode",
+        {"id": "default-provider"},
+        ["model-a"],
+        provider_id="relay",
+        managed_oauth_clis={"codex", "agy"},
+        runtime_with_launch_preferences=with_preferences,
+        resolve_launch_runtime=lambda *args, **kwargs: ({"id": "relay", "runtime_kind": "provider"}, ["model-b"]),
+        trace_runtime_choice=lambda *args, **kwargs: trace_calls.append((args, kwargs)),
+        list_runtime_sources=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        stdin_isatty=lambda: False,
+        ensure_rich=lambda: None,
+        table_cls=_FakeTable,
+        prompt_ask=lambda *_args, **_kwargs: "1",
+        runtime_source_kind_label=lambda runtime: "网关",
+        console=console,
+    )
+    assert runtime == {"id": "relay", "runtime_kind": "provider", "preferred_for": "opencode"}
+    assert models == ["model-b"]
+    assert cli == "opencode"
+    assert trace_calls[-1][1]["choice"] == "provider override"
+    assert preference_calls[-1] == ({"cfg": True}, "relay", "opencode")
+
+    options = [
+        {
+            "runtime": {"id": "provider-a", "name": "Provider A", "auth_mode": "api_key"},
+            "models": ["model-provider"],
+            "launch_cli": "codex",
+            "desc": "provider",
+            "title": "Provider A",
+        },
+        {
+            "runtime": {"id": "account-a", "name": "Account A", "auth_mode": "oauth"},
+            "models": ["model-account"],
+            "launch_cli": "codex",
+            "desc": "account",
+            "title": "Account A",
+        },
+    ]
+    runtime, models, cli = mms_command_tools.choose_runtime_source(
+        {},
+        "codex",
+        {},
+        ["model-a"],
+        managed_oauth_clis={"codex", "agy"},
+        runtime_with_launch_preferences=with_preferences,
+        resolve_launch_runtime=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_calls.append((args, kwargs)),
+        list_runtime_sources=lambda *_args, **_kwargs: (options, 1),
+        stdin_isatty=lambda: False,
+        ensure_rich=lambda: None,
+        table_cls=_FakeTable,
+        prompt_ask=lambda *_args, **_kwargs: "1",
+        runtime_source_kind_label=lambda runtime: "官方" if runtime.get("auth_mode") == "oauth" else "网关",
+        console=console,
+    )
+    assert runtime["id"] == "account-a"
+    assert runtime["preferred_for"] == "codex"
+    assert models == ["model-account"]
+    assert cli == "codex"
+    assert trace_calls[-1][1]["choice"] == "default(no-tty)"
+
+    prompt_answers = iter(["bad", "2"])
+    rich_calls = []
+    console.items.clear()
+    runtime, models, cli = mms_command_tools.choose_runtime_source(
+        {},
+        "codex",
+        {},
+        ["model-a"],
+        managed_oauth_clis={"codex", "agy"},
+        runtime_with_launch_preferences=with_preferences,
+        resolve_launch_runtime=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_calls.append((args, kwargs)),
+        list_runtime_sources=lambda *_args, **_kwargs: (options, 0),
+        stdin_isatty=lambda: True,
+        ensure_rich=lambda: rich_calls.append("rich"),
+        table_cls=_FakeTable,
+        prompt_ask=lambda *_args, **_kwargs: next(prompt_answers),
+        runtime_source_kind_label=lambda runtime: "官方" if runtime.get("auth_mode") == "oauth" else "网关",
+        console=console,
+    )
+    assert rich_calls == ["rich"]
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "codex 使用入口", "show_lines": True}
+    assert table.rows[0][0] == ("1", "网关", "Provider A", "codex", "provider / 默认")
+    assert "[red]请输入 1-2 的编号[/red]" in console.items
+    assert runtime["id"] == "account-a"
+    assert models == ["model-account"]
+    assert cli == "codex"
+    assert trace_calls[-1][1]["choice"] == "Account A"
+
+
 def test_runtime_resolver_helpers_preserve_provider_and_managed_oauth_paths():
     import mms_command_tools
 

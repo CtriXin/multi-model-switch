@@ -4345,81 +4345,29 @@ def _choose_runtime_source(
     model_info=None,
     allow_selected_model_accounts=False,
 ):
-    def _with_preferences(runtime, launch_cli):
-        return _runtime_with_launch_preferences(cfg, runtime, launch_cli)
+    from mms_command_tools import choose_runtime_source
 
-    if account_id or provider_id or cli_name not in MMS_MANAGED_OAUTH_CLIS:
-        runtime, models = _resolve_launch_runtime(
-            cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
-        )
-        choice = "single runtime path"
-        if provider_id:
-            choice = "provider override"
-        elif account_id:
-            choice = "account override"
-        runtime = _with_preferences(runtime, cli_name)
-        _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice=choice)
-        return runtime, models, cli_name
-
-    options, default_choice = _list_runtime_sources(
+    return choose_runtime_source(
         cfg,
         cli_name,
         default_provider,
         default_models,
+        account_id=account_id,
+        provider_id=provider_id,
         model_info=model_info,
         allow_selected_model_accounts=allow_selected_model_accounts,
+        managed_oauth_clis=MMS_MANAGED_OAUTH_CLIS,
+        runtime_with_launch_preferences=_runtime_with_launch_preferences,
+        resolve_launch_runtime=_resolve_launch_runtime,
+        trace_runtime_choice=_trace_runtime_choice,
+        list_runtime_sources=_list_runtime_sources,
+        stdin_isatty=lambda: sys.stdin.isatty(),
+        ensure_rich=_ensure_rich,
+        table_cls=lambda *args, **kwargs: Table(*args, **kwargs),
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        runtime_source_kind_label=_runtime_source_kind_label,
+        console=console,
     )
-
-    if not options:
-        return None, [], cli_name
-    if len(options) == 1:
-        chosen = options[0]
-        launch_cli = chosen.get("launch_cli", cli_name)
-        runtime = _with_preferences(chosen["runtime"], launch_cli)
-        _trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice="single option")
-        return runtime, chosen["models"], launch_cli
-
-    if not sys.stdin.isatty():
-        chosen = options[default_choice or 0]
-        launch_cli = chosen.get("launch_cli", cli_name)
-        runtime = _with_preferences(chosen["runtime"], launch_cli)
-        _trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice="default(no-tty)")
-        return runtime, chosen["models"], launch_cli
-
-    _ensure_rich()
-    table = Table(title=f"{cli_name} 使用入口", show_lines=True)
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("来源", style="green")
-    table.add_column("名称", style="yellow")
-    table.add_column("调用", style="cyan")
-    table.add_column("说明", style="magenta")
-    for idx, option in enumerate(options, 1):
-        runtime = option["runtime"]
-        source_type = _runtime_source_kind_label(runtime)
-        desc = option.get("desc", "")
-        if idx - 1 == default_choice:
-            desc = f"{desc} / 默认"
-        table.add_row(
-            str(idx),
-            source_type,
-            runtime.get("name", runtime.get("id", "")),
-            option.get("launch_cli", cli_name),
-            desc,
-        )
-    console.print(table)
-
-    default_num = str((default_choice or 0) + 1)
-    while True:
-        raw = Prompt.ask(f"为 {cli_name} 选择这次使用的入口", default=default_num)
-        if raw.isdigit():
-            selected = int(raw)
-            if 1 <= selected <= len(options):
-                chosen = options[selected - 1]
-                launch_cli = chosen.get("launch_cli", cli_name)
-                runtime = _with_preferences(chosen["runtime"], launch_cli)
-                _trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice=chosen.get("title"))
-                return runtime, chosen["models"], launch_cli
-        console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
 
 
 def _resolve_visible_clis(cfg, default_provider, default_models):

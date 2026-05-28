@@ -8482,6 +8482,110 @@ def list_runtime_sources(
     return options, default_choice
 
 
+def choose_runtime_source(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    account_id=None,
+    provider_id=None,
+    model_info=None,
+    allow_selected_model_accounts=False,
+    *,
+    managed_oauth_clis,
+    runtime_with_launch_preferences,
+    resolve_launch_runtime,
+    trace_runtime_choice,
+    list_runtime_sources,
+    stdin_isatty,
+    ensure_rich,
+    table_cls,
+    prompt_ask,
+    runtime_source_kind_label,
+    console,
+):
+    def with_preferences(runtime, launch_cli):
+        return runtime_with_launch_preferences(cfg, runtime, launch_cli)
+
+    if account_id or provider_id or cli_name not in managed_oauth_clis:
+        runtime, models = resolve_launch_runtime(
+            cfg,
+            cli_name,
+            default_provider,
+            default_models,
+            account_id=account_id,
+            provider_id=provider_id,
+        )
+        choice = "single runtime path"
+        if provider_id:
+            choice = "provider override"
+        elif account_id:
+            choice = "account override"
+        runtime = with_preferences(runtime, cli_name)
+        trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice=choice)
+        return runtime, models, cli_name
+
+    options, default_choice = list_runtime_sources(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        model_info=model_info,
+        allow_selected_model_accounts=allow_selected_model_accounts,
+    )
+
+    if not options:
+        return None, [], cli_name
+    if len(options) == 1:
+        chosen = options[0]
+        launch_cli = chosen.get("launch_cli", cli_name)
+        runtime = with_preferences(chosen["runtime"], launch_cli)
+        trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice="single option")
+        return runtime, chosen["models"], launch_cli
+
+    if not stdin_isatty():
+        chosen = options[default_choice or 0]
+        launch_cli = chosen.get("launch_cli", cli_name)
+        runtime = with_preferences(chosen["runtime"], launch_cli)
+        trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice="default(no-tty)")
+        return runtime, chosen["models"], launch_cli
+
+    ensure_rich()
+    table = table_cls(title=f"{cli_name} 使用入口", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("来源", style="green")
+    table.add_column("名称", style="yellow")
+    table.add_column("调用", style="cyan")
+    table.add_column("说明", style="magenta")
+    for idx, option in enumerate(options, 1):
+        runtime = option["runtime"]
+        source_type = runtime_source_kind_label(runtime)
+        desc = option.get("desc", "")
+        if idx - 1 == default_choice:
+            desc = f"{desc} / 默认"
+        table.add_row(
+            str(idx),
+            source_type,
+            runtime.get("name", runtime.get("id", "")),
+            option.get("launch_cli", cli_name),
+            desc,
+        )
+    console.print(table)
+
+    default_num = str((default_choice or 0) + 1)
+    while True:
+        raw = prompt_ask(f"为 {cli_name} 选择这次使用的入口", default=default_num)
+        if raw.isdigit():
+            selected = int(raw)
+            if 1 <= selected <= len(options):
+                chosen = options[selected - 1]
+                launch_cli = chosen.get("launch_cli", cli_name)
+                runtime = with_preferences(chosen["runtime"], launch_cli)
+                trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice=chosen.get("title"))
+                return runtime, chosen["models"], launch_cli
+        console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
+
+
 def trace_runtime_provider_id(runtime):
     if not isinstance(runtime, dict):
         return ""
