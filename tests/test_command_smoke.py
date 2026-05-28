@@ -1404,6 +1404,38 @@ def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
         "runtime_id": "claude-main",
     }
     assert mms_command_tools.runtime_hint_from_runtime(None, runtime_provider_id=lambda runtime: "", runtime_account_id=lambda runtime: "") == {}
+    stats = {
+        "sources": {
+            "old": {
+                "runtime_kind": "provider",
+                "id": "relay-old",
+                "cli": "claude",
+                "last_model": "gpt-5.5",
+                "last_used_at": "2026-05-27T10:00:00Z",
+            },
+            "new": {
+                "runtime_kind": "account",
+                "id": "claude-main",
+                "cli": "claude",
+                "last_model": "gpt-5.5",
+                "last_used_at": "2026-05-28T10:00:00Z",
+            },
+            "other": {
+                "runtime_kind": "provider",
+                "id": "codex-relay",
+                "cli": "codex",
+                "last_model": "gpt-5.5",
+                "last_used_at": "2026-05-29T10:00:00Z",
+            },
+        }
+    }
+    assert mms_command_tools.infer_runtime_hint_from_usage_stats(stats, "claude", "gpt-5.5") == {
+        "runtime_kind": "account",
+        "runtime_id": "claude-main",
+        "auth_mode": "oauth",
+        "account_id": "claude-main",
+    }
+    assert mms_command_tools.infer_runtime_hint_from_usage_stats(stats, "claude", "missing-model") == {}
 
 
 def test_env_command_renders_and_writes_export_file(tmp_path):

@@ -2706,43 +2706,9 @@ def _get_scene_usage():
 
 
 def _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
-    latest_entry = None
-    latest_at = ""
-    normalized_model = str(model_name or "").strip()
-    for entry in (stats.get("sources", {}) or {}).values():
-        if not isinstance(entry, dict):
-            continue
-        if str(entry.get("cli") or "").strip() != str(cli_name or "").strip():
-            continue
-        if str(entry.get("last_model") or "").strip() != normalized_model:
-            continue
-        used_at = str(entry.get("last_used_at") or "").strip()
-        if used_at < latest_at:
-            continue
-        latest_at = used_at
-        latest_entry = entry
+    from mms_command_tools import infer_runtime_hint_from_usage_stats
 
-    if not isinstance(latest_entry, dict):
-        return {}
-
-    runtime_kind = str(latest_entry.get("runtime_kind") or "").strip()
-    runtime_id = str(latest_entry.get("id") or "").strip()
-    if not runtime_kind or not runtime_id:
-        return {}
-
-    hint = {
-        "runtime_kind": runtime_kind,
-        "runtime_id": runtime_id,
-    }
-    if runtime_kind == "provider":
-        hint["auth_mode"] = "api_key"
-        hint["provider_id"] = runtime_id
-    elif runtime_kind == "account":
-        hint["auth_mode"] = "oauth"
-        hint["account_id"] = runtime_id
-    else:
-        return {}
-    return hint
+    return infer_runtime_hint_from_usage_stats(stats, cli_name, model_name)
 
 
 def _resolve_last_used_runtime(cfg, cli_name, last_item, default_models):
