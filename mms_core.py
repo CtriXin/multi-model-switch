@@ -5456,57 +5456,22 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
 
 def _display_provider_model_table(provider, probe):
     from mms_speed_stats import get_speed_entry
+    from mms_command_tools import display_provider_model_table
 
     _ensure_rich()
-    table = Table(title=f"{provider.get('name', provider.get('id'))} · 模型列表", show_lines=True)
-    table.add_column("模型", style="cyan")
-    table.add_column("家族", style="yellow")
-    table.add_column("能力", style="magenta")
-    table.add_column("CLI", style="dim")
-    table.add_column("来源", style="green")
-    table.add_column("首字节延迟", style="yellow")
-    table.add_column("生成速度", style="magenta")
-    table.add_column("样本", style="white")
-    table.add_column("最近更新", style="blue")
-
-    for model_id in probe.get("models") or []:
-        speed = get_speed_entry(model_id, provider=provider)
-        ttfb = "暂无数据"
-        tps = "暂无数据"
-        samples = "-"
-        updated = "-"
-        if speed:
-            ttfb_value = speed.get("ttfb_avg_ms")
-            ttfb = f"{ttfb_value:.0f}ms / {_ttfb_label(ttfb_value)}" if isinstance(ttfb_value, (int, float)) else "暂无数据"
-            tps_value = speed.get("tps_avg")
-            tps = f"{tps_value:.1f} / {_tps_label(tps_value)}" if isinstance(tps_value, (int, float)) else "暂无数据"
-            samples = str(speed.get("samples", 0))
-            if speed.get("warming_up"):
-                samples = f"{samples}（预热中）"
-            updated = str(speed.get("last_updated") or "-")
-            if speed.get("is_stale"):
-                updated = f"{updated} (stale)"
-        table.add_row(
-            model_id,
-            _infer_model_family(model_id)[0],
-            _model_capability_summary(model_id),
-            _model_cli_summary(model_id),
-            _model_source_label((probe.get("model_sources") or {}).get(model_id, probe.get("base_source", "remote"))),
-            ttfb,
-            tps,
-            samples,
-            updated,
-        )
-    console.print(table)
-    hidden_models = probe.get("hidden_models") or []
-    extra_models = probe.get("extra_models") or []
-    if extra_models:
-        console.print(f"[dim]手工补充模型: {', '.join(extra_models)}[/dim]")
-    if hidden_models:
-        console.print(f"[dim]已隐藏模型: {', '.join(hidden_models)}[/dim]")
-    raw_models = probe.get("raw_models") or []
-    if raw_models and raw_models != (probe.get("models") or []):
-        console.print(f"[dim]原始模型数: {len(raw_models)} | 最终展示模型数: {len(probe.get('models') or [])}[/dim]")
+    return display_provider_model_table(
+        provider,
+        probe,
+        get_speed_entry=get_speed_entry,
+        infer_model_family=_infer_model_family,
+        model_capability_summary=_model_capability_summary,
+        model_cli_summary=_model_cli_summary,
+        model_source_label=_model_source_label,
+        ttfb_label=_ttfb_label,
+        tps_label=_tps_label,
+        table_cls=Table,
+        console=console,
+    )
 
 
 def _pause_after_tui_report(prompt_text="按 Enter 返回"):

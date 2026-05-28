@@ -1010,6 +1010,62 @@ def test_session_prune_handler_dry_run_and_apply_with_injected_remove():
     assert any("已删除 2 个 stale MMS session" in str(item) for item in console.items)
 
 
+def test_provider_model_table_display_renders_speed_and_sources():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    provider = {"id": "relay", "name": "Relay"}
+    probe = {
+        "models": ["gpt-5.5", "custom-model"],
+        "raw_models": ["gpt-5.5", "custom-model", "hidden-model"],
+        "extra_models": ["custom-model"],
+        "hidden_models": ["hidden-model"],
+        "model_sources": {"custom-model": "manual"},
+        "base_source": "remote",
+    }
+
+    mms_command_tools.display_provider_model_table(
+        provider,
+        probe,
+        get_speed_entry=lambda model_id, provider=None: {
+            "ttfb_avg_ms": 123.4,
+            "tps_avg": 45.67,
+            "samples": 2,
+            "last_updated": "2026-05-28",
+            "warming_up": model_id == "custom-model",
+            "is_stale": model_id == "custom-model",
+        },
+        infer_model_family=lambda model_id: ("GPT", None),
+        model_capability_summary=lambda model_id: "tools",
+        model_cli_summary=lambda model_id: "codex",
+        model_source_label=lambda source: f"src:{source}",
+        ttfb_label=lambda value: "fast",
+        tps_label=lambda value: "quick",
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.rows[0][0] == (
+        "gpt-5.5",
+        "GPT",
+        "tools",
+        "codex",
+        "src:remote",
+        "123ms / fast",
+        "45.7 / quick",
+        "2",
+        "2026-05-28",
+    )
+    assert table.rows[1][0][4] == "src:manual"
+    assert table.rows[1][0][7] == "2（预热中）"
+    assert table.rows[1][0][8] == "2026-05-28 (stale)"
+    text = "\n".join(str(item) for item in console.items)
+    assert "手工补充模型: custom-model" in text
+    assert "已隐藏模型: hidden-model" in text
+    assert "原始模型数: 3" in text
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 
