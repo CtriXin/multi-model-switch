@@ -1285,6 +1285,23 @@ def select_rescue_route_fallback_model(
     )
 
 
+def resolve_rescue_action_fallback_model(
+    action,
+    *,
+    prefix,
+    prompt_label,
+    prompt_default="",
+    ensure_rich,
+    prompt_cls,
+):
+    action_text = str(action or "")
+    fallback_model = action_text.split("::", 1)[1] if action_text.startswith(prefix) else ""
+    if not fallback_model:
+        ensure_rich()
+        fallback_model = prompt_cls.ask(prompt_label, default=prompt_default).strip()
+    return fallback_model
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

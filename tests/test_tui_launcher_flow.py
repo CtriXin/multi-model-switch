@@ -44,6 +44,7 @@ from mms_tui_launcher_flow import (
     provider_browse_options,
     rescue_packet_action_menu_context,
     refresh_tui_runtime_state_after_config_change,
+    resolve_rescue_action_fallback_model,
     resolve_last_used_launch_context,
     resolve_confirm_launch_action,
     run_confirm_tui_prompt,
@@ -2171,6 +2172,52 @@ def test_select_rescue_route_fallback_model_delegates_to_model_tui() -> None:
 
     assert result == "route2"
     assert calls == [("select", ["route1", "route2"], "选择 fallback handover model")]
+
+
+def test_resolve_rescue_action_fallback_model_uses_embedded_model_without_prompt() -> None:
+    calls = []
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            raise AssertionError("unused")
+
+    result = resolve_rescue_action_fallback_model(
+        "handover::fallback-model",
+        prefix="handover::",
+        prompt_label="fallback model",
+        prompt_default="",
+        ensure_rich=lambda: calls.append(("ensure",)),
+        prompt_cls=Prompt,
+    )
+
+    assert result == "fallback-model"
+    assert calls == []
+
+
+def test_resolve_rescue_action_fallback_model_prompts_and_strips_default() -> None:
+    calls = []
+
+    class Prompt:
+        @staticmethod
+        def ask(label, *, default):
+            calls.append(("ask", label, default))
+            return "  fallback-model  "
+
+    result = resolve_rescue_action_fallback_model(
+        "manual_default",
+        prefix="default::",
+        prompt_label="全局默认 fallback model",
+        prompt_default="old-default",
+        ensure_rich=lambda: calls.append(("ensure",)),
+        prompt_cls=Prompt,
+    )
+
+    assert result == "fallback-model"
+    assert calls == [
+        ("ensure",),
+        ("ask", "全局默认 fallback model", "old-default"),
+    ]
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

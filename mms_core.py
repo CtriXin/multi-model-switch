@@ -5256,10 +5256,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         pause_after_tui_report=_pause_after_tui_report,
                     )
                 elif str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
-                    fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("handover::") else ""
-                    if not fallback_model:
-                        _ensure_rich()
-                        fallback_model = Prompt.ask("fallback model", default="").strip()
+                    fallback_model = tui_flow.resolve_rescue_action_fallback_model(
+                        rescue_action,
+                        prefix="handover::",
+                        prompt_label="fallback model",
+                        prompt_default="",
+                        ensure_rich=_ensure_rich,
+                        prompt_cls=Prompt,
+                    )
                     if fallback_model:
                         tui_flow.create_rescue_handover_action(
                             selected_rescue,
@@ -5291,10 +5295,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                             pause_after_tui_report=_pause_after_tui_report,
                         )
                 elif str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
-                    fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("default::") else ""
-                    if not fallback_model:
-                        _ensure_rich()
-                        fallback_model = Prompt.ask("全局默认 fallback model", default=default_fallback.get("model") or "").strip()
+                    fallback_model = tui_flow.resolve_rescue_action_fallback_model(
+                        rescue_action,
+                        prefix="default::",
+                        prompt_label="全局默认 fallback model",
+                        prompt_default=default_fallback.get("model") or "",
+                        ensure_rich=_ensure_rich,
+                        prompt_cls=Prompt,
+                    )
                     if fallback_model:
                         current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
                 elif rescue_action == "choose_route_default":
