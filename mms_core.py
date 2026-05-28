@@ -1191,14 +1191,18 @@ def _normalize_presets_config(cfg):
 
 
 def _normalize_config_sections(cfg):
-    cfg, _ = _ensure_provider_config(cfg)
-    cfg, _ = _ensure_account_config(cfg)
-    cfg, _ = ensure_broker_config(cfg)
-    cfg, _ = _normalize_ui_config(cfg)
-    cfg, _ = _normalize_presets_config(cfg)
-    cfg, _ = _normalize_user_config(cfg)
-    cfg, _ = _normalize_cache_config(cfg)
-    return cfg
+    from mms_command_tools import normalize_config_sections
+
+    return normalize_config_sections(
+        cfg,
+        ensure_provider_config=_ensure_provider_config,
+        ensure_account_config=_ensure_account_config,
+        ensure_broker_config=ensure_broker_config,
+        normalize_ui_config=_normalize_ui_config,
+        normalize_presets_config=_normalize_presets_config,
+        normalize_user_config=_normalize_user_config,
+        normalize_cache_config=_normalize_cache_config,
+    )
 
 
 def _normalize_user_config(cfg):

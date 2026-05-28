@@ -143,6 +143,42 @@ def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeyp
     assert mms_core._extract_global_lang(["--lang", "zh", "codex"]) == (["codex"], "zh")
 
 
+def test_normalize_config_sections_preserves_normalizer_order(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    order = ["provider", "account", "broker", "ui", "presets", "user", "cache"]
+
+    def make_step(name):
+        def step(cfg):
+            updated = dict(cfg)
+            updated["chain"] = list(cfg.get("chain", [])) + [name]
+            return updated, True
+
+        return step
+
+    direct = mms_command_tools.normalize_config_sections(
+        {"chain": []},
+        ensure_provider_config=make_step("provider"),
+        ensure_account_config=make_step("account"),
+        ensure_broker_config=make_step("broker"),
+        normalize_ui_config=make_step("ui"),
+        normalize_presets_config=make_step("presets"),
+        normalize_user_config=make_step("user"),
+        normalize_cache_config=make_step("cache"),
+    )
+    assert direct["chain"] == order
+
+    monkeypatch.setattr(mms_core, "_ensure_provider_config", make_step("provider"))
+    monkeypatch.setattr(mms_core, "_ensure_account_config", make_step("account"))
+    monkeypatch.setattr(mms_core, "ensure_broker_config", make_step("broker"))
+    monkeypatch.setattr(mms_core, "_normalize_ui_config", make_step("ui"))
+    monkeypatch.setattr(mms_core, "_normalize_presets_config", make_step("presets"))
+    monkeypatch.setattr(mms_core, "_normalize_user_config", make_step("user"))
+    monkeypatch.setattr(mms_core, "_normalize_cache_config", make_step("cache"))
+    assert mms_core._normalize_config_sections({"chain": []})["chain"] == order
+
+
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 

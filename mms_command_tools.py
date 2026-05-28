@@ -112,6 +112,27 @@ def display_title(title="MMS"):
     return title
 
 
+def normalize_config_sections(
+    cfg,
+    *,
+    ensure_provider_config,
+    ensure_account_config,
+    ensure_broker_config,
+    normalize_ui_config,
+    normalize_presets_config,
+    normalize_user_config,
+    normalize_cache_config,
+):
+    cfg, _ = ensure_provider_config(cfg)
+    cfg, _ = ensure_account_config(cfg)
+    cfg, _ = ensure_broker_config(cfg)
+    cfg, _ = normalize_ui_config(cfg)
+    cfg, _ = normalize_presets_config(cfg)
+    cfg, _ = normalize_user_config(cfg)
+    cfg, _ = normalize_cache_config(cfg)
+    return cfg
+
+
 def config_command_hint(*, current_command):
     return f"{current_command()} config api.edit"
 
