@@ -436,7 +436,7 @@ _DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
 _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
-_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo")
+_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo", "kimi", "k2.")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES = {
     "gpt-5.3-codex",
@@ -920,6 +920,17 @@ def _assistant_messages_with_reasoning_slots(payload):
     return messages
 
 
+def _assistant_message_has_tool_use(message):
+    if not isinstance(message, dict):
+        return False
+    if isinstance(message.get("tool_calls"), list) and any(isinstance(item, dict) for item in message["tool_calls"]):
+        return True
+    for block in _normalize_message_content(message.get("content")):
+        if block.get("type") == "tool_use":
+            return True
+    return False
+
+
 def _apply_domestic_thinking_toggle(payload, model_name, *, thinking_enabled):
     if not _domestic_model_supports_thinking(model_name):
         return
@@ -933,6 +944,7 @@ def _preserve_domestic_reasoning_roundtrip(payload, model_name):
     if not _domestic_model_requires_reasoning_content_roundtrip(model_name):
         return
     assistant_messages = _assistant_messages_with_reasoning_slots(payload)
+    last_reasoning_content = ""
     for message in assistant_messages:
         content = _normalize_message_content(message.get("content"))
         reasoning_content = str(message.get("reasoning_content") or "").strip()
@@ -945,6 +957,12 @@ def _preserve_domestic_reasoning_roundtrip(payload, model_name):
             # require assistant reasoning_content to be echoed back on continuation
             # even when the client talks to us in Anthropic thinking blocks.
             message["reasoning_content"] = reasoning_content
+            last_reasoning_content = reasoning_content
+            continue
+        if last_reasoning_content and _assistant_message_has_tool_use(message):
+            if not _assistant_has_thinking_block(content):
+                message["content"] = [{"type": "thinking", "thinking": last_reasoning_content}] + content
+            message["reasoning_content"] = last_reasoning_content
 
 
 def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=True, reasoning_effort="high"):

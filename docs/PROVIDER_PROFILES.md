@@ -36,7 +36,7 @@ The patch engine intentionally supports only data-driven field patches. It does 
 | Xiaomi MiMo | `https://api.xiaomimimo.com/v1` + `/chat/completions` | `https://api.xiaomimimo.com/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled; OpenAI format aliases output cap to `max_completion_tokens`; no GPT-style effort tier recorded |
 | MiniMax | `https://api.minimaxi.com/v1` + `/chat/completions` | `https://api.minimaxi.com/anthropic` + `/v1/messages` | OpenAI format can use `reasoning_split`; Anthropic format uses thinking blocks |
 | DeepSeek | `https://api.deepseek.com` + `/chat/completions` | `https://api.deepseek.com/anthropic` + `/v1/messages` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `high`/`max` |
-| Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | Thinking toggle metadata only; preserve normal client headers |
+| Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | `thinking.type` enabled/disabled; split assistant `tool_use` history must preserve both thinking blocks and `reasoning_content`; preserve normal client headers |
 | GLM / Z.ai | `https://api.z.ai/api/paas/v4/` + `/chat/completions` | `https://api.z.ai/api/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled |
 
 MiMo context is route-scoped. Direct MiMo OpenAI-compatible `/v1` and
