@@ -3601,7 +3601,7 @@ def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort(
     assert "reasoning_content" not in payload["messages"][0]
 
 
-def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_deepseek():
+def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_roundtrip_family():
     import mms_bridge
 
     payload = {
@@ -3611,7 +3611,7 @@ def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_no
 
     mms_bridge._apply_domestic_reasoning_controls(
         payload,
-        "kimi-for-coding",
+        "glm-5.1",
         thinking_enabled=True,
         reasoning_effort="high",
     )
@@ -3658,6 +3658,42 @@ def test_preserve_domestic_reasoning_roundtrip_rehydrates_missing_thinking_block
 
     assert payload["messages"][0]["content"][0] == {"type": "thinking", "thinking": "hidden step"}
     assert payload["messages"][0]["reasoning_content"] == "hidden step"
+
+
+def test_preserve_domestic_reasoning_roundtrip_propagates_split_kimi_tool_use_messages():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "carry this forward"}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I will call tools now."}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_b", "name": "Read", "input": {"file": "x"}}],
+            },
+        ]
+    }
+
+    mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "kimi-k2.6")
+
+    assert payload["messages"][0]["reasoning_content"] == "carry this forward"
+    assert "reasoning_content" not in payload["messages"][1]
+    assert payload["messages"][2]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][2]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][2]["content"][1]["type"] == "tool_use"
+    assert payload["messages"][3]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][3]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][3]["content"][1]["type"] == "tool_use"
 
 
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):

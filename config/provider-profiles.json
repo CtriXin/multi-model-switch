@@ -760,7 +760,7 @@
         "supported": true,
         "ui": "thinking_toggle",
         "default_enabled": true,
-        "roundtrip": "anthropic_thinking_blocks"
+        "roundtrip": "anthropic_thinking_blocks+reasoning_content"
       },
       "body_patches": {
         "anthropic_messages": {
