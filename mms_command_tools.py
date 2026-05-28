@@ -957,6 +957,12 @@ def save_json_file(path, payload):
     os.chmod(path, 0o600)
 
 
+def record_trace_override(trace_enabled, trace_overrides, source, **kv):
+    if not trace_enabled:
+        return
+    trace_overrides.append((source, {k: v for k, v in kv.items() if v is not None}))
+
+
 def trace_source_for(field, value, trace_overrides):
     expected = str(value or "").strip()
     if not expected:

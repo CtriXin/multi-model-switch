@@ -1356,6 +1356,29 @@ def test_launch_trace_formatter_preserves_sources_and_override_chain():
     assert "empty           -> (none)" in report
 
 
+def test_trace_record_helper_preserves_enabled_filtering_and_none_skip():
+    import mms_command_tools
+
+    trace_overrides = []
+    mms_command_tools.record_trace_override(
+        False,
+        trace_overrides,
+        "disabled",
+        cli="codex",
+    )
+    assert trace_overrides == []
+
+    mms_command_tools.record_trace_override(
+        True,
+        trace_overrides,
+        "cli arg",
+        cli="codex",
+        provider=None,
+        model="gpt-5.4",
+    )
+    assert trace_overrides == [("cli arg", {"cli": "codex", "model": "gpt-5.4"})]
+
+
 def test_settings_result_display_helpers_format_payload_and_fallback_report():
     import mms_command_tools
 

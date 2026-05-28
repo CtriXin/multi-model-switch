@@ -2241,9 +2241,9 @@ _trace_overrides = []
 
 def _trace_record(source, **kv):
     """记录一步 override 来源。source 是 config default / preset / CLI flags 等。"""
-    if not _trace_enabled:
-        return
-    _trace_overrides.append((source, {k: v for k, v in kv.items() if v is not None}))
+    from mms_command_tools import record_trace_override
+
+    return record_trace_override(_trace_enabled, _trace_overrides, source, **kv)
 
 
 def _trace_runtime_provider_id(runtime):
