@@ -32,7 +32,7 @@ from mms_core import (
     _probe_models,
     _provider_map,
     apply_local_overrides,
-    load_config,
+    load_runtime_config as load_config,
     resolve_provider_context,
 )
 from mms_fake_upstream import patch_httpx_module as _patch_fake_httpx
