@@ -3545,63 +3545,27 @@ def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
 
 
 def _trace_source_for(field, value):
-    expected = str(value or "").strip()
-    if not expected:
-        return "(not set)"
-    fallback_source = ""
-    generic_match = ""
-    prefer_explicit = field in {"cli", "provider", "account", "model"}
-    for source, kv in reversed(_trace_overrides):
-        if field not in kv:
-            continue
-        candidate = str(kv.get(field) or "").strip()
-        if candidate == expected:
-            if prefer_explicit and source == "runtime resolve":
-                generic_match = source
-                continue
-            return source
-        if not fallback_source:
-            fallback_source = source
-    return fallback_source or generic_match or "runtime result"
+    from mms_command_tools import trace_source_for
+
+    return trace_source_for(field, value, _trace_overrides)
 
 
 def _print_trace(cli_name, model_info, runtime):
     """打印 [MMS Trace] 到 stderr。"""
-    model = ""
-    if isinstance(model_info, dict):
-        model = model_info.get("model", "")
-    elif isinstance(model_info, str):
-        model = model_info
+    from mms_command_tools import format_launch_trace
 
-    provider_id = _trace_runtime_provider_id(runtime)
-    account_id = _trace_runtime_account_id(runtime)
-    auth_mode = runtime.get("auth_mode", "") if isinstance(runtime, dict) else ""
-    bridge = _trace_runtime_bridge(runtime)
-
-    lines = [
-        "",
-        "[MMS Trace]",
-        f"  cli:      {cli_name or '-'} <- {_trace_source_for('cli', cli_name)}",
-        f"  provider: {provider_id or '-'} <- {_trace_source_for('provider', provider_id)}",
-        f"  account:  {account_id or '-'} <- {_trace_source_for('account', account_id)}",
-        f"  model:    {model or '-'} <- {_trace_source_for('model', model)}",
-        f"  bridge:   {bridge or '-'} <- {_trace_source_for('bridge', bridge)}",
-        f"  runtime:  {auth_mode or '-'} <- {_trace_source_for('runtime', auth_mode)}",
-        "",
-        "Override chain:",
-    ]
-    if _trace_overrides:
-        for source, kv in _trace_overrides:
-            if kv:
-                parts = ", ".join(f"{k}={v}" for k, v in kv.items())
-                lines.append(f"  {source:<16s}-> {parts}")
-            else:
-                lines.append(f"  {source:<16s}-> (none)")
-    else:
-        lines.append("  (no overrides recorded)")
-    lines.append("")
-
-    print("\n".join(lines), file=sys.stderr)
+    print(
+        format_launch_trace(
+            cli_name,
+            model_info,
+            runtime,
+            _trace_overrides,
+            runtime_provider_id=_trace_runtime_provider_id,
+            runtime_account_id=_trace_runtime_account_id,
+            runtime_bridge=_trace_runtime_bridge,
+        ),
+        file=sys.stderr,
+    )
 
 
 def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=None):

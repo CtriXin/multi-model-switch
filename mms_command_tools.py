@@ -33,6 +33,73 @@ CONFIG_HELP_TOPICS = {
 }
 
 
+def trace_source_for(field, value, trace_overrides):
+    expected = str(value or "").strip()
+    if not expected:
+        return "(not set)"
+    fallback_source = ""
+    generic_match = ""
+    prefer_explicit = field in {"cli", "provider", "account", "model"}
+    for source, kv in reversed(trace_overrides or []):
+        if field not in kv:
+            continue
+        candidate = str(kv.get(field) or "").strip()
+        if candidate == expected:
+            if prefer_explicit and source == "runtime resolve":
+                generic_match = source
+                continue
+            return source
+        if not fallback_source:
+            fallback_source = source
+    return fallback_source or generic_match or "runtime result"
+
+
+def format_launch_trace(
+    cli_name,
+    model_info,
+    runtime,
+    trace_overrides,
+    *,
+    runtime_provider_id,
+    runtime_account_id,
+    runtime_bridge,
+):
+    model = ""
+    if isinstance(model_info, dict):
+        model = model_info.get("model", "")
+    elif isinstance(model_info, str):
+        model = model_info
+
+    provider_id = runtime_provider_id(runtime)
+    account_id = runtime_account_id(runtime)
+    auth_mode = runtime.get("auth_mode", "") if isinstance(runtime, dict) else ""
+    bridge = runtime_bridge(runtime)
+
+    lines = [
+        "",
+        "[MMS Trace]",
+        f"  cli:      {cli_name or '-'} <- {trace_source_for('cli', cli_name, trace_overrides)}",
+        f"  provider: {provider_id or '-'} <- {trace_source_for('provider', provider_id, trace_overrides)}",
+        f"  account:  {account_id or '-'} <- {trace_source_for('account', account_id, trace_overrides)}",
+        f"  model:    {model or '-'} <- {trace_source_for('model', model, trace_overrides)}",
+        f"  bridge:   {bridge or '-'} <- {trace_source_for('bridge', bridge, trace_overrides)}",
+        f"  runtime:  {auth_mode or '-'} <- {trace_source_for('runtime', auth_mode, trace_overrides)}",
+        "",
+        "Override chain:",
+    ]
+    if trace_overrides:
+        for source, kv in trace_overrides:
+            if kv:
+                parts = ", ".join(f"{k}={v}" for k, v in kv.items())
+                lines.append(f"  {source:<16s}-> {parts}")
+            else:
+                lines.append(f"  {source:<16s}-> (none)")
+    else:
+        lines.append("  (no overrides recorded)")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"

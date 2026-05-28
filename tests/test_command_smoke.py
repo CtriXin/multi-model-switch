@@ -147,6 +147,37 @@ def test_command_request_classifiers_preserve_help_and_safe_prune_semantics():
     assert mms_core._is_session_prune_dry_run(["session", "ls"]) is False
 
 
+def test_launch_trace_formatter_preserves_sources_and_override_chain():
+    import mms_command_tools
+
+    trace_overrides = [
+        ("cli arg", {"cli": "codex", "model": "gpt-5.4"}),
+        ("runtime resolve", {"provider": "relay", "runtime": "api_key", "bridge": "http://bridge"}),
+        ("empty", {}),
+    ]
+    runtime = {"auth_mode": "api_key", "provider_id": "relay"}
+
+    report = mms_command_tools.format_launch_trace(
+        "codex",
+        {"model": "gpt-5.4"},
+        runtime,
+        trace_overrides,
+        runtime_provider_id=lambda runtime: runtime.get("provider_id", ""),
+        runtime_account_id=lambda runtime: "",
+        runtime_bridge=lambda runtime: "http://bridge",
+    )
+
+    assert "[MMS Trace]" in report
+    assert "cli:      codex <- cli arg" in report
+    assert "provider: relay <- runtime resolve" in report
+    assert "account:  - <- (not set)" in report
+    assert "model:    gpt-5.4 <- cli arg" in report
+    assert "bridge:   http://bridge <- runtime resolve" in report
+    assert "runtime:  api_key <- runtime resolve" in report
+    assert "cli arg         -> cli=codex, model=gpt-5.4" in report
+    assert "empty           -> (none)" in report
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
