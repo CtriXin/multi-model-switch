@@ -3086,6 +3086,55 @@ def openrouter_extension_provider(
     return None, ""
 
 
+def handle_openrouter_extension_config(
+    cfg,
+    args_rest,
+    *,
+    parse_openrouter_extension_args,
+    display_openrouter_extension_help,
+    quick_connect_gateway,
+    openrouter_extension_provider,
+    openrouter_api_key_from_env,
+    probe_openrouter_extension,
+    display_openrouter_extension_summary,
+    console,
+):
+    parsed = parse_openrouter_extension_args(args_rest)
+    action = parsed["action"]
+    if action == "help":
+        display_openrouter_extension_help()
+        return
+    if action in {"add", "enable"}:
+        quick_connect_gateway(cfg, preset_id="openrouter")
+        return
+
+    provider, warning = openrouter_extension_provider(cfg, parsed["provider_id"])
+    if warning:
+        console.print(f"[yellow]{warning}[/yellow]")
+    api_key = ""
+    provider_label = ""
+    if provider:
+        provider_label = f"{provider.get('name') or provider.get('id')} ({provider.get('id')})"
+        api_key = str(provider.get("api_key") or "").strip()
+    if not api_key:
+        api_key = openrouter_api_key_from_env()
+        if api_key and not provider_label:
+            provider_label = "OPENROUTER_API_KEY"
+    summary = probe_openrouter_extension(
+        api_key,
+        assume_paid=bool(parsed["assume_paid"]),
+    )
+    if parsed["json"]:
+        console.print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+    display_openrouter_extension_summary(
+        summary,
+        provider_label=provider_label,
+        limit=int(parsed["limit"]),
+        show_models=action == "models",
+    )
+
+
 def parse_usage_timestamp(value):
     raw = str(value or "").strip()
     if not raw:

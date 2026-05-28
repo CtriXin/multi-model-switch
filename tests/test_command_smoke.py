@@ -4405,6 +4405,95 @@ def test_openrouter_extension_arg_and_provider_helpers_preserve_detection_rules(
     assert mms_command_tools.parse_openrouter_extension_args(["models", "--limit", "bad"])["limit"] == 12
 
 
+def test_openrouter_extension_handler_preserves_help_add_probe_json_and_env_fallback():
+    import json
+
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    calls = []
+    summaries = []
+
+    def parse_args(args_rest):
+        return mms_command_tools.parse_openrouter_extension_args(args_rest)
+
+    mms_command_tools.handle_openrouter_extension_config(
+        {"cfg": True},
+        ["help"],
+        parse_openrouter_extension_args=parse_args,
+        display_openrouter_extension_help=lambda: calls.append(("help",)),
+        quick_connect_gateway=lambda cfg, preset_id=None: calls.append(("connect", cfg, preset_id)),
+        openrouter_extension_provider=lambda cfg, provider_id="": (None, ""),
+        openrouter_api_key_from_env=lambda: "",
+        probe_openrouter_extension=lambda api_key, assume_paid=False: {"unexpected": True},
+        display_openrouter_extension_summary=lambda *args, **kwargs: summaries.append((args, kwargs)),
+        console=console,
+    )
+    assert calls == [("help",)]
+
+    mms_command_tools.handle_openrouter_extension_config(
+        {"cfg": True},
+        ["add"],
+        parse_openrouter_extension_args=parse_args,
+        display_openrouter_extension_help=lambda: calls.append(("unexpected-help",)),
+        quick_connect_gateway=lambda cfg, preset_id=None: calls.append(("connect", cfg, preset_id)),
+        openrouter_extension_provider=lambda cfg, provider_id="": (None, ""),
+        openrouter_api_key_from_env=lambda: "",
+        probe_openrouter_extension=lambda api_key, assume_paid=False: {"unexpected": True},
+        display_openrouter_extension_summary=lambda *args, **kwargs: summaries.append((args, kwargs)),
+        console=console,
+    )
+    assert calls[-1] == ("connect", {"cfg": True}, "openrouter")
+    assert summaries == []
+
+    console.items.clear()
+    calls.clear()
+    mms_command_tools.handle_openrouter_extension_config(
+        {},
+        ["models", "or", "--limit", "3", "--assume-paid"],
+        parse_openrouter_extension_args=parse_args,
+        display_openrouter_extension_help=lambda: calls.append(("unexpected-help",)),
+        quick_connect_gateway=lambda cfg, preset_id=None: calls.append(("unexpected-connect", cfg, preset_id)),
+        openrouter_extension_provider=lambda cfg, provider_id="": (
+            {"id": provider_id, "name": "OpenRouter", "api_key": "provider-key"},
+            "non-fatal warning",
+        ),
+        openrouter_api_key_from_env=lambda: "env-key",
+        probe_openrouter_extension=lambda api_key, assume_paid=False: calls.append(
+            ("probe", api_key, assume_paid)
+        ) or {"counts": {"visible_text": 1}},
+        display_openrouter_extension_summary=lambda summary, **kwargs: summaries.append((summary, kwargs)),
+        console=console,
+    )
+    assert "[yellow]non-fatal warning[/yellow]" in console.items
+    assert calls == [("probe", "provider-key", True)]
+    assert summaries[-1] == (
+        {"counts": {"visible_text": 1}},
+        {"provider_label": "OpenRouter (or)", "limit": 3, "show_models": True},
+    )
+
+    console.items.clear()
+    calls.clear()
+    summaries.clear()
+    mms_command_tools.handle_openrouter_extension_config(
+        {},
+        ["status", "--json"],
+        parse_openrouter_extension_args=parse_args,
+        display_openrouter_extension_help=lambda: calls.append(("unexpected-help",)),
+        quick_connect_gateway=lambda cfg, preset_id=None: calls.append(("unexpected-connect", cfg, preset_id)),
+        openrouter_extension_provider=lambda cfg, provider_id="": (None, ""),
+        openrouter_api_key_from_env=lambda: "env-key",
+        probe_openrouter_extension=lambda api_key, assume_paid=False: {
+            "api_key": api_key,
+            "assume_paid": assume_paid,
+        },
+        display_openrouter_extension_summary=lambda *args, **kwargs: summaries.append((args, kwargs)),
+        console=console,
+    )
+    assert json.loads(console.items[-1]) == {"api_key": "env-key", "assume_paid": False}
+    assert summaries == []
+
+
 def test_openrouter_extension_display_helpers_render_summary_and_limits():
     import mms_command_tools
 

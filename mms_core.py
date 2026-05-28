@@ -7972,44 +7972,23 @@ def _display_openrouter_extension_summary(summary, *, provider_label="", limit=1
 
 
 def _handle_openrouter_extension_config(cfg, args_rest):
-    parsed = _parse_openrouter_extension_args(args_rest)
-    action = parsed["action"]
-    if action == "help":
-        _display_openrouter_extension_help()
-        return
-    if action in {"add", "enable"}:
-        _quick_connect_gateway(cfg, preset_id="openrouter")
-        return
-
     from mms_openrouter_extension import (
         openrouter_api_key_from_env,
         probe_openrouter_extension,
     )
+    from mms_command_tools import handle_openrouter_extension_config
 
-    provider, warning = _openrouter_extension_provider(cfg, parsed["provider_id"])
-    if warning:
-        console.print(f"[yellow]{warning}[/yellow]")
-    api_key = ""
-    provider_label = ""
-    if provider:
-        provider_label = f"{provider.get('name') or provider.get('id')} ({provider.get('id')})"
-        api_key = str(provider.get("api_key") or "").strip()
-    if not api_key:
-        api_key = openrouter_api_key_from_env()
-        if api_key and not provider_label:
-            provider_label = "OPENROUTER_API_KEY"
-    summary = probe_openrouter_extension(
-        api_key,
-        assume_paid=bool(parsed["assume_paid"]),
-    )
-    if parsed["json"]:
-        console.print(json.dumps(summary, ensure_ascii=False, indent=2))
-        return
-    _display_openrouter_extension_summary(
-        summary,
-        provider_label=provider_label,
-        limit=int(parsed["limit"]),
-        show_models=action == "models",
+    return handle_openrouter_extension_config(
+        cfg,
+        args_rest,
+        parse_openrouter_extension_args=_parse_openrouter_extension_args,
+        display_openrouter_extension_help=_display_openrouter_extension_help,
+        quick_connect_gateway=_quick_connect_gateway,
+        openrouter_extension_provider=_openrouter_extension_provider,
+        openrouter_api_key_from_env=openrouter_api_key_from_env,
+        probe_openrouter_extension=probe_openrouter_extension,
+        display_openrouter_extension_summary=_display_openrouter_extension_summary,
+        console=console,
     )
 
 
