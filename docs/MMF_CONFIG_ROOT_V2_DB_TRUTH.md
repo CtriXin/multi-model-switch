@@ -455,6 +455,7 @@ Current bridge rescue consumer implementation:
 - Launcher runtime/cache/usage auxiliary paths derive from the selected config root, preventing preview sessions from reading or writing stable-root `runtime/`, `health_check.json`, `cache/anthropic_base_urls.json`, or `usage.json` by default.
 - Local runtime telemetry helpers now follow the selected config root for local `usage.json`, `speed-stats.json`, `health-cache.json`, and `events/`, so preview sessions do not bleed runtime state into stable root by default.
 - Preview usage writes no longer trigger the legacy background `model-routes.json` export; stable `mms` roots keep the legacy best-effort export for compatibility.
+- Preview startup-safe route refresh also skips legacy `model-routes.json` export; explicit legacy export commands remain available for compatibility.
 - Broker profile env resolution reads `credentials.sh` only from the selected config root, and local broker logs use `<config_root>/cache/broker`, so preview broker flows do not silently consume stable credentials/cache.
 - `statusline-command.sh` reads route status and health cache from the selected config root, so `mmf` gateway sessions display preview route/health state instead of stable-root state.
 - Launcher route status path uses `<config_root>/route_status.json` when an explicit config root is selected; default stable launches keep the previous session-home route status path.

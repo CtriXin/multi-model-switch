@@ -3536,6 +3536,9 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startu
     try:
         from mms_router import export_model_routes
 
+        if startup_safe and not _usage_routes_export_should_run():
+            return True
+
         current_cfg = cfg
         if current_cfg is None:
             current_cfg = load_config()

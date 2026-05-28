@@ -970,6 +970,51 @@ def test_refresh_routes_export_for_hive_supports_startup_safe_probe(monkeypatch)
     ]
 
 
+def test_refresh_routes_export_for_hive_skips_startup_safe_probe_for_preview(monkeypatch):
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "_config_root_status", lambda: {"mode": "preview"})
+    monkeypatch.setattr(
+        mms_core,
+        "load_config",
+        lambda: (_ for _ in ()).throw(AssertionError("preview startup route export must not load legacy config")),
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
+    assert calls == []
+
+
+def test_refresh_routes_export_for_hive_allows_explicit_preview_legacy_export(monkeypatch):
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "_config_root_status", lambda: {"mode": "preview"})
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(
+        mms_core,
+        "apply_local_overrides",
+        lambda cfg: {**cfg, "local_override_applied": True},
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=False) is True
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, False)
+    ]
+
+
 def test_handle_provider_default_config_triggers_routes_refresh(monkeypatch):
     import mms_core
 
