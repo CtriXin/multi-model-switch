@@ -507,6 +507,75 @@ def test_select_settings_result_tui_uses_payload_builder_and_selector():
     ]
 
 
+def test_print_settings_result_report_preserves_tui_and_fallback_flow():
+    import mms_command_tools
+
+    events = []
+
+    def display(title, rows, note="", *, ok=True, console):
+        events.append(("display", title, list(rows), note, ok, console))
+
+    mms_command_tools.print_settings_result_report(
+        "done",
+        [("Key", "value")],
+        "note",
+        ok=True,
+        settings_result_tui_available=lambda: True,
+        select_settings_result_tui=lambda title, rows, note="", ok=True: events.append(("tui", title, list(rows), note, ok)),
+        mark_tui_rendered=lambda: events.append(("mark",)),
+        clear_tui_rendered=lambda: events.append(("clear",)),
+        ensure_rich=lambda: events.append(("rich",)),
+        display_settings_result_report=display,
+        console="console",
+    )
+    assert events == [
+        ("tui", "done", [("Key", "value")], "note", True),
+        ("mark",),
+    ]
+
+    events.clear()
+    mms_command_tools.print_settings_result_report(
+        "done",
+        [("Key", "value")],
+        "note",
+        ok=False,
+        settings_result_tui_available=lambda: False,
+        select_settings_result_tui=lambda *args, **kwargs: events.append(("tui",)),
+        mark_tui_rendered=lambda: events.append(("mark",)),
+        clear_tui_rendered=lambda: events.append(("clear",)),
+        ensure_rich=lambda: events.append(("rich",)),
+        display_settings_result_report=display,
+        console="console",
+    )
+    assert events == [
+        ("rich",),
+        ("display", "done", [("Key", "value")], "note", False, "console"),
+    ]
+
+    events.clear()
+
+    def broken_selector(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    mms_command_tools.print_settings_result_report(
+        "done",
+        [],
+        "",
+        settings_result_tui_available=lambda: True,
+        select_settings_result_tui=broken_selector,
+        mark_tui_rendered=lambda: events.append(("mark",)),
+        clear_tui_rendered=lambda: events.append(("clear",)),
+        ensure_rich=lambda: events.append(("rich",)),
+        display_settings_result_report=display,
+        console="console",
+    )
+    assert events == [
+        ("clear",),
+        ("rich",),
+        ("display", "done", [], "", True, "console"),
+    ]
+
+
 def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     import mms_command_tools
 

@@ -145,6 +145,35 @@ def select_settings_result_tui(title, rows, note="", *, ok=True, settings_result
     return select_channel_action_tui(tui_title, info_lines, actions)
 
 
+def print_settings_result_report(
+    title,
+    rows,
+    note="",
+    *,
+    ok=True,
+    settings_result_tui_available,
+    select_settings_result_tui,
+    mark_tui_rendered,
+    clear_tui_rendered,
+    ensure_rich,
+    display_settings_result_report,
+    console,
+):
+    if settings_result_tui_available():
+        try:
+            select_settings_result_tui(title, rows, note, ok=ok)
+        except (KeyboardInterrupt, EOFError):
+            pass
+        except Exception:
+            clear_tui_rendered()
+        else:
+            mark_tui_rendered()
+            return
+
+    ensure_rich()
+    return display_settings_result_report(title, rows, note, ok=ok, console=console)
+
+
 def display_settings_result_report(title, rows, note="", *, ok=True, console):
     color = "green" if ok else "red"
     prefix = "✓ " if ok else "✗ "

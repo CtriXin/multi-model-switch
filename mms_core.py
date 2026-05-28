@@ -3738,21 +3738,29 @@ def _select_settings_result_tui(title, rows, note="", *, ok=True):
 
 def _print_settings_result_report(title, rows, note="", *, ok=True):
     global _SETTINGS_RESULT_RENDERED_TUI
-    if _settings_result_tui_available():
-        try:
-            _select_settings_result_tui(title, rows, note, ok=ok)
-        except (KeyboardInterrupt, EOFError):
-            pass
-        except Exception:
-            _SETTINGS_RESULT_RENDERED_TUI = False
-        else:
-            _SETTINGS_RESULT_RENDERED_TUI = True
-            return
+    from mms_command_tools import display_settings_result_report, print_settings_result_report
 
-    _ensure_rich()
-    from mms_command_tools import display_settings_result_report
+    def mark_tui_rendered():
+        global _SETTINGS_RESULT_RENDERED_TUI
+        _SETTINGS_RESULT_RENDERED_TUI = True
 
-    return display_settings_result_report(title, rows, note, ok=ok, console=console)
+    def clear_tui_rendered():
+        global _SETTINGS_RESULT_RENDERED_TUI
+        _SETTINGS_RESULT_RENDERED_TUI = False
+
+    return print_settings_result_report(
+        title,
+        rows,
+        note,
+        ok=ok,
+        settings_result_tui_available=_settings_result_tui_available,
+        select_settings_result_tui=_select_settings_result_tui,
+        mark_tui_rendered=mark_tui_rendered,
+        clear_tui_rendered=clear_tui_rendered,
+        ensure_rich=_ensure_rich,
+        display_settings_result_report=display_settings_result_report,
+        console=console,
+    )
 
 
 def _print_settings_error_report(title, exc):
