@@ -684,12 +684,9 @@ def export_command_hint(cli_name):
 
 
 def normalize_user_role(role):
-    value = str(role or "").strip()
-    if value in {"dev", "all", MODE_ALL}:
-        return MODE_ALL
-    if value in {"ops", "recommended", MODE_RECOMMENDED}:
-        return MODE_RECOMMENDED
-    return MODE_ALL
+    from mms_command_tools import normalize_user_role as normalize_user_role_helper
+
+    return normalize_user_role_helper(role, mode_all=MODE_ALL, mode_recommended=MODE_RECOMMENDED)
 
 
 def _normalize_ui_config(cfg):

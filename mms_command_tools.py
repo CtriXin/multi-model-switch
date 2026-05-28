@@ -4788,6 +4788,15 @@ def extract_semver_text(value):
     return match.group(0) if match else ""
 
 
+def normalize_user_role(role, *, mode_all, mode_recommended):
+    value = str(role or "").strip()
+    if value in {"dev", "all", mode_all}:
+        return mode_all
+    if value in {"ops", "recommended", mode_recommended}:
+        return mode_recommended
+    return mode_all
+
+
 def parse_semver_text(value):
     version = extract_semver_text(value)
     if not version:

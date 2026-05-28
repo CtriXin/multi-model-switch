@@ -7426,6 +7426,11 @@ def test_config_normalization_helpers_preserve_legacy_shapes():
     )
     assert changed is True
     assert user_cfg["user"] == {"role": "all", "note": "keep"}
+    assert mms_command_tools.normalize_user_role("dev", mode_all="全部模型", mode_recommended="推荐模型") == "全部模型"
+    assert mms_command_tools.normalize_user_role("all", mode_all="全部模型", mode_recommended="推荐模型") == "全部模型"
+    assert mms_command_tools.normalize_user_role("ops", mode_all="全部模型", mode_recommended="推荐模型") == "推荐模型"
+    assert mms_command_tools.normalize_user_role("recommended", mode_all="全部模型", mode_recommended="推荐模型") == "推荐模型"
+    assert mms_command_tools.normalize_user_role("unknown", mode_all="全部模型", mode_recommended="推荐模型") == "全部模型"
 
     cache_cfg, changed = mms_command_tools.normalize_cache_config(
         {"cache": {"probe_async_refresh_after_sec": "0", "probe_async_min_interval_sec": "bad", "extra": "drop"}},
