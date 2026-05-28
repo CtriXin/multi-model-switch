@@ -1253,6 +1253,19 @@ def normalize_supported_clis(value, *, protocols=None, cli_names, legacy_provide
     return normalized
 
 
+def normalize_role(value, *, valid_roles):
+    role = str(value or "auto").strip().lower()
+    return role if role in valid_roles else "auto"
+
+
+def normalize_positive_seconds(value, default, minimum=1):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
+
+
 def normalize_priority(value, *, default_priority):
     try:
         return max(1, int(value))

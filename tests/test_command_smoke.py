@@ -886,6 +886,11 @@ def test_runtime_priority_and_supported_cli_helpers_preserve_normalization():
         default_priority=50,
     ) == {"GPT": 9, "Claude": 1}
     assert mms_command_tools.normalize_family_priority_overrides([], model_families=model_families, default_priority=50) == {}
+    assert mms_command_tools.normalize_role("PRIMARY", valid_roles={"primary", "auto", "fallback"}) == "primary"
+    assert mms_command_tools.normalize_role("bad", valid_roles={"primary", "auto", "fallback"}) == "auto"
+    assert mms_command_tools.normalize_positive_seconds("0", 30, minimum=5) == 5
+    assert mms_command_tools.normalize_positive_seconds("42", 30, minimum=5) == 42
+    assert mms_command_tools.normalize_positive_seconds("bad", 30, minimum=5) == 30
 
 
 def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():

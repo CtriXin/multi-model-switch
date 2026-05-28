@@ -961,16 +961,15 @@ _VISION_CAPABLE_MODEL_HINTS = ("gemini-",)
 
 def _normalize_role(value):
     """Normalize provider role to one of: primary, auto, fallback."""
-    role = str(value or "auto").strip().lower()
-    return role if role in VALID_ROLES else "auto"
+    from mms_command_tools import normalize_role
+
+    return normalize_role(value, valid_roles=VALID_ROLES)
 
 
 def _normalize_positive_seconds(value, default, minimum=1):
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return max(minimum, parsed)
+    from mms_command_tools import normalize_positive_seconds
+
+    return normalize_positive_seconds(value, default, minimum=minimum)
 
 
 def _default_provider():
