@@ -207,6 +207,66 @@ def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     assert (backup_dir / "CLAUDE.md").read_text(encoding="utf-8") == "old claude"
 
 
+def test_snapshot_drift_prompt_helpers_preserve_tty_gate_and_preview():
+    import mms_command_tools
+
+    class Tty:
+        def __init__(self, value):
+            self.value = value
+
+        def isatty(self):
+            return self.value
+
+    class Panel:
+        def __init__(self, text, **kwargs):
+            self.text = text
+            self.kwargs = kwargs
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, value):
+            self.items.append(value)
+
+    assert mms_command_tools.snapshot_prompt_allowed(stdin=Tty(True), stdout=Tty(True)) is True
+    assert mms_command_tools.snapshot_prompt_allowed(stdin=Tty(True), stdout=Tty(False)) is False
+
+    console = Console()
+    confirm_calls = []
+    confirmed = mms_command_tools.confirm_startup_snapshot_drift(
+        [f"diff-{idx}" for idx in range(14)],
+        accepted_path="/accepted.json",
+        latest_path="/latest.json",
+        ensure_rich=lambda: confirm_calls.append("rich"),
+        panel_cls=Panel,
+        confirm_ask=lambda label, default=False: confirm_calls.append((label, default)) or True,
+        snapshot_prompt_allowed=lambda: True,
+        console=console,
+    )
+    assert confirmed is True
+    assert confirm_calls == ["rich", ("是否接受当前快照并继续启动？", False)]
+    panel = console.items[0]
+    assert panel.kwargs == {"title": "MMS Snapshot Guard", "border_style": "red"}
+    assert "diff-11" in panel.text
+    assert "diff-12" not in panel.text
+    assert "... 还有 2 项" in panel.text
+    assert "accepted: /accepted.json" in panel.text
+    assert "latest:   /latest.json" in panel.text
+
+    console = Console()
+    assert mms_command_tools.confirm_startup_snapshot_drift(
+        ["diff"],
+        accepted_path="/accepted.json",
+        latest_path="/latest.json",
+        ensure_rich=lambda: None,
+        panel_cls=Panel,
+        confirm_ask=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not ask")),
+        snapshot_prompt_allowed=lambda: False,
+        console=console,
+    ) is False
+
+
 def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     import hashlib
     import json

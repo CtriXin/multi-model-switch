@@ -1706,27 +1706,24 @@ def _snapshot_diff_lines(previous_snapshot, current_snapshot):
 
 
 def _snapshot_prompt_allowed():
-    try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except Exception:
-        return False
+    from mms_command_tools import snapshot_prompt_allowed
+
+    return snapshot_prompt_allowed()
 
 
 def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
-    _ensure_rich()
-    preview = "\n".join(f"- {line}" for line in diff_lines[:12])
-    if len(diff_lines) > 12:
-        preview += f"\n- ... 还有 {len(diff_lines) - 12} 项"
-    panel_text = (
-        "检测到 MMS 配置/关键文件与上次确认快照不一致，已阻止静默启动。\n\n"
-        f"{preview}\n\n"
-        f"accepted: {accepted_path}\n"
-        f"latest:   {latest_path}\n"
+    from mms_command_tools import confirm_startup_snapshot_drift
+
+    return confirm_startup_snapshot_drift(
+        diff_lines,
+        accepted_path=accepted_path,
+        latest_path=latest_path,
+        ensure_rich=_ensure_rich,
+        panel_cls=Panel,
+        confirm_ask=Confirm.ask,
+        snapshot_prompt_allowed=_snapshot_prompt_allowed,
+        console=console,
     )
-    console.print(Panel(panel_text, title="MMS Snapshot Guard", border_style="red"))
-    if not _snapshot_prompt_allowed():
-        return False
-    return bool(Confirm.ask("是否接受当前快照并继续启动？", default=False))
 
 
 def _ensure_startup_snapshot_guard(cfg, *, enforce=True):

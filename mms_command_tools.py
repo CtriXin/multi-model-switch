@@ -563,6 +563,42 @@ def update_periodic_snapshot(
     write_json_snapshot(path, payload)
 
 
+def snapshot_prompt_allowed(*, stdin=None, stdout=None):
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    try:
+        return stdin.isatty() and stdout.isatty()
+    except Exception:
+        return False
+
+
+def confirm_startup_snapshot_drift(
+    diff_lines,
+    *,
+    accepted_path,
+    latest_path,
+    ensure_rich,
+    panel_cls,
+    confirm_ask,
+    snapshot_prompt_allowed,
+    console,
+):
+    ensure_rich()
+    preview = "\n".join(f"- {line}" for line in diff_lines[:12])
+    if len(diff_lines) > 12:
+        preview += f"\n- ... 还有 {len(diff_lines) - 12} 项"
+    panel_text = (
+        "检测到 MMS 配置/关键文件与上次确认快照不一致，已阻止静默启动。\n\n"
+        f"{preview}\n\n"
+        f"accepted: {accepted_path}\n"
+        f"latest:   {latest_path}\n"
+    )
+    console.print(panel_cls(panel_text, title="MMS Snapshot Guard", border_style="red"))
+    if not snapshot_prompt_allowed():
+        return False
+    return bool(confirm_ask("是否接受当前快照并继续启动？", default=False))
+
+
 def load_json_file(path, default):
     if not os.path.exists(path):
         return default
