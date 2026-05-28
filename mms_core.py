@@ -5473,11 +5473,12 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             runtime_with_vision_sidecar=_runtime_with_vision_sidecar,
         )
 
-        clean_model_info = _clean_model_info(model_info)
-        env_vars = get_export_env(cli, runtime_runtime)
-        runtime_runtime = tui_flow.apply_claude_network_guard_preview(
-            runtime_runtime,
+        confirm_inputs = tui_flow.prepare_confirm_prompt_inputs(
             cli,
+            model_info,
+            runtime_runtime,
+            clean_model_info=_clean_model_info,
+            get_export_env=get_export_env,
             network_guard_preview_loader=lambda: (
                 lambda launchers: (
                     launchers.get_claude_network_guard_preview,
@@ -5485,6 +5486,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 )
             )(__import__("mms_launchers", fromlist=["get_claude_network_guard_preview", "_claude_bypass_requires_proxy"])),
         )
+        clean_model_info = confirm_inputs["clean_model_info"]
+        env_vars = confirm_inputs["env_vars"]
+        runtime_runtime = confirm_inputs["runtime"]
 
         confirm_prompt = tui_flow.run_confirm_tui_prompt(
             cli,

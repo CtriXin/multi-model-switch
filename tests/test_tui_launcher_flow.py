@@ -33,6 +33,7 @@ from mms_tui_launcher_flow import (
     normalize_confirm_result,
     official_account_profile_context,
     opencode_profile_launch_context,
+    prepare_confirm_prompt_inputs,
     provider_browse_launch_context,
     provider_browse_model_options,
     provider_browse_options,
@@ -124,6 +125,40 @@ def test_apply_claude_network_guard_preview_skips_non_claude_or_non_auth_mode() 
             cli_name,
             network_guard_preview_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         ) is runtime
+
+
+def test_prepare_confirm_prompt_inputs_cleans_exports_and_applies_network_preview() -> None:
+    calls = []
+    model_info = {"model": "raw"}
+    runtime = {"auth_mode": "api_key", "bypass": True}
+
+    def network_guard_loader():
+        return (
+            lambda runtime_arg, *, require_proxy: calls.append(("preview", runtime_arg, require_proxy)) or {"status": "ok"},
+            lambda runtime_arg: calls.append(("requires_proxy", runtime_arg)) or True,
+        )
+
+    result = prepare_confirm_prompt_inputs(
+        "claude",
+        model_info,
+        runtime,
+        clean_model_info=lambda model_info_arg: calls.append(("clean", model_info_arg)) or {"model": "clean"},
+        get_export_env=lambda cli, runtime_arg: calls.append(("env", cli, runtime_arg)) or {"ENV": "1"},
+        network_guard_preview_loader=network_guard_loader,
+    )
+
+    assert result == {
+        "clean_model_info": {"model": "clean"},
+        "env_vars": {"ENV": "1"},
+        "runtime": runtime,
+    }
+    assert runtime["_network_guard"] == {"status": "ok"}
+    assert calls == [
+        ("clean", model_info),
+        ("env", "claude", runtime),
+        ("requires_proxy", runtime),
+        ("preview", runtime, True),
+    ]
 
 
 def test_ensure_cli_installed_for_launch_skips_or_offers_install() -> None:

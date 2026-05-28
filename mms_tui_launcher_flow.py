@@ -1429,6 +1429,25 @@ def apply_claude_network_guard_preview(runtime, cli_name, *, network_guard_previ
     return runtime
 
 
+def prepare_confirm_prompt_inputs(
+    cli_name,
+    model_info,
+    runtime,
+    *,
+    clean_model_info,
+    get_export_env,
+    network_guard_preview_loader,
+):
+    clean = clean_model_info(model_info)
+    env_vars = get_export_env(cli_name, runtime)
+    runtime = apply_claude_network_guard_preview(
+        runtime,
+        cli_name,
+        network_guard_preview_loader=network_guard_preview_loader,
+    )
+    return {"clean_model_info": clean, "env_vars": env_vars, "runtime": runtime}
+
+
 def enforce_confirm_bypass_network_guard(runtime, cli_name, bypass, *, network_guard_enforcer_loader):
     if not (
         bypass
