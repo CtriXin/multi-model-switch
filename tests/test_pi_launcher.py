@@ -105,7 +105,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
             encoding="utf-8"
         )
     )
-    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 5, "baseDelayMs": 1000}
+    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
 
 
@@ -158,7 +158,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert provider["models"][0]["compat"] == {"forceAdaptiveThinking": True}
     assert provider["models"][1]["compat"] == {"forceAdaptiveThinking": True}
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
-    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 5, "baseDelayMs": 1000}
+    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
 
 
@@ -200,7 +200,7 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
-    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 5, "baseDelayMs": 1000}
+    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
 
 
@@ -687,7 +687,7 @@ def test_pi_skips_runtime_blocked_models(monkeypatch, tmp_path):
     assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low"]
 
 
-def test_pi_exposed_model_names_filter_flaky_antigravity_opus(monkeypatch):
+def test_pi_exposed_model_names_recover_antigravity_opus_after_retry_hardening(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(
@@ -711,7 +711,7 @@ def test_pi_exposed_model_names_filter_flaky_antigravity_opus(monkeypatch):
         }
     )
 
-    assert models == ["claude-sonnet-4-6"]
+    assert models == ["claude-opus-4-6-thinking", "claude-opus-4-6", "claude-sonnet-4-6"]
 
 
 def test_pi_rejects_selected_runtime_blocked_model(monkeypatch):

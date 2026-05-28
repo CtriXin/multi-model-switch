@@ -10653,7 +10653,7 @@ def _pi_settings_payload():
     payload = {
         "retry": {
             "enabled": True,
-            "maxRetries": 5,
+            "maxRetries": 8,
             "baseDelayMs": 1000,
         }
     }
@@ -10782,8 +10782,6 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
         "anthropic/claude-opus-4.7": "2026-05-28 live Pi smoke returned key-limit 403 on this relay",
     },
     "us-cpa-local-antigravity": {
-        "claude-opus-4-6": "2026-05-28 stability recheck was mixed (3 pass / 2 request_fail across 5 attempts), so Pi keeps this relay fail-closed",
-        "claude-opus-4-6-thinking": "2026-05-28 stability recheck was mixed (4 pass / 1 request_fail across 5 attempts), so Pi keeps this relay fail-closed",
         "gemini-3-pro-high": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
         "gemini-3-pro-low": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
     },
