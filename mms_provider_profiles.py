@@ -62,12 +62,10 @@ def _load_latest_approved_profiles(config_dir: str) -> tuple[dict[str, Any], boo
     return (payload if isinstance(payload, dict) else {}), True
 
 
-@lru_cache(maxsize=1)
-def load_provider_profiles() -> dict[str, Any]:
-    """Load built-in profiles plus verified latest-approved or legacy overlays."""
+@lru_cache(maxsize=8)
+def _load_provider_profiles_for_config(config_dir: str) -> dict[str, Any]:
     loaded = _read_json(_BUILTIN_PROFILE_PATH)
     profiles = loaded if loaded else {"schema_version": 1, "profiles": {}}
-    config_dir = resolve_mms_config_dir()
     approved_payload, has_latest_approved = _load_latest_approved_profiles(config_dir)
     if has_latest_approved:
         if approved_payload:
@@ -82,6 +80,14 @@ def load_provider_profiles() -> dict[str, Any]:
     if not isinstance(profiles.get("profiles"), dict):
         profiles["profiles"] = {}
     return profiles
+
+
+def load_provider_profiles() -> dict[str, Any]:
+    """Load built-in profiles plus verified latest-approved or legacy overlays."""
+    return _load_provider_profiles_for_config(resolve_mms_config_dir())
+
+
+load_provider_profiles.cache_clear = _load_provider_profiles_for_config.cache_clear  # type: ignore[attr-defined]
 
 
 def _clean(value: Any) -> str:

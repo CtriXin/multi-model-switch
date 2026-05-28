@@ -154,6 +154,46 @@ def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypa
     )
 
 
+def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: Path) -> None:
+    root_a = tmp_path / "root-a"
+    root_b = tmp_path / "root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    mms_registry.write_json_atomic(
+        root_a / "provider-profiles.json",
+        {
+            "schema_version": 1,
+            "profiles": {
+                "root-a-profile": {
+                    "match": {"provider_id_contains": ["cache-provider"]},
+                    "context_windows": {"cache-model": 111_000},
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        root_b / "provider-profiles.json",
+        {
+            "schema_version": 1,
+            "profiles": {
+                "root-b-profile": {
+                    "match": {"provider_id_contains": ["cache-provider"]},
+                    "context_windows": {"cache-model": 222_000},
+                }
+            },
+        },
+    )
+
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(root_a))
+    assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 111_000
+
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(root_b))
+    assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 222_000
+
+
 def test_capability_resolver_uses_verified_latest_approved_by_default(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     approved_caps = {
