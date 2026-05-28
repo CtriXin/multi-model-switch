@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 
@@ -405,3 +406,39 @@ def test_logs_command_shows_copyable_commands(monkeypatch, capsys, tmp_path):
 
     assert "fake-upstream log --tail 7" in out
     assert "guard status" in out
+
+
+def test_script_subcommand_sets_display_prog(monkeypatch, tmp_path):
+    import mms_command_tools
+
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    script_path = script_dir / "smoke_cli_channels.py"
+    script_path.write_text("print('ok')\n", encoding="utf-8")
+    captured = {}
+
+    class Console:
+        def print(self, *_args, **_kwargs):
+            raise AssertionError("console should not be used when script exists")
+
+    class Completed:
+        returncode = 7
+
+    def fake_run(cmd, env):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        return Completed()
+
+    monkeypatch.setattr(mms_command_tools.subprocess, "run", fake_run)
+
+    code = mms_command_tools.handle_test_command(
+        ["--dry-run"],
+        subcommand_name="smoke",
+        script_dir=str(script_dir),
+        command_name="mmg",
+        console=Console(),
+    )
+
+    assert code == 7
+    assert captured["cmd"] == [sys.executable, str(script_path), "--dry-run"]
+    assert captured["env"]["MMS_SUBCOMMAND_PROG"] == "mmg smoke"
