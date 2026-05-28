@@ -6202,6 +6202,17 @@ def select_custom_model(
     return model
 
 
+def select_model_interactive(models_list, *, int_prompt_cls, console, exit_func):
+    while True:
+        try:
+            choice = int_prompt_cls.ask("选择模型编号")
+            if 1 <= choice <= len(models_list):
+                return models_list[choice - 1]
+            console.print(f"[red]请输入 1-{len(models_list)}[/red]")
+        except KeyboardInterrupt:
+            exit_func(0)
+
+
 def build_provider_options_map(
     cfg,
     cli_name,

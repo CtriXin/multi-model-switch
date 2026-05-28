@@ -6189,6 +6189,54 @@ def test_select_custom_model_wrapper_preserves_core_dependencies(monkeypatch):
     assert table.kwargs == {"title": "codex · GPT", "show_lines": True}
 
 
+def test_select_model_interactive_helper_and_wrapper_preserve_prompt_retry(monkeypatch):
+    import pytest
+
+    import mms_command_tools
+    import mms_core
+
+    class FakeIntPrompt:
+        values = iter([3, 2])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    console = _CollectingConsole()
+    assert mms_command_tools.select_model_interactive(
+        ["gpt-5.5", "gpt-5.4"],
+        int_prompt_cls=FakeIntPrompt,
+        console=console,
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    ) == "gpt-5.4"
+    assert console.items == ["[red]请输入 1-2[/red]"]
+
+    class InterruptPrompt:
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            raise KeyboardInterrupt
+
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.select_model_interactive(
+            ["gpt-5.5"],
+            int_prompt_cls=InterruptPrompt,
+            console=console,
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        )
+    assert exc_info.value.code == 0
+
+    class WrapperPrompt:
+        values = iter([1])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    monkeypatch.setattr(mms_core, "IntPrompt", WrapperPrompt)
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+    assert mms_core.select_model_interactive(["gpt-5.5"]) == "gpt-5.5"
+
+
 def test_provider_options_map_helper_preserves_provider_and_account_alternatives():
     import mms_command_tools
 

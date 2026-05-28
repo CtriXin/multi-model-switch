@@ -5059,16 +5059,14 @@ def _clean_model_info(model_info):
 
 
 def select_model_interactive(models_list):
-    while True:
-        try:
-            choice = IntPrompt.ask("选择模型编号")
-            if 1 <= choice <= len(models_list):
-                return models_list[choice - 1]
-            console.print(f"[red]请输入 1-{len(models_list)}[/red]")
-        except KeyboardInterrupt:
-            sys.exit(0)
+    from mms_command_tools import select_model_interactive as select_model_interactive_helper
 
-
+    return select_model_interactive_helper(
+        models_list,
+        int_prompt_cls=IntPrompt,
+        console=console,
+        exit_func=sys.exit,
+    )
 
 # ── Confirmation ────────────────────────────────────────
 
