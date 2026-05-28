@@ -1022,6 +1022,154 @@ def test_mmf_config_mutation_is_blocked_from_legacy_config_path(monkeypatch, tmp
     assert "config apply-plan" in out
 
 
+def test_mmf_preview_runtime_can_use_verified_bundle_without_legacy_config(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "gpt-preview": {
+                    "primary": {
+                        "provider_id": "preview-provider",
+                        "openai_base_url": "https://preview.example/v1",
+                        "api_key": "sk-preview-secret",
+                        "model_id": "gpt-preview",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+
+    cfg = mms_core._load_config_or_preview_bundle()
+    provider = mms_core.resolve_provider_context(cfg, "preview-provider")
+
+    assert cfg["_mms_config_source"] == "latest-approved-bundle"
+    assert cfg["provider"]["default"] == "preview-provider"
+    assert provider["openai_base_url"] == "https://preview.example/v1"
+    assert provider["api_key"] == "sk-preview-secret"
+    assert provider["models_endpoint"] == "manual"
+    assert "gpt-preview" in provider["fallback_models"]
+    assert not (preview_root / "config.toml").exists()
+
+
+def test_mmf_preview_runtime_prefers_verified_bundle_over_legacy_config(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    (preview_root / "config.toml").write_text(
+        """
+[provider]
+default = "stale-provider"
+
+[[providers]]
+id = "stale-provider"
+name = "Stale Provider"
+enabled = true
+protocols = ["openai_chat_completions"]
+supported_clis = ["codex"]
+default_openai_base_url = "https://stale.example/v1"
+fallback_models = ["stale-model"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "gpt-preview": {
+                    "primary": {
+                        "provider_id": "preview-provider",
+                        "openai_base_url": "https://preview.example/v1",
+                        "api_key": "sk-preview-secret",
+                        "model_id": "gpt-preview",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+
+    cfg = mms_core._load_config_or_preview_bundle()
+
+    assert cfg["_mms_config_source"] == "latest-approved-bundle"
+    assert cfg["provider"]["default"] == "preview-provider"
+    assert [item["id"] for item in cfg["providers"]] == ["preview-provider"]
+
+
+def test_mmf_valid_bundle_without_config_reaches_launcher_selection(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "gpt-preview": {
+                    "primary": {
+                        "provider_id": "preview-provider",
+                        "openai_base_url": "https://preview.example/v1",
+                        "api_key": "sk-preview-secret",
+                        "model_id": "gpt-preview",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    calls: list[str] = []
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+    monkeypatch.setattr(sys, "argv", ["mmf"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: None)
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "setup_wizard", lambda *_args, **_kwargs: pytest.fail("legacy setup must not run when bundle is valid"))
+    monkeypatch.setattr(mms_core, "save_config", lambda *_args, **_kwargs: pytest.fail("bundle runtime must stay transient"))
+    monkeypatch.setattr(
+        mms_core,
+        "ensure_models_ready",
+        lambda _cfg, provider: (provider, ["gpt-preview"]),
+    )
+    monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["codex"])
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: True)
+
+    def fake_tui_handler(*_args, **_kwargs):
+        calls.append("tui")
+        return True
+
+    monkeypatch.setattr(mms_core, "_handle_tui_launcher_selection", fake_tui_handler)
+
+    mms_core.main()
+
+    assert calls == ["tui"]
+    assert not (preview_root / "config.toml").exists()
+
+
 def test_mms_numeric_target_no_longer_launches_builtin_scene(monkeypatch, capsys) -> None:
     import mms_core
 

@@ -528,6 +528,7 @@ Current TUI/settings boundary:
 
 Current Stage 6 guard:
 
+- When a preview root has a verified latest-approved Router bundle but no legacy `config.toml`, `mmf` can synthesize a transient in-memory provider config from the bundle for launcher/runtime selection without writing legacy files.
 - `mmf` / selected preview roots no longer create a legacy `config.toml` through the first-run setup wizard when no preview config exists; they stop with `config doctor`, `preview prepare`, and `config apply-plan` guidance.
 - Legacy `mms` first-run setup behavior is unchanged for the stable root.
 - Preview `mmf config` mutating legacy commands such as `provider.default`, `provider.add`, `account.*`, `api.*` writes, `set`, and `unset` are blocked from writing `config.toml` / `credentials.sh`; v2 writes must go through the DB-truth `config apply-plan` path.
