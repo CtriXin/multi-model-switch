@@ -931,6 +931,147 @@ def preview_check(
     }
 
 
+def _file_sha256_if_exists(path: Path) -> str:
+    try:
+        if not path.is_file():
+            return ""
+        return mms_registry.sha256_hex(path.read_bytes())
+    except OSError:
+        return ""
+
+
+def _promotion_bundle_snapshot(bundle_status: Mapping[str, Any]) -> dict[str, Any]:
+    raw_manifest_path = str(bundle_status.get("manifest_path") or bundle_status.get("consumer_entrypoint") or "")
+    manifest_path = Path(raw_manifest_path) if raw_manifest_path else None
+    revisions = bundle_status.get("component_revisions") if isinstance(bundle_status.get("component_revisions"), dict) else {}
+    files = bundle_status.get("files") if isinstance(bundle_status.get("files"), dict) else {}
+    file_summaries: dict[str, dict[str, Any]] = {}
+    secret_file_count = 0
+    for name, info in files.items():
+        if not isinstance(info, Mapping):
+            continue
+        sensitivity = str(info.get("sensitivity") or "")
+        if sensitivity == "secret":
+            secret_file_count += 1
+        file_summaries[str(name)] = {
+            "path": str(info.get("path") or ""),
+            "sha256": str(info.get("sha256") or ""),
+            "sensitivity": sensitivity,
+            "legacy_alias_compat": bool(info.get("legacy_alias_compat", False)),
+        }
+    return {
+        "config_root": str(bundle_status.get("config_root") or ""),
+        "manifest_path": str(manifest_path) if manifest_path is not None else "",
+        "manifest_exists": manifest_path.is_file() if manifest_path is not None else False,
+        "manifest_sha256": _file_sha256_if_exists(manifest_path) if manifest_path is not None else "",
+        "verified": bool(bundle_status.get("verified")),
+        "status": str(bundle_status.get("status") or ""),
+        "result": str(bundle_status.get("result") or ""),
+        "bundle_revision": str(revisions.get("bundle") or ""),
+        "model_registry_revision": str(revisions.get("model_registry") or ""),
+        "route_revision": str(revisions.get("route") or ""),
+        "policy_revision": str(revisions.get("policy") or ""),
+        "profile_revision": str(revisions.get("profile") or ""),
+        "file_count": len(file_summaries),
+        "secret_file_count": secret_file_count,
+        "files": file_summaries,
+        "error": str(bundle_status.get("error") or ""),
+    }
+
+
+def _promotion_bundle_comparison(
+    *,
+    preview_bundle: Mapping[str, Any],
+    stable_bundle: Mapping[str, Any],
+) -> dict[str, Any]:
+    preview = _promotion_bundle_snapshot(preview_bundle)
+    stable = _promotion_bundle_snapshot(stable_bundle)
+    preview_hash = str(preview.get("manifest_sha256") or "")
+    stable_hash = str(stable.get("manifest_sha256") or "")
+    preview_revision = str(preview.get("bundle_revision") or "")
+    stable_revision = str(stable.get("bundle_revision") or "")
+    if not preview.get("verified"):
+        comparison_status = "preview_not_verified"
+    elif not stable.get("manifest_exists"):
+        comparison_status = "stable_bundle_missing"
+    elif not stable.get("verified"):
+        comparison_status = "stable_bundle_invalid"
+    elif preview_hash and stable_hash and preview_hash == stable_hash:
+        comparison_status = "same_manifest_hash"
+    elif preview_revision and stable_revision and preview_revision == stable_revision:
+        comparison_status = "same_bundle_revision"
+    else:
+        comparison_status = "preview_differs_from_stable"
+    return {
+        "read_only": True,
+        "comparison_status": comparison_status,
+        "same_manifest_hash": bool(preview_hash and stable_hash and preview_hash == stable_hash),
+        "same_bundle_revision": bool(preview_revision and stable_revision and preview_revision == stable_revision),
+        "preview": preview,
+        "stable": stable,
+    }
+
+
+def _stable_promotion_backup_plan(stable_root: Path, stable_files: Mapping[str, Path]) -> dict[str, Any]:
+    backup_root = stable_root / "backups" / "stable-promotion" / "pre-promotion-<timestamp>"
+    generated_dir = stable_root / "generated"
+    secret_dir = stable_root / "secrets"
+    accounts_dir = stable_root / "accounts"
+    env_dir = stable_root / "env"
+    protected_items: list[dict[str, Any]] = []
+    sensitivity_by_name = {
+        "credentials_sh": "secret",
+        "registry_db": "internal",
+        "secret_backend": "secret",
+        "accounts_dir": "secret",
+        "env_dir": "secret",
+    }
+    for name, path in stable_files.items():
+        protected_items.append(
+            {
+                "name": name,
+                "path": str(path),
+                "exists": path.exists(),
+                "sensitivity": sensitivity_by_name.get(name, "config"),
+            }
+        )
+    for name, path in (
+        ("generated_dir", generated_dir),
+        ("secret_backend", secret_dir),
+        ("accounts_dir", accounts_dir),
+        ("env_dir", env_dir),
+    ):
+        protected_items.append(
+            {
+                "name": name,
+                "path": str(path),
+                "exists": path.exists(),
+                "sensitivity": sensitivity_by_name.get(name, "config"),
+            }
+        )
+    return {
+        "read_only": True,
+        "would_create_backup": False,
+        "requires_backup_before_apply": True,
+        "requires_human_confirmation": True,
+        "backup_root": str(backup_root),
+        "backup_destinations": {
+            "protected_config_files": str(backup_root / "config"),
+            "registry_db": str(backup_root / "registry"),
+            "generated_bundle": str(backup_root / "generated"),
+            "secret_backend": str(backup_root / "secrets"),
+            "accounts": str(backup_root / "accounts"),
+            "env": str(backup_root / "env"),
+        },
+        "protected_items": protected_items,
+        "notes": [
+            "plan only; no stable backup directory is created by this command",
+            "backup must run through the audited config writer before any stable-root write",
+            "plaintext secret files are listed by path only; contents are never included",
+        ],
+    }
+
+
 def config_v2_promotion_plan(
     *,
     preview_config_dir: str | Path | None = None,
@@ -952,10 +1093,12 @@ def config_v2_promotion_plan(
     stable_root_status = mms_config_root_status(command="mms", config_dir=stable_root, env={})
     check = preview_check(config_dir=preview_root, command_name=command_name)
     bundle = consumer_bundle_status(config_dir=preview_root, command_name=command_name)
+    stable_bundle = consumer_bundle_status(config_dir=stable_root, command_name="mms config bundle")
     preview_ready = check.get("ready") is True and bundle.get("verified") is True
     stable_files = {
         "config_toml": stable_root / "config.toml",
         "credentials_sh": stable_root / "credentials.sh",
+        "usage_json": stable_root / "usage.json",
         "model_policy_json": stable_root / "model-policy.json",
         "provider_profiles_json": stable_root / "provider-profiles.json",
         "legacy_model_routes_json": stable_root / "model-routes.json",
@@ -986,6 +1129,16 @@ def config_v2_promotion_plan(
         "result": result,
         "ready_for_human_review": result == "READY_FOR_HUMAN_PROMOTION_REVIEW",
         "blocked_reasons": blocked_reasons,
+        "promotion_safety": {
+            "read_only": True,
+            "apply_enabled": False,
+            "stable_write_policy": "human_only",
+            "requires_backup": True,
+            "requires_manifest_verification": True,
+            "forbids_silent_preview_to_stable_fallback": True,
+            "plaintext_secrets_in_db": False,
+            "stable_root_human_only": True,
+        },
         "preview": {
             "root": preview_root_status,
             "check": {
@@ -1009,6 +1162,8 @@ def config_v2_promotion_plan(
                 for name, path in stable_files.items()
             },
         },
+        "stable_backup_plan": _stable_promotion_backup_plan(stable_root, stable_files),
+        "bundle_comparison": _promotion_bundle_comparison(preview_bundle=bundle, stable_bundle=stable_bundle),
         "would_write": {
             "stable_config_root": False,
             "stable_registry_db": False,
@@ -1027,6 +1182,12 @@ def config_v2_promotion_plan(
             "./mmf config check --json",
             "./mmf config bundle --json",
             f"scripts/mms_health_watchdog.py --config-dir {shlex.quote(str(preview_root))} --require-bundle --dry-run --print-json",
+        ],
+        "post_promotion_verify_commands": [
+            f"MMS_CONFIG_ROOT={shlex.quote(str(stable_root))} ./mms config root --json",
+            f"MMS_CONFIG_ROOT={shlex.quote(str(stable_root))} ./mms config check --json",
+            f"MMS_CONFIG_ROOT={shlex.quote(str(stable_root))} ./mms config bundle --json",
+            f"scripts/mms_health_watchdog.py --config-dir {shlex.quote(str(stable_root))} --require-bundle --dry-run --print-json",
         ],
         "manual_promotion_outline": [
             "freeze launch/background writes during the promotion window",
@@ -3424,6 +3585,13 @@ def _print_config_v2_promotion_plan(summary: dict[str, Any]) -> None:
     print(f"preview_check_ready={preview_check_summary.get('ready')}")
     print(f"bundle_verified={preview_bundle.get('verified')}")
     print(f"bundle_entrypoint={preview_bundle.get('entrypoint', '')}")
+    safety = summary.get("promotion_safety") if isinstance(summary.get("promotion_safety"), dict) else {}
+    comparison = summary.get("bundle_comparison") if isinstance(summary.get("bundle_comparison"), dict) else {}
+    backup_plan = summary.get("stable_backup_plan") if isinstance(summary.get("stable_backup_plan"), dict) else {}
+    print(f"stable_write_policy={safety.get('stable_write_policy', '')}")
+    print(f"backup_required={backup_plan.get('requires_backup_before_apply', False)}")
+    print(f"backup_would_create={backup_plan.get('would_create_backup', False)}")
+    print(f"bundle_comparison={comparison.get('comparison_status', '')}")
     print(f"blocked_reasons={','.join(str(item) for item in (summary.get('blocked_reasons') or []))}")
     next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
     print(f"next_action={next_action.get('label', '')}")
@@ -3432,6 +3600,8 @@ def _print_config_v2_promotion_plan(summary: dict[str, Any]) -> None:
         print(f"human_gate_{index}={gate}")
     for index, command in enumerate(summary.get("preflight_commands") or [], start=1):
         print(f"preflight_{index}={command}")
+    for index, command in enumerate(summary.get("post_promotion_verify_commands") or [], start=1):
+        print(f"post_verify_{index}={command}")
 
 
 def _print_consumer_bundle_status(summary: dict[str, Any]) -> None:

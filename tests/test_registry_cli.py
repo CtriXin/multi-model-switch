@@ -2367,14 +2367,29 @@ def test_config_v2_promotion_plan_stops_at_human_gate_for_ready_preview(tmp_path
     assert summary["ready_for_human_review"] is True
     assert "stable_root_human_only" in summary["blocked_reasons"]
     assert "promotion_apply_not_implemented" in summary["blocked_reasons"]
+    assert summary["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert summary["promotion_safety"]["requires_backup"] is True
+    assert summary["promotion_safety"]["forbids_silent_preview_to_stable_fallback"] is True
     assert summary["would_write"]["stable_config_root"] is False
     assert summary["would_write"]["claude_config"] is False
     assert summary["preview"]["bundle"]["verified"] is True
     assert summary["stable"]["files"]["config_toml"]["exists"] is True
+    assert summary["stable_backup_plan"]["read_only"] is True
+    assert summary["stable_backup_plan"]["would_create_backup"] is False
+    assert summary["stable_backup_plan"]["requires_backup_before_apply"] is True
+    protected_names = {item["name"] for item in summary["stable_backup_plan"]["protected_items"]}
+    assert {"config_toml", "credentials_sh", "registry_db", "secret_backend"}.issubset(protected_names)
+    assert summary["bundle_comparison"]["read_only"] is True
+    assert summary["bundle_comparison"]["preview"]["verified"] is True
+    assert summary["bundle_comparison"]["preview"]["manifest_sha256"]
+    assert summary["bundle_comparison"]["stable"]["verified"] is False
+    assert summary["bundle_comparison"]["comparison_status"] == "stable_bundle_missing"
     assert summary["next_action"]["label"].startswith("Human gate")
     assert any("--dry-run --print-json" in item for item in summary["preflight_commands"])
+    assert any("./mms config bundle --json" in item for item in summary["post_promotion_verify_commands"])
     assert "sk-promote-plan-secret" not in combined
     assert not (stable_dir / "registry").exists()
+    assert not (stable_dir / "backups").exists()
 
 
 def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> None:
@@ -2408,6 +2423,9 @@ def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> Non
     assert payload["status"] == "human_gate"
     assert payload["stable"]["root"]["config_root"] == str(stable_dir)
     assert payload["would_write"]["stable_secret_backend"] is False
+    assert payload["promotion_safety"]["apply_enabled"] is False
+    assert payload["stable_backup_plan"]["would_create_backup"] is False
+    assert payload["bundle_comparison"]["preview"]["verified"] is True
     assert "human must approve any stable" in payload["human_gates"][0]
     assert "sk-promote-wrapper-secret" not in combined
     assert not stable_dir.exists()
@@ -2434,6 +2452,8 @@ def test_mms_config_promote_plan_strict_exit_fails_when_preview_not_ready(tmp_pa
     assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
     assert payload["ready_for_human_review"] is False
     assert "preview_not_runtime_ready" in payload["blocked_reasons"]
+    assert payload["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert payload["bundle_comparison"]["preview"]["verified"] is False
     assert payload["would_write"]["stable_config_root"] is False
     assert not (config_dir / "registry").exists()
 
