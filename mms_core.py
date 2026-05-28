@@ -3616,70 +3616,20 @@ def _config_truthy(value, default=False):
 
 
 def _vision_sidecar_model_candidates_for_provider(provider_id):
-    normalized = str(provider_id or "").strip().lower()
-    generic = [
-        "mimo-v2.5",
-        "mimo-v2-omni",
-        "K2.6",
-        "K2.6-code-preview",
-        "kimi-k2.5",
-        "qwen3.6-flash",
-        "qwen3.6-plus",
-    ]
-    if "mimo" in normalized:
-        return ["mimo-v2.5", "mimo-v2-omni"]
-    if "kimi" in normalized:
-        return ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
-    if "qwen" in normalized:
-        return ["qwen3.6-plus", "qwen3.6-flash"]
-    return generic
+    from mms_command_tools import vision_sidecar_model_candidates_for_provider
+
+    return vision_sidecar_model_candidates_for_provider(provider_id)
 
 
 def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", explicit_provider_id=""):
-    configured = (raw.get("candidates") or raw.get("routes")) if isinstance(raw, dict) else None
-    pairs = []
+    from mms_command_tools import vision_sidecar_candidate_pairs
 
-    def _append(provider_id, model):
-        provider_id = str(provider_id or "").strip()
-        model = str(model or "").strip()
-        if provider_id and model and (provider_id, model) not in pairs:
-            pairs.append((provider_id, model))
-
-    if isinstance(configured, list):
-        for item in configured:
-            if not isinstance(item, dict):
-                continue
-            provider_id = item.get("provider_id") or item.get("provider")
-            model = item.get("model") or item.get("vision_model")
-            _append(provider_id, model)
-
-    if explicit_model:
-        for provider_id in provider_ids:
-            _append(provider_id, explicit_model)
-        return pairs
-
-    if explicit_provider_id:
-        for model in _vision_sidecar_model_candidates_for_provider(explicit_provider_id):
-            _append(explicit_provider_id, model)
-        return pairs
-
-    preferred_pairs = [
-        ("mimo-direct-anthropic", "mimo-v2.5"),
-        ("direct-mimo", "mimo-v2.5"),
-        ("direct-kimi", "K2.6"),
-        ("newapi-personal-kimi", "K2.6-code-preview"),
-        ("newapi-personal-kimi", "kimi-k2.5"),
-        ("direct-qwen", "qwen3.6-plus"),
-        ("newapi-personal-qwen", "qwen3.6-plus"),
-        ("newapi-personal-tokyo", "K2.6"),
-        ("xin", "K2.6"),
-    ]
-    for provider_id, model in preferred_pairs:
-        _append(provider_id, model)
-    for provider_id in provider_ids:
-        for model in _vision_sidecar_model_candidates_for_provider(provider_id):
-            _append(provider_id, model)
-    return pairs
+    return vision_sidecar_candidate_pairs(
+        raw,
+        provider_ids,
+        explicit_model=explicit_model,
+        explicit_provider_id=explicit_provider_id,
+    )
 
 
 def _runtime_with_vision_sidecar(cfg, runtime):

@@ -708,6 +708,37 @@ def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     ]
 
 
+def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
+    import mms_command_tools
+
+    assert mms_command_tools.vision_sidecar_model_candidates_for_provider("direct-mimo") == ["mimo-v2.5", "mimo-v2-omni"]
+    assert mms_command_tools.vision_sidecar_model_candidates_for_provider("newapi-personal-kimi") == ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
+    assert mms_command_tools.vision_sidecar_model_candidates_for_provider("direct-qwen") == ["qwen3.6-plus", "qwen3.6-flash"]
+    assert mms_command_tools.vision_sidecar_model_candidates_for_provider("other")[:3] == ["mimo-v2.5", "mimo-v2-omni", "K2.6"]
+
+    configured = {
+        "routes": [
+            {"provider": "configured", "vision_model": "vision-a"},
+            {"provider_id": "configured", "model": "vision-a"},
+            {"provider_id": "second", "model": "vision-b"},
+            "bad",
+        ]
+    }
+    assert mms_command_tools.vision_sidecar_candidate_pairs(configured, ["direct-mimo"])[:3] == [
+        ("configured", "vision-a"),
+        ("second", "vision-b"),
+        ("mimo-direct-anthropic", "mimo-v2.5"),
+    ]
+    assert mms_command_tools.vision_sidecar_candidate_pairs({}, ["a", "b"], explicit_model="chosen") == [
+        ("a", "chosen"),
+        ("b", "chosen"),
+    ]
+    assert mms_command_tools.vision_sidecar_candidate_pairs({}, ["ignored"], explicit_provider_id="direct-qwen") == [
+        ("direct-qwen", "qwen3.6-plus"),
+        ("direct-qwen", "qwen3.6-flash"),
+    ]
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
