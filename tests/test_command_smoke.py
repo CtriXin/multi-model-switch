@@ -907,6 +907,62 @@ def test_config_validate_handler_prints_success_and_failure():
     assert any("bad provider" in str(item) for item in console.items)
 
 
+def test_session_list_info_display_helpers():
+    import pytest
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    rows = [
+        {
+            "session_id": "session-1",
+            "project_path": "/tmp/demo",
+            "account_id": "claude-a",
+            "last_active_at": "2026-05-28",
+        },
+        {
+            "pid": 123,
+            "project_path": "",
+            "runtime_kind": "provider",
+            "started_at": "2026-05-27",
+            "exit_code": 7,
+        },
+    ]
+
+    mms_command_tools.handle_session_ls(
+        "claude",
+        list_indexed_sessions=lambda cli_name: rows,
+        table_cls=_FakeTable,
+        console=console,
+    )
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.rows[0][0] == ("session-1", "demo", "claude-a", "active", "2026-05-28")
+    assert table.rows[1][0] == ("pid-123", "-", "provider", "active", "2026-05-27")
+
+    console.items.clear()
+    mms_command_tools.handle_session_info(
+        "session-1",
+        "claude",
+        get_indexed_session=lambda session_id, cli_name: {"session_id": session_id, "extra": "value"},
+        table_cls=_FakeTable,
+        console=console,
+    )
+    info_table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert ("session_id", "session-1") in [row for row, _kwargs in info_table.rows]
+    assert ("extra", "value") in [row for row, _kwargs in info_table.rows]
+
+    console.items.clear()
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.handle_session_info(
+            "missing",
+            "claude",
+            get_indexed_session=lambda session_id, cli_name: None,
+            table_cls=_FakeTable,
+            console=console,
+        )
+    assert exc.value.code == 1
+    assert any("找不到 session: missing" in str(item) for item in console.items)
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

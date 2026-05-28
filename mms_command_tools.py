@@ -292,6 +292,86 @@ def handle_config_validate(cfg, *, validate_config, console):
     console.print("[green]✓ 配置校验通过[/green]")
 
 
+def session_status_label(item):
+    session_id = str(item.get("session_id") or "").strip()
+    if not session_id:
+        return "active"
+    if item.get("stale_cleanup"):
+        return "stale-finalized"
+    if item.get("exit_code") is None:
+        return "active"
+    return f"exit:{item.get('exit_code')}"
+
+
+def session_display_id(item):
+    session_id = str(item.get("session_id") or "").strip()
+    if session_id:
+        return session_id
+    pid = item.get("pid")
+    return f"pid-{pid}" if pid is not None else "-"
+
+
+def handle_session_ls(cli_name, *, list_indexed_sessions, table_cls, console):
+    rows = list_indexed_sessions(cli_name=cli_name)
+    if not rows:
+        console.print(f"[yellow]当前没有已索引的 {cli_name} session[/yellow]")
+        return
+
+    table = table_cls(title=f"{cli_name} session 列表", show_lines=True)
+    table.add_column("ID", style="cyan")
+    table.add_column("项目", style="green")
+    table.add_column("来源", style="magenta")
+    table.add_column("状态", style="yellow")
+    table.add_column("最近活动", style="blue")
+    for item in rows:
+        project_name = os.path.basename(str(item.get("project_path", "")).rstrip(os.sep)) or "-"
+        source_label = str(item.get("account_id") or item.get("runtime_kind") or "-")
+        last_active = str(item.get("last_active_at") or item.get("started_at") or "-")
+        table.add_row(
+            session_display_id(item),
+            project_name,
+            source_label,
+            session_status_label(item),
+            last_active,
+        )
+    console.print(table)
+
+
+def handle_session_info(session_id, cli_name, *, get_indexed_session, table_cls, console):
+    item = get_indexed_session(session_id, cli_name=cli_name)
+    if item is None:
+        console.print(f"[red]找不到 session: {session_id}[/red]")
+        sys.exit(1)
+
+    table = table_cls(title=f"{cli_name} session 详情")
+    table.add_column("字段", style="cyan")
+    table.add_column("值", style="green")
+    ordered_keys = [
+        "session_id",
+        "project_key",
+        "project_path",
+        "account_id",
+        "runtime_kind",
+        "pid",
+        "cwd",
+        "started_at",
+        "last_active_at",
+        "exit_code",
+        "stale_cleanup",
+        "slot_home",
+        "_path",
+    ]
+    seen = set()
+    for key in ordered_keys:
+        seen.add(key)
+        table.add_row(key, str(item.get(key, "")))
+    for key in sorted(item):
+        if key in seen:
+            continue
+        table.add_row(str(key), str(item.get(key, "")))
+    console.print(table)
+
+
 def is_config_help_request(args_rest):
     if not args_rest:
         return False
