@@ -585,6 +585,28 @@ def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
     assert ("doctor", "Registry Doctor / 状态") in registry_actions
 
 
+def test_model_source_and_speed_labels_preserve_thresholds():
+    import mms_command_tools
+
+    assert mms_command_tools.model_source_label("remote") == "远端列表"
+    assert mms_command_tools.model_source_label("fallback") == "内置回退"
+    assert mms_command_tools.model_source_label("manual") == "手工列表"
+    assert mms_command_tools.model_source_label("extra") == "手工补充"
+    assert mms_command_tools.model_source_label("derived_alias") == "本地别名"
+    assert mms_command_tools.model_source_label("custom") == "custom"
+    assert mms_command_tools.model_source_label("") == "-"
+    assert mms_command_tools.ttfb_label(None) == "暂无数据"
+    assert mms_command_tools.ttfb_label(1199) == "很快"
+    assert mms_command_tools.ttfb_label(1200) == "正常"
+    assert mms_command_tools.ttfb_label(2500) == "偏慢"
+    assert mms_command_tools.ttfb_label(4500) == "很慢"
+    assert mms_command_tools.tps_label(None) == "暂无数据"
+    assert mms_command_tools.tps_label(80) == "很快"
+    assert mms_command_tools.tps_label(40) == "正常"
+    assert mms_command_tools.tps_label(20) == "偏慢"
+    assert mms_command_tools.tps_label(19.9) == "很慢"
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
