@@ -1974,6 +1974,57 @@ def test_config_nested_helpers_and_coercion():
     assert mms_core._mask_key("abcd1234efgh") == "abcd****efgh"
 
 
+def test_config_normalization_helpers_preserve_legacy_shapes():
+    import mms_command_tools
+    import mms_core
+
+    preset = mms_command_tools.normalize_preset_entry(
+        "demo",
+        {
+            "cli": " Codex ",
+            "account": " Main Account! ",
+            "sonnet": "claude-sonnet-4.5",
+            "temperature": 0.2,
+        },
+    )
+    assert preset == {
+        "cli": "codex",
+        "account": "main-account",
+        "model": "claude-sonnet-4.5",
+        "temperature": 0.2,
+    }
+    assert mms_command_tools.normalize_preset_entry("legacy", "gpt-5.5") == {"cli": "claude", "model": "gpt-5.5"}
+
+    cfg, changed = mms_command_tools.normalize_presets_config(
+        {"presets": {" demo ": "gpt-5.5", "": {"cli": "claude"}}}
+    )
+    assert changed is True
+    assert cfg["presets"] == {"demo": {"cli": "claude", "model": "gpt-5.5"}}
+
+    user_cfg, changed = mms_command_tools.normalize_user_config(
+        {"user": {"role": "dev", "note": "keep"}},
+        mode_all="all",
+        normalize_user_role=lambda value: "recommended" if value == "recommended" else "all",
+    )
+    assert changed is True
+    assert user_cfg["user"] == {"role": "all", "note": "keep"}
+
+    cache_cfg, changed = mms_command_tools.normalize_cache_config(
+        {"cache": {"probe_async_refresh_after_sec": "0", "probe_async_min_interval_sec": "bad", "extra": "drop"}},
+        probe_async_refresh_after=1800,
+        probe_async_min_interval=300,
+    )
+    assert changed is True
+    assert cache_cfg["cache"] == {
+        "probe_async_refresh_after_sec": 1,
+        "probe_async_min_interval_sec": 300,
+    }
+
+    wrapped_cache_cfg, changed = mms_core._normalize_cache_config({"cache": {}})
+    assert changed is True
+    assert wrapped_cache_cfg["cache"]["probe_async_refresh_after_sec"] > 0
+
+
 def test_config_validator_reports_provider_account_errors():
     import mms_command_tools
     import mms_core
