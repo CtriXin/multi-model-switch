@@ -151,12 +151,14 @@ For legacy `.ai/plan/current.md` projects, use the runtime guard below.
 
 ## Runtime Guard
 
-From any repo root, only when using the legacy `.ai/plan/current.md` contract:
+From any repo root, only when using the legacy `.ai/plan/current.md` contract.
+In examples, `<handover-root>` means the directory containing this `SKILL.md`
+or the target of the installed `handover` skill symlink:
 
 ```bash
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py status --root .
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py claim --root . --task-id <id> --owner <agent> --cli <cli> --model <model> --next-action "<next>"
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py audit --root .
+python3 <handover-root>/scripts/handover_current.py status --root .
+python3 <handover-root>/scripts/handover_current.py claim --root . --task-id <id> --owner <agent> --cli <cli> --model <model> --next-action "<next>"
+python3 <handover-root>/scripts/handover_current.py audit --root .
 ```
 
 If the project has its own guard script, use the project-local one.
@@ -240,7 +242,7 @@ native resume or a full transcript replay.
 The managed global skill installer is:
 
 ```bash
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/install_global_commands.py
+python3 <handover-root>/scripts/install_global_commands.py
 ```
 
 It creates or updates `handover` skill symlinks, `offduty` / `onduty` skill
@@ -248,6 +250,10 @@ alias symlinks for Codex `$offduty` / `$onduty`, and removes old managed
 `/offduty` / `/onduty` command-file symlinks so command/skill pickers do not
 show duplicates. It is idempotent and skips unmanaged existing files instead of
 overwriting them.
+
+The `offduty` and `onduty` alias directories include same-name wrapper scripts
+that delegate to `../../scripts/*` relative to the installed alias. Use those
+wrappers instead of any developer-machine absolute path.
 
 The `mobius` skill runs this installer on trigger, so a user who has invoked
 Mobius should get the continuity package loaded globally without extra
@@ -263,8 +269,8 @@ Default user UX is bare:
 /onduty
 $offduty
 $onduty
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty
-/Users/xin/auto-skills/shared-skills/handover/scripts/onduty
+<offduty-skill-dir>/offduty
+<onduty-skill-dir>/onduty
 ```
 
 When the user says `$offduty`, `/offduty`, or `offduty` with no parameters, do
@@ -306,7 +312,7 @@ concrete task line, and let the helper cap long names with a short hash suffix.
 Options are script overrides, not normal user-facing requirements:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>" --task-id <task-id> --summary "<current truth>" --next-action "<next>"
+<offduty-skill-dir>/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>" --task-id <task-id> --summary "<current truth>" --next-action "<next>"
 ```
 
 Rules:

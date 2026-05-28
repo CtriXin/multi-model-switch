@@ -182,7 +182,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Preview root 下 legacy 确认保存会被阻止" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
     assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
-    assert "preview root 写 DB candidate、preview secret backend 和 generated bundle" in html
+    assert "preview root 走 DB candidate + latest-approved publish" in html
     assert "stable 写 credentials.sh；preview 写 secret backend" in html
     assert "这里会写入 config.toml 的 [rescue]" not in html
     assert "保存时更新 credentials.sh（需要填写 API Key；会 backup + audit）" not in html
@@ -190,11 +190,19 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "applyV2Preview').disabled=!preview" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
-    assert "card span8 provider-editor" in html
-    assert ".provider-editor{position:sticky" in html
+    assert "card provider-editor" in html
+    assert ".provider-editor {" in html
+    assert "position: sticky;" in html
+    assert "provider-tabs" in html
+    assert "saveProviderForm" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "通道修改已暂存，生成保存预览后再写入" in html
+    assert "function providerEntries()" in html
+    assert "a.p.enabled?-1:1" in html
+    assert "renderProviderList();renderTestSelectors();" in html
+    assert "通道修改已暂存，生成保存预览后再写入" in html
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
@@ -254,6 +262,7 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     assert "modelOptionValue" in html
     assert "providerOptions(provider,{auto:true,enabledOnly:true})" in html
     assert "modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})" in html
+    assert "const entry=rosterEntry(agent,row);tr.querySelector" in html
     assert "state.opencode.agent_models={};" in html
     assert "state.opencode.agent_roster={};" in html
     assert "session-local opencode.json" in html

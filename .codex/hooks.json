@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath' | { read -r f; echo \"$f\" | grep -qE '/Users/xin/auto-skills/CtriXin-repo/mindkeeper/src/.*[.]ts$' && cd /Users/xin/auto-skills/CtriXin-repo/mindkeeper && npm run build; } 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Building mindkeeper..."
+          }
+        ]
+      }
+    ]
+  }
+}

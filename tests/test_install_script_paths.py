@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -83,6 +84,13 @@ def _run_handover_installer(home: Path) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+def _install_handover_vendor_fixture(home: Path) -> Path:
+    handover_target = home / ".mms" / "vendor" / "handover"
+    handover_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(ROOT_DIR / "vendor" / "handover", handover_target, symlinks=True)
+    return handover_target
 
 
 def test_cleanup_legacy_global_session_hooks_removes_stale_nsr_and_read_once_dupes(tmp_path):
@@ -631,10 +639,9 @@ def test_install_script_uses_bundled_handover_continuity_pack():
 
     assert "install_builtin_handover_continuity" in text
     assert "$MMS_HOME/vendor/handover" in text
-    assert "$SOURCE_DIR/vendor/handover" in text
     assert 'HOME="$REAL_HOME" "$(_python_bin)" "$installer_script"' in text
-    if '$REAL_HOME/auto-skills/shared-skills/handover' in text:
-        assert text.index('$MMS_HOME/vendor/handover') < text.index('$REAL_HOME/auto-skills/shared-skills/handover')
+    assert "$SOURCE_DIR/vendor/handover" not in text
+    assert "$REAL_HOME/auto-skills/shared-skills/handover" not in text
     assert (ROOT_DIR / "vendor" / "handover" / "scripts" / "install_global_commands.py").exists()
 
 
@@ -737,6 +744,43 @@ def test_handover_installer_installs_skill_surfaces_without_commands(tmp_path):
         assert not (command_root / "onduty.md").exists()
 
 
+def test_handover_public_docs_do_not_hardcode_developer_handover_path():
+    """Public handover docs must not tell agents to run a developer checkout path."""
+    root = ROOT_DIR / "vendor" / "handover"
+    offenders = []
+    for path in root.rglob("*.md"):
+        text = path.read_text(encoding="utf-8")
+        if "/Users/xin/auto-skills/shared-skills/handover" in text:
+            offenders.append(str(path.relative_to(ROOT_DIR)))
+
+    assert offenders == []
+
+
+def test_handover_alias_wrappers_resolve_from_public_skill_symlink(tmp_path):
+    """Alias wrapper scripts must work when installed under an arbitrary HOME."""
+    home = tmp_path / "home"
+    skill_root = home / ".codex" / "skills"
+    skill_root.mkdir(parents=True)
+    (skill_root / "offduty").symlink_to(ROOT_DIR / "vendor" / "handover" / "aliases" / "offduty")
+    (skill_root / "onduty").symlink_to(ROOT_DIR / "vendor" / "handover" / "aliases" / "onduty")
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    for name in ("offduty", "onduty"):
+        wrapper = skill_root / name / name
+        completed = subprocess.run(
+            [str(wrapper), "--help"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        output = completed.stdout + completed.stderr
+        assert completed.returncode == 0, output
+        assert f"continuity.py {name}" in output
+
+
 def test_handover_installer_is_idempotent_on_repeat_runs(tmp_path):
     first = _run_handover_installer(tmp_path)
     second = _run_handover_installer(tmp_path)
@@ -813,7 +857,7 @@ def test_handover_installer_preserves_unmanaged_command_files(tmp_path):
 
 
 def test_install_check_reports_handover_installed_when_all_skill_symlinks_present(tmp_path):
-    """--check reports installed only when all managed skill surfaces are present."""
+    """--check reports installed only when all managed skill surfaces point to bundled vendor."""
     home = tmp_path / "home"
     skill_roots = [
         home / ".agents" / "skills",
@@ -822,11 +866,9 @@ def test_install_check_reports_handover_installed_when_all_skill_symlinks_presen
         home / ".config" / "opencode" / "skills",
         home / ".opencode" / "skills",
     ]
-    handover_target = home / "handover"
-    offduty_target = home / "offduty"
-    onduty_target = home / "onduty"
-    for target in (handover_target, offduty_target, onduty_target):
-        target.mkdir(parents=True, exist_ok=True)
+    handover_target = _install_handover_vendor_fixture(home)
+    offduty_target = handover_target / "aliases" / "offduty"
+    onduty_target = handover_target / "aliases" / "onduty"
 
     for skill_dir in skill_roots:
         skill_dir.mkdir(parents=True)
@@ -846,6 +888,73 @@ def test_install_check_reports_handover_installed_when_all_skill_symlinks_presen
     assert ("offduty/onduty skill 已安装" in output) or ("offduty/onduty skills installed" in output)
 
 
+def test_install_check_reports_handover_missing_when_skill_symlinks_target_old_source(tmp_path):
+    """--check rejects stale handover symlinks even when all names exist."""
+    home = tmp_path / "home"
+    skill_roots = [
+        home / ".agents" / "skills",
+        home / ".claude" / "skills",
+        home / ".codex" / "skills",
+        home / ".config" / "opencode" / "skills",
+        home / ".opencode" / "skills",
+    ]
+    stale_root = tmp_path / "old-shared-skills" / "handover"
+    stale_offduty = stale_root / "aliases" / "offduty"
+    stale_onduty = stale_root / "aliases" / "onduty"
+    for target in (stale_root, stale_offduty, stale_onduty):
+        target.mkdir(parents=True, exist_ok=True)
+
+    for skill_dir in skill_roots:
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "handover").symlink_to(stale_root)
+        (skill_dir / "offduty").symlink_to(stale_offduty)
+        (skill_dir / "onduty").symlink_to(stale_onduty)
+
+    output = _run_install_check(
+        home=home,
+        extra_env={
+            "REAL_HOME": str(home),
+            "MMS_REAL_HOME": str(home),
+            "ORIGINAL_HOME": str(home),
+        },
+    )
+
+    assert ("offduty/onduty skill 未安装" in output) or ("offduty/onduty skills not installed" in output)
+
+
+def test_install_check_reports_handover_missing_when_legacy_commands_exist(tmp_path):
+    """--check rejects duplicate legacy command surfaces next to skill aliases."""
+    home = tmp_path / "home"
+    skill_roots = [
+        home / ".agents" / "skills",
+        home / ".claude" / "skills",
+        home / ".codex" / "skills",
+        home / ".config" / "opencode" / "skills",
+        home / ".opencode" / "skills",
+    ]
+    handover_target = _install_handover_vendor_fixture(home)
+    for skill_dir in skill_roots:
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "handover").symlink_to(handover_target)
+        (skill_dir / "offduty").symlink_to(handover_target / "aliases" / "offduty")
+        (skill_dir / "onduty").symlink_to(handover_target / "aliases" / "onduty")
+
+    commands_dir = home / ".codex" / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "offduty.md").symlink_to(handover_target / "commands" / "offduty.md")
+
+    output = _run_install_check(
+        home=home,
+        extra_env={
+            "REAL_HOME": str(home),
+            "MMS_REAL_HOME": str(home),
+            "ORIGINAL_HOME": str(home),
+        },
+    )
+
+    assert ("offduty/onduty skill 未安装" in output) or ("offduty/onduty skills not installed" in output)
+
+
 def test_install_check_reports_handover_missing_when_opencode_skill_symlinks_absent(tmp_path):
     """--check stays missing when only Claude/Codex skill symlinks exist."""
     home = tmp_path / "home"
@@ -853,11 +962,9 @@ def test_install_check_reports_handover_missing_when_opencode_skill_symlinks_abs
     codex_skills = home / ".codex" / "skills"
     claude_skills.mkdir(parents=True)
     codex_skills.mkdir(parents=True)
-    handover_target = home / "handover"
-    offduty_target = home / "offduty"
-    onduty_target = home / "onduty"
-    for target in (handover_target, offduty_target, onduty_target):
-        target.mkdir(parents=True, exist_ok=True)
+    handover_target = _install_handover_vendor_fixture(home)
+    offduty_target = handover_target / "aliases" / "offduty"
+    onduty_target = handover_target / "aliases" / "onduty"
 
     for skill_dir in (claude_skills, codex_skills):
         (skill_dir / "handover").symlink_to(handover_target)
@@ -908,6 +1015,15 @@ def test_install_script_dry_run_mentions_offduty_onduty(tmp_path):
     assert ("would install" in stdout.lower() or "would install/repair" in stdout or "would install" in stdout), (
         f"--dry-run output should include 'would install'; got: {stdout[:500]}"
     )
+
+
+def test_install_completion_hints_include_config_web():
+    """Install completion guide should point users at the browser config center."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "mms config web" in text
+    assert "$BIN_DIR/mms config web" in text
+    assert "打开浏览器配置中心" in text
 
 
 def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):

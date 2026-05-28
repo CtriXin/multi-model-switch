@@ -22,19 +22,26 @@ argument-hint: [optional note]
 4. 如果能可靠提炼，记录：当前真相、重要失败尝试/反转、validation、risk、next action、session_id、model_name。
 5. 默认写入 `.agent.local/continuity/`。只有项目明确要求 legacy 时才加 `--layout legacy-ai-plan`。
    同时默认写 `.agent.local/continuity/lifeboat/*.md/json`，并 best-effort 调用 `bkc` 写 `.ai/continuity/` 备份；`bkc` 失败只记录，不阻塞。
-6. 在每个实际 repo root 运行：
+6. 先从已安装的 skill alias 解析 helper，不能使用某台开发机的绝对路径：
+   - 优先使用 `<directory-containing-this-SKILL.md>/offduty`。
+   - 如果看不到当前 skill 目录，就在 `${MMS_REAL_HOME:-}`、`${REAL_HOME:-}`、
+     `${ORIGINAL_HOME:-}`、`$HOME` 下找这些 alias wrapper：
+     `.agents/skills/offduty/offduty`、`.claude/skills/offduty/offduty`、
+     `.codex/skills/offduty/offduty`、`.config/opencode/skills/offduty/offduty`、
+     `.opencode/skills/offduty/offduty`。
+7. 在每个实际 repo root 运行：
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>"
+"<offduty-skill-dir>/offduty" --root "<actual-repo-root>" --cwd "<actual-work-cwd>"
 ```
 
-7. 如果你已经明确知道摘要/下一步/模型名，可传少量 override，但不是必须：
+8. 如果你已经明确知道摘要/下一步/模型名，可传少量 override，但不是必须：
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>" --model "<model-name>" --summary "<current truth>" --next-action "<next>"
+"<offduty-skill-dir>/offduty" --root "<actual-repo-root>" --cwd "<actual-work-cwd>" --model "<model-name>" --summary "<current truth>" --next-action "<next>"
 ```
 
-8. 回执只说每个 root/cwd 写到哪些路径、session_id/hash/model 是什么、下一次 `/onduty` 或 `$onduty` 怎么恢复；不要输出长交接全文。
-9. 做 deterministic 测试时可以加 `--bkc off`；只有已经有其它 capsule 时才使用 `--no-lifeboat`。
+9. 回执只说每个 root/cwd 写到哪些路径、session_id/hash/model 是什么、下一次 `/onduty` 或 `$onduty` 怎么恢复；不要输出长交接全文。
+10. 做 deterministic 测试时可以加 `--bkc off`；只有已经有其它 capsule 时才使用 `--no-lifeboat`。
 
 如果当前请求处于 Moebius 流程，按 Mobius continuity addon/slot 处理；Pilot/Hive/Ant/Executor 结果只作为 artifact refs 写入，不接管 continuity source of truth。

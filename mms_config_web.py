@@ -2157,51 +2157,999 @@ _HTML_PAGE = r"""<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MMS 配置中心</title>
   <style>
-    :root{
-      --ink:#16211d; --muted:#65746f; --paper:#f7f1e6; --panel:#fffaf0; --panel2:#fefdf8;
-      --line:#d9cdb8; --accent:#0f7b5f; --accent2:#db7c26; --danger:#b42318; --ok:#16803d;
-      --shadow:0 24px 70px rgba(55,45,28,.14); --mono:"SFMono-Regular","Cascadia Code",monospace;
-      --sans:"Avenir Next","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
-      --serif:"Songti SC","STSong","Noto Serif CJK SC",serif;
+    :root {
+      --bg:      oklch(97% 0.004 250);
+      --surface: oklch(100% 0 0);
+      --fg:      oklch(16% 0.015 250);
+      --muted:   oklch(50% 0.015 250);
+      --border:  oklch(88% 0.008 250);
+      --accent:  oklch(54% 0.16 155);
+
+      --ok:      oklch(55% 0.14 145);
+      --warn:    oklch(68% 0.11 80);
+      --danger:  oklch(55% 0.18 25);
+
+      --accent-soft:  color-mix(in oklch, var(--accent) 10%, transparent);
+      --accent-hover: color-mix(in oklch, var(--accent) 80%, black);
+      --fg-soft:      color-mix(in oklch, var(--fg) 5%, transparent);
+      --fg-ghost:     color-mix(in oklch, var(--fg) 8%, transparent);
+      --ok-soft:      color-mix(in oklch, var(--ok) 12%, transparent);
+      --warn-soft:    color-mix(in oklch, var(--warn) 12%, transparent);
+      --danger-soft:  color-mix(in oklch, var(--danger) 12%, transparent);
+
+      --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.04);
+      --shadow:    0 1px 3px oklch(0% 0 0 / 0.06), 0 1px 2px oklch(0% 0 0 / 0.04);
+      --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.05), 0 2px 4px -2px oklch(0% 0 0 / 0.04);
+      --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.05), 0 4px 6px -4px oklch(0% 0 0 / 0.03);
+
+      --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+      --radius:    10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+
+      --gap-xs: 6px;
+      --gap-sm: 10px;
+      --gap-md: 16px;
+      --gap-lg: 24px;
+      --gap-xl: 32px;
     }
-    *{box-sizing:border-box} body{margin:0;color:var(--ink);font-family:var(--sans);background:radial-gradient(circle at 10% -5%,#d7eadb 0,transparent 34rem),radial-gradient(circle at 92% 10%,#ffe1b8 0,transparent 30rem),linear-gradient(135deg,#fbf5e8,#eef4ef 58%,#f6efe2);}
-    header{padding:34px clamp(18px,4vw,56px) 18px;display:grid;grid-template-columns:1.4fr .6fr;gap:20px;align-items:end}
-    h1{margin:0;font-family:var(--serif);font-size:clamp(34px,6vw,70px);line-height:.95;letter-spacing:-.05em}.lead{max-width:760px;color:#46564f;font-size:17px;line-height:1.7}.statusbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill{border:1px solid var(--line);border-radius:999px;padding:7px 11px;background:rgba(255,250,240,.7);font-size:12px;color:#55645f}.pill.ok{color:var(--ok);border-color:#94d3a2}.pill.warn{color:#9a5b00;border-color:#ecc37d}
-    .shell{display:grid;grid-template-columns:280px 1fr;gap:18px;padding:0 clamp(18px,4vw,56px) 48px}.side{position:sticky;top:12px;align-self:start;border:1px solid var(--line);background:rgba(255,250,240,.78);backdrop-filter:blur(16px);border-radius:26px;padding:14px;box-shadow:var(--shadow)}.navbtn{width:100%;border:0;background:transparent;text-align:left;border-radius:18px;padding:13px 14px;margin:3px 0;cursor:pointer;color:#44554e;font-weight:700}.navbtn.active{background:#163d32;color:#fff}.navbtn small{display:block;font-weight:500;opacity:.75;margin-top:4px}.content{display:grid;gap:18px}.panel{border:1px solid var(--line);border-radius:28px;background:rgba(255,250,240,.88);padding:22px;box-shadow:var(--shadow)}.panel h2{margin:0 0 10px;font-size:25px}.panel p{color:var(--muted);line-height:1.65}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{border:1px solid var(--line);border-radius:20px;background:var(--panel2);padding:16px}.span4{grid-column:span 4}.span5{grid-column:span 5}.span6{grid-column:span 6}.span7{grid-column:span 7}.span8{grid-column:span 8}.span12{grid-column:span 12}.provider-editor{position:sticky;top:14px;align-self:start;max-height:calc(100vh - 28px);overflow:auto;scrollbar-gutter:stable}
-    label{display:block;font-size:12px;font-weight:800;color:#566760;margin:0 0 6px}input,select,textarea{width:100%;border:1px solid #cfc2ae;background:#fffef8;border-radius:14px;padding:11px 12px;font:inherit;color:var(--ink)}textarea{min-height:92px;resize:vertical;font-family:var(--mono);font-size:13px}.checks{display:flex;gap:8px;flex-wrap:wrap}.check{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:8px 10px;background:#fffef8}.check input{width:auto}.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}button,.button{border:0;border-radius:999px;padding:10px 15px;background:#173d33;color:#fff;font-weight:800;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}button.secondary{background:#f0e4d0;color:#22342e}button.ghost{background:transparent;color:#173d33;border:1px solid var(--line)}button.danger{background:var(--danger)}button:disabled{opacity:.5;cursor:not-allowed}.provider-list{display:grid;gap:8px}.provider-item{border:1px solid var(--line);border-radius:18px;padding:12px;background:#fffef8;cursor:pointer}.provider-item.active{outline:3px solid rgba(15,123,95,.18);border-color:var(--accent)}.provider-item strong{display:block}.muted{color:var(--muted)}.mono{font-family:var(--mono);font-size:12px}.tag{display:inline-block;border-radius:999px;background:#e9f3ed;color:#0f674f;padding:4px 8px;font-size:12px;margin:2px}.tag.off{background:#f3e2dc;color:#9f2d20}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:20px;background:#fffef8}table{width:100%;border-collapse:collapse;min-width:860px}th,td{border-bottom:1px solid #eadfce;padding:10px;text-align:left;font-size:13px}th{position:sticky;top:0;background:#f8efdf;z-index:1}td input[type="checkbox"]{width:auto}.chips{display:flex;flex-wrap:wrap;gap:7px}.chip{border:1px solid #d8c8b1;border-radius:999px;padding:6px 9px;background:#fffdf5;font-size:12px}.chip button{padding:0 4px;background:transparent;color:#8a2d22}.result{white-space:pre-wrap;background:#13231d;color:#e8f8ed;border-radius:18px;padding:14px;max-height:420px;overflow:auto;font-family:var(--mono);font-size:12px}.diff{white-space:pre;overflow:auto;background:#111d19;color:#e8f8ed;border-radius:18px;padding:16px;max-height:520px;font-family:var(--mono);font-size:12px}.toast{position:fixed;right:18px;bottom:18px;background:#163d32;color:#fff;border-radius:18px;padding:14px 16px;box-shadow:var(--shadow);max-width:520px;display:none}.toast.show{display:block}.danger-text{color:var(--danger);font-weight:800}.ok-text{color:var(--ok);font-weight:800}.hide{display:none!important}
-    .oc-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}.oc-metric{border:1px solid var(--line);border-radius:18px;background:#fffef8;padding:12px}.oc-metric strong{display:block;font-size:22px;color:#173d33}.oc-advanced{border:1px dashed #c9b898;border-radius:20px;padding:14px;background:rgba(255,253,248,.7)}.oc-advanced summary{cursor:pointer;font-weight:900;color:#173d33}.filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0}.filterbar button{background:#f0e4d0;color:#22342e}.filterbar button.active{background:#173d33;color:#fff}.empty-row{padding:18px;color:var(--muted);text-align:center}.default-route{max-width:300px;white-space:normal}.oc-order-note{border-left:4px solid #173d33;background:#f7efe0;border-radius:14px;padding:10px 12px;margin:12px 0;color:#46564f}.oc-enabled{width:auto}
-    @media(max-width:980px){header{grid-template-columns:1fr}.statusbar{justify-content:flex-start}.shell{grid-template-columns:1fr}.side,.provider-editor{position:relative;top:auto;max-height:none;overflow:visible}.span4,.span5,.span6,.span7,.span8,.span12{grid-column:span 12}.oc-summary{grid-template-columns:1fr}}
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.55;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+    img, svg { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; }
+    p { text-wrap: pretty; margin: 0; }
+    h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+    pre { margin: 0; }
+
+    /* ===== Header ===== */
+    header {
+      padding: 24px clamp(18px, 4vw, 56px) 16px;
+      display: grid;
+      grid-template-columns: 1.5fr .5fr;
+      gap: 20px;
+      align-items: end;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    h1 {
+      font-size: clamp(26px, 3.5vw, 42px);
+      line-height: 1.15;
+      letter-spacing: -0.025em;
+      font-weight: 700;
+      color: var(--fg);
+    }
+    .lead {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+      max-width: 560px;
+      margin-top: 6px;
+    }
+    .statusbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    /* ===== Shell layout ===== */
+    .shell {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 28px;
+      padding: 24px clamp(18px, 4vw, 56px) 48px;
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+    .side {
+      position: sticky;
+      top: 20px;
+      align-self: start;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 10px;
+      box-shadow: var(--shadow-sm);
+    }
+    .content {
+      display: grid;
+      gap: 24px;
+    }
+
+    /* ===== Sidebar nav ===== */
+    .navbtn {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin: 3px 0;
+      cursor: pointer;
+      color: var(--fg);
+      font-size: 14px;
+      font-weight: 500;
+      transition: all .15s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .navbtn:hover {
+      background: var(--fg-soft);
+    }
+    .navbtn.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+    .navbtn small {
+      display: block;
+      font-size: 11.5px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+    .navbtn.active small { color: rgba(255,255,255,0.82); }
+
+    /* ===== Panels ===== */
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      padding: 28px;
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow .2s ease;
+    }
+    .panel:hover {
+      box-shadow: var(--shadow);
+    }
+    .panel h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel > p:first-of-type {
+      color: var(--muted);
+      font-size: 13.5px;
+      line-height: 1.6;
+      margin-bottom: 22px;
+    }
+    .panel h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--fg);
+    }
+
+    /* ===== Cards ===== */
+    .card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      padding: 18px;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .card:hover {
+      border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
+    }
+
+    /* ===== Grid system ===== */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+    }
+    .span4 { grid-column: span 4; }
+    .span5 { grid-column: span 5; }
+    .span6 { grid-column: span 6; }
+    .span7 { grid-column: span 7; }
+    .span8 { grid-column: span 8; }
+    .span12 { grid-column: span 12; }
+
+    /* ===== Forms ===== */
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      margin: 0 0 6px;
+      letter-spacing: 0.01em;
+    }
+    input, select, textarea {
+      width: 100%;
+      border: 1.5px solid var(--border);
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 14px;
+      color: var(--fg);
+      transition: border-color .15s ease, box-shadow .15s ease, outline .15s ease;
+    }
+    input:hover, select:hover, textarea:hover {
+      border-color: color-mix(in oklch, var(--fg) 25%, var(--border));
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    textarea {
+      min-height: 88px;
+      resize: vertical;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    select { cursor: pointer; }
+    input[type="password"] { font-family: var(--font-mono); }
+
+    /* ===== Checkbox groups ===== */
+    .checks {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      padding: 7px 13px;
+      background: var(--surface);
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease;
+      user-select: none;
+    }
+    .check:hover {
+      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+      background: var(--accent-soft);
+    }
+    .check input {
+      width: auto;
+      cursor: pointer;
+      accent-color: var(--accent);
+      margin: 0;
+    }
+
+    /* ===== Buttons ===== */
+    button, .button {
+      border: 0;
+      border-radius: 999px;
+      padding: 9px 17px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
+      box-shadow: var(--shadow-sm);
+    }
+    button:hover, .button:hover {
+      background: var(--accent-hover);
+      box-shadow: var(--shadow);
+    }
+    button:active, .button:active { transform: translateY(1px); }
+    button.secondary, .button.secondary {
+      background: var(--fg-ghost);
+      color: var(--fg);
+      box-shadow: none;
+    }
+    button.secondary:hover, .button.secondary:hover {
+      background: var(--fg-soft);
+    }
+    button.ghost, .button.ghost {
+      background: transparent;
+      color: var(--fg);
+      border: 1.5px solid var(--border);
+      box-shadow: none;
+    }
+    button.ghost:hover, .button.ghost:hover {
+      border-color: var(--fg);
+      background: var(--fg-soft);
+    }
+    button.danger, .button.danger { background: var(--danger); }
+    button.danger:hover, .button.danger:hover {
+      background: color-mix(in oklch, var(--danger) 82%, black);
+    }
+    button:disabled, .button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: center;
+    }
+
+    /* ===== Provider list ===== */
+    .provider-list { display: grid; gap: 6px; }
+    .provider-item {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all .15s ease;
+    }
+    .provider-item:hover {
+      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+      box-shadow: var(--shadow-sm);
+    }
+    .provider-item.active {
+      outline: none;
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .provider-item strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    /* ===== Channel layout: sidebar + main ===== */
+    .channel-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .channel-sidebar {
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 120px);
+      overflow: auto;
+      scrollbar-gutter: stable;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .channel-sidebar .btns {
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+    .channel-main {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      min-width: 0;
+    }
+    .channel-main .provider-editor {
+      position: static;
+      max-height: none;
+      overflow: visible;
+      align-self: stretch;
+    }
+
+    /* ===== Provider tabs ===== */
+    .provider-tabs {
+      display: flex;
+      gap: 2px;
+      border-bottom: 1.5px solid var(--border);
+      margin-bottom: 4px;
+      padding: 0 2px;
+    }
+    .tab-btn {
+      background: transparent;
+      border: 0;
+      border-bottom: 2.5px solid transparent;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all .15s ease;
+      border-radius: var(--radius) var(--radius) 0 0;
+      box-shadow: none;
+      margin-bottom: -1.5px;
+    }
+    .tab-btn:hover {
+      color: var(--fg);
+      background: var(--fg-soft);
+    }
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .tab-panel {
+      display: none;
+      animation: fadeIn .2s ease both;
+    }
+    .tab-panel.active {
+      display: block;
+    }
+
+    .model-section {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .model-section h3 {
+      font-size: 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .model-section > p {
+      color: var(--muted);
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+
+    /* ===== Pills ===== */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 11px;
+      background: var(--surface);
+      font-size: 12px;
+      color: var(--muted);
+      box-shadow: var(--shadow-sm);
+    }
+    .pill.ok {
+      color: var(--ok);
+      border-color: var(--ok-soft);
+      background: var(--ok-soft);
+    }
+    .pill.warn {
+      color: var(--warn);
+      border-color: var(--warn-soft);
+      background: var(--warn-soft);
+    }
+
+    /* ===== Tags ===== */
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 600;
+      margin: 2px;
+      letter-spacing: 0.01em;
+    }
+    .tag.off {
+      background: var(--fg-soft);
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    /* ===== Tables ===== */
+    .table-wrap {
+      overflow: auto;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 860px;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 1;
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    td input[type="checkbox"] {
+      width: auto;
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
+    tbody tr {
+      transition: background .1s ease;
+    }
+    tbody tr:hover {
+      background: var(--fg-soft);
+    }
+
+    /* ===== Chips ===== */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 11px;
+      background: var(--surface);
+      font-size: 12px;
+      transition: border-color .15s ease;
+    }
+    .chip:hover {
+      border-color: color-mix(in oklch, var(--accent) 25%, var(--border));
+    }
+    .chip button {
+      padding: 0 4px;
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      cursor: pointer;
+      font-size: 15px;
+      line-height: 1;
+      border-radius: 4px;
+      box-shadow: none;
+    }
+    .chip button:hover { color: var(--danger); }
+
+    /* ===== Result / Diff blocks ===== */
+    .result, .diff {
+      white-space: pre-wrap;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      max-height: 420px;
+      overflow: auto;
+      color: var(--fg);
+      box-shadow: inset var(--shadow-sm);
+    }
+    .diff { max-height: 320px; }
+
+    /* ===== OpenCode metrics ===== */
+    .oc-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .oc-metric {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 16px;
+      text-align: center;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .oc-metric:hover {
+      border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
+      box-shadow: var(--shadow-sm);
+    }
+    .oc-metric strong {
+      display: block;
+      font-size: 22px;
+      color: var(--fg);
+      margin: 6px 0;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .oc-metric .muted { font-size: 11px; }
+    .oc-metric .mono {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .oc-advanced {
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      background: var(--bg);
+      transition: border-color .15s ease;
+    }
+    .oc-advanced:hover {
+      border-color: color-mix(in oklch, var(--accent) 25%, var(--border));
+    }
+    .oc-advanced summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--fg);
+      font-size: 14px;
+      user-select: none;
+    }
+    .oc-advanced summary::marker { color: var(--muted); }
+
+    .oc-order-note {
+      border-left: 3px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 12px 16px;
+      margin: 14px 0;
+      color: var(--fg);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .oc-enabled {
+      width: auto;
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
+
+    /* ===== Filter bar ===== */
+    .filterbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 14px 0;
+    }
+    .filterbar button {
+      background: var(--fg-ghost);
+      color: var(--fg);
+      box-shadow: none;
+      font-size: 13px;
+      padding: 7px 13px;
+    }
+    .filterbar button.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* ===== Empty / default helpers ===== */
+    .empty-row {
+      padding: 22px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 14px;
+    }
+    .default-route {
+      max-width: 300px;
+      white-space: normal;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ===== Toast ===== */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      padding: 14px 22px;
+      background: var(--fg);
+      color: var(--surface);
+      border-radius: var(--radius-lg);
+      opacity: 0;
+      transform: translateY(16px) scale(0.96);
+      transition: opacity .35s cubic-bezier(.4,0,.2,1), transform .35s cubic-bezier(.4,0,.2,1);
+      pointer-events: none;
+      z-index: 100;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: var(--shadow-lg);
+      max-width: 400px;
+      word-break: break-word;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    /* ===== Utilities ===== */
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .mono {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .hide { display: none !important; }
+
+    /* ===== Section entrance animation ===== */
+    [data-section] {
+      animation: fadeIn .25s ease both;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 980px) {
+      header { grid-template-columns: 1fr; }
+      .statusbar { justify-content: flex-start; }
+      .shell { grid-template-columns: 1fr; padding: 16px; }
+      .side, .provider-editor {
+        position: relative;
+        top: auto;
+        max-height: none;
+        overflow: visible;
+      }
+      .channel-layout { grid-template-columns: 1fr; }
+      .channel-sidebar {
+        position: relative;
+        top: auto;
+        max-height: none;
+        overflow: visible;
+      }
+      .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
+      .oc-summary { grid-template-columns: 1fr 1fr; }
+      .panel { padding: 20px; }
+    }
   </style>
 </head>
 <body>
 <header>
-  <div><h1>MMS 配置中心</h1><p class="lead">不是展示页：这里可以配置通道、拉取模型、隐藏/补充模型、标记能力、测试模型、设置 fallback。保存前先预览；stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p></div>
+  <div>
+    <h1>MMS 配置中心</h1>
+    <p class="lead">不是展示页：这里可以配置通道、拉取模型、隐藏/补充模型、标记能力、测试模型、设置 fallback。保存前先预览；stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
+  </div>
   <div class="statusbar" id="statusbar"><span class="pill warn">加载中</span></div>
 </header>
 <div class="shell">
   <aside class="side" id="nav"></aside>
   <main class="content">
-    <section class="panel" data-section="source"><h2>真源状态</h2><p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态。</p><div class="grid" id="sourceStatus"></div></section>
-    <section class="panel" data-section="channel"><h2>通道配置</h2><p>先建通道：内部 ID、显示名、OpenAI/Anthropic URL、API Key、协议和模型列表接口。Key 只会通过 POST 发送，不会回显。</p><div class="grid"><div class="card span4"><div class="provider-list" id="providerList"></div><div class="btns"><button id="addProvider" class="secondary">+ 添加通道</button><button id="duplicateProvider" class="ghost">复制当前</button></div></div><div class="card span8 provider-editor" id="providerForm"></div></div></section>
-    <section class="panel" data-section="models"><h2>模型列表</h2><p>可拉取远端列表，也可像 NewAPI 一样手动补充；取消“显示”会写入 provider.hidden_models。拉取只更新缓存/当前表格，不会自动写入 fallback_models；需要固定保留的模型请用“手动补充模型”。</p><div class="grid"><div class="card span12"><div class="btns"><button id="fetchModels">拉取当前通道模型</button><button id="testList" class="secondary">测试 /models</button><input id="modelSearch" placeholder="搜索模型" style="max-width:260px"></div><label style="margin-top:14px">手动补充模型（逗号或换行分隔）</label><textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea><div class="btns"><button id="addManualModels" class="secondary">添加到列表</button><button id="clearHidden" class="ghost">取消当前通道全部隐藏</button><button id="clearAllStaleHidden" class="ghost">一键清理全部通道过期隐藏项</button></div><div id="modelChips" class="chips" style="margin-top:10px"></div></div><div class="card span12" id="staleHiddenBox"></div><div class="span12 table-wrap"><table id="modelTable"></table></div></div></section>
-    <section class="panel" data-section="test"><h2>模型测试</h2><p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p><div class="grid"><div class="card span5"><label>测试通道</label><select id="testProvider"></select><label>测试模型</label><select id="testModel"></select><label>协议</label><select id="testProtocol"><option value="auto">auto</option><option value="anthropic_messages">anthropic_messages</option><option value="openai_chat_completions">openai_chat_completions</option></select><label>Prompt</label><textarea id="testPrompt">只回复 pong</textarea><div class="btns"><button id="testModelBtn">Ping 模型</button><button id="chatTestBtn" class="secondary">Simple chat</button></div></div><div class="card span7"><div class="result" id="testResult">暂无测试结果</div></div></div></section>
-    <section class="panel" data-section="fallback"><h2>Fallback 设置</h2><p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。</p><div class="grid"><div class="card span6"><h3>Rescue fallback</h3><label>fallback_model</label><input id="rescueModel" placeholder="deepseek-v4-flash"><label>fallback_cli</label><select id="rescueCli"><option value="">不指定</option><option>codex</option><option>claude</option><option>opencode</option><option>agy</option></select><div class="check" style="margin-top:10px"><input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span></div></div><div class="card span6"><h3>Vision sidecar</h3><div class="check"><input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span></div><label>provider_id</label><select id="visionProvider"></select><label>model</label><select id="visionModel"></select><p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为“当前配置值”。</p><label>候选列表</label><div id="visionCandidates" class="grid"></div><div class="btns"><button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button></div></div></div></section>
-    <section class="panel" data-section="runtime"><h2>运行默认值</h2><p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p><div class="grid"><div class="card span5"><label>preferred CLI</label><select id="preferredCli"><option>opencode</option><option>codex</option><option>claude</option><option>agy</option></select><label>coding preset model（可选）</label><input id="codingModel" placeholder="gpt-5.5"></div><div class="card span7"><label>OpenCode default profile</label><select id="opencodeProfile"><option>agent</option><option>omo</option><option>raw</option></select><p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p></div><div class="card span12"><h3>OpenCode Agent Roster</h3><p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p><div class="oc-summary" id="opencodeOverrideSummary"></div><div class="oc-order-note">Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。</div><details class="oc-advanced" id="opencodeAdvanced"><summary>Advanced: OpenCode per-agent roster</summary><div class="filterbar" id="opencodeAgentFilters"></div><div class="table-wrap"><table id="opencodeAgents"></table></div></details></div></div></section>
-    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；preview root 写 DB candidate、preview secret backend 和 generated bundle。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button><button id="downloadPlanJson" class="ghost">下载 plan JSON</button><button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button><button id="saveBtn" class="danger">确认保存</button></div><p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；有 API Key 更新时请优先用本页“写入预览 DB + 发布”，下载 JSON 不含明文 key。</p><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span></div><label style="margin-top:12px">输入确认文字：保存配置 / 写入预览DB</label><input id="confirmPhrase" placeholder="保存配置 或 写入预览DB"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"><p class="muted">Preview root 下 legacy 确认保存会被阻止；请用“写入预览 DB + 发布”。Preview DB 按钮只写当前 MMS_CONFIG_ROOT 的 DB candidate + generated bundle；stable root 会被阻止。</p></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
-    <section class="panel" data-section="refs"><h2>本地参考</h2><p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p><div class="grid" id="refsGrid"></div></section>
+    <section class="panel" data-section="source">
+      <h2>真源状态</h2>
+      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态。</p>
+      <div class="grid" id="sourceStatus"></div>
+    </section>
+
+
+    <!-- 通道配置 -->
+    <section class="panel" data-section="channel">
+      <h2>通道配置</h2>
+      <p>先建通道：内部 ID、显示名、OpenAI/Anthropic URL、API Key、协议和模型列表接口。Key 只会通过 POST 发送，不会回显。</p>
+      <div class="channel-layout">
+        <div class="channel-sidebar">
+          <div class="provider-list" id="providerList"></div>
+          <div class="btns">
+            <button id="addProvider" class="secondary">+ 添加通道</button>
+            <button id="duplicateProvider" class="ghost">复制当前</button>
+          </div>
+        </div>
+        <div class="channel-main">
+          <div class="provider-tabs">
+            <button class="tab-btn active" data-tab="config" onclick="switchProviderTab('config')">通道配置</button>
+            <button class="tab-btn" data-tab="models" onclick="switchProviderTab('models')">模型配置</button>
+          </div>
+          <div class="tab-panel active" data-tab-panel="config">
+            <div class="card provider-editor" id="providerForm"></div>
+          </div>
+          <div class="tab-panel" data-tab-panel="models">
+            <div class="model-section">
+              <p class="muted">拉取通道支持的模型列表，或手动添加模型。取消勾选「显示」可将模型隐藏。需要长期保留的模型请使用「手动补充」。</p>
+              <div class="card">
+                <div class="btns">
+                  <button id="fetchModels">拉取当前通道模型</button>
+                  <button id="testList" class="secondary">测试 /models</button>
+                  <input id="modelSearch" placeholder="搜索模型" style="max-width:260px">
+                </div>
+                <label style="margin-top:14px">手动补充模型（逗号或换行分隔）</label>
+                <textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea>
+                <div class="btns">
+                  <button id="addManualModels" class="secondary">添加到列表</button>
+                  <button id="clearHidden" class="ghost">取消当前通道全部隐藏</button>
+                  <button id="clearAllStaleHidden" class="ghost">一键清理全部通道过期隐藏项</button>
+                </div>
+                <div id="modelChips" class="chips" style="margin-top:10px"></div>
+              </div>
+              <div class="card" id="staleHiddenBox"></div>
+              <div class="table-wrap"><table id="modelTable"></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 模型测试 -->
+    <section class="panel" data-section="test">
+      <h2>模型测试</h2>
+      <p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p>
+      <div class="grid">
+        <div class="card span5">
+          <label>测试通道</label><select id="testProvider"></select>
+          <label>测试模型</label><select id="testModel"></select>
+          <label>协议</label>
+          <select id="testProtocol">
+            <option value="auto">auto</option>
+            <option value="anthropic_messages">anthropic_messages</option>
+            <option value="openai_chat_completions">openai_chat_completions</option>
+          </select>
+          <label>Prompt</label>
+          <textarea id="testPrompt">只回复 pong</textarea>
+          <div class="btns">
+            <button id="testModelBtn">Ping 模型</button>
+            <button id="chatTestBtn" class="secondary">Simple chat</button>
+          </div>
+        </div>
+        <div class="card span7">
+          <div class="result" id="testResult">暂无测试结果</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fallback -->
+    <section class="panel" data-section="fallback">
+      <h2>Fallback 设置</h2>
+      <p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。</p>
+      <div class="grid">
+        <div class="card span6">
+          <h3>Rescue fallback</h3>
+          <label>fallback_model</label>
+          <input id="rescueModel" placeholder="deepseek-v4-flash">
+          <label>fallback_cli</label>
+          <select id="rescueCli">
+            <option value="">不指定</option>
+            <option>codex</option>
+            <option>claude</option>
+            <option>opencode</option>
+            <option>agy</option>
+          </select>
+          <div class="check" style="margin-top:10px">
+            <input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span>
+          </div>
+        </div>
+        <div class="card span6">
+          <h3>Vision sidecar</h3>
+          <div class="check">
+            <input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span>
+          </div>
+          <label>provider_id</label>
+          <select id="visionProvider"></select>
+          <label>model</label>
+          <select id="visionModel"></select>
+          <p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为「当前配置值」。</p>
+          <label>候选列表</label>
+          <div id="visionCandidates" class="grid"></div>
+          <div class="btns">
+            <button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 运行默认值 -->
+    <section class="panel" data-section="runtime">
+      <h2>运行默认值</h2>
+      <p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p>
+      <div class="grid">
+        <div class="card span5">
+          <label>preferred CLI</label>
+          <select id="preferredCli">
+            <option>opencode</option>
+            <option>codex</option>
+            <option>claude</option>
+            <option>agy</option>
+          </select>
+          <label>coding preset model（可选）</label>
+          <input id="codingModel" placeholder="gpt-5.5">
+        </div>
+        <div class="card span7">
+          <label>OpenCode default profile</label>
+          <select id="opencodeProfile">
+            <option>agent</option>
+            <option>omo</option>
+            <option>raw</option>
+          </select>
+          <p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p>
+        </div>
+        <div class="card span12">
+          <h3>OpenCode Agent Roster</h3>
+          <p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p>
+          <div class="oc-summary" id="opencodeOverrideSummary"></div>
+          <div class="oc-order-note">
+            Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。
+          </div>
+          <details class="oc-advanced" id="opencodeAdvanced">
+            <summary>Advanced: OpenCode per-agent roster</summary>
+            <div class="filterbar" id="opencodeAgentFilters"></div>
+            <div class="table-wrap"><table id="opencodeAgents"></table></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 保存 / 审计 -->
+    <section class="panel" data-section="save">
+      <h2>保存 / 审计</h2>
+      <p>保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；preview root 走 DB candidate + latest-approved publish。API Key 不会出现在 diff 或响应里。</p>
+      <div class="grid">
+        <div class="card span5">
+          <div class="btns">
+            <button id="previewPlan">生成保存预览</button>
+            <button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button>
+            <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
+            <button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button>
+            <button id="saveBtn" class="danger">确认保存</button>
+          </div>
+          <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；有 API Key 更新时请优先用本页“写入预览 DB + 发布”，下载 JSON 不含明文 key。</p>
+          <div class="check" style="margin-top:12px">
+            <input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span>
+          </div>
+          <label style="margin-top:12px">输入确认文字：保存配置 / 写入预览DB</label>
+          <input id="confirmPhrase" placeholder="保存配置 或 写入预览DB">
+          <label>保存原因 / audit reason</label>
+          <input id="saveReason" value="setup-web-ui:interactive-save">
+          <p class="muted">Preview root 下 legacy 确认保存会被阻止；请用“写入预览 DB + 发布”。Preview DB 按钮只写当前 MMS_CONFIG_ROOT 的 DB candidate + generated bundle；stable root 会被阻止。</p>
+        </div>
+        <div class="card span7">
+          <div class="result" id="saveResult">尚未生成预览</div>
+        </div>
+        <div class="card span12">
+          <h3>保存摘要</h3>
+          <div id="reviewSummary">
+            <p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p>
+          </div>
+        </div>
+        <div class="span12">
+          <h3 style="margin-bottom:8px">Raw diff / 审计详情</h3>
+          <div class="diff" id="diffBox">点击“生成保存预览”</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 本地参考 -->
+    <section class="panel" data-section="refs">
+      <h2>本地参考</h2>
+      <p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p>
+      <div class="grid" id="refsGrid"></div>
+    </section>
   </main>
 </div>
 <div class="toast" id="toast"></div>
 <script>
 const sections=[
-  ['source','真源状态','DB / legacy / bundle'],['channel','通道配置','URL / Key / 协议'],['models','模型列表','拉取 / 隐藏 / 补充'],['test','模型测试','ping / chat smoke'],['fallback','Fallback','rescue / vision'],['runtime','运行默认值','preferred CLI / OpenCode'],['save','保存审计','diff / backup / audit'],['refs','本地参考','配置契约 / docs']
+  ['source','真源状态','DB / legacy / bundle'],
+  ['channel','通道配置','URL / Key / 协议 / 模型'],
+  ['test','模型测试','ping / chat smoke'],
+  ['fallback','Fallback','rescue / vision'],
+  ['runtime','运行默认值','preferred CLI / OpenCode'],
+  ['save','保存审计','diff / backup / audit'],
+  ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false;
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false;
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
 function current(){return state.providers[activeProvider]}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
+function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
 function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
 function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -2212,8 +3160,8 @@ function renderProviderList(){const list=$('providerList');list.innerHTML=provid
 function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}
 function checks(name,values,allowed){values=values||[];return `<div class="checks">${allowed.map(v=>`<label class="check"><input type="checkbox" name="${name}" value="${v}" ${values.includes(v)?'checked':''}><span>${v}</span></label>`).join('')}</div>`}
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
-function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} $('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...'}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox"><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div>`; bindProviderForm();}
-function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);$('pKey').oninput=syncProvider;$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider)}
+function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} $('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...'}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox"><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
+function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);$('pKey').oninput=syncProvider;$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
 function syncProvider(){const p=current(); if(!p)return; const old=p.id;p.id=$('pId').value.trim()||p.id;p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');p.api_key=$('pKey').value;p.update_credentials=$('pUpdateCreds').checked;if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
 function providerModels(p){p=p||{};const map=new Map();const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})})}(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{if(map.has(id))map.get(id).visible=false});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
 function defaultCaps(id){const l=String(id||'').toLowerCase();return {text:true,vision:['mimo-v2.5','mimo-v2-omni','k2.6','k2.6-code-preview','kimi-k2.5','qwen3.6-plus','qwen3.6-flash','qwen3.5-plus'].includes(l)||l.startsWith('claude-')||l.startsWith('gemini-'),tool_use:/^(claude|gpt|o|qwen|kimi|glm|minimax|gemini)/.test(l),reasoning:/gpt-5|qwen3|kimi-k2|glm-5|deepseek|claude/.test(l),long_context:/1m|long|qwen3|kimi-k2|gpt-5|claude/.test(l),cache_sensitive:/^(qwen|kimi|k2\.|glm|deepseek|minimax|mimo)/.test(l)}}
@@ -2228,7 +3176,7 @@ function decodeModelSelection(value,currentProvider){const text=String(value||''
 function modelOptions(providerId,selected,{visionFirst=false,auto=false,defaultModels=[],enabledOnly=false,selectedProvider=''}={}){const rows=visibleModelsForProvider(providerId,{visionFirst,enabledOnly});let opts=[];if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动路线${defaultModels.length?'：'+escapeHtml(defaultModels.join(' / ')):''}</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>请选择模型</option>`);let matched=false;opts.push(...rows.map(r=>{const value=modelOptionValue(providerId,r);const label=providerId?r.id:`${r.provider_id} / ${r.id}`;const tag=(r.capabilities||{}).vision?' [vision]':'';const isSelected=providerId?r.id===selected:((selectedProvider&&r.provider_id===selectedProvider&&r.id===selected)||(!selectedProvider&&r.id===selected));if(isSelected)matched=true;return `<option value="${escapeHtml(value)}" ${isSelected?'selected':''}>${escapeHtml(label)}${tag}</option>`}));if(selected&&!matched)opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
 function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>过期隐藏项</strong><p class="muted">当前没有“已不在通道模型列表里”的 hidden_models。</p>';return}box.innerHTML=`<strong>过期隐藏项（不在当前通道模型列表）</strong><p class="muted">这些多半是之前手动隐藏过、后来通道不再返回的模型。默认保留配置但不放进主表；确认无用后可清理。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">清理</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">清理当前通道过期隐藏项</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已清理 ${count} 个当前通道过期 hidden_models`:'没有需要清理的过期隐藏项')}}
 function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));$('modelChips').innerHTML=(p.extra_models||[]).map(m=>`<span class="chip">${escapeHtml(m)} <button data-rm="${escapeHtml(m)}">×</button></span>`).join('');document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{p.extra_models=(p.extra_models||[]).filter(x=>x!==b.dataset.rm);renderModelTable()});renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
-function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
+function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,source:'hidden',visible:!(p.hidden_models||[]).includes(model),favorite:false,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
 function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [disabled]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
 function syncFallback(){state.rescue=state.rescue||{};state.rescue.fallback_model=$('rescueModel').value.trim();state.rescue.fallback_cli=$('rescueCli').value;state.rescue.hot_fallback_enabled=$('rescueHot').checked;state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.enabled=$('visionEnabled').checked;state.vision_sidecar.provider_id=$('visionProvider').value.trim();state.vision_sidecar.model=$('visionModel').value.trim();state.vision_sidecar.candidates=[...document.querySelectorAll('[data-vision-candidate]')].map(row=>({provider_id:row.querySelector('[data-vc-provider]').value.trim(),model:row.querySelector('[data-vc-model]').value.trim()})).filter(x=>x.provider_id&&x.model)}
 function bindVisionCandidateRow(row){const provider=row.querySelector('[data-vc-provider]');const model=row.querySelector('[data-vc-model]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{visionFirst:true});syncFallback()};model.onchange=syncFallback;row.querySelector('[data-vc-remove]').onclick=()=>{row.remove();syncFallback()}}
@@ -2251,7 +3199,7 @@ function syncRuntime(){state.runtime=state.runtime||{};state.opencode=state.open
 function renderOpencodeSummary(){const box=$('opencodeOverrideSummary');if(!box)return;const rows=opencodeAllRows();const enabled=rows.filter(row=>rosterEntry(row.agent,row).enabled!==false).length;const count=opencodeOverrideEntries().length;const custom=rows.filter(row=>rosterEntry(row.agent,row).custom).length;const profile=state.opencode.default_profile||'agent';box.innerHTML=`<div class="oc-metric"><span class="muted">Profile</span><strong>${escapeHtml(profile)}</strong><span class="mono">Lite Pro Roster</span></div><div class="oc-metric"><span class="muted">Enabled agents</span><strong>${enabled}/${rows.length}</strong><span class="mono">进入 session-local opencode.json</span></div><div class="oc-metric"><span class="muted">Agent overrides</span><strong>${count}/${rows.length}</strong><span class="mono">Auto 不写 agent_models</span></div><div class="oc-metric"><span class="muted">Custom agents</span><strong>${custom}</strong><span class="mono">按 preset 继承 prompt/permission</span></div>`}
 function opencodeFilterMatches(row,overridden){const entry=rosterEntry(row.agent,row);if(opencodeOnlyOverridden&&!overridden&&entry.enabled!==false&&!entry.custom)return false;if(opencodeAgentFilter==='all')return true;if(opencodeAgentFilter==='enabled')return entry.enabled!==false;if(opencodeAgentFilter==='custom')return !!entry.custom;if(opencodeAgentFilter==='execute')return ['builder','executor','fixer','spec'].includes(entry.preset)||String(row.category||'').startsWith('执行');if(opencodeAgentFilter==='explore')return entry.preset==='explore'||row.category==='探索';if(opencodeAgentFilter==='bughunt')return entry.preset==='bughunt'||row.category==='找茬';if(opencodeAgentFilter==='vision')return entry.preset==='vision'||row.category==='Vision';if(opencodeAgentFilter==='review')return entry.preset==='reviewer'||row.category==='审查';return true}
 function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)return;const filters=[['all','全部'],['enabled','已启用'],['custom','自定义'],['execute','执行/协调'],['explore','探索'],['bughunt','找茬'],['vision','Vision'],['review','审查']];wrap.innerHTML=`${filters.map(([id,label])=>`<button class="ghost ${opencodeAgentFilter===id?'active':''}" data-oc-filter="${id}">${label}</button>`).join('')}<label class="check"><input id="ocOnlyOverridden" type="checkbox" ${opencodeOnlyOverridden?'checked':''}><span>只看改动项</span></label><button class="ghost" data-oc-add="vision">+ Add Vision Agent</button><button class="ghost" data-oc-add="executor">+ Add Executor Agent</button><button class="ghost" data-oc-add="explore">+ Add Explore Agent</button><button class="ghost" id="ocClearAll">全部自动</button>`;document.querySelectorAll('[data-oc-filter]').forEach(btn=>btn.onclick=()=>{opencodeAgentFilter=btn.dataset.ocFilter;renderOpencodeAgents()});document.querySelectorAll('[data-oc-add]').forEach(btn=>btn.onclick=()=>addCustomAgent(btn.dataset.ocAdd));$('ocOnlyOverridden').onchange=()=>{opencodeOnlyOverridden=$('ocOnlyOverridden').checked;renderOpencodeAgents()};$('ocClearAll').onclick=()=>{state.opencode.agent_models={};state.opencode.agent_roster={};syncRuntime();renderOpencodeAgents();toast('OpenCode roster 已恢复默认自动路线')}}
-function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button>${entry.custom?'<button class="ghost" data-oc-remove>移除</button>':''}</td></tr>`}).join(''):`<tr><td colspan="8" class="empty-row">当前过滤条件下没有 agent；关闭“只看改动项”或切换分类。</td></tr>`;table.innerHTML=`<thead><tr><th>启用</th><th>agent</th><th>preset</th><th>priority</th><th>provider</th><th>model</th><th>默认路线</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(rowEl=>{const agent=rowEl.dataset.ocAgent;const row=rows.find(x=>x.agent===agent)||{};const provider=rowEl.querySelector('[data-oc-provider]');const model=rowEl.querySelector('[data-oc-model]');const enabled=rowEl.querySelector('[data-oc-enabled]');const preset=rowEl.querySelector('[data-oc-preset]');const priority=rowEl.querySelector('[data-oc-priority]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{auto:true,defaultModels:row.default_models||[],visionFirst:(rosterEntry(agent,row).preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider.value});setOpencodeOverride(agent,provider.value.trim(),'');persistRosterEntry(agent,row,{provider_id:provider.value.trim(),model:''});syncRuntime();renderOpencodeSummary()};model.onchange=()=>{const picked=decodeModelSelection(model.value.trim(),provider.value.trim());if(picked.provider_id&&provider.value!==picked.provider_id){provider.value=picked.provider_id}setOpencodeOverride(agent,picked.provider_id,picked.model);persistRosterEntry(agent,row,{provider_id:picked.provider_id,model:picked.model});syncRuntime();renderOpencodeSummary()};enabled.onchange=()=>{setRosterEnabled(agent,row,enabled.checked);syncRuntime();renderOpencodeAgents()};preset.onchange=()=>{persistRosterEntry(agent,row,{preset:preset.value});syncRuntime();renderOpencodeAgents()};priority.onchange=()=>{persistRosterEntry(agent,row,{priority:Number(priority.value||999)});syncRuntime();renderOpencodeAgents()};rowEl.querySelector('[data-oc-reset]').onclick=()=>{setOpencodeOverride(agent,'','');delete opencodeRoster()[agent];syncRuntime();renderOpencodeAgents()};const remove=rowEl.querySelector('[data-oc-remove]');if(remove)remove.onclick=()=>{setOpencodeOverride(agent,'','');delete opencodeRoster()[agent];syncRuntime();renderOpencodeAgents()}})}
+function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的 agent</td></tr>';table.innerHTML=`<thead><tr><th>启用</th><th>Agent</th><th>Preset</th><th>Priority</th><th>Provider</th><th>Model</th><th>Default</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(tr=>{const agent=tr.dataset.ocAgent;const row=visible.find(r=>r.agent===agent);const entry=rosterEntry(agent,row);tr.querySelector('[data-oc-enabled]').onchange=(e)=>{setRosterEnabled(agent,row,e.target.checked);renderOpencodeSummary()};tr.querySelector('[data-oc-preset]').onchange=(e)=>{persistRosterEntry(agent,row,{preset:e.target.value});renderOpencodeAgents()};tr.querySelector('[data-oc-priority]').oninput=(e)=>{persistRosterEntry(agent,row,{priority:Number(e.target.value)});renderOpencodeSummary()};tr.querySelector('[data-oc-provider]').onchange=(e)=>{const sel=e.target;const modelSel=tr.querySelector('[data-oc-model]');modelSel.innerHTML=modelOptions(sel.value,modelSel.value,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:sel.value});setOpencodeOverride(agent,sel.value,tr.querySelector('[data-oc-model]').value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-model]').onchange=(e)=>{setOpencodeOverride(agent,tr.querySelector('[data-oc-provider]').value,e.target.value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-reset]').onclick=()=>{const roster=opencodeRoster();delete roster[agent];const overrides=opencodeOverrides();delete overrides[agent];syncRuntime();renderOpencodeAgents();toast(`${agent} 已恢复默认`)}})}
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
@@ -2273,7 +3221,7 @@ $('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览
 $('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
 $('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'预览 DB 已写入并发布':'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 $('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
-load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:#b42318">'+escapeHtml(err.stack||err.message)+'</pre>'})
+load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:var(--danger);font-family:var(--font-mono)">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
 </body>
 </html>"""

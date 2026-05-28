@@ -28,7 +28,7 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
-DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.2.6}"
+DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.3.0}"
 BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
 # Legacy env names remain accepted by installer aliases and downstream scripts.
@@ -161,6 +161,18 @@ ensure_install_ref_resolved() {
     fi
 }
 
+resolve_builtin_handover_root() {
+    local candidate
+    for candidate in \
+        "$MMS_HOME/vendor/handover"; do
+        if [ -f "$candidate/scripts/install_global_commands.py" ]; then
+            (cd "$candidate" 2>/dev/null && pwd -P)
+            return 0
+        fi
+    done
+    return 1
+}
+
 optional_rtk_installed() {
     [ -x "$REAL_HOME/.claude/hooks/rtk-rewrite.sh" ]
 }
@@ -175,6 +187,18 @@ optional_brainkeeper_context_installed() {
 
 optional_handover_continuity_installed() {
     local skill_dir
+    local command_dir
+    local handover_root
+    local expected_handover
+    local expected_offduty
+    local expected_onduty
+
+    handover_root="$(resolve_builtin_handover_root || true)"
+    [ -n "$handover_root" ] || return 1
+    expected_handover="$handover_root"
+    expected_offduty="$handover_root/aliases/offduty"
+    expected_onduty="$handover_root/aliases/onduty"
+
     for skill_dir in \
         "$REAL_HOME/.agents/skills" \
         "$REAL_HOME/.claude/skills" \
@@ -184,6 +208,21 @@ optional_handover_continuity_installed() {
         [ -L "$skill_dir/handover" ] || return 1
         [ -L "$skill_dir/offduty" ] || return 1
         [ -L "$skill_dir/onduty" ] || return 1
+        [ "$(readlink "$skill_dir/handover")" = "$expected_handover" ] || return 1
+        [ "$(readlink "$skill_dir/offduty")" = "$expected_offduty" ] || return 1
+        [ "$(readlink "$skill_dir/onduty")" = "$expected_onduty" ] || return 1
+        [ -x "$skill_dir/offduty/offduty" ] || return 1
+        [ -x "$skill_dir/onduty/onduty" ] || return 1
+    done
+
+    for command_dir in \
+        "$REAL_HOME/.agents/commands" \
+        "$REAL_HOME/.claude/commands" \
+        "$REAL_HOME/.codex/commands" \
+        "$REAL_HOME/.config/opencode/commands" \
+        "$REAL_HOME/.opencode/commands"; do
+        [ ! -e "$command_dir/offduty.md" ] && [ ! -L "$command_dir/offduty.md" ] || return 1
+        [ ! -e "$command_dir/onduty.md" ] && [ ! -L "$command_dir/onduty.md" ] || return 1
     done
 }
 
@@ -4030,17 +4069,10 @@ install_builtin_handover_continuity() {
     echo ""
     echo "$(t "正在安装内置 offduty/onduty（handover continuity）..." "Installing built-in offduty/onduty (handover continuity)...")"
 
-    # Resolve handover root from the installed/bundled MMS vendor pack first.
-    for candidate in \
-        "$MMS_HOME/vendor/handover" \
-        "$SOURCE_DIR/vendor/handover" \
-        "$REAL_HOME/auto-skills/shared-skills/handover" \
-        "$(dirname "$SOURCE_DIR" 2>/dev/null || echo "")/../shared-skills/handover"; do
-        if [ -f "$candidate/scripts/install_global_commands.py" ]; then
-            handover_root="$candidate"
-            break
-        fi
-    done
+    # Resolve handover root only from the installed MMS vendor pack. If the
+    # packaged vendor copy is missing, skip instead of pointing global skills at
+    # a developer checkout or temporary installer source directory.
+    handover_root="$(resolve_builtin_handover_root || true)"
 
     if [ -z "$handover_root" ]; then
         HANDOVER_CONTINUITY_INSTALL_STATUS="missing_source"
@@ -4525,9 +4557,11 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms claude       $(t "直接启动 Claude 入口" "launch the Claude entrypoint")"
     echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
     echo "    mms config       $(t "查看/修改配置" "view or edit config")"
+    echo "    mms config web   $(t "打开浏览器配置中心" "open the browser config center")"
     echo "    mms --export claude  $(t "导出环境变量" "export env vars")"
     echo ""
     echo "  $(t "简单上手示例:" "Quick examples:")"
+    echo "    mms config web                      $(t "图形化配置通道、模型、fallback、OpenCode agents" "configure providers, models, fallback, and OpenCode agents in the WebUI")"
     echo "    mms doctor                          $(t "先看 route / auth / protocol 通不通" "check route / auth / protocol first")"
     echo "    mms test --provider <id> --cli claude  $(t "验证 Claude 实际链路" "verify the real Claude message path")"
     echo "    mms test --provider <id> --cli codex   $(t "验证 Codex 实际链路" "verify the real Codex message path")"
@@ -4604,8 +4638,9 @@ if [ -x "$BIN_DIR/mms" ]; then
         "$BIN_DIR/mms" || true
         DID_LAUNCH=1
     elif [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
-        echo "  $(t "首次配置请运行:" "Run this for first-time setup:")"
+        echo "  $(t "首次配置请运行（二选一）:" "Run one of these for first-time setup:")"
         echo "    $BIN_DIR/mms"
+        echo "    $BIN_DIR/mms config web"
         echo ""
         echo "  $(t "如需安装完成后立即进入配置向导，可执行:" "To launch setup immediately after install, run:")"
         echo "    bash install.sh --run-setup"
