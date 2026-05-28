@@ -4066,6 +4066,129 @@ def prompt_provider_credentials(
     return base_url, api_key, openai_base_url, anthropic_base_url
 
 
+def quick_connect_official(
+    cfg,
+    preset_cli=None,
+    *,
+    ensure_interactive_terminal,
+    localize,
+    panel_cls,
+    console,
+    managed_oauth_clis,
+    delegated_oauth_clis,
+    wizard_prompt,
+    wizard_back_cls,
+    wizard_cancel_cls,
+    account_map,
+    unique_runtime_id,
+    normalize_account_id,
+    default_account_home,
+    prompt_validated_proxy_fields,
+    prompt_validated_timezone,
+    default_account_timezone,
+    normalize_account,
+    default_priority,
+    ensure_account_config,
+    save_config,
+    load_config,
+    confirm_ask,
+):
+    ensure_interactive_terminal(localize("官方通道接入", "official channel setup"))
+    console.print(panel_cls(
+        localize(
+            "[bold]官方通道[/bold]\n\n创建一个独立登录目录；创建完成后，回主界面启动该通道时再进入官方 CLI 登录。\n"
+            "显示名称给你自己看；系统会自动生成内部标识，避免后续引用丢失。\n"
+            "适合多个 ChatGPT / Claude / Antigravity 账号并行使用。\n"
+            "[dim]输入 b 返回，q 退出。[/dim]",
+            "[bold]Official channel[/bold]\n\nCreate an isolated login directory first; after setup, launch this channel from the main UI to continue the official CLI login flow.\n"
+            "The display name is user-facing; MMS auto-generates the stable system ID used by config and follow-up commands.\n"
+            "Use this when you want multiple ChatGPT / Claude / Antigravity accounts in parallel.\n"
+            "[dim]Type b to go back, q to cancel.[/dim]",
+        ),
+        title=localize("快速接入", "Quick Connect"),
+        border_style="cyan",
+    ))
+    choices = {
+        "1": ("codex", "ChatGPT / Codex"),
+        "2": ("agy", "Antigravity CLI"),
+    }
+    if preset_cli in delegated_oauth_clis:
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再新增 Claude 官方账号。[/yellow]")
+        return cfg, False
+    if preset_cli in managed_oauth_clis:
+        cli_name = preset_cli
+    else:
+        console.print("  1. ChatGPT / Codex")
+        console.print("  2. Antigravity CLI")
+        try:
+            selected = wizard_prompt(localize("选择官方通道类型", "Select official channel type"), default="1")
+        except wizard_back_cls:
+            console.print(f"[yellow]{localize('已返回上一层', 'Returned to previous step')}[/yellow]")
+            return cfg, False
+        except wizard_cancel_cls:
+            console.print(f"[yellow]{localize('已退出接入', 'Setup cancelled')}[/yellow]")
+            return cfg, False
+        if selected not in choices:
+            console.print(f"[red]{localize('请输入 1-2', 'Please enter 1-2')}[/red]")
+            return cfg, False
+        cli_name = choices[selected][0]
+
+    suggested_name = f"{cli_name}-main"
+    try:
+        name = wizard_prompt(
+            localize("显示名 / 列表展示名（主界面里看到的名字）", "Display name / list label"),
+            default=suggested_name,
+        ).strip() or suggested_name
+    except wizard_back_cls:
+        console.print(f"[yellow]{localize('已返回上一层', 'Returned to previous step')}[/yellow]")
+        return cfg, False
+    except wizard_cancel_cls:
+        console.print(f"[yellow]{localize('已退出接入', 'Setup cancelled')}[/yellow]")
+        return cfg, False
+    accounts = account_map(cfg)
+    account_id = unique_runtime_id(set(accounts.keys()), normalize_account_id(name))
+    console.print(f"[dim]{localize('系统内部标识（自动生成）', 'System ID (auto-generated)')}: {account_id}[/dim]")
+
+    home_dir = default_account_home(account_id)
+    try:
+        proxy, no_proxy = prompt_validated_proxy_fields("", "", wizard=True)
+        timezone_name = prompt_validated_timezone(default_account_timezone, wizard=True)
+    except wizard_back_cls:
+        console.print(f"[yellow]{localize('已返回上一层', 'Returned to previous step')}[/yellow]")
+        return cfg, False
+    except wizard_cancel_cls:
+        console.print(f"[yellow]{localize('已退出接入', 'Setup cancelled')}[/yellow]")
+        return cfg, False
+    account = normalize_account({
+        "id": account_id,
+        "name": name,
+        "cli": cli_name,
+        "home_dir": home_dir,
+        "enabled": True,
+        "priority": default_priority,
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
+    })
+    updated_cfg = dict(cfg)
+    updated_cfg["accounts"] = list(cfg.get("accounts", [])) + [account]
+    updated_cfg, _ = ensure_account_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ {localize('已添加官方通道', 'Official channel added')}: {name}[/green]")
+    console.print(f"[dim]{localize('内部标识', 'System ID')}: {account_id}[/dim]")
+    console.print(f"[dim]{localize('文件夹目录', 'Directory')}: {home_dir}[/dim]")
+    console.print(
+        f"[dim]{localize('已跳过立即登录；请回主界面启动这个官方通道，再完成登录。', 'Immediate login skipped; launch this official channel from the main UI when you are ready to sign in.')}[/dim]"
+    )
+    if confirm_ask(localize(f"设为 {cli_name} 的默认官方通道？", f"Set as the default {cli_name} official channel?"), default=True):
+        updated_cfg = load_config()
+        updated_cfg.setdefault("account", {}).setdefault("defaults", {})
+        updated_cfg["account"]["defaults"][cli_name] = account_id
+        save_config(updated_cfg)
+        console.print(f"[green]✓ {localize(f'{cli_name} 默认官方通道已更新为 {account_id}', f'Default {cli_name} official channel set to {account_id}')}[/green]")
+    return load_config(), True
+
+
 def select_cli(
     cli_names,
     *,

@@ -9950,6 +9950,106 @@ def test_account_add_status_login_handlers_preserve_guards_and_dispatch():
     assert login_calls == [{"id": "codex-main", "cli": "codex"}]
 
 
+def test_quick_connect_official_helper_preserves_account_save_default_and_core_guard(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    class WizardBack(Exception):
+        pass
+
+    class WizardCancel(Exception):
+        pass
+
+    console = _CollectingConsole()
+    saved = []
+    load_calls = []
+    prompts = iter(["2", "Agy Main"])
+    ensured = []
+
+    def load_config():
+        load_calls.append("load")
+        return {"accounts": [{"id": "loaded"}], "account": {}}
+
+    cfg, changed = mms_command_tools.quick_connect_official(
+        {"accounts": []},
+        ensure_interactive_terminal=lambda label: ensured.append(label),
+        localize=lambda zh, _en: zh,
+        panel_cls=lambda content, **kwargs: ("panel", content, kwargs),
+        console=console,
+        managed_oauth_clis={"codex", "agy"},
+        delegated_oauth_clis={"claude"},
+        wizard_prompt=lambda *_args, **_kwargs: next(prompts),
+        wizard_back_cls=WizardBack,
+        wizard_cancel_cls=WizardCancel,
+        account_map=lambda current: {item["id"]: item for item in current.get("accounts", [])},
+        unique_runtime_id=lambda _existing, suggested: suggested,
+        normalize_account_id=lambda value: value.lower().replace(" ", "-"),
+        default_account_home=lambda account_id: f"/tmp/mms/{account_id}",
+        prompt_validated_proxy_fields=lambda proxy, no_proxy, wizard=False: ("http://proxy", "localhost"),
+        prompt_validated_timezone=lambda current, wizard=False: "Asia/Singapore",
+        default_account_timezone="UTC",
+        normalize_account=lambda account: {**account, "normalized": True},
+        default_priority=100,
+        ensure_account_config=lambda current: (current, False),
+        save_config=lambda current: saved.append(current),
+        load_config=load_config,
+        confirm_ask=lambda *_args, **_kwargs: True,
+    )
+
+    assert changed is True
+    assert cfg == {"accounts": [{"id": "loaded"}], "account": {}}
+    assert ensured == ["官方通道接入"]
+    assert saved[0]["accounts"][0] == {
+        "id": "agy-main",
+        "name": "Agy Main",
+        "cli": "agy",
+        "home_dir": "/tmp/mms/agy-main",
+        "enabled": True,
+        "priority": 100,
+        "proxy": "http://proxy",
+        "no_proxy": "localhost",
+        "timezone": "Asia/Singapore",
+        "normalized": True,
+    }
+    assert saved[1]["account"]["defaults"] == {"agy": "agy-main"}
+    assert load_calls == ["load", "load"]
+    assert any("已跳过立即登录" in str(item) for item in console.items)
+
+    console.items.clear()
+    assert mms_command_tools.quick_connect_official(
+        {"accounts": []},
+        preset_cli="claude",
+        ensure_interactive_terminal=lambda _label: None,
+        localize=lambda zh, _en: zh,
+        panel_cls=lambda content, **kwargs: ("panel", content, kwargs),
+        console=console,
+        managed_oauth_clis={"codex", "agy"},
+        delegated_oauth_clis={"claude"},
+        wizard_prompt=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected prompt")),
+        wizard_back_cls=WizardBack,
+        wizard_cancel_cls=WizardCancel,
+        account_map=lambda current: {},
+        unique_runtime_id=lambda *_args: "unexpected",
+        normalize_account_id=lambda value: value,
+        default_account_home=lambda account_id: account_id,
+        prompt_validated_proxy_fields=lambda *_args, **_kwargs: ("", ""),
+        prompt_validated_timezone=lambda *_args, **_kwargs: "UTC",
+        default_account_timezone="UTC",
+        normalize_account=lambda account: account,
+        default_priority=100,
+        ensure_account_config=lambda current: (current, False),
+        save_config=lambda _current: None,
+        load_config=lambda: {},
+        confirm_ask=lambda *_args, **_kwargs: False,
+    ) == ({"accounts": []}, False)
+    assert any("不再新增 Claude 官方账号" in str(item) for item in console.items)
+
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda _label: None)
+    monkeypatch.setattr(mms_core, "Panel", lambda content, **kwargs: ("panel", content, kwargs))
+    monkeypatch.setattr(mms_core, "console", console)
+    assert mms_core._quick_connect_official({"cfg": True}, preset_cli="claude") == ({"cfg": True}, False)
+
+
 def test_account_env_helpers_preserve_scrub_seed_proxy_and_home_behavior():
     import mms_command_tools
 
