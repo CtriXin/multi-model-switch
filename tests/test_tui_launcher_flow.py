@@ -15,6 +15,7 @@ from mms_tui_launcher_flow import (
     confirm_agent_pack,
     confirm_tui_options,
     create_rescue_handover_action,
+    create_rescue_handover_from_action,
     enforce_confirm_bypass_network_guard,
     ensure_cli_installed_for_launch,
     execute_confirmed_launch,
@@ -2357,6 +2358,79 @@ def test_apply_rescue_default_from_action_skips_empty_prompt() -> None:
     assert calls == [
         ("ensure",),
         ("ask", "全局默认 fallback model", "old-default"),
+    ]
+
+
+def test_create_rescue_handover_from_action_creates_embedded_model() -> None:
+    calls = []
+    selected_rescue = {"failed_model": "gpt-5.5"}
+    handover = {"path": "/tmp/handover.md"}
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            raise AssertionError("unused")
+
+    result = create_rescue_handover_from_action(
+        selected_rescue,
+        "handover::fallback-model",
+        write_fallback_handover=lambda rescue, *, fallback_model: calls.append(("write", rescue, fallback_model)) or handover,
+        rescue_handover_report_payload=lambda payload, model: calls.append(("payload", payload, model)) or ("handover", [("model", model)]),
+        localize=lambda zh, _en: f"zh:{zh}",
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        print_settings_error_report=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        ensure_rich=lambda: calls.append(("ensure",)),
+        prompt_cls=Prompt,
+    )
+
+    assert result == {
+        "status": "continue",
+        "handover": handover,
+        "error": None,
+        "fallback_model": "fallback-model",
+        "applied": True,
+    }
+    assert calls == [
+        ("write", selected_rescue, "fallback-model"),
+        ("payload", handover, "fallback-model"),
+        ("report", ("handover", [("model", "fallback-model")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_create_rescue_handover_from_action_skips_empty_prompt() -> None:
+    calls = []
+    selected_rescue = {"failed_model": "gpt-5.5"}
+
+    class Prompt:
+        @staticmethod
+        def ask(label, *, default):
+            calls.append(("ask", label, default))
+            return "  "
+
+    result = create_rescue_handover_from_action(
+        selected_rescue,
+        "manual_handover",
+        write_fallback_handover=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        rescue_handover_report_payload=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        localize=lambda zh, _en: f"zh:{zh}",
+        print_settings_result_report=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        print_settings_error_report=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        pause_after_tui_report=lambda _message: (_ for _ in ()).throw(AssertionError("unused")),
+        ensure_rich=lambda: calls.append(("ensure",)),
+        prompt_cls=Prompt,
+    )
+
+    assert result == {
+        "status": "continue",
+        "handover": None,
+        "fallback_model": "",
+        "applied": False,
+    }
+    assert calls == [
+        ("ensure",),
+        ("ask", "fallback model", ""),
     ]
 
 

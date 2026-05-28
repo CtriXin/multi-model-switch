@@ -1381,6 +1381,48 @@ def apply_rescue_default_from_action(
     }
 
 
+def create_rescue_handover_from_action(
+    selected_rescue,
+    action,
+    *,
+    write_fallback_handover,
+    rescue_handover_report_payload,
+    localize,
+    print_settings_result_report,
+    print_settings_error_report,
+    pause_after_tui_report,
+    ensure_rich,
+    prompt_cls,
+):
+    fallback_model = resolve_rescue_action_fallback_model(
+        action,
+        prefix="handover::",
+        prompt_label="fallback model",
+        prompt_default="",
+        ensure_rich=ensure_rich,
+        prompt_cls=prompt_cls,
+    )
+    if not fallback_model:
+        return {"status": "continue", "handover": None, "fallback_model": "", "applied": False}
+    result = create_rescue_handover_action(
+        selected_rescue,
+        fallback_model,
+        write_fallback_handover=write_fallback_handover,
+        rescue_handover_report_payload=rescue_handover_report_payload,
+        localize=localize,
+        print_settings_result_report=print_settings_result_report,
+        print_settings_error_report=print_settings_error_report,
+        pause_after_tui_report=pause_after_tui_report,
+    )
+    return {
+        "status": "continue",
+        "handover": result["handover"],
+        "error": result["error"],
+        "fallback_model": fallback_model,
+        "applied": True,
+    }
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

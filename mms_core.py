@@ -5269,25 +5269,18 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         pause_after_tui_report=_pause_after_tui_report,
                     )
                 elif str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
-                    fallback_model = tui_flow.resolve_rescue_action_fallback_model(
+                    tui_flow.create_rescue_handover_from_action(
+                        selected_rescue,
                         rescue_action,
-                        prefix="handover::",
-                        prompt_label="fallback model",
-                        prompt_default="",
+                        write_fallback_handover=write_fallback_handover,
+                        rescue_handover_report_payload=_rescue_handover_report_payload,
+                        localize=_L,
+                        print_settings_result_report=_print_settings_result_report,
+                        print_settings_error_report=_print_settings_error_report,
+                        pause_after_tui_report=_pause_after_tui_report,
                         ensure_rich=_ensure_rich,
                         prompt_cls=Prompt,
                     )
-                    if fallback_model:
-                        tui_flow.create_rescue_handover_action(
-                            selected_rescue,
-                            fallback_model,
-                            write_fallback_handover=write_fallback_handover,
-                            rescue_handover_report_payload=_rescue_handover_report_payload,
-                            localize=_L,
-                            print_settings_result_report=_print_settings_result_report,
-                            print_settings_error_report=_print_settings_error_report,
-                            pause_after_tui_report=_pause_after_tui_report,
-                        )
                 elif rescue_action == "choose_route_handover":
                     from mms_tui import select_model_tui
 
