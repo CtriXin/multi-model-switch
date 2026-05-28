@@ -5284,16 +5284,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         _ensure_rich()
                         fallback_model = Prompt.ask("fallback model", default="").strip()
                     if fallback_model:
-                        try:
-                            handover = write_fallback_handover(
-                                selected_rescue,
-                                fallback_model=fallback_model,
-                            )
-                        except Exception as exc:
-                            _print_settings_error_report(_L("生成 fallback handover 失败", "Create fallback handover failed"), exc)
-                        else:
-                            _print_settings_result_report(*_rescue_handover_report_payload(handover, fallback_model))
-                        _pause_after_tui_report("按 Enter 返回设置")
+                        tui_flow.create_rescue_handover_action(
+                            selected_rescue,
+                            fallback_model,
+                            write_fallback_handover=write_fallback_handover,
+                            rescue_handover_report_payload=_rescue_handover_report_payload,
+                            localize=_L,
+                            print_settings_result_report=_print_settings_result_report,
+                            print_settings_error_report=_print_settings_error_report,
+                            pause_after_tui_report=_pause_after_tui_report,
+                        )
                 elif rescue_action == "choose_route_handover":
                     from mms_tui import select_model_tui
 
@@ -5303,16 +5303,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         title="选择 fallback handover model",
                     )
                     if fallback_model:
-                        try:
-                            handover = write_fallback_handover(
-                                selected_rescue,
-                                fallback_model=fallback_model,
-                            )
-                        except Exception as exc:
-                            _print_settings_error_report(_L("生成 fallback handover 失败", "Create fallback handover failed"), exc)
-                        else:
-                            _print_settings_result_report(*_rescue_handover_report_payload(handover, fallback_model))
-                        _pause_after_tui_report("按 Enter 返回设置")
+                        tui_flow.create_rescue_handover_action(
+                            selected_rescue,
+                            fallback_model,
+                            write_fallback_handover=write_fallback_handover,
+                            rescue_handover_report_payload=_rescue_handover_report_payload,
+                            localize=_L,
+                            print_settings_result_report=_print_settings_result_report,
+                            print_settings_error_report=_print_settings_error_report,
+                            pause_after_tui_report=_pause_after_tui_report,
+                        )
                 elif str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
                     fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("default::") else ""
                     if not fallback_model:

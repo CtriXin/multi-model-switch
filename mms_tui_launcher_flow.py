@@ -1196,6 +1196,35 @@ def show_rescue_paths_action(
     return {"status": "continue"}
 
 
+def create_rescue_handover_action(
+    selected_rescue,
+    fallback_model,
+    *,
+    write_fallback_handover,
+    rescue_handover_report_payload,
+    localize,
+    print_settings_result_report,
+    print_settings_error_report,
+    pause_after_tui_report,
+):
+    try:
+        handover = write_fallback_handover(
+            selected_rescue,
+            fallback_model=fallback_model,
+        )
+    except Exception as exc:
+        print_settings_error_report(
+            localize("生成 fallback handover 失败", "Create fallback handover failed"),
+            exc,
+        )
+        result = {"status": "continue", "handover": None, "error": exc}
+    else:
+        print_settings_result_report(*rescue_handover_report_payload(handover, fallback_model))
+        result = {"status": "continue", "handover": handover, "error": None}
+    pause_after_tui_report("按 Enter 返回设置")
+    return result
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

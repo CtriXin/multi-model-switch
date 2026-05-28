@@ -13,6 +13,7 @@ from mms_tui_launcher_flow import (
     build_confirm_capability_context,
     confirm_agent_pack,
     confirm_tui_options,
+    create_rescue_handover_action,
     enforce_confirm_bypass_network_guard,
     ensure_cli_installed_for_launch,
     execute_confirmed_launch,
@@ -2051,6 +2052,55 @@ def test_show_rescue_paths_action_reports_paths_and_pauses() -> None:
     assert calls == [
         ("payload", selected_rescue),
         ("report", ("paths", [("md", "/tmp/rescue.md")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_create_rescue_handover_action_writes_reports_and_pauses() -> None:
+    calls = []
+    selected_rescue = {"failed_model": "gpt-5.5"}
+    handover = {"path": "/tmp/handover.md"}
+
+    result = create_rescue_handover_action(
+        selected_rescue,
+        "fallback-model",
+        write_fallback_handover=lambda rescue, *, fallback_model: calls.append(("write", rescue, fallback_model)) or handover,
+        rescue_handover_report_payload=lambda payload, model: calls.append(("payload", payload, model)) or ("handover", [("model", model)]),
+        localize=lambda zh, _en: f"zh:{zh}",
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        print_settings_error_report=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue", "handover": handover, "error": None}
+    assert calls == [
+        ("write", selected_rescue, "fallback-model"),
+        ("payload", handover, "fallback-model"),
+        ("report", ("handover", [("model", "fallback-model")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_create_rescue_handover_action_reports_error_and_pauses() -> None:
+    calls = []
+    selected_rescue = {"failed_model": "gpt-5.5"}
+    failure = RuntimeError("boom")
+
+    result = create_rescue_handover_action(
+        selected_rescue,
+        "fallback-model",
+        write_fallback_handover=lambda rescue, *, fallback_model: calls.append(("write", rescue, fallback_model)) or (_ for _ in ()).throw(failure),
+        rescue_handover_report_payload=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        localize=lambda zh, _en: f"zh:{zh}",
+        print_settings_result_report=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        print_settings_error_report=lambda title, exc: calls.append(("error", title, exc)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue", "handover": None, "error": failure}
+    assert calls == [
+        ("write", selected_rescue, "fallback-model"),
+        ("error", "zh:生成 fallback handover 失败", failure),
         ("pause", "按 Enter 返回设置"),
     ]
 
