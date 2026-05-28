@@ -1381,6 +1381,11 @@ def apply_rescue_default_from_action(
     }
 
 
+def apply_rescue_clear_default_action(cfg, *, apply_rescue_default_action):
+    result = apply_rescue_default_action("", cleared=True)
+    return {"status": "continue", "cfg": result["cfg"], "cleared": True}
+
+
 def apply_rescue_default_from_route_selection(
     cfg,
     route_fallback_candidates,

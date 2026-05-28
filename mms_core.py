@@ -5205,7 +5205,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     )["cfg"]
                     continue
                 if landing_action == "clear_default":
-                    current_cfg = _apply_rescue_default_action("", cleared=True)["cfg"]
+                    current_cfg = tui_flow.apply_rescue_clear_default_action(
+                        current_cfg,
+                        apply_rescue_default_action=_apply_rescue_default_action,
+                    )["cfg"]
                     continue
                 if landing_action == "create_demo":
                     tui_flow.apply_rescue_demo_packet_action(
@@ -5316,7 +5319,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         apply_rescue_default_action=_apply_rescue_default_action,
                     )["cfg"]
                 elif rescue_action == "clear_default":
-                    current_cfg = _apply_rescue_default_action("", cleared=True)["cfg"]
+                    current_cfg = tui_flow.apply_rescue_clear_default_action(
+                        current_cfg,
+                        apply_rescue_default_action=_apply_rescue_default_action,
+                    )["cfg"]
             continue
 
         # ── 上次使用 ──

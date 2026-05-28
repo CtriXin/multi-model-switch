@@ -6,6 +6,7 @@ from mms_tui_launcher_flow import (
     apply_confirm_runtime_preferences,
     apply_launch_runtime_preferences,
     apply_opencode_profile_for_launch,
+    apply_rescue_clear_default_action,
     apply_rescue_default_from_action,
     apply_rescue_default_fallback_action,
     apply_rescue_default_from_route_selection,
@@ -2361,6 +2362,20 @@ def test_apply_rescue_default_from_action_skips_empty_prompt() -> None:
         ("ensure",),
         ("ask", "全局默认 fallback model", "old-default"),
     ]
+
+
+def test_apply_rescue_clear_default_action_clears_and_returns_cfg() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "old"}}
+    cleared_cfg = {"rescue": {}}
+
+    result = apply_rescue_clear_default_action(
+        cfg,
+        apply_rescue_default_action=lambda fallback_model, *, cleared: calls.append((fallback_model, cleared)) or {"cfg": cleared_cfg},
+    )
+
+    assert result == {"status": "continue", "cfg": cleared_cfg, "cleared": True}
+    assert calls == [("", True)]
 
 
 def test_apply_rescue_default_from_route_selection_applies_selected_model() -> None:
