@@ -3881,6 +3881,38 @@ def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths()
 def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
     import mms_command_tools
 
+    default_provider = {"id": "default", "name": "Default"}
+    cfg = {
+        "providers": [
+            {"id": "relay-a"},
+            {"id": "relay-b"},
+            {"id": "relay-a"},
+            {"id": ""},
+            {"name": "missing-id"},
+        ]
+    }
+    cache = {
+        "relay-a": {"raw_models": ["gpt-5.5"], "models": ["display-only"]},
+        "relay-b": {"raw_models": ["stale-model"], "is_stale": True},
+    }
+    resolved = {
+        "relay-a": {"id": "relay-a", "resolved": True},
+        "relay-b": {"id": "relay-b", "resolved": True},
+    }
+    cache_calls = []
+    assert mms_command_tools.provider_candidates(
+        cfg,
+        default_provider,
+        ("fallback",),
+        load_probe_file_cache=lambda provider_id, allow_stale=False: cache_calls.append((provider_id, allow_stale)) or cache.get(provider_id),
+        resolve_provider_context=lambda _cfg, provider_id: resolved[provider_id],
+    ) == [
+        (default_provider, ["fallback"]),
+        (resolved["relay-a"], ["gpt-5.5"]),
+        (resolved["relay-b"], None),
+    ]
+    assert cache_calls == [("relay-a", True), ("relay-b", True)]
+
     providers = [
         {
             "id": "relay-a",

@@ -2719,6 +2719,29 @@ def provider_supports_model_for_cli(
     return False
 
 
+def provider_candidates(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    load_probe_file_cache,
+    resolve_provider_context,
+):
+    candidates = [(default_provider, list(default_models or []))]
+    seen_ids = {default_provider.get("id")}
+    for provider_def in cfg.get("providers", []):
+        provider_id = provider_def.get("id")
+        if not provider_id or provider_id in seen_ids:
+            continue
+        file_cached = load_probe_file_cache(provider_id, allow_stale=True)
+        cached_models = None
+        if file_cached is not None and not file_cached.get("is_stale"):
+            cached_models = list((file_cached or {}).get("raw_models") or [])
+        candidates.append((resolve_provider_context(cfg, provider_id), cached_models))
+        seen_ids.add(provider_id)
+    return candidates
+
+
 def is_installed_mms_layout(
     module_path,
     *,

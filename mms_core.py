@@ -5098,20 +5098,15 @@ def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
 
 
 def _provider_candidates(cfg, default_provider, default_models):
-    candidates = [(default_provider, list(default_models or []))]
-    seen_ids = {default_provider.get("id")}
-    for provider_def in cfg.get("providers", []):
-        provider_id = provider_def.get("id")
-        if not provider_id or provider_id in seen_ids:
-            continue
-        # 首屏/启动阶段允许使用 stale 文件缓存，避免单个慢 provider 卡住 TUI。
-        file_cached = _load_probe_file_cache(provider_id, allow_stale=True)
-        cached_models = None
-        if file_cached is not None and not file_cached.get("is_stale"):
-            cached_models = list((file_cached or {}).get("raw_models") or [])
-        candidates.append((resolve_provider_context(cfg, provider_id), cached_models))
-        seen_ids.add(provider_id)
-    return candidates
+    from mms_command_tools import provider_candidates
+
+    return provider_candidates(
+        cfg,
+        default_provider,
+        default_models,
+        load_probe_file_cache=_load_probe_file_cache,
+        resolve_provider_context=resolve_provider_context,
+    )
 
 
 def _provider_models_for_cli(cli_name, models):
