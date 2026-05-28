@@ -4767,10 +4767,9 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
 
 
 def _ensure_models_cache_available(models_cache):
-    if models_cache:
-        return True
-    console.print("[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用预设 / 直接 CLI 启动。[/yellow]")
-    return False
+    from mms_command_tools import ensure_models_cache_available
+
+    return ensure_models_cache_available(models_cache, console=console)
 
 
 def _model_matches_cli_family(cli_name, model_name):
@@ -5608,8 +5607,10 @@ def _launch_broker_experiment_interactive(cfg, cli_name):
 # ── CLI Selection (fallback) ───────────────────────────
 
 def check_cli_installed(cli_name):
+    from mms_command_tools import check_cli_installed as check_cli_installed_helper
     from mms_runtime import resolve_cli_binary
-    return bool(resolve_cli_binary(cli_name))
+
+    return check_cli_installed_helper(cli_name, resolve_cli_binary=resolve_cli_binary)
 
 
 def select_cli(cli_names=None):

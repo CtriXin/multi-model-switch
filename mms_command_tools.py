@@ -3302,6 +3302,17 @@ def fetch_models(provider, *, probe_models):
     return probe_models(provider, emit_output=True).get("models")
 
 
+def ensure_models_cache_available(models_cache, *, console):
+    if models_cache:
+        return True
+    console.print("[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用预设 / 直接 CLI 启动。[/yellow]")
+    return False
+
+
+def check_cli_installed(cli_name, *, resolve_cli_binary):
+    return bool(resolve_cli_binary(cli_name))
+
+
 def provider_supports_mimo_anthropic_selectors(provider):
     provider = provider if isinstance(provider, dict) else {}
     identity = " ".join(

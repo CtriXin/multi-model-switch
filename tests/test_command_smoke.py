@@ -4200,6 +4200,26 @@ def test_warm_command_small_helpers_preserve_delegation(monkeypatch):
     assert calls == [({"id": "core-relay"}, {"emit_output": True})]
 
 
+def test_availability_helpers_preserve_cache_warning_and_cli_check(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    console = _CollectingConsole()
+    assert mms_command_tools.ensure_models_cache_available(["model"], console=console) is True
+    assert console.items == []
+    assert mms_command_tools.ensure_models_cache_available([], console=console) is False
+    assert console.items == ["[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用预设 / 直接 CLI 启动。[/yellow]"]
+
+    console = _CollectingConsole()
+    monkeypatch.setattr(mms_core, "console", console)
+    assert mms_core._ensure_models_cache_available(["model"]) is True
+    assert mms_core._ensure_models_cache_available([]) is False
+    assert console.items == ["[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用预设 / 直接 CLI 启动。[/yellow]"]
+
+    assert mms_command_tools.check_cli_installed("codex", resolve_cli_binary=lambda cli: "/bin/codex") is True
+    assert mms_command_tools.check_cli_installed("missing", resolve_cli_binary=lambda cli: "") is False
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
