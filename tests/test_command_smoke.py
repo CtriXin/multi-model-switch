@@ -4150,6 +4150,112 @@ def test_prompt_provider_metadata_helper_and_wrapper_preserve_prompt_flow(monkey
     assert ("core-interactive", "模型源配置编辑") in calls
 
 
+def test_prompt_account_metadata_helper_and_wrapper_preserve_prompt_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    calls = []
+
+    def prompt_ask(label, **kwargs):
+        calls.append(("prompt", label, kwargs))
+        if label == "文件夹名（用于目录和命令）":
+            return " Codex Main! "
+        if label == "绑定的 CLI":
+            assert kwargs == {"choices": ["codex", "agy"], "default": "codex"}
+            return "agy"
+        if label == "显示名 / 列表展示名":
+            return "AGY Main"
+        if label == "优先级（数字越大越优先）":
+            return "80"
+        if label == "Claude 1M 策略（auto/enable/disable）":
+            return "disable"
+        if label == "备注（可选）":
+            return " demo "
+        raise AssertionError(label)
+
+    normalized = mms_command_tools.prompt_account_metadata(
+        {"id": "old", "cli": "bad", "priority": 7, "timezone": "UTC"},
+        ensure_interactive_terminal=lambda label: calls.append(("interactive", label)),
+        normalize_account=lambda account: calls.append(("normalize", dict(account))) or dict(account),
+        normalize_account_id=lambda value: calls.append(("account-id", value)) or "codex-main",
+        default_account_home=lambda account_id: calls.append(("home", account_id)) or f"/accounts/{account_id}",
+        managed_oauth_clis=("codex", "agy"),
+        prompt_ask=prompt_ask,
+        confirm_ask=lambda label, **kwargs: calls.append(("confirm", label, kwargs)) or False,
+        normalize_priority=lambda value: calls.append(("priority", value)) or int(value),
+        default_priority=50,
+        normalize_claude_1m_mode=lambda value: calls.append(("claude-1m", value)) or value,
+        prompt_validated_proxy_fields=lambda proxy, no_proxy, **kwargs: calls.append(("proxy", proxy, no_proxy, kwargs))
+        or ("http://proxy:7890", "localhost"),
+        default_account_timezone="Asia/Singapore",
+        prompt_validated_timezone=lambda timezone, **kwargs: calls.append(("timezone", timezone, kwargs)) or "Asia/Singapore",
+    )
+    assert normalized == {
+        "id": "codex-main",
+        "name": "AGY Main",
+        "cli": "agy",
+        "home_dir": "/accounts/codex-main",
+        "priority": 80,
+        "claude_1m_mode": "disable",
+        "proxy": "http://proxy:7890",
+        "no_proxy": "localhost",
+        "timezone": "Asia/Singapore",
+        "note": "demo",
+        "enabled": False,
+    }
+    assert calls[0] == ("interactive", "账号档案配置编辑")
+    assert ("account-id", " Codex Main! ") in calls
+    assert ("home", "codex-main") in calls
+    assert ("proxy", "", "", {"wizard": False}) in calls
+    assert ("timezone", "UTC", {"wizard": False}) in calls
+
+    calls.clear()
+
+    class FakePrompt:
+        @staticmethod
+        def ask(label, **kwargs):
+            calls.append(("core-prompt", label, kwargs))
+            return {
+                "文件夹名（用于目录和命令）": "Wrapped Account",
+                "绑定的 CLI": "agy",
+                "显示名 / 列表展示名": "Wrapped",
+                "优先级（数字越大越优先）": "101",
+                "Claude 1M 策略（auto/enable/disable）": "auto",
+                "备注（可选）": "wrapped note",
+            }[label]
+
+    monkeypatch.setattr(mms_core, "Prompt", FakePrompt)
+    monkeypatch.setattr(
+        mms_core,
+        "Confirm",
+        type("Confirm", (), {"ask": staticmethod(lambda label, **kwargs: calls.append(("core-confirm", label, kwargs)) or True)}),
+    )
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda label: calls.append(("core-interactive", label)))
+    monkeypatch.setattr(mms_core, "_normalize_account", lambda account: calls.append(("core-normalize", dict(account))) or dict(account))
+    monkeypatch.setattr(mms_core, "_normalize_account_id", lambda value: calls.append(("core-account-id", value)) or "wrapped-id")
+    monkeypatch.setattr(mms_core, "_default_account_home", lambda account_id: calls.append(("core-home", account_id)) or f"/accounts/{account_id}")
+    monkeypatch.setattr(mms_core, "_normalize_priority", lambda value: int(value))
+    monkeypatch.setattr(mms_core, "_normalize_claude_1m_mode", lambda value: value)
+    monkeypatch.setattr(mms_core, "_prompt_validated_proxy_fields", lambda proxy, no_proxy, **kwargs: ("http://wrapped:7890", "wrapped.local"))
+    monkeypatch.setattr(mms_core, "_prompt_validated_timezone", lambda timezone, **kwargs: "UTC")
+
+    assert mms_core._prompt_account_metadata({"id": "old", "cli": "claude"}) == {
+        "id": "wrapped-id",
+        "name": "Wrapped",
+        "cli": "agy",
+        "home_dir": "/accounts/wrapped-id",
+        "priority": 101,
+        "claude_1m_mode": "auto",
+        "proxy": "http://wrapped:7890",
+        "no_proxy": "wrapped.local",
+        "timezone": "UTC",
+        "note": "wrapped note",
+        "enabled": True,
+    }
+    assert ("core-interactive", "账号档案配置编辑") in calls
+    assert ("core-home", "wrapped-id") in calls
+
+
 def test_provider_template_helpers_preserve_payload_copy_and_generic_collapse():
     import mms_command_tools
 

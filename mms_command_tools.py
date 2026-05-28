@@ -2674,6 +2674,68 @@ def prompt_provider_metadata(
     })
 
 
+def prompt_account_metadata(
+    existing=None,
+    preset_id=None,
+    preset_cli=None,
+    *,
+    ensure_interactive_terminal,
+    normalize_account,
+    normalize_account_id,
+    default_account_home,
+    managed_oauth_clis,
+    prompt_ask,
+    confirm_ask,
+    normalize_priority,
+    default_priority,
+    normalize_claude_1m_mode,
+    prompt_validated_proxy_fields,
+    default_account_timezone,
+    prompt_validated_timezone,
+):
+    ensure_interactive_terminal("账号档案配置编辑")
+    current = normalize_account(existing or {"cli": preset_cli or "claude", "id": preset_id or ""})
+    account_id = preset_id or current.get("id") or "claude-main"
+    if not preset_id:
+        account_id = normalize_account_id(prompt_ask("文件夹名（用于目录和命令）", default=account_id))
+    cli_name = preset_cli or current.get("cli", "claude")
+    if not preset_cli:
+        if cli_name not in managed_oauth_clis:
+            cli_name = managed_oauth_clis[0]
+        cli_name = prompt_ask("绑定的 CLI", choices=list(managed_oauth_clis), default=cli_name)
+    name = prompt_ask("显示名 / 列表展示名", default=current.get("name") or account_id).strip() or account_id
+    home_dir = current.get("home_dir") or default_account_home(account_id)
+    priority = normalize_priority(prompt_ask("优先级（数字越大越优先）", default=str(current.get("priority", default_priority))))
+    claude_1m_mode = normalize_claude_1m_mode(
+        prompt_ask(
+            "Claude 1M 策略（auto/enable/disable）",
+            choices=["auto", "enable", "disable"],
+            default=current.get("claude_1m_mode", "auto"),
+        )
+    )
+    proxy, no_proxy = prompt_validated_proxy_fields(
+        current.get("proxy", ""),
+        current.get("no_proxy", ""),
+        wizard=False,
+    )
+    timezone_name = prompt_validated_timezone(current.get("timezone") or default_account_timezone, wizard=False)
+    note = prompt_ask("备注（可选）", default=current.get("note", "")).strip()
+    enabled = confirm_ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
+    return normalize_account({
+        "id": account_id,
+        "name": name,
+        "cli": cli_name,
+        "home_dir": home_dir,
+        "priority": priority,
+        "claude_1m_mode": claude_1m_mode,
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
+        "note": note,
+        "enabled": enabled,
+    })
+
+
 def merge_dicts(base, override):
     merged = dict(base)
     for key, value in override.items():

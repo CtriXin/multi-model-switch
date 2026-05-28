@@ -2643,47 +2643,26 @@ def _select_provider_template(preset_id=None):
 
 
 def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
-    _ensure_interactive_terminal("账号档案配置编辑")
-    current = _normalize_account(existing or {"cli": preset_cli or "claude", "id": preset_id or ""})
-    account_id = preset_id or current.get("id") or "claude-main"
-    if not preset_id:
-        account_id = _normalize_account_id(Prompt.ask("文件夹名（用于目录和命令）", default=account_id))
-    cli_name = preset_cli or current.get("cli", "claude")
-    if not preset_cli:
-        if cli_name not in MMS_MANAGED_OAUTH_CLIS:
-            cli_name = MMS_MANAGED_OAUTH_CLIS[0]
-        cli_name = Prompt.ask("绑定的 CLI", choices=list(MMS_MANAGED_OAUTH_CLIS), default=cli_name)
-    name = Prompt.ask("显示名 / 列表展示名", default=current.get("name") or account_id).strip() or account_id
-    home_dir = current.get("home_dir") or _default_account_home(account_id)
-    priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
-    claude_1m_mode = _normalize_claude_1m_mode(
-        Prompt.ask(
-            "Claude 1M 策略（auto/enable/disable）",
-            choices=["auto", "enable", "disable"],
-            default=current.get("claude_1m_mode", "auto"),
-        )
+    from mms_command_tools import prompt_account_metadata
+
+    return prompt_account_metadata(
+        existing,
+        preset_id,
+        preset_cli,
+        ensure_interactive_terminal=_ensure_interactive_terminal,
+        normalize_account=_normalize_account,
+        normalize_account_id=_normalize_account_id,
+        default_account_home=_default_account_home,
+        managed_oauth_clis=MMS_MANAGED_OAUTH_CLIS,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        confirm_ask=lambda *args, **kwargs: Confirm.ask(*args, **kwargs),
+        normalize_priority=_normalize_priority,
+        default_priority=DEFAULT_PRIORITY,
+        normalize_claude_1m_mode=_normalize_claude_1m_mode,
+        prompt_validated_proxy_fields=_prompt_validated_proxy_fields,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        prompt_validated_timezone=_prompt_validated_timezone,
     )
-    proxy, no_proxy = _prompt_validated_proxy_fields(
-        current.get("proxy", ""),
-        current.get("no_proxy", ""),
-        wizard=False,
-    )
-    timezone_name = _prompt_validated_timezone(current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE, wizard=False)
-    note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
-    enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
-    return _normalize_account({
-        "id": account_id,
-        "name": name,
-        "cli": cli_name,
-        "home_dir": home_dir,
-        "priority": priority,
-        "claude_1m_mode": claude_1m_mode,
-        "proxy": proxy,
-        "no_proxy": no_proxy,
-        "timezone": timezone_name,
-        "note": note,
-        "enabled": enabled,
-    })
 
 
 def _prompt_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
