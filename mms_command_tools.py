@@ -853,6 +853,31 @@ def resolve_config_provider_id(provider_defs, provider_id):
     return ""
 
 
+def config_truthy(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"0", "false", "no", "off", "disable", "disabled"}
+
+
+def parse_csv_values(raw_value, allowed_values=None, *, console=None):
+    values = []
+    for chunk in str(raw_value or "").split(","):
+        item = chunk.strip()
+        if item and item not in values:
+            values.append(item)
+    if allowed_values is None:
+        return values
+    invalid = [item for item in values if item not in allowed_values]
+    if invalid:
+        if console is not None:
+            console.print(f"[red]不支持的值: {', '.join(invalid)}[/red]")
+            console.print(f"[dim]可选值: {', '.join(allowed_values)}[/dim]")
+        sys.exit(1)
+    return values
+
+
 def env_file_path(cli_name, *, env_dir):
     return os.path.join(env_dir, f"{cli_name}.sh")
 

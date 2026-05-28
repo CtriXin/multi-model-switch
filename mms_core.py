@@ -3610,11 +3610,9 @@ def _resolve_config_provider_id(provider_defs, provider_id):
 
 
 def _config_truthy(value, default=False):
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() not in {"0", "false", "no", "off", "disable", "disabled"}
+    from mms_command_tools import config_truthy
+
+    return config_truthy(value, default=default)
 
 
 def _vision_sidecar_model_candidates_for_provider(provider_id):
@@ -3925,19 +3923,9 @@ def _ensure_interactive_terminal(action_hint):
 
 
 def _parse_csv_values(raw_value, allowed_values=None):
-    values = []
-    for chunk in str(raw_value or "").split(","):
-        item = chunk.strip()
-        if item and item not in values:
-            values.append(item)
-    if allowed_values is None:
-        return values
-    invalid = [item for item in values if item not in allowed_values]
-    if invalid:
-        console.print(f"[red]不支持的值: {', '.join(invalid)}[/red]")
-        console.print(f"[dim]可选值: {', '.join(allowed_values)}[/dim]")
-        sys.exit(1)
-    return values
+    from mms_command_tools import parse_csv_values
+
+    return parse_csv_values(raw_value, allowed_values=allowed_values, console=console)
 
 
 def _prompt_csv_values(label, default_values, allowed_values):

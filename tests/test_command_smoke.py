@@ -685,6 +685,29 @@ def test_env_file_helpers_preserve_shell_parsing_and_paths(tmp_path):
     }
 
 
+def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
+    import pytest
+
+    import mms_command_tools
+
+    console = _CollectingConsole()
+
+    assert mms_command_tools.config_truthy(None, default=True) is True
+    assert mms_command_tools.config_truthy(None, default=False) is False
+    assert mms_command_tools.config_truthy(True) is True
+    assert mms_command_tools.config_truthy("disabled") is False
+    assert mms_command_tools.config_truthy("yes") is True
+    assert mms_command_tools.parse_csv_values(" codex, claude, codex, ,opencode ") == ["codex", "claude", "opencode"]
+    assert mms_command_tools.parse_csv_values("codex,claude", allowed_values=["codex", "claude"]) == ["codex", "claude"]
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.parse_csv_values("codex,bad", allowed_values=["codex", "claude"], console=console)
+    assert exc_info.value.code == 1
+    assert console.items == [
+        "[red]不支持的值: bad[/red]",
+        "[dim]可选值: codex, claude[/dim]",
+    ]
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
