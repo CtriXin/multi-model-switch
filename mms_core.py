@@ -6749,70 +6749,36 @@ def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferre
 
 
 def _build_provider_options_map(cfg, cli_name, default_provider, default_models, model_names):
-    """为一组模型名构建运行来源替代选项映射（供 P 键使用）。
+    from mms_command_tools import build_provider_options_map
 
-    Returns:
-        dict[str, list[dict]] — model_name -> [{"provider_name", "provider_id", "provider_ctx"}]
-    """
-    result = {}
-    for model_name in model_names:
-        selected_family, _ = _infer_model_family(model_name)
-        options = []
-        for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
-            if not provider.get("enabled", True):
-                continue
-            if not _provider_has_configured_base_url(provider):
-                continue
-            if not provider.get("api_key"):
-                continue
-            models = _provider_effective_models(provider, cached_models, cfg)
-            model_lower = [str(m or "").strip().lower() for m in models]
-            if model_name.strip().lower() not in model_lower:
-                continue
-            if not _provider_supports_model_for_cli(provider, cli_name, model_name):
-                continue
-            runtime = _runtime_with_priority(provider, model_name=model_name, family_name=selected_family)
-            options.append({
-                "provider_name": _provider_label(provider),
-                "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
-                "priority_family": selected_family,
-                "provider_ctx": runtime,
-            })
-        account_options = _account_options_for_model(
-            cfg,
-            cli_name,
-            default_models,
-            model_info={"model": model_name},
-            allow_selected_model=True,
-        )
-        for option in account_options:
-            runtime = option.get("runtime") or {}
-            options.append({
-                "provider_name": f"{option.get('title', runtime.get('id', 'account'))} OAuth",
-                "provider_id": runtime.get("id", ""),
-                "priority_family": option.get("priority_family", selected_family),
-                "provider_ctx": runtime,
-            })
-        if len(options) > 1:
-            result[model_name] = options
-    return result
+    return build_provider_options_map(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        model_names,
+        infer_model_family=_infer_model_family,
+        provider_candidates=_provider_candidates,
+        provider_has_configured_base_url=_provider_has_configured_base_url,
+        provider_effective_models=_provider_effective_models,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+        runtime_with_priority=_runtime_with_priority,
+        provider_label=_provider_label,
+        account_options_for_model=_account_options_for_model,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+    )
 
 
 def _make_provider_options_loader(cfg, cli_name, default_provider, default_models):
-    """按模型懒加载 provider options，避免 TUI 首屏全量预计算。"""
-    cache = {}
+    from mms_command_tools import make_provider_options_loader
 
-    def _loader(model_name):
-        key = str(model_name or "").strip()
-        if not key:
-            return []
-        if key not in cache:
-            cache[key] = _build_provider_options_map(
-                cfg, cli_name, default_provider, default_models, [key]
-            ).get(key, [])
-        return cache[key]
-
-    return _loader
+    return make_provider_options_loader(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        build_provider_options_map=_build_provider_options_map,
+    )
 
 
 def _apply_runtime_priority_changes(cfg, pri_changes):

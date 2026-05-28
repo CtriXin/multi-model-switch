@@ -2602,6 +2602,83 @@ def group_models_by_family_and_provider(
     return [(family, dict(family_providers[family])) for family in family_order]
 
 
+def build_provider_options_map(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    model_names,
+    *,
+    infer_model_family,
+    provider_candidates,
+    provider_has_configured_base_url,
+    provider_effective_models,
+    provider_supports_model_for_cli,
+    runtime_with_priority,
+    provider_label,
+    account_options_for_model,
+    default_provider_id,
+):
+    result = {}
+    for model_name in model_names:
+        selected_family, _ = infer_model_family(model_name)
+        options = []
+        for provider, cached_models in provider_candidates(cfg, default_provider, default_models):
+            if not provider.get("enabled", True):
+                continue
+            if not provider_has_configured_base_url(provider):
+                continue
+            if not provider.get("api_key"):
+                continue
+            models = provider_effective_models(provider, cached_models, cfg)
+            model_lower = [str(item or "").strip().lower() for item in models]
+            if model_name.strip().lower() not in model_lower:
+                continue
+            if not provider_supports_model_for_cli(provider, cli_name, model_name):
+                continue
+            runtime = runtime_with_priority(provider, model_name=model_name, family_name=selected_family)
+            options.append({
+                "provider_name": provider_label(provider),
+                "provider_id": provider.get("id", default_provider_id),
+                "priority_family": selected_family,
+                "provider_ctx": runtime,
+            })
+        account_options = account_options_for_model(
+            cfg,
+            cli_name,
+            default_models,
+            model_info={"model": model_name},
+            allow_selected_model=True,
+        )
+        for option in account_options:
+            runtime = option.get("runtime") or {}
+            options.append({
+                "provider_name": f"{option.get('title', runtime.get('id', 'account'))} OAuth",
+                "provider_id": runtime.get("id", ""),
+                "priority_family": option.get("priority_family", selected_family),
+                "provider_ctx": runtime,
+            })
+        if len(options) > 1:
+            result[model_name] = options
+    return result
+
+
+def make_provider_options_loader(cfg, cli_name, default_provider, default_models, *, build_provider_options_map):
+    cache = {}
+
+    def _loader(model_name):
+        key = str(model_name or "").strip()
+        if not key:
+            return []
+        if key not in cache:
+            cache[key] = build_provider_options_map(
+                cfg, cli_name, default_provider, default_models, [key]
+            ).get(key, [])
+        return cache[key]
+
+    return _loader
+
+
 def build_model_families_for_cli(
     cfg,
     cli_name,

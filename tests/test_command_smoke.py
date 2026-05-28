@@ -1663,6 +1663,75 @@ def test_model_display_grouping_helpers_preserve_recommend_and_provider_dedupe()
     ]
 
 
+def test_provider_options_map_helper_preserves_provider_and_account_alternatives():
+    import mms_command_tools
+
+    providers = [
+        {
+            "id": "relay-a",
+            "name": "Relay A",
+            "enabled": True,
+            "api_key": "sk-a",
+            "models": ["gpt-5.5"],
+            "supported_clis": ["codex"],
+        },
+        {
+            "id": "relay-b",
+            "name": "Relay B",
+            "enabled": True,
+            "api_key": "sk-b",
+            "models": ["gpt-5.5", "gpt-5.4"],
+            "supported_clis": ["codex"],
+        },
+    ]
+    calls = []
+
+    provider_map = mms_command_tools.build_provider_options_map(
+        {"providers": providers},
+        "codex",
+        {},
+        [],
+        ["gpt-5.5", "gpt-5.4"],
+        infer_model_family=lambda model_name: ("GPT", "GPT"),
+        provider_candidates=lambda cfg, _default_provider, _default_models: [
+            (provider, provider["models"]) for provider in cfg["providers"]
+        ],
+        provider_has_configured_base_url=lambda _provider: True,
+        provider_effective_models=lambda _provider, cached_models, _cfg: list(cached_models or []),
+        provider_supports_model_for_cli=lambda provider, cli_name, _model_name: cli_name in provider["supported_clis"],
+        runtime_with_priority=lambda provider, model_name="", family_name="": {
+            **provider,
+            "runtime_model": model_name,
+            "priority_family": family_name,
+        },
+        provider_label=lambda provider: provider["name"],
+        account_options_for_model=lambda _cfg, _cli_name, _default_models, model_info=None, allow_selected_model=False: [
+            {
+                "title": "Codex Main",
+                "runtime": {"id": "codex-main"},
+                "priority_family": "GPT",
+            }
+        ] if model_info == {"model": "gpt-5.5"} and allow_selected_model else [],
+        default_provider_id="default",
+    )
+    assert [item["provider_id"] for item in provider_map["gpt-5.5"]] == ["relay-a", "relay-b", "codex-main"]
+    assert "gpt-5.4" not in provider_map
+
+    loader = mms_command_tools.make_provider_options_loader(
+        {},
+        "codex",
+        {},
+        [],
+        build_provider_options_map=lambda _cfg, _cli, _provider, _models, names: calls.append(tuple(names)) or {
+            names[0]: [{"provider_id": "relay-a"}]
+        },
+    )
+    assert loader("gpt-5.5") == [{"provider_id": "relay-a"}]
+    assert loader("gpt-5.5") == [{"provider_id": "relay-a"}]
+    assert loader("") == []
+    assert calls == [("gpt-5.5",)]
+
+
 def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
     import mms_command_tools
 
