@@ -4136,6 +4136,136 @@ def test_api_and_config_file_handlers_preserve_masking_and_save_flow():
     assert "[red]配置项 'api.missing' 不存在[/red]" in console.items
 
 
+def test_handle_config_dispatch_preserves_command_routing_and_api_setup():
+    import pytest
+    import mms_command_tools
+
+    cfg = {"cfg": True}
+    console = _CollectingConsole()
+    calls = []
+
+    def mark(name):
+        def _inner(*args, **kwargs):
+            calls.append((name, args, kwargs))
+        return _inner
+
+    kwargs = {
+        "preferences_doc_path": "/tmp/preferences.md",
+        "preference_paths": ["/tmp/preferences.toml"],
+        "display_config": mark("display-config"),
+        "display_config_help": mark("display-help"),
+        "handle_config_migrate": mark("migrate"),
+        "handle_config_file": mark("file"),
+        "handle_config_validate": mark("validate"),
+        "display_preferences_help": mark("preferences-help"),
+        "display_preferences_path": mark("preferences-path"),
+        "display_preferences_example": mark("preferences-example"),
+        "run_config_web": lambda *args, **kwargs: calls.append(("web", args, kwargs)) or 23,
+        "command_name": "mmg",
+        "config_write_target_path": lambda: "/tmp/config.toml",
+        "display_human_gate_help": mark("human-gate"),
+        "handle_config_get": mark("get"),
+        "handle_config_set": mark("set"),
+        "handle_config_unset": mark("unset"),
+        "run_connect_wizard": mark("connect"),
+        "handle_openrouter_extension_config": mark("openrouter"),
+        "display_adapter_registry": mark("adapter-registry"),
+        "display_providers": mark("provider-list"),
+        "handle_provider_default_config": mark("provider-default"),
+        "handle_provider_add_config": mark("provider-add"),
+        "handle_provider_edit_config": mark("provider-edit"),
+        "handle_provider_rename_config": mark("provider-rename"),
+        "handle_provider_remove_config": mark("provider-remove"),
+        "handle_provider_credentials_config": mark("provider-credentials"),
+        "display_accounts": mark("account-list"),
+        "handle_account_default_config": mark("account-default"),
+        "handle_account_add_config": mark("account-add"),
+        "handle_account_edit_config": mark("account-edit"),
+        "handle_account_remove_config": mark("account-remove"),
+        "handle_account_rename_config": mark("account-rename"),
+        "handle_account_status_config": mark("account-status"),
+        "handle_account_login_config": mark("account-login"),
+        "display_usage_stats": mark("usage"),
+        "resolve_provider_context": lambda current: {"id": "relay", "base_url": "https://api.example", "api_key": "key"},
+        "setup_provider_credentials": mark("setup-provider-credentials"),
+        "handle_api_config": mark("api-config"),
+        "console": console,
+    }
+
+    routes = [
+        ([], "display-config", (cfg,)),
+        (["help"], "display-help", ()),
+        (["migrate"], "migrate", ()),
+        (["file"], "file", ()),
+        (["validate"], "validate", (cfg,)),
+        (["preferences.help"], "preferences-help", ()),
+        (["preferences.path"], "preferences-path", ()),
+        (["preferences.example"], "preferences-example", ()),
+        (["human-gate"], "human-gate", ()),
+        (["get", "provider.default"], "get", (cfg, ["provider.default"])),
+        (["set", "provider.default", "relay"], "set", (cfg, ["provider.default", "relay"])),
+        (["unset", "provider.default"], "unset", (cfg, ["provider.default"])),
+        (["connect"], "connect", (cfg,)),
+        (["extension.openrouter", "models"], "openrouter", (cfg, ["models"])),
+        (["adapter.registry"], "adapter-registry", ()),
+        (["provider.list"], "provider-list", (cfg,)),
+        (["provider.default", "relay"], "provider-default", (cfg, ["relay"])),
+        (["provider.add", "openrouter"], "provider-add", (cfg, ["openrouter"])),
+        (["provider.edit", "relay"], "provider-edit", (cfg, ["relay"])),
+        (["provider.rename", "old", "new"], "provider-rename", (cfg, ["old", "new"])),
+        (["provider.remove", "relay"], "provider-remove", (cfg, ["relay"])),
+        (["provider.credentials", "relay"], "provider-credentials", (cfg, ["relay"])),
+        (["account.list"], "account-list", (cfg,)),
+        (["account.default"], "account-default", (cfg, [])),
+        (["account.add", "codex"], "account-add", (cfg, ["codex"])),
+        (["account.edit", "codex"], "account-edit", (cfg, ["codex"])),
+        (["account.remove", "codex"], "account-remove", (cfg, ["codex"])),
+        (["account.rename", "old", "new"], "account-rename", (cfg, ["old", "new"])),
+        (["account.status", "codex"], "account-status", (cfg, ["codex"])),
+        (["account.login", "codex"], "account-login", (cfg, ["codex"])),
+        (["usage"], "usage", ()),
+        (["api.base_url"], "api-config", ("api.base_url", [])),
+        (["ui.language"], "get", (cfg, ["ui.language"])),
+        (["ui.language", "zh"], "set", (cfg, ["ui.language", "zh"])),
+    ]
+
+    for argv, name, expected_args in routes:
+        calls.clear()
+        mms_command_tools.handle_config(cfg, argv, **kwargs)
+        assert calls[-1][0] == name
+        assert calls[-1][1] == expected_args
+
+    console.items.clear()
+    mms_command_tools.handle_config(cfg, ["preferences.doc"], **kwargs)
+    assert "/tmp/preferences.md" in console.items
+
+    calls.clear()
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.handle_config(cfg, ["web", "--port", "0"], **kwargs)
+    assert exc.value.code == 23
+    assert calls == [
+        (
+            "web",
+            (cfg, ["--port", "0"]),
+            {
+                "command_name": "mmg",
+                "config_path": "/tmp/config.toml",
+                "preferences_path": "/tmp/preferences.toml",
+            },
+        )
+    ]
+
+    calls.clear()
+    mms_command_tools.handle_config(cfg, ["api.setup"], **kwargs)
+    assert calls == [
+        (
+            "setup-provider-credentials",
+            ({"id": "relay", "base_url": "https://api.example", "api_key": "key"}, "https://api.example", "key"),
+            {"allow_keep": True},
+        )
+    ]
+
+
 def test_session_list_info_display_helpers():
     import pytest
     import mms_command_tools

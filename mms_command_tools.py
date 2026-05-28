@@ -3963,6 +3963,179 @@ def handle_config_validate(cfg, *, validate_config, console):
     console.print("[green]✓ 配置校验通过[/green]")
 
 
+def handle_config(
+    cfg,
+    args_rest,
+    *,
+    preferences_doc_path,
+    preference_paths,
+    display_config,
+    display_config_help,
+    handle_config_migrate,
+    handle_config_file,
+    handle_config_validate,
+    display_preferences_help,
+    display_preferences_path,
+    display_preferences_example,
+    run_config_web,
+    command_name,
+    config_write_target_path,
+    display_human_gate_help,
+    handle_config_get,
+    handle_config_set,
+    handle_config_unset,
+    run_connect_wizard,
+    handle_openrouter_extension_config,
+    display_adapter_registry,
+    display_providers,
+    handle_provider_default_config,
+    handle_provider_add_config,
+    handle_provider_edit_config,
+    handle_provider_rename_config,
+    handle_provider_remove_config,
+    handle_provider_credentials_config,
+    display_accounts,
+    handle_account_default_config,
+    handle_account_add_config,
+    handle_account_edit_config,
+    handle_account_remove_config,
+    handle_account_rename_config,
+    handle_account_status_config,
+    handle_account_login_config,
+    display_usage_stats,
+    resolve_provider_context,
+    setup_provider_credentials,
+    handle_api_config,
+    console,
+):
+    if not args_rest:
+        display_config(cfg)
+        return
+
+    key_path = args_rest[0]
+    if key_path in {"-h", "--help", "help"}:
+        display_config_help()
+        return
+    if key_path == "migrate":
+        handle_config_migrate()
+        return
+    if key_path == "file":
+        handle_config_file()
+        return
+    if key_path == "validate":
+        handle_config_validate(cfg)
+        return
+    if key_path in {"preferences", "preferences.help", "preference.help"}:
+        display_preferences_help()
+        return
+    if key_path in {"preferences.path", "preference.path"}:
+        display_preferences_path()
+        return
+    if key_path in {"preferences.example", "preference.example"}:
+        display_preferences_example()
+        return
+    if key_path in {"preferences.doc", "preference.doc"}:
+        console.print(preferences_doc_path)
+        return
+    if key_path in {"web", "webui", "setup.web", "setup-web"}:
+        raise SystemExit(run_config_web(
+            cfg,
+            args_rest[1:],
+            command_name=command_name,
+            config_path=config_write_target_path(),
+            preferences_path=preference_paths[0],
+        ))
+    if key_path in {"gates", "human-gate", "humangate", "human-gates"}:
+        display_human_gate_help()
+        return
+    if key_path == "get":
+        handle_config_get(cfg, args_rest[1:])
+        return
+    if key_path == "set":
+        handle_config_set(cfg, args_rest[1:])
+        return
+    if key_path == "unset":
+        handle_config_unset(cfg, args_rest[1:])
+        return
+    if key_path == "connect":
+        run_connect_wizard(cfg)
+        return
+    if key_path in {"extension.openrouter", "openrouter"}:
+        handle_openrouter_extension_config(cfg, args_rest[1:])
+        return
+    if key_path in {"adapter.registry", "source.registry", "source.top10"}:
+        display_adapter_registry()
+        return
+    if key_path == "provider.list":
+        display_providers(cfg)
+        return
+    if key_path == "provider.default":
+        handle_provider_default_config(cfg, args_rest[1:])
+        return
+    if key_path == "provider.add":
+        handle_provider_add_config(cfg, args_rest[1:])
+        return
+    if key_path == "provider.edit":
+        handle_provider_edit_config(cfg, args_rest[1:])
+        return
+    if key_path == "provider.rename":
+        handle_provider_rename_config(cfg, args_rest[1:])
+        return
+    if key_path == "provider.remove":
+        handle_provider_remove_config(cfg, args_rest[1:])
+        return
+    if key_path == "provider.credentials":
+        handle_provider_credentials_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.list":
+        display_accounts(cfg)
+        return
+    if key_path == "account.default":
+        handle_account_default_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.add":
+        handle_account_add_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.edit":
+        handle_account_edit_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.remove":
+        handle_account_remove_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.rename":
+        handle_account_rename_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.status":
+        handle_account_status_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.login":
+        handle_account_login_config(cfg, args_rest[1:])
+        return
+    if key_path in {"usage", "stats"}:
+        display_usage_stats()
+        return
+    if key_path in ("api.setup", "api.edit"):
+        provider = resolve_provider_context(cfg)
+        setup_provider_credentials(
+            provider,
+            provider.get("base_url", ""),
+            provider.get("api_key", ""),
+            allow_keep=True,
+        )
+        return
+
+    if key_path.startswith("api."):
+        handle_api_config(key_path, args_rest[1:])
+        return
+
+    if len(args_rest) == 1:
+        handle_config_get(cfg, [key_path])
+        return
+    if len(args_rest) == 2:
+        handle_config_set(cfg, [key_path, args_rest[1]])
+        return
+
+
 def handle_config_file(*, config_path, console):
     console.print(config_path)
 

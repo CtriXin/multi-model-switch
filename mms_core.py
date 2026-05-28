@@ -7673,135 +7673,57 @@ def handle_activate_command(cfg, argv):
 
 def handle_config(cfg, args_rest):
     """处理 config 子命令"""
-    if not args_rest:
-        _display_config(cfg)
-        return
+    from mms_command_tools import handle_config as handle_config_impl
 
-    key_path = args_rest[0]
-    if key_path in {"-h", "--help", "help"}:
-        _display_config_help()
-        return
-    if key_path == "migrate":
-        _handle_config_migrate()
-        return
-    if key_path == "file":
-        _handle_config_file()
-        return
-    if key_path == "validate":
-        _handle_config_validate(cfg)
-        return
-    if key_path in {"preferences", "preferences.help", "preference.help"}:
-        _display_preferences_help()
-        return
-    if key_path in {"preferences.path", "preference.path"}:
-        _display_preferences_path()
-        return
-    if key_path in {"preferences.example", "preference.example"}:
-        _display_preferences_example()
-        return
-    if key_path in {"preferences.doc", "preference.doc"}:
-        console.print(PREFERENCES_DOC_PATH)
-        return
-    if key_path in {"web", "webui", "setup.web", "setup-web"}:
+    def _run_config_web(*args, **kwargs):
         from mms_config_web import run_config_web
 
-        raise SystemExit(run_config_web(
-            cfg,
-            args_rest[1:],
-            command_name=current_command(),
-            config_path=_config_write_target_path(),
-            preferences_path=PREFERENCES_PATHS[0],
-        ))
-    if key_path in {"gates", "human-gate", "humangate", "human-gates"}:
-        _display_human_gate_help()
-        return
-    if key_path == "get":
-        _handle_config_get(cfg, args_rest[1:])
-        return
-    if key_path == "set":
-        _handle_config_set(cfg, args_rest[1:])
-        return
-    if key_path == "unset":
-        _handle_config_unset(cfg, args_rest[1:])
-        return
-    if key_path == "connect":
-        run_connect_wizard(cfg)
-        return
-    if key_path in {"extension.openrouter", "openrouter"}:
-        _handle_openrouter_extension_config(cfg, args_rest[1:])
-        return
-    if key_path in {"adapter.registry", "source.registry", "source.top10"}:
-        _display_adapter_registry()
-        return
-    if key_path == "provider.list":
-        _display_providers(cfg)
-        return
-    if key_path == "provider.default":
-        _handle_provider_default_config(cfg, args_rest[1:])
-        return
-    if key_path == "provider.add":
-        _handle_provider_add_config(cfg, args_rest[1:])
-        return
-    if key_path == "provider.edit":
-        _handle_provider_edit_config(cfg, args_rest[1:])
-        return
-    if key_path == "provider.rename":
-        _handle_provider_rename_config(cfg, args_rest[1:])
-        return
-    if key_path == "provider.remove":
-        _handle_provider_remove_config(cfg, args_rest[1:])
-        return
-    if key_path == "provider.credentials":
-        _handle_provider_credentials_config(cfg, args_rest[1:])
-        return
-    if key_path == "account.list":
-        _display_accounts(cfg)
-        return
-    if key_path == "account.default":
-        _handle_account_default_config(cfg, args_rest[1:])
-        return
-    if key_path == "account.add":
-        _handle_account_add_config(cfg, args_rest[1:])
-        return
-    if key_path == "account.edit":
-        _handle_account_edit_config(cfg, args_rest[1:])
-        return
-    if key_path == "account.remove":
-        _handle_account_remove_config(cfg, args_rest[1:])
-        return
-    if key_path == "account.rename":
-        _handle_account_rename_config(cfg, args_rest[1:])
-        return
-    if key_path == "account.status":
-        _handle_account_status_config(cfg, args_rest[1:])
-        return
-    if key_path == "account.login":
-        _handle_account_login_config(cfg, args_rest[1:])
-        return
-    if key_path in {"usage", "stats"}:
-        _display_usage_stats()
-        return
-    if key_path in ("api.setup", "api.edit"):
-        provider = resolve_provider_context(cfg)
-        setup_provider_credentials(
-            provider,
-            provider.get("base_url", ""),
-            provider.get("api_key", ""),
-            allow_keep=True,
-        )
-        return
+        return run_config_web(*args, **kwargs)
 
-    if key_path.startswith("api."):
-        _handle_api_config(key_path, args_rest[1:])
-        return
-
-    parts = key_path.split(".")
-    if len(args_rest) == 1:
-        _handle_config_get(cfg, [key_path])
-        return
-    if len(args_rest) == 2:
-        _handle_config_set(cfg, [key_path, args_rest[1]])
-        return
+    return handle_config_impl(
+        cfg,
+        args_rest,
+        preferences_doc_path=PREFERENCES_DOC_PATH,
+        preference_paths=PREFERENCES_PATHS,
+        display_config=_display_config,
+        display_config_help=_display_config_help,
+        handle_config_migrate=_handle_config_migrate,
+        handle_config_file=_handle_config_file,
+        handle_config_validate=_handle_config_validate,
+        display_preferences_help=_display_preferences_help,
+        display_preferences_path=_display_preferences_path,
+        display_preferences_example=_display_preferences_example,
+        run_config_web=_run_config_web,
+        command_name=current_command(),
+        config_write_target_path=_config_write_target_path,
+        display_human_gate_help=_display_human_gate_help,
+        handle_config_get=_handle_config_get,
+        handle_config_set=_handle_config_set,
+        handle_config_unset=_handle_config_unset,
+        run_connect_wizard=run_connect_wizard,
+        handle_openrouter_extension_config=_handle_openrouter_extension_config,
+        display_adapter_registry=_display_adapter_registry,
+        display_providers=_display_providers,
+        handle_provider_default_config=_handle_provider_default_config,
+        handle_provider_add_config=_handle_provider_add_config,
+        handle_provider_edit_config=_handle_provider_edit_config,
+        handle_provider_rename_config=_handle_provider_rename_config,
+        handle_provider_remove_config=_handle_provider_remove_config,
+        handle_provider_credentials_config=_handle_provider_credentials_config,
+        display_accounts=_display_accounts,
+        handle_account_default_config=_handle_account_default_config,
+        handle_account_add_config=_handle_account_add_config,
+        handle_account_edit_config=_handle_account_edit_config,
+        handle_account_remove_config=_handle_account_remove_config,
+        handle_account_rename_config=_handle_account_rename_config,
+        handle_account_status_config=_handle_account_status_config,
+        handle_account_login_config=_handle_account_login_config,
+        display_usage_stats=_display_usage_stats,
+        resolve_provider_context=resolve_provider_context,
+        setup_provider_credentials=setup_provider_credentials,
+        handle_api_config=_handle_api_config,
+        console=console,
+    )
 
 
 def _handle_api_config(key_path, args_rest):
