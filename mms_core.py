@@ -10257,77 +10257,32 @@ def _handle_config_migrate():
 
 
 def _display_providers(cfg):
-    providers = cfg.get("providers", [])
-    if not providers:
-        console.print("[yellow]未配置模型源[/yellow]")
-        return
+    from mms_command_tools import display_providers
 
-    table = Table(title="模型源列表", show_lines=True)
-    table.add_column("ID", style="cyan")
-    table.add_column("名称", style="green")
-    table.add_column("协议", style="yellow")
-    table.add_column("CLI", style="magenta")
-    table.add_column("优先级", style="white")
-    table.add_column("状态", style="white")
-    table.add_column("地址", style="blue")
-
-    default_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
-    for provider in providers:
-        provider_ctx = resolve_provider_context(cfg, provider.get("id"))
-        status = "默认" if provider.get("id") == default_id else ""
-        status = f"{status} 启用" if provider.get("enabled", True) else f"{status} 禁用".strip()
-        table.add_row(
-            str(provider.get("id", "")),
-            str(provider.get("name", "")),
-            ", ".join(provider.get("protocols", [])),
-            ", ".join(provider.get("supported_clis", [])),
-            str(provider.get("priority", DEFAULT_PRIORITY)),
-            status.strip(),
-            _provider_openai_base_url(provider_ctx) or _provider_anthropic_base_url(provider_ctx) or "(未设置)",
-        )
-    console.print(table)
-    console.print(
-        f"[dim]提示: 可用 {current_command()} config provider.default <id> 切换默认模型源。[/dim]"
+    return display_providers(
+        cfg,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        default_priority=DEFAULT_PRIORITY,
+        resolve_provider_context=resolve_provider_context,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        command_name=current_command(),
+        table_cls=Table,
+        console=console,
     )
 
 
 def _display_accounts(cfg):
-    accounts = cfg.get("accounts", [])
-    if not accounts:
-        console.print("[yellow]未配置账号档案[/yellow]")
-        return
+    from mms_command_tools import display_accounts
 
-    defaults = cfg.get("account", {}).get("defaults", {})
-    table = Table(title="账号档案列表", show_lines=True)
-    table.add_column("文件夹名", style="cyan")
-    table.add_column("显示名", style="green")
-    table.add_column("CLI", style="yellow")
-    table.add_column("优先级", style="white")
-    table.add_column("状态", style="magenta")
-    table.add_column("登录态", style="white")
-    table.add_column("文件夹目录", style="blue")
-
-    for account in accounts:
-        login_state = _probe_account_status(account)
-        status = []
-        if defaults.get(account.get("cli")) == account.get("id"):
-            status.append("默认")
-        status.append("启用" if account.get("enabled", True) else "禁用")
-        table.add_row(
-            str(account.get("id", "")),
-            str(account.get("name", "")),
-            str(account.get("cli", "")),
-            str(account.get("priority", DEFAULT_PRIORITY)),
-            " ".join(status).strip(),
-            login_state.get("summary") or login_state.get("state", ""),
-            str(account.get("home_dir", "")),
-        )
-    console.print(table)
-    console.print(
-        f"[dim]提示: 可用 {current_command()} config account.default <cli> <id> 设置默认账号，"
-        f"{current_command()} config account.login <id> 进入官方登录。[/dim]"
+    return display_accounts(
+        cfg,
+        default_priority=DEFAULT_PRIORITY,
+        probe_account_status=_probe_account_status,
+        command_name=current_command(),
+        table_cls=Table,
+        console=console,
     )
-    console.print("[dim]注: Claude OAuth 独立入口已下线，这里仅保留旧配置只读兼容。[/dim]")
 
 
 def _display_config_help():

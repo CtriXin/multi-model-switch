@@ -561,6 +561,92 @@ def test_adapter_registry_display_renders_policy():
     assert any("mmg config adapter.registry" in str(item) for item in console.items)
 
 
+def test_provider_account_display_helpers_render_rows():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    cfg = {
+        "provider": {"default": "relay"},
+        "providers": [
+            {
+                "id": "relay",
+                "name": "Relay",
+                "protocols": ["openai"],
+                "supported_clis": ["codex"],
+                "enabled": True,
+                "openai_base_url": "https://relay.example/v1",
+            },
+            {
+                "id": "backup",
+                "name": "Backup",
+                "protocols": ["anthropic"],
+                "supported_clis": ["claude"],
+                "enabled": False,
+                "anthropic_base_url": "https://anthropic.example/v1",
+            },
+        ],
+    }
+
+    mms_command_tools.display_providers(
+        cfg,
+        default_provider_id="default",
+        default_priority=100,
+        resolve_provider_context=lambda cfg_arg, provider_id: next(
+            provider for provider in cfg_arg["providers"] if provider["id"] == provider_id
+        ),
+        provider_openai_base_url=lambda provider: provider.get("openai_base_url", ""),
+        provider_anthropic_base_url=lambda provider: provider.get("anthropic_base_url", ""),
+        command_name="mmg",
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    provider_table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert provider_table.rows[0][0] == (
+        "relay",
+        "Relay",
+        "openai",
+        "codex",
+        "100",
+        "默认 启用",
+        "https://relay.example/v1",
+    )
+    assert provider_table.rows[1][0][5] == "禁用"
+
+    console.items.clear()
+    mms_command_tools.display_accounts(
+        {
+            "account": {"defaults": {"codex": "codex-a"}},
+            "accounts": [
+                {
+                    "id": "codex-a",
+                    "name": "Codex A",
+                    "cli": "codex",
+                    "priority": 200,
+                    "enabled": True,
+                    "home_dir": "/tmp/codex-a",
+                }
+            ],
+        },
+        default_priority=100,
+        probe_account_status=lambda account: {"summary": "logged-in"},
+        command_name="mmg",
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    account_table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert account_table.rows[0][0] == (
+        "codex-a",
+        "Codex A",
+        "codex",
+        "200",
+        "默认 启用",
+        "logged-in",
+        "/tmp/codex-a",
+    )
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 
