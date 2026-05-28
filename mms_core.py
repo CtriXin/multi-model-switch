@@ -2304,33 +2304,27 @@ def _print_trace(cli_name, model_info, runtime):
 
 
 def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=None):
-    runtime = _runtime_with_launch_preferences(
-        {"_mms_preferences": load_user_preferences()},
-        runtime,
-        cli_name,
-    )
-    if cli_name == "claude":
-        runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime)
-    if _trace_enabled:
-        _print_trace(cli_name, model_info, runtime)
-    _record_usage(runtime, cli_name, model_info)
-    if runtime and runtime.get("runtime_kind") == "broker" and cli_name == "claude":
-        if extra_args:
-            console.print("[red]broker profile 暂不支持 CLI resume 参数[/red]")
-            raise SystemExit(1)
-        model_override = _resolve_model_name(model_info)
-        if model_override == "official-default":
-            model_override = runtime.get("remote_service_model", "")
-        exit_code = run_broker_profile_interactive(
-            load_config(),
-            runtime.get("broker_profile_id", runtime.get("id", "")),
-            model_override=model_override,
-        )
-        if exit_code != 0:
-            raise SystemExit(exit_code)
-        return
+    from mms_command_tools import launch_with_tracking
     from mms_launchers import launch_cli
-    launch_cli(cli_name, model_info, runtime, once=once, extra_args=extra_args)
+
+    return launch_with_tracking(
+        cli_name,
+        model_info,
+        runtime,
+        once=once,
+        extra_args=extra_args,
+        runtime_with_launch_preferences=_runtime_with_launch_preferences,
+        load_user_preferences=load_user_preferences,
+        load_config=load_config,
+        runtime_with_vision_sidecar=_runtime_with_vision_sidecar,
+        trace_enabled=_trace_enabled,
+        print_trace=_print_trace,
+        record_usage=_record_usage,
+        console=console,
+        resolve_model_name=_resolve_model_name,
+        run_broker_profile_interactive=run_broker_profile_interactive,
+        launch_cli=launch_cli,
+    )
 
 
 

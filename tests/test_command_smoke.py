@@ -1925,6 +1925,98 @@ def test_launch_trace_formatter_preserves_sources_and_override_chain():
     assert "empty           -> (none)" in report
 
 
+def test_launch_with_tracking_helper_preserves_preferences_trace_and_broker_flow():
+    import pytest
+
+    import mms_command_tools
+
+    calls = []
+    runtime = {"id": "relay", "auth_mode": "api_key"}
+    mms_command_tools.launch_with_tracking(
+        "codex",
+        {"model": "gpt-5.5"},
+        runtime,
+        once=True,
+        extra_args=["--help"],
+        runtime_with_launch_preferences=lambda cfg, received_runtime, cli: calls.append(
+            ("prefs", cfg, received_runtime, cli)
+        )
+        or {**received_runtime, "preferred": cli},
+        load_user_preferences=lambda: calls.append("load-prefs") or {"launch": {}},
+        load_config=lambda: calls.append("unexpected-load-config"),
+        runtime_with_vision_sidecar=lambda *_args: calls.append("unexpected-sidecar"),
+        trace_enabled=True,
+        print_trace=lambda *args: calls.append(("trace", args)),
+        record_usage=lambda *args: calls.append(("usage", args)),
+        console=_CollectingConsole(),
+        resolve_model_name=lambda model_info: model_info.get("model", "official-default"),
+        run_broker_profile_interactive=lambda *_args, **_kwargs: calls.append("unexpected-broker"),
+        launch_cli=lambda *args, **kwargs: calls.append(("launch", args, kwargs)),
+    )
+    assert calls == [
+        "load-prefs",
+        ("prefs", {"_mms_preferences": {"launch": {}}}, runtime, "codex"),
+        ("trace", ("codex", {"model": "gpt-5.5"}, {"id": "relay", "auth_mode": "api_key", "preferred": "codex"})),
+        ("usage", ({"id": "relay", "auth_mode": "api_key", "preferred": "codex"}, "codex", {"model": "gpt-5.5"})),
+        (
+            "launch",
+            ("codex", {"model": "gpt-5.5"}, {"id": "relay", "auth_mode": "api_key", "preferred": "codex"}),
+            {"once": True, "extra_args": ["--help"]},
+        ),
+    ]
+
+    calls.clear()
+    cfg = {"cfg": True}
+    mms_command_tools.launch_with_tracking(
+        "claude",
+        {},
+        {"id": "broker-a", "runtime_kind": "broker", "remote_service_model": "remote-default"},
+        runtime_with_launch_preferences=lambda _cfg, received_runtime, _cli: calls.append(("prefs", received_runtime))
+        or received_runtime,
+        load_user_preferences=lambda: {},
+        load_config=lambda: calls.append("load-config") or cfg,
+        runtime_with_vision_sidecar=lambda received_cfg, received_runtime: calls.append(("sidecar", received_cfg, received_runtime))
+        or received_runtime,
+        trace_enabled=False,
+        print_trace=lambda *_args: calls.append("unexpected-trace"),
+        record_usage=lambda *args: calls.append(("usage", args)),
+        console=_CollectingConsole(),
+        resolve_model_name=lambda _model_info: "official-default",
+        run_broker_profile_interactive=lambda *args, **kwargs: calls.append(("broker", args, kwargs)) or 0,
+        launch_cli=lambda *_args, **_kwargs: calls.append("unexpected-launch"),
+    )
+    assert calls == [
+        ("prefs", {"id": "broker-a", "runtime_kind": "broker", "remote_service_model": "remote-default"}),
+        "load-config",
+        ("sidecar", cfg, {"id": "broker-a", "runtime_kind": "broker", "remote_service_model": "remote-default"}),
+        ("usage", ({"id": "broker-a", "runtime_kind": "broker", "remote_service_model": "remote-default"}, "claude", {})),
+        "load-config",
+        ("broker", (cfg, "broker-a"), {"model_override": "remote-default"}),
+    ]
+
+    console = _CollectingConsole()
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.launch_with_tracking(
+            "claude",
+            {"model": "gpt-5.5"},
+            {"id": "broker-a", "runtime_kind": "broker"},
+            extra_args=["--resume", "abc"],
+            runtime_with_launch_preferences=lambda _cfg, received_runtime, _cli: received_runtime,
+            load_user_preferences=lambda: {},
+            load_config=lambda: cfg,
+            runtime_with_vision_sidecar=lambda _cfg, received_runtime: received_runtime,
+            trace_enabled=False,
+            print_trace=lambda *_args: None,
+            record_usage=lambda *_args: None,
+            console=console,
+            resolve_model_name=lambda model_info: model_info["model"],
+            run_broker_profile_interactive=lambda *_args, **_kwargs: 0,
+            launch_cli=lambda *_args, **_kwargs: None,
+        )
+    assert exc_info.value.code == 1
+    assert console.items == ["[red]broker profile 暂不支持 CLI resume 参数[/red]"]
+
+
 def test_trace_record_helper_preserves_enabled_filtering_and_none_skip():
     import mms_command_tools
 

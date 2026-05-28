@@ -1243,6 +1243,53 @@ def format_launch_trace(
     return "\n".join(lines)
 
 
+def launch_with_tracking(
+    cli_name,
+    model_info,
+    runtime,
+    once=False,
+    extra_args=None,
+    *,
+    runtime_with_launch_preferences,
+    load_user_preferences,
+    load_config,
+    runtime_with_vision_sidecar,
+    trace_enabled,
+    print_trace,
+    record_usage,
+    console,
+    resolve_model_name,
+    run_broker_profile_interactive,
+    launch_cli,
+):
+    runtime = runtime_with_launch_preferences(
+        {"_mms_preferences": load_user_preferences()},
+        runtime,
+        cli_name,
+    )
+    if cli_name == "claude":
+        runtime = runtime_with_vision_sidecar(load_config() or {}, runtime)
+    if trace_enabled:
+        print_trace(cli_name, model_info, runtime)
+    record_usage(runtime, cli_name, model_info)
+    if runtime and runtime.get("runtime_kind") == "broker" and cli_name == "claude":
+        if extra_args:
+            console.print("[red]broker profile 暂不支持 CLI resume 参数[/red]")
+            raise SystemExit(1)
+        model_override = resolve_model_name(model_info)
+        if model_override == "official-default":
+            model_override = runtime.get("remote_service_model", "")
+        exit_code = run_broker_profile_interactive(
+            load_config(),
+            runtime.get("broker_profile_id", runtime.get("id", "")),
+            model_override=model_override,
+        )
+        if exit_code != 0:
+            raise SystemExit(exit_code)
+        return
+    launch_cli(cli_name, model_info, runtime, once=once, extra_args=extra_args)
+
+
 def compact_tui_report_value(value, max_len=96):
     text = str(value if value is not None else "-").replace("\n", " ").strip()
     if len(text) <= max_len:
