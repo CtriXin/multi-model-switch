@@ -567,6 +567,57 @@ def official_account_profile_context(
     return model_info, runtime
 
 
+def handle_tui_profile_action(
+    cfg,
+    cli_name,
+    action_data,
+    current_provider,
+    default_models,
+    *,
+    agy_connect_profile_id,
+    connect_action,
+    resolve_opencode_profile_runtime,
+    resolve_account_context,
+    trace_record,
+    trace_runtime_choice,
+):
+    if cli_name == "opencode":
+        model_info, runtime = opencode_profile_launch_context(
+            cfg,
+            current_provider,
+            default_models,
+            action_data,
+            resolve_opencode_profile_runtime=resolve_opencode_profile_runtime,
+            trace_record=trace_record,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+        if runtime is None:
+            return {
+                "status": "continue",
+                "message": "OpenCode Lite/Raw 未找到安全的 OpenAI-compatible GPT provider；请用 Heavy/OMO 或先配置 GPT provider。",
+            }
+        return {"status": "launch", "model_info": model_info, "runtime": runtime}
+
+    if cli_name == "agy":
+        if action_data == agy_connect_profile_id:
+            connect_result = connect_action(cfg, cli_name)
+            return {"status": "continue", **connect_result}
+
+        model_info, runtime = official_account_profile_context(
+            cfg,
+            cli_name,
+            action_data,
+            resolve_account_context=resolve_account_context,
+            trace_record=trace_record,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+        if runtime is None:
+            return {"status": "continue", "message": f"未找到 {cli_name} 官方账号: {action_data}"}
+        return {"status": "launch", "model_info": model_info, "runtime": runtime}
+
+    return {"status": "continue"}
+
+
 def refresh_tui_runtime_state_after_config_change(
     cfg,
     *,

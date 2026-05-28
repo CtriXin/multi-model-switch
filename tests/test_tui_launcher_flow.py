@@ -10,6 +10,7 @@ from mms_tui_launcher_flow import (
     handle_tui_connect_action,
     handle_tui_last_used_action,
     handle_tui_provider_browse_action,
+    handle_tui_profile_action,
     handle_tui_selected_model_action,
     last_used_model_info,
     normalize_confirm_result,
@@ -620,6 +621,97 @@ def test_official_account_profile_context_rejects_wrong_cli() -> None:
 
     assert model_info == {}
     assert runtime is None
+
+
+def test_handle_tui_profile_action_launches_opencode_profile() -> None:
+    trace_records = []
+    trace_choices = []
+    runtime = {"id": "provider", "opencode_profile": "agent"}
+
+    result = handle_tui_profile_action(
+        {"cfg": True},
+        "opencode",
+        "agent",
+        {"id": "current"},
+        ["gpt-5.4"],
+        agy_connect_profile_id="__connect__",
+        connect_action=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_opencode_profile_runtime=lambda *_args: ({"model": "gpt-5.4"}, runtime),
+        resolve_account_context=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert result == {"status": "launch", "model_info": {"model": "gpt-5.4"}, "runtime": runtime}
+    assert trace_records == [
+        (
+            ("opencode profile",),
+            {"cli": "opencode", "profile": "agent", "model": "gpt-5.4", "provider": "provider"},
+        )
+    ]
+    assert trace_choices == [(("runtime resolve", runtime), {"launch_cli": "opencode", "choice": "opencode profile"})]
+
+
+def test_handle_tui_profile_action_connects_or_reports_missing_account() -> None:
+    connect_result = {
+        "cfg": {"updated": True},
+        "changed": True,
+        "current_provider": {"id": "provider"},
+        "default_models": ["gpt-5.4"],
+        "current_cli_names": ["agy"],
+        "families_dirty": True,
+    }
+    assert handle_tui_profile_action(
+        {"cfg": True},
+        "agy",
+        "__connect__",
+        {},
+        [],
+        agy_connect_profile_id="__connect__",
+        connect_action=lambda cfg, cli: {**connect_result, "called_with": (cfg, cli)},
+        resolve_opencode_profile_runtime=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_account_context=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_record=lambda *_args, **_kwargs: None,
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    ) == {"status": "continue", **connect_result, "called_with": ({"cfg": True}, "agy")}
+
+    assert handle_tui_profile_action(
+        {},
+        "agy",
+        "missing",
+        {},
+        [],
+        agy_connect_profile_id="__connect__",
+        connect_action=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_opencode_profile_runtime=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_account_context=lambda *_args, **_kwargs: None,
+        trace_record=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+    ) == {"status": "continue", "message": "未找到 agy 官方账号: missing"}
+
+
+def test_handle_tui_profile_action_launches_official_account() -> None:
+    trace_records = []
+    trace_choices = []
+    runtime = {"id": "agy-main", "cli": "agy"}
+
+    result = handle_tui_profile_action(
+        {"cfg": True},
+        "agy",
+        "agy-main",
+        {},
+        [],
+        agy_connect_profile_id="__connect__",
+        connect_action=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_opencode_profile_runtime=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_account_context=lambda *_args, **_kwargs: runtime,
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert result == {"status": "launch", "model_info": {}, "runtime": runtime}
+    assert trace_records == [(("official account",), {"cli": "agy", "account": "agy-main"})]
+    assert trace_choices == [(("runtime resolve", runtime), {"launch_cli": "agy", "choice": "official account"})]
 
 
 def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> None:

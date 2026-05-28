@@ -4948,50 +4948,39 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 return True
             continue
 
-        # ── OpenCode profile ──
-        if action_type == "profile" and cli == "opencode":
-
-            model_info, runtime_runtime = tui_flow.opencode_profile_launch_context(
-                current_cfg,
-                current_provider,
-                default_models,
-                action_data,
-                resolve_opencode_profile_runtime=_resolve_opencode_profile_runtime,
-                trace_record=_trace_record,
-                trace_runtime_choice=_trace_runtime_choice,
-            )
-            if runtime_runtime is None:
-                console.print("[yellow]OpenCode Lite/Raw 未找到安全的 OpenAI-compatible GPT provider；请用 Heavy/OMO 或先配置 GPT provider。[/yellow]")
-                continue
-            # fall through to confirm
-        if action_type == "profile" and cli == "agy":
-            if action_data == _AGY_CONNECT_PROFILE_ID:
-                connect_result = tui_flow.handle_tui_connect_action(
-                    current_cfg,
-                    cli,
-                    quick_connect_official=_quick_connect_official,
-                    run_connect_wizard=run_connect_wizard,
-                    refresh_runtime_state=_refresh_runtime_state_after_config_change,
-                )
-                current_cfg = connect_result["cfg"]
-                if connect_result["changed"]:
-                    current_provider = connect_result["current_provider"]
-                    default_models = connect_result["default_models"]
-                    current_cli_names = connect_result["current_cli_names"]
-                    _families_dirty = connect_result["families_dirty"]
-                continue
-
-            model_info, runtime_runtime = tui_flow.official_account_profile_context(
+        # ── Profile / 官方账号 ──
+        if action_type == "profile" and cli in {"opencode", "agy"}:
+            profile_action = tui_flow.handle_tui_profile_action(
                 current_cfg,
                 cli,
                 action_data,
+                current_provider,
+                default_models,
+                agy_connect_profile_id=_AGY_CONNECT_PROFILE_ID,
+                connect_action=lambda cfg_arg, cli_arg: tui_flow.handle_tui_connect_action(
+                    cfg_arg,
+                    cli_arg,
+                    quick_connect_official=_quick_connect_official,
+                    run_connect_wizard=run_connect_wizard,
+                    refresh_runtime_state=_refresh_runtime_state_after_config_change,
+                ),
+                resolve_opencode_profile_runtime=_resolve_opencode_profile_runtime,
                 resolve_account_context=resolve_account_context,
                 trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if runtime_runtime is None:
-                console.print(f"[yellow]未找到 {cli} 官方账号: {action_data}[/yellow]")
+            if profile_action.get("changed"):
+                current_cfg = profile_action["cfg"]
+                current_provider = profile_action["current_provider"]
+                default_models = profile_action["default_models"]
+                current_cli_names = profile_action["current_cli_names"]
+                _families_dirty = profile_action["families_dirty"]
+            if profile_action.get("message"):
+                console.print(f"[yellow]{profile_action['message']}[/yellow]")
+            if profile_action["status"] != "launch":
                 continue
+            model_info = profile_action["model_info"]
+            runtime_runtime = profile_action["runtime"]
             # fall through to confirm
 
         # ── Provider 浏览 ──
