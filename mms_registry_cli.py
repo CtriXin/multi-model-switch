@@ -499,6 +499,64 @@ def _generated_bundle_summary(root: Path) -> dict[str, Any]:
     }
 
 
+def _model_source_readiness(
+    *,
+    root: Path,
+    root_status: Mapping[str, Any],
+    registry_db: Mapping[str, Any],
+    legacy_import: Mapping[str, Any],
+    bundle: Mapping[str, Any],
+) -> dict[str, Any]:
+    candidates = legacy_import.get("candidates") if isinstance(legacy_import.get("candidates"), Mapping) else {}
+    route_count = int(candidates.get("provider_route_count") or 0)
+    missing_keys = int(bundle.get("router_missing_api_key_count") or 0)
+    missing_urls = int(bundle.get("router_missing_base_url_count") or 0)
+    if root_status.get("mode") != "preview":
+        status = "stable_root_read_only"
+        headline = "Stable root: v2 DB-truth writes stay human-only; use mmf for preview."
+        next_action = {"label": "Open preview root status", "command": "./mmf config source --json"}
+    elif registry_db.get("status") != "ok":
+        status = "needs_init"
+        headline = "Preview root needs registry DB initialization."
+        next_action = {"label": "Initialize preview root", "command": "./mmf preview init --json"}
+    elif route_count <= 0:
+        status = "needs_import"
+        headline = "Preview DB has no route candidates yet."
+        next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}
+    elif not bundle.get("verified"):
+        status = "needs_publish"
+        headline = "Latest-approved bundle is missing or failed manifest verification."
+        next_action = {"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"}
+    elif bundle.get("runtime_ready") is not True:
+        status = "verified_not_runtime_ready"
+        if missing_urls > 0:
+            command = "./mmf preview prepare --from ~/.config/mms --include-secrets --json" if missing_keys > 0 else "./mmf preview prepare --from ~/.config/mms --json"
+            next_action = {"label": "Rebuild preview routes from legacy source", "command": command}
+        elif missing_keys > 0:
+            next_action = {
+                "label": "Import keys into preview secret backend",
+                "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json",
+            }
+        else:
+            next_action = {"label": "Inspect preview readiness", "command": "./mmf config doctor --json"}
+        headline = "Bundle verifies, but runtime route leaves are not ready."
+    else:
+        status = "ready"
+        watchdog_root = shlex.quote(str(root))
+        headline = "Preview root is ready: DB candidates, latest-approved bundle, and runtime routes verify."
+        next_action = {
+            "label": "Optional: run read-only watchdog check",
+            "command": f"scripts/mms_health_watchdog.py --config-dir {watchdog_root} --require-bundle --dry-run --print-json",
+        }
+    return {
+        "status": status,
+        "ready": status == "ready",
+        "result": "READY" if status == "ready" else "VERIFIED_NOT_RUNTIME_READY" if status == "verified_not_runtime_ready" else "NOT_READY",
+        "headline": headline,
+        "next_action": next_action,
+    }
+
+
 def _generated_router_runtime_summary(verified: dict[str, Any]) -> dict[str, Any]:
     files = verified.get("verified_files") if isinstance(verified.get("verified_files"), dict) else {}
     router = files.get("router") if isinstance(files.get("router"), dict) else {}
@@ -603,19 +661,34 @@ def model_source_status(
     legacy = legacy_import_report(config_dir=root)
     db_path = mms_registry.default_registry_db_path(config_dir=root)
     registry_db = _read_only_registry_summary(db_path)
+    root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
+    legacy_import = {
+        "read_only": True,
+        "provider_count": legacy.get("provider_count", 0),
+        "conflict_count": legacy.get("conflict_count", 0),
+        "candidates": registry_db.get("legacy_import_candidates", _empty_legacy_import_candidate_summary()),
+        "next_action": legacy.get("next_action", ""),
+        "files": legacy.get("files", {}),
+    }
+    generated_bundle = _generated_bundle_summary(root)
+    readiness = _model_source_readiness(
+        root=root,
+        root_status=root_status,
+        registry_db=registry_db,
+        legacy_import=legacy_import,
+        bundle=generated_bundle,
+    )
     return {
         "schema": "mms.model_source_status.v1",
-        "root": mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root),
+        "status": readiness["status"],
+        "ready": readiness["ready"],
+        "result": readiness["result"],
+        "headline": readiness["headline"],
+        "next_action": readiness["next_action"],
+        "root": root_status,
         "registry_db": registry_db,
-        "legacy_import": {
-            "read_only": True,
-            "provider_count": legacy.get("provider_count", 0),
-            "conflict_count": legacy.get("conflict_count", 0),
-            "candidates": registry_db.get("legacy_import_candidates", _empty_legacy_import_candidate_summary()),
-            "next_action": legacy.get("next_action", ""),
-            "files": legacy.get("files", {}),
-        },
-        "generated_bundle": _generated_bundle_summary(root),
+        "legacy_import": legacy_import,
+        "generated_bundle": generated_bundle,
         "read_only": True,
     }
 
@@ -2961,6 +3034,13 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     counts = registry_db.get("counts") if isinstance(registry_db.get("counts"), dict) else {}
     candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
     print("MMS Model Source Status")
+    print(f"result={summary.get('result', '')}")
+    print(f"ready={summary.get('ready')}")
+    print(f"status={summary.get('status', '')}")
+    print(f"headline={summary.get('headline', '')}")
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    print(f"next_action={next_action.get('label', '')}")
+    print(f"next_command={next_action.get('command', '')}")
     print(f"command={root.get('command')}")
     print(f"mode={root.get('mode')}")
     print(f"config_root={root.get('config_root')}")

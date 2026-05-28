@@ -617,6 +617,10 @@ def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_pat
 
     assert payload["schema"] == "mms.model_source_status.v1"
     assert payload["read_only"] is True
+    assert payload["result"] == "NOT_READY"
+    assert payload["ready"] is False
+    assert payload["status"] == "needs_init"
+    assert payload["next_action"]["command"] == "./mmf preview init --json"
     assert payload["root"]["command"] == "mmf"
     assert payload["root"]["mode"] == "preview"
     assert payload["legacy_import"]["conflict_count"] >= 1

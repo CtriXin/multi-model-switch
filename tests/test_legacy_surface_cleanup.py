@@ -494,6 +494,11 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     mms_i18n.set_language("zh")
     title, info_lines, actions = mms_core._model_source_status_tui_payload(
         {
+            "result": "NOT_READY",
+            "status": "needs_init",
+            "ready": False,
+            "headline": "Preview root needs registry DB initialization.",
+            "next_action": {"label": "Initialize preview root", "command": "./mmf preview init --json"},
             "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
             "registry_db": {
                 "path": "/tmp/mms-next/registry/model-registry.sqlite",
@@ -515,6 +520,11 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     )
     report_title, rows, note = mms_core._model_source_status_report_payload(
         {
+            "result": "NOT_READY",
+            "status": "needs_init",
+            "ready": False,
+            "headline": "Preview root needs registry DB initialization.",
+            "next_action": {"label": "Initialize preview root", "command": "./mmf preview init --json"},
             "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
             "registry_db": {"path": "/tmp/mms-next/registry/model-registry.sqlite", "status": "missing", "counts": {}},
             "legacy_import": {
@@ -532,7 +542,11 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     )
 
     assert title == "模型真源 / Registry Truth"
-    assert info_lines[:4] == [
+    assert info_lines[:8] == [
+        ("结果", "NOT_READY"),
+        ("状态", "needs_init"),
+        ("Ready", "no"),
+        ("一句话", "Preview root needs registry DB initialization."),
         ("Root", "/tmp/mms-next"),
         ("Mode", "preview"),
         ("DB", "/tmp/mms-next/registry/model-registry.sqlite"),
@@ -547,6 +561,8 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("Legacy 候选 routes", 0) in rows
     assert ("Bundle runtime", "unknown") in rows
     assert ("Router 缺失 key", 0) in rows
+    assert ("下一步", "Initialize preview root") in rows
+    assert ("建议命令", "./mmf preview init --json") in rows
     assert "只读视图" in note
 
     plan_title, plan_rows, plan_note = mms_core._registry_v2_save_plan_report_payload(

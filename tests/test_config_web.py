@@ -68,6 +68,10 @@ def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
 
     assert status["schema"] == "mms.model_source_status.v1"
     assert status["read_only"] is True
+    assert status["result"] == "NOT_READY"
+    assert status["ready"] is False
+    assert status["status"] == "needs_init"
+    assert "registry DB initialization" in status["headline"]
     assert status["root"]["command"] == "mmf"
     assert status["root"]["mode"] == "preview"
     assert status["root"]["config_root"] == str(config_root)
@@ -152,6 +156,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "['source','真源状态','DB / legacy / bundle']" in html
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
+    assert "status.headline" in html
     assert "candidate routes" in html
     assert "missing keys" in html
     assert "registry_v2_save_plan" in html

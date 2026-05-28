@@ -5279,7 +5279,12 @@ def _model_source_status_rows(summary):
     candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
     if not candidates and isinstance(registry_db.get("legacy_import_candidates"), dict):
         candidates = registry_db.get("legacy_import_candidates")
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
     return [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Ready", "Ready"), "yes" if summary.get("ready") else "no"),
+        (_L("一句话", "headline"), summary.get("headline") or "-"),
         ("Root", root.get("config_root") or summary.get("config_root") or "-"),
         ("Mode", root.get("mode") or "-"),
         ("DB", registry_db.get("path") or "-"),
@@ -5295,6 +5300,8 @@ def _model_source_status_rows(summary):
         (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
         (_L("Bundle runtime", "bundle runtime"), bundle.get("runtime_ready_status") or "unknown"),
         (_L("Router 缺失 key", "router missing keys"), bundle.get("router_missing_api_key_count", 0)),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
     ]
 
 
