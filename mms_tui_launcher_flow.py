@@ -1443,3 +1443,32 @@ def enforce_confirm_bypass_network_guard(runtime, cli_name, bypass, *, network_g
         require_proxy=claude_bypass_requires_proxy(runtime),
     )
     return {"status": "continue"}
+
+
+def execute_confirmed_launch(
+    cli_name,
+    clean_model_info,
+    runtime,
+    *,
+    bypass,
+    runtime_preferences,
+    once,
+    network_guard_enforcer_loader,
+    merge_disabled_session_surfaces,
+    launch_with_tracking,
+):
+    apply_confirm_bypass_flag(runtime, cli_name, bypass)
+    enforce_confirm_bypass_network_guard(
+        runtime,
+        cli_name,
+        bypass,
+        network_guard_enforcer_loader=network_guard_enforcer_loader,
+    )
+    apply_confirm_runtime_preferences(
+        runtime,
+        cli_name,
+        **runtime_preferences,
+        merge_disabled_session_surfaces=merge_disabled_session_surfaces,
+    )
+    launch_with_tracking(cli_name, clean_model_info, runtime, once=once)
+    return {"status": "launched"}

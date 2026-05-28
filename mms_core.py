@@ -5517,26 +5517,22 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         bypass = confirm_action["bypass"]
         runtime_preferences = confirm_action["runtime_preferences"]
-        tui_flow.apply_confirm_bypass_flag(runtime_runtime, cli, bypass)
-        tui_flow.enforce_confirm_bypass_network_guard(
-            runtime_runtime,
+        tui_flow.execute_confirmed_launch(
             cli,
-            bypass,
+            clean_model_info,
+            runtime_runtime,
+            bypass=bypass,
+            runtime_preferences=runtime_preferences,
+            once=once,
             network_guard_enforcer_loader=lambda: (
                 lambda launchers: (
                     launchers._enforce_claude_network_guard_or_exit,
                     launchers._claude_bypass_requires_proxy,
                 )
             )(__import__("mms_launchers", fromlist=["_enforce_claude_network_guard_or_exit", "_claude_bypass_requires_proxy"])),
-        )
-
-        tui_flow.apply_confirm_runtime_preferences(
-            runtime_runtime,
-            cli,
-            **runtime_preferences,
             merge_disabled_session_surfaces=_merge_disabled_session_surfaces,
+            launch_with_tracking=_launch_with_tracking,
         )
-        _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
 

@@ -12,6 +12,7 @@ from mms_tui_launcher_flow import (
     confirm_tui_options,
     enforce_confirm_bypass_network_guard,
     ensure_cli_installed_for_launch,
+    execute_confirmed_launch,
     handle_tui_account_mgmt_settings_action,
     handle_tui_about_settings_action,
     handle_tui_broker_action,
@@ -2130,3 +2131,55 @@ def test_apply_confirm_bypass_flag_only_for_launch_clis() -> None:
     runtime = {}
     apply_confirm_bypass_flag(runtime, "chat", True)
     assert runtime == {}
+
+
+def test_execute_confirmed_launch_applies_flags_preferences_and_launches() -> None:
+    calls = []
+    runtime = {"auth_mode": "api_key"}
+    clean_model_info = {"model": "claude-sonnet"}
+    runtime_preferences = {
+        "claude_1m_enabled": True,
+        "caveman_enabled": True,
+        "agent_pack": "ecc",
+        "thinking_enabled": False,
+        "reasoning_effort": "LOW",
+        "disabled_session_surfaces": {"toon": True},
+        "nsr_enabled": True,
+        "has_nsr": True,
+        "confirm_returned_surfaces": True,
+    }
+
+    result = execute_confirmed_launch(
+        "claude",
+        clean_model_info,
+        runtime,
+        bypass=True,
+        runtime_preferences=runtime_preferences,
+        once=True,
+        network_guard_enforcer_loader=lambda: (
+            lambda runtime_arg, *, require_proxy: calls.append(("enforce", runtime_arg, require_proxy)),
+            lambda runtime_arg: calls.append(("requires_proxy", runtime_arg)) or True,
+        ),
+        merge_disabled_session_surfaces=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        launch_with_tracking=lambda cli, model, runtime_arg, *, once: calls.append(("launch", cli, model, runtime_arg, once)),
+    )
+
+    assert result == {"status": "launched"}
+    assert runtime == {
+        "auth_mode": "api_key",
+        "bypass": True,
+        "claude_1m_mode": "enable",
+        "agent_pack": "ecc",
+        "ecc_mode": "enable",
+        "omc_mode": "disable",
+        "caveman_mode": "enable",
+        "nsr_mode": "enable",
+        "disabled_session_surfaces": {"toon": True},
+        "thinking_mode": "disable",
+        "reasoning_effort": "low",
+    }
+    assert calls == [
+        ("requires_proxy", runtime),
+        ("enforce", runtime, True),
+        ("launch", "claude", clean_model_info, runtime, True),
+    ]
