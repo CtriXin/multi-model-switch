@@ -867,6 +867,35 @@ def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
     assert ("doctor", "Registry Doctor / 状态") in registry_actions
 
 
+def test_latest_rescue_hot_fallback_event_filters_recent_events():
+    import mms_command_tools
+
+    old_event = {
+        "type": "fallback",
+        "model": "deepseek-v4-flash",
+        "note": "rescue_hot_fallback status=503",
+    }
+    latest_event = {
+        "type": "fallback",
+        "model": "gpt-5.5",
+        "note": "rescue_hot_fallback status=429",
+    }
+    events = [
+        {"type": "fallback", "note": "manual fallback"},
+        old_event,
+        {"type": "failure", "note": "rescue_hot_fallback status=503"},
+        "bad-event",
+        latest_event,
+    ]
+
+    assert mms_command_tools.latest_rescue_hot_fallback_event(
+        get_recent_events=lambda limit: events,
+    ) is latest_event
+    assert mms_command_tools.latest_rescue_hot_fallback_event(
+        get_recent_events=lambda limit: (_ for _ in ()).throw(RuntimeError("boom")),
+    ) is None
+
+
 def test_model_source_and_speed_labels_preserve_thresholds():
     import mms_command_tools
 

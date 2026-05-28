@@ -3669,19 +3669,11 @@ def _set_rescue_hot_fallback_enabled(cfg, enabled=False):
 def _latest_rescue_hot_fallback_event():
     try:
         from mms_events import get_recent_events
-
-        events = get_recent_events(limit=40)
     except Exception:
         return None
-    for event in reversed(events or []):
-        if not isinstance(event, dict):
-            continue
-        if event.get("type") != "fallback":
-            continue
-        if "rescue_hot_fallback" not in str(event.get("note") or ""):
-            continue
-        return event
-    return None
+    from mms_command_tools import latest_rescue_hot_fallback_event
+
+    return latest_rescue_hot_fallback_event(get_recent_events=get_recent_events)
 
 
 def _format_rescue_hot_fallback_event(event):

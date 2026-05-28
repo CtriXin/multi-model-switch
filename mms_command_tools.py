@@ -873,6 +873,22 @@ def format_rescue_hot_fallback_event(event):
     return " · ".join(parts) if parts else "-"
 
 
+def latest_rescue_hot_fallback_event(*, get_recent_events, limit=40):
+    try:
+        events = get_recent_events(limit=limit)
+    except Exception:
+        return None
+    for event in reversed(events or []):
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") != "fallback":
+            continue
+        if "rescue_hot_fallback" not in str(event.get("note") or ""):
+            continue
+        return event
+    return None
+
+
 def rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None, hot_fallback_enabled=False):
     events = list(rescue_events or [])
     latest = events[0] if events else {}
