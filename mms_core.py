@@ -485,43 +485,28 @@ def _major_update_notice():
 
 def _start_async_update_check():
     global _UPDATE_CHECK_RUNNING
+    from mms_command_tools import start_async_update_check
 
-    version_meta = _load_version_meta()
-    _installed_version, installed_semver = _installed_update_semver(version_meta)
-    if installed_semver is None:
-        return
+    def get_running():
+        return bool(_UPDATE_CHECK_RUNNING)
 
-    cache = _load_update_check_cache()
-    last_checked_at = float(cache.get("checked_at") or 0)
-    if time.time() - last_checked_at < UPDATE_CHECK_INTERVAL_SEC:
-        return
-
-    with _UPDATE_CHECK_LOCK:
-        if _UPDATE_CHECK_RUNNING:
-            return
-        _UPDATE_CHECK_RUNNING = True
-
-    def _run():
+    def set_running(value):
         global _UPDATE_CHECK_RUNNING
-        try:
-            semver_tags = _fetch_latest_semver_tags()
-            payload = _load_update_check_cache()
-            payload["checked_at"] = time.time()
-            if semver_tags:
-                payload["latest_tag"] = semver_tags[0]
-                payload["semver_tags"] = semver_tags
-            _save_update_check_cache(payload)
-        except Exception:
-            pass
-        finally:
-            with _UPDATE_CHECK_LOCK:
-                _UPDATE_CHECK_RUNNING = False
+        _UPDATE_CHECK_RUNNING = bool(value)
 
-    threading.Thread(
-        target=_run,
-        daemon=True,
-        name="mms-update-check",
-    ).start()
+    return start_async_update_check(
+        load_version_meta=_load_version_meta,
+        installed_update_semver=_installed_update_semver,
+        load_update_check_cache=_load_update_check_cache,
+        fetch_latest_semver_tags=_fetch_latest_semver_tags,
+        save_update_check_cache=_save_update_check_cache,
+        lock=_UPDATE_CHECK_LOCK,
+        get_running=get_running,
+        set_running=set_running,
+        thread_cls=threading.Thread,
+        now=time.time,
+        interval_sec=UPDATE_CHECK_INTERVAL_SEC,
+    )
 
 # 统一模型家族规则表（有序）。
 # keywords 匹配模型名任意部分（不限前缀），支持 provider/model 格式。

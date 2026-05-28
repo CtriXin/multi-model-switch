@@ -2948,6 +2948,57 @@ def update_notice(
     }
 
 
+def start_async_update_check(
+    *,
+    load_version_meta,
+    installed_update_semver,
+    load_update_check_cache,
+    fetch_latest_semver_tags,
+    save_update_check_cache,
+    lock,
+    get_running,
+    set_running,
+    thread_cls,
+    now,
+    interval_sec,
+):
+    version_meta = load_version_meta()
+    _installed_version, installed_semver = installed_update_semver(version_meta)
+    if installed_semver is None:
+        return
+
+    cache = load_update_check_cache()
+    last_checked_at = float(cache.get("checked_at") or 0)
+    if now() - last_checked_at < interval_sec:
+        return
+
+    with lock:
+        if get_running():
+            return
+        set_running(True)
+
+    def _run():
+        try:
+            semver_tags = fetch_latest_semver_tags()
+            payload = load_update_check_cache()
+            payload["checked_at"] = now()
+            if semver_tags:
+                payload["latest_tag"] = semver_tags[0]
+                payload["semver_tags"] = semver_tags
+            save_update_check_cache(payload)
+        except Exception:
+            pass
+        finally:
+            with lock:
+                set_running(False)
+
+    thread_cls(
+        target=_run,
+        daemon=True,
+        name="mms-update-check",
+    ).start()
+
+
 def mms_update_status(version_info, cache, *, localize):
     current = str(version_info.get("installed_version") or version_info.get("release") or "").strip()
     latest = str(cache.get("latest_tag") or "").strip()

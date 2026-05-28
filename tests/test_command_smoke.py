@@ -2288,6 +2288,65 @@ def test_update_notice_preserves_prompt_payload_and_throttle():
     ) is None
 
 
+def test_start_async_update_check_preserves_interval_running_and_worker_flow():
+    import mms_command_tools
+
+    events = []
+    saved = []
+    running = {"value": False}
+
+    class FakeLock:
+        def __enter__(self):
+            events.append(("lock", "enter"))
+
+        def __exit__(self, exc_type, exc, tb):
+            events.append(("lock", "exit"))
+            return False
+
+    class FakeThread:
+        def __init__(self, *, target, daemon=False, name=""):
+            events.append(("thread", daemon, name))
+            self.target = target
+
+        def start(self):
+            events.append(("start",))
+            self.target()
+
+    mms_command_tools.start_async_update_check(
+        load_version_meta=lambda: {"source": "install.sh", "installed_version": "v1.16.3"},
+        installed_update_semver=lambda meta: ("v1.16.3", (1, 16, 3)),
+        load_update_check_cache=lambda: {"checked_at": 0},
+        fetch_latest_semver_tags=lambda: ["v1.16.6", "v1.16.5"],
+        save_update_check_cache=saved.append,
+        lock=FakeLock(),
+        get_running=lambda: running["value"],
+        set_running=lambda value: events.append(("running", value)) or running.__setitem__("value", value),
+        thread_cls=FakeThread,
+        now=lambda: 1000,
+        interval_sec=60,
+    )
+    assert saved == [{"checked_at": 1000, "latest_tag": "v1.16.6", "semver_tags": ["v1.16.6", "v1.16.5"]}]
+    assert ("thread", True, "mms-update-check") in events
+    assert ("running", True) in events
+    assert events[-2:] == [("running", False), ("lock", "exit")]
+
+    events.clear()
+    mms_command_tools.start_async_update_check(
+        load_version_meta=lambda: {"source": "install.sh", "installed_version": "v1.16.3"},
+        installed_update_semver=lambda meta: ("v1.16.3", (1, 16, 3)),
+        load_update_check_cache=lambda: {"checked_at": 990},
+        fetch_latest_semver_tags=lambda: (_ for _ in ()).throw(AssertionError("should not fetch")),
+        save_update_check_cache=saved.append,
+        lock=FakeLock(),
+        get_running=lambda: False,
+        set_running=lambda value: events.append(("running", value)),
+        thread_cls=FakeThread,
+        now=lambda: 1000,
+        interval_sec=60,
+    )
+    assert events == []
+
+
 def test_release_version_info_preserves_installed_and_git_fallbacks():
     import mms_command_tools
 
