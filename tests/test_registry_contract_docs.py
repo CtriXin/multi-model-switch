@@ -18,6 +18,10 @@ ARCHITECTURE_DOCS = [
     ROOT / "docs/images/architecture-mainline-en.html",
     ROOT / "docs/images/architecture-mainline-cn.html",
 ]
+README_DOCS = [
+    ROOT / "README.md",
+    ROOT / "README.zh-CN.md",
+]
 
 
 def _contract_text() -> str:
@@ -38,6 +42,10 @@ def _llm_operation_text() -> str:
 
 def _architecture_text() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in ARCHITECTURE_DOCS)
+
+
+def _readme_text() -> str:
+    return "\n".join(path.read_text(encoding="utf-8") for path in README_DOCS)
 
 
 def test_registry_contract_docs_define_latest_approved_bundle_terms() -> None:
@@ -201,6 +209,30 @@ def test_architecture_images_show_latest_approved_bundle_not_legacy_route_truth(
         "`model-routes.json`, route keyword files, gateway slots, and speed stats expose the current runtime picture.",
         "<code>model-routes.json</code>, route keyword files, gateway slots, and speed stats expose the current runtime picture.",
         "<code>model-routes.json</code>、route keyword 文件、gateway slots、speed stats 共同暴露当前 runtime picture。",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    present = [phrase for phrase in forbidden_guidance if phrase in text]
+    assert missing == []
+    assert present == []
+
+
+def test_readmes_describe_registry_v2_profile_boundary() -> None:
+    text = _readme_text()
+
+    required_terms = [
+        "Registry v2 is the preferred path for local changes",
+        "TUI / `mms config` / WebUI",
+        "creates DB candidates",
+        "`generated/model-registry.latest-approved.json` bundle",
+        "generated Profile it references is the runtime boundary",
+        "本地修改优先走 Registry v2",
+        "TUI / `mms config` / WebUI 先创建 DB candidate",
+        "它引用的 generated Profile 就是 runtime boundary",
+    ]
+    forbidden_guidance = [
+        "User overlays can live in the MMS config directory as read-only profile inputs.",
+        "用户自己的 overlay 可以作为只读 profile 输入放在 MMS config 目录。",
     ]
 
     missing = [term for term in required_terms if term not in text]

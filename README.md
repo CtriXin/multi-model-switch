@@ -218,7 +218,14 @@ Provider-specific behavior belongs in data, not in one-off launcher branches.
 - context window metadata
 - reference URLs for future verification
 
-User overlays can live in the MMS config directory as read-only profile inputs. MMS should not mutate your real `config.toml` just because a model was probed.
+Registry v2 is the preferred path for local changes: TUI / `mms config` / WebUI
+creates DB candidates, then publishes a verified
+`generated/model-registry.latest-approved.json` bundle. When that manifest is
+present, the generated Profile it references is the runtime boundary.
+
+Legacy user overlays can still live in the MMS config directory as manual
+import/export compatibility inputs. MMS should not mutate your real
+`config.toml` just because a model was probed.
 
 ## User Preferences
 

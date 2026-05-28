@@ -216,7 +216,10 @@ MMS 的默认策略是：在当前选择的 runtime 内 fail closed。
 - context window metadata
 - 便于后续核验的官方 reference URL
 
-用户自己的 overlay 可以作为只读 profile 输入放在 MMS config 目录。MMS 不应该因为一次 probe 就自动改写真实 `config.toml`。
+本地修改优先走 Registry v2：TUI / `mms config` / WebUI 先创建 DB candidate，再发布并校验
+`generated/model-registry.latest-approved.json` bundle。只要该 manifest 存在，它引用的 generated Profile 就是 runtime boundary。
+
+legacy 用户 overlay 仍可作为手动 import/export 兼容输入放在 MMS config 目录。MMS 不应该因为一次 probe 就自动改写真实 `config.toml`。
 
 ## 用户偏好
 
