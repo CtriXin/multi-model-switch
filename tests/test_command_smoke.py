@@ -305,6 +305,55 @@ def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
         }
     }
 
+    config_path = tmp_path / "cfg" / "config.toml"
+    snapshot = mms_command_tools.build_config_guard_snapshot(
+        {
+            "provider": {"default": " relay "},
+            "account": {"defaults": {"codex": "codex-a"}},
+            "accounts": [
+                {"id": "z-account", "home_dir": str(tmp_path / "z"), "cli": "codex"},
+                "ignored",
+                {"id": "a-account", "home_dir": str(tmp_path / "a"), "cli": "claude"},
+            ],
+            "providers": [
+                {"id": "z-provider"},
+                "ignored",
+                {"id": "a-provider"},
+            ],
+        },
+        config_path=str(config_path),
+        default_config=lambda: {"provider": {}, "account": {}, "accounts": [], "providers": []},
+        config_write_target_path=lambda: str(config_path),
+        config_guard_root_dir=lambda path: str(tmp_path / "cfg"),
+        config_snapshot_schema="schema.v1",
+        iso_now=lambda: "now",
+        snapshot_account_entry=lambda account: {
+            "id": account["id"],
+            "home_dir": account["home_dir"],
+            "cli": account["cli"],
+        },
+        snapshot_cli_state=lambda home, cli: [
+            str(tmp_path / "cfg" / "credentials.sh"),
+            str(tmp_path / "cfg" / "usage.json"),
+            str(tmp_path / f"{cli}.state"),
+        ],
+        snapshot_provider_entry=lambda provider: {"id": provider["id"]},
+        is_snapshot_ignored_file=lambda path: str(path).endswith("usage.json"),
+        snapshot_file_entry=lambda path: {"path": path},
+        environ={"MMS_REAL_HOME": str(tmp_path / "real-home")},
+    )
+    assert snapshot["schema"] == "schema.v1"
+    assert snapshot["captured_at"] == "now"
+    assert snapshot["config_path"] == str(config_path)
+    assert snapshot["real_home"] == str(tmp_path / "real-home")
+    assert snapshot["defaults"] == {"provider_default": "relay", "account_defaults": {"codex": "codex-a"}}
+    assert [item["id"] for item in snapshot["accounts"]] == ["a-account", "z-account"]
+    assert [item["id"] for item in snapshot["providers"]] == ["a-provider", "z-provider"]
+    file_paths = [item["path"] for item in snapshot["files"]]
+    assert file_paths == sorted(set(file_paths))
+    assert not any(path.endswith("usage.json") for path in file_paths)
+    assert str(tmp_path / "cfg" / "credentials.sh") in file_paths
+
 
 def test_usage_main_initializes_rich_before_render(monkeypatch):
     import mms_account_state

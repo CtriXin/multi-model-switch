@@ -1653,59 +1653,23 @@ def _snapshot_provider_entry(provider):
 
 
 def _build_config_guard_snapshot(cfg, *, config_path=None):
-    cfg = cfg if isinstance(cfg, dict) else _default_config()
-    config_path = os.path.abspath(str(config_path or _config_write_target_path()))
-    config_root = _config_guard_root_dir(config_path)
-    real_home = os.path.expanduser(
-        str(os.environ.get("MMS_REAL_HOME") or os.environ.get("ORIGINAL_HOME") or os.environ.get("REAL_HOME") or "~")
+    from mms_command_tools import build_config_guard_snapshot
+
+    return build_config_guard_snapshot(
+        cfg,
+        config_path=config_path,
+        default_config=_default_config,
+        config_write_target_path=_config_write_target_path,
+        config_guard_root_dir=_config_guard_root_dir,
+        config_snapshot_schema=CONFIG_SNAPSHOT_SCHEMA,
+        iso_now=_iso_now,
+        snapshot_account_entry=_snapshot_account_entry,
+        snapshot_cli_state=_snapshot_cli_state,
+        snapshot_provider_entry=_snapshot_provider_entry,
+        is_snapshot_ignored_file=_is_snapshot_ignored_file,
+        snapshot_file_entry=_snapshot_file_entry,
+        environ=os.environ,
     )
-
-    files = [
-        os.path.join(config_root, "override.toml"),
-        os.path.join(config_root, "credentials.sh"),
-        os.path.join(config_root, "usage.json"),
-        os.path.join(config_root, "account-guard-state.json"),
-        os.path.join(config_root, "AGENTS.md"),
-        os.path.join(config_root, "CLAUDE.md"),
-    ]
-    accounts = []
-    for account in cfg.get("accounts", []):
-        if not isinstance(account, dict):
-            continue
-        entry = _snapshot_account_entry(account)
-        accounts.append(entry)
-        files.extend(_snapshot_cli_state(entry.get("home_dir"), entry.get("cli")))
-    providers = [
-        _snapshot_provider_entry(provider)
-        for provider in cfg.get("providers", [])
-        if isinstance(provider, dict)
-    ]
-
-    deduped_files = []
-    seen_paths = set()
-    for path in files:
-        normalized = os.path.abspath(os.path.expanduser(str(path)))
-        if _is_snapshot_ignored_file(normalized):
-            continue
-        if normalized in seen_paths:
-            continue
-        seen_paths.add(normalized)
-        deduped_files.append(_snapshot_file_entry(normalized))
-
-    return {
-        "schema": CONFIG_SNAPSHOT_SCHEMA,
-        "captured_at": _iso_now(),
-        "config_root": config_root,
-        "config_path": config_path,
-        "real_home": real_home,
-        "defaults": {
-            "provider_default": str(cfg.get("provider", {}).get("default") or "").strip(),
-            "account_defaults": dict(cfg.get("account", {}).get("defaults") or {}),
-        },
-        "accounts": sorted(accounts, key=lambda item: item.get("id", "")),
-        "providers": sorted(providers, key=lambda item: item.get("id", "")),
-        "files": sorted(deduped_files, key=lambda item: item.get("path", "")),
-    }
 
 
 def _snapshot_digest(snapshot_data):

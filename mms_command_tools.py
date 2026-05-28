@@ -271,6 +271,78 @@ def snapshot_provider_entry(
     }
 
 
+def build_config_guard_snapshot(
+    cfg,
+    *,
+    config_path=None,
+    default_config,
+    config_write_target_path,
+    config_guard_root_dir,
+    config_snapshot_schema,
+    iso_now,
+    snapshot_account_entry,
+    snapshot_cli_state,
+    snapshot_provider_entry,
+    is_snapshot_ignored_file,
+    snapshot_file_entry,
+    environ=None,
+):
+    cfg = cfg if isinstance(cfg, dict) else default_config()
+    config_path = os.path.abspath(str(config_path or config_write_target_path()))
+    config_root = config_guard_root_dir(config_path)
+    environ = os.environ if environ is None else environ
+    real_home = os.path.expanduser(
+        str(environ.get("MMS_REAL_HOME") or environ.get("ORIGINAL_HOME") or environ.get("REAL_HOME") or "~")
+    )
+
+    files = [
+        os.path.join(config_root, "override.toml"),
+        os.path.join(config_root, "credentials.sh"),
+        os.path.join(config_root, "usage.json"),
+        os.path.join(config_root, "account-guard-state.json"),
+        os.path.join(config_root, "AGENTS.md"),
+        os.path.join(config_root, "CLAUDE.md"),
+    ]
+    accounts = []
+    for account in cfg.get("accounts", []):
+        if not isinstance(account, dict):
+            continue
+        entry = snapshot_account_entry(account)
+        accounts.append(entry)
+        files.extend(snapshot_cli_state(entry.get("home_dir"), entry.get("cli")))
+    providers = [
+        snapshot_provider_entry(provider)
+        for provider in cfg.get("providers", [])
+        if isinstance(provider, dict)
+    ]
+
+    deduped_files = []
+    seen_paths = set()
+    for path in files:
+        normalized = os.path.abspath(os.path.expanduser(str(path)))
+        if is_snapshot_ignored_file(normalized):
+            continue
+        if normalized in seen_paths:
+            continue
+        seen_paths.add(normalized)
+        deduped_files.append(snapshot_file_entry(normalized))
+
+    return {
+        "schema": config_snapshot_schema,
+        "captured_at": iso_now(),
+        "config_root": config_root,
+        "config_path": config_path,
+        "real_home": real_home,
+        "defaults": {
+            "provider_default": str(cfg.get("provider", {}).get("default") or "").strip(),
+            "account_defaults": dict(cfg.get("account", {}).get("defaults") or {}),
+        },
+        "accounts": sorted(accounts, key=lambda item: item.get("id", "")),
+        "providers": sorted(providers, key=lambda item: item.get("id", "")),
+        "files": sorted(deduped_files, key=lambda item: item.get("path", "")),
+    }
+
+
 def snapshot_file_content_bytes(path, *, session_env_keys):
     absolute_path = os.path.abspath(os.path.expanduser(str(path)))
     if os.path.basename(absolute_path) == ".claude.json":
