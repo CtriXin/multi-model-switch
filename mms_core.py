@@ -707,23 +707,15 @@ def _release_version_info():
 
 
 def _refresh_update_cache_for_about(force_update=False):
-    cache = _load_update_check_cache()
-    if not force_update:
-        return cache
-    try:
-        semver_tags = _fetch_latest_semver_tags()
-    except Exception as exc:
-        cache["last_error"] = str(exc)
-        cache["checked_at"] = time.time()
-        _save_update_check_cache(cache)
-        return cache
-    cache["checked_at"] = time.time()
-    cache["last_error"] = ""
-    if semver_tags:
-        cache["latest_tag"] = semver_tags[0]
-        cache["semver_tags"] = semver_tags
-    _save_update_check_cache(cache)
-    return cache
+    from mms_command_tools import refresh_update_cache_for_about
+
+    return refresh_update_cache_for_about(
+        force_update=force_update,
+        load_update_check_cache=_load_update_check_cache,
+        fetch_latest_semver_tags=_fetch_latest_semver_tags,
+        save_update_check_cache=_save_update_check_cache,
+        now=time.time,
+    )
 
 
 def _cli_version_status(force_update=False):

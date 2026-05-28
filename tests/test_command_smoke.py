@@ -2104,6 +2104,46 @@ def test_about_status_snapshot_preserves_callback_flow():
     ]
 
 
+def test_refresh_update_cache_for_about_preserves_force_and_error_paths():
+    import mms_command_tools
+
+    saved = []
+    base_cache = {"latest_tag": "v1.0.0"}
+    assert mms_command_tools.refresh_update_cache_for_about(
+        force_update=False,
+        load_update_check_cache=lambda: base_cache,
+        fetch_latest_semver_tags=lambda: (_ for _ in ()).throw(AssertionError("should not fetch")),
+        save_update_check_cache=saved.append,
+        now=lambda: 99,
+    ) is base_cache
+    assert saved == []
+
+    cache = mms_command_tools.refresh_update_cache_for_about(
+        force_update=True,
+        load_update_check_cache=lambda: {},
+        fetch_latest_semver_tags=lambda: ["v1.2.4", "v1.2.3"],
+        save_update_check_cache=saved.append,
+        now=lambda: 123,
+    )
+    assert cache == {
+        "checked_at": 123,
+        "last_error": "",
+        "latest_tag": "v1.2.4",
+        "semver_tags": ["v1.2.4", "v1.2.3"],
+    }
+    assert saved[-1] is cache
+
+    failed = mms_command_tools.refresh_update_cache_for_about(
+        force_update=True,
+        load_update_check_cache=lambda: {"latest_tag": "v1.0.0"},
+        fetch_latest_semver_tags=lambda: (_ for _ in ()).throw(RuntimeError("net")),
+        save_update_check_cache=saved.append,
+        now=lambda: 456,
+    )
+    assert failed == {"latest_tag": "v1.0.0", "last_error": "net", "checked_at": 456}
+    assert saved[-1] is failed
+
+
 def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
     import mms_command_tools
 

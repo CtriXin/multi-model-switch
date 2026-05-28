@@ -2823,6 +2823,26 @@ def mms_update_status(version_info, cache, *, localize):
     }
 
 
+def refresh_update_cache_for_about(*, force_update=False, load_update_check_cache, fetch_latest_semver_tags, save_update_check_cache, now):
+    cache = load_update_check_cache()
+    if not force_update:
+        return cache
+    try:
+        semver_tags = fetch_latest_semver_tags()
+    except Exception as exc:
+        cache["last_error"] = str(exc)
+        cache["checked_at"] = now()
+        save_update_check_cache(cache)
+        return cache
+    cache["checked_at"] = now()
+    cache["last_error"] = ""
+    if semver_tags:
+        cache["latest_tag"] = semver_tags[0]
+        cache["semver_tags"] = semver_tags
+    save_update_check_cache(cache)
+    return cache
+
+
 def about_status_snapshot(*, force_update=False, release_version_info, refresh_update_cache_for_about, cli_version_status, mms_update_status):
     version_info = release_version_info()
     cache = refresh_update_cache_for_about(force_update=force_update)
