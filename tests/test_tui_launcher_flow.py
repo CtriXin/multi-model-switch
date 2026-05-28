@@ -42,6 +42,7 @@ from mms_tui_launcher_flow import (
     provider_browse_launch_context,
     provider_browse_model_options,
     provider_browse_options,
+    rescue_landing_action_context,
     rescue_packet_action_menu_context,
     refresh_tui_runtime_state_after_config_change,
     resolve_rescue_action_fallback_model,
@@ -1894,6 +1895,42 @@ def test_apply_rescue_default_fallback_action_clears_default() -> None:
         ("save", cleared_cfg, "tui:clear_rescue_default_fallback"),
         ("report", ("clear title", [("model", ""), ("kwargs", {"cleared": True})]), {}),
         ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_rescue_landing_action_context_collects_state_and_payload() -> None:
+    calls = []
+    cfg = {"rescue": True}
+    events = [{"id": "evt1"}]
+    latest = {"note": "rescue_hot_fallback"}
+
+    result = rescue_landing_action_context(
+        cfg,
+        "/repo",
+        rescue_default_fallback=lambda cfg_arg: calls.append(("default", cfg_arg)) or {"model": "fallback-model"},
+        rescue_hot_fallback_enabled_cfg=lambda cfg_arg: calls.append(("hot", cfg_arg)) or True,
+        rescue_route_fallback_model_candidates=lambda *, limit: calls.append(("routes", limit)) or ["route1"],
+        list_rescue_events=lambda *, repo_root, limit: calls.append(("events", repo_root, limit)) or events,
+        latest_rescue_hot_fallback_event=lambda: calls.append(("latest",)) or latest,
+        rescue_landing_tui_payload=lambda default_label, rescue_events, latest_event, hot_enabled: calls.append(("payload", default_label, rescue_events, latest_event, hot_enabled)) or ([("Default", default_label)], [("view_packets", "View")]),
+    )
+
+    assert result == {
+        "default_fallback": {"model": "fallback-model"},
+        "default_label": "fallback-model",
+        "hot_fallback_enabled": True,
+        "route_fallback_candidates": ["route1"],
+        "rescue_events": events,
+        "landing_info": [("Default", "fallback-model")],
+        "landing_actions": [("view_packets", "View")],
+    }
+    assert calls == [
+        ("default", cfg),
+        ("hot", cfg),
+        ("routes", 120),
+        ("events", "/repo", 20),
+        ("latest",),
+        ("payload", "fallback-model", events, latest, True),
     ]
 
 

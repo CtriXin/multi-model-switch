@@ -1107,6 +1107,39 @@ def apply_rescue_default_fallback_action(
     return {"status": "continue", "cfg": cfg}
 
 
+def rescue_landing_action_context(
+    cfg,
+    repo_root,
+    *,
+    rescue_default_fallback,
+    rescue_hot_fallback_enabled_cfg,
+    rescue_route_fallback_model_candidates,
+    list_rescue_events,
+    latest_rescue_hot_fallback_event,
+    rescue_landing_tui_payload,
+):
+    default_fallback = rescue_default_fallback(cfg)
+    default_label = default_fallback.get("model") or "未设置"
+    hot_fallback_enabled = rescue_hot_fallback_enabled_cfg(cfg)
+    route_fallback_candidates = rescue_route_fallback_model_candidates(limit=120)
+    rescue_events = list_rescue_events(repo_root=repo_root, limit=20)
+    landing_info, landing_actions = rescue_landing_tui_payload(
+        default_label,
+        rescue_events,
+        latest_rescue_hot_fallback_event(),
+        hot_fallback_enabled,
+    )
+    return {
+        "default_fallback": default_fallback,
+        "default_label": default_label,
+        "hot_fallback_enabled": hot_fallback_enabled,
+        "route_fallback_candidates": route_fallback_candidates,
+        "rescue_events": rescue_events,
+        "landing_info": landing_info,
+        "landing_actions": landing_actions,
+    }
+
+
 def apply_rescue_hot_fallback_toggle_action(
     cfg,
     enable_hot,

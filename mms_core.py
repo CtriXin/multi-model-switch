@@ -5146,22 +5146,25 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         pause_after_tui_report=_pause_after_tui_report,
                     )
 
-                default_fallback = _rescue_default_fallback(current_cfg)
-                default_label = default_fallback.get("model") or "未设置"
-                hot_fallback_enabled = _rescue_hot_fallback_enabled_cfg(current_cfg)
-                route_fallback_candidates = _rescue_route_fallback_model_candidates(limit=120)
-                rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
-                landing_info, landing_actions = _rescue_landing_tui_payload(
-                    default_label,
-                    rescue_events,
-                    _latest_rescue_hot_fallback_event(),
-                    hot_fallback_enabled,
+                landing_context = tui_flow.rescue_landing_action_context(
+                    current_cfg,
+                    os.getcwd(),
+                    rescue_default_fallback=_rescue_default_fallback,
+                    rescue_hot_fallback_enabled_cfg=_rescue_hot_fallback_enabled_cfg,
+                    rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
+                    list_rescue_events=list_rescue_events,
+                    latest_rescue_hot_fallback_event=_latest_rescue_hot_fallback_event,
+                    rescue_landing_tui_payload=_rescue_landing_tui_payload,
                 )
+                default_fallback = landing_context["default_fallback"]
+                default_label = landing_context["default_label"]
+                route_fallback_candidates = landing_context["route_fallback_candidates"]
+                rescue_events = landing_context["rescue_events"]
                 landing_action = tui_flow.safe_tui_call(
                     select_channel_action_tui,
                     "Rescue / Current-session Fallback",
-                    landing_info,
-                    landing_actions,
+                    landing_context["landing_info"],
+                    landing_context["landing_actions"],
                 )
                 if landing_action == "__interrupt__":
                     return True
