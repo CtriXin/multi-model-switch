@@ -8097,6 +8097,73 @@ def handle_models_command(
     manage_provider_models(cfg, provider_id)
 
 
+def select_provider_for_models(
+    cfg,
+    *,
+    list_manage_targets,
+    table_cls,
+    prompt_cls,
+    console,
+):
+    providers = [item for item in list_manage_targets(cfg) if item.get("kind") == "provider"]
+    if not providers:
+        console.print("[yellow]当前还没有可管理的网关通道[/yellow]")
+        return None
+
+    table = table_cls(title="模型与测速 · 选择通道", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("显示名", style="yellow")
+    table.add_column("内部标识", style="green")
+    table.add_column("默认", style="magenta", width=6)
+    table.add_column("状态", style="white")
+    for index, provider in enumerate(providers, 1):
+        table.add_row(
+            str(index),
+            provider.get("title", ""),
+            provider.get("id", ""),
+            provider.get("default_label", ""),
+            provider.get("status", ""),
+        )
+    console.print(table)
+
+    while True:
+        raw = prompt_cls.ask("选择要查看的通道，直接回车返回", default="")
+        if not raw:
+            return None
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(providers):
+                return providers[idx - 1]["id"]
+        console.print(f"[red]请输入 1-{len(providers)} 的编号[/red]")
+
+
+def pick_manual_models(models, *, table_cls, prompt_cls, console):
+    if not models:
+        return []
+    table = table_cls(title="选择要预热的模型", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("模型", style="green")
+    for idx, model_name in enumerate(models, 1):
+        table.add_row(str(idx), model_name)
+    console.print(table)
+    raw = prompt_cls.ask("输入模型编号，支持逗号分隔；直接回车取消", default="")
+    if not raw.strip():
+        return []
+    selected = []
+    seen = set()
+    for chunk in raw.split(","):
+        value = chunk.strip()
+        if not value.isdigit():
+            continue
+        idx = int(value)
+        if 1 <= idx <= len(models):
+            model_name = models[idx - 1]
+            if model_name not in seen:
+                seen.add(model_name)
+                selected.append(model_name)
+    return selected
+
+
 def handle_warm_command(
     cfg,
     argv,

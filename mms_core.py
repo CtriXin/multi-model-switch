@@ -3666,36 +3666,15 @@ def _manage_provider_models(cfg, provider_id):
 
 
 def _select_provider_for_models(cfg):
-    providers = [item for item in _list_manage_targets(cfg) if item.get("kind") == "provider"]
-    if not providers:
-        console.print("[yellow]当前还没有可管理的网关通道[/yellow]")
-        return None
+    from mms_command_tools import select_provider_for_models
 
-    table = Table(title="模型与测速 · 选择通道", show_lines=True)
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("显示名", style="yellow")
-    table.add_column("内部标识", style="green")
-    table.add_column("默认", style="magenta", width=6)
-    table.add_column("状态", style="white")
-    for index, provider in enumerate(providers, 1):
-        table.add_row(
-            str(index),
-            provider.get("title", ""),
-            provider.get("id", ""),
-            provider.get("default_label", ""),
-            provider.get("status", ""),
-        )
-    console.print(table)
-
-    while True:
-        raw = Prompt.ask("选择要查看的通道，直接回车返回", default="")
-        if not raw:
-            return None
-        if raw.isdigit():
-            idx = int(raw)
-            if 1 <= idx <= len(providers):
-                return providers[idx - 1]["id"]
-        console.print(f"[red]请输入 1-{len(providers)} 的编号[/red]")
+    return select_provider_for_models(
+        cfg,
+        list_manage_targets=_list_manage_targets,
+        table_cls=Table,
+        prompt_cls=Prompt,
+        console=console,
+    )
 
 
 def _select_provider_for_warm(cfg):
@@ -3709,30 +3688,14 @@ def _recent_models_for_provider(provider_id):
 
 
 def _pick_manual_models(models):
-    if not models:
-        return []
-    table = Table(title="选择要预热的模型", show_lines=True)
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("模型", style="green")
-    for idx, model_name in enumerate(models, 1):
-        table.add_row(str(idx), model_name)
-    console.print(table)
-    raw = Prompt.ask("输入模型编号，支持逗号分隔；直接回车取消", default="")
-    if not raw.strip():
-        return []
-    selected = []
-    seen = set()
-    for chunk in raw.split(","):
-        value = chunk.strip()
-        if not value.isdigit():
-            continue
-        idx = int(value)
-        if 1 <= idx <= len(models):
-            model_name = models[idx - 1]
-            if model_name not in seen:
-                seen.add(model_name)
-                selected.append(model_name)
-    return selected
+    from mms_command_tools import pick_manual_models
+
+    return pick_manual_models(
+        models,
+        table_cls=Table,
+        prompt_cls=Prompt,
+        console=console,
+    )
 
 
 def _warm_model_request(provider, model_name):

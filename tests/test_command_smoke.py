@@ -4932,6 +4932,58 @@ def test_models_command_dispatches_selected_provider():
     assert calls == [({"providers": [{"id": "relay"}]}, "relay")]
 
 
+def test_select_provider_for_models_filters_providers_and_reprompts_invalid():
+    import mms_command_tools
+
+    answers = ["bad", "2"]
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            return answers.pop(0)
+
+    console = _CollectingConsole()
+    selected = mms_command_tools.select_provider_for_models(
+        {},
+        list_manage_targets=lambda _cfg: [
+            {"kind": "account", "id": "codex-main", "title": "Codex"},
+            {"kind": "provider", "id": "relay-a", "title": "Relay A", "default_label": "是", "status": "启用"},
+            {"kind": "provider", "id": "relay-b", "title": "Relay B", "default_label": "", "status": "启用"},
+        ],
+        table_cls=_FakeTable,
+        prompt_cls=Prompt,
+        console=console,
+    )
+
+    assert selected == "relay-b"
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "模型与测速 · 选择通道", "show_lines": True}
+    assert table.rows == [
+        (("1", "Relay A", "relay-a", "是", "启用"), {}),
+        (("2", "Relay B", "relay-b", "", "启用"), {}),
+    ]
+    assert any("请输入 1-2 的编号" in str(item) for item in console.items)
+
+
+def test_select_provider_for_models_returns_none_without_provider_targets():
+    import mms_command_tools
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            raise AssertionError("empty provider list must not prompt")
+
+    console = _CollectingConsole()
+    assert mms_command_tools.select_provider_for_models(
+        {},
+        list_manage_targets=lambda _cfg: [{"kind": "account", "id": "codex-main"}],
+        table_cls=_FakeTable,
+        prompt_cls=Prompt,
+        console=console,
+    ) is None
+    assert any("当前还没有可管理的网关通道" in str(item) for item in console.items)
+
+
 def test_models_command_unknown_provider_exits_with_available_list():
     import pytest
     import mms_command_tools
@@ -4953,6 +5005,54 @@ def test_models_command_unknown_provider_exits_with_available_list():
     assert exc.value.code == 1
     assert any("未找到模型源: missing" in str(item) for item in console.items)
     assert any("relay" in str(item) for item in console.items)
+
+
+def test_pick_manual_models_parses_unique_valid_indexes_only():
+    import mms_command_tools
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            return "2, bad, 2, 4, 1"
+
+    console = _CollectingConsole()
+    selected = mms_command_tools.pick_manual_models(
+        ["gpt-5.5", "gpt-5.4", "qwen3.6-plus"],
+        table_cls=_FakeTable,
+        prompt_cls=Prompt,
+        console=console,
+    )
+
+    assert selected == ["gpt-5.4", "gpt-5.5"]
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "选择要预热的模型", "show_lines": True}
+    assert table.rows == [
+        (("1", "gpt-5.5"), {}),
+        (("2", "gpt-5.4"), {}),
+        (("3", "qwen3.6-plus"), {}),
+    ]
+
+
+def test_pick_manual_models_empty_and_blank_cancel_without_selection():
+    import mms_command_tools
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            return "  "
+
+    assert mms_command_tools.pick_manual_models(
+        [],
+        table_cls=_FakeTable,
+        prompt_cls=Prompt,
+        console=_CollectingConsole(),
+    ) == []
+    assert mms_command_tools.pick_manual_models(
+        ["gpt-5.5"],
+        table_cls=_FakeTable,
+        prompt_cls=Prompt,
+        console=_CollectingConsole(),
+    ) == []
 
 
 def test_warm_command_uses_recent_models_without_live_requests():
