@@ -977,6 +977,10 @@ def _config_root_is_explicit(env):
     return bool(str(merged_env.get("MMS_CONFIG_ROOT") or merged_env.get("MMS_CONFIG_DIR") or "").strip())
 
 
+def _selected_config_path(*parts):
+    return os.path.join(_selected_mms_config_root({}), *parts)
+
+
 def _inject_rescue_launch_env(env):
     if not isinstance(env, dict):
         return env
@@ -1976,9 +1980,9 @@ def _apply_runtime_ip_stack_profile(env, runtime):
     return env
 
 
-RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")
-HEALTH_CHECK_PATH = _real_user_path(".config", "mms", "health_check.json")
-ANTHROPIC_URL_CACHE_PATH = _real_user_path(".config", "mms", "cache", "anthropic_base_urls.json")
+RUNTIME_DIR = _selected_config_path("runtime")
+HEALTH_CHECK_PATH = _selected_config_path("health_check.json")
+ANTHROPIC_URL_CACHE_PATH = _selected_config_path("cache", "anthropic_base_urls.json")
 
 # Anthropic URL 探测结果缓存（内存，TTL 1h）
 # key: provider_id → {"url": str, "ts": datetime}
@@ -10426,7 +10430,7 @@ def _show_launch_info(cli, runtime, auth_mode):
 
     # ── 本地用量统计 ──
     try:
-        usage_path = _real_user_path(".config", "mms", "usage.json")
+        usage_path = _selected_config_path("usage.json")
         if os.path.exists(usage_path):
             with open(usage_path, "r", encoding="utf-8") as f:
                 stats = json.load(f)

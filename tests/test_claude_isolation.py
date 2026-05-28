@@ -246,6 +246,30 @@ def test_project_store_uses_selected_config_root(monkeypatch, tmp_path):
     assert mms_project_store.get_projects_dir() == preview_root / "projects"
 
 
+def test_launcher_runtime_aux_paths_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_launchers)
+    try:
+        assert reloaded.RUNTIME_DIR == str(preview_root / "runtime")
+        assert reloaded.HEALTH_CHECK_PATH == str(preview_root / "health_check.json")
+        assert reloaded.ANTHROPIC_URL_CACHE_PATH == str(preview_root / "cache" / "anthropic_base_urls.json")
+        assert reloaded._selected_config_path("usage.json") == str(preview_root / "usage.json")
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_launchers)
+
+
 def test_rescue_launch_env_uses_selected_config_root(monkeypatch, tmp_path):
     import mms_launchers
 
