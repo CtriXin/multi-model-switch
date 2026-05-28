@@ -2029,10 +2029,13 @@ def load_user_preferences():
 
 
 def preference_asset_root(asset_name):
-    key = _PREFERENCE_ASSET_ROOT_KEYS.get(str(asset_name or "").strip().lower())
-    if not key:
-        return ""
-    return str(load_user_preferences().get("assets", {}).get("roots", {}).get(key) or "").strip()
+    from mms_command_tools import preference_asset_root as preference_asset_root_impl
+
+    return preference_asset_root_impl(
+        asset_name,
+        asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS,
+        load_user_preferences=load_user_preferences,
+    )
 
 
 def _merge_disabled_session_surfaces(*payloads):
@@ -2097,11 +2100,15 @@ def _load_env_file(path):
 
 
 def _iso_now():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    from mms_command_tools import iso_now
+
+    return iso_now()
 
 
 def _local_now_slug():
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
+    from mms_command_tools import local_now_slug
+
+    return local_now_slug()
 
 
 def _load_usage_stats():

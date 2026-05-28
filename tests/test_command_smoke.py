@@ -200,6 +200,8 @@ def test_toml_and_existing_path_helpers_preserve_read_and_filtering(tmp_path):
 
 
 def test_preference_and_override_load_helpers_preserve_merge_warning_and_sanitize():
+    from datetime import datetime, timezone
+
     import mms_command_tools
 
     class DecodeError(Exception):
@@ -254,6 +256,20 @@ def test_preference_and_override_load_helpers_preserve_merge_warning_and_sanitiz
         "_mms_preferences": {"launch": {"defaults": {"bypass": "enable"}}},
     }
     assert any("跳过无效 override 文件 /broken.toml" in item for item in console.items)
+
+    prefs = {"assets": {"roots": {"toon": "/tmp/toon-root"}}}
+    assert mms_command_tools.preference_asset_root(
+        "toon",
+        asset_root_keys={"toon": "toon"},
+        load_user_preferences=lambda: prefs,
+    ) == "/tmp/toon-root"
+    assert mms_command_tools.preference_asset_root(
+        "unknown",
+        asset_root_keys={"toon": "toon"},
+        load_user_preferences=lambda: prefs,
+    ) == ""
+    assert mms_command_tools.iso_now(now_func=lambda: datetime(2026, 5, 28, 15, 20, 32, tzinfo=timezone.utc)) == "2026-05-28T15:20:32Z"
+    assert mms_command_tools.local_now_slug(now_func=lambda: datetime(2026, 5, 28, 23, 20, 32)) == "20260528-232032"
 
 
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):

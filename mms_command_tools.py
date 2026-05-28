@@ -728,6 +728,23 @@ def apply_local_overrides(
     return merged
 
 
+def preference_asset_root(asset_name, *, asset_root_keys, load_user_preferences):
+    key = asset_root_keys.get(str(asset_name or "").strip().lower())
+    if not key:
+        return ""
+    return str(load_user_preferences().get("assets", {}).get("roots", {}).get(key) or "").strip()
+
+
+def iso_now(*, now_func=None):
+    now = now_func() if now_func is not None else datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def local_now_slug(*, now_func=None):
+    now = now_func() if now_func is not None else datetime.now()
+    return now.strftime("%Y%m%d-%H%M%S")
+
+
 def confirm_guard_accept_from_tui(
     cfg,
     *,
