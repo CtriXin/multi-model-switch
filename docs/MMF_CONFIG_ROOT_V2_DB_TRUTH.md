@@ -390,10 +390,11 @@ Current Stage 3a implementation:
 
 - CLI: `mms config source [--json]` / `mmf config source [--json]`.
 - CLI: `mms config save-plan [--json]` / `mmf config save-plan [--json]` shows the same read-only v2 DB-truth save sequence without writing DB, secrets, generated bundle, or legacy files.
+- CLI: `mms config doctor [--json]` / `mmf config doctor [--json]` exposes the read-only preview readiness doctor under the `config` entry.
 - WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, legacy candidate import counts, and latest-approved bundle status.
 - WebUI: `/api/plan` includes a read-only `registry_v2_save_plan` that shows the future DB backup -> candidate revision -> secret backend -> publish -> verify -> rollback sequence. It is plan-only and does not enable DB writes yet.
 - TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes `查看 v2 Save Plan` plus read-only `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
-- Existing WebUI Save behavior is not changed in this slice; disabling or redirecting save to preview candidates belongs to Stage 4.
+- Stable-root WebUI Save behavior is not changed; preview-root legacy save is blocked and users are directed to the DB-truth preview apply path.
 
 Current preview init implementation:
 
@@ -418,7 +419,7 @@ Current preview publish implementation:
 
 - `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB preview route candidate. It supports both legacy import candidates and v2 save candidates.
 - `mmf preview verify [--json]` verifies manifest hashes for the active preview root; `mmf preview status [--json]` is a wrapper for Model Source status.
-- `mmf preview doctor [--json]` is the single read-only "what next?" command for preview setup. It checks preview root mode, registry DB, legacy import candidates, latest-approved bundle verification, runtime readiness, and then prints one next action.
+- `mmf preview doctor [--json]` and `mmf config doctor [--json]` are read-only "what next?" commands for preview setup. They check preview root mode, registry DB, legacy import candidates, latest-approved bundle verification, runtime readiness, and then print one next action.
 - `mmf preview doctor --strict-exit` exits non-zero unless the preview root is runtime-ready. This avoids treating "printed something and did not crash" as success.
 - `mmf preview prepare --from <legacy-root> [--include-secrets] [--json]` is the single explicit preview write command for user testing. It runs preview init, legacy import, publish, verify, and doctor against the active preview root; the source root remains read-only.
 - Re-running `mmf preview prepare` backs up the existing preview DB under `<config_root>/backups/db/` before importing new candidate evidence.

@@ -11952,6 +11952,7 @@ def _display_config_help():
     console.print(f"  {command} config root [--json]")
     console.print(f"  {command} config source [--json]")
     console.print(f"  {command} config save-plan [--json]")
+    console.print(f"  {command} config doctor [--json]")
     console.print(f"  {command} config validate")
     console.print(f"  {command} config get <dot.path>")
     console.print(f"  {command} config set <dot.path> <value>")
@@ -12030,6 +12031,16 @@ def _display_registry_v2_save_plan(json_output=False):
         print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_registry_v2_save_plan(plan)
+
+
+def _display_preview_doctor(json_output=False):
+    from mms_registry_cli import _print_preview_doctor, preview_doctor
+
+    summary = preview_doctor(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config doctor")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_preview_doctor(summary)
 
 
 def _display_preferences_path():
@@ -13402,6 +13413,10 @@ def _is_config_help_request(args_rest):
         "save-plan",
         "save.plan",
         "v2-save-plan",
+        "doctor",
+        "preview-doctor",
+        "preview.doctor",
+        "v2-doctor",
         "web",
         "webui",
         "setup.web",
@@ -13429,6 +13444,12 @@ def _is_config_registry_v2_save_plan_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
     return str(argv[1] or "").strip() in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}
+
+
+def _is_config_preview_doctor_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"}
 
 
 def _is_session_prune_dry_run(argv):
@@ -13472,6 +13493,9 @@ def main():
         return
     if _is_config_registry_v2_save_plan_request(argv):
         _display_registry_v2_save_plan(json_output="--json" in argv[2:])
+        return
+    if _is_config_preview_doctor_request(argv):
+        _display_preview_doctor(json_output="--json" in argv[2:])
         return
 
     help_request = _is_help_request(argv) or _is_setup_web_request(argv)
