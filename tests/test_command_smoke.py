@@ -2581,6 +2581,103 @@ def test_default_config_helper_preserves_baseline_shape_and_defaults():
     }
 
 
+def test_legacy_api_migration_helper_preserves_credential_and_config_save_flow():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    calls = []
+    cfg = {
+        "api": {"base_url": " https://legacy.example/v1/ ", "api_key": " legacy-key "},
+        "providers": [],
+    }
+
+    def ensure_provider_config(current):
+        calls.append(("ensure_provider", "api" in current))
+        updated = {**current, "providers": [{"id": "default"}]}
+        return updated, True
+
+    def ensure_account_config(current):
+        calls.append(("ensure_account", bool(current.get("providers"))))
+        return {**current, "accounts": []}, True
+
+    def normalize_user_config(current):
+        calls.append(("normalize_user", bool(current.get("accounts") == [])))
+        return {**current, "user": {"role": "all"}}, True
+
+    result = mms_command_tools.migrate_legacy_api_config(
+        cfg,
+        load_api_credentials=lambda: ("", "", ""),
+        save_api_credentials=lambda base_url, api_key: calls.append(("save_api", base_url, api_key)),
+        ensure_provider_config=ensure_provider_config,
+        ensure_account_config=ensure_account_config,
+        normalize_user_config=normalize_user_config,
+        save_config=lambda updated: calls.append(("save_config", dict(updated))),
+        credentials_path="/tmp/credentials.sh",
+        config_path="/tmp/config.toml",
+        console=console,
+    )
+
+    assert result == {
+        "providers": [{"id": "default"}],
+        "accounts": [],
+        "user": {"role": "all"},
+    }
+    assert calls[:4] == [
+        ("save_api", "https://legacy.example/v1/", "legacy-key"),
+        ("ensure_provider", False),
+        ("ensure_account", True),
+        ("normalize_user", True),
+    ]
+    assert calls[-1] == ("save_config", result)
+    assert console.items == ["[yellow]已将 API 凭据迁移到 /tmp/credentials.sh[/yellow]"]
+
+    calls.clear()
+    unchanged = {"providers": [{"id": "default"}]}
+    assert mms_command_tools.migrate_legacy_api_config(
+        unchanged,
+        load_api_credentials=lambda: ("exists", "exists", ""),
+        save_api_credentials=lambda *_args: calls.append("unexpected_save_api"),
+        ensure_provider_config=lambda current: calls.append("ensure_provider") or (current, False),
+        ensure_account_config=lambda current: calls.append("ensure_account") or (current, False),
+        normalize_user_config=lambda current: calls.append("normalize_user") or (current, False),
+        save_config=lambda updated: calls.append(("unexpected_save", updated)),
+        credentials_path="/tmp/credentials.sh",
+        config_path="/tmp/config.toml",
+        console=console,
+    ) == unchanged
+    assert calls == ["ensure_provider", "ensure_account", "normalize_user"]
+
+    failing_cfg = {"api": {"base_url": "https://legacy.example/v1", "api_key": "key"}}
+    assert mms_command_tools.migrate_legacy_api_config(
+        failing_cfg,
+        load_api_credentials=lambda: ("", "", ""),
+        save_api_credentials=lambda *_args: (_ for _ in ()).throw(OSError("disk full")),
+        ensure_provider_config=lambda current: (_ for _ in ()).throw(AssertionError("must not normalize")),
+        ensure_account_config=lambda current: (current, False),
+        normalize_user_config=lambda current: (current, False),
+        save_config=lambda updated: calls.append(("unexpected_save", updated)),
+        credentials_path="/tmp/credentials.sh",
+        config_path="/tmp/config.toml",
+        console=console,
+    ) is failing_cfg
+    assert console.items[-1] == "[yellow]无法迁移 API 凭据到 /tmp/credentials.sh: disk full[/yellow]"
+
+    save_fail_cfg = {"api": {}}
+    assert mms_command_tools.migrate_legacy_api_config(
+        save_fail_cfg,
+        load_api_credentials=lambda: ("exists", "exists", ""),
+        save_api_credentials=lambda *_args: calls.append("unexpected_save_api"),
+        ensure_provider_config=lambda current: (current, False),
+        ensure_account_config=lambda current: (current, False),
+        normalize_user_config=lambda current: (current, False),
+        save_config=lambda updated: (_ for _ in ()).throw(OSError("locked")),
+        credentials_path="/tmp/credentials.sh",
+        config_path="/tmp/config.toml",
+        console=console,
+    ) is save_fail_cfg
+    assert console.items[-1] == "[yellow]无法更新 /tmp/config.toml: locked[/yellow]"
+
+
 def test_runtime_context_resolvers_preserve_provider_credentials_and_account_home():
     import mms_command_tools
 

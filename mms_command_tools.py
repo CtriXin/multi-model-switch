@@ -3620,6 +3620,49 @@ def default_config(
     }
 
 
+def migrate_legacy_api_config(
+    cfg,
+    *,
+    load_api_credentials,
+    save_api_credentials,
+    ensure_provider_config,
+    ensure_account_config,
+    normalize_user_config,
+    save_config,
+    credentials_path,
+    config_path,
+    console,
+):
+    api_cfg = cfg.get("api")
+    updated_cfg = dict(cfg)
+
+    if isinstance(api_cfg, dict):
+        base_url = str(api_cfg.get("base_url", "")).strip()
+        api_key = str(api_cfg.get("api_key", "")).strip()
+        file_base_url, file_api_key, _ = load_api_credentials()
+
+        if base_url and api_key and (not file_base_url or not file_api_key):
+            try:
+                save_api_credentials(base_url, api_key)
+                console.print(f"[yellow]已将 API 凭据迁移到 {credentials_path}[/yellow]")
+            except OSError as exc:
+                console.print(f"[yellow]无法迁移 API 凭据到 {credentials_path}: {exc}[/yellow]")
+                return cfg
+
+        updated_cfg.pop("api", None)
+
+    updated_cfg, changed = ensure_provider_config(updated_cfg)
+    updated_cfg, account_changed = ensure_account_config(updated_cfg)
+    updated_cfg, role_changed = normalize_user_config(updated_cfg)
+    if changed or account_changed or role_changed or updated_cfg != cfg:
+        try:
+            save_config(updated_cfg)
+        except OSError as exc:
+            console.print(f"[yellow]无法更新 {config_path}: {exc}[/yellow]")
+            return cfg
+    return updated_cfg
+
+
 def resolve_provider_context(
     cfg,
     provider_id=None,
