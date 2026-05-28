@@ -2577,6 +2577,50 @@ def test_model_capability_helpers_preserve_native_bridge_and_tags():
         models,
         cli_model_family_hints=hints,
     ) == models
+    assert mms_command_tools.provider_supports_cli_name(
+        {"id": "kimi-relay", "supported_clis": ["codex", "claude"]},
+        "codex",
+    ) is False
+    assert mms_command_tools.provider_supports_cli_name(
+        {"id": "relay", "supported_clis": "codex"},
+        "codex",
+    ) is True
+    assert mms_command_tools.provider_supports_cli_name(
+        {"id": "relay", "supported_clis": ["claude"], "protocols": "anthropic_messages"},
+        "opencode",
+    ) is True
+    assert mms_command_tools.provider_supports_cli_name(
+        {"id": "relay", "supported_clis": ["codex"], "protocols": ["openai_chat_completions"]},
+        "opencode",
+    ) is True
+    assert mms_command_tools.provider_supports_cli_name(
+        {"id": "relay", "supported_clis": ["claude"]},
+        "agy",
+    ) is False
+    assert mms_command_tools.provider_supports_model_for_cli(
+        {"supported_clis": ["claude"]},
+        "claude",
+        "claude-sonnet-4.5",
+        model_matches_account_cli=mms_command_tools.model_matches_account_cli,
+        provider_supports_cli_name=mms_command_tools.provider_supports_cli_name,
+        bridge_clis_for_model=lambda _model: ["claude"],
+    ) is True
+    assert mms_command_tools.provider_supports_model_for_cli(
+        {"supported_clis": ["claude"]},
+        "claude",
+        "qwen3.6-plus",
+        model_matches_account_cli=mms_command_tools.model_matches_account_cli,
+        provider_supports_cli_name=mms_command_tools.provider_supports_cli_name,
+        bridge_clis_for_model=lambda _model: ["claude"],
+    ) is True
+    assert mms_command_tools.provider_supports_model_for_cli(
+        {"supported_clis": ["codex"]},
+        "claude",
+        "qwen3.6-plus",
+        model_matches_account_cli=mms_command_tools.model_matches_account_cli,
+        provider_supports_cli_name=mms_command_tools.provider_supports_cli_name,
+        bridge_clis_for_model=lambda _model: [],
+    ) is False
     assert mms_command_tools.is_installed_mms_layout(
         "/Users/xin/.mms/mms_core.py",
         real_user_home=lambda: "/Users/xin",
