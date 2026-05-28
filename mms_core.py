@@ -250,27 +250,15 @@ _GATEWAY_SESSION_MARKERS = (
 
 
 def _base_user_config_path_from_gateway(config_path):
-    normalized = os.path.normpath(str(config_path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
-        idx = normalized.find(marker)
-        if idx == -1:
-            continue
-        base_home = normalized[:idx]
-        if base_home:
-            return os.path.join(base_home, ".config", "mms", "config.toml")
-    return ""
+    from mms_command_tools import base_user_config_path_from_gateway
+
+    return base_user_config_path_from_gateway(config_path, gateway_session_markers=_GATEWAY_SESSION_MARKERS)
 
 
 def _base_user_primary_dir_from_gateway(path):
-    normalized = os.path.normpath(str(path or ""))
-    for marker in _GATEWAY_SESSION_MARKERS:
-        idx = normalized.find(marker)
-        if idx == -1:
-            continue
-        base_home = normalized[:idx]
-        if base_home:
-            return os.path.join(base_home, ".config", "mms")
-    return ""
+    from mms_command_tools import base_user_primary_dir_from_gateway
+
+    return base_user_primary_dir_from_gateway(path, gateway_session_markers=_GATEWAY_SESSION_MARKERS)
 
 
 def _merge_base_user_broker_profiles(cfg, config_path):
@@ -1451,46 +1439,64 @@ def get_account_definition(cfg, account_id=None, cli_name=None):
 
 
 def _active_config_path():
-    base_primary_dir = _base_user_primary_dir_from_gateway(CONFIG_PATH)
-    if base_primary_dir:
-        base_config_path = os.path.join(base_primary_dir, "config.toml")
-        if os.path.exists(base_config_path):
-            return base_config_path
-    return CONFIG_PATH
+    from mms_command_tools import active_sibling_path_from_gateway
+
+    return active_sibling_path_from_gateway(
+        CONFIG_PATH,
+        filename="config.toml",
+        base_user_primary_dir_from_gateway=_base_user_primary_dir_from_gateway,
+    )
 
 
 def _active_credentials_path():
-    base_primary_dir = _base_user_primary_dir_from_gateway(CREDENTIALS_PATH)
-    if base_primary_dir:
-        base_credentials_path = os.path.join(base_primary_dir, "credentials.sh")
-        if os.path.exists(base_credentials_path):
-            return base_credentials_path
-    return CREDENTIALS_PATH
+    from mms_command_tools import active_sibling_path_from_gateway
+
+    return active_sibling_path_from_gateway(
+        CREDENTIALS_PATH,
+        filename="credentials.sh",
+        base_user_primary_dir_from_gateway=_base_user_primary_dir_from_gateway,
+    )
 
 
 def _active_usage_path():
-    base_primary_dir = _base_user_primary_dir_from_gateway(USAGE_PATH)
-    if base_primary_dir:
-        base_usage_path = os.path.join(base_primary_dir, "usage.json")
-        if os.path.exists(base_usage_path):
-            return base_usage_path
-    return USAGE_PATH
+    from mms_command_tools import active_sibling_path_from_gateway
+
+    return active_sibling_path_from_gateway(
+        USAGE_PATH,
+        filename="usage.json",
+        base_user_primary_dir_from_gateway=_base_user_primary_dir_from_gateway,
+    )
 
 
 def _config_guard_root_dir(config_path=None):
-    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
-    base_primary_dir = _base_user_primary_dir_from_gateway(target_path)
-    if base_primary_dir:
-        return base_primary_dir
-    return os.path.dirname(target_path)
+    from mms_command_tools import config_guard_root_dir
+
+    return config_guard_root_dir(
+        config_path=config_path,
+        config_write_target_path=_config_write_target_path,
+        base_user_primary_dir_from_gateway=_base_user_primary_dir_from_gateway,
+    )
 
 
 def _config_snapshot_root(config_path=None):
-    return os.path.join(_config_guard_root_dir(config_path), CONFIG_SNAPSHOT_DIR)
+    from mms_command_tools import config_snapshot_root
+
+    return config_snapshot_root(
+        config_path=config_path,
+        config_guard_root_dir=_config_guard_root_dir,
+        config_snapshot_dir=CONFIG_SNAPSHOT_DIR,
+    )
 
 
 def _config_snapshot_path(snapshot_kind, filename="latest.json", *, config_path=None):
-    return os.path.join(_config_snapshot_root(config_path), snapshot_kind, filename)
+    from mms_command_tools import config_snapshot_path
+
+    return config_snapshot_path(
+        snapshot_kind,
+        filename,
+        config_path=config_path,
+        config_snapshot_root=_config_snapshot_root,
+    )
 
 
 def _is_snapshot_ignored_file(path):

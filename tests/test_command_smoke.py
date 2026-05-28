@@ -123,6 +123,64 @@ def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeyp
     assert mms_core._extract_global_lang(["--lang", "zh", "codex"]) == (["codex"], "zh")
 
 
+def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
+    import os
+
+    import mms_command_tools
+    import mms_core
+
+    marker = os.path.join(".config", "mms", "codex-gateway", "s") + os.sep
+    gateway_path = os.path.join(str(tmp_path), marker, "123", "config.toml")
+    base_config = os.path.join(str(tmp_path), ".config", "mms", "config.toml")
+    base_dir = os.path.join(str(tmp_path), ".config", "mms")
+
+    assert mms_command_tools.base_user_config_path_from_gateway(
+        gateway_path,
+        gateway_session_markers=(marker,),
+    ) == base_config
+    assert mms_command_tools.base_user_primary_dir_from_gateway(
+        gateway_path,
+        gateway_session_markers=(marker,),
+    ) == base_dir
+    assert mms_core._base_user_primary_dir_from_gateway(gateway_path) == base_dir
+
+    assert mms_command_tools.active_sibling_path_from_gateway(
+        gateway_path,
+        filename="config.toml",
+        base_user_primary_dir_from_gateway=lambda _path: base_dir,
+        path_exists=lambda path: path == base_config,
+    ) == base_config
+    assert mms_command_tools.active_sibling_path_from_gateway(
+        gateway_path,
+        filename="config.toml",
+        base_user_primary_dir_from_gateway=lambda _path: base_dir,
+        path_exists=lambda _path: False,
+    ) == gateway_path
+
+    assert mms_command_tools.config_guard_root_dir(
+        config_path=gateway_path,
+        config_write_target_path=lambda: "unused",
+        base_user_primary_dir_from_gateway=lambda _path: base_dir,
+    ) == base_dir
+    normal_config_path = str(tmp_path / "plain" / "config.toml")
+    assert mms_command_tools.config_guard_root_dir(
+        config_path=normal_config_path,
+        config_write_target_path=lambda: "unused",
+        base_user_primary_dir_from_gateway=lambda _path: "",
+    ) == str(tmp_path / "plain")
+    assert mms_command_tools.config_snapshot_root(
+        config_path=normal_config_path,
+        config_guard_root_dir=lambda path: os.path.dirname(path),
+        config_snapshot_dir="snapshots",
+    ) == str(tmp_path / "plain" / "snapshots")
+    assert mms_command_tools.config_snapshot_path(
+        "startup",
+        "accepted.json",
+        config_path=normal_config_path,
+        config_snapshot_root=lambda path: os.path.join(os.path.dirname(path), "snapshots"),
+    ) == str(tmp_path / "plain" / "snapshots" / "startup" / "accepted.json")
+
+
 def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     import hashlib
     import json

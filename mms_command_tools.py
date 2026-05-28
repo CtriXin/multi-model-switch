@@ -98,6 +98,67 @@ def extract_global_lang(argv, *, normalize_language):
     return cleaned, lang
 
 
+def base_user_config_path_from_gateway(config_path, *, gateway_session_markers):
+    normalized = os.path.normpath(str(config_path or ""))
+    for marker in gateway_session_markers:
+        idx = normalized.find(marker)
+        if idx == -1:
+            continue
+        base_home = normalized[:idx]
+        if base_home:
+            return os.path.join(base_home, ".config", "mms", "config.toml")
+    return ""
+
+
+def base_user_primary_dir_from_gateway(path, *, gateway_session_markers):
+    normalized = os.path.normpath(str(path or ""))
+    for marker in gateway_session_markers:
+        idx = normalized.find(marker)
+        if idx == -1:
+            continue
+        base_home = normalized[:idx]
+        if base_home:
+            return os.path.join(base_home, ".config", "mms")
+    return ""
+
+
+def active_sibling_path_from_gateway(
+    path,
+    *,
+    filename,
+    base_user_primary_dir_from_gateway,
+    path_exists=os.path.exists,
+):
+    base_primary_dir = base_user_primary_dir_from_gateway(path)
+    if base_primary_dir:
+        base_path = os.path.join(base_primary_dir, filename)
+        if path_exists(base_path):
+            return base_path
+    return path
+
+
+def config_guard_root_dir(*, config_path=None, config_write_target_path, base_user_primary_dir_from_gateway):
+    target_path = os.path.abspath(str(config_path or config_write_target_path()))
+    base_primary_dir = base_user_primary_dir_from_gateway(target_path)
+    if base_primary_dir:
+        return base_primary_dir
+    return os.path.dirname(target_path)
+
+
+def config_snapshot_root(*, config_path=None, config_guard_root_dir, config_snapshot_dir):
+    return os.path.join(config_guard_root_dir(config_path), config_snapshot_dir)
+
+
+def config_snapshot_path(
+    snapshot_kind,
+    filename="latest.json",
+    *,
+    config_path=None,
+    config_snapshot_root,
+):
+    return os.path.join(config_snapshot_root(config_path), snapshot_kind, filename)
+
+
 def snapshot_proxy_fingerprint(proxy_url):
     proxy_url = str(proxy_url or "").strip()
     if not proxy_url:
