@@ -816,6 +816,22 @@ def about_check_error_summary(error_text, *, localize):
     return raw
 
 
+def mms_upgrade_shell_command(*, include_clis=False, preferred_language="", normalize_language):
+    args = ["--latest-tag", "--lang", normalize_language(preferred_language) or "zh"]
+    if include_clis:
+        args.extend(["--install-cli", "claude,codex"])
+    quoted_args = " ".join(shlex.quote(arg) for arg in args)
+    return f"curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- {quoted_args}"
+
+
+def cli_upgrade_shell_command(cli_name, *, cli_version_packages):
+    cli = str(cli_name or "").strip().lower()
+    package = cli_version_packages.get(cli)
+    if not package:
+        return ""
+    return "npm install -g " + shlex.quote(f"{package}@latest")
+
+
 def about_tui_payload(about_snapshot, *, config_path, localize):
     about_snapshot = about_snapshot if isinstance(about_snapshot, dict) else {}
     version_info = about_snapshot.get("version_info") if isinstance(about_snapshot.get("version_info"), dict) else {}

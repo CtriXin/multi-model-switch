@@ -813,19 +813,19 @@ def _about_check_error_summary(error_text):
 
 
 def _mms_upgrade_shell_command(*, include_clis=False):
-    args = ["--latest-tag", "--lang", normalize_language(_load_version_meta().get("preferred_language", "")) or "zh"]
-    if include_clis:
-        args.extend(["--install-cli", "claude,codex"])
-    quoted_args = " ".join(shlex.quote(arg) for arg in args)
-    return f"curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- {quoted_args}"
+    from mms_command_tools import mms_upgrade_shell_command
+
+    return mms_upgrade_shell_command(
+        include_clis=include_clis,
+        preferred_language=_load_version_meta().get("preferred_language", ""),
+        normalize_language=normalize_language,
+    )
 
 
 def _cli_upgrade_shell_command(cli_name):
-    cli = str(cli_name or "").strip().lower()
-    package = CLI_VERSION_PACKAGES.get(cli)
-    if not package:
-        return ""
-    return "npm install -g " + shlex.quote(f"{package}@latest")
+    from mms_command_tools import cli_upgrade_shell_command
+
+    return cli_upgrade_shell_command(cli_name, cli_version_packages=CLI_VERSION_PACKAGES)
 
 
 def _print_about_version_summary(about_snapshot):

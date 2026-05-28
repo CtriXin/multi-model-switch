@@ -1061,6 +1061,28 @@ def test_about_and_snapshot_payload_helpers_preserve_version_actions():
     assert console.items == ["[cyan]关于 / About[/cyan]", "[cyan]MMS[/cyan] dev"]
 
 
+def test_about_upgrade_command_helpers_preserve_shell_commands():
+    import mms_command_tools
+
+    assert mms_command_tools.mms_upgrade_shell_command(
+        preferred_language="en",
+        normalize_language=lambda value: value,
+    ).endswith("install.sh | bash -s -- --latest-tag --lang en")
+    assert mms_command_tools.mms_upgrade_shell_command(
+        include_clis=True,
+        preferred_language="",
+        normalize_language=lambda value: "",
+    ).endswith("install.sh | bash -s -- --latest-tag --lang zh --install-cli claude,codex")
+    assert mms_command_tools.cli_upgrade_shell_command(
+        "codex",
+        cli_version_packages={"codex": "@openai/codex"},
+    ) == "npm install -g @openai/codex@latest"
+    assert mms_command_tools.cli_upgrade_shell_command(
+        "missing",
+        cli_version_packages={"codex": "@openai/codex"},
+    ) == ""
+
+
 def test_mms_config_guard_renderers_preserve_human_gate_text():
     import mms_command_tools
 
