@@ -1376,6 +1376,29 @@ def run_confirm_tui_prompt(
     }
 
 
+def resolve_confirm_launch_action(confirm_result, *, has_nsr):
+    action = confirm_result["action"]
+    if action == "q":
+        return {"status": "exit"}
+    if action == "b":
+        return {"status": "back"}
+    return {
+        "status": "launch",
+        "bypass": confirm_result["bypass"],
+        "runtime_preferences": {
+            "claude_1m_enabled": confirm_result["claude_1m_enabled"],
+            "caveman_enabled": confirm_result["caveman_enabled"],
+            "agent_pack": confirm_result["agent_pack"],
+            "thinking_enabled": confirm_result["thinking_enabled"],
+            "reasoning_effort": confirm_result["reasoning_effort"],
+            "disabled_session_surfaces": confirm_result["disabled_session_surfaces"],
+            "nsr_enabled": confirm_result["nsr_enabled"],
+            "has_nsr": has_nsr,
+            "confirm_returned_surfaces": confirm_result["confirm_returned_surfaces"],
+        },
+    }
+
+
 def apply_confirm_bypass_flag(runtime, cli_name, bypass):
     if cli_name in {"claude", "codex", "opencode", "agy"}:
         runtime["bypass"] = bool(bypass)

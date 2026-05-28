@@ -37,6 +37,7 @@ from mms_tui_launcher_flow import (
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
     resolve_last_used_launch_context,
+    resolve_confirm_launch_action,
     run_confirm_tui_prompt,
     safe_tui_call,
     selected_model_launch_context,
@@ -2082,6 +2083,43 @@ def test_run_confirm_tui_prompt_handles_interrupt() -> None:
         default_reasoning_effort_for_model_info=lambda _model_info: "high",
         build_confirm_preview_catalog=lambda *_args, **_kwargs: {},
     ) == {"status": "interrupt"}
+
+
+def test_resolve_confirm_launch_action_maps_exit_back_and_launch_preferences() -> None:
+    assert resolve_confirm_launch_action({"action": "q"}, has_nsr=True) == {"status": "exit"}
+    assert resolve_confirm_launch_action({"action": "b"}, has_nsr=False) == {"status": "back"}
+
+    result = resolve_confirm_launch_action(
+        {
+            "action": "",
+            "bypass": True,
+            "claude_1m_enabled": True,
+            "caveman_enabled": False,
+            "agent_pack": "omc",
+            "thinking_enabled": True,
+            "reasoning_effort": "medium",
+            "disabled_session_surfaces": {"toon": True},
+            "nsr_enabled": True,
+            "confirm_returned_surfaces": True,
+        },
+        has_nsr=True,
+    )
+
+    assert result == {
+        "status": "launch",
+        "bypass": True,
+        "runtime_preferences": {
+            "claude_1m_enabled": True,
+            "caveman_enabled": False,
+            "agent_pack": "omc",
+            "thinking_enabled": True,
+            "reasoning_effort": "medium",
+            "disabled_session_surfaces": {"toon": True},
+            "nsr_enabled": True,
+            "has_nsr": True,
+            "confirm_returned_surfaces": True,
+        },
+    }
 
 
 def test_apply_confirm_bypass_flag_only_for_launch_clis() -> None:
