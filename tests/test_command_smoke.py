@@ -2288,6 +2288,16 @@ def test_update_notice_preserves_prompt_payload_and_throttle():
     ) is None
 
 
+def test_major_update_notice_delegates_to_update_notice():
+    import mms_command_tools
+
+    calls = []
+    assert mms_command_tools.major_update_notice(
+        update_notice=lambda: calls.append("called") or {"latest_tag": "v2.0.0"},
+    ) == {"latest_tag": "v2.0.0"}
+    assert calls == ["called"]
+
+
 def test_start_async_update_check_preserves_interval_running_and_worker_flow():
     import mms_command_tools
 

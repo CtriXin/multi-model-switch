@@ -2948,6 +2948,10 @@ def update_notice(
     }
 
 
+def major_update_notice(*, update_notice):
+    return update_notice()
+
+
 def start_async_update_check(
     *,
     load_version_meta,

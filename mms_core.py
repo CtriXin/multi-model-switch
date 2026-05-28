@@ -480,7 +480,9 @@ def _update_notice():
 
 
 def _major_update_notice():
-    return _update_notice()
+    from mms_command_tools import major_update_notice
+
+    return major_update_notice(update_notice=_update_notice)
 
 
 def _start_async_update_check():
