@@ -647,6 +647,50 @@ def test_provider_account_display_helpers_render_rows():
     )
 
 
+def test_runtime_usage_display_handles_tui_empty_and_rows():
+    import mms_command_tools
+
+    events = []
+    console = _CollectingConsole()
+
+    mms_command_tools.display_runtime_usage(
+        "provider",
+        "relay",
+        "Relay",
+        use_tui=lambda: True,
+        clear_console=lambda: events.append("clear"),
+        usage_rows_for_runtime=lambda kind, runtime_id: [],
+        active_usage_path=lambda: "/tmp/usage.json",
+        pause_after_tui_report=lambda message: events.append(("pause", message)),
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    assert events == ["clear", ("pause", "按 Enter 返回通道详情")]
+    assert any("Relay 还没有本地启动统计" in str(item) for item in console.items)
+
+    events.clear()
+    console.items.clear()
+    mms_command_tools.display_runtime_usage(
+        "account",
+        "codex-a",
+        "Codex A",
+        use_tui=lambda: False,
+        clear_console=lambda: events.append("clear"),
+        usage_rows_for_runtime=lambda kind, runtime_id: [
+            {"cli": "codex", "launches": 3, "last_model": "gpt-5.5", "last_used_at": "2026-05-28"}
+        ],
+        active_usage_path=lambda: "/tmp/usage.json",
+        pause_after_tui_report=lambda message: events.append(("pause", message)),
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    assert events == []
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.rows[0][0] == ("codex", "3", "gpt-5.5", "2026-05-28")
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

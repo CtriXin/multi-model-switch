@@ -1139,6 +1139,50 @@ def display_accounts(
     console.print("[dim]注: Claude OAuth 独立入口已下线，这里仅保留旧配置只读兼容。[/dim]")
 
 
+def display_runtime_usage(
+    runtime_kind,
+    runtime_id,
+    title,
+    *,
+    use_tui,
+    clear_console,
+    usage_rows_for_runtime,
+    active_usage_path,
+    pause_after_tui_report,
+    table_cls,
+    console,
+):
+    if use_tui():
+        try:
+            clear_console()
+        except Exception:
+            pass
+    rows = usage_rows_for_runtime(runtime_kind, runtime_id)
+    if not rows:
+        console.print(f"[yellow]{title} 还没有本地启动统计[/yellow]")
+        console.print(f"[dim]统计文件: {active_usage_path()}[/dim]")
+        if use_tui():
+            pause_after_tui_report("按 Enter 返回通道详情")
+        return
+
+    table = table_cls(title=f"{title} · 本地统计", show_lines=True)
+    table.add_column("CLI", style="cyan")
+    table.add_column("启动次数", style="green")
+    table.add_column("最近模型", style="yellow")
+    table.add_column("最近使用", style="magenta")
+    for item in rows:
+        table.add_row(
+            str(item.get("cli", "")),
+            str(item.get("launches", 0)),
+            str(item.get("last_model", "")),
+            str(item.get("last_used_at", "")),
+        )
+    console.print(table)
+    console.print("[dim]这里只是本地启动统计，不代表官方真实余额或剩余额度。[/dim]")
+    if use_tui():
+        pause_after_tui_report("按 Enter 返回通道详情")
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):

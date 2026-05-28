@@ -5307,35 +5307,20 @@ def _snapshot_guard_tui_payload():
 
 
 def _display_runtime_usage(runtime_kind, runtime_id, title):
-    if _use_tui():
-        try:
-            console.clear()
-        except Exception:
-            pass
-    rows = _usage_rows_for_runtime(runtime_kind, runtime_id)
-    if not rows:
-        console.print(f"[yellow]{title} 还没有本地启动统计[/yellow]")
-        console.print(f"[dim]统计文件: {_active_usage_path()}[/dim]")
-        if _use_tui():
-            _pause_after_tui_report("按 Enter 返回通道详情")
-        return
+    from mms_command_tools import display_runtime_usage
 
-    table = Table(title=f"{title} · 本地统计", show_lines=True)
-    table.add_column("CLI", style="cyan")
-    table.add_column("启动次数", style="green")
-    table.add_column("最近模型", style="yellow")
-    table.add_column("最近使用", style="magenta")
-    for item in rows:
-        table.add_row(
-            str(item.get("cli", "")),
-            str(item.get("launches", 0)),
-            str(item.get("last_model", "")),
-            str(item.get("last_used_at", "")),
-        )
-    console.print(table)
-    console.print("[dim]这里只是本地启动统计，不代表官方真实余额或剩余额度。[/dim]")
-    if _use_tui():
-        _pause_after_tui_report("按 Enter 返回通道详情")
+    return display_runtime_usage(
+        runtime_kind,
+        runtime_id,
+        title,
+        use_tui=_use_tui,
+        clear_console=console.clear,
+        usage_rows_for_runtime=_usage_rows_for_runtime,
+        active_usage_path=_active_usage_path,
+        pause_after_tui_report=_pause_after_tui_report,
+        table_cls=Table,
+        console=console,
+    )
 
 
 def _list_manage_targets(cfg):
