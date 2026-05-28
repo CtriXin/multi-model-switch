@@ -6071,12 +6071,8 @@ def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
     from mms_command_tools import resolve_provider_for_cli
 
     return resolve_provider_for_cli(
-        cfg,
-        cli_name,
-        default_provider,
-        default_models,
-        provider_options_for_model=_provider_options_for_model,
-        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
+        cfg, cli_name, default_provider, default_models,
+        provider_options_for_model=_provider_options_for_model, cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
     )
 
 
@@ -6087,23 +6083,24 @@ def _resolve_source_default_index(options, preferred_cli):
 
 
 def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
-    if provider_id:
-        provider = resolve_provider_context(cfg, provider_id)
-        return _resolve_provider_for_cli(cfg, cli_name, provider, _probe_models(provider, emit_output=False).get("models"))
-    if cli_name in MMS_MANAGED_OAUTH_CLIS:
-        account = resolve_account_context(cfg, account_id=account_id, cli_name=cli_name)
-        if account_id and account is not None:
-            return account, list(default_models or [])
-        if account is not None and account.get("enabled", True):
-            return account, list(default_models or [])
-    return _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+    from mms_command_tools import resolve_launch_runtime
+
+    return resolve_launch_runtime(
+        cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id,
+        resolve_provider_context=resolve_provider_context, resolve_provider_for_cli=_resolve_provider_for_cli,
+        probe_models=_probe_models, managed_oauth_clis=MMS_MANAGED_OAUTH_CLIS,
+        resolve_account_context=resolve_account_context,
+    )
 
 
 def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, provider_id=None):
-    if provider_id:
-        provider = resolve_provider_context(cfg, provider_id)
-        return _resolve_provider_for_cli(cfg, cli_name, provider, _probe_models(provider, emit_output=False).get("models"))
-    return _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+    from mms_command_tools import resolve_provider_runtime
+
+    return resolve_provider_runtime(
+        cfg, cli_name, default_provider, default_models, provider_id=provider_id,
+        resolve_provider_context=resolve_provider_context, resolve_provider_for_cli=_resolve_provider_for_cli,
+        probe_models=_probe_models,
+    )
 
 
 def _runtime_choice_label(runtime):

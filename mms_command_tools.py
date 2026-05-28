@@ -2742,6 +2742,49 @@ def resolve_provider_for_cli(cfg, cli_name, default_provider, default_models, *,
     return None, []
 
 
+def resolve_launch_runtime(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    *,
+    account_id=None,
+    provider_id=None,
+    resolve_provider_context,
+    resolve_provider_for_cli,
+    probe_models,
+    managed_oauth_clis,
+    resolve_account_context,
+):
+    if provider_id:
+        provider = resolve_provider_context(cfg, provider_id)
+        return resolve_provider_for_cli(cfg, cli_name, provider, probe_models(provider, emit_output=False).get("models"))
+    if cli_name in managed_oauth_clis:
+        account = resolve_account_context(cfg, account_id=account_id, cli_name=cli_name)
+        if account_id and account is not None:
+            return account, list(default_models or [])
+        if account is not None and account.get("enabled", True):
+            return account, list(default_models or [])
+    return resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+
+
+def resolve_provider_runtime(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    *,
+    provider_id=None,
+    resolve_provider_context,
+    resolve_provider_for_cli,
+    probe_models,
+):
+    if provider_id:
+        provider = resolve_provider_context(cfg, provider_id)
+        return resolve_provider_for_cli(cfg, cli_name, provider, probe_models(provider, emit_output=False).get("models"))
+    return resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+
+
 def resolve_source_default_index(options, preferred_cli):
     if not options:
         return 0

@@ -1869,6 +1869,82 @@ def test_runtime_source_selection_helpers_preserve_sort_defaults_and_trace_ids()
     ]
 
 
+def test_runtime_resolver_helpers_preserve_provider_and_managed_oauth_paths():
+    import mms_command_tools
+
+    calls = []
+    providers = {
+        "override": {"id": "override", "runtime_kind": "provider", "models": ["gpt-5.5"]},
+        "default": {"id": "default", "runtime_kind": "provider", "models": ["gpt-5.4"]},
+    }
+    accounts = {
+        "codex-main": {"id": "codex-main", "auth_mode": "oauth", "enabled": True},
+        "disabled": {"id": "disabled", "auth_mode": "oauth", "enabled": False},
+    }
+
+    def resolve_provider_for_cli(_cfg, cli_name, provider, models):
+        calls.append(("provider_for_cli", cli_name, provider["id"], tuple(models or [])))
+        return {**provider, "selected": cli_name}, list(models or [])
+
+    runtime, models = mms_command_tools.resolve_launch_runtime(
+        {},
+        "codex",
+        providers["default"],
+        ["gpt-5.4"],
+        provider_id="override",
+        resolve_provider_context=lambda _cfg, provider_id: providers[provider_id],
+        resolve_provider_for_cli=resolve_provider_for_cli,
+        probe_models=lambda provider, emit_output=False: {"models": provider["models"]},
+        managed_oauth_clis=("codex", "agy"),
+        resolve_account_context=lambda *_args, **_kwargs: None,
+    )
+    assert runtime["id"] == "override"
+    assert models == ["gpt-5.5"]
+    assert calls[-1] == ("provider_for_cli", "codex", "override", ("gpt-5.5",))
+
+    runtime, models = mms_command_tools.resolve_launch_runtime(
+        {},
+        "codex",
+        providers["default"],
+        ["gpt-5.4"],
+        account_id="disabled",
+        resolve_provider_context=lambda _cfg, provider_id: providers[provider_id],
+        resolve_provider_for_cli=resolve_provider_for_cli,
+        probe_models=lambda provider, emit_output=False: {"models": provider["models"]},
+        managed_oauth_clis=("codex", "agy"),
+        resolve_account_context=lambda _cfg, account_id=None, cli_name=None: accounts.get(account_id),
+    )
+    assert runtime["id"] == "disabled"
+    assert models == ["gpt-5.4"]
+
+    runtime, models = mms_command_tools.resolve_launch_runtime(
+        {},
+        "codex",
+        providers["default"],
+        ["gpt-5.4"],
+        resolve_provider_context=lambda _cfg, provider_id: providers[provider_id],
+        resolve_provider_for_cli=resolve_provider_for_cli,
+        probe_models=lambda provider, emit_output=False: {"models": provider["models"]},
+        managed_oauth_clis=("codex", "agy"),
+        resolve_account_context=lambda _cfg, account_id=None, cli_name=None: accounts["codex-main"],
+    )
+    assert runtime["id"] == "codex-main"
+    assert models == ["gpt-5.4"]
+
+    runtime, models = mms_command_tools.resolve_provider_runtime(
+        {},
+        "claude",
+        providers["default"],
+        ["gpt-5.4"],
+        provider_id="override",
+        resolve_provider_context=lambda _cfg, provider_id: providers[provider_id],
+        resolve_provider_for_cli=resolve_provider_for_cli,
+        probe_models=lambda provider, emit_output=False: {"models": provider["models"]},
+    )
+    assert runtime["id"] == "override"
+    assert models == ["gpt-5.5"]
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
