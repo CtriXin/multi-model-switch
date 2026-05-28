@@ -7855,71 +7855,62 @@ def _handle_provider_default_config(cfg, args_rest):
 
 
 def _handle_provider_add_config(cfg, args_rest):
-    preset_id = args_rest[0].strip() if args_rest else None
-    _quick_connect_gateway(cfg, preset_id=preset_id)
+    from mms_command_tools import handle_provider_add_config
+
+    return handle_provider_add_config(
+        cfg,
+        args_rest,
+        quick_connect_gateway=_quick_connect_gateway,
+    )
 
 
 def _handle_provider_edit_config(cfg, args_rest):
-    if not args_rest:
-        console.print(f"[red]用法: {current_command()} config provider.edit <id>[/red]")
-        return
-    provider_id = args_rest[0].strip()
-    providers = _provider_map(cfg)
-    if provider_id not in providers:
-        console.print(f"[red]未找到模型源: {provider_id}[/red]")
-        return
-    provider = _prompt_provider_metadata(existing=providers[provider_id], preset_id=provider_id)
-    updated_cfg = _upsert_provider(cfg, provider)
-    save_config(updated_cfg)
-    _invalidate_probe_cache(provider_id)
-    _refresh_routes_export_for_hive(force=True, quiet=False)
-    console.print(f"[green]✓ 已更新模型源: {provider_id}[/green]")
+    from mms_command_tools import handle_provider_edit_config
+
+    return handle_provider_edit_config(
+        cfg,
+        args_rest,
+        command_name=current_command(),
+        provider_map=_provider_map,
+        prompt_provider_metadata=_prompt_provider_metadata,
+        upsert_provider=_upsert_provider,
+        save_config=save_config,
+        invalidate_probe_cache=_invalidate_probe_cache,
+        refresh_routes_export_for_hive=_refresh_routes_export_for_hive,
+        console=console,
+    )
 
 
 def _handle_provider_remove_config(cfg, args_rest):
-    if not args_rest:
-        console.print(f"[red]用法: {current_command()} config provider.remove <id>[/red]")
-        return
-    _ensure_interactive_terminal("模型源删除确认")
-    provider_id = args_rest[0].strip()
-    providers = _provider_map(cfg)
-    if provider_id not in providers:
-        console.print(f"[red]未找到模型源: {provider_id}[/red]")
-        return
-    if len(providers) == 1:
-        console.print("[red]至少需要保留一个模型源，无法删除最后一个[/red]")
-        return
-    if not Confirm.ask(f"确认删除模型源 '{provider_id}'？", default=False):
-        console.print("[yellow]已取消删除[/yellow]")
-        return
+    from mms_command_tools import handle_provider_remove_config
 
-    updated_cfg = dict(cfg)
-    updated_cfg["providers"] = [
-        provider for provider in cfg.get("providers", [])
-        if provider.get("id") != provider_id
-    ]
-    default_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
-    if default_id == provider_id:
-        updated_cfg["provider"] = {"default": updated_cfg["providers"][0]["id"]}
-    save_config(updated_cfg)
-    _delete_provider_credentials(provider_id)
-    _invalidate_probe_cache(provider_id)
-    _refresh_routes_export_for_hive(force=True, quiet=False)
-    console.print(f"[green]✓ 已删除模型源: {provider_id}[/green]")
+    return handle_provider_remove_config(
+        cfg,
+        args_rest,
+        command_name=current_command(),
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        ensure_interactive_terminal=_ensure_interactive_terminal,
+        provider_map=_provider_map,
+        confirm_ask=lambda *args, **kwargs: Confirm.ask(*args, **kwargs),
+        save_config=save_config,
+        delete_provider_credentials=_delete_provider_credentials,
+        invalidate_probe_cache=_invalidate_probe_cache,
+        refresh_routes_export_for_hive=_refresh_routes_export_for_hive,
+        console=console,
+    )
 
 
 def _handle_provider_credentials_config(cfg, args_rest):
-    target_id = args_rest[0].strip() if args_rest else cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
-    providers = _provider_map(cfg)
-    if target_id not in providers:
-        console.print(f"[red]未找到模型源: {target_id}[/red]")
-        return
-    provider = resolve_provider_context(cfg, target_id)
-    setup_provider_credentials(
-        provider,
-        provider.get("base_url", ""),
-        provider.get("api_key", ""),
-        allow_keep=True,
+    from mms_command_tools import handle_provider_credentials_config
+
+    return handle_provider_credentials_config(
+        cfg,
+        args_rest,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        provider_map=_provider_map,
+        resolve_provider_context=resolve_provider_context,
+        setup_provider_credentials=setup_provider_credentials,
+        console=console,
     )
 
 

@@ -3976,6 +3976,115 @@ def handle_provider_default_config(
     console.print("[dim]默认模型源已更新[/dim]")
 
 
+def handle_provider_add_config(
+    cfg,
+    args_rest,
+    *,
+    quick_connect_gateway,
+):
+    preset_id = args_rest[0].strip() if args_rest else None
+    quick_connect_gateway(cfg, preset_id=preset_id)
+
+
+def handle_provider_edit_config(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    provider_map,
+    prompt_provider_metadata,
+    upsert_provider,
+    save_config,
+    invalidate_probe_cache,
+    refresh_routes_export_for_hive,
+    console,
+):
+    if not args_rest:
+        console.print(f"[red]用法: {command_name} config provider.edit <id>[/red]")
+        return
+    provider_id = args_rest[0].strip()
+    providers = provider_map(cfg)
+    if provider_id not in providers:
+        console.print(f"[red]未找到模型源: {provider_id}[/red]")
+        return
+    provider = prompt_provider_metadata(existing=providers[provider_id], preset_id=provider_id)
+    updated_cfg = upsert_provider(cfg, provider)
+    save_config(updated_cfg)
+    invalidate_probe_cache(provider_id)
+    refresh_routes_export_for_hive(force=True, quiet=False)
+    console.print(f"[green]✓ 已更新模型源: {provider_id}[/green]")
+
+
+def handle_provider_remove_config(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    default_provider_id,
+    ensure_interactive_terminal,
+    provider_map,
+    confirm_ask,
+    save_config,
+    delete_provider_credentials,
+    invalidate_probe_cache,
+    refresh_routes_export_for_hive,
+    console,
+):
+    if not args_rest:
+        console.print(f"[red]用法: {command_name} config provider.remove <id>[/red]")
+        return
+    ensure_interactive_terminal("模型源删除确认")
+    provider_id = args_rest[0].strip()
+    providers = provider_map(cfg)
+    if provider_id not in providers:
+        console.print(f"[red]未找到模型源: {provider_id}[/red]")
+        return
+    if len(providers) == 1:
+        console.print("[red]至少需要保留一个模型源，无法删除最后一个[/red]")
+        return
+    if not confirm_ask(f"确认删除模型源 '{provider_id}'？", default=False):
+        console.print("[yellow]已取消删除[/yellow]")
+        return
+
+    updated_cfg = dict(cfg)
+    updated_cfg["providers"] = [
+        provider for provider in cfg.get("providers", [])
+        if provider.get("id") != provider_id
+    ]
+    default_id = cfg.get("provider", {}).get("default", default_provider_id)
+    if default_id == provider_id:
+        updated_cfg["provider"] = {"default": updated_cfg["providers"][0]["id"]}
+    save_config(updated_cfg)
+    delete_provider_credentials(provider_id)
+    invalidate_probe_cache(provider_id)
+    refresh_routes_export_for_hive(force=True, quiet=False)
+    console.print(f"[green]✓ 已删除模型源: {provider_id}[/green]")
+
+
+def handle_provider_credentials_config(
+    cfg,
+    args_rest,
+    *,
+    default_provider_id,
+    provider_map,
+    resolve_provider_context,
+    setup_provider_credentials,
+    console,
+):
+    target_id = args_rest[0].strip() if args_rest else cfg.get("provider", {}).get("default", default_provider_id)
+    providers = provider_map(cfg)
+    if target_id not in providers:
+        console.print(f"[red]未找到模型源: {target_id}[/red]")
+        return
+    provider = resolve_provider_context(cfg, target_id)
+    setup_provider_credentials(
+        provider,
+        provider.get("base_url", ""),
+        provider.get("api_key", ""),
+        allow_keep=True,
+    )
+
+
 def handle_account_default_config(
     cfg,
     args_rest,

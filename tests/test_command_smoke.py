@@ -3353,6 +3353,147 @@ def test_provider_default_handler_preserves_show_missing_and_save_refresh_flow()
     assert "[green]✓ provider.default = demo-b[/green]" in console.items
 
 
+def test_provider_add_credentials_handlers_preserve_dispatch_and_validation():
+    import mms_command_tools
+
+    cfg = {
+        "provider": {"default": "demo-a"},
+        "providers": [
+            {"id": "demo-a", "base_url": "https://a.example", "api_key": "key-a"},
+            {"id": "demo-b", "base_url": "https://b.example", "api_key": "key-b"},
+        ],
+    }
+    console = _CollectingConsole()
+    connect_calls = []
+    mms_command_tools.handle_provider_add_config(
+        cfg,
+        ["openrouter"],
+        quick_connect_gateway=lambda current, preset_id=None: connect_calls.append((current, preset_id)),
+    )
+    assert connect_calls == [(cfg, "openrouter")]
+
+    setup_calls = []
+    provider_map = lambda current: {item["id"]: item for item in current.get("providers", [])}
+    resolve_provider = lambda current, provider_id: provider_map(current)[provider_id]
+    mms_command_tools.handle_provider_credentials_config(
+        cfg,
+        [],
+        default_provider_id="fallback",
+        provider_map=provider_map,
+        resolve_provider_context=resolve_provider,
+        setup_provider_credentials=lambda provider, base_url, api_key, allow_keep=False: setup_calls.append(
+            (provider["id"], base_url, api_key, allow_keep)
+        ),
+        console=console,
+    )
+    assert setup_calls == [("demo-a", "https://a.example", "key-a", True)]
+
+    console.items.clear()
+    mms_command_tools.handle_provider_credentials_config(
+        cfg,
+        ["missing"],
+        default_provider_id="fallback",
+        provider_map=provider_map,
+        resolve_provider_context=resolve_provider,
+        setup_provider_credentials=lambda *_args, **_kwargs: setup_calls.append("unexpected"),
+        console=console,
+    )
+    assert setup_calls == [("demo-a", "https://a.example", "key-a", True)]
+    assert "[red]未找到模型源: missing[/red]" in console.items
+
+
+def test_provider_edit_remove_handlers_preserve_validation_refresh_and_default_cleanup():
+    import mms_command_tools
+
+    cfg = {
+        "provider": {"default": "demo-a"},
+        "providers": [
+            {"id": "demo-a", "name": "Demo A"},
+            {"id": "demo-b", "name": "Demo B"},
+        ],
+    }
+    console = _CollectingConsole()
+    calls = []
+    provider_map = lambda current: {item["id"]: item for item in current.get("providers", [])}
+
+    edit_common = {
+        "command_name": "mmg",
+        "provider_map": provider_map,
+        "prompt_provider_metadata": lambda existing=None, preset_id=None: {
+            **existing,
+            "name": f"Edited {preset_id}",
+        },
+        "upsert_provider": lambda current, provider: {
+            **current,
+            "providers": [
+                provider if item.get("id") == provider.get("id") else item
+                for item in current.get("providers", [])
+            ],
+        },
+        "save_config": lambda updated: calls.append(("save", updated)),
+        "invalidate_probe_cache": lambda provider_id: calls.append(("invalidate", provider_id)),
+        "refresh_routes_export_for_hive": lambda **kwargs: calls.append(("refresh", kwargs)),
+        "console": console,
+    }
+
+    mms_command_tools.handle_provider_edit_config(cfg, [], **edit_common)
+    assert "[red]用法: mmg config provider.edit <id>[/red]" in console.items
+    mms_command_tools.handle_provider_edit_config(cfg, ["missing"], **edit_common)
+    assert any("未找到模型源: missing" in str(item) for item in console.items)
+    assert calls == []
+
+    console.items.clear()
+    mms_command_tools.handle_provider_edit_config(cfg, ["demo-b"], **edit_common)
+    assert calls[0][0] == "save"
+    assert calls[0][1]["providers"][1]["name"] == "Edited demo-b"
+    assert calls[1:] == [("invalidate", "demo-b"), ("refresh", {"force": True, "quiet": False})]
+    assert "[green]✓ 已更新模型源: demo-b[/green]" in console.items
+
+    console.items.clear()
+    calls.clear()
+    interactive_calls = []
+    remove_common = {
+        "command_name": "mmg",
+        "default_provider_id": "default",
+        "ensure_interactive_terminal": lambda reason: interactive_calls.append(reason),
+        "provider_map": provider_map,
+        "confirm_ask": lambda *args, **kwargs: True,
+        "save_config": lambda updated: calls.append(("save", updated)),
+        "delete_provider_credentials": lambda provider_id: calls.append(("delete-creds", provider_id)),
+        "invalidate_probe_cache": lambda provider_id: calls.append(("invalidate", provider_id)),
+        "refresh_routes_export_for_hive": lambda **kwargs: calls.append(("refresh", kwargs)),
+        "console": console,
+    }
+    mms_command_tools.handle_provider_remove_config(cfg, ["demo-a"], **remove_common)
+    assert interactive_calls == ["模型源删除确认"]
+    assert calls[0] == ("save", {"provider": {"default": "demo-b"}, "providers": [{"id": "demo-b", "name": "Demo B"}]})
+    assert calls[1:] == [
+        ("delete-creds", "demo-a"),
+        ("invalidate", "demo-a"),
+        ("refresh", {"force": True, "quiet": False}),
+    ]
+    assert "[green]✓ 已删除模型源: demo-a[/green]" in console.items
+
+    console.items.clear()
+    calls.clear()
+    mms_command_tools.handle_provider_remove_config(
+        cfg,
+        ["demo-b"],
+        **{**remove_common, "confirm_ask": lambda *args, **kwargs: False},
+    )
+    assert calls == []
+    assert "[yellow]已取消删除[/yellow]" in console.items
+
+    console.items.clear()
+    one_provider_cfg = {"providers": [{"id": "only"}]}
+    mms_command_tools.handle_provider_remove_config(
+        one_provider_cfg,
+        ["only"],
+        **remove_common,
+    )
+    assert any("无法删除最后一个" in str(item) for item in console.items)
+
+
 def test_account_default_handler_preserves_show_reject_and_save_flow():
     import mms_command_tools
 
