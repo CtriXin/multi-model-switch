@@ -3242,6 +3242,46 @@ def test_config_ensure_helpers_dedupe_and_repair_defaults():
     assert accounts_cfg["account"] == {"defaults": {"codex": "codex-main", "gemini": "gemini-old"}}
 
 
+def test_handle_config_migrate_preserves_backup_save_and_report_flow():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    saved = []
+
+    mms_command_tools.handle_config_migrate(
+        backup_config_tree=lambda reason: f"/backup/{reason}",
+        load_config=lambda: None,
+        migrate_accounts_dirs=lambda cfg: ([], False),
+        save_config=lambda cfg: saved.append(cfg),
+        config_path="/config.toml",
+        active_credentials_path=lambda: "/credentials.sh",
+        active_usage_path=lambda: "/usage.json",
+        console=console,
+    )
+    assert saved == []
+    assert any("未找到可迁移配置" in str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.handle_config_migrate(
+        backup_config_tree=lambda reason: f"/backup/{reason}",
+        load_config=lambda: {"accounts": [{"id": "old"}], "provider": {"default": "relay"}},
+        migrate_accounts_dirs=lambda cfg: ([{"id": "new"}], True),
+        save_config=lambda cfg: saved.append(cfg),
+        config_path="/config.toml",
+        active_credentials_path=lambda: "/credentials.sh",
+        active_usage_path=lambda: "/usage.json",
+        console=console,
+    )
+    assert saved == [{"accounts": [{"id": "new"}], "provider": {"default": "relay"}}]
+    assert console.items == [
+        "[green]✓ 配置迁移完成[/green]",
+        "[dim]config: /config.toml[/dim]",
+        "[dim]credentials: /credentials.sh[/dim]",
+        "[dim]usage: /usage.json[/dim]",
+        "[dim]备份目录: /backup/config-migrate[/dim]",
+    ]
+
+
 def test_config_normalization_helpers_preserve_legacy_shapes():
     import mms_command_tools
     import mms_core

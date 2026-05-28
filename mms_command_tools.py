@@ -3891,6 +3891,37 @@ def handle_config_validate(cfg, *, validate_config, console):
     console.print("[green]✓ 配置校验通过[/green]")
 
 
+def handle_config_migrate(
+    *,
+    backup_config_tree,
+    load_config,
+    migrate_accounts_dirs,
+    save_config,
+    config_path,
+    active_credentials_path,
+    active_usage_path,
+    console,
+):
+    backup_dir = backup_config_tree("config-migrate")
+    cfg = load_config()
+    if cfg is None:
+        console.print("[yellow]未找到可迁移配置，当前无需执行 migrate[/yellow]")
+        console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+        return
+
+    updated_cfg = dict(cfg)
+    updated_accounts, moved_accounts = migrate_accounts_dirs(cfg)
+    if moved_accounts:
+        updated_cfg["accounts"] = updated_accounts
+    save_config(updated_cfg)
+
+    console.print("[green]✓ 配置迁移完成[/green]")
+    console.print(f"[dim]config: {config_path}[/dim]")
+    console.print(f"[dim]credentials: {active_credentials_path()}[/dim]")
+    console.print(f"[dim]usage: {active_usage_path()}[/dim]")
+    console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+
+
 def session_status_label(item):
     session_id = str(item.get("session_id") or "").strip()
     if not session_id:

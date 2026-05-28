@@ -8320,24 +8320,18 @@ def _migrate_accounts_dirs(cfg):
 
 
 def _handle_config_migrate():
-    backup_dir = _backup_config_tree("config-migrate")
-    cfg = load_config()
-    if cfg is None:
-        console.print("[yellow]未找到可迁移配置，当前无需执行 migrate[/yellow]")
-        console.print(f"[dim]备份目录: {backup_dir}[/dim]")
-        return
+    from mms_command_tools import handle_config_migrate
 
-    updated_cfg = dict(cfg)
-    updated_accounts, moved_accounts = _migrate_accounts_dirs(cfg)
-    if moved_accounts:
-        updated_cfg["accounts"] = updated_accounts
-    save_config(updated_cfg)
-
-    console.print("[green]✓ 配置迁移完成[/green]")
-    console.print(f"[dim]config: {CONFIG_PATH}[/dim]")
-    console.print(f"[dim]credentials: {_active_credentials_path()}[/dim]")
-    console.print(f"[dim]usage: {_active_usage_path()}[/dim]")
-    console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+    return handle_config_migrate(
+        backup_config_tree=_backup_config_tree,
+        load_config=load_config,
+        migrate_accounts_dirs=_migrate_accounts_dirs,
+        save_config=save_config,
+        config_path=CONFIG_PATH,
+        active_credentials_path=_active_credentials_path,
+        active_usage_path=_active_usage_path,
+        console=console,
+    )
 
 
 def _display_providers(cfg):
