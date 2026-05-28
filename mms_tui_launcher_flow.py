@@ -2482,3 +2482,109 @@ def execute_confirmed_launch(
     )
     launch_with_tracking(cli_name, clean_model_info, runtime, once=once)
     return {"status": "launched"}
+
+
+def handle_tui_launch_confirmation(
+    cfg,
+    cli_name,
+    model_info,
+    runtime,
+    *,
+    once,
+    check_cli_installed,
+    check_and_offer_install_loader,
+    select_and_apply_opencode_profile,
+    runtime_with_launch_preferences,
+    runtime_with_vision_sidecar,
+    clean_model_info,
+    get_export_env,
+    network_guard_preview_loader,
+    confirm_tui,
+    confirm_context_lines,
+    caveman_available_for_cli,
+    nsr_available_for_cli,
+    ecc_available_for_claude,
+    omc_available_for_claude,
+    model_info_looks_domestic,
+    default_reasoning_effort_for_model_info,
+    build_confirm_preview_catalog,
+    network_guard_enforcer_loader,
+    merge_disabled_session_surfaces,
+    launch_with_tracking,
+):
+    install_result = ensure_cli_installed_for_launch(
+        cli_name,
+        check_cli_installed=check_cli_installed,
+        check_and_offer_install_loader=check_and_offer_install_loader,
+    )
+    if install_result["status"] == "exit":
+        return {"status": "exit"}
+
+    opencode_profile_result = apply_opencode_profile_for_launch(
+        runtime,
+        cli_name,
+        select_and_apply_opencode_profile=select_and_apply_opencode_profile,
+    )
+    if opencode_profile_result.get("cancelled"):
+        return {"status": "continue"}
+    runtime = opencode_profile_result["runtime"]
+    runtime = apply_launch_runtime_preferences(
+        cfg,
+        runtime,
+        cli_name,
+        runtime_with_launch_preferences=runtime_with_launch_preferences,
+        runtime_with_vision_sidecar=runtime_with_vision_sidecar,
+    )
+
+    confirm_inputs = prepare_confirm_prompt_inputs(
+        cli_name,
+        model_info,
+        runtime,
+        clean_model_info=clean_model_info,
+        get_export_env=get_export_env,
+        network_guard_preview_loader=network_guard_preview_loader,
+    )
+    clean = confirm_inputs["clean_model_info"]
+    env_vars = confirm_inputs["env_vars"]
+    runtime = confirm_inputs["runtime"]
+
+    confirm_prompt = run_confirm_tui_prompt(
+        cli_name,
+        clean,
+        runtime,
+        env_vars=env_vars,
+        once=once,
+        confirm_tui=confirm_tui,
+        confirm_context_lines=confirm_context_lines,
+        caveman_available_for_cli=caveman_available_for_cli,
+        nsr_available_for_cli=nsr_available_for_cli,
+        ecc_available_for_claude=ecc_available_for_claude,
+        omc_available_for_claude=omc_available_for_claude,
+        model_info_looks_domestic=model_info_looks_domestic,
+        default_reasoning_effort_for_model_info=default_reasoning_effort_for_model_info,
+        build_confirm_preview_catalog=build_confirm_preview_catalog,
+    )
+    if confirm_prompt["status"] == "interrupt":
+        return {"status": "exit"}
+
+    confirm_action = resolve_confirm_launch_action(
+        confirm_prompt["confirm_result"],
+        has_nsr=confirm_prompt["has_nsr"],
+    )
+    if confirm_action["status"] == "exit":
+        return {"status": "exit"}
+    if confirm_action["status"] == "back":
+        return {"status": "continue"}
+
+    execute_confirmed_launch(
+        cli_name,
+        clean,
+        runtime,
+        bypass=confirm_action["bypass"],
+        runtime_preferences=confirm_action["runtime_preferences"],
+        once=once,
+        network_guard_enforcer_loader=network_guard_enforcer_loader,
+        merge_disabled_session_surfaces=merge_disabled_session_surfaces,
+        launch_with_tracking=launch_with_tracking,
+    )
+    return {"status": "exit"}

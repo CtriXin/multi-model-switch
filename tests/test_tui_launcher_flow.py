@@ -31,6 +31,7 @@ from mms_tui_launcher_flow import (
     handle_tui_guard_settings_action,
     handle_tui_last_action,
     handle_tui_last_used_action,
+    handle_tui_launch_confirmation,
     handle_tui_language_settings_action,
     handle_tui_provider_browse_action,
     handle_tui_provider_mgmt_settings_action,
@@ -3658,3 +3659,107 @@ def test_execute_confirmed_launch_applies_flags_preferences_and_launches() -> No
         ("enforce", runtime, True),
         ("launch", "claude", clean_model_info, runtime, True),
     ]
+
+
+def _launch_confirmation_deps(**overrides):
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    deps = {
+        "once": False,
+        "check_cli_installed": lambda _cli: True,
+        "check_and_offer_install_loader": unused,
+        "select_and_apply_opencode_profile": lambda runtime, *, use_tui: runtime,
+        "runtime_with_launch_preferences": lambda _cfg, runtime, _cli: runtime,
+        "runtime_with_vision_sidecar": lambda _cfg, runtime: runtime,
+        "clean_model_info": lambda model_info: dict(model_info),
+        "get_export_env": lambda _cli, _runtime: {},
+        "network_guard_preview_loader": unused,
+        "confirm_tui": lambda *_args, **_kwargs: ("", False, False, False),
+        "confirm_context_lines": lambda _cli, _runtime: [],
+        "caveman_available_for_cli": lambda _cli: False,
+        "nsr_available_for_cli": lambda _cli: False,
+        "ecc_available_for_claude": lambda: False,
+        "omc_available_for_claude": lambda: False,
+        "model_info_looks_domestic": lambda _model_info: False,
+        "default_reasoning_effort_for_model_info": lambda _model_info: "high",
+        "build_confirm_preview_catalog": lambda *_args, **_kwargs: {},
+        "network_guard_enforcer_loader": unused,
+        "merge_disabled_session_surfaces": lambda old, new: new or old or {},
+        "launch_with_tracking": unused,
+    }
+    deps.update(overrides)
+    return deps
+
+
+def test_handle_tui_launch_confirmation_returns_continue_for_profile_cancel_and_back() -> None:
+    runtime = {"id": "runtime"}
+
+    assert handle_tui_launch_confirmation(
+        {},
+        "opencode",
+        {"model": "gpt-5.4"},
+        runtime,
+        **_launch_confirmation_deps(
+            select_and_apply_opencode_profile=lambda _runtime, *, use_tui: None,
+        ),
+    ) == {"status": "continue"}
+
+    assert handle_tui_launch_confirmation(
+        {},
+        "codex",
+        {"model": "gpt-5.4"},
+        runtime,
+        **_launch_confirmation_deps(
+            confirm_tui=lambda *_args, **_kwargs: "b",
+        ),
+    ) == {"status": "continue"}
+
+
+def test_handle_tui_launch_confirmation_launches_with_prepared_runtime() -> None:
+    calls = []
+    cfg = {"cfg": True}
+    runtime = {"id": "runtime"}
+    preferred_runtime = {"id": "runtime", "preferred": True}
+    model_info = {"model": "gpt-5.4", "extra": True}
+
+    result = handle_tui_launch_confirmation(
+        cfg,
+        "codex",
+        model_info,
+        runtime,
+        **_launch_confirmation_deps(
+            once=True,
+            runtime_with_launch_preferences=lambda cfg_arg, runtime_arg, cli: calls.append(("prefs", cfg_arg, runtime_arg, cli)) or preferred_runtime,
+            clean_model_info=lambda model: calls.append(("clean", model)) or {"model": model["model"]},
+            get_export_env=lambda cli, runtime_arg: calls.append(("env", cli, runtime_arg)) or {"A": "B"},
+            confirm_context_lines=lambda cli, runtime_arg: calls.append(("context", cli, runtime_arg)) or ["ctx"],
+            confirm_tui=lambda cli, clean_model, **kwargs: calls.append(("confirm", cli, clean_model, kwargs)) or ("", True, False, True),
+            launch_with_tracking=lambda cli, clean_model, runtime_arg, *, once: calls.append(("launch", cli, clean_model, dict(runtime_arg), once)),
+        ),
+    )
+
+    assert result == {"status": "exit"}
+    assert calls[0] == ("prefs", cfg, runtime, "codex")
+    assert calls[1] == ("clean", model_info)
+    assert calls[2] == ("env", "codex", preferred_runtime)
+    assert calls[3] == ("context", "codex", preferred_runtime)
+    assert calls[4][0:3] == ("confirm", "codex", {"model": "gpt-5.4"})
+    assert calls[4][3]["env_vars"] == {"A": "B"}
+    assert calls[4][3]["context_lines"] == ["ctx"]
+    assert calls[5] == (
+        "launch",
+        "codex",
+        {"model": "gpt-5.4"},
+        {
+            "id": "runtime",
+            "preferred": True,
+            "bypass": True,
+            "caveman_mode": "enable",
+            "nsr_mode": "disable",
+            "disabled_session_surfaces": {},
+            "thinking_mode": "enable",
+            "reasoning_effort": "high",
+        },
+        True,
+    )

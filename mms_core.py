@@ -5184,37 +5184,20 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             continue
 
         # ── 公共：确认页 + 启动 ──
-        install_result = tui_flow.ensure_cli_installed_for_launch(
+        launch_result = tui_flow.handle_tui_launch_confirmation(
+            current_cfg,
             cli,
+            model_info,
+            runtime_runtime,
+            once=once,
             check_cli_installed=check_cli_installed,
             check_and_offer_install_loader=lambda: __import__(
                 "mms_installer",
                 fromlist=["check_and_offer_install"],
             ).check_and_offer_install,
-        )
-        if install_result["status"] == "exit":
-            return True
-
-        opencode_profile_result = tui_flow.apply_opencode_profile_for_launch(
-            runtime_runtime,
-            cli,
             select_and_apply_opencode_profile=_select_and_apply_opencode_profile,
-        )
-        if opencode_profile_result.get("cancelled"):
-            continue
-        runtime_runtime = opencode_profile_result["runtime"]
-        runtime_runtime = tui_flow.apply_launch_runtime_preferences(
-            current_cfg,
-            runtime_runtime,
-            cli,
             runtime_with_launch_preferences=_runtime_with_launch_preferences,
             runtime_with_vision_sidecar=_runtime_with_vision_sidecar,
-        )
-
-        confirm_inputs = tui_flow.prepare_confirm_prompt_inputs(
-            cli,
-            model_info,
-            runtime_runtime,
             clean_model_info=_clean_model_info,
             get_export_env=get_export_env,
             network_guard_preview_loader=lambda: (
@@ -5223,17 +5206,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     launchers._claude_bypass_requires_proxy,
                 )
             )(__import__("mms_launchers", fromlist=["get_claude_network_guard_preview", "_claude_bypass_requires_proxy"])),
-        )
-        clean_model_info = confirm_inputs["clean_model_info"]
-        env_vars = confirm_inputs["env_vars"]
-        runtime_runtime = confirm_inputs["runtime"]
-
-        confirm_prompt = tui_flow.run_confirm_tui_prompt(
-            cli,
-            clean_model_info,
-            runtime_runtime,
-            env_vars=env_vars,
-            once=once,
             confirm_tui=confirm_tui,
             confirm_context_lines=_confirm_context_lines,
             caveman_available_for_cli=_caveman_available_for_cli,
@@ -5243,29 +5215,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             model_info_looks_domestic=_model_info_looks_domestic,
             default_reasoning_effort_for_model_info=_default_reasoning_effort_for_model_info,
             build_confirm_preview_catalog=_build_confirm_preview_catalog,
-        )
-        if confirm_prompt["status"] == "interrupt":
-            return True
-
-        confirm_result = confirm_prompt["confirm_result"]
-        confirm_action = tui_flow.resolve_confirm_launch_action(
-            confirm_result,
-            has_nsr=confirm_prompt["has_nsr"],
-        )
-        if confirm_action["status"] == "exit":
-            return True
-        if confirm_action["status"] == "back":
-            continue
-
-        bypass = confirm_action["bypass"]
-        runtime_preferences = confirm_action["runtime_preferences"]
-        tui_flow.execute_confirmed_launch(
-            cli,
-            clean_model_info,
-            runtime_runtime,
-            bypass=bypass,
-            runtime_preferences=runtime_preferences,
-            once=once,
             network_guard_enforcer_loader=lambda: (
                 lambda launchers: (
                     launchers._enforce_claude_network_guard_or_exit,
@@ -5275,7 +5224,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             merge_disabled_session_surfaces=_merge_disabled_session_surfaces,
             launch_with_tracking=_launch_with_tracking,
         )
+        if launch_result["status"] == "continue":
+            continue
         return True
+
 
 
 # ── Export command ──────────────────────────────────────
