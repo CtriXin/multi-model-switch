@@ -279,6 +279,7 @@ def legacy_import_report(
             {
                 "provider_id": provider_id,
                 "name": str(provider.get("name") or provider_id),
+                "enabled": bool(provider.get("enabled", True)),
                 "protocols": provider.get("protocols") if isinstance(provider.get("protocols"), list) else [],
                 "role": str(provider.get("role") or "auto"),
                 "priority": provider.get("priority"),
@@ -1319,6 +1320,7 @@ def _db_safe_legacy_report(report: dict[str, Any]) -> dict[str, Any]:
             {
                 "provider_id": item.get("provider_id") or "",
                 "name": item.get("name") or "",
+                "enabled": bool(item.get("enabled", True)),
                 "protocols": _as_string_list(item.get("protocols")),
                 "role": item.get("role") or "auto",
                 "priority": item.get("priority"),
@@ -1396,6 +1398,8 @@ def _insert_legacy_route_candidates(db: sqlite3.Connection, report: dict[str, An
             continue
         provider_id = str(provider.get("provider_id") or "").strip()
         if not provider_id:
+            continue
+        if provider.get("enabled") is False:
             continue
         fields = _import_field_map(provider)
         models = _as_string_list(provider.get("fallback_models")) + _as_string_list(provider.get("extra_models"))

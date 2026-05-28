@@ -1604,6 +1604,54 @@ def test_legacy_import_backfills_route_urls_from_legacy_route_artifact(tmp_path:
         db.close()
 
 
+def test_legacy_import_skips_disabled_providers_for_route_candidates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "enabled-route"
+        enabled = true
+        default_openai_base_url = "https://enabled.example/v1"
+        api_key = "sk-enabled-secret"
+        fallback_models = ["enabled-model"]
+
+        [[providers]]
+        id = "disabled-route"
+        enabled = false
+        default_openai_base_url = "https://disabled.example/v1"
+        api_key = "sk-disabled-secret"
+        fallback_models = ["disabled-model"]
+        """,
+        encoding="utf-8",
+    )
+
+    summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert summary["provider_count"] == 2
+    assert summary["route_candidates"]["provider_route_count"] == 1
+    assert publish_summary["runtime_ready"] is True
+    assert "enabled-model" in router["routes"]
+    assert "disabled-model" not in router["routes"]
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        providers = {
+            row[0]
+            for row in db.execute("SELECT provider_id FROM provider_route").fetchall()
+        }
+        assert providers == {"enabled-route"}
+    finally:
+        db.close()
+
+
 def test_model_source_status_downgrades_stale_runtime_ready_when_route_url_missing(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     generated = config_dir / "generated"
