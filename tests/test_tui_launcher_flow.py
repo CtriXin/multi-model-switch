@@ -10,6 +10,7 @@ from mms_tui_launcher_flow import (
     handle_tui_connect_action,
     handle_tui_last_used_action,
     handle_tui_provider_browse_action,
+    handle_tui_selected_model_action,
     last_used_model_info,
     normalize_confirm_result,
     official_account_profile_context,
@@ -485,6 +486,63 @@ def test_selected_model_launch_context_falls_back_to_best_provider() -> None:
     assert trace_calls == [
         (("runtime resolve", best_provider), {"launch_cli": "claude", "choice": "best provider"})
     ]
+
+
+def test_handle_tui_selected_model_action_applies_priority_and_traces_launch() -> None:
+    calls = []
+    trace_records = []
+    trace_choices = []
+    runtime = {"id": "provider-a"}
+    selected = {"model": "gpt-5.4", "provider_id": "fallback", "priority_changes": [{"id": "provider-a"}]}
+
+    result = handle_tui_selected_model_action(
+        {"cfg": True},
+        "codex",
+        selected,
+        "GPT",
+        {"id": "current"},
+        ["gpt-5.4"],
+        apply_priority_changes=lambda cfg, changes: calls.append(("priority", cfg, changes)) or True,
+        selected_model_launch_context=selected_model_launch_context,
+        resolve_best_provider=lambda *_args, **_kwargs: (runtime, None),
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert result == {
+        "status": "launch",
+        "model_info": {"model": "gpt-5.4"},
+        "runtime": runtime,
+        "families_dirty": True,
+    }
+    assert selected == {"model": "gpt-5.4", "provider_id": "fallback"}
+    assert calls == [("priority", {"cfg": True}, [{"id": "provider-a"}])]
+    assert trace_records == [(('family "GPT"',), {"cli": "codex", "model": "gpt-5.4", "provider": "provider-a"})]
+    assert trace_choices == [(("runtime resolve", runtime), {"launch_cli": "codex", "choice": "best provider"})]
+
+
+def test_handle_tui_selected_model_action_reports_missing_runtime() -> None:
+    trace_records = []
+    result = handle_tui_selected_model_action(
+        {},
+        "claude",
+        {"model": "missing-model"},
+        "Claude",
+        {},
+        [],
+        apply_priority_changes=lambda cfg, changes: False,
+        selected_model_launch_context=selected_model_launch_context,
+        resolve_best_provider=lambda *_args, **_kwargs: (None, None),
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    )
+
+    assert result == {
+        "status": "continue",
+        "message": "没有可用 provider 承载 missing-model",
+        "families_dirty": False,
+    }
+    assert trace_records == []
 
 
 def test_opencode_profile_launch_context_traces_resolved_runtime() -> None:

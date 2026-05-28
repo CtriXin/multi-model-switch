@@ -4884,6 +4884,15 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
     families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
     _families_dirty = False
 
+    def _apply_tui_priority_changes(priority_changes):
+        return tui_flow.apply_tui_priority_changes(
+            current_cfg,
+            priority_changes,
+            apply_runtime_priority_changes=_apply_runtime_priority_changes,
+            save_config=save_config,
+            export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
+        )
+
     while True:
         if _families_dirty:
             families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
@@ -5455,36 +5464,27 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             selected = dict(action_data or {})
             family_name = selected.pop("_family_name", "模型")
 
-            pri_changes = selected.pop("priority_changes", None)
-
-            if tui_flow.apply_tui_priority_changes(
-                current_cfg,
-                pri_changes,
-                apply_runtime_priority_changes=_apply_runtime_priority_changes,
-                save_config=save_config,
-                export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
-            ):
-                _families_dirty = True
-
-
-            model_info, runtime_runtime = tui_flow.selected_model_launch_context(
+            selected_action = tui_flow.handle_tui_selected_model_action(
                 current_cfg,
                 cli,
                 selected,
+                family_name,
                 current_provider,
                 default_models,
+                apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
+                selected_model_launch_context=tui_flow.selected_model_launch_context,
                 resolve_best_provider=_resolve_best_provider,
+                trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if runtime_runtime is None:
-                console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
+            if selected_action["families_dirty"]:
+                _families_dirty = True
+            if selected_action.get("message"):
+                console.print(f"[yellow]{selected_action['message']}[/yellow]")
+            if selected_action["status"] != "launch":
                 continue
-            _trace_record(
-                f'family "{family_name}"',
-                cli=cli,
-                model=selected.get("model"),
-                provider=(runtime_runtime or {}).get("id") if isinstance(runtime_runtime, dict) else selected.get("provider_id"),
-            )
+            model_info = selected_action["model_info"]
+            runtime_runtime = selected_action["runtime"]
             # fall through to confirm
 
         elif action_type == "family":
@@ -5534,37 +5534,27 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 runtime_runtime = last_action["runtime"]
                 cli = last_action["cli"]
             else:
-                # 持久化 priority 变更
-                pri_changes = selected.pop("priority_changes", None)
-
-                if tui_flow.apply_tui_priority_changes(
-                    current_cfg,
-                    pri_changes,
-                    apply_runtime_priority_changes=_apply_runtime_priority_changes,
-                    save_config=save_config,
-                    export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
-                ):
-                    _families_dirty = True
-
-
-                model_info, runtime_runtime = tui_flow.selected_model_launch_context(
+                selected_action = tui_flow.handle_tui_selected_model_action(
                     current_cfg,
                     cli,
                     selected,
+                    family_name,
                     current_provider,
                     default_models,
+                    apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
+                    selected_model_launch_context=tui_flow.selected_model_launch_context,
                     resolve_best_provider=_resolve_best_provider,
+                    trace_record=_trace_record,
                     trace_runtime_choice=_trace_runtime_choice,
                 )
-                if runtime_runtime is None:
-                    console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
+                if selected_action["families_dirty"]:
+                    _families_dirty = True
+                if selected_action.get("message"):
+                    console.print(f"[yellow]{selected_action['message']}[/yellow]")
+                if selected_action["status"] != "launch":
                     continue
-                _trace_record(
-                    f'family "{family_name}"',
-                    cli=cli,
-                    model=selected.get("model"),
-                    provider=(runtime_runtime or {}).get("id") if isinstance(runtime_runtime, dict) else selected.get("provider_id"),
-                )
+                model_info = selected_action["model_info"]
+                runtime_runtime = selected_action["runtime"]
             # fall through to confirm
         elif action_type == "profile" and cli not in {"opencode", "agy"}:
             continue

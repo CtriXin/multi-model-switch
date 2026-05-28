@@ -474,6 +474,52 @@ def selected_model_launch_context(
     return model_info, runtime
 
 
+def handle_tui_selected_model_action(
+    cfg,
+    cli_name,
+    selected,
+    family_name,
+    current_provider,
+    default_models,
+    *,
+    apply_priority_changes,
+    selected_model_launch_context,
+    resolve_best_provider,
+    trace_record,
+    trace_runtime_choice,
+):
+    priority_changes = selected.pop("priority_changes", None)
+    families_dirty = bool(apply_priority_changes(cfg, priority_changes))
+
+    model_info, runtime = selected_model_launch_context(
+        cfg,
+        cli_name,
+        selected,
+        current_provider,
+        default_models,
+        resolve_best_provider=resolve_best_provider,
+        trace_runtime_choice=trace_runtime_choice,
+    )
+    if runtime is None:
+        return {
+            "status": "continue",
+            "message": f"没有可用 provider 承载 {selected['model']}",
+            "families_dirty": families_dirty,
+        }
+    trace_record(
+        f'family "{family_name}"',
+        cli=cli_name,
+        model=selected.get("model"),
+        provider=(runtime or {}).get("id") if isinstance(runtime, dict) else selected.get("provider_id"),
+    )
+    return {
+        "status": "launch",
+        "model_info": model_info,
+        "runtime": runtime,
+        "families_dirty": families_dirty,
+    }
+
+
 def opencode_profile_launch_context(
     cfg,
     current_provider,
