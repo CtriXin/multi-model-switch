@@ -4986,10 +4986,6 @@ def _usage_summary_for_runtime(runtime_kind, runtime_id):
 def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", limit=80):
     failed = str(failed_model or "").strip().lower()
     root = os.path.expanduser(str(config_dir or CONFIG_DIR))
-    paths = [
-        os.path.join(root, "generated", "model-routes.json"),
-        os.path.join(root, "model-routes.json"),
-    ]
     candidates = []
     seen = set()
 
@@ -4998,11 +4994,7 @@ def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="",
             return False
         return bool(str(route.get("openai_base_url") or "").strip() and str(route.get("api_key") or "").strip())
 
-    for path in paths:
-        try:
-            payload = json.loads(open(path, "r", encoding="utf-8").read())
-        except (OSError, json.JSONDecodeError, TypeError):
-            continue
+    def add_from_router_payload(payload):
         routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
         for model_name, entry in routes.items():
             name = str(model_name or "").strip()
@@ -5017,6 +5009,29 @@ def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="",
                 continue
             seen.add(name.lower())
             candidates.append(name)
+
+    manifest_path = os.path.join(root, "generated", "model-registry.latest-approved.json")
+    if os.path.exists(manifest_path):
+        try:
+            import mms_registry
+
+            payload = mms_registry.try_load_latest_approved_payload("router", config_dir=root, include_secret=True)
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and payload:
+            add_from_router_payload(payload)
+        return candidates[: max(1, int(limit or 1))]
+
+    paths = [
+        os.path.join(root, "generated", "model-routes.json"),
+        os.path.join(root, "model-routes.json"),
+    ]
+    for path in paths:
+        try:
+            payload = json.loads(open(path, "r", encoding="utf-8").read())
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        add_from_router_payload(payload)
         if candidates:
             break
     return candidates[: max(1, int(limit or 1))]

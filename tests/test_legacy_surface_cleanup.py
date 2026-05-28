@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -8,6 +9,28 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_latest_approved_router_manifest(config_root: Path, *, router_payload: dict, sha_override: str = "") -> None:
+    generated = config_root / "generated"
+    generated.mkdir(parents=True, exist_ok=True)
+    router_path = generated / "model-routes.json"
+    router_bytes = json.dumps(router_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    router_path.write_bytes(router_bytes)
+    manifest = {
+        "schema": "mms.model_registry.latest_approved.v1",
+        "files": {
+            "router": {
+                "canonical_path": "generated/model-routes.json",
+                "sha256": sha_override or hashlib.sha256(router_bytes).hexdigest(),
+                "sensitivity": "secret",
+            }
+        },
+    }
+    (generated / "model-registry.latest-approved.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 def test_tui_settings_action_descriptors_have_stable_labels() -> None:
@@ -163,6 +186,97 @@ def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path:
     assert "deepseek-v4-flash" in all_candidates
     assert "failed-model" not in route_candidates
     assert "no-openai-route" not in route_candidates
+
+
+def test_rescue_route_candidates_read_verified_latest_approved_router(tmp_path: Path) -> None:
+    import mms_core
+
+    _write_latest_approved_router_manifest(
+        tmp_path,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "verified-fallback": {
+                    "primary": {
+                        "provider_id": "verified",
+                        "openai_base_url": "https://verified.example/v1",
+                        "api_key": "sk-test-verified",
+                        "model_id": "verified-fallback",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    (tmp_path / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "stale-root": {
+                        "primary": {
+                            "provider_id": "stale",
+                            "openai_base_url": "https://stale.example/v1",
+                            "api_key": "sk-test-stale",
+                            "model_id": "stale-root",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = mms_core._rescue_route_fallback_model_candidates(config_dir=tmp_path)
+
+    assert candidates == ["verified-fallback"]
+
+
+def test_rescue_route_candidates_fail_closed_on_invalid_latest_approved_manifest(tmp_path: Path) -> None:
+    import mms_core
+
+    _write_latest_approved_router_manifest(
+        tmp_path,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "untrusted-generated": {
+                    "primary": {
+                        "provider_id": "untrusted",
+                        "openai_base_url": "https://untrusted.example/v1",
+                        "api_key": "sk-test-untrusted",
+                        "model_id": "untrusted-generated",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+        sha_override="0" * 64,
+    )
+    (tmp_path / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "stale-root": {
+                        "primary": {
+                            "provider_id": "stale",
+                            "openai_base_url": "https://stale.example/v1",
+                            "api_key": "sk-test-stale",
+                            "model_id": "stale-root",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = mms_core._rescue_route_fallback_model_candidates(config_dir=tmp_path)
+
+    assert candidates == []
 
 
 def test_rescue_default_fallback_config_roundtrip() -> None:

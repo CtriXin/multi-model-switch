@@ -444,6 +444,7 @@ Current bridge rescue consumer implementation:
 - Rescue hot fallback now checks `<config_root>/generated/model-registry.latest-approved.json` before reading generated/root `model-routes.json`.
 - If the manifest exists, rescue fallback only uses the verified Router payload; invalid or hash-mismatched manifests fail closed for that fallback lookup instead of silently using unverified generated routes.
 - If the manifest is missing, default behavior remains legacy-compatible and reads generated/root route files in the previous order.
+- TUI Rescue routed fallback candidate lists use the same boundary: when a latest-approved manifest exists, candidates are read only from the verified Router payload; invalid manifests return no routed candidates instead of falling back to stale legacy files.
 
 ### Stage 4 - Write Path And Publish
 
