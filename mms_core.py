@@ -610,39 +610,20 @@ def _infer_model_family(model_name):
     支持 provider/model 格式（如 bailian/kimi-2.5）：
     先用完整名匹配，再用 '/' 后面的部分匹配。
     """
-    raw = str(model_name or "").strip().lower()
-    # 拆出 '/' 后面的实际模型名
-    parts = raw.rsplit("/", 1)
-    candidates = [raw] if len(parts) == 1 else [raw, parts[-1]]
-    for entry in MODEL_FAMILIES:
-        for candidate in candidates:
-            if any(kw in candidate for kw in entry["keywords"]):
-                return entry["family"], entry["category"]
-    return "其他", "其他"
+    from mms_command_tools import infer_model_family
+
+    return infer_model_family(model_name, model_families=MODEL_FAMILIES)
 
 
 def _model_info_looks_domestic(model_info):
-    values = []
-    if isinstance(model_info, dict):
-        primary = str(model_info.get("model") or "").strip()
-        if primary:
-            values.append(primary)
-        values.extend(
-            str(value or "").strip()
-            for key, value in model_info.items()
-            if key not in {"subagent", "model"} and str(value or "").strip()
-        )
-    else:
-        values.append(str(model_info or "").strip())
+    from mms_command_tools import model_info_looks_domestic
 
-    for value in values:
-        lower = value.lower()
-        family, _ = _infer_model_family(value)
-        if family in DOMESTIC_MODEL_FAMILIES:
-            return True
-        if any(keyword in lower for keyword in DOMESTIC_MODEL_KEYWORDS):
-            return True
-    return False
+    return model_info_looks_domestic(
+        model_info,
+        infer_model_family=_infer_model_family,
+        domestic_model_families=DOMESTIC_MODEL_FAMILIES,
+        domestic_model_keywords=DOMESTIC_MODEL_KEYWORDS,
+    )
 
 
 _MMS_HIDDEN_MODEL_FAMILIES = set()
@@ -650,38 +631,26 @@ _MMS_HIDDEN_MODELS = set()
 
 
 def _mms_model_visible(model_name):
-    normalized = str(model_name or "").strip()
-    if not normalized:
-        return True
-    if normalized.lower() in _MMS_HIDDEN_MODELS:
-        return False
-    family, _ = _infer_model_family(normalized)
-    return family not in _MMS_HIDDEN_MODEL_FAMILIES
+    from mms_command_tools import mms_model_visible
+
+    return mms_model_visible(
+        model_name,
+        infer_model_family=_infer_model_family,
+        hidden_models=_MMS_HIDDEN_MODELS,
+        hidden_model_families=_MMS_HIDDEN_MODEL_FAMILIES,
+    )
 
 
 def _filter_visible_models(models):
-    return [
-        str(model_name).strip()
-        for model_name in (models or [])
-        if str(model_name or "").strip() and _mms_model_visible(model_name)
-    ]
+    from mms_command_tools import filter_visible_models
+
+    return filter_visible_models(models, mms_model_visible=_mms_model_visible)
 
 
 def _model_info_has_visible_models(model_info):
-    if isinstance(model_info, str):
-        return _mms_model_visible(model_info)
-    if not isinstance(model_info, dict):
-        return True
-    model_like_keys = ("model", "opus", "sonnet", "haiku", "subagent")
-    found_model = False
-    for key in model_like_keys:
-        value = str(model_info.get(key) or "").strip()
-        if not value:
-            continue
-        found_model = True
-        if _mms_model_visible(value):
-            return True
-    return not found_model
+    from mms_command_tools import model_info_has_visible_models
+
+    return model_info_has_visible_models(model_info, mms_model_visible=_mms_model_visible)
 
 
 def _preset_has_visible_model_options(preset):

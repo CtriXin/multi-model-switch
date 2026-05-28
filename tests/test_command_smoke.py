@@ -708,6 +708,51 @@ def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     ]
 
 
+def test_model_family_visibility_helpers_preserve_display_filter_semantics():
+    import mms_command_tools
+
+    model_families = [
+        {"family": "Claude", "keywords": ("claude",), "category": "Claude 系 ⭐"},
+        {"family": "GPT", "keywords": ("gpt-", "codex-"), "category": "GPT 系"},
+        {"family": "Qwen", "keywords": ("qwen",), "category": "国产系"},
+        {"family": "Kimi", "keywords": ("kimi", "k2.6"), "category": "国产系"},
+    ]
+
+    def infer_family(model_id):
+        return mms_command_tools.infer_model_family(model_id, model_families=model_families)
+
+    assert mms_command_tools.infer_model_family("anthropic/claude-opus-4.7", model_families=model_families) == (
+        "Claude",
+        "Claude 系 ⭐",
+    )
+    assert mms_command_tools.infer_model_family("deepseek-v4-pro", model_families=model_families) == ("其他", "其他")
+    assert mms_command_tools.model_info_looks_domestic(
+        {"model": "gpt-5.5", "backup": "qwen3.6-plus"},
+        infer_model_family=infer_family,
+        domestic_model_families={"Qwen", "Kimi"},
+        domestic_model_keywords=("qwen", "kimi"),
+    ) is True
+    assert mms_command_tools.mms_model_visible(
+        "hidden-model",
+        infer_model_family=infer_family,
+        hidden_models={"hidden-model"},
+        hidden_model_families=set(),
+    ) is False
+    visible = mms_command_tools.filter_visible_models(
+        [" claude-sonnet-4.5 ", "", "hidden-model", "qwen3.6-plus"],
+        mms_model_visible=lambda model_id: model_id != "hidden-model",
+    )
+    assert visible == ["claude-sonnet-4.5", "qwen3.6-plus"]
+    assert mms_command_tools.model_info_has_visible_models(
+        {"opus": "hidden-model", "sonnet": "claude-sonnet-4.5"},
+        mms_model_visible=lambda model_id: model_id != "hidden-model",
+    ) is True
+    assert mms_command_tools.model_info_has_visible_models(
+        {"model": "hidden-model"},
+        mms_model_visible=lambda model_id: model_id != "hidden-model",
+    ) is False
+
+
 def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
     import mms_command_tools
 

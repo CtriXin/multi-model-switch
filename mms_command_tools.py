@@ -878,6 +878,76 @@ def parse_csv_values(raw_value, allowed_values=None, *, console=None):
     return values
 
 
+def infer_model_family(model_name, *, model_families):
+    raw = str(model_name or "").strip().lower()
+    parts = raw.rsplit("/", 1)
+    candidates = [raw] if len(parts) == 1 else [raw, parts[-1]]
+    for entry in model_families:
+        for candidate in candidates:
+            if any(kw in candidate for kw in entry["keywords"]):
+                return entry["family"], entry["category"]
+    return "其他", "其他"
+
+
+def model_info_looks_domestic(model_info, *, infer_model_family, domestic_model_families, domestic_model_keywords):
+    values = []
+    if isinstance(model_info, dict):
+        primary = str(model_info.get("model") or "").strip()
+        if primary:
+            values.append(primary)
+        values.extend(
+            str(value or "").strip()
+            for key, value in model_info.items()
+            if key not in {"subagent", "model"} and str(value or "").strip()
+        )
+    else:
+        values.append(str(model_info or "").strip())
+
+    for value in values:
+        lower = value.lower()
+        family, _ = infer_model_family(value)
+        if family in domestic_model_families:
+            return True
+        if any(keyword in lower for keyword in domestic_model_keywords):
+            return True
+    return False
+
+
+def mms_model_visible(model_name, *, infer_model_family, hidden_models, hidden_model_families):
+    normalized = str(model_name or "").strip()
+    if not normalized:
+        return True
+    if normalized.lower() in hidden_models:
+        return False
+    family, _ = infer_model_family(normalized)
+    return family not in hidden_model_families
+
+
+def filter_visible_models(models, *, mms_model_visible):
+    return [
+        str(model_name).strip()
+        for model_name in (models or [])
+        if str(model_name or "").strip() and mms_model_visible(model_name)
+    ]
+
+
+def model_info_has_visible_models(model_info, *, mms_model_visible):
+    if isinstance(model_info, str):
+        return mms_model_visible(model_info)
+    if not isinstance(model_info, dict):
+        return True
+    model_like_keys = ("model", "opus", "sonnet", "haiku", "subagent")
+    found_model = False
+    for key in model_like_keys:
+        value = str(model_info.get(key) or "").strip()
+        if not value:
+            continue
+        found_model = True
+        if mms_model_visible(value):
+            return True
+    return not found_model
+
+
 def vision_sidecar_model_candidates_for_provider(provider_id):
     normalized = str(provider_id or "").strip().lower()
     generic = [
