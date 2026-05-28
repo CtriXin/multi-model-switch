@@ -2754,7 +2754,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     publish_parser.add_argument("--refresh-sources", action="store_true", help="Refresh source snapshots before publishing")
     preview_publish_parser = subparsers.add_parser(
         "publish-preview",
-        help="Publish generated/latest-approved bundle from preview DB legacy import candidates",
+        help="Publish generated/latest-approved bundle from preview DB candidates",
     )
     preview_publish_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
     preview_publish_parser.add_argument("--json", action="store_true", help="Print publish summary as JSON")

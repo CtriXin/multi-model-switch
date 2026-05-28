@@ -416,7 +416,7 @@ Current legacy import candidate implementation:
 
 Current preview publish implementation:
 
-- `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB legacy import route candidate.
+- `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB preview route candidate. It supports both legacy import candidates and v2 save candidates.
 - `mmf preview verify [--json]` verifies manifest hashes for the active preview root; `mmf preview status [--json]` is a wrapper for Model Source status.
 - `mmf preview doctor [--json]` is the single read-only "what next?" command for preview setup. It checks preview root mode, registry DB, legacy import candidates, latest-approved bundle verification, runtime readiness, and then prints one next action.
 - `mmf preview doctor --strict-exit` exits non-zero unless the preview root is runtime-ready. This avoids treating "printed something and did not crash" as success.
@@ -451,6 +451,7 @@ Current Stage 4a implementation:
 - The command initializes the selected preview root if needed, backs up an existing preview DB before writing, then writes candidate `route`, `policy`, and `profile` revisions into SQLite.
 - Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB and `secret_backend`, generated bundle, and legacy compatibility files are not written in this slice.
 - If candidate write fails after backup, the preview DB is restored from the pre-write backup.
+- `publish-preview` now prefers the latest preview route candidate, including `registry-v2-save-candidate`, and reuses matching DB candidate policy/profile revisions when generating the latest-approved bundle.
 - WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after publish/verify rollback is wired.
 
 ### Stage 5 - Router Export From DB

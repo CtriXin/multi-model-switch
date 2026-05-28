@@ -1250,7 +1250,13 @@ def _metadata_dict(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _latest_legacy_import_route_revision(db: sqlite3.Connection) -> sqlite3.Row:
+_PREVIEW_ROUTE_SOURCE_LABELS = {
+    "legacy-import": "registry-preview-legacy-import",
+    "registry-v2-save-candidate": "registry-preview-v2-save-candidate",
+}
+
+
+def _latest_preview_route_revision(db: sqlite3.Connection) -> tuple[sqlite3.Row, str]:
     rows = db.execute(
         """
         SELECT revision_id, status, metadata_json
@@ -1261,9 +1267,37 @@ def _latest_legacy_import_route_revision(db: sqlite3.Connection) -> sqlite3.Row:
     ).fetchall()
     for row in rows:
         metadata = _metadata_dict(row["metadata_json"])
-        if metadata.get("source") == "legacy-import":
-            return row
-    raise RegistryValidationError("no legacy import route candidate found; run legacy-import --apply first")
+        source = str(metadata.get("source") or "")
+        if source in _PREVIEW_ROUTE_SOURCE_LABELS:
+            return row, source
+    raise RegistryValidationError("no preview route candidate found; run legacy-import --apply or v2-save-candidate --apply first")
+
+
+def _latest_legacy_import_route_revision(db: sqlite3.Connection) -> sqlite3.Row:
+    row, source = _latest_preview_route_revision(db)
+    if source == "legacy-import":
+        return row
+    raise RegistryValidationError("latest preview route candidate is not a legacy import candidate")
+
+
+def _latest_revision_payload_for_source(db: sqlite3.Connection, revision_class: str, source: str) -> tuple[str, dict[str, Any]]:
+    rows = db.execute(
+        """
+        SELECT revision_id, metadata_json
+        FROM registry_revision
+        WHERE revision_class = ? AND status IN ('candidate', 'approved')
+        ORDER BY created_at DESC, revision_id DESC
+        """,
+        (revision_class,),
+    ).fetchall()
+    for row in rows:
+        metadata = _metadata_dict(row["metadata_json"])
+        if str(metadata.get("source") or "") != source:
+            continue
+        payload = metadata.get("payload") if isinstance(metadata.get("payload"), dict) else {}
+        if payload:
+            return str(row["revision_id"] or ""), payload
+    return "", {}
 
 
 def _legacy_route_role_rank(value: Any) -> int:
@@ -1299,6 +1333,9 @@ def _build_preview_bundle_payloads_from_route_revision(
     route_revision_id: str,
     generated_at: str,
     secret_values: Mapping[str, str] | None = None,
+    source_label: str = "registry-preview-legacy-import",
+    policy_payload: Mapping[str, Any] | None = None,
+    profile_payload: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = db.execute(
         """
@@ -1365,7 +1402,7 @@ def _build_preview_bundle_payloads_from_route_revision(
     router_payload = {
         "version": 1,
         "generated_at": generated_at,
-        "source": "registry-preview-legacy-import",
+        "source": source_label,
         "route_revision": route_revision_id,
         "runtime_ready": runtime_ready,
         "runtime_ready_reason": "" if runtime_ready else "missing plaintext secrets in preview secret backend",
@@ -1374,30 +1411,45 @@ def _build_preview_bundle_payloads_from_route_revision(
     lineup_payload = {
         "version": 1,
         "generated_at": generated_at,
-        "source": "registry-preview-legacy-import",
+        "source": source_label,
         "source_routes_hash": sha256_hex(_canonical_json_bytes({"version": 1, "routes": routes})),
         "routes": lineup_routes,
     }
-    policy_payload = {
-        "version": 1,
-        "generated_at": generated_at,
-        "source": "registry-preview-legacy-import",
-        "models": {model: {"visible": True, "source": "registry-preview-legacy-import"} for model in sorted(routes)},
-    }
-    profile_payload = {
-        "schema_version": 1,
-        "generated_at": generated_at,
-        "source": "registry-preview-legacy-import",
-        "profiles": profiles,
-    }
+    if policy_payload:
+        effective_policy_payload = dict(policy_payload)
+        effective_policy_payload.setdefault("version", 1)
+        effective_policy_payload["generated_at"] = generated_at
+        effective_policy_payload["source"] = source_label
+    else:
+        effective_policy_payload = {
+            "version": 1,
+            "generated_at": generated_at,
+            "source": source_label,
+            "models": {model: {"visible": True, "source": source_label} for model in sorted(routes)},
+        }
+    if profile_payload:
+        raw_profiles = profile_payload.get("profiles") if isinstance(profile_payload.get("profiles"), Mapping) else {}
+        effective_profile_payload = {
+            "schema_version": 1,
+            "generated_at": generated_at,
+            "source": source_label,
+            "profiles": dict(raw_profiles),
+        }
+    else:
+        effective_profile_payload = {
+            "schema_version": 1,
+            "generated_at": generated_at,
+            "source": source_label,
+            "profiles": profiles,
+        }
     validate_non_secret_payload(lineup_payload, context="preview_lineup")
-    validate_non_secret_payload(policy_payload, context="preview_policy")
-    validate_non_secret_payload(profile_payload, context="preview_profile")
+    validate_non_secret_payload(effective_policy_payload, context="preview_policy")
+    validate_non_secret_payload(effective_profile_payload, context="preview_profile")
     return {
         "router": router_payload,
         "lineup": lineup_payload,
-        "policy": policy_payload,
-        "profile": profile_payload,
+        "policy": effective_policy_payload,
+        "profile": effective_profile_payload,
         "route_count": len(routes),
         "provider_route_count": len(rows),
         "runtime_ready": runtime_ready,
@@ -1432,24 +1484,30 @@ def publish_latest_approved_bundle_from_legacy_candidates(
     generated_at: str | None = None,
     actor: str = "agent",
 ) -> dict[str, Any]:
-    """Publish a preview latest-approved bundle from DB legacy import candidates.
+    """Publish a preview latest-approved bundle from DB preview candidates.
 
     This is an explicit preview bridge toward DB truth. It does not read root
-    legacy artifacts and it does not resolve plaintext secrets; generated
-    router entries carry `secret_ref` and `runtime_ready=false`.
+    legacy artifacts and it resolves plaintext secrets only from the selected
+    preview secret backend; otherwise router entries carry `secret_ref`.
     """
     config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     generated_dir = config_root / "generated"
     generated = generated_at or utc_now()
     db = open_registry(db_path or default_registry_db_path(config_root))
     try:
-        route_revision_row = _latest_legacy_import_route_revision(db)
+        route_revision_row, preview_source = _latest_preview_route_revision(db)
+        source_label = _PREVIEW_ROUTE_SOURCE_LABELS.get(preview_source, "registry-preview")
         route_revision = str(route_revision_row["revision_id"] or "")
+        policy_revision_override, policy_payload_override = _latest_revision_payload_for_source(db, "policy", preview_source)
+        profile_revision_override, profile_payload_override = _latest_revision_payload_for_source(db, "profile", preview_source)
         payloads = _build_preview_bundle_payloads_from_route_revision(
             db,
             route_revision_id=route_revision,
             generated_at=generated,
             secret_values=_load_preview_secret_values(config_root),
+            source_label=source_label,
+            policy_payload=policy_payload_override,
+            profile_payload=profile_payload_override,
         )
         output_files = {
             "router": generated_dir / "model-routes.json",
@@ -1464,7 +1522,8 @@ def publish_latest_approved_bundle_from_legacy_candidates(
         capability_revision_seed = sha256_hex(
             _canonical_json_bytes(
                 {
-                    "source": "registry-preview-legacy-import",
+                    "source": source_label,
+                    "preview_source": preview_source,
                     "route_revision": route_revision,
                     "route_count": payloads["route_count"],
                     "generated_at": generated,
@@ -1480,12 +1539,13 @@ def publish_latest_approved_bundle_from_legacy_candidates(
         write_json_atomic(output_files["capabilities"], capabilities_payload)
 
         file_hashes = {name: sha256_hex(path.read_bytes()) for name, path in output_files.items()}
-        policy_revision = _revision_slug("policy", file_hashes["policy"], generated_at=generated)
-        profile_revision = _revision_slug("profile", file_hashes["profile"], generated_at=generated)
+        policy_revision = policy_revision_override or _revision_slug("policy", file_hashes["policy"], generated_at=generated)
+        profile_revision = profile_revision_override or _revision_slug("profile", file_hashes["profile"], generated_at=generated)
         bundle_hash = sha256_hex(
             _canonical_json_bytes(
                 {
-                    "source": "registry-preview-legacy-import",
+                    "source": source_label,
+                    "preview_source": preview_source,
                     "capability_revision": capability_revision,
                     "route_revision": route_revision,
                     "policy_revision": policy_revision,
@@ -1496,18 +1556,19 @@ def publish_latest_approved_bundle_from_legacy_candidates(
         )
         bundle_revision = _revision_slug("bundle", bundle_hash, generated_at=generated)
 
-        for revision_id, revision_class, revision_hash in (
-            (capability_revision, "capability", file_hashes["capabilities"]),
-            (policy_revision, "policy", file_hashes["policy"]),
-            (profile_revision, "profile", file_hashes["profile"]),
-            (bundle_revision, "bundle", bundle_hash),
-        ):
+        revisions_to_create = [(capability_revision, "capability", file_hashes["capabilities"])]
+        if not policy_revision_override:
+            revisions_to_create.append((policy_revision, "policy", file_hashes["policy"]))
+        if not profile_revision_override:
+            revisions_to_create.append((profile_revision, "profile", file_hashes["profile"]))
+        revisions_to_create.append((bundle_revision, "bundle", bundle_hash))
+        for revision_id, revision_class, revision_hash in revisions_to_create:
             _create_revision_for_publish(
                 db,
                 revision_id,
                 revision_class,
                 revision_hash=revision_hash,
-                metadata={"source": "registry-preview-legacy-import", "publish_generated_at": generated},
+                metadata={"source": source_label, "preview_source": preview_source, "publish_generated_at": generated},
             )
 
         for revision_id, revision_class in (
@@ -1521,7 +1582,7 @@ def publish_latest_approved_bundle_from_legacy_candidates(
                 bundle_revision,
                 revision_id,
                 revision_class,
-                metadata={"source": "registry-preview-legacy-import", "publish_generated_at": generated},
+                metadata={"source": source_label, "preview_source": preview_source, "publish_generated_at": generated},
             )
 
         for revision_id in (capability_revision, route_revision, policy_revision, profile_revision, bundle_revision):
@@ -1586,6 +1647,7 @@ def publish_latest_approved_bundle_from_legacy_candidates(
                         {
                             "manifest_path": str(manifest_path),
                             "route_revision": route_revision,
+                            "preview_source": preview_source,
                             "runtime_ready": False,
                         }
                     ),
@@ -1593,7 +1655,8 @@ def publish_latest_approved_bundle_from_legacy_candidates(
             )
         return {
             "schema": "mms.preview_bundle_publish.v1",
-            "source": "registry-preview-legacy-import",
+            "source": source_label,
+            "preview_source": preview_source,
             "manifest": manifest,
             "manifest_path": str(manifest_path),
             "generated_dir": str(generated_dir),

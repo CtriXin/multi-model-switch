@@ -953,6 +953,60 @@ def test_mmf_registry_v2_save_candidate_cli_accepts_webui_plan_json(tmp_path: Pa
     assert (config_dir / "registry" / "model-registry.sqlite").exists()
 
 
+def test_publish_preview_bundle_prefers_latest_registry_v2_save_candidate(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    policy = {
+        "version": 1,
+        "models": {
+            "shared-model": {"visible": True, "favorite": True},
+            "manual-model": {"visible": False},
+        },
+    }
+    candidate = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        credential_updates=[{"provider_id": "primary-local", "api_key": "***"}],
+        apply=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    verify_summary = mms_registry_cli.verify_approved_bundle(config_dir=config_dir)
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    policy_payload = json.loads((config_dir / "generated" / "model-policy.effective.json").read_text(encoding="utf-8"))
+    profile_payload = json.loads((config_dir / "generated" / "provider-profiles.generated.json").read_text(encoding="utf-8"))
+    generated_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            config_dir / "generated" / "model-routes.json",
+            config_dir / "generated" / "model-policy.effective.json",
+            config_dir / "generated" / "provider-profiles.generated.json",
+            config_dir / "generated" / "model-registry.latest-approved.json",
+        )
+    )
+
+    assert publish_summary["schema"] == "mms.preview_bundle_publish.v1"
+    assert publish_summary["source"] == "registry-preview-v2-save-candidate"
+    assert publish_summary["preview_source"] == "registry-v2-save-candidate"
+    assert publish_summary["route_revision"] == candidate["route_candidates"]["revision_id"]
+    assert publish_summary["policy_revision"] == candidate["policy_candidate"]["revision_id"]
+    assert publish_summary["profile_revision"] == candidate["profile_candidate"]["revision_id"]
+    assert publish_summary["provider_route_count"] == 2
+    assert publish_summary["runtime_ready"] is False
+    assert verify_summary["verified"] is True
+    assert status["generated_bundle"]["verified"] is True
+    assert router["source"] == "registry-preview-v2-save-candidate"
+    assert router["routes"]["shared-model"]["primary"]["secret_ref"] == "pending-webui:primary_local:api_key"
+    assert router["routes"]["shared-model"]["primary"]["api_key"] == ""
+    assert policy_payload["source"] == "registry-preview-v2-save-candidate"
+    assert policy_payload["models"]["manual-model"]["visible"] is False
+    assert profile_payload["source"] == "registry-preview-v2-save-candidate"
+    assert profile_payload["profiles"]["primary-local"]["models_endpoint"] == "/models"
+    assert "sk-primary-local-secret" not in generated_text
+
+
 def test_mmf_preview_init_creates_preview_layout_without_stable_fallback(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     real_home = tmp_path / "home"
@@ -1423,7 +1477,7 @@ def test_mmf_preview_publish_wrapper_fails_closed_without_candidates(tmp_path: P
 
     assert result.returncode == 2
     assert payload["ok"] is False
-    assert "legacy import route candidate" in payload["error"]
+    assert "preview route candidate" in payload["error"]
     assert not (config_dir / "generated" / "model-registry.latest-approved.json").exists()
 
 
