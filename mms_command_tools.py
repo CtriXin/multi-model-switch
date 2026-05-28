@@ -236,6 +236,40 @@ def display_model_probe_details(probe, *, panel_cls, console):
     console.print(panel_cls("\n".join(lines), title="校验详情", border_style="yellow"))
 
 
+def select_provider_interactive(cfg, current_provider_id, *, resolve_provider_context, table_cls, prompt_cls, console):
+    providers = [
+        provider for provider in cfg.get("providers", [])
+        if provider.get("enabled", True) and provider.get("id") != current_provider_id
+    ]
+    if not providers:
+        console.print("[yellow]没有可切换的其他 provider[/yellow]")
+        return None
+
+    table = table_cls(title="可切换的 Providers")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("ID", style="green")
+    table.add_column("名称", style="yellow")
+    table.add_column("协议", style="magenta")
+    for index, item in enumerate(providers, 1):
+        table.add_row(
+            str(index),
+            item.get("id", ""),
+            item.get("name", ""),
+            ", ".join(item.get("protocols", [])),
+        )
+    console.print(table)
+
+    while True:
+        choice = prompt_cls.ask("切换到哪个 provider？输入编号，留空取消", default="")
+        if not choice:
+            return None
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(providers):
+                return resolve_provider_context(cfg, providers[idx - 1]["id"])
+        console.print(f"[red]请输入 1-{len(providers)} 的编号，或直接回车取消[/red]")
+
+
 def pick_recovery_actions(findings, actions, *, use_tui=False, select_actions_tui=None, panel_cls, prompt_cls, console):
     if use_tui and select_actions_tui is not None:
         selected = select_actions_tui(findings, actions, title="处理发现")

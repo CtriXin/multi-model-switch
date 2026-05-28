@@ -485,6 +485,51 @@ def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     assert panel.kwargs == {"title": "校验详情", "border_style": "yellow"}
 
 
+def test_select_provider_interactive_preserves_prompt_flow():
+    import mms_command_tools
+
+    cfg = {
+        "providers": [
+            {"id": "relay", "name": "Relay", "protocols": ["openai"]},
+            {"id": "disabled", "name": "Disabled", "enabled": False},
+            {"id": "backup", "name": "Backup", "protocols": ["anthropic", "openai"]},
+        ]
+    }
+
+    class FakePrompt:
+        values = iter(["9", "1"])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    console = _CollectingConsole()
+    selected = mms_command_tools.select_provider_interactive(
+        cfg,
+        "relay",
+        resolve_provider_context=lambda received_cfg, provider_id: {"resolved": provider_id, "cfg": received_cfg},
+        table_cls=_FakeTable,
+        prompt_cls=FakePrompt,
+        console=console,
+    )
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "可切换的 Providers"}
+    assert table.rows == [(("1", "backup", "Backup", "anthropic, openai"), {})]
+    assert selected == {"resolved": "backup", "cfg": cfg}
+    assert any("请输入 1-1 的编号" in str(item) for item in console.items)
+
+    empty_console = _CollectingConsole()
+    assert mms_command_tools.select_provider_interactive(
+        {"providers": [{"id": "relay"}]},
+        "relay",
+        resolve_provider_context=lambda received_cfg, provider_id: None,
+        table_cls=_FakeTable,
+        prompt_cls=FakePrompt,
+        console=empty_console,
+    ) is None
+    assert empty_console.items == ["[yellow]没有可切换的其他 provider[/yellow]"]
+
+
 def test_pick_recovery_actions_preserves_tui_and_prompt_fallback():
     import mms_command_tools
 

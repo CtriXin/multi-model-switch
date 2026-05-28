@@ -5150,37 +5150,16 @@ def _print_model_probe_details(probe):
 
 
 def _select_provider_interactive(cfg, current_provider_id):
-    providers = [
-        provider for provider in cfg.get("providers", [])
-        if provider.get("enabled", True) and provider.get("id") != current_provider_id
-    ]
-    if not providers:
-        console.print("[yellow]没有可切换的其他 provider[/yellow]")
-        return None
+    from mms_command_tools import select_provider_interactive
 
-    table = Table(title="可切换的 Providers")
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("ID", style="green")
-    table.add_column("名称", style="yellow")
-    table.add_column("协议", style="magenta")
-    for index, item in enumerate(providers, 1):
-        table.add_row(
-            str(index),
-            item.get("id", ""),
-            item.get("name", ""),
-            ", ".join(item.get("protocols", [])),
-        )
-    console.print(table)
-
-    while True:
-        choice = Prompt.ask("切换到哪个 provider？输入编号，留空取消", default="")
-        if not choice:
-            return None
-        if choice.isdigit():
-            idx = int(choice)
-            if 1 <= idx <= len(providers):
-                return resolve_provider_context(cfg, providers[idx - 1]["id"])
-        console.print(f"[red]请输入 1-{len(providers)} 的编号，或直接回车取消[/red]")
+    return select_provider_interactive(
+        cfg,
+        current_provider_id,
+        resolve_provider_context=resolve_provider_context,
+        table_cls=Table,
+        prompt_cls=Prompt,
+        console=console,
+    )
 
 
 def _pick_recovery_actions(findings, actions):
