@@ -439,6 +439,7 @@ Current watchdog consumer implementation:
 - If a manifest exists but is invalid or hash-mismatched, watchdog reports `stale_or_invalid_bundle` and does not silently fall back to legacy route files.
 - If the manifest is missing, explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle and fail closed by default; no-explicit-root stable watchdog behavior remains legacy-compatible.
 - `--require-bundle` still forces fail-closed behavior, and `MMS_WATCHDOG_REQUIRE_BUNDLE=0` remains an explicit diagnostic override for an explicit root.
+- `--dry-run` is read-only for watchdog persistence: it prints JSON and skips `health-watchdog/latest.json`, `health-watchdog/state.json`, and `logs/health-watchdog.log` writes.
 - Watchdog remains read-only with respect to DB and does not run route export or publish.
 
 Current bridge rescue consumer implementation:

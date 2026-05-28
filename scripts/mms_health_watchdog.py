@@ -779,7 +779,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--env-file", default="")
     parser.add_argument("--timeout-sec", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--remind-sec", type=int, default=DEFAULT_REMIND_SECONDS)
-    parser.add_argument("--dry-run", action="store_true", help="Do not send Feishu notification or update state")
+    parser.add_argument("--dry-run", action="store_true", help="Do not send Feishu notification or write report/state files")
     parser.add_argument("--notify-ok", action="store_true", help="Notify when recovering to OK")
     parser.add_argument("--notify-always", action="store_true", help="Send a notification regardless of status/dedup")
     parser.add_argument("--print-json", action="store_true", help="Print full report JSON")
@@ -800,8 +800,6 @@ def main(argv: list[str]) -> int:
     latest_path = watchdog_dir / LATEST_FILE_NAME
     state_path = watchdog_dir / STATE_FILE_NAME
     log_path = config_dir / "logs" / LOG_FILE_NAME
-    write_json_atomic(latest_path, report)
-    append_log(log_path, {"ts": iso_now(), "status": report.get("status"), "summary": report.get("summary"), "failures": report.get("failures")})
 
     state = read_json(state_path)
     notify, reason = should_notify(report, state, max(60, int(args.remind_sec)), bool(args.notify_ok))
@@ -821,6 +819,8 @@ def main(argv: list[str]) -> int:
         notification["detail"] = "dry_run"
 
     if not args.dry_run:
+        write_json_atomic(latest_path, report)
+        append_log(log_path, {"ts": iso_now(), "status": report.get("status"), "summary": report.get("summary"), "failures": report.get("failures")})
         update_state(state_path, report, notification)
 
     if args.print_json:

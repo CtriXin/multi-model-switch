@@ -183,3 +183,44 @@ def test_watchdog_default_config_dir_honors_mms_config_dir(monkeypatch, tmp_path
 
     assert config_dir == tmp_path
     assert watchdog.resolve_require_bundle(args, config_dir) is True
+
+
+def test_watchdog_dry_run_does_not_persist_report_log_or_state(tmp_path: Path, capsys) -> None:
+    watchdog = _load_watchdog()
+
+    exit_code = watchdog.main([
+        "--config-dir",
+        str(tmp_path),
+        "--require-bundle",
+        "--dry-run",
+        "--print-json",
+        "--timeout-sec",
+        "1",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["notification"]["detail"] == "dry_run"
+    assert not (tmp_path / "health-watchdog" / "latest.json").exists()
+    assert not (tmp_path / "health-watchdog" / "state.json").exists()
+    assert not (tmp_path / "logs" / "health-watchdog.log").exists()
+
+
+def test_watchdog_non_dry_persists_report_log_and_state(tmp_path: Path, capsys) -> None:
+    watchdog = _load_watchdog()
+
+    exit_code = watchdog.main([
+        "--config-dir",
+        str(tmp_path),
+        "--require-bundle",
+        "--print-json",
+        "--timeout-sec",
+        "1",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["notification"]["detail"] == "MMS_FEISHU_WEBHOOK_URL is not set"
+    assert (tmp_path / "health-watchdog" / "latest.json").exists()
+    assert (tmp_path / "health-watchdog" / "state.json").exists()
+    assert (tmp_path / "logs" / "health-watchdog.log").exists()
