@@ -118,3 +118,91 @@ def test_temporarily_unblock_case_only_lifts_target_pair(monkeypatch):
         assert smoke_pi_matrix.mms_launchers._pi_model_block_reason(runtime, "gpt-5.4") == "still blocked"
 
     assert smoke_pi_matrix.mms_launchers._pi_model_block_reason(runtime, "gpt-5.5") == "token invalidated"
+
+
+def test_run_direct_check_uses_claude_for_anthropic_cases(monkeypatch):
+    smoke_pi_matrix = _load_smoke_pi_matrix()
+
+    monkeypatch.setattr(
+        smoke_pi_matrix.mms_launchers,
+        "_pi_pick_protocol",
+        lambda runtime, model_name: ({"protocol": "anthropic_messages"}, {}),
+    )
+
+    captured = {}
+
+    class _Completed:
+        returncode = 2
+        stdout = (
+            '{"results":[{"provider":"relay-a","cli":"claude","ok":false,'
+            '"route":"direct","model":"claude-sonnet-4-6","status":"500",'
+            '"detail":"resolved=https://relay.example.com method=file_cached",'
+            '"preview":null}]}'
+        )
+        stderr = ""
+
+    def fake_run(cmd, capture_output, text, timeout):
+        captured["cmd"] = list(cmd)
+        captured["timeout"] = timeout
+        return _Completed()
+
+    monkeypatch.setattr(smoke_pi_matrix.subprocess, "run", fake_run)
+
+    result = smoke_pi_matrix.run_direct_check(
+        "relay-a",
+        {"id": "relay-a"},
+        "claude-sonnet-4-6",
+        120,
+    )
+
+    assert captured["cmd"][0].endswith("/mms")
+    assert captured["cmd"][1:] == [
+        "test",
+        "--provider",
+        "relay-a",
+        "--cli",
+        "claude",
+        "--model",
+        "claude-sonnet-4-6",
+        "--timeout",
+        "120",
+        "--json",
+    ]
+    assert captured["timeout"] == 120
+    assert result == {
+        "ok": False,
+        "cli": "claude",
+        "route": "direct",
+        "status": "500",
+        "detail": "resolved=https://relay.example.com method=file_cached",
+        "preview": [],
+        "rc": 2,
+    }
+
+
+def test_maybe_attach_direct_check_skips_pass(monkeypatch):
+    smoke_pi_matrix = _load_smoke_pi_matrix()
+    monkeypatch.setattr(
+        smoke_pi_matrix,
+        "run_direct_check",
+        lambda *args, **kwargs: {"status": "should-not-run"},
+    )
+
+    result = smoke_pi_matrix.maybe_attach_direct_check(
+        {
+            "provider": "relay-a",
+            "model": "gpt-5.4",
+            "status": "pass",
+        },
+        provider_id="relay-a",
+        runtime={"id": "relay-a"},
+        model_name="gpt-5.4",
+        timeout_sec=90,
+        enabled=True,
+    )
+
+    assert result == {
+        "provider": "relay-a",
+        "model": "gpt-5.4",
+        "status": "pass",
+    }

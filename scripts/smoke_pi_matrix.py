@@ -98,6 +98,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run only currently Pi-blocked provider/model pairs. Implies --include-blocked.",
     )
+    parser.add_argument(
+        "--verify-direct",
+        action="store_true",
+        help="For non-pass Pi cases, also run `mms test` on the same provider/model to separate Pi-only failures from route/upstream failures.",
+    )
     return parser.parse_args()
 
 
@@ -137,6 +142,7 @@ def write_report(
     attempts: int,
     include_blocked: bool,
     blocked_only: bool,
+    verify_direct: bool,
 ) -> None:
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -144,6 +150,7 @@ def write_report(
         "attempts_per_case": attempts,
         "include_blocked": include_blocked,
         "blocked_only": blocked_only,
+        "verify_direct": verify_direct,
         "summary": summarize_results(results),
         "results": results,
     }
@@ -436,6 +443,106 @@ def run_case(
     }
 
 
+def _direct_cli_for_case(runtime: dict, model_name: str) -> str:
+    variant, _caps = mms_launchers._pi_pick_protocol(runtime, model_name)
+    if str(variant.get("protocol") or "").strip() == "anthropic_messages":
+        return "claude"
+    return "codex"
+
+
+def run_direct_check(provider_id: str, runtime: dict, model_name: str, timeout_sec: int) -> dict:
+    try:
+        cli = _direct_cli_for_case(runtime, model_name)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "cli": "",
+            "route": "",
+            "status": "direct_pick_fail",
+            "detail": str(exc),
+            "preview": [],
+            "rc": None,
+        }
+
+    cmd = [
+        str(ROOT / "mms"),
+        "test",
+        "--provider",
+        provider_id,
+        "--cli",
+        cli,
+        "--model",
+        model_name,
+        "--timeout",
+        str(timeout_sec),
+        "--json",
+    ]
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "cli": cli,
+            "route": "",
+            "status": "timeout",
+            "detail": f"Timed out after {timeout_sec}s",
+            "preview": [],
+            "rc": None,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "cli": cli,
+            "route": "",
+            "status": "direct_exec_fail",
+            "detail": str(exc),
+            "preview": [],
+            "rc": None,
+        }
+
+    payload = {}
+    raw_output = (completed.stdout or "").strip()
+    if raw_output:
+        try:
+            payload = json.loads(raw_output)
+        except json.JSONDecodeError:
+            payload = {}
+    results = payload.get("results") if isinstance(payload, dict) else None
+    row = results[0] if isinstance(results, list) and results else {}
+    return {
+        "ok": bool(row.get("ok")),
+        "cli": str(row.get("cli") or cli).strip(),
+        "route": str(row.get("route") or "").strip(),
+        "status": str(row.get("status") or completed.returncode).strip(),
+        "detail": str(row.get("detail") or "").strip(),
+        "preview": list(row.get("preview") or []),
+        "rc": completed.returncode,
+    }
+
+
+def maybe_attach_direct_check(
+    result: dict,
+    *,
+    provider_id: str,
+    runtime: dict,
+    model_name: str,
+    timeout_sec: int,
+    enabled: bool,
+) -> dict:
+    if not enabled:
+        return result
+    if str(result.get("status") or "").strip() == "pass":
+        return result
+    updated = dict(result)
+    updated["direct_check"] = run_direct_check(provider_id, runtime, model_name, timeout_sec)
+    return updated
+
+
 def aggregate_attempts(attempt_results: list[dict]) -> dict:
     if not attempt_results:
         return {}
@@ -533,6 +640,14 @@ def main() -> int:
             result["attempt"] = attempt_index
             attempt_results.append(result)
         result = aggregate_attempts(attempt_results)
+        result = maybe_attach_direct_check(
+            result,
+            provider_id=provider_id,
+            runtime=runtime,
+            model_name=model_name,
+            timeout_sec=args.timeout,
+            enabled=bool(args.verify_direct),
+        )
         result["surface"] = row["surface"]
         result["blocked_reason"] = row["blocked_reason"]
         results.append(result)
@@ -545,6 +660,7 @@ def main() -> int:
             attempts=args.attempts,
             include_blocked=include_blocked,
             blocked_only=blocked_only,
+            verify_direct=bool(args.verify_direct),
         )
         attempt_note = ""
         if result.get("attempt_count", 1) > 1:
@@ -560,6 +676,16 @@ def main() -> int:
             print(f"  error: {result['errorMessage']}")
         elif result.get("content") and result["status"] != "pass":
             print(f"  content: {result['content']}")
+        direct_check = result.get("direct_check") if isinstance(result.get("direct_check"), dict) else {}
+        if direct_check:
+            print(
+                "  direct: "
+                f"{direct_check.get('cli') or '<no-cli>'} "
+                f"{direct_check.get('status') or '<no-status>'} "
+                f"{direct_check.get('route') or '<no-route>'}"
+            )
+            if direct_check.get("detail"):
+                print(f"    detail: {direct_check['detail']}")
 
     summary = summarize_results(results)
     print(json.dumps({"output": str(output_path), "summary": summary, "executed": executed}, ensure_ascii=False))
