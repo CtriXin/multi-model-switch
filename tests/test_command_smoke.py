@@ -486,6 +486,65 @@ def test_backup_config_tree_preserves_real_home_backup_layout(tmp_path):
     assert calls == []
 
 
+def test_refresh_routes_export_for_hive_helper_preserves_load_override_export_and_errors():
+    import mms_command_tools
+
+    calls = []
+    messages = []
+
+    class FakeConsole:
+        def print(self, message):
+            messages.append(message)
+
+    assert mms_command_tools.refresh_routes_export_for_hive(
+        None,
+        force=True,
+        quiet=False,
+        startup_safe=True,
+        load_config=lambda: {"provider": {"default": "demo"}, "providers": []},
+        apply_local_overrides=lambda cfg: {**cfg, "local_override_applied": True},
+        export_model_routes=lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)),
+        console=FakeConsole(),
+    ) is True
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, True)
+    ]
+
+    assert mms_command_tools.refresh_routes_export_for_hive(
+        {"direct": True},
+        force=False,
+        quiet=True,
+        startup_safe=False,
+        load_config=lambda: None,
+        apply_local_overrides=lambda cfg: calls.append(("unexpected_apply", cfg)),
+        export_model_routes=lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)),
+        console=FakeConsole(),
+    ) is True
+    assert calls[-1] == ({"direct": True}, False, False)
+
+    assert mms_command_tools.refresh_routes_export_for_hive(
+        None,
+        load_config=lambda: None,
+        apply_local_overrides=lambda cfg: calls.append(("unexpected_apply", cfg)),
+        export_model_routes=lambda cfg, **kwargs: calls.append(("unexpected_export", cfg, kwargs)),
+        console=FakeConsole(),
+    ) is False
+    assert calls[-1] == ({"direct": True}, False, False)
+
+    def failing_export(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    assert mms_command_tools.refresh_routes_export_for_hive(
+        {"direct": True},
+        quiet=False,
+        load_config=lambda: None,
+        apply_local_overrides=lambda cfg: cfg,
+        export_model_routes=failing_export,
+        console=FakeConsole(),
+    ) is False
+    assert messages == ["[yellow]⚠ Hive routes export 刷新失败: boom[/yellow]"]
+
+
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 

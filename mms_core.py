@@ -2113,21 +2113,23 @@ def _trigger_routes_export_after_usage_write():
 
 def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False):
     """Synchronously refresh the Hive-facing routes export from current config."""
-    try:
+    from mms_command_tools import refresh_routes_export_for_hive
+
+    def export_model_routes_current(*args, **kwargs):
         from mms_router import export_model_routes
 
-        current_cfg = cfg
-        if current_cfg is None:
-            current_cfg = load_config()
-            if current_cfg is None:
-                return False
-            current_cfg = apply_local_overrides(current_cfg)
-        export_model_routes(current_cfg, force=force, startup_safe=startup_safe)
-        return True
-    except Exception as exc:
-        if not quiet:
-            console.print(f"[yellow]⚠ Hive routes export 刷新失败: {exc}[/yellow]")
-        return False
+        return export_model_routes(*args, **kwargs)
+
+    return refresh_routes_export_for_hive(
+        cfg,
+        force=force,
+        quiet=quiet,
+        startup_safe=startup_safe,
+        load_config=load_config,
+        apply_local_overrides=apply_local_overrides,
+        export_model_routes=export_model_routes_current,
+        console=console,
+    )
 
 
 def _trigger_routes_export_after_credentials_write():

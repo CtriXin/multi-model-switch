@@ -884,6 +884,32 @@ def backup_config_tree(
     return backup_dir
 
 
+def refresh_routes_export_for_hive(
+    cfg=None,
+    *,
+    force=True,
+    quiet=False,
+    startup_safe=False,
+    load_config,
+    apply_local_overrides,
+    export_model_routes,
+    console,
+):
+    try:
+        current_cfg = cfg
+        if current_cfg is None:
+            current_cfg = load_config()
+            if current_cfg is None:
+                return False
+            current_cfg = apply_local_overrides(current_cfg)
+        export_model_routes(current_cfg, force=force, startup_safe=startup_safe)
+        return True
+    except Exception as exc:
+        if not quiet:
+            console.print(f"[yellow]⚠ Hive routes export 刷新失败: {exc}[/yellow]")
+        return False
+
+
 def confirm_guard_accept_from_tui(
     cfg,
     *,
