@@ -1538,6 +1538,34 @@ def test_preview_include_secrets_without_route_url_is_not_runtime_ready(tmp_path
     assert doctor["next_actions"][0]["command"] == "./mmf preview prepare --from ~/.config/mms --json"
 
 
+def test_preview_doctor_missing_url_and_key_suggests_prepare_include_secrets(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "missing-url-and-key"
+        api_key = "sk-missing-url-and-key"
+        fallback_models = ["model-needing-url-and-key"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        command_name="mmf registry",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+
+    doctor = mms_registry_cli.preview_doctor(config_dir=config_dir, command_name="mmf config doctor")
+
+    assert doctor["counts"]["missing_api_keys"] == 1
+    assert doctor["counts"]["missing_base_urls"] == 1
+    assert doctor["next_actions"][0]["command"] == "./mmf preview prepare --from ~/.config/mms --include-secrets --json"
+
+
 def test_legacy_import_backfills_route_urls_from_legacy_route_artifact(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     config_dir.mkdir()
