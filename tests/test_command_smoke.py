@@ -737,6 +737,44 @@ def test_config_display_renders_summary_and_masks_keys():
     assert "plain" in text
 
 
+def test_config_nested_helpers_and_coercion():
+    import pytest
+    import mms_command_tools
+    import mms_core
+
+    data = {}
+    assert mms_command_tools.mask_key("abcd1234efgh") == "abcd****efgh"
+    assert mms_command_tools.mask_key("short") == "****"
+
+    mms_command_tools.set_nested(data, ["a", "b", "c"], "value")
+    assert data == {"a": {"b": {"c": "value"}}}
+    assert mms_command_tools.get_nested(data, ["a", "b", "c"]) == ("value", True)
+    assert mms_command_tools.get_nested(data, ["a", "missing"]) == (None, False)
+    assert mms_command_tools.unset_nested(data, ["a", "b", "c"]) is True
+    assert mms_command_tools.unset_nested(data, ["a", "b", "c"]) is False
+
+    coerce = lambda key, value: mms_command_tools.coerce_config_value(
+        key,
+        value,
+        validate_user_role=lambda raw: f"role:{raw}",
+        normalize_language=lambda raw: {"zh": "zh", "en": "en"}.get(str(raw).strip()),
+        normalize_positive_seconds=lambda raw, minimum: max(int(raw), minimum),
+    )
+    assert coerce("user.role", "dev") == "role:dev"
+    assert coerce("ui.language", "zh") == "zh"
+    assert coerce("provider.default", " relay ") == "relay"
+    assert coerce("cache.probe_async_min_interval_sec", "0") == 1
+    assert coerce("provider.relay.enabled", "yes") is True
+    with pytest.raises(ValueError):
+        coerce("ui.language", "fr")
+
+    wrapped = {}
+    mms_core._set_nested(wrapped, ["x", "y"], "z")
+    assert mms_core._get_nested(wrapped, ["x", "y"]) == ("z", True)
+    assert mms_core._unset_nested(wrapped, ["x", "y"]) is True
+    assert mms_core._mask_key("abcd1234efgh") == "abcd****efgh"
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

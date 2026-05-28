@@ -33,6 +33,58 @@ CONFIG_HELP_TOPICS = {
 }
 
 
+def mask_key(value):
+    if len(value) <= 8:
+        return "****"
+    return value[:4] + "****" + value[-4:]
+
+
+def set_nested(target, parts, value):
+    for part in parts[:-1]:
+        if part not in target or not isinstance(target[part], dict):
+            target[part] = {}
+        target = target[part]
+    target[parts[-1]] = value
+
+
+def get_nested(target, parts):
+    current = target
+    for part in parts:
+        if not isinstance(current, dict) or part not in current:
+            return None, False
+        current = current[part]
+    return current, True
+
+
+def unset_nested(target, parts):
+    current = target
+    for part in parts[:-1]:
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    if not isinstance(current, dict) or parts[-1] not in current:
+        return False
+    current.pop(parts[-1], None)
+    return True
+
+
+def coerce_config_value(key_path, raw_value, *, validate_user_role, normalize_language, normalize_positive_seconds):
+    if key_path == "user.role":
+        return validate_user_role(raw_value)
+    if key_path == "ui.language":
+        lang = normalize_language(raw_value)
+        if not lang:
+            raise ValueError("ui.language 只支持 zh 或 en")
+        return lang
+    if key_path == "provider.default":
+        return str(raw_value).strip()
+    if key_path in {"cache.probe_async_refresh_after_sec", "cache.probe_async_min_interval_sec"}:
+        return normalize_positive_seconds(raw_value, 1)
+    if key_path.startswith("provider.") and key_path.endswith(".enabled"):
+        return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    return raw_value
+
+
 def is_config_help_request(args_rest):
     if not args_rest:
         return False

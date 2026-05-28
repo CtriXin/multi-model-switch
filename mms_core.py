@@ -10366,56 +10366,40 @@ def _display_adapter_registry():
 
 def _mask_key(val):
     """遮蔽 API key，只显示前 4 和后 4 位"""
-    if len(val) <= 8:
-        return "****"
-    return val[:4] + "****" + val[-4:]
+    from mms_command_tools import mask_key
+
+    return mask_key(val)
 
 
 def _set_nested(d, parts, val):
     """设置嵌套 dict 的值"""
-    for p in parts[:-1]:
-        if p not in d or not isinstance(d[p], dict):
-            d[p] = {}
-        d = d[p]
-    d[parts[-1]] = val
+    from mms_command_tools import set_nested
+
+    return set_nested(d, parts, val)
 
 
 def _get_nested(d, parts):
-    current = d
-    for part in parts:
-        if not isinstance(current, dict) or part not in current:
-            return None, False
-        current = current[part]
-    return current, True
+    from mms_command_tools import get_nested
+
+    return get_nested(d, parts)
 
 
 def _unset_nested(d, parts):
-    current = d
-    for part in parts[:-1]:
-        if not isinstance(current, dict) or part not in current:
-            return False
-        current = current[part]
-    if not isinstance(current, dict) or parts[-1] not in current:
-        return False
-    current.pop(parts[-1], None)
-    return True
+    from mms_command_tools import unset_nested
+
+    return unset_nested(d, parts)
 
 
 def _coerce_config_value(key_path, raw_value):
-    if key_path == "user.role":
-        return _validate_user_role(raw_value)
-    if key_path == "ui.language":
-        lang = normalize_language(raw_value)
-        if not lang:
-            raise ValueError("ui.language 只支持 zh 或 en")
-        return lang
-    if key_path == "provider.default":
-        return str(raw_value).strip()
-    if key_path in {"cache.probe_async_refresh_after_sec", "cache.probe_async_min_interval_sec"}:
-        return _normalize_positive_seconds(raw_value, 1)
-    if key_path.startswith("provider.") and key_path.endswith(".enabled"):
-        return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
-    return raw_value
+    from mms_command_tools import coerce_config_value
+
+    return coerce_config_value(
+        key_path,
+        raw_value,
+        validate_user_role=_validate_user_role,
+        normalize_language=normalize_language,
+        normalize_positive_seconds=_normalize_positive_seconds,
+    )
 
 
 def _validate_config(cfg):
