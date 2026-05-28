@@ -233,6 +233,79 @@ def test_mms_config_root_overrides_gateway_real_home(monkeypatch, tmp_path):
         importlib.reload(mms_core)
 
 
+def test_preview_usage_write_skips_legacy_routes_export(monkeypatch, tmp_path):
+    import mms_core
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setenv("MMS_PREVIEW_MODE", "mmf")
+
+    reloaded = importlib.reload(mms_core)
+    try:
+        calls = []
+        monkeypatch.setattr(reloaded, "_refresh_routes_export_for_hive", lambda *args, **kwargs: calls.append(kwargs))
+
+        def fail_thread(*_args, **_kwargs):
+            raise AssertionError("preview usage writes must not start legacy route export thread")
+
+        monkeypatch.setattr(reloaded.threading, "Thread", fail_thread)
+        reloaded._trigger_routes_export_after_usage_write()
+
+        assert calls == []
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+        monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_core)
+
+
+def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
+    import mms_core
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    stable_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+
+    reloaded = importlib.reload(mms_core)
+    try:
+        calls = []
+        monkeypatch.setattr(reloaded, "_refresh_routes_export_for_hive", lambda *args, **kwargs: calls.append(kwargs))
+
+        class ImmediateThread:
+            def __init__(self, *, target, **_kwargs):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        monkeypatch.setattr(reloaded.threading, "Thread", ImmediateThread)
+        reloaded._trigger_routes_export_after_usage_write()
+
+        assert calls == [{"force": True, "quiet": True}]
+    finally:
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_core)
+
+
 def test_project_store_uses_selected_config_root(monkeypatch, tmp_path):
     import mms_project_store
 

@@ -129,6 +129,7 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "`stable_legacy_writes`",
         "`preview_v2_writes`",
         "same-`candidate_id` route/policy/profile revisions",
+        "Preview usage writes no longer trigger the legacy background `model-routes.json` export",
         "TUI Settings labels direct `model-routes.json` export as `Legacy",
         "not presented as the v2 truth/publish path",
     ]

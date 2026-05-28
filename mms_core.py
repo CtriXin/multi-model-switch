@@ -3486,13 +3486,24 @@ _USAGE_ROUTES_EXPORT_LAST_STARTED_AT = 0.0
 _USAGE_ROUTES_EXPORT_MIN_INTERVAL_SEC = 15.0
 
 
+def _usage_routes_export_should_run():
+    """Keep legacy route-export refresh out of preview DB-truth roots."""
+    try:
+        return _config_root_status().get("mode") != "preview"
+    except Exception:
+        return True
+
+
 def _trigger_routes_export_after_usage_write():
     """Best-effort async routes export after usage changes.
 
-    This keeps model-routes.json reasonably fresh for file readers such as Hive
-    without blocking the foreground launch path on a full export.
+    Stable roots keep model-routes.json reasonably fresh for legacy file
+    readers. Preview roots use the verified latest-approved bundle instead.
     """
     global _USAGE_ROUTES_EXPORT_RUNNING, _USAGE_ROUTES_EXPORT_LAST_STARTED_AT
+
+    if not _usage_routes_export_should_run():
+        return
 
     now = time.monotonic()
     with _USAGE_ROUTES_EXPORT_LOCK:
