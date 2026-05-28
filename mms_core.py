@@ -2712,51 +2712,22 @@ def _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
 
 
 def _resolve_last_used_runtime(cfg, cli_name, last_item, default_models):
-    if not isinstance(last_item, dict):
-        return None, None, None
+    from mms_command_tools import resolve_last_used_runtime
 
-    hint = last_item.get("runtime_hint")
-    if not isinstance(hint, dict):
-        return None, None, None
-
-    model_info = last_item.get("model_info") if isinstance(last_item.get("model_info"), dict) else {
-        "model": str(last_item.get("model") or "")
-    }
-    model_name = _resolve_model_name(model_info)
-
-    provider_id = str(hint.get("provider_id") or "").strip()
-    if provider_id:
-        try:
-            provider = resolve_provider_context(cfg, provider_id)
-        except Exception:
-            provider = None
-        if provider and _provider_supports_model_for_cli(provider, cli_name, model_name):
-            models = _probe_models(provider, emit_output=False).get("models")
-            models = _provider_effective_models(provider, models, cfg)
-            if str(model_name or "").strip().lower() in {
-                str(item or "").strip().lower() for item in (models or [])
-            }:
-                return (
-                    _runtime_with_priority(provider, model_name=model_name),
-                    models,
-                    f"last used provider:{provider_id}",
-                )
-
-    auth_mode = str(hint.get("auth_mode") or "").strip()
-    account_id = str(hint.get("account_id") or "").strip()
-    if account_id and auth_mode != "oauth_bridge":
-        try:
-            account = resolve_account_context(cfg, account_id=account_id, cli_name=cli_name)
-        except Exception:
-            account = None
-        if account and _model_matches_account_cli(cli_name, model_name):
-            return (
-                _runtime_with_priority(account, model_name=model_name),
-                list(default_models or []),
-                f"last used account:{account_id}",
-            )
-
-    return None, None, None
+    return resolve_last_used_runtime(
+        cfg,
+        cli_name,
+        last_item,
+        default_models,
+        resolve_model_name=_resolve_model_name,
+        resolve_provider_context=resolve_provider_context,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+        probe_models=_probe_models,
+        provider_effective_models=_provider_effective_models,
+        runtime_with_priority=_runtime_with_priority,
+        resolve_account_context=resolve_account_context,
+        model_matches_account_cli=_model_matches_account_cli,
+    )
 
 
 # ── Trace ─────────────────────────────────────────────

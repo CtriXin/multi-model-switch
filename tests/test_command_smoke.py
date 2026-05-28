@@ -1438,6 +1438,67 @@ def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
     assert mms_command_tools.infer_runtime_hint_from_usage_stats(stats, "claude", "missing-model") == {}
 
 
+def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths():
+    import mms_command_tools
+
+    provider = {"id": "relay", "runtime_kind": "provider", "models": ["gpt-5.5"]}
+    account = {"id": "codex-main", "runtime_kind": "account"}
+
+    runtime, models, choice = mms_command_tools.resolve_last_used_runtime(
+        {},
+        "codex",
+        {
+            "model_info": {"model": "gpt-5.5"},
+            "runtime_hint": {"provider_id": "relay", "auth_mode": "api_key"},
+        },
+        ["gpt-5.5"],
+        resolve_provider_context=lambda _cfg, provider_id: provider if provider_id == "relay" else None,
+        provider_supports_model_for_cli=lambda provider_arg, cli_name, model_name: cli_name == "codex",
+        probe_models=lambda provider_arg, emit_output=False: {"models": provider_arg["models"]},
+        provider_effective_models=lambda _provider, cached_models, _cfg: list(cached_models or []),
+        runtime_with_priority=lambda runtime_arg, model_name="": {**runtime_arg, "model_name": model_name},
+        resolve_account_context=lambda *_args, **_kwargs: None,
+        model_matches_account_cli=lambda *_args: False,
+    )
+    assert runtime == {"id": "relay", "runtime_kind": "provider", "models": ["gpt-5.5"], "model_name": "gpt-5.5"}
+    assert models == ["gpt-5.5"]
+    assert choice == "last used provider:relay"
+
+    runtime, models, choice = mms_command_tools.resolve_last_used_runtime(
+        {},
+        "codex",
+        {
+            "model": "gpt-5.5",
+            "runtime_hint": {"account_id": "codex-main", "auth_mode": "oauth"},
+        },
+        ["gpt-5.5", "gpt-5.4"],
+        resolve_provider_context=lambda *_args, **_kwargs: None,
+        provider_supports_model_for_cli=lambda *_args: False,
+        probe_models=lambda *_args, **_kwargs: {"models": []},
+        provider_effective_models=lambda *_args: [],
+        runtime_with_priority=lambda runtime_arg, model_name="": {**runtime_arg, "model_name": model_name},
+        resolve_account_context=lambda _cfg, account_id, cli_name: account if account_id == "codex-main" and cli_name == "codex" else None,
+        model_matches_account_cli=lambda cli_name, model_name: cli_name == "codex" and model_name == "gpt-5.5",
+    )
+    assert runtime == {"id": "codex-main", "runtime_kind": "account", "model_name": "gpt-5.5"}
+    assert models == ["gpt-5.5", "gpt-5.4"]
+    assert choice == "last used account:codex-main"
+
+    assert mms_command_tools.resolve_last_used_runtime(
+        {},
+        "codex",
+        {"runtime_hint": {"account_id": "codex-main", "auth_mode": "oauth_bridge"}},
+        ["gpt-5.5"],
+        resolve_provider_context=lambda *_args, **_kwargs: None,
+        provider_supports_model_for_cli=lambda *_args: False,
+        probe_models=lambda *_args, **_kwargs: {"models": []},
+        provider_effective_models=lambda *_args: [],
+        runtime_with_priority=lambda runtime_arg, model_name="": runtime_arg,
+        resolve_account_context=lambda *_args, **_kwargs: account,
+        model_matches_account_cli=lambda *_args: True,
+    ) == (None, None, None)
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
