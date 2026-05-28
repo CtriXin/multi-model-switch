@@ -211,6 +211,143 @@ def handle_exposure_command(
             console.print(f"  - {note}")
 
 
+def _save_cache_config_value(
+    cfg,
+    key,
+    value,
+    *,
+    normalize_positive_seconds,
+    ensure_provider_config,
+    ensure_account_config,
+    normalize_user_config,
+    normalize_cache_config,
+    save_config,
+):
+    updated_cfg = dict(cfg)
+    cache_cfg = dict(updated_cfg.get("cache", {}) if isinstance(updated_cfg.get("cache"), dict) else {})
+    cache_cfg[key] = normalize_positive_seconds(value, 1)
+    updated_cfg["cache"] = cache_cfg
+    updated_cfg, _ = ensure_provider_config(updated_cfg)
+    updated_cfg, _ = ensure_account_config(updated_cfg)
+    updated_cfg, _ = normalize_user_config(updated_cfg)
+    updated_cfg, _ = normalize_cache_config(updated_cfg)
+    save_config(updated_cfg)
+    return updated_cfg
+
+
+def _display_cache_settings(
+    cfg,
+    *,
+    probe_async_refresh_after,
+    probe_async_min_interval,
+    command_name,
+    table_cls,
+    console,
+):
+    cache_cfg = cfg.get("cache", {}) if isinstance(cfg.get("cache"), dict) else {}
+    refresh_after = cache_cfg.get("probe_async_refresh_after_sec", probe_async_refresh_after)
+    min_interval = cache_cfg.get("probe_async_min_interval_sec", probe_async_min_interval)
+    table = table_cls(title="MMS Cache Settings")
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_column("Meaning", style="white")
+    table.add_row("probe_async_refresh_after_sec", str(refresh_after), "cache 超过多久后，启动时后台刷新")
+    table.add_row("probe_async_min_interval_sec", str(min_interval), "同一 provider 两次异步刷新最小间隔")
+    console.print(table)
+    console.print(f"[dim]命令示例: {command_name} cache refresh-after 1800[/dim]")
+    console.print(f"[dim]命令示例: {command_name} cache min-interval 300[/dim]")
+    console.print(f"[dim]命令示例: {command_name} cache reset[/dim]")
+
+
+def handle_cache_command(
+    argv,
+    *,
+    command_name,
+    load_command_config,
+    normalize_positive_seconds,
+    ensure_provider_config,
+    ensure_account_config,
+    normalize_user_config,
+    normalize_cache_config,
+    save_config,
+    probe_async_refresh_after,
+    probe_async_min_interval,
+    table_cls,
+    console,
+):
+    parser = argparse.ArgumentParser(
+        prog=f"{command_name} cache",
+        description="查看或调整启动期 provider model cache 的异步刷新窗口",
+    )
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    subparsers.add_parser("show", help="显示当前 cache 异步刷新参数")
+
+    refresh_parser = subparsers.add_parser("refresh-after", help="设置 cache 多久后触发后台刷新")
+    refresh_parser.add_argument("seconds", type=int, help="正整数秒数")
+
+    interval_parser = subparsers.add_parser("min-interval", help="设置同一 provider 最小异步刷新间隔")
+    interval_parser.add_argument("seconds", type=int, help="正整数秒数")
+
+    subparsers.add_parser("reset", help="恢复默认异步刷新参数")
+
+    args = parser.parse_args(argv)
+    cfg = load_command_config()
+
+    display_kwargs = {
+        "probe_async_refresh_after": probe_async_refresh_after,
+        "probe_async_min_interval": probe_async_min_interval,
+        "command_name": command_name,
+        "table_cls": table_cls,
+        "console": console,
+    }
+
+    if args.subcommand in {None, "show"}:
+        _display_cache_settings(cfg, **display_kwargs)
+        return
+    if args.subcommand == "refresh-after":
+        _save_cache_config_value(
+            cfg,
+            "probe_async_refresh_after_sec",
+            args.seconds,
+            normalize_positive_seconds=normalize_positive_seconds,
+            ensure_provider_config=ensure_provider_config,
+            ensure_account_config=ensure_account_config,
+            normalize_user_config=normalize_user_config,
+            normalize_cache_config=normalize_cache_config,
+            save_config=save_config,
+        )
+        console.print(f"[green]✓ cache.probe_async_refresh_after_sec = {int(args.seconds)}[/green]")
+        return
+    if args.subcommand == "min-interval":
+        _save_cache_config_value(
+            cfg,
+            "probe_async_min_interval_sec",
+            args.seconds,
+            normalize_positive_seconds=normalize_positive_seconds,
+            ensure_provider_config=ensure_provider_config,
+            ensure_account_config=ensure_account_config,
+            normalize_user_config=normalize_user_config,
+            normalize_cache_config=normalize_cache_config,
+            save_config=save_config,
+        )
+        console.print(f"[green]✓ cache.probe_async_min_interval_sec = {int(args.seconds)}[/green]")
+        return
+    if args.subcommand == "reset":
+        updated_cfg = dict(cfg)
+        updated_cfg["cache"] = {
+            "probe_async_refresh_after_sec": probe_async_refresh_after,
+            "probe_async_min_interval_sec": probe_async_min_interval,
+        }
+        updated_cfg, _ = normalize_cache_config(updated_cfg)
+        save_config(updated_cfg)
+        console.print("[green]✓ 已恢复默认 cache 异步刷新参数[/green]")
+        _display_cache_settings(updated_cfg, **display_kwargs)
+        return
+
+    parser.print_help()
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):

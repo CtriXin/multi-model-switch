@@ -444,6 +444,95 @@ def test_script_subcommand_sets_display_prog(monkeypatch, tmp_path):
     assert captured["env"]["MMS_SUBCOMMAND_PROG"] == "mmg smoke"
 
 
+def test_cache_command_show_renders_defaults():
+    import mms_command_tools
+
+    class Table:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            self.rows = []
+
+        def add_column(self, *_args, **_kwargs):
+            pass
+
+        def add_row(self, *args, **kwargs):
+            self.rows.append((args, kwargs))
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, *args, **_kwargs):
+            self.items.append(args[0] if args else "")
+
+    console = Console()
+
+    mms_command_tools.handle_cache_command(
+        ["show"],
+        command_name="mmg",
+        load_command_config=lambda: {},
+        normalize_positive_seconds=lambda value, minimum: max(int(value), minimum),
+        ensure_provider_config=lambda cfg: (cfg, False),
+        ensure_account_config=lambda cfg: (cfg, False),
+        normalize_user_config=lambda cfg: (cfg, False),
+        normalize_cache_config=lambda cfg: (cfg, False),
+        save_config=lambda _cfg: (_ for _ in ()).throw(AssertionError("show must not save config")),
+        probe_async_refresh_after=1800,
+        probe_async_min_interval=300,
+        table_cls=Table,
+        console=console,
+    )
+
+    table = console.items[0]
+    assert table.kwargs["title"] == "MMS Cache Settings"
+    rows = [row for row, _kwargs in table.rows]
+    assert ("probe_async_refresh_after_sec", "1800", "cache 超过多久后，启动时后台刷新") in rows
+    assert ("probe_async_min_interval_sec", "300", "同一 provider 两次异步刷新最小间隔") in rows
+    assert any("mmg cache reset" in str(item) for item in console.items)
+
+
+def test_cache_command_refresh_after_saves_normalized_config():
+    import mms_command_tools
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, *args, **_kwargs):
+            self.items.append(args[0] if args else "")
+
+    saved = {}
+    calls = []
+
+    def passthrough(name):
+        def _inner(cfg):
+            calls.append(name)
+            return cfg, False
+
+        return _inner
+
+    mms_command_tools.handle_cache_command(
+        ["refresh-after", "0"],
+        command_name="mmg",
+        load_command_config=lambda: {"cache": {"probe_async_min_interval_sec": 42}},
+        normalize_positive_seconds=lambda value, minimum: max(int(value), minimum),
+        ensure_provider_config=passthrough("provider"),
+        ensure_account_config=passthrough("account"),
+        normalize_user_config=passthrough("user"),
+        normalize_cache_config=passthrough("cache"),
+        save_config=lambda cfg: saved.update(cfg),
+        probe_async_refresh_after=1800,
+        probe_async_min_interval=300,
+        table_cls=object,
+        console=Console(),
+    )
+
+    assert calls == ["provider", "account", "user", "cache"]
+    assert saved["cache"]["probe_async_refresh_after_sec"] == 1
+    assert saved["cache"]["probe_async_min_interval_sec"] == 42
+
+
 def test_exposure_command_renders_runtime_sections():
     import mms_command_tools
 
