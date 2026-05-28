@@ -918,6 +918,47 @@ def test_preference_runtime_overlay_helpers_preserve_merge_order():
     ) == "not-runtime"
 
 
+def test_usage_runtime_helpers_filter_sort_and_summarize_sources():
+    import mms_command_tools
+
+    stats = {
+        "sources": {
+            "old": {
+                "runtime_kind": "provider",
+                "id": "relay",
+                "cli": "claude",
+                "launches": 2,
+                "last_used_at": "2026-05-27T10:00:00Z",
+            },
+            "new": {
+                "runtime_kind": "provider",
+                "id": "relay",
+                "cli": "codex",
+                "launches": 5,
+                "last_used_at": "2026-05-28T10:00:00Z",
+            },
+            "other": {
+                "runtime_kind": "account",
+                "id": "relay",
+                "cli": "codex",
+                "launches": 7,
+                "last_used_at": "2026-05-29T10:00:00Z",
+            },
+        }
+    }
+    rows = mms_command_tools.usage_rows_for_runtime(
+        "provider",
+        "relay",
+        load_usage_stats=lambda: stats,
+    )
+    assert [item["cli"] for item in rows] == ["codex", "claude"]
+    assert mms_command_tools.usage_summary_for_runtime(
+        "provider",
+        "relay",
+        usage_rows_for_runtime=lambda kind, runtime_id: rows,
+    ) == (7, "2026-05-28T10:00:00Z")
+
+
 def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
     import mms_command_tools
 

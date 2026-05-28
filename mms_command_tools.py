@@ -1097,6 +1097,23 @@ def runtime_with_launch_preferences(cfg, runtime, cli_name, *, load_user_prefere
     return result
 
 
+def usage_rows_for_runtime(runtime_kind, runtime_id, *, load_usage_stats):
+    stats = load_usage_stats()
+    rows = []
+    for item in stats.get("sources", {}).values():
+        if item.get("runtime_kind") == runtime_kind and item.get("id") == runtime_id:
+            rows.append(item)
+    rows.sort(key=lambda item: (item.get("last_used_at", ""), item.get("launches", 0)), reverse=True)
+    return rows
+
+
+def usage_summary_for_runtime(runtime_kind, runtime_id, *, usage_rows_for_runtime):
+    rows = usage_rows_for_runtime(runtime_kind, runtime_id)
+    launches = sum(int(item.get("launches", 0)) for item in rows)
+    last_used_at = rows[0].get("last_used_at", "") if rows else ""
+    return launches, last_used_at
+
+
 def infer_model_family(model_name, *, model_families):
     raw = str(model_name or "").strip().lower()
     parts = raw.rsplit("/", 1)

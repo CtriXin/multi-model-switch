@@ -4170,20 +4170,19 @@ def _quick_connect_official(cfg, preset_cli=None):
 
 
 def _usage_rows_for_runtime(runtime_kind, runtime_id):
-    stats = _load_usage_stats()
-    rows = []
-    for item in stats.get("sources", {}).values():
-        if item.get("runtime_kind") == runtime_kind and item.get("id") == runtime_id:
-            rows.append(item)
-    rows.sort(key=lambda item: (item.get("last_used_at", ""), item.get("launches", 0)), reverse=True)
-    return rows
+    from mms_command_tools import usage_rows_for_runtime
+
+    return usage_rows_for_runtime(runtime_kind, runtime_id, load_usage_stats=_load_usage_stats)
 
 
 def _usage_summary_for_runtime(runtime_kind, runtime_id):
-    rows = _usage_rows_for_runtime(runtime_kind, runtime_id)
-    launches = sum(int(item.get("launches", 0)) for item in rows)
-    last_used_at = rows[0].get("last_used_at", "") if rows else ""
-    return launches, last_used_at
+    from mms_command_tools import usage_summary_for_runtime
+
+    return usage_summary_for_runtime(
+        runtime_kind,
+        runtime_id,
+        usage_rows_for_runtime=_usage_rows_for_runtime,
+    )
 
 
 def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", limit=80):
