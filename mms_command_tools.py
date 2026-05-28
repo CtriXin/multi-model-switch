@@ -6074,6 +6074,134 @@ def group_models_by_family_and_provider(
     return [(family, dict(family_providers[family])) for family in family_order]
 
 
+def select_custom_model(
+    models,
+    cli_name,
+    role="all",
+    recommend=None,
+    use_tui=False,
+    *,
+    group_models_by_family_and_provider,
+    group_models_for_custom,
+    table_cls,
+    int_prompt_cls,
+    console,
+    exit_func,
+    select_model_tui=None,
+):
+    """Select model by family, provider, then model; supports legacy and aggregated inputs."""
+    is_aggregated = models and isinstance(models[0], dict)
+
+    if is_aggregated:
+        groups = group_models_by_family_and_provider(models, role, recommend)
+    else:
+        plain_groups = group_models_for_custom(models, role, recommend)
+        groups = [(family, {"_default_||_default_": items}) for family, items in plain_groups]
+
+    if not groups:
+        return (None, None) if is_aggregated else None
+
+    if use_tui and select_model_tui is None:
+        from mms_tui import select_model_tui as select_model_tui_impl
+
+        select_model_tui = select_model_tui_impl
+
+    if len(groups) == 1:
+        selected_family, provider_map = groups[0]
+    else:
+        total_per_family = []
+        for family, pmap in groups:
+            count = sum(len(m) for m in pmap.values())
+            total_per_family.append(count)
+        family_labels = [f"{family} ({total_per_family[i]})" for i, (family, _) in enumerate(groups)]
+        if use_tui:
+            selected_label = select_model_tui(family_labels, title=f"为 {cli_name} 选择模型品牌")
+            if selected_label is None:
+                return (None, None) if is_aggregated else None
+            family_index = family_labels.index(selected_label)
+        else:
+            family_index = None
+            while family_index is None:
+                table = table_cls(title=f"{cli_name} · 选择模型品牌", show_lines=True)
+                table.add_column("#", style="cyan", width=4)
+                table.add_column("品牌", style="green")
+                table.add_column("数量", style="yellow", width=6)
+                for idx, (family, _) in enumerate(groups, 1):
+                    table.add_row(str(idx), family, str(total_per_family[idx - 1]))
+                console.print(table)
+                try:
+                    picked = int_prompt_cls.ask("选择模型品牌编号") - 1
+                except KeyboardInterrupt:
+                    exit_func(0)
+                if 0 <= picked < len(groups):
+                    family_index = picked
+                else:
+                    console.print(f"[red]请输入 1-{len(groups)}[/red]")
+        selected_family, provider_map = groups[family_index]
+
+    provider_keys = list(provider_map.keys())
+    if len(provider_keys) == 1:
+        selected_provider_key = provider_keys[0]
+    else:
+        provider_labels = []
+        for key in provider_keys:
+            label, _ = key.split("||", 1)
+            count = len(provider_map[key])
+            provider_labels.append(f"{label} ({count})")
+        if use_tui:
+            selected_label = select_model_tui(provider_labels, title=f"{selected_family} · 选择 Provider")
+            if selected_label is None:
+                return (None, None) if is_aggregated else None
+            provider_index = provider_labels.index(selected_label)
+        else:
+            provider_index = None
+            while provider_index is None:
+                table = table_cls(title=f"{cli_name} · {selected_family} · 选择 Provider", show_lines=True)
+                table.add_column("#", style="cyan", width=4)
+                table.add_column("Provider", style="green")
+                table.add_column("模型数", style="yellow", width=6)
+                for idx, plabel in enumerate(provider_labels, 1):
+                    table.add_row(str(idx), plabel, "")
+                console.print(table)
+                try:
+                    picked = int_prompt_cls.ask("选择 Provider 编号") - 1
+                except KeyboardInterrupt:
+                    exit_func(0)
+                if 0 <= picked < len(provider_keys):
+                    provider_index = picked
+                else:
+                    console.print(f"[red]请输入 1-{len(provider_keys)}[/red]")
+        selected_provider_key = provider_keys[provider_index]
+
+    family_models = provider_map[selected_provider_key]
+    _, selected_provider_id = selected_provider_key.split("||", 1)
+
+    if use_tui:
+        model = select_model_tui(family_models, title=f"{selected_family} · 选择子模型")
+    else:
+        model = None
+        while model is None:
+            table = table_cls(title=f"{cli_name} · {selected_family}", show_lines=True)
+            table.add_column("#", style="cyan", width=4)
+            table.add_column("模型", style="green")
+            for idx, model_name in enumerate(family_models, 1):
+                table.add_row(str(idx), model_name)
+            console.print(table)
+            try:
+                model_index = int_prompt_cls.ask("选择子模型编号") - 1
+            except KeyboardInterrupt:
+                exit_func(0)
+            if 0 <= model_index < len(family_models):
+                model = family_models[model_index]
+            else:
+                console.print(f"[red]请输入 1-{len(family_models)}[/red]")
+
+    if is_aggregated:
+        pid = selected_provider_id if selected_provider_id != "_default_" else None
+        return (model, pid) if model else (None, None)
+    return model
+
+
 def build_provider_options_map(
     cfg,
     cli_name,

@@ -6092,6 +6092,103 @@ def test_model_display_grouping_helpers_preserve_recommend_and_provider_dedupe()
     ]
 
 
+def test_select_custom_model_helper_preserves_prompt_and_tui_flow():
+    import mms_command_tools
+
+    class FakeIntPrompt:
+        values = iter([3, 2, 1])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    console = _CollectingConsole()
+    selected = mms_command_tools.select_custom_model(
+        ["gpt-5.5", "claude-sonnet-4.5"],
+        "codex",
+        "all",
+        [],
+        False,
+        group_models_by_family_and_provider=lambda *_args, **_kwargs: [],
+        group_models_for_custom=lambda *_args, **_kwargs: [
+            ("GPT", ["gpt-5.5"]),
+            ("Claude", ["claude-sonnet-4.5"]),
+        ],
+        table_cls=_FakeTable,
+        int_prompt_cls=FakeIntPrompt,
+        console=console,
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    )
+    assert selected == "claude-sonnet-4.5"
+    tables = [item for item in console.items if isinstance(item, _FakeTable)]
+    assert tables[0].kwargs == {"title": "codex · 选择模型品牌", "show_lines": True}
+    assert tables[-1].kwargs == {"title": "codex · Claude", "show_lines": True}
+    assert "[red]请输入 1-2[/red]" in console.items
+
+    tui_calls = []
+    selected = mms_command_tools.select_custom_model(
+        [{"model": "gpt-5.5", "provider_id": "relay", "provider_name": "Relay"}],
+        "codex",
+        "all",
+        [],
+        True,
+        group_models_by_family_and_provider=lambda *_args, **_kwargs: [
+            ("GPT", {"Relay||relay": ["gpt-5.5"], "Backup||backup": ["gpt-5.4"]})
+        ],
+        group_models_for_custom=lambda *_args, **_kwargs: [],
+        table_cls=_FakeTable,
+        int_prompt_cls=FakeIntPrompt,
+        console=console,
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        select_model_tui=lambda options, title: tui_calls.append((title, options))
+        or ("Backup (1)" if "Provider" in title else "gpt-5.4"),
+    )
+    assert selected == ("gpt-5.4", "backup")
+    assert tui_calls == [
+        ("GPT · 选择 Provider", ["Relay (1)", "Backup (1)"]),
+        ("GPT · 选择子模型", ["gpt-5.4"]),
+    ]
+
+    assert mms_command_tools.select_custom_model(
+        [{"model": "gpt-5.5", "provider_id": "relay", "provider_name": "Relay"}],
+        "codex",
+        "all",
+        [],
+        True,
+        group_models_by_family_and_provider=lambda *_args, **_kwargs: [
+            ("GPT", {"Relay||relay": ["gpt-5.5"], "Backup||backup": ["gpt-5.4"]})
+        ],
+        group_models_for_custom=lambda *_args, **_kwargs: [],
+        table_cls=_FakeTable,
+        int_prompt_cls=FakeIntPrompt,
+        console=console,
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        select_model_tui=lambda *_args, **_kwargs: None,
+    ) == (None, None)
+
+
+def test_select_custom_model_wrapper_preserves_core_dependencies(monkeypatch):
+    import mms_core
+
+    class FakeIntPrompt:
+        values = iter([1])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    console = _CollectingConsole()
+    monkeypatch.setattr(mms_core, "_group_models_for_custom", lambda *_args, **_kwargs: [("GPT", ["gpt-5.5"])])
+    monkeypatch.setattr(mms_core, "_group_models_by_family_and_provider", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_core, "Table", _FakeTable)
+    monkeypatch.setattr(mms_core, "IntPrompt", FakeIntPrompt)
+    monkeypatch.setattr(mms_core, "console", console)
+
+    assert mms_core._select_custom_model(["gpt-5.5"], "codex") == "gpt-5.5"
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "codex · GPT", "show_lines": True}
+
+
 def test_provider_options_map_helper_preserves_provider_and_account_alternatives():
     import mms_command_tools
 
