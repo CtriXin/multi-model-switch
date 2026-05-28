@@ -6,6 +6,28 @@ import ssl
 import stat
 
 
+class _FakeTable:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.columns = []
+        self.rows = []
+
+    def add_column(self, *args, **kwargs):
+        self.columns.append((args, kwargs))
+
+    def add_row(self, *args, **kwargs):
+        self.rows.append((args, kwargs))
+
+
+class _CollectingConsole:
+    def __init__(self):
+        self.items = []
+
+    def print(self, *args, **kwargs):
+        self.items.append(args[0] if args else "")
+
+
 def test_fake_upstream_runtime_httpx_request_and_log(monkeypatch, tmp_path):
     import mms_core
 
@@ -141,6 +163,56 @@ def test_confirm_context_lines_show_fake_only_when_enabled(monkeypatch):
     monkeypatch.setenv("MMS_FAKE_UPSTREAM", "0")
     disabled_lines = mms_core._confirm_context_lines("claude", runtime)
     assert all(label != "Fake" for label, _ in disabled_lines)
+
+
+def test_fake_upstream_command_handler_toggles_and_renders_log():
+    import mms_command_tools
+
+    enabled_values = []
+    tail_values = []
+    console = _CollectingConsole()
+
+    def status_payload():
+        return {
+            "enabled": True,
+            "state_path": "/tmp/state.json",
+            "log_path": "/tmp/requests.jsonl",
+            "proxy_url": "http://127.0.0.1:7777",
+            "ca_cert_path": "/tmp/ca.pem",
+            "proxy_pid": 123,
+            "proxy_started_at": "now",
+            "updated_at": "later",
+        }
+
+    mms_command_tools.handle_fake_upstream_command(
+        ["on"],
+        command_name="mmg",
+        set_enabled=enabled_values.append,
+        status_payload=status_payload,
+        tail_log=lambda _tail: [],
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    assert enabled_values == [True]
+    assert any("已开启" in str(item) for item in console.items)
+
+    mms_command_tools.handle_fake_upstream_command(
+        ["log", "--tail", "3"],
+        command_name="mmg",
+        set_enabled=enabled_values.append,
+        status_payload=status_payload,
+        tail_log=lambda tail: tail_values.append(tail) or [
+            {"ts": "t1", "kind": "upstream", "host": "api.example", "request_body_preview": "redacted"},
+        ],
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    assert tail_values == [3]
+    table = console.items[-1]
+    assert table.kwargs == {"title": "Fake Upstream Log"}
+    assert table.rows[-1][0] == ("t1", "upstream", "api.example", "redacted")
 
 
 def test_fake_upstream_form_body_is_redacted(monkeypatch, tmp_path):

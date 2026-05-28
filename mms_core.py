@@ -11594,72 +11594,17 @@ def _confirm_guard_accept_from_tui(cfg):
 
 def handle_fake_upstream_command(argv):
     _ensure_rich()
-    parser = argparse.ArgumentParser(
-        prog=f"{current_command()} fake-upstream",
-        description="开发期 fake upstream：不访问真实上游，并把请求写入日志",
+    from mms_command_tools import handle_fake_upstream_command as handle_fake_upstream_command_impl
+
+    return handle_fake_upstream_command_impl(
+        argv,
+        command_name=current_command(),
+        set_enabled=_set_fake_upstream_enabled,
+        status_payload=_fake_upstream_status_payload,
+        tail_log=_fake_upstream_tail_log,
+        table_cls=Table,
+        console=console,
     )
-    subparsers = parser.add_subparsers(dest="subcommand")
-    subparsers.add_parser("status", help="查看 fake upstream 状态")
-    subparsers.add_parser("on", help="开启 fake upstream")
-    subparsers.add_parser("off", help="关闭 fake upstream")
-    log_parser = subparsers.add_parser("log", help="查看 fake upstream 日志")
-    log_parser.add_argument("--tail", type=int, default=20, help="最后 N 条")
-
-    args = parser.parse_args(argv)
-
-    if args.subcommand == "on":
-        _set_fake_upstream_enabled(True)
-        payload = _fake_upstream_status_payload()
-        console.print(f"[green]✓ fake upstream 已开启[/green]")
-        console.print(f"[dim]state: {payload['state_path']}[/dim]")
-        console.print(f"[dim]log:   {payload['log_path']}[/dim]")
-        return
-    if args.subcommand == "off":
-        _set_fake_upstream_enabled(False)
-        payload = _fake_upstream_status_payload()
-        console.print(f"[green]✓ fake upstream 已关闭[/green]")
-        console.print(f"[dim]state: {payload['state_path']}[/dim]")
-        return
-    if args.subcommand == "log":
-        rows = _fake_upstream_tail_log(args.tail)
-        if not rows:
-            console.print("[yellow]暂无 fake upstream 日志[/yellow]")
-            return
-        table = Table(title="Fake Upstream Log")
-        table.add_column("Time", style="cyan")
-        table.add_column("Kind", style="green")
-        table.add_column("Target", style="magenta")
-        table.add_column("Detail", style="white")
-        for row in rows:
-            target = str(row.get("url") or row.get("host") or "-")
-            if str(row.get("kind") or "") == "upstream":
-                detail = row.get("request_body_preview") or row.get("path") or "-"
-            else:
-                detail = (
-                    row.get("path")
-                    or row.get("request_body_preview")
-                    or row.get("body")
-                    or row.get("proxy")
-                    or row.get("listen")
-                    or "-"
-                )
-            table.add_row(str(row.get("ts") or "-"), str(row.get("kind") or "-"), target, str(detail))
-        console.print(table)
-        return
-
-    payload = _fake_upstream_status_payload()
-    table = Table(title="Fake Upstream")
-    table.add_column("字段", style="cyan")
-    table.add_column("值", style="green")
-    table.add_row("enabled", "yes" if payload.get("enabled") else "no")
-    table.add_row("state_path", str(payload.get("state_path") or "-"))
-    table.add_row("log_path", str(payload.get("log_path") or "-"))
-    table.add_row("proxy_url", str(payload.get("proxy_url") or "-"))
-    table.add_row("ca_cert_path", str(payload.get("ca_cert_path") or "-"))
-    table.add_row("proxy_pid", str(payload.get("proxy_pid") or "-"))
-    table.add_row("proxy_started_at", str(payload.get("proxy_started_at") or "-"))
-    table.add_row("updated_at", str(payload.get("updated_at") or "-"))
-    console.print(table)
 
 
 def handle_logs_command(argv):
