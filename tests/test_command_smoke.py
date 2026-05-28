@@ -53,6 +53,13 @@ def test_json_file_helpers_preserve_dict_only_load_and_secure_save(tmp_path):
     assert stat.S_IMODE(saved_path.stat().st_mode) == 0o600
 
 
+def test_command_hint_helpers_preserve_current_command_formatting():
+    import mms_command_tools
+
+    assert mms_command_tools.config_command_hint(current_command=lambda: "mmg") == "mmg config api.edit"
+    assert mms_command_tools.export_command_hint("claude", current_command=lambda: "mmg") == "mmg --export claude --apply"
+
+
 def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeypatch):
     import mms_command_tools
     import mms_core

@@ -104,6 +104,14 @@ def extract_global_lang(argv, *, normalize_language):
     return cleaned, lang
 
 
+def config_command_hint(*, current_command):
+    return f"{current_command()} config api.edit"
+
+
+def export_command_hint(cli_name, *, current_command):
+    return f"{current_command()} --export {cli_name} --apply"
+
+
 def base_user_config_path_from_gateway(config_path, *, gateway_session_markers):
     normalized = os.path.normpath(str(config_path or ""))
     for marker in gateway_session_markers:

@@ -676,11 +676,15 @@ def _run_about_upgrade(*, target="mms", include_clis=False):
 
 
 def config_command_hint():
-    return f"{current_command()} config api.edit"
+    from mms_command_tools import config_command_hint as config_command_hint_helper
+
+    return config_command_hint_helper(current_command=current_command)
 
 
 def export_command_hint(cli_name):
-    return f"{current_command()} --export {cli_name} --apply"
+    from mms_command_tools import export_command_hint as export_command_hint_helper
+
+    return export_command_hint_helper(cli_name, current_command=current_command)
 
 
 def normalize_user_role(role):
