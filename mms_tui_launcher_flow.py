@@ -1386,6 +1386,75 @@ def apply_rescue_clear_default_action(cfg, *, apply_rescue_default_action):
     return {"status": "continue", "cfg": result["cfg"], "cleared": True}
 
 
+def handle_rescue_landing_action(
+    cfg,
+    landing_action,
+    default_fallback,
+    route_fallback_candidates,
+    repo_root,
+    *,
+    apply_rescue_default_action,
+    select_model_tui_loader,
+    set_rescue_hot_fallback_enabled,
+    save_config,
+    rescue_hot_fallback_toggle_report_payload,
+    write_demo_rescue_packet,
+    rescue_demo_packet_report_payload,
+    print_settings_result_report,
+    pause_after_tui_report,
+    ensure_rich,
+    prompt_cls,
+):
+    if str(landing_action or "").startswith("default::") or landing_action == "manual_default":
+        result = apply_rescue_default_from_action(
+            cfg,
+            landing_action,
+            default_fallback,
+            apply_rescue_default_action=apply_rescue_default_action,
+            ensure_rich=ensure_rich,
+            prompt_cls=prompt_cls,
+        )
+        return {"status": "continue", "cfg": result["cfg"], "result": result}
+    if landing_action == "choose_route_default":
+        result = apply_rescue_default_from_route_selection(
+            cfg,
+            route_fallback_candidates,
+            "选择全局默认 fallback model",
+            select_model_tui=select_model_tui_loader(),
+            apply_rescue_default_action=apply_rescue_default_action,
+        )
+        return {"status": "continue", "cfg": result["cfg"], "result": result}
+    if landing_action in {"enable_hot_fallback", "disable_hot_fallback"}:
+        result = apply_rescue_hot_fallback_toggle_action(
+            cfg,
+            landing_action == "enable_hot_fallback",
+            set_rescue_hot_fallback_enabled=set_rescue_hot_fallback_enabled,
+            save_config=save_config,
+            rescue_hot_fallback_toggle_report_payload=rescue_hot_fallback_toggle_report_payload,
+            print_settings_result_report=print_settings_result_report,
+            pause_after_tui_report=pause_after_tui_report,
+        )
+        return {"status": "continue", "cfg": result["cfg"], "result": result}
+    if landing_action == "clear_default":
+        result = apply_rescue_clear_default_action(
+            cfg,
+            apply_rescue_default_action=apply_rescue_default_action,
+        )
+        return {"status": "continue", "cfg": result["cfg"], "result": result}
+    if landing_action == "create_demo":
+        result = apply_rescue_demo_packet_action(
+            repo_root,
+            write_demo_rescue_packet=write_demo_rescue_packet,
+            rescue_demo_packet_report_payload=rescue_demo_packet_report_payload,
+            print_settings_result_report=print_settings_result_report,
+            pause_after_tui_report=pause_after_tui_report,
+        )
+        return {"status": "continue", "cfg": cfg, "result": result}
+    if landing_action == "view_packets":
+        return {"status": "view_packets", "cfg": cfg, "result": None}
+    return {"status": "continue", "cfg": cfg, "result": None}
+
+
 def apply_rescue_default_from_route_selection(
     cfg,
     route_fallback_candidates,

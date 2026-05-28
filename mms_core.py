@@ -5171,55 +5171,32 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if landing_result["status"] != "action":
                     continue
                 landing_action = landing_result["action"]
-                if str(landing_action or "").startswith("default::") or landing_action == "manual_default":
-                    current_cfg = tui_flow.apply_rescue_default_from_action(
-                        current_cfg,
-                        landing_action,
-                        default_fallback,
-                        apply_rescue_default_action=_apply_rescue_default_action,
-                        ensure_rich=_ensure_rich,
-                        prompt_cls=Prompt,
-                    )["cfg"]
-                    continue
-                if landing_action == "choose_route_default":
+
+                def _select_model_tui_loader():
                     from mms_tui import select_model_tui
 
-                    current_cfg = tui_flow.apply_rescue_default_from_route_selection(
-                        current_cfg,
-                        route_fallback_candidates,
-                        "选择全局默认 fallback model",
-                        select_model_tui=select_model_tui,
-                        apply_rescue_default_action=_apply_rescue_default_action,
-                    )["cfg"]
-                    continue
-                if landing_action in {"enable_hot_fallback", "disable_hot_fallback"}:
-                    enable_hot = landing_action == "enable_hot_fallback"
-                    current_cfg = tui_flow.apply_rescue_hot_fallback_toggle_action(
-                        current_cfg,
-                        enable_hot,
-                        set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
-                        save_config=save_config,
-                        rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
-                        print_settings_result_report=_print_settings_result_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                    )["cfg"]
-                    continue
-                if landing_action == "clear_default":
-                    current_cfg = tui_flow.apply_rescue_clear_default_action(
-                        current_cfg,
-                        apply_rescue_default_action=_apply_rescue_default_action,
-                    )["cfg"]
-                    continue
-                if landing_action == "create_demo":
-                    tui_flow.apply_rescue_demo_packet_action(
-                        os.getcwd(),
-                        write_demo_rescue_packet=write_demo_rescue_packet,
-                        rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
-                        print_settings_result_report=_print_settings_result_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                    )
-                    continue
-                if landing_action != "view_packets":
+                    return select_model_tui
+
+                landing_dispatch = tui_flow.handle_rescue_landing_action(
+                    current_cfg,
+                    landing_action,
+                    default_fallback,
+                    route_fallback_candidates,
+                    os.getcwd(),
+                    apply_rescue_default_action=_apply_rescue_default_action,
+                    select_model_tui_loader=_select_model_tui_loader,
+                    set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
+                    save_config=save_config,
+                    rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
+                    write_demo_rescue_packet=write_demo_rescue_packet,
+                    rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
+                    print_settings_result_report=_print_settings_result_report,
+                    pause_after_tui_report=_pause_after_tui_report,
+                    ensure_rich=_ensure_rich,
+                    prompt_cls=Prompt,
+                )
+                current_cfg = landing_dispatch["cfg"]
+                if landing_dispatch["status"] != "view_packets":
                     continue
                 if not rescue_events:
                     tui_flow.show_rescue_no_packets_report(

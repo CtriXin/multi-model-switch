@@ -38,6 +38,7 @@ from mms_tui_launcher_flow import (
     handle_tui_routes_export_settings_action,
     handle_tui_selected_model_action,
     handle_tui_submodel_action,
+    handle_rescue_landing_action,
     handle_rescue_view_markdown_action,
     last_used_model_info,
     normalize_confirm_result,
@@ -2376,6 +2377,129 @@ def test_apply_rescue_clear_default_action_clears_and_returns_cfg() -> None:
 
     assert result == {"status": "continue", "cfg": cleared_cfg, "cleared": True}
     assert calls == [("", True)]
+
+
+def test_handle_rescue_landing_action_returns_view_packets_or_continue() -> None:
+    cfg = {"cfg": True}
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    deps = {
+        "apply_rescue_default_action": unused,
+        "select_model_tui_loader": unused,
+        "set_rescue_hot_fallback_enabled": unused,
+        "save_config": unused,
+        "rescue_hot_fallback_toggle_report_payload": unused,
+        "write_demo_rescue_packet": unused,
+        "rescue_demo_packet_report_payload": unused,
+        "print_settings_result_report": unused,
+        "pause_after_tui_report": unused,
+        "ensure_rich": unused,
+        "prompt_cls": type("Prompt", (), {"ask": staticmethod(unused)}),
+    }
+
+    assert handle_rescue_landing_action(
+        cfg,
+        "view_packets",
+        {"model": "old"},
+        [],
+        "/repo",
+        **deps,
+    ) == {"status": "view_packets", "cfg": cfg, "result": None}
+
+    assert handle_rescue_landing_action(
+        cfg,
+        "unknown",
+        {"model": "old"},
+        [],
+        "/repo",
+        **deps,
+    ) == {"status": "continue", "cfg": cfg, "result": None}
+
+
+def test_handle_rescue_landing_action_dispatches_existing_helpers() -> None:
+    calls = []
+    cfg = {"cfg": True}
+    route_cfg = {"cfg": "route"}
+    clear_cfg = {"cfg": "clear"}
+    hot_cfg = {"cfg": "hot"}
+
+    def apply_default(model, *, cleared=False):
+        calls.append(("apply_default", model, cleared))
+        return {"cfg": clear_cfg if cleared else route_cfg}
+
+    def select_model_tui_loader():
+        calls.append(("loader",))
+        return lambda candidates, *, title: calls.append(("select", candidates, title)) or "route-model"
+
+    common = {
+        "apply_rescue_default_action": apply_default,
+        "select_model_tui_loader": select_model_tui_loader,
+        "set_rescue_hot_fallback_enabled": lambda cfg_arg, *, enabled: calls.append(("set_hot", cfg_arg, enabled)) or (hot_cfg, enabled),
+        "save_config": lambda cfg_arg, *, reason: calls.append(("save", cfg_arg, reason)),
+        "rescue_hot_fallback_toggle_report_payload": lambda enabled, **kwargs: ("hot", [("enabled", enabled), ("kwargs", kwargs)]),
+        "write_demo_rescue_packet": lambda *, repo_root: calls.append(("demo", repo_root)) or {"repo": repo_root},
+        "rescue_demo_packet_report_payload": lambda payload: calls.append(("demo_payload", payload)) or ("demo", [("repo", payload["repo"])]),
+        "print_settings_result_report": lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        "pause_after_tui_report": lambda message: calls.append(("pause", message)),
+        "ensure_rich": lambda: calls.append(("ensure",)),
+        "prompt_cls": type("Prompt", (), {"ask": staticmethod(lambda *_args, **_kwargs: "unused")}),
+    }
+
+    assert handle_rescue_landing_action(
+        cfg,
+        "choose_route_default",
+        {"model": "old"},
+        ["route-model"],
+        "/repo",
+        **common,
+    ) == {"status": "continue", "cfg": route_cfg, "result": {"status": "continue", "cfg": route_cfg, "fallback_model": "route-model", "applied": True}}
+
+    assert handle_rescue_landing_action(
+        cfg,
+        "enable_hot_fallback",
+        {"model": "old"},
+        ["route-model"],
+        "/repo",
+        **common,
+    )["cfg"] == hot_cfg
+
+    assert handle_rescue_landing_action(
+        cfg,
+        "clear_default",
+        {"model": "old"},
+        ["route-model"],
+        "/repo",
+        **common,
+    ) == {"status": "continue", "cfg": clear_cfg, "result": {"status": "continue", "cfg": clear_cfg, "cleared": True}}
+
+    demo_result = handle_rescue_landing_action(
+        cfg,
+        "create_demo",
+        {"model": "old"},
+        ["route-model"],
+        "/repo",
+        **common,
+    )
+    assert demo_result["status"] == "continue"
+    assert demo_result["cfg"] == cfg
+    assert demo_result["result"]["payload"] == {"repo": "/repo"}
+
+    assert calls == [
+        ("loader",),
+        ("select", ["route-model"], "选择全局默认 fallback model"),
+        ("apply_default", "route-model", False),
+        ("set_hot", cfg, True),
+        ("save", hot_cfg, "tui:rescue_hot_fallback"),
+        ("report", ("hot", [("enabled", True), ("kwargs", {})]), {}),
+        ("pause", "按 Enter 返回设置"),
+        ("apply_default", "", True),
+        ("demo", "/repo"),
+        ("demo_payload", {"repo": "/repo"}),
+        ("report", ("demo", [("repo", "/repo")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
 
 
 def test_apply_rescue_default_from_route_selection_applies_selected_model() -> None:
