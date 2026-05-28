@@ -1192,6 +1192,51 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     assert mms_command_tools.runtime_force_ipv4(None) is False
 
 
+def test_account_normalization_helpers_preserve_oauth_profile_shape(tmp_path):
+    import mms_command_tools
+
+    model_families = [{"family": "GPT"}, {"family": "Claude"}]
+    normalized = mms_command_tools.normalize_account(
+        {
+            "id": " Claude Main! ",
+            "name": "",
+            "cli": "unknown",
+            "home_dir": "~/mms-test-account",
+            "enabled": 0,
+            "priority": "0",
+            "family_priority_overrides": {"Claude": "9", "unknown": "4"},
+            "claude_1m_mode": "disabled",
+            "proxy": " http://127.0.0.1:7890 ",
+            "no_proxy": " localhost ",
+            "timezone": "Bad/Timezone",
+            "force_ipv4": "enabled",
+            "note": " demo ",
+        },
+        oauth_capable_clis=("claude", "codex", "gemini", "agy"),
+        accounts_dir=str(tmp_path),
+        default_priority=50,
+        model_families=model_families,
+        default_account_timezone="Asia/Singapore",
+        claude_1m_valid_modes={"auto", "enable", "disable"},
+    )
+
+    assert mms_command_tools.default_account_home("claude-main", accounts_dir=str(tmp_path)) == str(tmp_path / "claude-main")
+    assert normalized["id"] == "claude-main"
+    assert normalized["name"] == "claude-main"
+    assert normalized["cli"] == "claude"
+    assert normalized["auth_mode"] == "oauth"
+    assert normalized["enabled"] is False
+    assert normalized["home_dir"].endswith("mms-test-account")
+    assert normalized["priority"] == 1
+    assert normalized["family_priority_overrides"] == {"Claude": 9}
+    assert normalized["claude_1m_mode"] == "disable"
+    assert normalized["proxy"] == "http://127.0.0.1:7890"
+    assert normalized["no_proxy"] == "localhost"
+    assert normalized["timezone"] == "Asia/Singapore"
+    assert normalized["force_ipv4"] is True
+    assert normalized["note"] == "demo"
+
+
 def test_semver_and_http_status_helpers_preserve_update_semantics():
     import mms_command_tools
 

@@ -1631,6 +1631,54 @@ def normalize_provider(
     return merged
 
 
+def default_account_home(account_id, *, accounts_dir):
+    return os.path.join(accounts_dir, account_id)
+
+
+def normalize_account(
+    account,
+    *,
+    oauth_capable_clis,
+    accounts_dir,
+    default_priority,
+    model_families,
+    default_account_timezone,
+    claude_1m_valid_modes,
+):
+    cli = str(account.get("cli") or "claude").strip().lower()
+    if cli not in oauth_capable_clis:
+        cli = "claude"
+    account_id = normalize_account_id(account.get("id") or f"{cli}-account")
+    default_home = default_account_home(account_id, accounts_dir=accounts_dir)
+    home_dir = str(account.get("home_dir") or default_home).strip() or default_home
+    proxy = str(account.get("proxy") or "").strip()
+    no_proxy = str(account.get("no_proxy") or "").strip()
+    timezone_name = normalize_timezone_name(account.get("timezone"), default=default_account_timezone)
+    return {
+        "id": account_id,
+        "name": str(account.get("name") or account_id).strip() or account_id,
+        "cli": cli,
+        "auth_mode": "oauth",
+        "enabled": bool(account.get("enabled", True)),
+        "home_dir": os.path.expanduser(home_dir),
+        "priority": normalize_priority(account.get("priority", default_priority), default_priority=default_priority),
+        "family_priority_overrides": normalize_family_priority_overrides(
+            account.get("family_priority_overrides", {}),
+            model_families=model_families,
+            default_priority=default_priority,
+        ),
+        "claude_1m_mode": normalize_claude_1m_mode(
+            account.get("claude_1m_mode", "auto"),
+            valid_modes=claude_1m_valid_modes,
+        ),
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
+        "force_ipv4": runtime_force_ipv4(account),
+        "note": str(account.get("note", "")).strip(),
+    }
+
+
 def normalize_account_id(account_id):
     value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
     value = value.strip("-_")

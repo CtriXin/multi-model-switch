@@ -994,7 +994,9 @@ def _normalize_supported_clis(value, protocols=None):
 
 
 def _default_account_home(account_id):
-    return os.path.join(ACCOUNTS_DIR, account_id)
+    from mms_command_tools import default_account_home
+
+    return default_account_home(account_id, accounts_dir=ACCOUNTS_DIR)
 
 
 def _normalize_priority(value):
@@ -1324,32 +1326,17 @@ def _wizard_prompt(label, default="", password=False, required=False):
 
 
 def _normalize_account(account):
-    cli = str(account.get("cli") or "claude").strip().lower()
-    if cli not in OAUTH_CAPABLE_CLIS:
-        cli = "claude"
-    account_id = _normalize_account_id(account.get("id") or f"{cli}-account")
-    home_dir = str(account.get("home_dir") or _default_account_home(account_id)).strip() or _default_account_home(account_id)
-    proxy = str(account.get("proxy") or "").strip()
-    no_proxy = str(account.get("no_proxy") or "").strip()
-    timezone_name = _normalize_timezone_name(account.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE)
-    return {
-        "id": account_id,
-        "name": str(account.get("name") or account_id).strip() or account_id,
-        "cli": cli,
-        "auth_mode": "oauth",
-        "enabled": bool(account.get("enabled", True)),
-        "home_dir": os.path.expanduser(home_dir),
-        "priority": _normalize_priority(account.get("priority", DEFAULT_PRIORITY)),
-        "family_priority_overrides": _normalize_family_priority_overrides(
-            account.get("family_priority_overrides", {})
-        ),
-        "claude_1m_mode": _normalize_claude_1m_mode(account.get("claude_1m_mode", "auto")),
-        "proxy": proxy,
-        "no_proxy": no_proxy,
-        "timezone": timezone_name,
-        "force_ipv4": _runtime_force_ipv4(account),
-        "note": str(account.get("note", "")).strip(),
-    }
+    from mms_command_tools import normalize_account
+
+    return normalize_account(
+        account,
+        oauth_capable_clis=OAUTH_CAPABLE_CLIS,
+        accounts_dir=ACCOUNTS_DIR,
+        default_priority=DEFAULT_PRIORITY,
+        model_families=MODEL_FAMILIES,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        claude_1m_valid_modes=VALID_CLAUDE_1M_MODES,
+    )
 
 
 def _normalize_provider_id_input(provider_id):
