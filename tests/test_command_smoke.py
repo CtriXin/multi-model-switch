@@ -753,6 +753,39 @@ def test_model_family_visibility_helpers_preserve_display_filter_semantics():
     ) is False
 
 
+def test_preference_primitive_helpers_preserve_allowlist_semantics():
+    import mms_command_tools
+
+    assert mms_command_tools.merge_dicts(
+        {"launch": {"defaults": {"bypass": False}, "cli": {"codex": {"reasoning_effort": "low"}}}},
+        {"launch": {"defaults": {"thinking_mode": "enable"}}},
+    ) == {
+        "launch": {
+            "defaults": {"bypass": False, "thinking_mode": "enable"},
+            "cli": {"codex": {"reasoning_effort": "low"}},
+        }
+    }
+    assert mms_command_tools.pref_bool("enabled") is True
+    assert mms_command_tools.pref_bool("off") is False
+    assert mms_command_tools.pref_bool("maybe") is None
+    assert mms_command_tools.pref_enable_disable(True) == "enable"
+    assert mms_command_tools.pref_enable_disable("disabled") == "disable"
+    assert mms_command_tools.pref_enable_disable("maybe") == ""
+    assert mms_command_tools.pref_reasoning_effort("XHIGH") == "xhigh"
+    assert mms_command_tools.pref_reasoning_effort("extreme") == ""
+    assert mms_command_tools.pref_agent_pack("everything_claude_code") == "ecc"
+    assert mms_command_tools.pref_agent_pack("oh-my-claude-code") == "omc"
+    assert mms_command_tools.pref_agent_pack("off") == "none"
+    assert mms_command_tools.sanitize_surface_list(["web-access", "web-access", "", None, "xmem"]) == ["web-access", "xmem"]
+    assert mms_command_tools.sanitize_disabled_session_surfaces(
+        {"skill": ["web-access"], "mcps": "pilot", "hook": ["/tmp/a", "/tmp/a"], "unknown": ["drop"]}
+    ) == {
+        "skills": ["web-access"],
+        "mcp": ["pilot"],
+        "hooks": ["/tmp/a"],
+    }
+
+
 def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
     import mms_command_tools
 

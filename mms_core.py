@@ -2599,95 +2599,45 @@ def _existing_preferences_paths():
 
 
 def _merge_dicts(base, override):
-    merged = dict(base)
-    for key, value in override.items():
-        current = merged.get(key)
-        if isinstance(current, dict) and isinstance(value, dict):
-            merged[key] = _merge_dicts(current, value)
-        else:
-            merged[key] = value
-    return merged
+    from mms_command_tools import merge_dicts
+
+    return merge_dicts(base, override)
 
 
 def _pref_bool(value):
-    if isinstance(value, bool):
-        return value
-    raw = str(value or "").strip().lower()
-    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
-        return True
-    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
-        return False
-    return None
+    from mms_command_tools import pref_bool
+
+    return pref_bool(value)
 
 
 def _pref_enable_disable(value):
-    enabled = _pref_bool(value)
-    if enabled is True:
-        return "enable"
-    if enabled is False:
-        return "disable"
-    raw = str(value or "").strip().lower()
-    if raw in {"enable", "enabled", "disable", "disabled"}:
-        return "enable" if raw.startswith("enable") else "disable"
-    return ""
+    from mms_command_tools import pref_enable_disable
+
+    return pref_enable_disable(value)
 
 
 def _pref_reasoning_effort(value):
-    raw = str(value or "").strip().lower()
-    return raw if raw in {"low", "medium", "high", "xhigh"} else ""
+    from mms_command_tools import pref_reasoning_effort
+
+    return pref_reasoning_effort(value)
 
 
 def _pref_agent_pack(value):
-    if value is None:
-        return ""
-    raw = str(value or "").strip().lower().replace("_", "-")
-    if not raw:
-        return ""
-    if raw in {"none", "off", "disable", "disabled", "false", "0"}:
-        return "none"
-    if raw in {"ecc", "everything-claude-code"}:
-        return "ecc"
-    if raw in {"omc", "oh-my-claudecode", "oh-my-claude-code"}:
-        return "omc"
-    return ""
+    from mms_command_tools import pref_agent_pack
+
+    return pref_agent_pack(value)
 
 
 def _sanitize_surface_list(values):
-    if isinstance(values, str):
-        values = [values]
-    if not isinstance(values, (list, tuple, set)):
-        return []
-    result = []
-    seen = set()
-    for item in values:
-        text = str(item or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        result.append(text)
-    return result
+    from mms_command_tools import sanitize_surface_list
+
+    return sanitize_surface_list(values)
 
 
 def _sanitize_disabled_session_surfaces(payload):
-    payload = payload if isinstance(payload, dict) else {}
-    aliases = {
-        "mcp": "mcp",
-        "mcps": "mcp",
-        "mcp_servers": "mcp",
-        "skills": "skills",
-        "skill": "skills",
-        "hooks": "hooks",
-        "hook": "hooks",
-    }
-    result = {}
-    for key, values in payload.items():
-        normalized_key = aliases.get(str(key or "").strip().lower())
-        if not normalized_key:
-            continue
-        cleaned = _sanitize_surface_list(values)
-        if cleaned:
-            result[normalized_key] = cleaned
-    return result
+    from mms_command_tools import sanitize_disabled_session_surfaces
+
+    return sanitize_disabled_session_surfaces(payload)
 
 
 def _sanitize_launch_preferences(payload):

@@ -878,6 +878,98 @@ def parse_csv_values(raw_value, allowed_values=None, *, console=None):
     return values
 
 
+def merge_dicts(base, override):
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = merge_dicts(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def pref_bool(value):
+    if isinstance(value, bool):
+        return value
+    raw = str(value or "").strip().lower()
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    return None
+
+
+def pref_enable_disable(value):
+    enabled = pref_bool(value)
+    if enabled is True:
+        return "enable"
+    if enabled is False:
+        return "disable"
+    raw = str(value or "").strip().lower()
+    if raw in {"enable", "enabled", "disable", "disabled"}:
+        return "enable" if raw.startswith("enable") else "disable"
+    return ""
+
+
+def pref_reasoning_effort(value):
+    raw = str(value or "").strip().lower()
+    return raw if raw in {"low", "medium", "high", "xhigh"} else ""
+
+
+def pref_agent_pack(value):
+    if value is None:
+        return ""
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if not raw:
+        return ""
+    if raw in {"none", "off", "disable", "disabled", "false", "0"}:
+        return "none"
+    if raw in {"ecc", "everything-claude-code"}:
+        return "ecc"
+    if raw in {"omc", "oh-my-claudecode", "oh-my-claude-code"}:
+        return "omc"
+    return ""
+
+
+def sanitize_surface_list(values):
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    result = []
+    seen = set()
+    for item in values:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def sanitize_disabled_session_surfaces(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    aliases = {
+        "mcp": "mcp",
+        "mcps": "mcp",
+        "mcp_servers": "mcp",
+        "skills": "skills",
+        "skill": "skills",
+        "hooks": "hooks",
+        "hook": "hooks",
+    }
+    result = {}
+    for key, values in payload.items():
+        normalized_key = aliases.get(str(key or "").strip().lower())
+        if not normalized_key:
+            continue
+        cleaned = sanitize_surface_list(values)
+        if cleaned:
+            result[normalized_key] = cleaned
+    return result
+
+
 def infer_model_family(model_name, *, model_families):
     raw = str(model_name or "").strip().lower()
     parts = raw.rsplit("/", 1)
