@@ -318,6 +318,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --apply --json
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --source-config-dir ~/.config/mms --apply --json
+./mmf registry v2-save-candidate --config-dir "$MMS_CONFIG_ROOT" --plan-json <webui-plan.json> --apply --json
 ./mmf preview import-legacy --from ~/.config/mms --apply --json
 ./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json
 ./mmf preview publish --json
@@ -442,6 +443,15 @@ Current watchdog consumer implementation:
 - WebUI Save writes DB + secret backend.
 - Save triggers backup, publish-approved, verify.
 - Generated bundle becomes the only downstream preview output.
+
+Current Stage 4a implementation:
+
+- `mms registry v2-save-candidate` / `mmf registry v2-save-candidate` accepts a WebUI plan JSON (`config`, `model_policy`, `credential_updates`) or direct config/policy JSON and is dry-run unless `--apply`.
+- `--apply` is preview-root guarded by default; stable roots require explicit `--allow-stable`.
+- The command initializes the selected preview root if needed, backs up an existing preview DB before writing, then writes candidate `route`, `policy`, and `profile` revisions into SQLite.
+- Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB and `secret_backend`, generated bundle, and legacy compatibility files are not written in this slice.
+- If candidate write fails after backup, the preview DB is restored from the pre-write backup.
+- WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after publish/verify rollback is wired.
 
 ### Stage 5 - Router Export From DB
 

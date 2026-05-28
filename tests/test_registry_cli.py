@@ -746,6 +746,213 @@ def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path)
     assert not stable_root.exists()
 
 
+def _registry_v2_candidate_config() -> dict:
+    return {
+        "provider": {"default": "primary-local"},
+        "providers": [
+            {
+                "id": "primary-local",
+                "name": "Primary Local",
+                "enabled": True,
+                "role": "primary",
+                "priority": 100,
+                "default_openai_base_url": "https://primary.example/v1",
+                "api_key": "sk-primary-local-secret",
+                "models_endpoint": "/models",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex", "opencode"],
+                "fallback_models": ["shared-model"],
+                "extra_models": ["manual-model"],
+            },
+            {
+                "id": "disabled-local",
+                "enabled": False,
+                "default_openai_base_url": "https://disabled.example/v1",
+                "fallback_models": ["disabled-model"],
+            },
+        ],
+    }
+
+
+def test_registry_v2_save_candidate_writes_preview_db_without_secrets(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    policy = {
+        "version": 1,
+        "models": {
+            "shared-model": {"visible": True, "favorite": True},
+            "manual-model": {"visible": False},
+        },
+    }
+
+    dry_run = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        credential_updates=[{"provider_id": "primary-local", "api_key": "sk-redacted"}],
+    )
+    assert dry_run["skipped"] is True
+    assert dry_run["candidate"]["route_entry_count"] == 2
+    assert not (config_dir / "registry").exists()
+
+    summary = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        credential_updates=[{"provider_id": "primary-local", "api_key": "sk-redacted"}],
+        apply=True,
+        command_name="mmf registry",
+    )
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    db_text = db_path.read_bytes()
+
+    assert summary["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_CANDIDATE_SCHEMA
+    assert summary["skipped"] is False
+    assert summary["backup"]["reason"] == "new_db"
+    assert summary["route_candidates"]["provider_route_count"] == 2
+    assert summary["route_candidates"]["route_group_count"] == 2
+    assert summary["policy_candidate"]["model_count"] == 2
+    assert summary["profile_candidate"]["provider_count"] == 2
+    assert summary["writes"]["generated_latest_approved_bundle"] is False
+    assert summary["writes"]["secret_backend"] is False
+    assert b"sk-primary-local-secret" not in db_text
+    assert not (config_dir / "generated" / "model-registry.latest-approved.json").exists()
+
+    db = sqlite3.connect(db_path)
+    try:
+        route_revision = summary["route_candidates"]["revision_id"]
+        assert db.execute("SELECT count(*) FROM provider_route WHERE route_revision_id = ?", (route_revision,)).fetchone()[0] == 2
+        refs = {row[0] for row in db.execute("SELECT secret_ref FROM provider_route WHERE route_revision_id = ?", (route_revision,))}
+        assert refs == {"pending-webui:primary_local:api_key"}
+        sources = {
+            json.loads(row[0])["source"]
+            for row in db.execute("SELECT metadata_json FROM registry_revision WHERE revision_id IN (?, ?, ?)", (
+                summary["route_candidates"]["revision_id"],
+                summary["policy_candidate"]["revision_id"],
+                summary["profile_candidate"]["revision_id"],
+            ))
+        }
+        assert sources == {"registry-v2-save-candidate"}
+    finally:
+        db.close()
+
+
+def test_registry_v2_save_candidate_refuses_stable_root_without_allow_stable(tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+
+    try:
+        mms_registry_cli.apply_registry_v2_save_candidate(
+            config_dir=stable_root,
+            config_payload=_registry_v2_candidate_config(),
+            apply=True,
+            command_name="mms registry",
+        )
+    except mms_registry.RegistryValidationError as exc:
+        assert "refusing to write registry v2 save candidate into stable config root" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("stable config root candidate write should require --allow-stable")
+    assert not stable_root.exists()
+
+
+def test_registry_v2_save_candidate_rolls_back_preview_db_on_failure(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    first = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        apply=True,
+        command_name="mmf registry",
+    )
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    first_route_revision = first["route_candidates"]["revision_id"]
+
+    original = mms_registry_cli._insert_registry_v2_candidate_revisions
+
+    def write_then_fail(db, payload, *, actor):
+        original(db, payload, actor=actor)
+        raise RuntimeError("injected candidate failure")
+
+    monkeypatch.setattr(mms_registry_cli, "_insert_registry_v2_candidate_revisions", write_then_fail)
+    broken_cfg = _registry_v2_candidate_config()
+    broken_cfg["providers"][0]["extra_models"] = ["manual-model", "should-rollback"]
+
+    try:
+        mms_registry_cli.apply_registry_v2_save_candidate(
+            config_dir=config_dir,
+            config_payload=broken_cfg,
+            apply=True,
+            command_name="mmf registry",
+        )
+    except RuntimeError as exc:
+        assert "injected candidate failure" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("injected failure should be raised")
+
+    backups = list((config_dir / "backups" / "db").glob("model-registry.*.sqlite"))
+    assert backups
+    db = sqlite3.connect(db_path)
+    try:
+        route_revisions = {
+            row[0]
+            for row in db.execute("SELECT revision_id, metadata_json FROM registry_revision WHERE revision_class = 'route'")
+            if json.loads(row[1]).get("source") == "registry-v2-save-candidate"
+        }
+        assert route_revisions == {first_route_revision}
+        assert db.execute("SELECT count(*) FROM provider_route").fetchone()[0] == first["route_candidates"]["provider_route_count"]
+        assert not db.execute("SELECT 1 FROM route_group WHERE logical_model = 'should-rollback'").fetchone()
+    finally:
+        db.close()
+
+
+def test_mmf_registry_v2_save_candidate_cli_accepts_webui_plan_json(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema": "mms.setup_web.plan.v1",
+                "config": _registry_v2_candidate_config(),
+                "model_policy": {"version": 1, "models": {"shared-model": {"visible": True}}},
+                "credential_updates": [{"provider_id": "primary-local", "api_key": "***"}],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "registry",
+            "v2-save-candidate",
+            "--config-dir",
+            str(config_dir),
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_CANDIDATE_SCHEMA
+    assert payload["route_candidates"]["provider_route_count"] == 2
+    assert payload["policy_candidate"]["model_count"] == 1
+    assert "sk-primary-local-secret" not in combined
+    assert (config_dir / "registry" / "model-registry.sqlite").exists()
+
+
 def test_mmf_preview_init_creates_preview_layout_without_stable_fallback(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     real_home = tmp_path / "home"

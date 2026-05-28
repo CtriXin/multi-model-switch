@@ -42,6 +42,7 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
                 "  mmf preview init --json",
                 "  mmf preview import-legacy --from ~/.config/mms --apply --json",
                 "  mmf preview publish --json",
+                "  mmf registry v2-save-candidate --plan-json <plan.json> --apply --json",
                 "",
                 "Safety: preview writes stay under MMS_CONFIG_ROOT; source roots are read-only.",
             ]

@@ -6,7 +6,7 @@ import shlex
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from urllib.request import Request, urlopen
 
 import mms_registry
@@ -25,6 +25,7 @@ LEGACY_IMPORT_SCHEMA = "mms.legacy_config_import.v1"
 LEGACY_SECRET_BACKEND_SCHEMA = "mms.legacy_secret_backend.v1"
 CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
 REGISTRY_V2_SAVE_PLAN_SCHEMA = "mms.setup_web.registry_v2_save_plan.v1"
+REGISTRY_V2_SAVE_CANDIDATE_SCHEMA = "mms.registry_v2_save_candidate.v1"
 CONFIG_ROOT_LAYOUT_DIRS = (
     "registry",
     "secrets",
@@ -95,6 +96,19 @@ def _load_json_mapping(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _read_json_mapping(path: str | Path, *, label: str = "json") -> dict[str, Any]:
+    json_path = Path(path).expanduser()
+    if not json_path.exists():
+        raise mms_registry.RegistryValidationError(f"{label} not found: {json_path}")
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise mms_registry.RegistryValidationError(f"{label} is invalid JSON: {json_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise mms_registry.RegistryValidationError(f"{label} must be a JSON object: {json_path}")
+    return payload
 
 
 def _secret_fingerprint(value: Any) -> str:
@@ -911,6 +925,259 @@ def _provider_secret_ref(report: dict[str, Any], provider_id: str) -> str:
     return ""
 
 
+def _provider_route_models(provider: Mapping[str, Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def add(model_id: Any) -> None:
+        text = str(model_id or "").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        result.append(text)
+
+    for key in ("fallback_models", "extra_models"):
+        for model in _as_string_list(provider.get(key)):
+            add(model)
+    hidden = set(_as_string_list(provider.get("hidden_models")))
+    models = provider.get("models") if isinstance(provider.get("models"), list) else []
+    for item in models:
+        if isinstance(item, Mapping):
+            model_id = str(item.get("id") or item.get("model") or "").strip()
+            if item.get("visible") is False or model_id in hidden:
+                continue
+            add(model_id)
+        else:
+            model_id = str(item or "").strip()
+            if model_id and model_id not in hidden:
+                add(model_id)
+    return result
+
+
+def _provider_route_secret_ref(provider: Mapping[str, Any], credential_provider_ids: set[str]) -> tuple[str, str]:
+    provider_id = str(provider.get("id") or provider.get("provider_id") or "default").strip() or "default"
+    explicit_ref = str(provider.get("secret_ref") or "").strip()
+    if explicit_ref:
+        return explicit_ref, "provider.secret_ref"
+    if provider_id in credential_provider_ids:
+        return f"pending-webui:{_secret_ref_part(provider_id)}:api_key", "credential_update"
+    for field in ("api_key", "openai_api_key", "anthropic_api_key"):
+        value = str(provider.get(field) or "").strip()
+        if value:
+            return f"legacy-config:{_secret_ref_part(provider_id)}:{field}", f"config.{field}"
+    return "", ""
+
+
+def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str, Any]:
+    providers = [item for item in (config_payload.get("providers") or []) if isinstance(item, Mapping)]
+    profiles: dict[str, dict[str, Any]] = {}
+    for provider in providers:
+        provider_id = str(provider.get("id") or provider.get("provider_id") or "").strip()
+        if not provider_id:
+            continue
+        profiles[provider_id] = {
+            "name": str(provider.get("name") or provider_id),
+            "role": str(provider.get("role") or "auto"),
+            "priority": int(provider.get("priority") or 0),
+            "models_endpoint": str(provider.get("models_endpoint") or ""),
+            "protocols": _as_string_list(provider.get("protocols")),
+            "supported_clis": _as_string_list(provider.get("supported_clis")),
+            "enabled": provider.get("enabled", True) is not False,
+        }
+    payload = {
+        "schema": "mms.registry_v2.profile_candidate.v1",
+        "source": "registry-v2-save-candidate",
+        "profiles": profiles,
+    }
+    mms_registry.validate_non_secret_payload(payload, context="registry_v2_profile_candidate")
+    return payload
+
+
+def _registry_v2_policy_payload(policy_payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    payload = dict(policy_payload or {})
+    if not payload:
+        payload = {
+            "version": 1,
+            "description": "Registry v2 candidate policy placeholder.",
+            "models": {},
+            "projects": {},
+        }
+    payload.setdefault("source", "registry-v2-save-candidate")
+    mms_registry.validate_non_secret_payload(payload, context="registry_v2_policy_candidate")
+    return payload
+
+
+def _registry_v2_candidate_payload(
+    config_payload: Mapping[str, Any],
+    *,
+    policy_payload: Mapping[str, Any] | None = None,
+    credential_updates: list[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    providers = [item for item in (config_payload.get("providers") or []) if isinstance(item, Mapping)]
+    credential_provider_ids = {
+        str(item.get("provider_id") or item.get("id") or "").strip()
+        for item in (credential_updates or [])
+        if isinstance(item, Mapping)
+    }
+    route_entries: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for provider in providers:
+        provider_id = str(provider.get("id") or provider.get("provider_id") or "").strip()
+        if not provider_id:
+            skipped.append({"reason": "missing_provider_id"})
+            continue
+        if provider.get("enabled", True) is False:
+            skipped.append({"provider_id": provider_id, "reason": "provider_disabled"})
+            continue
+        models = _provider_route_models(provider)
+        if not models:
+            skipped.append({"provider_id": provider_id, "reason": "no_configured_models"})
+            continue
+        openai_base = str(
+            provider.get("openai_base_url")
+            or provider.get("default_openai_base_url")
+            or provider.get("base_url")
+            or ""
+        ).strip().rstrip("/")
+        anthropic_base = str(provider.get("anthropic_base_url") or provider.get("default_anthropic_base_url") or "").strip().rstrip("/")
+        secret_ref, secret_source = _provider_route_secret_ref(provider, credential_provider_ids)
+        key_fingerprint = ""
+        for field in ("api_key", "openai_api_key", "anthropic_api_key"):
+            if provider.get(field):
+                key_fingerprint = _secret_fingerprint(provider.get(field))
+                break
+        for model in models:
+            route_entries.append(
+                {
+                    "provider_id": provider_id,
+                    "model": model,
+                    "priority": int(provider.get("priority") or 0),
+                    "anthropic_base_url": anthropic_base,
+                    "openai_base_url": openai_base,
+                    "secret_ref": secret_ref,
+                    "metadata": {
+                        "source": "registry-v2-save-candidate",
+                        "name": str(provider.get("name") or provider_id),
+                        "role": str(provider.get("role") or "auto"),
+                        "models_endpoint": str(provider.get("models_endpoint") or ""),
+                        "protocols": _as_string_list(provider.get("protocols")),
+                        "supported_clis": _as_string_list(provider.get("supported_clis")),
+                        "secret_source": secret_source,
+                        "secret_fingerprint": key_fingerprint,
+                    },
+                }
+            )
+    payload = {
+        "schema": REGISTRY_V2_SAVE_CANDIDATE_SCHEMA,
+        "source": "registry-v2-save-candidate",
+        "captured_at": mms_registry.utc_now(),
+        "route_entries": route_entries,
+        "policy": _registry_v2_policy_payload(policy_payload),
+        "profile": _registry_v2_profile_payload(config_payload),
+        "skipped": skipped,
+    }
+    mms_registry.validate_non_secret_payload(payload, context="registry_v2_save_candidate")
+    return payload
+
+
+def _insert_registry_v2_candidate_revisions(db: sqlite3.Connection, payload: dict[str, Any], *, actor: str) -> dict[str, Any]:
+    route_entries = [item for item in (payload.get("route_entries") or []) if isinstance(item, dict)]
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    source = "registry-v2-save-candidate"
+    result: dict[str, Any] = {
+        "route": {"revision_id": "", "route_group_count": 0, "provider_route_count": 0},
+        "policy": {"revision_id": "", "model_count": 0},
+        "profile": {"revision_id": "", "provider_count": 0},
+    }
+    if route_entries:
+        digest = mms_registry.sha256_hex(json.dumps(route_entries, ensure_ascii=False, sort_keys=True))
+        route_revision_id = f"registry_v2_route_{stamp}_{digest[:12]}"
+        mms_registry.create_revision(
+            db,
+            route_revision_id,
+            "route",
+            status="candidate",
+            revision_hash=digest,
+            metadata={"source": source, "route_count": len(route_entries)},
+        )
+        groups: set[str] = set()
+        for idx, entry in enumerate(route_entries, start=1):
+            model = str(entry.get("model") or "").strip()
+            provider_id = str(entry.get("provider_id") or "").strip()
+            group_id = f"{route_revision_id}_{_slug_id(model, 'model')}"
+            if group_id not in groups:
+                mms_registry.insert_route_group(
+                    db,
+                    group_id,
+                    route_revision_id,
+                    logical_model=model,
+                    display_name=model,
+                    metadata={"source": source},
+                )
+                groups.add(group_id)
+            mms_registry.insert_provider_route(
+                db,
+                f"{group_id}_{_slug_id(provider_id, 'provider')}_{idx}",
+                group_id,
+                route_revision_id,
+                provider_id=provider_id,
+                wire_model_id=model,
+                priority=int(entry.get("priority") or 0),
+                anthropic_base_url=str(entry.get("anthropic_base_url") or ""),
+                openai_base_url=str(entry.get("openai_base_url") or ""),
+                secret_ref=str(entry.get("secret_ref") or ""),
+                validation_state="candidate",
+                metadata=entry.get("metadata") or {},
+            )
+        result["route"] = {
+            "revision_id": route_revision_id,
+            "route_group_count": len(groups),
+            "provider_route_count": len(route_entries),
+        }
+
+    policy_payload = payload.get("policy") if isinstance(payload.get("policy"), dict) else {}
+    policy_digest = mms_registry.sha256_hex(json.dumps(policy_payload, ensure_ascii=False, sort_keys=True))
+    policy_revision_id = f"registry_v2_policy_{stamp}_{policy_digest[:12]}"
+    policy_models = policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}
+    mms_registry.create_revision(
+        db,
+        policy_revision_id,
+        "policy",
+        status="candidate",
+        revision_hash=policy_digest,
+        metadata={"source": source, "payload": policy_payload, "model_count": len(policy_models)},
+    )
+    result["policy"] = {"revision_id": policy_revision_id, "model_count": len(policy_models)}
+
+    profile_payload = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
+    profile_digest = mms_registry.sha256_hex(json.dumps(profile_payload, ensure_ascii=False, sort_keys=True))
+    profile_revision_id = f"registry_v2_profile_{stamp}_{profile_digest[:12]}"
+    profiles = profile_payload.get("profiles") if isinstance(profile_payload.get("profiles"), dict) else {}
+    mms_registry.create_revision(
+        db,
+        profile_revision_id,
+        "profile",
+        status="candidate",
+        revision_hash=profile_digest,
+        metadata={"source": source, "payload": profile_payload, "provider_count": len(profiles)},
+    )
+    result["profile"] = {"revision_id": profile_revision_id, "provider_count": len(profiles)}
+
+    with db:
+        db.execute(
+            """
+            INSERT INTO audit_log(event_type, actor, target_type, target_id, details_json)
+            VALUES ('registry_v2_save.candidate', ?, 'registry_revision', ?, ?)
+            """,
+            (
+                actor,
+                result["route"].get("revision_id") or policy_revision_id,
+                json.dumps(result, ensure_ascii=False, sort_keys=True),
+            ),
+        )
+    return result
+
+
 def _legacy_artifact_summary(root: Path) -> dict[str, Any]:
     policy = _load_json_mapping(root / "model-policy.json")
     profiles = _load_json_mapping(root / "provider-profiles.json")
@@ -1283,6 +1550,133 @@ def import_legacy_config(
         summary["secret_backend"] = _write_legacy_secret_backend(target_root=root, source_root=source_root)
     return summary
 
+
+
+def apply_registry_v2_save_candidate(
+    *,
+    config_dir: str | Path | None = None,
+    config_payload: Mapping[str, Any] | None = None,
+    policy_payload: Mapping[str, Any] | None = None,
+    credential_updates: list[Mapping[str, Any]] | None = None,
+    db_path: str | Path | None = None,
+    apply: bool = False,
+    allow_stable: bool = False,
+    command_name: str = "mms registry",
+) -> dict[str, Any]:
+    """Write preview DB candidate revisions for the future v2 save path."""
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
+    if root_status.get("mode") != "preview" and not allow_stable:
+        raise mms_registry.RegistryValidationError("refusing to write registry v2 save candidate into stable config root without --allow-stable")
+    config_payload = config_payload if isinstance(config_payload, Mapping) else {}
+    candidate_payload = _registry_v2_candidate_payload(
+        config_payload,
+        policy_payload=policy_payload if isinstance(policy_payload, Mapping) else {},
+        credential_updates=credential_updates or [],
+    )
+    target_db = Path(db_path).expanduser() if db_path is not None else mms_registry.default_registry_db_path(config_dir=root)
+    route_entries = candidate_payload.get("route_entries") if isinstance(candidate_payload.get("route_entries"), list) else []
+    policy = candidate_payload.get("policy") if isinstance(candidate_payload.get("policy"), dict) else {}
+    profile = candidate_payload.get("profile") if isinstance(candidate_payload.get("profile"), dict) else {}
+    summary: dict[str, Any] = {
+        "schema": REGISTRY_V2_SAVE_CANDIDATE_SCHEMA,
+        "apply": bool(apply),
+        "config_root": str(root),
+        "db_path": str(target_db),
+        "root": root_status,
+        "plaintext_secret_in_db": False,
+        "candidate": {
+            "route_entry_count": len(route_entries),
+            "policy_model_count": len(policy.get("models") if isinstance(policy.get("models"), dict) else {}),
+            "profile_provider_count": len(profile.get("profiles") if isinstance(profile.get("profiles"), dict) else {}),
+            "skipped": candidate_payload.get("skipped") or [],
+        },
+        "writes": {
+            "target_preview_root": root_status.get("mode") == "preview",
+            "db_candidate_revision": bool(apply),
+            "secret_backend": False,
+            "generated_latest_approved_bundle": False,
+            "legacy_files": False,
+        },
+    }
+    if not apply:
+        summary["skipped"] = True
+        summary["skip_reason"] = "dry_run_apply_required"
+        return summary
+
+    db_existed_before = target_db.exists()
+    init_summary = init_config_root(config_dir=root, create_db=True, allow_stable=allow_stable, command_name=command_name)
+    backup_summary = (
+        mms_registry.backup_registry_db(config_dir=root, db_path=target_db, reason="pre-registry-v2-save-candidate")
+        if db_existed_before
+        else {"skipped": True, "reason": "new_db", "source_db_path": str(target_db)}
+    )
+    summary["init"] = init_summary
+    summary["backup"] = backup_summary
+    db = None
+    try:
+        db = mms_registry.open_registry(target_db)
+        revisions = _insert_registry_v2_candidate_revisions(
+            db,
+            candidate_payload,
+            actor=command_name.split()[0] if command_name else "mms",
+        )
+    except Exception as exc:
+        if db is not None:
+            db.close()
+            db = None
+        rollback: dict[str, Any] = {"attempted": False, "restored": False}
+        backup_path = str(backup_summary.get("backup_path") or "") if isinstance(backup_summary, dict) else ""
+        if backup_path:
+            rollback["attempted"] = True
+            try:
+                rollback["restore"] = mms_registry.restore_registry_db(
+                    backup_path,
+                    config_dir=root,
+                    db_path=target_db,
+                    apply=True,
+                    reason="registry-v2-save-candidate-failure",
+                )
+                rollback["restored"] = True
+            except Exception as rollback_exc:  # pragma: no cover - defensive path
+                rollback["error"] = f"{type(rollback_exc).__name__}: {rollback_exc}"
+        summary["rollback"] = rollback
+        summary["error"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        if db is not None:
+            db.close()
+    summary.update(
+        {
+            "skipped": False,
+            "route_candidates": revisions.get("route", {}),
+            "policy_candidate": revisions.get("policy", {}),
+            "profile_candidate": revisions.get("profile", {}),
+        }
+    )
+    return summary
+
+
+def _registry_v2_candidate_inputs_from_files(
+    *,
+    plan_json: str = "",
+    config_json: str = "",
+    policy_json: str = "",
+) -> tuple[dict[str, Any], dict[str, Any], list[Mapping[str, Any]]]:
+    plan = _read_json_mapping(plan_json, label="plan-json") if str(plan_json or "").strip() else {}
+    if plan:
+        config_payload = plan.get("config") if isinstance(plan.get("config"), dict) else {}
+        policy_payload = plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {}
+        credentials = plan.get("credential_updates") if isinstance(plan.get("credential_updates"), list) else []
+    else:
+        config_payload = _read_json_mapping(config_json, label="config-json") if str(config_json or "").strip() else {}
+        policy_payload = _read_json_mapping(policy_json, label="policy-json") if str(policy_json or "").strip() else {}
+        credentials = []
+    if not config_payload:
+        raise mms_registry.RegistryValidationError("registry v2 save candidate requires --plan-json or --config-json")
+    credential_updates = [item for item in credentials if isinstance(item, Mapping)]
+    return config_payload, policy_payload, credential_updates
 
 
 def _reference_snapshot_paths(paths: Iterable[str | Path] | None = None) -> list[Path]:
@@ -2136,6 +2530,31 @@ def _print_registry_v2_save_plan(plan: dict[str, Any]) -> None:
     print(f"next_implementation_step={plan.get('next_implementation_step', '')}")
 
 
+def _print_registry_v2_save_candidate(summary: dict[str, Any]) -> None:
+    candidate = summary.get("candidate") if isinstance(summary.get("candidate"), dict) else {}
+    route = summary.get("route_candidates") if isinstance(summary.get("route_candidates"), dict) else {}
+    policy = summary.get("policy_candidate") if isinstance(summary.get("policy_candidate"), dict) else {}
+    profile = summary.get("profile_candidate") if isinstance(summary.get("profile_candidate"), dict) else {}
+    backup = summary.get("backup") if isinstance(summary.get("backup"), dict) else {}
+    print("MMS Registry v2 Save Candidate")
+    print(f"schema={summary.get('schema')}")
+    print(f"apply={summary.get('apply', False)}")
+    print(f"skipped={summary.get('skipped', False)}")
+    print(f"skip_reason={summary.get('skip_reason', '')}")
+    print(f"config_root={summary.get('config_root')}")
+    print(f"db_path={summary.get('db_path')}")
+    print(f"route_entry_count={candidate.get('route_entry_count', 0)}")
+    print(f"policy_model_count={candidate.get('policy_model_count', 0)}")
+    print(f"profile_provider_count={candidate.get('profile_provider_count', 0)}")
+    print(f"route_revision_id={route.get('revision_id', '')}")
+    print(f"provider_route_count={route.get('provider_route_count', 0)}")
+    print(f"policy_revision_id={policy.get('revision_id', '')}")
+    print(f"profile_revision_id={profile.get('revision_id', '')}")
+    print(f"backup_skipped={backup.get('skipped', '')}")
+    print(f"backup_path={backup.get('backup_path', '')}")
+    print(f"plaintext_secret_in_db={summary.get('plaintext_secret_in_db', False)}")
+
+
 def _print_preview_doctor(summary: dict[str, Any]) -> None:
     print("MMF Preview Doctor")
     print(f"result={summary.get('result')}")
@@ -2238,6 +2657,17 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     save_plan_parser = subparsers.add_parser("save-plan", help="Read-only v2 DB-truth save plan; does not write")
     save_plan_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     save_plan_parser.add_argument("--json", action="store_true", help="Print the full save plan as JSON")
+    save_candidate_parser = subparsers.add_parser(
+        "v2-save-candidate",
+        help="Write preview DB candidate revisions from a WebUI plan/config JSON; dry-run unless --apply",
+    )
+    save_candidate_parser.add_argument("--config-dir", default="", help="Override MMS config dir to write")
+    save_candidate_parser.add_argument("--plan-json", default="", help="WebUI build_config_plan JSON containing config/model_policy")
+    save_candidate_parser.add_argument("--config-json", default="", help="Config JSON object to convert into DB candidates")
+    save_candidate_parser.add_argument("--policy-json", default="", help="Optional model policy JSON object")
+    save_candidate_parser.add_argument("--apply", action="store_true", help="Actually write candidate revisions into the preview DB")
+    save_candidate_parser.add_argument("--allow-stable", action="store_true", help="Allow writing into a stable root explicitly")
+    save_candidate_parser.add_argument("--json", action="store_true", help="Print the full candidate summary as JSON")
     preview_doctor_parser = subparsers.add_parser("preview-doctor", help="Read-only preview root doctor with one next action")
     preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     preview_doctor_parser.add_argument("--json", action="store_true", help="Print the full doctor summary as JSON")
@@ -2355,6 +2785,34 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_registry_v2_save_plan(plan)
+        return 0
+    if args.subcommand == "v2-save-candidate":
+        try:
+            config_payload, policy_payload, credential_updates = _registry_v2_candidate_inputs_from_files(
+                plan_json=args.plan_json or "",
+                config_json=args.config_json or "",
+                policy_json=args.policy_json or "",
+            )
+            summary = apply_registry_v2_save_candidate(
+                config_dir=args.config_dir or None,
+                config_payload=config_payload,
+                policy_payload=policy_payload,
+                credential_updates=credential_updates,
+                db_path=db_path,
+                apply=bool(args.apply),
+                allow_stable=bool(args.allow_stable),
+                command_name=command_name,
+            )
+        except mms_registry.RegistryValidationError as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2, sort_keys=True))
+            else:
+                print(f"error={exc}")
+            return 2
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_registry_v2_save_candidate(summary)
         return 0
     if args.subcommand == "preview-doctor":
         summary = preview_doctor(config_dir=args.config_dir or None, command_name=command_name)
@@ -2541,6 +2999,7 @@ __all__ = [
     "model_source_status",
     "preview_doctor",
     "preview_prepare",
+    "apply_registry_v2_save_candidate",
     "registry_v2_save_plan",
     "scheduled_refresh",
     "backup_registry_db",
