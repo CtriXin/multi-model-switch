@@ -309,6 +309,39 @@ def test_watchdog_fails_closed_on_manifest_canonical_path_drift(tmp_path: Path) 
     assert any("unexpected manifest canonical_path for router" in item["detail"] for item in report["failures"])
 
 
+def test_watchdog_fails_closed_on_non_secret_bundle_secret_leak(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    policy_path = tmp_path / "generated" / "model-policy.effective.json"
+    policy_path.write_text(
+        json.dumps({"version": 1, "models": {"fresh-model": {"api_key": "sk-leaked-secret-123456789"}}}),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["policy"]["sha256"] = mms_registry.sha256_hex(policy_path.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("secret-looking field in non-secret data" in item["detail"] for item in report["failures"])
+    assert "sk-leaked-secret" not in json.dumps(report, ensure_ascii=False)
+
+
 def test_watchdog_requires_bundle_for_explicit_config_root(monkeypatch, tmp_path: Path) -> None:
     watchdog = _load_watchdog()
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path))

@@ -468,3 +468,12 @@ def test_verify_latest_approved_bundle_rejects_incomplete_or_escaping_manifest(t
     output_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
     with pytest.raises(mms_registry.RegistryValidationError, match="unexpected manifest canonical_path for router"):
         mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)
+
+    manifest["files"]["router"]["canonical_path"] = "generated/model-routes.json"
+    policy_path = tmp_path / "generated/model-policy.effective.json"
+    _write_json(policy_path, {"version": 1, "models": {"kimi-k2.5": {"api_key": "sk-leaked-secret-123456789"}}})
+    manifest["files"]["policy"]["sha256"] = hashlib.sha256(policy_path.read_bytes()).hexdigest()
+    output_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_registry.RegistryValidationError, match="secret-looking field in non-secret data") as exc:
+        mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)
+    assert "sk-leaked-secret" not in str(exc.value)

@@ -72,6 +72,8 @@ The `router` manifest entry must be `sensitivity=secret`; all other required
 entries must be `sensitivity=non-secret`. Required canonical paths are exact:
 consumers must reject manifests that point these keys at root legacy aliases or
 other in-root files.
+Consumers must also reject secret-looking fields or plaintext key patterns in
+non-secret files, even when the manifest hash matches.
 
 ## Human / Script Checks
 

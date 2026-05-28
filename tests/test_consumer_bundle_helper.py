@@ -166,3 +166,13 @@ def test_load_verified_consumer_bundle_fails_closed_for_invalid_manifest(tmp_pat
     paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="unexpected manifest canonical_path for router"):
         mms_consumer_bundle.load_verified_consumer_bundle(config_root=wrong_path)
+
+    non_secret_leak = tmp_path / "non-secret-leak"
+    paths = _write_bundle(non_secret_leak)
+    _write_json(paths["policy"], {"version": 1, "models": {"gpt-test": {"api_key": "sk-leaked-secret-123456789"}}})
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["files"]["policy"]["sha256"] = _sha256(paths["policy"])
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="secret-looking field in non-secret data") as exc:
+        mms_consumer_bundle.load_verified_consumer_bundle(config_root=non_secret_leak)
+    assert "sk-leaked-secret" not in str(exc.value)

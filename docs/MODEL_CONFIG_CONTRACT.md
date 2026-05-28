@@ -117,6 +117,9 @@ Bundle rules:
 - Consumers must fail closed if a required manifest key points outside its exact
   generated canonical path or uses the wrong sensitivity. Router is `secret`;
   Lineup, Profile, Policy, and Capabilities are `non-secret`.
+- Consumers must rescan non-secret manifest files for secret-looking fields or
+  plaintext key patterns after hash verification; matching hashes do not make a
+  leaked non-secret payload acceptable.
 - Publishing uses atomic temp-file + rename: write canonical payloads first,
   refresh legacy aliases, then rename the manifest last.
 - `provider-profiles.generated.json` and `model-policy.effective.json` are

@@ -2012,10 +2012,16 @@ def verify_latest_approved_bundle(
         file_path = _manifest_file_path(base_dir, entry.get("canonical_path"), name=str(name))
         if not file_path.exists():
             raise RegistryValidationError(f"manifest file missing: {file_path}")
-        actual_hash = sha256_hex(file_path.read_bytes())
+        raw = file_path.read_bytes()
+        actual_hash = sha256_hex(raw)
         expected_hash = str(entry.get("sha256") or "")
         if actual_hash != expected_hash:
             raise RegistryValidationError(f"manifest hash mismatch for {name}: {file_path}")
+        if sensitivity != "secret":
+            try:
+                validate_non_secret_payload(json.loads(raw.decode("utf-8")), context=str(file_path))
+            except json.JSONDecodeError:
+                validate_non_secret_payload(raw.decode("utf-8", errors="replace"), context=str(file_path))
         verified_files[name] = {
             "path": str(file_path),
             "sha256": actual_hash,

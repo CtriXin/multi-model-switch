@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import socket
 import ssl
 import sys
@@ -52,6 +53,33 @@ EXPECTED_BUNDLE_FILES = {
 }
 REQUIRED_BUNDLE_FILES = tuple(EXPECTED_BUNDLE_FILES)
 REQUIRED_REVISION_FIELDS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
+_SECRET_FIELD_PARTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "auth_header",
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "oauth",
+    "password",
+    "passwd",
+    "credential",
+    "cookie",
+)
+_SECRET_REFERENCE_KEYS = {"secret_ref", "secret_refs", "secret_fingerprint", "secret_hash", "key_fingerprint"}
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bsk_live_[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{12,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{12,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+)
 
 OLD_ROUTE_MARKERS = {
     "http://82.156.121.141:4001": "xin fallback should use https://apple.clawopen.online",
@@ -171,6 +199,44 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def looks_like_plaintext_secret(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="ignore")
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text or text in {"<redacted>", "[redacted]", "***", "****"}:
+        return False
+    return any(pattern.search(text) for pattern in _SECRET_VALUE_PATTERNS)
+
+
+def validate_non_secret_payload(payload: Any, *, context: str) -> None:
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for raw_key, item in value.items():
+                key = str(raw_key)
+                normalized = key.lower().replace("-", "_")
+                child_path = f"{path}.{key}" if path else key
+                if normalized in _SECRET_REFERENCE_KEYS:
+                    if looks_like_plaintext_secret(item):
+                        raise ValueError(f"{child_path} contains a plaintext secret, not a reference")
+                    continue
+                if any(part in normalized for part in _SECRET_FIELD_PARTS) and item not in (None, "", [], {}):
+                    raise ValueError(f"{child_path} is a secret-looking field in non-secret data")
+                walk(item, child_path)
+            return
+        if isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                walk(item, f"{path}[{index}]")
+            return
+        if looks_like_plaintext_secret(value):
+            raise ValueError(f"{path} contains a plaintext secret-looking value")
+
+    walk(payload, context)
+
+
 def manifest_file_path(config_dir: Path, canonical_path: str, *, name: str) -> Path:
     relative = Path(str(canonical_path or "").strip())
     if not str(canonical_path or "").strip():
@@ -286,7 +352,8 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
                 "detail": f"manifest file missing: {path}",
                 "payloads": {},
             }
-        actual = sha256_file(path)
+        raw = path.read_bytes()
+        actual = hashlib.sha256(raw).hexdigest()
         if actual != expected:
             return {
                 "status": "invalid",
@@ -296,7 +363,17 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
             }
         verified_files[name] = str(path)
         try:
-            payloads[name] = json.loads(path.read_text(encoding="utf-8"))
+            parsed_payload = json.loads(raw.decode("utf-8"))
+            if sensitivity != "secret":
+                validate_non_secret_payload(parsed_payload, context=str(path))
+            payloads[name] = parsed_payload
+        except ValueError as exc:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": str(exc),
+                "payloads": {},
+            }
         except Exception:
             payloads[name] = {}
     return {
