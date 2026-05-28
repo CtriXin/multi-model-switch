@@ -144,6 +144,34 @@ def config_write_target_path(*, active_config_path, config_path):
     return active_config_path() or config_path
 
 
+def config_lock_path(config_path=None, *, config_write_target_path, config_lock_file):
+    target_path = os.path.abspath(str(config_path or config_write_target_path()))
+    return os.path.join(os.path.dirname(target_path), config_lock_file)
+
+
+def config_audit_path(config_path=None, *, config_write_target_path, config_audit_log):
+    target_path = os.path.abspath(str(config_path or config_write_target_path()))
+    return os.path.join(os.path.dirname(target_path), config_audit_log)
+
+
+def config_backup_root(config_path=None, *, config_write_target_path):
+    target_path = os.path.abspath(str(config_path or config_write_target_path()))
+    return os.path.join(os.path.dirname(target_path), "backups")
+
+
+def sha1_file(path):
+    if not path or not os.path.exists(path):
+        return ""
+    h = hashlib.sha1()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def config_command_hint(*, current_command):
     return f"{current_command()} config api.edit"
 

@@ -211,6 +211,51 @@ def test_runtime_config_and_write_target_helpers_preserve_delegation(monkeypatch
     assert mms_core._config_write_target_path() == "/tmp/default/config.toml"
 
 
+def test_config_path_and_sha1_helpers_preserve_paths_and_hashes(tmp_path, monkeypatch):
+    import hashlib
+    import os
+
+    import mms_command_tools
+    import mms_core
+
+    config_path = tmp_path / "config" / "config.toml"
+    config_path.parent.mkdir()
+    config_path.write_bytes(b"abc")
+    fallback_path = tmp_path / "fallback" / "config.toml"
+
+    assert mms_command_tools.config_lock_path(
+        str(config_path),
+        config_write_target_path=lambda: str(fallback_path),
+        config_lock_file="config.lock",
+    ) == str(config_path.parent / "config.lock")
+    assert mms_command_tools.config_lock_path(
+        None,
+        config_write_target_path=lambda: str(fallback_path),
+        config_lock_file="config.lock",
+    ) == str(fallback_path.parent / "config.lock")
+    assert mms_command_tools.config_audit_path(
+        str(config_path),
+        config_write_target_path=lambda: str(fallback_path),
+        config_audit_log="config-audit.jsonl",
+    ) == str(config_path.parent / "config-audit.jsonl")
+    assert mms_command_tools.config_backup_root(
+        str(config_path),
+        config_write_target_path=lambda: str(fallback_path),
+    ) == str(config_path.parent / "backups")
+    assert mms_command_tools.sha1_file(str(config_path)) == hashlib.sha1(b"abc").hexdigest()
+    assert mms_command_tools.sha1_file("") == ""
+    assert mms_command_tools.sha1_file(str(tmp_path / "missing.toml")) == ""
+
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(fallback_path))
+    monkeypatch.setattr(mms_core, "CONFIG_LOCK_FILE", "config.lock")
+    monkeypatch.setattr(mms_core, "CONFIG_AUDIT_LOG", "config-audit.jsonl")
+    assert mms_core._config_lock_path(str(config_path)) == os.path.join(str(config_path.parent), "config.lock")
+    assert mms_core._config_lock_path() == os.path.join(str(fallback_path.parent), "config.lock")
+    assert mms_core._config_audit_path(str(config_path)) == os.path.join(str(config_path.parent), "config-audit.jsonl")
+    assert mms_core._config_backup_root(str(config_path)) == os.path.join(str(config_path.parent), "backups")
+    assert mms_core._sha1_file(str(config_path)) == hashlib.sha1(b"abc").hexdigest()
+
+
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 

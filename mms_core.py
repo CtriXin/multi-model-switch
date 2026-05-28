@@ -1716,31 +1716,35 @@ def _config_write_target_path():
 
 
 def _config_lock_path(config_path=None):
-    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
-    return os.path.join(os.path.dirname(target_path), CONFIG_LOCK_FILE)
+    from mms_command_tools import config_lock_path
+
+    return config_lock_path(
+        config_path,
+        config_write_target_path=_config_write_target_path,
+        config_lock_file=CONFIG_LOCK_FILE,
+    )
 
 
 def _config_audit_path(config_path=None):
-    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
-    return os.path.join(os.path.dirname(target_path), CONFIG_AUDIT_LOG)
+    from mms_command_tools import config_audit_path
+
+    return config_audit_path(
+        config_path,
+        config_write_target_path=_config_write_target_path,
+        config_audit_log=CONFIG_AUDIT_LOG,
+    )
 
 
 def _config_backup_root(config_path=None):
-    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
-    return os.path.join(os.path.dirname(target_path), "backups")
+    from mms_command_tools import config_backup_root
+
+    return config_backup_root(config_path, config_write_target_path=_config_write_target_path)
 
 
 def _sha1_file(path):
-    if not path or not os.path.exists(path):
-        return ""
-    h = hashlib.sha1()
-    with open(path, "rb") as f:
-        while True:
-            chunk = f.read(65536)
-            if not chunk:
-                break
-            h.update(chunk)
-    return h.hexdigest()
+    from mms_command_tools import sha1_file
+
+    return sha1_file(path)
 
 
 def _config_write_caller():
