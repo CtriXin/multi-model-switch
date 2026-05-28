@@ -368,6 +368,13 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
         verified_files[name] = str(path)
         try:
             parsed_payload = json.loads(raw.decode("utf-8"))
+            if not isinstance(parsed_payload, dict):
+                return {
+                    "status": "invalid",
+                    "manifest_path": str(manifest_path),
+                    "detail": f"manifest file must be a JSON object for {name}: {path}",
+                    "payloads": {},
+                }
             if sensitivity != "secret":
                 validate_non_secret_payload(parsed_payload, context=str(path))
             payloads[name] = parsed_payload

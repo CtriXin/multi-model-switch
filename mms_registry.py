@@ -949,13 +949,21 @@ def record_candidate_changes(
     }
 
 
-def _read_file_hash(path: Path, *, sensitivity: str) -> str:
+def _parse_bundle_json_object(raw: bytes, *, path: Path, name: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RegistryValidationError(f"manifest file is not valid JSON for {name}: {path}") from exc
+    if not isinstance(payload, dict):
+        raise RegistryValidationError(f"manifest file must be a JSON object for {name}: {path}")
+    return payload
+
+
+def _read_file_hash(path: Path, *, sensitivity: str, name: str) -> str:
     raw = path.read_bytes()
+    payload = _parse_bundle_json_object(raw, path=path, name=name)
     if sensitivity != "secret":
-        try:
-            validate_non_secret_payload(json.loads(raw.decode("utf-8")), context=str(path))
-        except json.JSONDecodeError:
-            validate_non_secret_payload(raw.decode("utf-8", errors="replace"), context=str(path))
+        validate_non_secret_payload(payload, context=str(path))
     return sha256_hex(raw)
 
 
@@ -976,7 +984,7 @@ def _manifest_file_entry(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "canonical_path": canonical_path,
         "legacy_alias_path": str(spec.get("legacy_alias_path") or ""),
-        "sha256": str(spec.get("sha256") or _read_file_hash(path, sensitivity=sensitivity)),
+        "sha256": str(spec.get("sha256") or _read_file_hash(path, sensitivity=sensitivity, name=name)),
         "sensitivity": sensitivity,
         "legacy_alias_compat": bool(spec.get("legacy_alias_compat", False)),
     }
@@ -2017,11 +2025,9 @@ def verify_latest_approved_bundle(
         expected_hash = str(entry.get("sha256") or "")
         if actual_hash != expected_hash:
             raise RegistryValidationError(f"manifest hash mismatch for {name}: {file_path}")
+        payload = _parse_bundle_json_object(raw, path=file_path, name=str(name))
         if sensitivity != "secret":
-            try:
-                validate_non_secret_payload(json.loads(raw.decode("utf-8")), context=str(file_path))
-            except json.JSONDecodeError:
-                validate_non_secret_payload(raw.decode("utf-8", errors="replace"), context=str(file_path))
+            validate_non_secret_payload(payload, context=str(file_path))
         verified_files[name] = {
             "path": str(file_path),
             "sha256": actual_hash,
@@ -2048,10 +2054,7 @@ def load_latest_approved_bundle(
         if info.get("sensitivity") == "secret" and not include_secret:
             continue
         path = Path(info["path"])
-        try:
-            payloads[name] = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            payloads[name] = path.read_text(encoding="utf-8", errors="replace")
+        payloads[name] = _parse_bundle_json_object(path.read_bytes(), path=path, name=str(name))
     result = dict(verified)
     result["payloads"] = payloads
     return result

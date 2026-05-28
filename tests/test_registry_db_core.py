@@ -477,3 +477,43 @@ def test_verify_latest_approved_bundle_rejects_incomplete_or_escaping_manifest(t
     with pytest.raises(mms_registry.RegistryValidationError, match="secret-looking field in non-secret data") as exc:
         mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)
     assert "sk-leaked-secret" not in str(exc.value)
+
+
+def test_verify_latest_approved_bundle_rejects_non_json_or_non_object_payloads(tmp_path: Path) -> None:
+    router_root = tmp_path / "bad-router"
+    router_manifest_path = router_root / "generated/model-registry.latest-approved.json"
+    mms_registry.export_latest_approved_bundle_manifest(
+        router_manifest_path,
+        bundle_revision="bundle_20260522_003",
+        capability_revision="cap_20260522_003",
+        route_revision="route_20260522_003",
+        policy_revision="policy_20260522_003",
+        profile_revision="profile_20260522_003",
+        files=_bundle_file_specs(router_root),
+    )
+    router_path = router_root / "generated/model-routes.json"
+    router_path.write_text("{not json", encoding="utf-8")
+    manifest = json.loads(router_manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["router"]["sha256"] = hashlib.sha256(router_path.read_bytes()).hexdigest()
+    router_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_registry.RegistryValidationError, match="manifest file is not valid JSON for router"):
+        mms_registry.verify_latest_approved_bundle(config_dir=router_root)
+
+    policy_root = tmp_path / "bad-policy"
+    policy_manifest_path = policy_root / "generated/model-registry.latest-approved.json"
+    mms_registry.export_latest_approved_bundle_manifest(
+        policy_manifest_path,
+        bundle_revision="bundle_20260522_004",
+        capability_revision="cap_20260522_004",
+        route_revision="route_20260522_004",
+        policy_revision="policy_20260522_004",
+        profile_revision="profile_20260522_004",
+        files=_bundle_file_specs(policy_root),
+    )
+    policy_path = policy_root / "generated/model-policy.effective.json"
+    policy_path.write_text("[]", encoding="utf-8")
+    manifest = json.loads(policy_manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["policy"]["sha256"] = hashlib.sha256(policy_path.read_bytes()).hexdigest()
+    policy_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_registry.RegistryValidationError, match="manifest file must be a JSON object for policy"):
+        mms_registry.verify_latest_approved_bundle(config_dir=policy_root)

@@ -171,6 +171,16 @@ def _validate_manifest_file_contract(name: str, entry: Mapping[str, Any]) -> Non
         raise ConsumerBundleError(f"unexpected manifest sensitivity for {name}: {sensitivity}")
 
 
+def _parse_bundle_json_object(raw: bytes, *, path: Path, name: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConsumerBundleError(f"manifest file is not valid JSON for {name}: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ConsumerBundleError(f"manifest file must be a JSON object for {name}: {path}")
+    return payload
+
+
 def load_verified_consumer_bundle(
     *,
     config_root: str | os.PathLike[str] | None = None,
@@ -229,6 +239,7 @@ def load_verified_consumer_bundle(
         if actual != expected:
             raise ConsumerBundleError(f"manifest hash mismatch for {name_text}: {path}")
         sensitivity = str(entry.get("sensitivity") or "").strip()
+        parsed_payload = _parse_bundle_json_object(raw, path=path, name=name_text)
         verified_files[name_text] = {
             "path": str(path),
             "canonical_path": str(entry.get("canonical_path") or ""),
@@ -238,20 +249,13 @@ def load_verified_consumer_bundle(
             "sensitivity": sensitivity,
         }
         if sensitivity != "secret":
-            try:
-                parsed_payload = json.loads(raw.decode("utf-8"))
-            except json.JSONDecodeError as exc:
-                raise ConsumerBundleError(f"manifest file is not valid JSON for {name_text}: {path}") from exc
             _validate_non_secret_payload(parsed_payload, context=str(path))
             payloads[name_text] = parsed_payload
             continue
         if not include_secret:
             skipped_secret_files.append(name_text)
             continue
-        try:
-            payloads[name_text] = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ConsumerBundleError(f"manifest file is not valid JSON for {name_text}: {path}") from exc
+        payloads[name_text] = parsed_payload
 
     component_revisions = {
         "bundle": manifest_payload.get("bundle_revision") or "",

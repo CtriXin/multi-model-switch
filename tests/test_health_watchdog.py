@@ -309,6 +309,35 @@ def test_watchdog_fails_closed_on_manifest_canonical_path_drift(tmp_path: Path) 
     assert any("unexpected manifest canonical_path for router" in item["detail"] for item in report["failures"])
 
 
+def test_watchdog_fails_closed_on_non_object_bundle_payload(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    router_path = tmp_path / "generated" / "model-routes.json"
+    router_path.write_text("[]", encoding="utf-8")
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["router"]["sha256"] = mms_registry.sha256_hex(router_path.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("manifest file must be a JSON object for router" in item["detail"] for item in report["failures"])
+
+
 def test_watchdog_fails_closed_on_non_secret_bundle_secret_leak(tmp_path: Path) -> None:
     watchdog = _load_watchdog()
     _write_latest_bundle(
