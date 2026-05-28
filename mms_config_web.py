@@ -1223,8 +1223,18 @@ def _build_review_summary(
 
     if credential_updates:
         provider_ids = ", ".join(item["provider_id"] for item in credential_updates)
-        add_item("credentials", "凭据写入", f"将更新 credentials.sh：{provider_ids}", level="warn")
-        add_risk("credential_update", "凭据写入", "只有输入了新 API Key 且勾选更新凭据的通道会写 credentials.sh。", level="warn")
+        add_item(
+            "credentials",
+            "凭据写入",
+            f"stable legacy 写 credentials.sh；preview 写 secret backend：{provider_ids}",
+            level="warn",
+        )
+        add_risk(
+            "credential_update",
+            "凭据写入",
+            "只有输入了新 API Key 且勾选更新凭据的通道才会写入；stable legacy 目标是 credentials.sh，preview 目标是 secret backend。",
+            level="warn",
+        )
 
     policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
     policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
@@ -1451,7 +1461,10 @@ def build_config_plan(
     diffs = {
         "config_toml": _diff_text(before_config_text, after_config_text, before_name="config.toml(before)", after_name="config.toml(after)"),
         "model_policy_json": _diff_text(before_policy_text, after_policy_text, before_name="model-policy.json(before)", after_name="model-policy.json(after)"),
-        "credentials": "\n".join(f"credentials.sh: update provider {item['provider_id']} (secret hidden)" for item in credential_updates),
+        "credentials": "\n".join(
+            f"credential update: provider {item['provider_id']} (secret hidden; stable credentials.sh / preview secret backend)"
+            for item in credential_updates
+        ),
     }
     review_summary = _build_review_summary(current_cfg, next_cfg, policy_before, policy_after, credential_updates)
     summary = {

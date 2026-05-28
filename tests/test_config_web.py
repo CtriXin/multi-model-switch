@@ -419,11 +419,15 @@ def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
     assert plan["config"]["opencode"]["agent_models"]["mobius-reviewer-gpt55"] == {"model": "gpt-5.5"}
     assert plan["model_policy"]["models"]["qwen3.6-plus"]["capabilities"]["vision"] is True
     assert "Demo Gateway" in plan["diffs"]["config_toml"]
-    assert "credentials.sh: update provider demo" in plan["diffs"]["credentials"]
+    assert "credential update: provider demo" in plan["diffs"]["credentials"]
+    assert "preview secret backend" in plan["diffs"]["credentials"]
     assert plan["review_summary"]["schema"] == "mms.setup_web.review_summary.v1"
     assert any(item["kind"] == "provider_url" for item in plan["review_summary"]["items"])
-    assert any(item["kind"] == "credentials" for item in plan["review_summary"]["items"])
-    assert any(risk["id"] == "credential_update" for risk in plan["review_summary"]["risks"])
+    credentials_item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "credentials")
+    credential_risk = next(risk for risk in plan["review_summary"]["risks"] if risk["id"] == "credential_update")
+    assert "stable legacy 写 credentials.sh；preview 写 secret backend" in credentials_item["detail"]
+    assert "preview 目标是 secret backend" in credential_risk["detail"]
+    assert "将更新 credentials.sh" not in json.dumps(plan["review_summary"], ensure_ascii=False)
     assert "sk-super-secret-value" not in encoded
 
 
