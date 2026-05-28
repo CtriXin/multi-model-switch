@@ -5313,6 +5313,38 @@ def _model_source_status_report_payload(summary):
     )
 
 
+def _consumer_bundle_status_rows(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
+    revisions = summary.get("component_revisions") if isinstance(summary.get("component_revisions"), dict) else {}
+    files = summary.get("files") if isinstance(summary.get("files"), dict) else {}
+    rules = summary.get("consumer_rules") if isinstance(summary.get("consumer_rules"), list) else []
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    return [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Bundle 校验", "bundle verified"), "yes" if summary.get("verified") else "no"),
+        (_L("入口", "entrypoint"), summary.get("consumer_entrypoint") or summary.get("manifest_path") or "-"),
+        ("Root", root.get("config_root") or summary.get("config_root") or "-"),
+        (_L("Bundle revision", "bundle revision"), revisions.get("bundle") or "-"),
+        (_L("Route revision", "route revision"), revisions.get("route") or "-"),
+        (_L("Policy revision", "policy revision"), revisions.get("policy") or "-"),
+        (_L("Profile revision", "profile revision"), revisions.get("profile") or "-"),
+        (_L("文件数", "file count"), len(files)),
+        (_L("消费规则", "consumer rules"), " / ".join(str(item) for item in rules) or "-"),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
+    ]
+
+
+def _consumer_bundle_status_report_payload(summary):
+    return (
+        _L("Consumer Bundle Status", "Consumer Bundle Status"),
+        _consumer_bundle_status_rows(summary),
+        _L("只读视图：验证 latest-approved manifest/hash；不写 DB、不发布 bundle、不读取 SQLite。", "Read-only view: verifies latest-approved manifest/hashes; no DB writes, no bundle publish, no SQLite reads."),
+    )
+
+
 def _registry_v2_save_plan_rows(plan):
     plan = plan if isinstance(plan, dict) else {}
     root = plan.get("root") if isinstance(plan.get("root"), dict) else {}
@@ -5385,6 +5417,7 @@ def _preview_doctor_report_payload(summary):
 def _model_source_status_tui_payload(summary):
     actions = [
         ("model_source_status", _L("查看 Model Source Status", "View Model Source Status")),
+        ("consumer_bundle_status", _L("查看 Consumer Bundle", "View Consumer Bundle")),
         ("registry_v2_save_plan", _L("查看 v2 Save Plan", "View v2 Save Plan")),
         ("preview_doctor", _L("运行 Preview Doctor", "Run Preview Doctor")),
         ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
@@ -10278,7 +10311,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, preview_doctor, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
+                from mms_registry_cli import consumer_bundle_status, diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, preview_doctor, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
 
                 source_status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
                 registry_title, registry_info, registry_actions = _model_source_status_tui_payload(source_status)
@@ -10292,6 +10325,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     return True
                 if registry_action == "model_source_status":
                     _print_settings_result_report(*_model_source_status_report_payload(source_status))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "consumer_bundle_status":
+                    summary = consumer_bundle_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config bundle")
+                    _print_settings_result_report(*_consumer_bundle_status_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "registry_v2_save_plan":
                     plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")

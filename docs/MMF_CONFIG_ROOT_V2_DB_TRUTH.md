@@ -404,7 +404,7 @@ Current Stage 3a implementation:
 - WebUI: `/api/state` also includes `consumer_bundle_status`, and the first panel shows the downstream consumer entrypoint, component revisions, file count, and consumer rules so Hive/Pilot/Ant/Mobius cutover can verify one source without reading SQLite.
 - WebUI: `/api/plan` includes a read-only `registry_v2_save_plan` that shows the DB backup -> candidate revision -> secret backend -> publish -> verify -> rollback sequence. The plan itself is read-only; writes require the preview-gated WebUI `写入预览 DB + 发布` action or `mms/mmf config apply-plan --apply --confirm-preview-apply`.
 - WebUI: the save preview now labels `webui-plan.json` as a redacted review artifact and exposes download/copy helpers. Downloaded plan JSON does not include plaintext API keys; when a credential update is part of the draft, the preferred apply path is the WebUI button so the plaintext key stays inside the single POST and preview secret backend write path.
-- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes `查看 v2 Save Plan` plus read-only `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
+- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes read-only `查看 Consumer Bundle`, `查看 v2 Save Plan`, and `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
 - Stable-root WebUI Save behavior is not changed; preview-root legacy save is blocked and users are directed to the DB-truth preview apply path.
 
 Current preview init implementation:

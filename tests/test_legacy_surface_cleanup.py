@@ -553,8 +553,9 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
         ("DB 状态", "missing"),
     ]
     assert actions[0] == ("model_source_status", "查看 Model Source Status")
-    assert actions[1] == ("registry_v2_save_plan", "查看 v2 Save Plan")
-    assert actions[2] == ("preview_doctor", "运行 Preview Doctor")
+    assert actions[1] == ("consumer_bundle_status", "查看 Consumer Bundle")
+    assert actions[2] == ("registry_v2_save_plan", "查看 v2 Save Plan")
+    assert actions[3] == ("preview_doctor", "运行 Preview Doctor")
     assert report_title == "Model Source Status"
     assert ("Legacy 冲突", 2) in rows
     assert ("Legacy 候选状态", "not_imported") in rows
@@ -564,6 +565,46 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("下一步", "Initialize preview root") in rows
     assert ("建议命令", "./mmf preview init --json") in rows
     assert "只读视图" in note
+
+    consumer_title, consumer_rows, consumer_note = mms_core._consumer_bundle_status_report_payload(
+        {
+            "result": "READY",
+            "status": "ok",
+            "verified": True,
+            "consumer_entrypoint": "/tmp/mms-next/generated/model-registry.latest-approved.json",
+            "root": {"config_root": "/tmp/mms-next"},
+            "component_revisions": {
+                "bundle": "bundle_abc",
+                "route": "route_abc",
+                "policy": "policy_abc",
+                "profile": "profile_abc",
+            },
+            "files": {
+                "router": {"path": "/tmp/mms-next/generated/model-routes.json", "sha256": "abc"},
+                "policy": {"path": "/tmp/mms-next/generated/model-policy.effective.json", "sha256": "def"},
+            },
+            "consumer_rules": ["read manifest first", "do not query SQLite directly"],
+            "next_action": {"label": "Consume verified bundle", "command": "/tmp/mms-next/generated/model-registry.latest-approved.json"},
+        }
+    )
+    assert consumer_title == "Consumer Bundle Status"
+    assert consumer_rows[:5] == [
+        ("结果", "READY"),
+        ("状态", "ok"),
+        ("Bundle 校验", "yes"),
+        ("入口", "/tmp/mms-next/generated/model-registry.latest-approved.json"),
+        ("Root", "/tmp/mms-next"),
+    ]
+    assert ("Bundle revision", "bundle_abc") in consumer_rows
+    assert ("Route revision", "route_abc") in consumer_rows
+    assert ("Policy revision", "policy_abc") in consumer_rows
+    assert ("Profile revision", "profile_abc") in consumer_rows
+    assert ("文件数", 2) in consumer_rows
+    assert ("消费规则", "read manifest first / do not query SQLite directly") in consumer_rows
+    assert ("下一步", "Consume verified bundle") in consumer_rows
+    assert ("建议命令", "/tmp/mms-next/generated/model-registry.latest-approved.json") in consumer_rows
+    assert "只读视图" in consumer_note
+    assert "不读取 SQLite" in consumer_note
 
     plan_title, plan_rows, plan_note = mms_core._registry_v2_save_plan_report_payload(
         {
