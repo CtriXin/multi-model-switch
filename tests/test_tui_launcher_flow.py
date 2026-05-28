@@ -7,6 +7,7 @@ from mms_tui_launcher_flow import (
     apply_launch_runtime_preferences,
     apply_opencode_profile_for_launch,
     apply_rescue_default_fallback_action,
+    apply_rescue_hot_fallback_toggle_action,
     apply_tui_priority_changes,
     build_confirm_capability_context,
     confirm_agent_pack,
@@ -1883,6 +1884,52 @@ def test_apply_rescue_default_fallback_action_clears_default() -> None:
         ("set", cfg, ""),
         ("save", cleared_cfg, "tui:clear_rescue_default_fallback"),
         ("report", ("clear title", [("model", ""), ("kwargs", {"cleared": True})]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_apply_rescue_hot_fallback_toggle_action_saves_reports_and_pauses() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "fallback-model"}}
+    updated_cfg = {"rescue": {"fallback_model": "fallback-model", "hot_fallback_enabled": True}}
+
+    result = apply_rescue_hot_fallback_toggle_action(
+        cfg,
+        True,
+        set_rescue_hot_fallback_enabled=lambda cfg_arg, *, enabled: calls.append(("set", cfg_arg, enabled)) or (updated_cfg, True),
+        save_config=lambda cfg_arg, *, reason: calls.append(("save", cfg_arg, reason)),
+        rescue_hot_fallback_toggle_report_payload=lambda enabled, **kwargs: ("title", [("enabled", enabled), ("kwargs", kwargs)]),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue", "cfg": updated_cfg, "applied": True}
+    assert calls == [
+        ("set", cfg, True),
+        ("save", updated_cfg, "tui:rescue_hot_fallback"),
+        ("report", ("title", [("enabled", True), ("kwargs", {})]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_apply_rescue_hot_fallback_toggle_action_reports_blocked_without_save() -> None:
+    calls = []
+    cfg = {"rescue": {}}
+
+    result = apply_rescue_hot_fallback_toggle_action(
+        cfg,
+        True,
+        set_rescue_hot_fallback_enabled=lambda cfg_arg, *, enabled: calls.append(("set", cfg_arg, enabled)) or (cfg_arg, False),
+        save_config=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        rescue_hot_fallback_toggle_report_payload=lambda enabled, **kwargs: ("blocked", [("enabled", enabled), ("kwargs", kwargs)]),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue", "cfg": cfg, "applied": False}
+    assert calls == [
+        ("set", cfg, True),
+        ("report", ("blocked", [("enabled", False), ("kwargs", {"has_default": False})]), {"ok": False}),
         ("pause", "按 Enter 返回设置"),
     ]
 

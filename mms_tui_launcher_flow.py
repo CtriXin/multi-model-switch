@@ -1107,6 +1107,29 @@ def apply_rescue_default_fallback_action(
     return {"status": "continue", "cfg": cfg}
 
 
+def apply_rescue_hot_fallback_toggle_action(
+    cfg,
+    enable_hot,
+    *,
+    set_rescue_hot_fallback_enabled,
+    save_config,
+    rescue_hot_fallback_toggle_report_payload,
+    print_settings_result_report,
+    pause_after_tui_report,
+):
+    cfg, applied = set_rescue_hot_fallback_enabled(cfg, enabled=enable_hot)
+    if applied != enable_hot:
+        print_settings_result_report(
+            *rescue_hot_fallback_toggle_report_payload(False, has_default=False),
+            ok=False,
+        )
+    else:
+        save_config(cfg, reason="tui:rescue_hot_fallback")
+        print_settings_result_report(*rescue_hot_fallback_toggle_report_payload(enable_hot))
+    pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue", "cfg": cfg, "applied": applied}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

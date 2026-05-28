@@ -5189,16 +5189,15 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     continue
                 if landing_action in {"enable_hot_fallback", "disable_hot_fallback"}:
                     enable_hot = landing_action == "enable_hot_fallback"
-                    current_cfg, applied = _set_rescue_hot_fallback_enabled(current_cfg, enabled=enable_hot)
-                    if applied != enable_hot:
-                        _print_settings_result_report(
-                            *_rescue_hot_fallback_toggle_report_payload(False, has_default=False),
-                            ok=False,
-                        )
-                    else:
-                        save_config(current_cfg, reason="tui:rescue_hot_fallback")
-                        _print_settings_result_report(*_rescue_hot_fallback_toggle_report_payload(enable_hot))
-                    _pause_after_tui_report("按 Enter 返回设置")
+                    current_cfg = tui_flow.apply_rescue_hot_fallback_toggle_action(
+                        current_cfg,
+                        enable_hot,
+                        set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
+                        save_config=save_config,
+                        rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
+                        print_settings_result_report=_print_settings_result_report,
+                        pause_after_tui_report=_pause_after_tui_report,
+                    )["cfg"]
                     continue
                 if landing_action == "clear_default":
                     current_cfg = _apply_rescue_default_action("", cleared=True)["cfg"]
