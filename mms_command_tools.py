@@ -3576,6 +3576,47 @@ def resolve_account_context(
     return resolved
 
 
+def save_provider_credentials_with_probe(
+    provider,
+    base_url,
+    api_key,
+    openai_base_url="",
+    anthropic_base_url="",
+    *,
+    probe_models,
+    provider_openai_base_url,
+    save_provider_credentials,
+    resolve_provider_context,
+    credentials_path,
+    console,
+):
+    provider_ctx = dict(provider)
+    provider_ctx["base_url"] = base_url
+    provider_ctx["openai_base_url"] = openai_base_url
+    provider_ctx["anthropic_base_url"] = anthropic_base_url
+    provider_ctx["api_key"] = api_key
+
+    console.print("\n正在测试连接...", style="dim")
+    probe = probe_models(provider_ctx)
+    models = probe.get("models")
+    if models is None:
+        console.print("[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]")
+    else:
+        console.print(f"[green]✓ 连接成功！发现 {len(models)} 个可用模型[/green]")
+        working_url = probe.get("working_url")
+        computed_openai = provider_openai_base_url(provider_ctx)
+        if working_url and working_url != computed_openai:
+            fixed_base = working_url
+            console.print(f"[yellow]→ 自动修正地址为 {fixed_base}[/yellow]")
+            openai_base_url = fixed_base
+            base_url = fixed_base
+
+    save_provider_credentials(provider["id"], base_url, api_key, openai_base_url, anthropic_base_url)
+    console.print(f"[green]✓ provider '{provider['id']}' 的凭据已保存到 {credentials_path}[/green]")
+    console.print("[dim]API Key 在配置显示里会以掩码形式展示，不会直接回显明文。[/dim]")
+    return resolve_provider_context({"providers": [provider], "provider": {"default": provider["id"]}}, provider["id"])
+
+
 def provider_env_value(provider_id, field, *, default_provider_id, environ=None):
     environ = os.environ if environ is None else environ
     return environ.get(provider_env_name(provider_id, field, default_provider_id=default_provider_id), "").strip()

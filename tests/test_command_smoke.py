@@ -2608,6 +2608,63 @@ def test_runtime_context_resolvers_preserve_provider_credentials_and_account_hom
     }
 
 
+def test_save_provider_credentials_with_probe_preserves_autofix_failure_and_resolve_flow():
+    import mms_command_tools
+
+    provider = {"id": "relay", "name": "Relay"}
+    console = _CollectingConsole()
+    saved = []
+    resolved_calls = []
+
+    resolved = mms_command_tools.save_provider_credentials_with_probe(
+        provider,
+        "https://relay.example",
+        "sk-relay",
+        openai_base_url="https://relay.example/openai",
+        anthropic_base_url="https://relay.example/anthropic",
+        probe_models=lambda provider_ctx: {
+            "models": ["gpt-5.4", "gpt-5.5"],
+            "working_url": "https://relay.example/v1",
+        },
+        provider_openai_base_url=lambda provider_ctx: provider_ctx["openai_base_url"],
+        save_provider_credentials=lambda *args: saved.append(args),
+        resolve_provider_context=lambda cfg, provider_id: resolved_calls.append((cfg, provider_id)) or {"id": provider_id},
+        credentials_path="/tmp/credentials.sh",
+        console=console,
+    )
+
+    assert saved == [
+        (
+            "relay",
+            "https://relay.example/v1",
+            "sk-relay",
+            "https://relay.example/v1",
+            "https://relay.example/anthropic",
+        )
+    ]
+    assert resolved == {"id": "relay"}
+    assert resolved_calls == [({"providers": [provider], "provider": {"default": "relay"}}, "relay")]
+    assert "[green]✓ 连接成功！发现 2 个可用模型[/green]" in console.items
+    assert "[yellow]→ 自动修正地址为 https://relay.example/v1[/yellow]" in console.items
+    assert "[green]✓ provider 'relay' 的凭据已保存到 /tmp/credentials.sh[/green]" in console.items
+
+    console.items.clear()
+    saved.clear()
+    mms_command_tools.save_provider_credentials_with_probe(
+        provider,
+        "https://bad.example",
+        "sk-relay",
+        probe_models=lambda provider_ctx: {"models": None},
+        provider_openai_base_url=lambda provider_ctx: "",
+        save_provider_credentials=lambda *args: saved.append(args),
+        resolve_provider_context=lambda cfg, provider_id: {"id": provider_id},
+        credentials_path="/tmp/credentials.sh",
+        console=console,
+    )
+    assert saved == [("relay", "https://bad.example", "sk-relay", "", "")]
+    assert "[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]" in console.items
+
+
 def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     import pytest
 
