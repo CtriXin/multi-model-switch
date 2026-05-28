@@ -174,15 +174,16 @@ optional_brainkeeper_context_installed() {
 }
 
 optional_handover_continuity_installed() {
-    local command_dir
-    for command_dir in \
-        "$REAL_HOME/.agents/commands" \
-        "$REAL_HOME/.claude/commands" \
-        "$REAL_HOME/.codex/commands" \
-        "$REAL_HOME/.config/opencode/commands" \
-        "$REAL_HOME/.opencode/commands"; do
-        [ -L "$command_dir/offduty.md" ] || return 1
-        [ -L "$command_dir/onduty.md" ] || return 1
+    local skill_dir
+    for skill_dir in \
+        "$REAL_HOME/.agents/skills" \
+        "$REAL_HOME/.claude/skills" \
+        "$REAL_HOME/.codex/skills" \
+        "$REAL_HOME/.config/opencode/skills" \
+        "$REAL_HOME/.opencode/skills"; do
+        [ -L "$skill_dir/handover" ] || return 1
+        [ -L "$skill_dir/offduty" ] || return 1
+        [ -L "$skill_dir/onduty" ] || return 1
     done
 }
 
@@ -406,7 +407,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR 内建且默认开启；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 和命令目录" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; NSR is built in and enabled by default; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill and command dirs")
+  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR 内建且默认开启；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; NSR is built in and enabled by default; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -1522,41 +1523,44 @@ if not isinstance(hooks, dict):
     hooks = {}
 data["hooks"] = hooks
 
-entries = hooks.get(hook_event)
-if not isinstance(entries, list):
-    entries = []
-
-exists = False
+raw_entries = hooks.get(hook_event)
+entries = raw_entries if isinstance(raw_entries, list) else []
+cleaned_entries = []
 for entry in entries:
     if not isinstance(entry, dict):
+        cleaned_entries.append(entry)
         continue
     hook_items = entry.get("hooks")
     if not isinstance(hook_items, list):
+        cleaned_entries.append(entry)
         continue
+    kept_hooks = []
     for hook in hook_items:
         if not isinstance(hook, dict):
+            kept_hooks.append(hook)
             continue
         command = normalize(hook.get("command"))
         if command in dedupe_commands:
-            exists = True
-            break
-    if exists:
-        break
+            continue
+        kept_hooks.append(hook)
+    if kept_hooks:
+        cleaned_entry = dict(entry)
+        cleaned_entry["hooks"] = kept_hooks
+        cleaned_entries.append(cleaned_entry)
 
-if not exists:
-    entries.append(
-        {
-            "matcher": matcher,
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": command_to_add,
-                }
-            ],
-        }
-    )
+cleaned_entries.append(
+    {
+        "matcher": matcher,
+        "hooks": [
+            {
+                "type": "command",
+                "command": command_to_add,
+            }
+        ],
+    }
+)
 
-hooks[hook_event] = entries
+hooks[hook_event] = cleaned_entries
 settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 if backup_path is not None:
@@ -1736,6 +1740,144 @@ repair_managed_claude_settings() {
     fi
     if [ -f "$session_template_path" ]; then
         merge_claude_settings_template "$HOME/.claude/settings.json" "$session_template_path" || true
+    fi
+}
+
+cleanup_legacy_global_session_hooks() {
+    local py_output=""
+
+    py_output="$("$(_python_bin)" - "$REAL_HOME/.claude/settings.json" "$REAL_HOME/.codex/hooks.json" <<'PY'
+import json
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+
+def normalize(value):
+    return " ".join(str(value or "").strip().split())
+
+
+def is_legacy_global_nsr(command):
+    text = normalize(command).lower()
+    if "multi-model-switch" not in text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "nsr-claude-hook.sh",
+            "nsr-codex-hook.sh",
+            "nsr-builtin-hook.py",
+        )
+    )
+
+
+def read_once_target(command):
+    text = normalize(command)
+    lower = text.lower()
+    if "/.claude/read-once/hook.sh" in lower:
+        return "read-once-hook"
+    if "/.claude/read-once/compact.sh" in lower:
+        return "read-once-compact"
+    return ""
+
+
+def read_once_rank(command):
+    text = normalize(command)
+    if "/bin/bash " in text:
+        return 0
+    if " bash " in f" {text} ":
+        return 1
+    return 2
+
+
+def cleanup_file(path):
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+
+    removed = 0
+    for event_name, groups in list(hooks.items()):
+        if not isinstance(groups, list):
+            continue
+        cleaned_groups = []
+        for group in groups:
+            if not isinstance(group, dict):
+                cleaned_groups.append(group)
+                continue
+            hook_items = group.get("hooks")
+            if not isinstance(hook_items, list):
+                cleaned_groups.append(group)
+                continue
+            matcher = str(group.get("matcher") or "").strip()
+            candidates = []
+            kept_hooks = []
+            read_once_seen = {}
+            for hook in hook_items:
+                if not isinstance(hook, dict):
+                    kept_hooks.append(hook)
+                    continue
+                command = hook.get("command")
+                if is_legacy_global_nsr(command):
+                    removed += 1
+                    continue
+                ro_target = read_once_target(command)
+                if ro_target:
+                    candidates.append((ro_target, hook))
+                    continue
+                kept_hooks.append(hook)
+            for ro_target, hook in candidates:
+                key = (event_name, matcher, ro_target)
+                current = read_once_seen.get(key)
+                if current is None:
+                    read_once_seen[key] = hook
+                    continue
+                if read_once_rank(hook.get("command")) < read_once_rank(current.get("command")):
+                    read_once_seen[key] = hook
+                removed += 1
+            kept_hooks.extend(read_once_seen.values())
+            if kept_hooks:
+                cleaned = dict(group)
+                cleaned["hooks"] = kept_hooks
+                cleaned_groups.append(cleaned)
+        if cleaned_groups:
+            hooks[event_name] = cleaned_groups
+        else:
+            hooks.pop(event_name, None)
+
+    if not removed:
+        return
+    backup = path.with_name(f"{path.name}.bak-mms-hook-cleanup-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    shutil.copy2(path, backup)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"CLEANED:{path}:{removed}:{backup}")
+
+
+for raw in sys.argv[1:]:
+    cleanup_file(Path(raw))
+PY
+)"
+
+    if [ -n "$py_output" ]; then
+        echo "$py_output" | while IFS= read -r line; do
+            case "$line" in
+                CLEANED:*)
+                    cleaned_path="${line#CLEANED:}"
+                    cleaned_count="${cleaned_path#*:}"
+                    cleaned_path="${cleaned_path%%:*}"
+                    cleaned_count="${cleaned_count%%:*}"
+                    echo "• $(t "已清理旧全局 session hook" "Cleaned legacy global session hooks"): $cleaned_path ($cleaned_count)"
+                    ;;
+            esac
+        done
     fi
 }
 
@@ -2184,9 +2326,9 @@ run_install_check() {
     print_bundled_session_asset_status
 
     if optional_handover_continuity_installed; then
-        echo "✓ $(t "offduty/onduty 命令已安装（handover continuity）" "offduty/onduty commands installed (handover continuity)")"
+        echo "✓ $(t "offduty/onduty skill 已安装（handover continuity）" "offduty/onduty skills installed (handover continuity)")"
     else
-        echo "• $(t "offduty/onduty 命令未安装（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "offduty/onduty commands not installed (built-in auto-install; rerun MMS install or upgrade if missing)")"
+        echo "• $(t "offduty/onduty skill 未安装（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "offduty/onduty skills not installed (built-in auto-install; rerun MMS install or upgrade if missing)")"
     fi
 
     if optional_ecc_installed; then
@@ -3738,7 +3880,7 @@ print_dry_run_plan() {
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
     fi
     [ "$INSTALL_RTK" -eq 1 ] && echo "• $(t "会安装 RTK rewrite hook" "would install RTK rewrite hook")"
-    echo "• $(t "会安装/修复 offduty/onduty（handover continuity）到 Claude/Codex/OpenCode 全局目录" "would install/repair offduty/onduty (handover continuity) into Claude/Codex/OpenCode global dirs")"
+    echo "• $(t "会安装/修复 offduty/onduty（handover continuity）到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "would install/repair offduty/onduty (handover continuity) into Claude/Codex/OpenCode global skill dirs and clean legacy command symlinks")"
     [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
     [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map auto-index" "would install Map auto-index"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
     [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
@@ -3902,7 +4044,7 @@ install_builtin_handover_continuity() {
 
     if [ -z "$handover_root" ]; then
         HANDOVER_CONTINUITY_INSTALL_STATUS="missing_source"
-        echo "⚠ $(t "未找到 vendor/handover，跳过 offduty/onduty 命令安装；请确认 MMS vendor 目录完整" "vendor/handover not found, skipping offduty/onduty command install; verify the MMS vendor directory is complete")"
+        echo "⚠ $(t "未找到 vendor/handover，跳过 offduty/onduty skill 安装；请确认 MMS vendor 目录完整" "vendor/handover not found, skipping offduty/onduty skill install; verify the MMS vendor directory is complete")"
         return 0
     fi
 
@@ -3910,10 +4052,10 @@ install_builtin_handover_continuity() {
 
     if HOME="$REAL_HOME" "$(_python_bin)" "$installer_script"; then
         HANDOVER_CONTINUITY_INSTALL_STATUS="installed"
-        echo "✓ $(t "offduty/onduty 命令已安装（handover continuity）" "offduty/onduty commands installed (handover continuity)")"
+        echo "✓ $(t "offduty/onduty skill 已安装（handover continuity）" "offduty/onduty skills installed (handover continuity)")"
     else
         HANDOVER_CONTINUITY_INSTALL_STATUS="partial"
-        echo "⚠ $(t "offduty/onduty 命令安装未完全成功，可重试或稍后手动安装" "offduty/onduty command install did not fully succeed; retry or install manually later")"
+        echo "⚠ $(t "offduty/onduty skill 安装未完全成功，可重试或稍后手动安装" "offduty/onduty skill install did not fully succeed; retry or install manually later")"
     fi
 
     return 0
@@ -4253,6 +4395,7 @@ done
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
 write_version_metadata
 repair_managed_claude_settings
+cleanup_legacy_global_session_hooks
 write_language_config
 
 # ── 内置安装：handover continuity (offduty/onduty) ──
@@ -4394,7 +4537,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""
     if [ "$HANDOVER_CONTINUITY_INSTALL_STATUS" = "installed" ]; then
-        echo "  $(t "内建：offduty/onduty（handover continuity）已安装到 Claude/Codex/OpenCode 全局 skill 和命令目录，可在任意 session 使用。" "Built-in: offduty/onduty (handover continuity) installed into Claude/Codex/OpenCode global skill and command dirs, usable in any session.")"
+        echo "  $(t "内建：offduty/onduty（handover continuity）已安装到 Claude/Codex/OpenCode 全局 skill 目录，并已清理旧 command symlink，可在任意 session 使用。" "Built-in: offduty/onduty (handover continuity) installed into Claude/Codex/OpenCode global skill dirs, with legacy command symlinks cleaned, usable in any session.")"
     else
         echo "  $(t "内建：offduty/onduty（handover continuity）未自动安装完成；可重新运行安装器或检查 vendor/handover。" "Built-in: offduty/onduty (handover continuity) was not fully auto-installed; rerun the installer or check vendor/handover.")"
     fi

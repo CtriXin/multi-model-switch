@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Install handover/offduty/onduty skill and command surfaces globally."""
+"""Install handover/offduty/onduty skill surfaces globally.
+
+Legacy command symlinks are removed when they are managed by this installer so
+the same name does not appear twice in command/skill pickers.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +18,8 @@ ALIAS_SKILLS = {
     "offduty": ROOT / "aliases" / "offduty",
     "onduty": ROOT / "aliases" / "onduty",
 }
-COMMAND_SOURCES = {
+LEGACY_COMMAND_NAMES = ("offduty.md", "onduty.md")
+LEGACY_COMMAND_TARGETS = {
     "offduty.md": ROOT / "commands" / "offduty.md",
     "onduty.md": ROOT / "commands" / "onduty.md",
 }
@@ -68,26 +73,26 @@ def ensure_dir_symlink(path: Path, target: Path) -> dict[str, str]:
     return {"path": str(path), "target": str(target), "status": "created_symlink"}
 
 
-def ensure_command_symlink(path: Path, target: Path) -> dict[str, str]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    target = target.resolve(strict=False)
-    if not target.exists():
-        return {"path": str(path), "target": str(target), "status": "missing_source"}
+def is_managed_legacy_command_symlink(path: Path) -> bool:
+    expected = LEGACY_COMMAND_TARGETS.get(path.name)
+    if expected is None:
+        return False
+    return readlink_path(path) == expected.resolve(strict=False)
+
+
+def cleanup_legacy_command(path: Path) -> dict[str, str]:
     if path.is_symlink():
-        if readlink_path(path) == target:
-            return {"path": str(path), "target": str(target), "status": "ok"}
-        path.unlink()
-        path.symlink_to(target)
-        return {"path": str(path), "target": str(target), "status": "updated_symlink"}
+        if is_managed_legacy_command_symlink(path):
+            path.unlink()
+            return {"path": str(path), "status": "removed_legacy_command_symlink"}
+        return {"path": str(path), "status": "skipped_existing_unmanaged"}
     if path.exists():
         text = path.read_text(encoding="utf-8", errors="replace")
         if MARKER not in text:
-            return {"path": str(path), "target": str(target), "status": "skipped_existing_unmanaged"}
+            return {"path": str(path), "status": "skipped_existing_unmanaged"}
         path.unlink()
-        path.symlink_to(target)
-        return {"path": str(path), "target": str(target), "status": "replaced_managed_file_with_symlink"}
-    path.symlink_to(target)
-    return {"path": str(path), "target": str(target), "status": "created_symlink"}
+        return {"path": str(path), "status": "removed_legacy_managed_command_file"}
+    return {"path": str(path), "status": "ok_absent"}
 
 
 def main() -> int:
@@ -97,10 +102,9 @@ def main() -> int:
         for name, target in ALIAS_SKILLS.items():
             results.append(ensure_dir_symlink(directory / name, target))
     for directory in command_dirs():
-        for name, target in COMMAND_SOURCES.items():
-            results.append(ensure_command_symlink(directory / name, target))
+        for name in LEGACY_COMMAND_NAMES:
+            results.append(cleanup_legacy_command(directory / name))
     failed = {
-        "missing_source",
         "skipped_existing_non_symlink",
         "skipped_existing_unmanaged",
     }

@@ -31,7 +31,7 @@ Direct script commands:
 /Users/xin/auto-skills/shared-skills/handover/scripts/onduty
 ```
 
-Global command install is idempotent:
+Global skill alias install is idempotent:
 
 ```bash
 python3 /Users/xin/auto-skills/shared-skills/handover/scripts/install_global_commands.py
