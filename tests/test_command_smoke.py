@@ -849,6 +849,75 @@ def test_preference_allowlist_sanitizers_preserve_runtime_shape(tmp_path):
     }
 
 
+def test_preference_runtime_overlay_helpers_preserve_merge_order():
+    import mms_command_tools
+
+    prefs = {
+        "launch": {
+            "defaults": {
+                "thinking_mode": "enable",
+                "reasoning_effort": "xhigh",
+                "disabled_session_surfaces": {"skills": ["token-saver"]},
+            },
+            "cli": {
+                "codex": {
+                    "reasoning_effort": "low",
+                    "disabled_session_surfaces": {"mcp": ["pilot"], "skills": ["token-saver"]},
+                }
+            },
+        },
+        "session_surfaces": {"disabled": {"skills": ["web-access"], "hooks": ["/tmp/drop.sh"]}},
+    }
+    runtime = {
+        "id": "relay",
+        "reasoning_effort": "medium",
+        "disabled_session_surfaces": {"skills": ["existing", "web-access"]},
+    }
+
+    assert mms_command_tools.merge_disabled_session_surfaces(
+        {"skills": ["existing", "web-access"]},
+        {"skills": ["web-access", "token-saver"], "mcps": ["pilot"]},
+    ) == {"mcp": ["pilot"], "skills": ["existing", "web-access", "token-saver"]}
+    assert mms_command_tools.preference_runtime_overlay(prefs, "codex") == {
+        "thinking_mode": "enable",
+        "reasoning_effort": "low",
+        "disabled_session_surfaces": {
+            "skills": ["web-access", "token-saver"],
+            "hooks": ["/tmp/drop.sh"],
+            "mcp": ["pilot"],
+        },
+    }
+
+    result = mms_command_tools.runtime_with_launch_preferences(
+        {"_mms_preferences": prefs},
+        runtime,
+        "codex",
+        load_user_preferences=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+    assert result is not runtime
+    assert runtime["reasoning_effort"] == "medium"
+    assert result["thinking_mode"] == "enable"
+    assert result["reasoning_effort"] == "low"
+    assert result["disabled_session_surfaces"] == {
+        "skills": ["existing", "web-access", "token-saver"],
+        "hooks": ["/tmp/drop.sh"],
+        "mcp": ["pilot"],
+    }
+    assert result["_mms_preferences_applied"] is True
+    assert mms_command_tools.runtime_with_launch_preferences(
+        {},
+        {"_mms_preferences_applied": True},
+        "codex",
+        load_user_preferences=lambda: prefs,
+    ) == {"_mms_preferences_applied": True}
+    assert mms_command_tools.runtime_with_launch_preferences(
+        {},
+        "not-runtime",
+        "codex",
+        load_user_preferences=lambda: prefs,
+    ) == "not-runtime"
+
+
 def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
     import mms_command_tools
 

@@ -2698,58 +2698,26 @@ def preference_asset_root(asset_name):
 
 
 def _merge_disabled_session_surfaces(*payloads):
-    merged = {"mcp": [], "skills": [], "hooks": []}
-    seen = {key: set() for key in merged}
-    for payload in payloads:
-        cleaned = _sanitize_disabled_session_surfaces(payload)
-        for key, values in cleaned.items():
-            for value in values:
-                if value in seen[key]:
-                    continue
-                seen[key].add(value)
-                merged[key].append(value)
-    return {key: values for key, values in merged.items() if values}
+    from mms_command_tools import merge_disabled_session_surfaces
+
+    return merge_disabled_session_surfaces(*payloads)
 
 
 def _preference_runtime_overlay(prefs, cli_name):
-    prefs = prefs if isinstance(prefs, dict) else {}
-    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
-    merged = dict(launch.get("defaults") or {})
-    cli_overrides = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
-    cli_specific = cli_overrides.get(str(cli_name or "").strip().lower())
-    if isinstance(cli_specific, dict):
-        merged = _merge_dicts(merged, cli_specific)
-    global_disabled = (prefs.get("session_surfaces") or {}).get("disabled") if isinstance(prefs.get("session_surfaces"), dict) else {}
-    disabled = _merge_disabled_session_surfaces(global_disabled, merged.get("disabled_session_surfaces"))
-    if disabled:
-        merged["disabled_session_surfaces"] = disabled
-    return merged
+    from mms_command_tools import preference_runtime_overlay
+
+    return preference_runtime_overlay(prefs, cli_name)
 
 
 def _runtime_with_launch_preferences(cfg, runtime, cli_name):
-    if not isinstance(runtime, dict):
-        return runtime
-    if runtime.get("_mms_preferences_applied"):
-        return runtime
-    prefs = (cfg or {}).get("_mms_preferences") if isinstance(cfg, dict) else None
-    if not isinstance(prefs, dict):
-        prefs = load_user_preferences()
-    overlay = _preference_runtime_overlay(prefs, cli_name)
-    if not overlay:
-        result = dict(runtime)
-        result["_mms_preferences_applied"] = True
-        return result
-    result = dict(runtime)
-    existing_disabled = result.get("disabled_session_surfaces")
-    for key, value in overlay.items():
-        if key == "disabled_session_surfaces":
-            continue
-        result[key] = value
-    disabled = _merge_disabled_session_surfaces(existing_disabled, overlay.get("disabled_session_surfaces"))
-    if disabled:
-        result["disabled_session_surfaces"] = disabled
-    result["_mms_preferences_applied"] = True
-    return result
+    from mms_command_tools import runtime_with_launch_preferences
+
+    return runtime_with_launch_preferences(
+        cfg,
+        runtime,
+        cli_name,
+        load_user_preferences=load_user_preferences,
+    )
 
 
 def apply_local_overrides(cfg):

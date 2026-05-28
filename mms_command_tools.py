@@ -1042,6 +1042,61 @@ def sanitize_user_preferences(raw, *, cli_names, asset_root_keys):
     return result
 
 
+def merge_disabled_session_surfaces(*payloads):
+    merged = {"mcp": [], "skills": [], "hooks": []}
+    seen = {key: set() for key in merged}
+    for payload in payloads:
+        cleaned = sanitize_disabled_session_surfaces(payload)
+        for key, values in cleaned.items():
+            for value in values:
+                if value in seen[key]:
+                    continue
+                seen[key].add(value)
+                merged[key].append(value)
+    return {key: values for key, values in merged.items() if values}
+
+
+def preference_runtime_overlay(prefs, cli_name):
+    prefs = prefs if isinstance(prefs, dict) else {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    merged = dict(launch.get("defaults") or {})
+    cli_overrides = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
+    cli_specific = cli_overrides.get(str(cli_name or "").strip().lower())
+    if isinstance(cli_specific, dict):
+        merged = merge_dicts(merged, cli_specific)
+    global_disabled = (prefs.get("session_surfaces") or {}).get("disabled") if isinstance(prefs.get("session_surfaces"), dict) else {}
+    disabled = merge_disabled_session_surfaces(global_disabled, merged.get("disabled_session_surfaces"))
+    if disabled:
+        merged["disabled_session_surfaces"] = disabled
+    return merged
+
+
+def runtime_with_launch_preferences(cfg, runtime, cli_name, *, load_user_preferences):
+    if not isinstance(runtime, dict):
+        return runtime
+    if runtime.get("_mms_preferences_applied"):
+        return runtime
+    prefs = (cfg or {}).get("_mms_preferences") if isinstance(cfg, dict) else None
+    if not isinstance(prefs, dict):
+        prefs = load_user_preferences()
+    overlay = preference_runtime_overlay(prefs, cli_name)
+    if not overlay:
+        result = dict(runtime)
+        result["_mms_preferences_applied"] = True
+        return result
+    result = dict(runtime)
+    existing_disabled = result.get("disabled_session_surfaces")
+    for key, value in overlay.items():
+        if key == "disabled_session_surfaces":
+            continue
+        result[key] = value
+    disabled = merge_disabled_session_surfaces(existing_disabled, overlay.get("disabled_session_surfaces"))
+    if disabled:
+        result["disabled_session_surfaces"] = disabled
+    result["_mms_preferences_applied"] = True
+    return result
+
+
 def infer_model_family(model_name, *, model_families):
     raw = str(model_name or "").strip().lower()
     parts = raw.rsplit("/", 1)
