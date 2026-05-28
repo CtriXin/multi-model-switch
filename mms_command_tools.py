@@ -1119,6 +1119,10 @@ def refresh_routes_export_for_hive(
         return False
 
 
+def trigger_routes_export_after_credentials_write(*, refresh_routes_export_for_hive):
+    refresh_routes_export_for_hive(force=True, quiet=True)
+
+
 def confirm_guard_accept_from_tui(
     cfg,
     *,

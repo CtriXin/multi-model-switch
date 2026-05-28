@@ -915,6 +915,22 @@ def test_refresh_routes_export_for_hive_helper_preserves_load_override_export_an
     assert messages == ["[yellow]⚠ Hive routes export 刷新失败: boom[/yellow]"]
 
 
+def test_credentials_routes_export_trigger_preserves_force_quiet(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    calls = []
+    mms_command_tools.trigger_routes_export_after_credentials_write(
+        refresh_routes_export_for_hive=lambda **kwargs: calls.append(kwargs)
+    )
+    assert calls == [{"force": True, "quiet": True}]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda **kwargs: calls.append(kwargs))
+    assert mms_core._trigger_routes_export_after_credentials_write() is None
+    assert calls == [{"force": True, "quiet": True}]
+
+
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 

@@ -2128,7 +2128,11 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startu
 
 def _trigger_routes_export_after_credentials_write():
     """Best-effort routes export after provider key / URL changes."""
-    _refresh_routes_export_for_hive(force=True, quiet=True)
+    from mms_command_tools import trigger_routes_export_after_credentials_write
+
+    return trigger_routes_export_after_credentials_write(
+        refresh_routes_export_for_hive=_refresh_routes_export_for_hive
+    )
 
 
 def _backup_config_tree(label):
