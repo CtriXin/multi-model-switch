@@ -102,9 +102,12 @@ def default_registry_db_path(config_dir: str | os.PathLike[str] | None = None, *
     source_env = env or os.environ
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir(source_env))
     root = root.expanduser()
-    explicit_root = str(source_env.get("MMS_CONFIG_ROOT") or "").strip()
-    explicit_path = Path(explicit_root).expanduser() if explicit_root else None
-    if root.name == "mms-next" or (explicit_path and explicit_path.absolute() == root.absolute()):
+    explicit_paths = []
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR"):
+        raw = str(source_env.get(key) or "").strip()
+        if raw:
+            explicit_paths.append(Path(raw).expanduser())
+    if root.name == "mms-next" or any(path.absolute() == root.absolute() for path in explicit_paths):
         return root / "registry" / "model-registry.sqlite"
     return root / "model-registry.sqlite"
 

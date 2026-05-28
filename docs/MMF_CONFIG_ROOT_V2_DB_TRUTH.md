@@ -79,6 +79,7 @@ Rules:
 - `mms` continues reading `~/.config/mms` by default.
 - `mmf` sets `MMS_CONFIG_ROOT=~/.config/mms-next` and uses the same MMS code path.
 - `MMS_CONFIG_ROOT` is the v2 root selector. Existing `MMS_CONFIG_DIR` remains legacy/test compatibility below it, but once explicitly set it is still treated as a selected-root boundary for fail-closed consumers.
+- Explicit selected roots from either `MMS_CONFIG_ROOT` or `MMS_CONFIG_DIR` use `<config_root>/registry/model-registry.sqlite`; no-explicit stable compatibility roots may still use the old root-level DB path.
 - `mms-next` is a directory name, not a permanent architecture contract.
 - All paths must derive from `config_root`; business logic must not hardcode `mms-next`.
 - New root failures must fail closed inside the selected root. They must not silently fall back to old `~/.config/mms` credentials or account state.

@@ -40,10 +40,21 @@ def test_preview_config_root_uses_registry_subdir_for_db(monkeypatch, tmp_path: 
     assert mms_registry.default_registry_db_path(config_dir=preview_root) == preview_root / "registry" / "model-registry.sqlite"
 
 
+def test_config_dir_explicit_root_uses_registry_subdir_for_db(monkeypatch, tmp_path: Path) -> None:
+    selected_root = tmp_path / "selected-root"
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
+
+    assert mms_registry.default_registry_db_path() == selected_root / "registry" / "model-registry.sqlite"
+    assert mms_registry.default_registry_db_path(config_dir=selected_root) == selected_root / "registry" / "model-registry.sqlite"
+
+
 def test_legacy_config_dir_keeps_root_level_registry_db(monkeypatch, tmp_path: Path) -> None:
     legacy_root = tmp_path / "mms"
 
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
 
     assert mms_registry.default_registry_db_path(config_dir=legacy_root) == legacy_root / "model-registry.sqlite"
 
