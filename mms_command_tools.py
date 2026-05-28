@@ -673,6 +673,34 @@ def ensure_startup_snapshot_guard(
     exit_func(config_guard_exit_code)
 
 
+def confirm_guard_accept_from_tui(
+    cfg,
+    *,
+    config_write_target_path,
+    build_config_guard_snapshot,
+    config_snapshot_path,
+    load_json_snapshot,
+    snapshot_diff_lines,
+    confirm_startup_snapshot_drift,
+    console,
+):
+    config_path = config_write_target_path()
+    current_snapshot = build_config_guard_snapshot(cfg, config_path=config_path)
+    latest_path = config_snapshot_path("startup", "latest.json", config_path=config_path)
+    accepted_path = config_snapshot_path("startup", "accepted.json", config_path=config_path)
+    accepted_payload = load_json_snapshot(accepted_path) or {}
+    accepted_snapshot = accepted_payload.get("snapshot") if isinstance(accepted_payload, dict) else None
+    diff_lines = snapshot_diff_lines(accepted_snapshot, current_snapshot) if accepted_snapshot else []
+    if not diff_lines:
+        console.print("[green]当前快照没有 drift，不需要 accept。[/green]")
+        return False
+    return confirm_startup_snapshot_drift(
+        diff_lines,
+        accepted_path=accepted_path,
+        latest_path=latest_path,
+    )
+
+
 def load_json_file(path, default):
     if not os.path.exists(path):
         return default

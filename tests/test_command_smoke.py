@@ -332,6 +332,49 @@ def test_startup_snapshot_guard_helper_preserves_bootstrap_pending_and_exit_flow
     assert "mmg guard accept" in console.items[-1]
 
 
+def test_guard_accept_tui_confirm_helper_preserves_no_drift_and_confirm_paths():
+    import mms_command_tools
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, value):
+            self.items.append(value)
+
+    console = Console()
+    paths = {
+        "latest.json": "/latest.json",
+        "accepted.json": "/accepted.json",
+    }
+    accepted = {"snapshot": {"generation": 1}}
+    current = {"generation": 1}
+
+    kwargs = {
+        "config_write_target_path": lambda: "/config.toml",
+        "build_config_guard_snapshot": lambda cfg, config_path=None: dict(current),
+        "config_snapshot_path": lambda _kind, name, config_path=None: paths[name],
+        "load_json_snapshot": lambda path: accepted if path == "/accepted.json" else None,
+        "snapshot_diff_lines": lambda old, new: [] if old == new else ["generation changed"],
+        "confirm_startup_snapshot_drift": lambda *_args, **_kwargs: True,
+        "console": console,
+    }
+
+    assert mms_command_tools.confirm_guard_accept_from_tui({}, **kwargs) is False
+    assert console.items == ["[green]当前快照没有 drift，不需要 accept。[/green]"]
+
+    current["generation"] = 2
+    confirm_calls = []
+    kwargs["confirm_startup_snapshot_drift"] = lambda diffs, **kw: confirm_calls.append((diffs, kw)) or True
+    assert mms_command_tools.confirm_guard_accept_from_tui({}, **kwargs) is True
+    assert confirm_calls == [
+        (
+            ["generation changed"],
+            {"accepted_path": "/accepted.json", "latest_path": "/latest.json"},
+        )
+    ]
+
+
 def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     import hashlib
     import json
