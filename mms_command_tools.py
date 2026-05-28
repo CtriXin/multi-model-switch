@@ -985,6 +985,67 @@ def display_preferences_help(*, command_name, preference_paths, preferences_doc_
     console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms/** without human confirmation.")
 
 
+def display_usage_stats(*, load_usage_stats, usage_path, table_cls, console):
+    stats = load_usage_stats()
+    sources = stats.get("sources", {})
+    if not sources:
+        console.print("[yellow]还没有本地启动统计[/yellow]")
+        console.print(f"[dim]统计文件会写入 {usage_path}[/dim]")
+        return
+
+    table = table_cls(title="本地启动统计", show_lines=True)
+    table.add_column("来源", style="cyan")
+    table.add_column("CLI", style="green")
+    table.add_column("启动次数", style="yellow")
+    table.add_column("最近模型", style="magenta")
+    table.add_column("最近使用", style="white")
+
+    rows = sorted(
+        sources.values(),
+        key=lambda item: (item.get("last_used_at", ""), item.get("launches", 0)),
+        reverse=True,
+    )
+    for item in rows:
+        table.add_row(
+            f"{item.get('runtime_kind', 'source')} / {item.get('name', item.get('id', 'default'))}",
+            str(item.get("cli", "")),
+            str(item.get("launches", 0)),
+            str(item.get("last_model", "")),
+            str(item.get("last_used_at", "")),
+        )
+    console.print(table)
+    console.print("[dim]这是本地软统计，用于排序/推荐参考；不等于真实计费数据。[/dim]")
+
+
+def display_adapter_registry(*, top_source_companies, default_adapter_policy, command_name, table_cls, console):
+    table = table_cls(title="来源公司 / Adapter Registry (Top 10)", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("公司/品牌", style="green")
+    table.add_column("模型族", style="yellow")
+    table.add_column("推荐 Adapter", style="magenta")
+    table.add_column("当前状态", style="white")
+    table.add_column("OAuth", style="white")
+    table.add_column("默认 Claude Bridge", style="white")
+
+    for idx, item in enumerate(top_source_companies, 1):
+        table.add_row(
+            str(idx),
+            f"{item.get('company', '')} / {item.get('brand', '')}",
+            ", ".join(item.get("families", [])),
+            str(item.get("default_adapter", "")),
+            str(item.get("current_support", "")),
+            "yes" if item.get("oauth_native") else "no",
+            "yes" if item.get("claude_bridge_default") else "no",
+        )
+    console.print(table)
+    console.print("[bold]默认策略:[/bold]")
+    for key, text in default_adapter_policy.items():
+        console.print(f"  [cyan]{key}[/cyan]: {text}")
+    console.print(
+        f"[dim]详情文档: docs/ADAPTER_REGISTRY.md；命令: {command_name} config adapter.registry[/dim]"
+    )
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):

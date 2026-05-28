@@ -496,6 +496,71 @@ def test_config_help_display_helpers_render_expected_sections(tmp_path):
     assert "[launch.defaults]" in text
 
 
+def test_usage_stats_display_sorts_recent_sources():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+
+    mms_command_tools.display_usage_stats(
+        load_usage_stats=lambda: {
+            "sources": {
+                "old": {
+                    "runtime_kind": "provider",
+                    "name": "Old",
+                    "cli": "claude",
+                    "launches": 2,
+                    "last_model": "sonnet",
+                    "last_used_at": "2026-01-01T00:00:00Z",
+                },
+                "new": {
+                    "runtime_kind": "account",
+                    "name": "New",
+                    "cli": "codex",
+                    "launches": 1,
+                    "last_model": "gpt-5.5",
+                    "last_used_at": "2026-05-01T00:00:00Z",
+                },
+            }
+        },
+        usage_path="/tmp/usage.json",
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.rows[0][0][0] == "account / New"
+    assert table.rows[1][0][0] == "provider / Old"
+
+
+def test_adapter_registry_display_renders_policy():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+
+    mms_command_tools.display_adapter_registry(
+        top_source_companies=[
+            {
+                "company": "Example",
+                "brand": "Relay",
+                "families": ["GPT"],
+                "default_adapter": "openai",
+                "current_support": "supported",
+                "oauth_native": False,
+                "claude_bridge_default": True,
+            }
+        ],
+        default_adapter_policy={"gpt": "use openai"},
+        command_name="mmg",
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.rows[0][0] == ("1", "Example / Relay", "GPT", "openai", "supported", "no", "yes")
+    assert any("gpt" in str(item) and "use openai" in str(item) for item in console.items)
+    assert any("mmg config adapter.registry" in str(item) for item in console.items)
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 
