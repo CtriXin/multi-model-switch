@@ -1093,6 +1093,20 @@ def apply_opencode_profile_for_launch(runtime, cli_name, *, select_and_apply_ope
     return {"status": "continue", "runtime": runtime, "cancelled": False}
 
 
+def apply_launch_runtime_preferences(
+    cfg,
+    runtime,
+    cli_name,
+    *,
+    runtime_with_launch_preferences,
+    runtime_with_vision_sidecar,
+):
+    runtime = runtime_with_launch_preferences(cfg, runtime, cli_name)
+    if cli_name == "claude":
+        runtime = runtime_with_vision_sidecar(cfg, runtime)
+    return runtime
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:

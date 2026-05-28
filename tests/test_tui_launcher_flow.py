@@ -4,6 +4,7 @@ from mms_tui_launcher_flow import (
     apply_confirm_bypass_flag,
     apply_claude_network_guard_preview,
     apply_confirm_runtime_preferences,
+    apply_launch_runtime_preferences,
     apply_opencode_profile_for_launch,
     apply_tui_priority_changes,
     build_confirm_capability_context,
@@ -212,6 +213,36 @@ def test_apply_opencode_profile_for_launch_only_applies_for_opencode() -> None:
     assert calls == [
         (runtime, True),
         (runtime, True),
+    ]
+
+
+def test_apply_launch_runtime_preferences_applies_common_and_claude_sidecar() -> None:
+    calls = []
+    cfg = {"cfg": True}
+    runtime = {"id": "p1"}
+    preferred_runtime = {"id": "p1", "prefs": True}
+    sidecar_runtime = {"id": "p1", "prefs": True, "vision": True}
+
+    assert apply_launch_runtime_preferences(
+        cfg,
+        runtime,
+        "codex",
+        runtime_with_launch_preferences=lambda cfg_arg, runtime_arg, cli: calls.append(("prefs", cfg_arg, runtime_arg, cli)) or preferred_runtime,
+        runtime_with_vision_sidecar=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+    ) is preferred_runtime
+
+    assert apply_launch_runtime_preferences(
+        cfg,
+        runtime,
+        "claude",
+        runtime_with_launch_preferences=lambda cfg_arg, runtime_arg, cli: calls.append(("prefs", cfg_arg, runtime_arg, cli)) or preferred_runtime,
+        runtime_with_vision_sidecar=lambda cfg_arg, runtime_arg: calls.append(("vision", cfg_arg, runtime_arg)) or sidecar_runtime,
+    ) is sidecar_runtime
+
+    assert calls == [
+        ("prefs", cfg, runtime, "codex"),
+        ("prefs", cfg, runtime, "claude"),
+        ("vision", cfg, preferred_runtime),
     ]
 
 

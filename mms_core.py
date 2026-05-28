@@ -5465,9 +5465,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         if opencode_profile_result.get("cancelled"):
             continue
         runtime_runtime = opencode_profile_result["runtime"]
-        runtime_runtime = _runtime_with_launch_preferences(current_cfg, runtime_runtime, cli)
-        if cli == "claude":
-            runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)
+        runtime_runtime = tui_flow.apply_launch_runtime_preferences(
+            current_cfg,
+            runtime_runtime,
+            cli,
+            runtime_with_launch_preferences=_runtime_with_launch_preferences,
+            runtime_with_vision_sidecar=_runtime_with_vision_sidecar,
+        )
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
