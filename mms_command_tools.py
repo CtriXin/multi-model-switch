@@ -3955,6 +3955,42 @@ def resolve_claude_resume_ref(session_ref, *, list_indexed_sessions, allow_passt
     return None, None, f"找不到 Claude session: {ref}"
 
 
+def resolve_resume_target(
+    session_ref,
+    cli_hint="auto",
+    *,
+    split_cli_prefixed_resume_ref=split_cli_prefixed_resume_ref,
+    resolve_codex_resume_ref,
+    resolve_claude_resume_ref,
+    uuid_resume_cli_hint,
+):
+    prefix_cli, ref = split_cli_prefixed_resume_ref(session_ref)
+    cli_hint = prefix_cli or str(cli_hint or "auto").strip().lower()
+    if cli_hint not in {"auto", "codex", "claude"}:
+        return None, None, None, f"不支持的 CLI: {cli_hint}"
+    if cli_hint == "codex":
+        session_id, record, error = resolve_codex_resume_ref(ref, allow_passthrough=True)
+        return "codex", session_id, record, error
+    if cli_hint == "claude":
+        session_id, record, error = resolve_claude_resume_ref(ref, allow_passthrough=True)
+        return "claude", session_id, record, error
+
+    codex_id, codex_record, codex_error = resolve_codex_resume_ref(ref, allow_passthrough=False)
+    claude_id, claude_record, claude_error = resolve_claude_resume_ref(ref)
+    if codex_id and not claude_id:
+        return "codex", codex_id, codex_record, None
+    if claude_id and not codex_id:
+        return "claude", claude_id, claude_record, None
+    if codex_id and claude_id:
+        return None, None, None, f"session id 同时匹配 Codex 和 Claude，请使用 codex:{ref} 或 claude:{ref}"
+    uuid_cli = uuid_resume_cli_hint(ref)
+    if uuid_cli == "codex":
+        return "codex", ref, {"id": ref, "_unindexed": True}, None
+    if uuid_cli == "claude":
+        return "claude", ref, {"session_id": ref, "_unindexed": True}, None
+    return None, None, None, codex_error or claude_error or f"找不到 session: {ref}"
+
+
 def uuid_resume_cli_hint(session_ref):
     ref = str(session_ref or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", ref):

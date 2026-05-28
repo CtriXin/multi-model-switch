@@ -123,7 +123,24 @@ def test_resolve_claude_resume_ref_from_index(monkeypatch):
 
 
 def test_resolve_resume_target_requires_prefix_when_ambiguous(monkeypatch):
+    import mms_command_tools
     import mms_core
+
+    cli, session_id, record, error = mms_command_tools.resolve_resume_target(
+        "same",
+        resolve_codex_resume_ref=lambda ref, allow_passthrough=False: ("same-id", {"id": "same-id"}, None),
+        resolve_claude_resume_ref=lambda ref, allow_passthrough=False: (
+            "same-id",
+            {"session_id": "same-id"},
+            None,
+        ),
+        uuid_resume_cli_hint=lambda ref: "",
+    )
+    assert cli is None
+    assert session_id is None
+    assert record is None
+    assert "codex:same" in error
+    assert "claude:same" in error
 
     monkeypatch.setattr(
         mms_core,
