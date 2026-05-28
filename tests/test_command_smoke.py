@@ -217,6 +217,45 @@ def test_tui_usage_recency_helpers_preserve_sorting_and_cold_family_rules():
     ) is False
 
 
+def test_resolve_visible_clis_preserves_oauth_and_family_hint_rules():
+    import mms_command_tools
+
+    resolver_calls = []
+
+    def accounts_for_cli(_cfg, cli_name):
+        return ["account"] if cli_name == "claude" else []
+
+    def check_cli_installed(cli_name):
+        return cli_name == "agy"
+
+    def resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
+        resolver_calls.append((cfg, cli_name, default_provider, default_models))
+        if cli_name == "missing":
+            return None, []
+        if cli_name == "gemini":
+            return {"id": "provider"}, []
+        if cli_name == "codex":
+            return {"id": "provider"}, ["gpt-5.5"]
+        return {"id": "provider"}, []
+
+    cfg = {"cfg": True}
+    provider = {"id": "default"}
+    models = ["gpt-5.5"]
+
+    assert mms_command_tools.resolve_visible_clis(
+        cfg,
+        provider,
+        models,
+        cli_names=["claude", "agy", "missing", "gemini", "codex", "opencode"],
+        managed_oauth_clis={"claude", "agy"},
+        cli_model_family_hints={"gemini": ["Gemini"], "codex": ["GPT"]},
+        accounts_for_cli=accounts_for_cli,
+        check_cli_installed=check_cli_installed,
+        resolve_provider_for_cli=resolve_provider_for_cli,
+    ) == ["claude", "agy", "codex", "opencode"]
+    assert [call[1] for call in resolver_calls] == ["missing", "gemini", "codex", "opencode"]
+
+
 def test_launch_trace_formatter_preserves_sources_and_override_chain():
     import mms_command_tools
 

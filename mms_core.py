@@ -6146,30 +6146,19 @@ def _choose_runtime_source(
 
 
 def _resolve_visible_clis(cfg, default_provider, default_models):
-    visible = []
+    from mms_command_tools import resolve_visible_clis
 
-    for cli_name in CLI_NAMES:
-        if cli_name in MMS_MANAGED_OAUTH_CLIS:
-            if _accounts_for_cli(cfg, cli_name):
-                visible.append(cli_name)
-                continue
-            # Antigravity is an official OAuth-native CLI: show the tab when
-            # the binary exists so users can enter the TUI connect flow first.
-            if cli_name == "agy":
-                try:
-                    if check_cli_installed(cli_name):
-                        visible.append(cli_name)
-                        continue
-                except Exception:
-                    pass
-        provider, family_models = _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
-        if provider is None:
-            continue
-        if cli_name in CLI_MODEL_FAMILY_HINTS and not family_models:
-            continue
-        visible.append(cli_name)
-
-    return visible
+    return resolve_visible_clis(
+        cfg,
+        default_provider,
+        default_models,
+        cli_names=CLI_NAMES,
+        managed_oauth_clis=MMS_MANAGED_OAUTH_CLIS,
+        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
+        accounts_for_cli=_accounts_for_cli,
+        check_cli_installed=check_cli_installed,
+        resolve_provider_for_cli=_resolve_provider_for_cli,
+    )
 
 
 def _clean_model_info(model_info):

@@ -2729,6 +2729,44 @@ def apply_runtime_priority_changes(
     return changed
 
 
+def resolve_visible_clis(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    cli_names,
+    managed_oauth_clis,
+    cli_model_family_hints,
+    accounts_for_cli,
+    check_cli_installed,
+    resolve_provider_for_cli,
+):
+    visible = []
+
+    for cli_name in cli_names:
+        if cli_name in managed_oauth_clis:
+            if accounts_for_cli(cfg, cli_name):
+                visible.append(cli_name)
+                continue
+            # Antigravity is OAuth-native, so show the tab before account setup
+            # when the binary exists and let the TUI connect flow handle setup.
+            if cli_name == "agy":
+                try:
+                    if check_cli_installed(cli_name):
+                        visible.append(cli_name)
+                        continue
+                except Exception:
+                    pass
+        provider, family_models = resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+        if provider is None:
+            continue
+        if cli_name in cli_model_family_hints and not family_models:
+            continue
+        visible.append(cli_name)
+
+    return visible
+
+
 def parse_usage_timestamp(value):
     raw = str(value or "").strip()
     if not raw:
