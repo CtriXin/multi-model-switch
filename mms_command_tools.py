@@ -3364,6 +3364,43 @@ def check_cli_installed(cli_name, *, resolve_cli_binary):
     return bool(resolve_cli_binary(cli_name))
 
 
+def select_cli(
+    cli_names,
+    *,
+    check_cli_installed,
+    check_and_offer_install,
+    table_cls,
+    int_prompt_cls,
+    console,
+    exit_func,
+):
+    if not cli_names:
+        console.print("[red]当前没有可用的 CLI。请先检查 provider 配置和模型探测结果。[/red]")
+        exit_func(1)
+    table = table_cls(title="选择 CLI")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("CLI", style="green")
+    table.add_column("状态", style="yellow")
+
+    for i, name in enumerate(cli_names, 1):
+        status = "[green]已安装[/green]" if check_cli_installed(name) else "[red]未安装[/red]"
+        table.add_row(str(i), name, status)
+
+    console.print(table)
+
+    while True:
+        try:
+            choice = int_prompt_cls.ask("选择 CLI 编号")
+            if 1 <= choice <= len(cli_names):
+                cli = cli_names[choice - 1]
+                if not check_cli_installed(cli):
+                    check_and_offer_install(cli)
+                return cli
+            console.print(f"[red]请输入 1-{len(cli_names)}[/red]")
+        except KeyboardInterrupt:
+            exit_func(0)
+
+
 def setup_provider_credentials(
     provider,
     existing_base_url="",

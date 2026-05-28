@@ -4755,6 +4755,69 @@ def test_availability_helpers_preserve_cache_warning_and_cli_check(monkeypatch):
     assert mms_command_tools.check_cli_installed("missing", resolve_cli_binary=lambda cli: "") is False
 
 
+def test_select_cli_helper_and_wrapper_preserve_prompt_install_flow(monkeypatch):
+    import pytest
+
+    import mms_command_tools
+    import mms_core
+
+    class FakeIntPrompt:
+        values = iter([3, 2])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    console = _CollectingConsole()
+    installed = {"codex": True, "claude": False}
+    installs = []
+    selected = mms_command_tools.select_cli(
+        ["codex", "claude"],
+        check_cli_installed=lambda cli: installed[cli],
+        check_and_offer_install=lambda cli: installs.append(cli),
+        table_cls=_FakeTable,
+        int_prompt_cls=FakeIntPrompt,
+        console=console,
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    )
+    assert selected == "claude"
+    assert installs == ["claude"]
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "选择 CLI"}
+    assert table.rows == [
+        (("1", "codex", "[green]已安装[/green]"), {}),
+        (("2", "claude", "[red]未安装[/red]"), {}),
+    ]
+    assert "[red]请输入 1-2[/red]" in console.items
+
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.select_cli(
+            [],
+            check_cli_installed=lambda *_args: True,
+            check_and_offer_install=lambda *_args: None,
+            table_cls=_FakeTable,
+            int_prompt_cls=FakeIntPrompt,
+            console=console,
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        )
+    assert exc_info.value.code == 1
+    assert console.items[-1] == "[red]当前没有可用的 CLI。请先检查 provider 配置和模型探测结果。[/red]"
+
+    class WrapperPrompt:
+        values = iter([1])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    monkeypatch.setattr(mms_core, "CLI_NAMES", ["codex"])
+    monkeypatch.setattr(mms_core, "Table", _FakeTable)
+    monkeypatch.setattr(mms_core, "IntPrompt", WrapperPrompt)
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+    monkeypatch.setattr(mms_core, "check_cli_installed", lambda cli: True)
+    assert mms_core.select_cli() == "codex"
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
