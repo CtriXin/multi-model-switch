@@ -1725,6 +1725,34 @@ def test_opencode_smoke_classifies_reasoning_content_roundtrip_as_blocked():
     assert smoke_opencode_profile._health_status(error_class, 0.5) == "blocked"
 
 
+def test_opencode_smoke_classifies_thinking_block_roundtrip_as_blocked():
+    from scripts import smoke_opencode_profile
+
+    route = {
+        "id": "reviewer_primary",
+        "model": "deepseek-v4-pro",
+        "provider_id": "deepseek-direct",
+        "protocol": "anthropic_messages",
+    }
+    check = {
+        "ok": False,
+        "returncode": 1,
+        "stderr": "API Error: 400 The `content[].thinking` in the thinking mode must be passed back to the API.",
+        "cache_transport_evidence": {
+            "schema": "cache_transport_evidence.v1",
+            "model": "deepseek-v4-pro",
+            "provider_id": "deepseek-direct",
+            "protocol": "anthropic_messages",
+            "request_url": "https://deepseek.example/v1/messages",
+        },
+    }
+
+    error_class = smoke_opencode_profile._classify_error(check, route)
+
+    assert error_class == "reasoning_content_roundtrip_required"
+    assert smoke_opencode_profile._health_status(error_class, 0.5) == "blocked"
+
+
 def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch):
     import mms_core
 

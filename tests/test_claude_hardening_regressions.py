@@ -83,6 +83,7 @@ def test_build_claude_session_settings_injects_only_allowlisted_mcp_servers(monk
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
         "_resolve_real_home_command_path",
@@ -145,6 +146,7 @@ def test_build_claude_session_settings_drops_deprecated_mindkeeper_mcp(monkeypat
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
 
@@ -157,6 +159,27 @@ def test_build_claude_session_settings_drops_deprecated_mindkeeper_mcp(monkeypat
     )
 
     assert "mcpServers" not in result
+
+
+def test_build_claude_session_settings_includes_installed_plugin_http_mcp(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    result = mms_launchers._build_claude_session_settings({})
+
+    assert result["mcpServers"] == {
+        "figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}
+    }
 
 
 def test_default_session_mcp_servers_prefer_brainkeeper_over_legacy(monkeypatch, tmp_path):
@@ -195,6 +218,7 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_brainkeeper_
         "_resolve_real_home_command_path",
         lambda name, env=None: {"node": str(fake_node), "python3": str(fake_python)}.get(name, ""),
     )
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
         "_default_session_mcp_servers",
@@ -242,6 +266,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
 
@@ -495,6 +520,51 @@ def test_append_codex_mcp_servers_drops_missing_bare_codegraph(monkeypatch, tmp_
     assert rendered == 'base_url = "https://example.test"\n'
 
 
+def test_append_codex_mcp_servers_includes_installed_plugin_http_server(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.figma]" in rendered
+    assert 'url = "https://mcp.figma.com/mcp"' in rendered
+
+
+def test_append_codex_mcp_servers_skips_http_plugin_when_real_codex_plugin_enabled(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    codex_dir = real_home / ".codex"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "config.toml").write_text(
+        '[plugins."figma@openai-curated"]\n'
+        'enabled = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.figma]" not in rendered
+
+
 def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallback(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -507,6 +577,7 @@ def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallba
         "_resolve_real_home_command_path",
         lambda name, env=None: str(fake_python) if name == "python3" else "",
     )
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
         "_default_hive_session_mcp_server",
@@ -545,6 +616,7 @@ def test_inject_managed_mcp_servers_drops_unresolvable_existing_codegraph(monkey
         lambda: {"mcpServers": {"codegraph": {"command": "codegraph", "args": ["serve", "--mcp"]}}},
     )
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda name, env=None: "")
@@ -552,6 +624,46 @@ def test_inject_managed_mcp_servers_drops_unresolvable_existing_codegraph(monkey
     result = mms_launchers._inject_managed_mcp_servers_into_claude_state({})
 
     assert "mcpServers" not in result
+
+
+def test_installed_claude_plugin_mcp_servers_reads_plugin_manifest(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    install_root = real_home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "figma" / "2.2.12"
+    (install_root / ".cursor-plugin").mkdir(parents=True, exist_ok=True)
+    (install_root / ".cursor-plugin" / "plugin.json").write_text(
+        json.dumps({"mcpServers": "./.mcp.json"}),
+        encoding="utf-8",
+    )
+    (install_root / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}}}),
+        encoding="utf-8",
+    )
+    installed = real_home / ".claude" / "plugins" / "installed_plugins.json"
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    installed.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "plugins": {
+                    "figma@claude-plugins-official": [
+                        {
+                            "scope": "user",
+                            "installPath": str(install_root),
+                            "version": "2.2.12",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    assert mms_launchers._installed_claude_plugin_mcp_servers() == {
+        "figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}
+    }
 
 
 def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claude(monkeypatch):
@@ -3489,7 +3601,7 @@ def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort(
     assert "reasoning_content" not in payload["messages"][0]
 
 
-def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_deepseek():
+def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_roundtrip_family():
     import mms_bridge
 
     payload = {
@@ -3499,7 +3611,7 @@ def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_no
 
     mms_bridge._apply_domestic_reasoning_controls(
         payload,
-        "kimi-for-coding",
+        "glm-5.1",
         thinking_enabled=True,
         reasoning_effort="high",
     )
@@ -3525,6 +3637,63 @@ def test_preserve_domestic_reasoning_roundtrip_supports_mimo():
     mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "mimo-v2.5-pro")
 
     assert payload["messages"][0]["reasoning_content"] == "mimo step"
+
+
+def test_preserve_domestic_reasoning_roundtrip_rehydrates_missing_thinking_block_from_reasoning_content():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "reasoning_content": "hidden step",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_mimo", "name": "Read", "input": {"file": "x"}},
+                ],
+            }
+        ]
+    }
+
+    mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "mimo-v2.5-pro")
+
+    assert payload["messages"][0]["content"][0] == {"type": "thinking", "thinking": "hidden step"}
+    assert payload["messages"][0]["reasoning_content"] == "hidden step"
+
+
+def test_preserve_domestic_reasoning_roundtrip_propagates_split_kimi_tool_use_messages():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "carry this forward"}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I will call tools now."}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_b", "name": "Read", "input": {"file": "x"}}],
+            },
+        ]
+    }
+
+    mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "kimi-k2.6")
+
+    assert payload["messages"][0]["reasoning_content"] == "carry this forward"
+    assert "reasoning_content" not in payload["messages"][1]
+    assert payload["messages"][2]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][2]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][2]["content"][1]["type"] == "tool_use"
+    assert payload["messages"][3]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][3]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][3]["content"][1]["type"] == "tool_use"
 
 
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):

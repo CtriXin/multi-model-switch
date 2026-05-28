@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v3.3.0`
+当前 tagged version：`v3.4.0`
 
 这一代的重点：
 
@@ -47,7 +47,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`xmem` 和 Web automation bundle（`weber` 路由器 + `web-access` 登录态 Chrome + `agent-browser` headless）；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
 - Caveman 默认改为 `lite`，保留完整句子但去掉 filler；需要更强压缩时仍可用 `/caveman full`
 - quiet hook policy：MMS-managed Claude/Codex session 默认不再挂 SessionStart/UserPrompt probe；保留的 hook 只用于 guard、closeout 或显式启用的 pack
-- session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；Codex Caveman 尽量保留已信任 hook 顺序
+- session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；同时补载已安装 Claude plugin 的 URL-based MCP（如 Figma）；对 Codex，如果 real `~/.codex/config.toml` 里已启用同名 app-backed plugin，则不再额外注入重复的 URL MCP，避免制造第二条坏掉的 OAuth 路径；Codex Caveman 尽量保留已信任 hook 顺序
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
 - 可选 xmem installer pack：`--install-xmem` 安装通用 xmem CLI/skill，`--xmem-ref` 可固定来源版本，`--dry-run` 可预览安装/setup 计划且不写文件
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
@@ -60,10 +60,10 @@ MMS 会内建通用版 `xmem` skill 和静默 session closeout hook；默认不�
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
 
-稳定版安装（固定到 `v3.3.0`）：
+稳定版安装（固定到 `v3.4.0`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 默认行为：
@@ -101,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 安装后自检：
