@@ -4189,6 +4189,130 @@ def quick_connect_official(
     return load_config(), True
 
 
+def quick_connect_gateway(
+    cfg,
+    preset_id=None,
+    *,
+    ensure_interactive_terminal,
+    select_provider_template,
+    provider_template_payload,
+    localize,
+    panel_cls,
+    console,
+    provider_map,
+    wizard_prompt,
+    wizard_back_cls,
+    wizard_cancel_cls,
+    normalize_provider_id_input,
+    default_provider_id,
+    unique_runtime_id,
+    normalize_provider,
+    default_base_url,
+    confirm_ask,
+    prompt_ask,
+    normalize_models_endpoint,
+    prompt_validated_proxy_fields,
+    prompt_validated_timezone,
+    default_account_timezone,
+    upsert_provider,
+    save_config,
+    save_provider_credentials_with_probe,
+    load_config,
+):
+    ensure_interactive_terminal(localize("网关通道接入", "gateway channel setup"))
+    template_key = select_provider_template(preset_id=preset_id)
+    template = provider_template_payload(template_key)
+    console.print(panel_cls(
+        localize(
+            "[bold]网关通道[/bold]\n\n填写接口地址（请求地址 / Base URL）和 API Key，接入兼容 OpenAI / Anthropic 的服务。\n"
+            "显示名称给你自己看；系统会自动生成内部标识，避免后续功能和外部消费引用丢失。\n"
+            "如果模型列表地址和请求地址不同，再额外填写“模型列表地址（高级）”。\n"
+            "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。\n"
+            "[dim]输入 b 返回，q 退出。[/dim]",
+            "[bold]Gateway channel[/bold]\n\nEnter the request Base URL and API key for any OpenAI- or Anthropic-compatible service.\n"
+            "The display name is for you; MMS auto-generates a stable system ID so presets and external consumers do not break.\n"
+            "Only fill a separate model list URL if listing models uses a different endpoint.\n"
+            "All CLIs are enabled by default; use provider.edit later if you need tighter limits.\n"
+            "[dim]Type b to go back, q to cancel.[/dim]",
+        ),
+        title=localize("快速接入", "Quick Connect"),
+        border_style="cyan",
+    ))
+    providers = provider_map(cfg)
+    suggested_name = template["name"]
+    try:
+        name = wizard_prompt(
+            localize("显示名称 / 列表展示名（主界面里看到的名字）", "Display name / list label"),
+            default=suggested_name,
+        ).strip() or suggested_name
+        suggested_id = normalize_provider_id_input(name)
+        if suggested_id == default_provider_id:
+            suggested_id = normalize_provider_id_input(template["id"] or name)
+        provider_id = unique_runtime_id(set(providers.keys()), suggested_id)
+    except wizard_back_cls:
+        console.print(f"[yellow]{localize('已返回上一层', 'Returned to previous step')}[/yellow]")
+        return cfg, False
+    except wizard_cancel_cls:
+        console.print(f"[yellow]{localize('已退出接入', 'Setup cancelled')}[/yellow]")
+        return cfg, False
+    console.print(f"[dim]{localize('系统内部标识（自动生成）', 'System ID (auto-generated)')}: {provider_id}[/dim]")
+
+    provider = normalize_provider({
+        **template,
+        "id": provider_id,
+        "name": name,
+    })
+    try:
+        base_url = wizard_prompt(
+            localize("接口地址 / Base URL（请求地址）", "Request Base URL"),
+            default=provider.get("default_openai_base_url") or provider.get("default_anthropic_base_url") or default_base_url,
+            required=True,
+        ).rstrip("/")
+        api_key = wizard_prompt(
+            localize("API Key（不会回显）", "API key (hidden)"),
+            password=True,
+            required=True,
+        )
+        if confirm_ask(localize("模型列表地址与请求地址不同？（高级）", "Use a separate model list URL? (advanced)"), default=False):
+            provider["models_endpoint"] = normalize_models_endpoint(
+                prompt_ask(
+                    localize(
+                        "模型列表地址（高级，仅用于独立拉取模型列表；通常留默认）",
+                        "Model list URL (advanced, only used for a separate model-list endpoint)",
+                    ),
+                    default=provider.get("models_endpoint", "/models"),
+                )
+            )
+        provider["proxy"], provider["no_proxy"] = prompt_validated_proxy_fields(
+            provider.get("proxy", ""),
+            provider.get("no_proxy", ""),
+            wizard=True,
+        )
+        provider["timezone"] = prompt_validated_timezone(
+            provider.get("timezone") or default_account_timezone,
+            wizard=True,
+        )
+        provider = normalize_provider(provider)
+    except wizard_back_cls:
+        console.print(f"[yellow]{localize('已返回上一层', 'Returned to previous step')}[/yellow]")
+        return cfg, False
+    except wizard_cancel_cls:
+        console.print(f"[yellow]{localize('已退出接入', 'Setup cancelled')}[/yellow]")
+        return cfg, False
+    updated_cfg = upsert_provider(cfg, provider)
+    save_config(updated_cfg)
+    save_provider_credentials_with_probe(
+        provider,
+        base_url,
+        api_key,
+        base_url if "openai_chat_completions" in provider.get("protocols", []) else "",
+        base_url if "anthropic_messages" in provider.get("protocols", []) else "",
+    )
+    console.print(f"[green]✓ {localize('已接入网关通道', 'Gateway channel added')}: {name}[/green]")
+    console.print(f"[dim]{localize('内部标识', 'System ID')}: {provider_id}[/dim]")
+    return load_config(), True
+
+
 def select_cli(
     cli_names,
     *,

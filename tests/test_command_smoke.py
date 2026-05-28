@@ -10050,6 +10050,76 @@ def test_quick_connect_official_helper_preserves_account_save_default_and_core_g
     assert mms_core._quick_connect_official({"cfg": True}, preset_cli="claude") == ({"cfg": True}, False)
 
 
+def test_quick_connect_gateway_helper_preserves_provider_credentials_and_advanced_endpoint():
+    import mms_command_tools
+
+    class WizardBack(Exception):
+        pass
+
+    class WizardCancel(Exception):
+        pass
+
+    console = _CollectingConsole()
+    saved_configs = []
+    saved_credentials = []
+    prompts = iter(["Team Gateway", "https://relay.example/v1/", "sk-demo"])
+
+    cfg, changed = mms_command_tools.quick_connect_gateway(
+        {"providers": [{"id": "team-gateway"}]},
+        preset_id="generic",
+        ensure_interactive_terminal=lambda _label: None,
+        select_provider_template=lambda preset_id=None: preset_id or "generic",
+        provider_template_payload=lambda template_key: {
+            "id": template_key,
+            "name": "Generic Gateway",
+            "protocols": ["openai_chat_completions", "anthropic_messages"],
+            "default_openai_base_url": "https://default.example/v1",
+            "models_endpoint": "/models",
+        },
+        localize=lambda zh, _en: zh,
+        panel_cls=lambda content, **kwargs: ("panel", content, kwargs),
+        console=console,
+        provider_map=lambda current: {item["id"]: item for item in current.get("providers", [])},
+        wizard_prompt=lambda *_args, **_kwargs: next(prompts),
+        wizard_back_cls=WizardBack,
+        wizard_cancel_cls=WizardCancel,
+        normalize_provider_id_input=lambda value: value.lower().replace(" ", "-"),
+        default_provider_id="default",
+        unique_runtime_id=lambda existing, suggested: f"{suggested}-2" if suggested in existing else suggested,
+        normalize_provider=lambda provider: {**provider, "normalized": True},
+        default_base_url="https://fallback.example/v1",
+        confirm_ask=lambda *_args, **_kwargs: True,
+        prompt_ask=lambda *_args, **_kwargs: "custom/models",
+        normalize_models_endpoint=lambda value: f"/{str(value).strip('/')}",
+        prompt_validated_proxy_fields=lambda proxy, no_proxy, wizard=False: ("http://proxy", "localhost"),
+        prompt_validated_timezone=lambda current, wizard=False: "Asia/Singapore",
+        default_account_timezone="UTC",
+        upsert_provider=lambda current, provider: {**current, "providers": current.get("providers", []) + [provider]},
+        save_config=lambda current: saved_configs.append(current),
+        save_provider_credentials_with_probe=lambda *args: saved_credentials.append(args),
+        load_config=lambda: {"providers": [{"id": "loaded"}]},
+    )
+
+    assert changed is True
+    assert cfg == {"providers": [{"id": "loaded"}]}
+    provider = saved_configs[0]["providers"][1]
+    assert provider["id"] == "team-gateway-2"
+    assert provider["name"] == "Team Gateway"
+    assert provider["models_endpoint"] == "/custom/models"
+    assert provider["proxy"] == "http://proxy"
+    assert provider["timezone"] == "Asia/Singapore"
+    assert saved_credentials == [
+        (
+            provider,
+            "https://relay.example/v1",
+            "sk-demo",
+            "https://relay.example/v1",
+            "https://relay.example/v1",
+        )
+    ]
+    assert any("已接入网关通道" in str(item) for item in console.items)
+
+
 def test_account_env_helpers_preserve_scrub_seed_proxy_and_home_behavior():
     import mms_command_tools
 

@@ -2705,98 +2705,37 @@ def _save_provider_credentials_with_probe(provider, base_url, api_key, openai_ba
 
 
 def _quick_connect_gateway(cfg, preset_id=None):
-    _ensure_interactive_terminal(_L("网关通道接入", "gateway channel setup"))
-    template_key = _select_provider_template(preset_id=preset_id)
-    template = _provider_template_payload(template_key)
-    console.print(Panel(
-        _L(
-            "[bold]网关通道[/bold]\n\n填写接口地址（请求地址 / Base URL）和 API Key，接入兼容 OpenAI / Anthropic 的服务。\n"
-            "显示名称给你自己看；系统会自动生成内部标识，避免后续功能和外部消费引用丢失。\n"
-            "如果模型列表地址和请求地址不同，再额外填写“模型列表地址（高级）”。\n"
-            "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。\n"
-            "[dim]输入 b 返回，q 退出。[/dim]",
-            "[bold]Gateway channel[/bold]\n\nEnter the request Base URL and API key for any OpenAI- or Anthropic-compatible service.\n"
-            "The display name is for you; MMS auto-generates a stable system ID so presets and external consumers do not break.\n"
-            "Only fill a separate model list URL if listing models uses a different endpoint.\n"
-            "All CLIs are enabled by default; use provider.edit later if you need tighter limits.\n"
-            "[dim]Type b to go back, q to cancel.[/dim]",
-        ),
-        title=_L("快速接入", "Quick Connect"),
-        border_style="cyan",
-    ))
-    providers = _provider_map(cfg)
-    suggested_name = template["name"]
-    try:
-        name = _wizard_prompt(
-            _L("显示名称 / 列表展示名（主界面里看到的名字）", "Display name / list label"),
-            default=suggested_name,
-        ).strip() or suggested_name
-        suggested_id = _normalize_provider_id_input(name)
-        if suggested_id == DEFAULT_PROVIDER_ID:
-            suggested_id = _normalize_provider_id_input(template["id"] or name)
-        provider_id = _unique_runtime_id(set(providers.keys()), suggested_id)
-    except WizardBack:
-        console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
-        return cfg, False
-    except WizardCancel:
-        console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
-        return cfg, False
-    console.print(f"[dim]{_L('系统内部标识（自动生成）', 'System ID (auto-generated)')}: {provider_id}[/dim]")
+    from mms_command_tools import quick_connect_gateway
 
-    provider = _normalize_provider({
-        **template,
-        "id": provider_id,
-        "name": name,
-    })
-    try:
-        base_url = _wizard_prompt(
-            _L("接口地址 / Base URL（请求地址）", "Request Base URL"),
-            default=provider.get("default_openai_base_url") or provider.get("default_anthropic_base_url") or DEFAULT_BASE_URL,
-            required=True,
-        ).rstrip("/")
-        api_key = _wizard_prompt(
-            _L("API Key（不会回显）", "API key (hidden)"),
-            password=True,
-            required=True,
-        )
-        if Confirm.ask(_L("模型列表地址与请求地址不同？（高级）", "Use a separate model list URL? (advanced)"), default=False):
-            provider["models_endpoint"] = _normalize_models_endpoint(
-                Prompt.ask(
-                    _L(
-                        "模型列表地址（高级，仅用于独立拉取模型列表；通常留默认）",
-                        "Model list URL (advanced, only used for a separate model-list endpoint)",
-                    ),
-                    default=provider.get("models_endpoint", "/models"),
-                )
-            )
-        provider["proxy"], provider["no_proxy"] = _prompt_validated_proxy_fields(
-            provider.get("proxy", ""),
-            provider.get("no_proxy", ""),
-            wizard=True,
-        )
-        provider["timezone"] = _prompt_validated_timezone(
-            provider.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
-            wizard=True,
-        )
-        provider = _normalize_provider(provider)
-    except WizardBack:
-        console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
-        return cfg, False
-    except WizardCancel:
-        console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
-        return cfg, False
-    updated_cfg = _upsert_provider(cfg, provider)
-    save_config(updated_cfg)
-    _save_provider_credentials_with_probe(
-        provider,
-        base_url,
-        api_key,
-        base_url if "openai_chat_completions" in provider.get("protocols", []) else "",
-        base_url if "anthropic_messages" in provider.get("protocols", []) else "",
+    return quick_connect_gateway(
+        cfg,
+        preset_id=preset_id,
+        ensure_interactive_terminal=_ensure_interactive_terminal,
+        select_provider_template=_select_provider_template,
+        provider_template_payload=_provider_template_payload,
+        localize=_L,
+        panel_cls=Panel,
+        console=console,
+        provider_map=_provider_map,
+        wizard_prompt=_wizard_prompt,
+        wizard_back_cls=WizardBack,
+        wizard_cancel_cls=WizardCancel,
+        normalize_provider_id_input=_normalize_provider_id_input,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        unique_runtime_id=_unique_runtime_id,
+        normalize_provider=_normalize_provider,
+        default_base_url=DEFAULT_BASE_URL,
+        confirm_ask=lambda *args, **kwargs: Confirm.ask(*args, **kwargs),
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        normalize_models_endpoint=_normalize_models_endpoint,
+        prompt_validated_proxy_fields=_prompt_validated_proxy_fields,
+        prompt_validated_timezone=_prompt_validated_timezone,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        upsert_provider=_upsert_provider,
+        save_config=save_config,
+        save_provider_credentials_with_probe=_save_provider_credentials_with_probe,
+        load_config=load_config,
     )
-    console.print(f"[green]✓ {_L('已接入网关通道', 'Gateway channel added')}: {name}[/green]")
-    console.print(f"[dim]{_L('内部标识', 'System ID')}: {provider_id}[/dim]")
-    return load_config(), True
 
 
 def _quick_connect_official(cfg, preset_cli=None):
