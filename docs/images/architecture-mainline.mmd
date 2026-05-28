@@ -13,7 +13,7 @@ flowchart LR
   end
   subgraph Artifacts[Artifacts / Operator Surfaces]
     A1["Config Tree\n`~/.config/mms/` holds legacy config, accounts, env, usage, and session state; humans use TUI / `mms config` / WebUI."]
-    A2["Registry Bundle\n`generated/model-registry.latest-approved.json` verifies generated Router / Lineup / Profile / Policy; root route files are compatibility exports."]
+    A2["Registry Bundle\n`generated/model-registry.latest-approved.json` verifies generated Router / Lineup / Profile / Policy / Capabilities; root route files are compatibility exports."]
     A3["Operator Surfaces\n`mms routes`, `doctor`, `test`, `warm`, and the TUI let the operator steer or debug the system."]
   end
   E1 --> R1

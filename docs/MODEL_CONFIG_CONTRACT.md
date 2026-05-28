@@ -46,7 +46,7 @@ capability calibration snapshot lives at:
 These files are evidence inputs for registry import/refresh. They are not live
 runtime truth and should not be consumed directly by downstream projects.
 Runtime consumers should keep reading the approved Router / Lineup / Profile /
-Policy surfaces documented below.
+Policy / Capabilities surfaces documented below.
 
 ## Latest-Approved Bundle
 

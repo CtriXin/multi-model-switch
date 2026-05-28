@@ -174,7 +174,7 @@ Target behavior:
 
 - WebUI/TUI/`mms config` model changes trigger backup, publish, and verify automatically.
 - Watchdog is a consumer, not a writer. It must not mutate DB truth or run surprise route export from launchd/background context.
-- Watchdog should first read `<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json`, verify hashes, then consume generated Router/Policy/Profile/Lineup.
+- Watchdog should first read `<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json`, verify hashes, then consume generated Router/Lineup/Profile/Policy/Capabilities.
 - If the bundle is missing, invalid, hash-mismatched, or older than the approved DB revision, watchdog should report `stale_or_invalid_bundle` with a clear remediation hint.
 - Upstream `/models` newly exposing a model should enter candidate/source evidence first; it should not silently become approved route truth unless a later safe auto-promote policy explicitly allows it.
 - User-approved WebUI model additions should make the model visible to watchdog on the next run without manual `mms routes export`.

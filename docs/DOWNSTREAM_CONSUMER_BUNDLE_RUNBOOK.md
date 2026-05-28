@@ -51,7 +51,7 @@ Consumer algorithm:
    `route_source=mms:latest-approved:<bundle_revision>`.
 
 Fail closed when the manifest is missing, unreadable, has a wrong schema, points
-to missing files, or any hash mismatches. Do not silently fallback to stable
+to missing files, omits required Router/Lineup/Profile/Policy/Capabilities entries, or any hash mismatches. Do not silently fallback to stable
 `~/.config/mms` credentials, global OAuth state, or root legacy files.
 
 ## File Responsibilities
@@ -62,7 +62,7 @@ to missing files, or any hash mismatches. Do not silently fallback to stable
 | `lineup` | `generated/model-routes.lineup.json` | context/display/capability metadata |
 | `profile` | `generated/provider-profiles.generated.json` | protocol quirks, auth header rules, body/model aliases |
 | `policy` | `generated/model-policy.effective.json` | visibility, favorites, project allow/deny, downgrade/fallback policy |
-| `capabilities` | `generated/model-capabilities.approved.json` | approved capability facts when present |
+| `capabilities` | `generated/model-capabilities.approved.json` | required approved capability facts |
 
 `router` is local secret-bearing data. Do not copy it into public artifacts,
 logs, GitHub issues, or model-to-model prompts.
