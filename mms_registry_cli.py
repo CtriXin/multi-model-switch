@@ -23,6 +23,7 @@ LEGACY_IMPORT_REPORT_SCHEMA = "mms.legacy_import_report.v1"
 LEGACY_IMPORT_SOURCE_KIND = "legacy_config_import"
 LEGACY_IMPORT_SCHEMA = "mms.legacy_config_import.v1"
 LEGACY_SECRET_BACKEND_SCHEMA = "mms.legacy_secret_backend.v1"
+REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA = "mms.registry_v2_webui_secret_backend.v1"
 CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
 REGISTRY_V2_SAVE_PLAN_SCHEMA = "mms.setup_web.registry_v2_save_plan.v1"
 REGISTRY_V2_SAVE_CANDIDATE_SCHEMA = "mms.registry_v2_save_candidate.v1"
@@ -33,6 +34,7 @@ CONFIG_ROOT_LAYOUT_DIRS = (
     "backups/db",
     "backups/generated",
     "backups/legacy-import",
+    "backups/secret-backend",
     "imports",
     "logs",
     "snapshots",
@@ -529,26 +531,39 @@ def _generated_router_runtime_summary(verified: dict[str, Any]) -> dict[str, Any
 
 
 def _preview_secret_backend_summary(root: Path) -> dict[str, Any]:
-    path = root / "secrets" / "legacy-secrets.json"
-    if not path.exists():
-        return {"path": str(path), "exists": False, "status": "missing", "secret_count": 0}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return {
-            "path": str(path),
-            "exists": True,
-            "status": "invalid",
-            "secret_count": 0,
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-    items = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+    paths = [root / "secrets" / "legacy-secrets.json", root / "secrets" / "webui-secrets.json"]
+    rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for path in paths:
+        if not path.exists():
+            rows.append({"path": str(path), "exists": False, "status": "missing", "secret_count": 0})
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            rows.append({"path": str(path), "exists": True, "status": "invalid", "secret_count": 0})
+            errors.append(f"{path.name}: {type(exc).__name__}: {exc}")
+            continue
+        items = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+        rows.append(
+            {
+                "path": str(path),
+                "exists": True,
+                "status": "ok",
+                "secret_count": len(items),
+                "schema": payload.get("schema") or "",
+            }
+        )
+    existing = [item for item in rows if item.get("exists")]
+    secret_count = sum(int(item.get("secret_count") or 0) for item in rows)
+    status = "invalid" if errors else "ok" if existing else "missing"
     return {
-        "path": str(path),
-        "exists": True,
-        "status": "ok",
-        "secret_count": len(items),
-        "schema": payload.get("schema") or "",
+        "path": str(paths[0]),
+        "paths": rows,
+        "exists": bool(existing),
+        "status": status,
+        "secret_count": secret_count,
+        "error": "; ".join(errors),
     }
 
 
@@ -1474,6 +1489,87 @@ def _write_legacy_secret_backend(*, target_root: Path, source_root: Path) -> dic
     mms_registry.write_json_atomic(path, payload, mode=0o600)
     return {
         "schema": LEGACY_SECRET_BACKEND_SCHEMA,
+        "path": str(path),
+        "secret_count": len(entries),
+        "backup_path": backup_path,
+        "plaintext_secret_store": True,
+    }
+
+
+def _registry_v2_webui_secret_entries(credential_updates: list[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in credential_updates or []:
+        if not isinstance(item, Mapping):
+            continue
+        provider_id = str(item.get("provider_id") or item.get("id") or "").strip()
+        secret_value = str(item.get("api_key") or "").strip()
+        if not provider_id or not secret_value or "*" in secret_value:
+            continue
+        secret_ref = f"pending-webui:{_secret_ref_part(provider_id)}:api_key"
+        if secret_ref in seen:
+            continue
+        seen.add(secret_ref)
+        entries.append(
+            {
+                "provider_id": provider_id,
+                "field": "api_key",
+                "source": "webui-credential-update",
+                "secret_ref": secret_ref,
+                "fingerprint": _secret_fingerprint(secret_value),
+                "value": secret_value,
+            }
+        )
+    return entries
+
+
+def write_registry_v2_webui_secret_backend(
+    *,
+    config_dir: str | Path | None = None,
+    credential_updates: list[Mapping[str, Any]] | None = None,
+    allow_stable: bool = False,
+    command_name: str = "mms registry",
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
+    if root_status.get("mode") != "preview" and not allow_stable:
+        raise mms_registry.RegistryValidationError("refusing to write registry v2 WebUI secrets into stable config root without --allow-stable")
+    entries = _registry_v2_webui_secret_entries(credential_updates)
+    if not entries:
+        return {
+            "schema": REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA,
+            "skipped": True,
+            "skip_reason": "no_plaintext_credential_updates",
+            "path": str(root / "secrets" / "webui-secrets.json"),
+            "secret_count": 0,
+            "plaintext_secret_store": True,
+        }
+    secret_dir = root / "secrets"
+    secret_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        secret_dir.chmod(0o700)
+    except OSError:
+        pass
+    path = secret_dir / "webui-secrets.json"
+    backup_path = ""
+    if path.exists():
+        backup_dir = root / "backups" / "secret-backend"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        digest = mms_registry.sha256_hex(path.read_bytes())
+        backup = backup_dir / f"webui-secrets.{_timestamp_slug()}.{digest[:12]}.json"
+        mms_registry.copy_file_atomic(path, backup, mode=0o600)
+        backup_path = str(backup)
+    payload = {
+        "schema": REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA,
+        "written_at": mms_registry.utc_now(),
+        "source": "webui-credential-update",
+        "secrets": entries,
+    }
+    mms_registry.write_json_atomic(path, payload, mode=0o600)
+    return {
+        "schema": REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA,
+        "skipped": False,
         "path": str(path),
         "secret_count": len(entries),
         "backup_path": backup_path,
@@ -3011,4 +3107,5 @@ __all__ = [
     "resolve_approved_model",
     "source_freshness",
     "verify_approved_bundle",
+    "write_registry_v2_webui_secret_backend",
 ]

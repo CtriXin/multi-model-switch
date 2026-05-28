@@ -1458,22 +1458,22 @@ def _build_preview_bundle_payloads_from_route_revision(
 
 
 def _load_preview_secret_values(config_root: Path) -> dict[str, str]:
-    path = config_root / "secrets" / "legacy-secrets.json"
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
     values: dict[str, str] = {}
-    items = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
-    for item in items:
-        if not isinstance(item, Mapping):
+    for path in (config_root / "secrets" / "legacy-secrets.json", config_root / "secrets" / "webui-secrets.json"):
+        if not path.exists():
             continue
-        ref = str(item.get("secret_ref") or "").strip()
-        value = str(item.get("value") or "").strip()
-        if ref and value:
-            values[ref] = value
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        items = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            ref = str(item.get("secret_ref") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if ref and value:
+                values[ref] = value
     return values
 
 

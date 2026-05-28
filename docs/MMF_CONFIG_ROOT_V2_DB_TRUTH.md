@@ -449,11 +449,12 @@ Current Stage 4a implementation:
 - `mms registry v2-save-candidate` / `mmf registry v2-save-candidate` accepts a WebUI plan JSON (`config`, `model_policy`, `credential_updates`) or direct config/policy JSON and is dry-run unless `--apply`.
 - `--apply` is preview-root guarded by default; stable roots require explicit `--allow-stable`.
 - The command initializes the selected preview root if needed, backs up an existing preview DB before writing, then writes candidate `route`, `policy`, and `profile` revisions into SQLite.
-- Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB and `secret_backend`, generated bundle, and legacy compatibility files are not written in this slice.
+- Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB; legacy compatibility files are not written in this slice.
 - If candidate write fails after backup, the preview DB is restored from the pre-write backup.
 - `publish-preview` now prefers the latest preview route candidate, including `registry-v2-save-candidate`, and reuses matching DB candidate policy/profile revisions when generating the latest-approved bundle.
-- WebUI has a preview-only `写入预览 DB + 发布` action backed by `/api/registry-v2/apply`. It requires the confirmation phrase `写入预览DB`, refuses stable roots, writes DB candidates, publishes `generated/model-registry.latest-approved.json`, and verifies hashes.
-- This WebUI preview action does not call legacy `/api/save`, does not write `config.toml` / `credentials.sh` / `model-policy.json`, and does not write secret backend yet.
+- WebUI has a preview-only `写入预览 DB + 发布` action backed by `/api/registry-v2/apply`. It requires the confirmation phrase `写入预览DB`, refuses stable roots, writes DB candidates, writes `<preview-root>/secrets/webui-secrets.json` only when explicit plaintext credential updates are submitted, publishes `generated/model-registry.latest-approved.json`, and verifies hashes.
+- WebUI plaintext credential updates are stored only in the preview secret backend; DB candidate rows keep `secret_ref` / fingerprint, the API response is sanitized, and generated Router entries become `runtime_ready=true` when matching preview secret values exist.
+- This WebUI preview action does not call legacy `/api/save` and does not write `config.toml` / `credentials.sh` / `model-policy.json`.
 - WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after publish/verify rollback is wired.
 
 ### Stage 5 - Router Export From DB

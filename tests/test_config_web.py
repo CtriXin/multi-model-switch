@@ -715,22 +715,26 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
     router_path = config_root / "generated" / "model-routes.json"
     manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    secret_path = config_root / "secrets" / "webui-secrets.json"
     router = json.loads(router_path.read_text(encoding="utf-8"))
 
     assert result["ok"] is True
     assert result["schema"] == "mms.setup_web.registry_v2_apply_result.v1"
     assert result["status"] == "verified"
     assert result["candidate"]["route_candidates"]["provider_route_count"] == 2
+    assert result["credential_backend"]["count"] == 1
     assert result["publish"]["preview_source"] == "registry-v2-save-candidate"
+    assert result["publish"]["runtime_ready"] is True
     assert result["verify"]["verified"] is True
     assert router["source"] == "registry-preview-v2-save-candidate"
     assert router["routes"]["gpt-5.5"]["primary"]["secret_ref"] == "pending-webui:demo:api_key"
-    assert router["routes"]["gpt-5.5"]["primary"]["api_key"] == ""
+    assert router["routes"]["gpt-5.5"]["primary"]["api_key"] == "sk-super-secret-value"
     assert manifest_path.exists()
+    assert secret_path.exists()
+    assert "sk-super-secret-value" in secret_path.read_text(encoding="utf-8")
     assert not config_path.exists()
     assert not credentials_path.exists()
     assert "sk-super-secret-value" not in encoded
-    assert "sk-super-secret-value" not in router_path.read_text(encoding="utf-8")
 
 
 def test_config_web_registry_v2_apply_requires_explicit_preview_confirmation(tmp_path):

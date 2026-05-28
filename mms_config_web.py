@@ -1649,7 +1649,7 @@ def apply_registry_v2_preview_plan(
         return {"ok": False, "errors": ["写入预览 DB 前必须勾选确认。"], "status": "blocked"}
     if _safe_text(payload.get("confirm_phrase")) != "写入预览DB":
         return {"ok": False, "errors": ["确认文字必须输入：写入预览DB"], "status": "blocked"}
-    plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path)
+    plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, include_secrets=True)
     if not plan.get("ok"):
         return {
             "ok": False,
@@ -1671,14 +1671,20 @@ def apply_registry_v2_preview_plan(
 
     config_root = _config_root_for_snapshot(config_path)
     try:
-        from mms_registry_cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle
+        from mms_registry_cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle, write_registry_v2_webui_secret_backend
 
+        credential_updates = [item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)]
         candidate = apply_registry_v2_save_candidate(
             config_dir=config_root or None,
             config_payload=plan.get("config") if isinstance(plan.get("config"), dict) else {},
             policy_payload=plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {},
-            credential_updates=[item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)],
+            credential_updates=credential_updates,
             apply=True,
+            command_name="mms-config-web",
+        )
+        secret_backend = write_registry_v2_webui_secret_backend(
+            config_dir=config_root or None,
+            credential_updates=credential_updates,
             command_name="mms-config-web",
         )
         publish = publish_preview_bundle(config_dir=config_root or None)
@@ -1693,6 +1699,14 @@ def apply_registry_v2_preview_plan(
         }
 
     verified = bool(verify.get("verified"))
+    credential_backend = {
+        "schema": secret_backend.get("schema"),
+        "skipped": bool(secret_backend.get("skipped")),
+        "path": secret_backend.get("path"),
+        "count": secret_backend.get("secret_count", 0),
+        "backup_path": secret_backend.get("backup_path", ""),
+        "plaintext_store": bool(secret_backend.get("plaintext_secret_store")),
+    }
     return {
         "ok": verified,
         "schema": "mms.setup_web.registry_v2_apply_result.v1",
@@ -1702,6 +1716,7 @@ def apply_registry_v2_preview_plan(
         "paths": plan.get("paths") or {},
         "registry_v2_save_plan": v2_plan,
         "candidate": _sanitize_for_output(candidate),
+        "credential_backend": credential_backend,
         "publish": _sanitize_for_output(publish),
         "verify": _sanitize_for_output(verify),
     }
