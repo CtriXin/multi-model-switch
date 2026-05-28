@@ -714,6 +714,27 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     assert mms_command_tools.runtime_force_ipv4(None) is False
 
 
+def test_semver_and_http_status_helpers_preserve_update_semantics():
+    import mms_command_tools
+
+    assert mms_command_tools.parse_semver_tag("v1.2.3") == (1, 2, 3)
+    assert mms_command_tools.parse_semver_tag("1.2.3") is None
+    assert mms_command_tools.normalize_semver_tags(["v1.2.0", "v1.10.0", "bad", "v1.2.0"]) == ["v1.10.0", "v1.2.0"]
+    assert mms_command_tools.extract_semver_text("codex-cli 0.133.0-beta.1") == "0.133.0-beta.1"
+    assert mms_command_tools.parse_semver_text("codex-cli 0.133.0-beta.1") == (0, 133, 0)
+    assert mms_command_tools.compare_semver_text("0.132.0", "0.133.0") == -1
+    assert mms_command_tools.compare_semver_text("0.134.0", "0.133.0") == 1
+    assert mms_command_tools.compare_semver_text("0.133.0", "0.133.0") == 0
+    assert mms_command_tools.compare_semver_text("dev", "0.133.0") is None
+    assert mms_command_tools.semver_tag_gap("v1.16.3", ["v1.16.6", "v1.16.5", "v1.16.4", "v1.16.3"]) == 3
+    assert mms_command_tools.semver_tag_gap("v1.16.6", ["v1.16.6", "v1.16.5"]) == 0
+    assert mms_command_tools.semver_tag_gap("v1.16.6", [], "v2.0.0") is None
+    assert mms_command_tools.http_status_is_success("200") is True
+    assert mms_command_tools.http_status_is_success("299") is True
+    assert mms_command_tools.http_status_is_success("300") is False
+    assert mms_command_tools.http_status_is_success("bad") is False
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

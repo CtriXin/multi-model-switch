@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -967,6 +968,92 @@ def runtime_force_ipv4(runtime):
     if value in {"1", "true", "yes", "on", "enable", "enabled", ""}:
         return True
     return False
+
+
+def parse_semver_tag(tag):
+    value = str(tag or "").strip()
+    if not value.startswith("v"):
+        return None
+    parts = value[1:].split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def normalize_semver_tags(raw_tags):
+    if not isinstance(raw_tags, list):
+        return []
+
+    normalized = []
+    seen = set()
+    for item in raw_tags:
+        tag = str(item or "").strip()
+        parsed = parse_semver_tag(tag)
+        if parsed is None or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append((parsed, tag))
+
+    normalized.sort(key=lambda item: item[0], reverse=True)
+    return [tag for _, tag in normalized]
+
+
+def extract_semver_text(value):
+    match = re.search(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?", str(value or ""))
+    return match.group(0) if match else ""
+
+
+def parse_semver_text(value):
+    version = extract_semver_text(value)
+    if not version:
+        return None
+    core = re.split(r"[-+]", version, maxsplit=1)[0]
+    parts = core.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def compare_semver_text(current, latest):
+    current_semver = parse_semver_text(current)
+    latest_semver = parse_semver_text(latest)
+    if current_semver is None or latest_semver is None:
+        return None
+    if current_semver < latest_semver:
+        return -1
+    if current_semver > latest_semver:
+        return 1
+    return 0
+
+
+def semver_tag_gap(installed_version, known_tags, latest_tag=""):
+    installed_version = str(installed_version or "").strip()
+    tags = normalize_semver_tags(known_tags)
+    if not tags:
+        latest_semver = parse_semver_tag(latest_tag)
+        installed_semver = parse_semver_tag(installed_version)
+        if latest_semver is None or installed_semver is None or latest_semver <= installed_semver:
+            return 0
+        return None
+
+    latest_tag = tags[0]
+    latest_semver = parse_semver_tag(latest_tag)
+    installed_semver = parse_semver_tag(installed_version)
+    if latest_semver is None or installed_semver is None or latest_semver <= installed_semver:
+        return 0
+
+    try:
+        return tags.index(installed_version)
+    except ValueError:
+        return len(tags)
+
+
+def http_status_is_success(value):
+    try:
+        status_code = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return False
+    return 200 <= status_code < 300
 
 
 def mask_key(value):
