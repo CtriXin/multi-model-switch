@@ -2078,6 +2078,43 @@ def test_update_status_helpers_preserve_install_and_about_status_semantics():
     assert mms_command_tools.mms_update_status({"installed_version": "v1.2.4"}, {"latest_tag": "v1.2.4"}, localize=localize)["status"] == "最新"
 
 
+def test_release_version_info_preserves_installed_and_git_fallbacks():
+    import mms_command_tools
+
+    calls = []
+    info = mms_command_tools.release_version_info(
+        load_version_meta=lambda: {
+            "installed_version": "v9.9.9",
+            "installed_ref": "release-ref",
+            "install_channel": "latest-tag",
+            "source": "install.sh",
+        },
+        git_output=lambda args: calls.append(tuple(args)) or "git-value",
+    )
+    assert info == {
+        "release": "v9.9.9",
+        "installed_version": "v9.9.9",
+        "installed_ref": "release-ref",
+        "git_describe": "git-value",
+        "git_branch": "git-value",
+        "git_commit": "git-value",
+        "install_channel": "latest-tag",
+        "source": "install.sh",
+    }
+    assert calls == [
+        ("describe", "--tags", "--always", "--dirty"),
+        ("branch", "--show-current"),
+        ("rev-parse", "--short", "HEAD"),
+    ]
+
+    fallback = mms_command_tools.release_version_info(
+        load_version_meta=lambda: {},
+        git_output=lambda args: "abc123" if args[0] == "rev-parse" else "",
+    )
+    assert fallback["release"] == "abc123"
+    assert fallback["installed_version"] == ""
+
+
 def test_about_status_snapshot_preserves_callback_flow():
     import mms_command_tools
 

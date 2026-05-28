@@ -2823,6 +2823,26 @@ def mms_update_status(version_info, cache, *, localize):
     }
 
 
+def release_version_info(*, load_version_meta, git_output):
+    version_meta = load_version_meta()
+    installed_version = str(version_meta.get("installed_version") or "").strip()
+    installed_ref = str(version_meta.get("installed_ref") or "").strip()
+    git_describe = git_output(["describe", "--tags", "--always", "--dirty"])
+    git_branch = git_output(["branch", "--show-current"])
+    git_commit = git_output(["rev-parse", "--short", "HEAD"])
+    release = installed_version or git_describe or git_commit or "dev"
+    return {
+        "release": release,
+        "installed_version": installed_version,
+        "installed_ref": installed_ref,
+        "git_describe": git_describe,
+        "git_branch": git_branch,
+        "git_commit": git_commit,
+        "install_channel": str(version_meta.get("install_channel") or "").strip(),
+        "source": str(version_meta.get("source") or "").strip(),
+    }
+
+
 def refresh_update_cache_for_about(*, force_update=False, load_update_check_cache, fetch_latest_semver_tags, save_update_check_cache, now):
     cache = load_update_check_cache()
     if not force_update:

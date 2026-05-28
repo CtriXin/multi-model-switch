@@ -687,23 +687,9 @@ def _git_output(args):
 
 
 def _release_version_info():
-    version_meta = _load_version_meta()
-    installed_version = str(version_meta.get("installed_version") or "").strip()
-    installed_ref = str(version_meta.get("installed_ref") or "").strip()
-    git_describe = _git_output(["describe", "--tags", "--always", "--dirty"])
-    git_branch = _git_output(["branch", "--show-current"])
-    git_commit = _git_output(["rev-parse", "--short", "HEAD"])
-    release = installed_version or git_describe or git_commit or "dev"
-    return {
-        "release": release,
-        "installed_version": installed_version,
-        "installed_ref": installed_ref,
-        "git_describe": git_describe,
-        "git_branch": git_branch,
-        "git_commit": git_commit,
-        "install_channel": str(version_meta.get("install_channel") or "").strip(),
-        "source": str(version_meta.get("source") or "").strip(),
-    }
+    from mms_command_tools import release_version_info
+
+    return release_version_info(load_version_meta=_load_version_meta, git_output=_git_output)
 
 
 def _refresh_update_cache_for_about(force_update=False):
