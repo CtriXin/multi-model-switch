@@ -7,6 +7,132 @@ import os
 import shlex
 
 
+def mask_identity_value(value, *, keep=4):
+    text = str(value or "").strip()
+    if len(text) <= keep * 2:
+        return text or "-"
+    return f"{text[:keep]}***{text[-keep:]}"
+
+
+def mask_email_value(value):
+    text = str(value or "").strip()
+    if not text or "@" not in text:
+        return mask_identity_value(text)
+    name, domain = text.split("@", 1)
+    if len(name) <= 2:
+        masked_name = name[:1] + "*"
+    else:
+        masked_name = name[:2] + "***"
+    return f"{masked_name}@{domain}"
+
+
+def runtime_network_summary_for_confirm(
+    runtime,
+    *,
+    default_account_timezone,
+    runtime_force_ipv4,
+    snapshot_proxy_fingerprint,
+):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    proxy = str(runtime.get("proxy") or "").strip()
+    timezone_name = str(runtime.get("timezone") or default_account_timezone).strip() or default_account_timezone
+    force_ipv4 = bool(runtime_force_ipv4(runtime))
+    mode = snapshot_proxy_fingerprint(proxy)
+    return f"{mode} | TZ {timezone_name} | IPv4 {'on' if force_ipv4 else 'auto'}"
+
+
+def load_runtime_identity_preview(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    home_dir = os.path.expanduser(str(runtime.get("home_dir") or "").strip())
+    if not home_dir:
+        return {}
+    target = os.path.join(home_dir, ".claude.json")
+    if not os.path.exists(target):
+        return {}
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    oauth_account = data.get("oauthAccount") if isinstance(data.get("oauthAccount"), dict) else {}
+    return {
+        "user_id": str(data.get("userID") or oauth_account.get("accountUuid") or "").strip(),
+        "account_uuid": str(oauth_account.get("accountUuid") or "").strip(),
+        "org_uuid": str(oauth_account.get("organizationUuid") or "").strip(),
+        "email": str(oauth_account.get("emailAddress") or "").strip(),
+    }
+
+
+def confirm_context_lines(
+    cli,
+    runtime,
+    *,
+    default_account_timezone,
+    runtime_force_ipv4,
+    snapshot_proxy_fingerprint,
+    fake_upstream_enabled,
+):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    lines = []
+    if runtime:
+        runtime_id = str(runtime.get("id") or runtime.get("name") or "").strip()
+        if runtime_id:
+            lines.append(("Source", runtime_id))
+        if cli == "claude":
+            sidecar = runtime.get("vision_sidecar") if isinstance(runtime.get("vision_sidecar"), dict) else {}
+            if sidecar and sidecar.get("enabled", True):
+                provider_id = str(sidecar.get("provider_id") or "-").strip() or "-"
+                model = str(sidecar.get("model") or "-").strip() or "-"
+                lines.append(("Vision", f"{provider_id}/{model}"))
+    if cli == "opencode":
+        profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "").strip()
+        if profile_label:
+            lines.append(("Profile", profile_label))
+    if cli == "claude" and runtime.get("auth_mode") == "oauth":
+        if fake_upstream_enabled():
+            lines.append(("Fake", "ON"))
+        lines.append(("Proxy", str(snapshot_proxy_fingerprint(runtime.get("proxy")))))
+        lines.append(("TZ", str(runtime.get("timezone") or default_account_timezone)))
+        lines.append(("IPv4", "on" if runtime_force_ipv4(runtime) else "auto"))
+        lines.append(("Slot", f"pid-{os.getpid()}"))
+        home_dir = os.path.expanduser(str(runtime.get("home_dir") or "").strip())
+        if home_dir:
+            lines.append(("Session", os.path.join(home_dir, "s", str(os.getpid()))))
+        identity = load_runtime_identity_preview(runtime)
+        if identity.get("email"):
+            lines.append(("Email", mask_email_value(identity.get("email"))))
+        if identity.get("user_id"):
+            lines.append(("UserID", mask_identity_value(identity.get("user_id"))))
+        if identity.get("org_uuid"):
+            lines.append(("OrgID", mask_identity_value(identity.get("org_uuid"))))
+        network_guard = runtime.get("_network_guard") if isinstance(runtime.get("_network_guard"), dict) else {}
+        if network_guard:
+            lines.append(("DNS", str(network_guard.get("dns_mode") or "-")))
+            proxy_validation = str(network_guard.get("proxy_validation") or "").strip()
+            if proxy_validation == "skipped_fake":
+                lines.append(("Check", "skipped(fake)"))
+            if network_guard.get("ipv4_egress") not in {"", "-"}:
+                lines.append(("IPv4Egress", str(network_guard.get("ipv4_egress") or "-")))
+            if network_guard.get("ipv6_egress") not in {"", "-", "blocked"}:
+                lines.append(("IPv6Egress", str(network_guard.get("ipv6_egress") or "-")))
+            target_states = []
+            for item in network_guard.get("targets") or []:
+                label = str(item.get("label") or "?")
+                target_states.append(f"{label}:{'ok' if item.get('ok') else 'fail'}")
+            if target_states:
+                lines.append(("Reach", " ".join(target_states[:3])))
+            no_proxy_conflicts = network_guard.get("no_proxy_conflicts") or []
+            if no_proxy_conflicts:
+                lines.append(("Leak", ",".join(no_proxy_conflicts[:2])))
+        report = runtime.get("_account_guard_report") if isinstance(runtime.get("_account_guard_report"), dict) else {}
+        if report:
+            lines.append(("Score", str(report.get("score", "-"))))
+            lines.append(("Sessions", str(report.get("active_sessions_after", "-"))))
+            drift = report.get("drift_fields") or []
+            lines.append(("Profile", "stable" if not drift else ",".join(drift)))
+    return lines[:12]
+
+
 def build_confirm_preview_catalog(
     cli,
     runtime,
