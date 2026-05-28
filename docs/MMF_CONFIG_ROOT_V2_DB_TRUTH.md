@@ -432,11 +432,12 @@ Current preview publish implementation:
 
 Current watchdog consumer implementation:
 
-- `scripts/mms_health_watchdog.py` respects `MMS_CONFIG_ROOT` when selecting its config root.
+- `scripts/mms_health_watchdog.py` respects `MMS_CONFIG_ROOT` and `MMS_CONFIG_DIR` when selecting its config root.
 - It prefers a verified `<config_root>/generated/model-registry.latest-approved.json` bundle over root legacy `model-routes.json` / `model-policy.json`.
 - When using a verified bundle, it reads generated Profile metadata such as `models_endpoint` for provider checks instead of requiring root `config.toml` provider metadata.
 - If a manifest exists but is invalid or hash-mismatched, watchdog reports `stale_or_invalid_bundle` and does not silently fall back to legacy route files.
-- If the manifest is missing, default behavior remains legacy-compatible; `--require-bundle` or `MMS_WATCHDOG_REQUIRE_BUNDLE=1` fails closed for preview/v2 operation.
+- If the manifest is missing, explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle and fail closed by default; no-explicit-root stable watchdog behavior remains legacy-compatible.
+- `--require-bundle` still forces fail-closed behavior, and `MMS_WATCHDOG_REQUIRE_BUNDLE=0` remains an explicit diagnostic override for an explicit root.
 - Watchdog remains read-only with respect to DB and does not run route export or publish.
 
 Current bridge rescue consumer implementation:
@@ -476,8 +477,14 @@ Current Stage 4a implementation:
 - WebUI plaintext credential updates are stored only in the preview secret backend; DB candidate rows keep `secret_ref` / fingerprint, the API response is sanitized, and generated Router entries become `runtime_ready=true` when matching preview secret values exist.
 - If WebUI preview publish/verify fails, the action attempts to roll back the preview DB candidate, WebUI secret backend file, and generated bundle files from the pre-publish snapshot.
 - This WebUI preview action does not call legacy `/api/save` and does not write `config.toml` / `credentials.sh` / `model-policy.json`.
+- WebUI `/api/state` exposes the save contract as two separate write surfaces: `stable_legacy_writes` for legacy `config.toml` / `credentials.sh` / `model-policy.json`, and `preview_v2_writes` for DB candidate revisions, preview secret backend, and generated latest-approved bundle files.
 - WebUI legacy `/api/save` is blocked while running against a preview root, so `mmf` users do not accidentally create legacy config files in `~/.config/mms-next`.
 - Stable-root WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after more interactive/browser validation.
+
+Current TUI/settings boundary:
+
+- TUI Settings labels direct `model-routes.json` export as `Legacy 路由导出` / `Legacy Route Export` and points v2 publishing users to Registry Truth.
+- The compatibility export action remains available, but it is not presented as the v2 truth/publish path.
 
 ### Stage 5 - Router Export From DB
 

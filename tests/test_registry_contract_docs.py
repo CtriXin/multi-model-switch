@@ -10,10 +10,15 @@ CONTRACT_DOCS = [
     ROOT / "docs/MODEL_CONFIG_CONTRACT.md",
     ROOT / "docs/REGISTRY_ARCHITECTURE.md",
 ]
+MMF_V2_DOC = ROOT / "docs/MMF_CONFIG_ROOT_V2_DB_TRUTH.md"
 
 
 def _contract_text() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in CONTRACT_DOCS)
+
+
+def _mmf_v2_text() -> str:
+    return MMF_V2_DOC.read_text(encoding="utf-8")
 
 
 def test_registry_contract_docs_define_latest_approved_bundle_terms() -> None:
@@ -96,6 +101,23 @@ def test_registry_contract_docs_forbid_direct_downstream_sqlite_dependency() -> 
     assert "MUST NOT query SQLite tables" in text
     assert "must not read the\nSQLite schema directly" in text
     assert "cache_transport_evidence.v1" in text
+
+
+def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
+    text = _mmf_v2_text()
+
+    required_terms = [
+        "respects `MMS_CONFIG_ROOT` and `MMS_CONFIG_DIR`",
+        "explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle",
+        "MMS_WATCHDOG_REQUIRE_BUNDLE=0",
+        "`stable_legacy_writes`",
+        "`preview_v2_writes`",
+        "TUI Settings labels direct `model-routes.json` export as `Legacy",
+        "not presented as the v2 truth/publish path",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    assert missing == []
 
 
 def test_reference_snapshot_schema_and_source_keys_are_readable() -> None:
