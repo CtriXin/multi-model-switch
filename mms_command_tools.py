@@ -2602,6 +2602,58 @@ def native_clis_for_model(model_name):
     return []
 
 
+def model_matches_account_cli(cli_name, model_name):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return False
+    if cli_name == "claude":
+        return normalized.startswith("claude-")
+    if cli_name == "codex":
+        return normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-"))
+    if cli_name == "gemini":
+        return normalized.startswith("gemini-")
+    return False
+
+
+def is_installed_mms_layout(
+    module_path,
+    *,
+    real_user_home,
+    abspath=os.path.abspath,
+    commonpath=os.path.commonpath,
+):
+    current_path = abspath(module_path)
+    installed_root = abspath(os.path.join(real_user_home(), ".mms"))
+    try:
+        return commonpath([current_path, installed_root]) == installed_root
+    except ValueError:
+        return False
+
+
+def default_gpt_reasoning_effort(*, module_path, is_installed_mms_layout):
+    return "high" if is_installed_mms_layout(module_path) else "xhigh"
+
+
+def default_reasoning_effort_for_model_info(
+    model_info,
+    *,
+    model_matches_account_cli,
+    default_gpt_reasoning_effort,
+):
+    values = []
+    if isinstance(model_info, dict):
+        values.extend(str(value or "") for key, value in model_info.items() if key != "subagent")
+    else:
+        values.append(str(model_info or ""))
+    for item in values:
+        normalized = str(item or "").strip().lower()
+        if "/" in normalized:
+            normalized = normalized.rsplit("/", 1)[-1]
+        if model_matches_account_cli("codex", normalized):
+            return default_gpt_reasoning_effort()
+    return "high"
+
+
 def bridge_clis_for_model(model_name, *, infer_model_family):
     family, _ = infer_model_family(model_name)
     if family == "Unknown":

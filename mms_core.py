@@ -1300,31 +1300,31 @@ def _native_clis_for_model(model_name):
 
 
 def _is_installed_mms_layout(module_path=None):
-    current_path = os.path.abspath(module_path or __file__)
-    installed_root = os.path.abspath(os.path.join(resolve_real_user_home(), ".mms"))
-    try:
-        return os.path.commonpath([current_path, installed_root]) == installed_root
-    except ValueError:
-        return False
+    from mms_command_tools import is_installed_mms_layout
+
+    return is_installed_mms_layout(
+        module_path or __file__,
+        real_user_home=resolve_real_user_home,
+    )
 
 
 def _default_gpt_reasoning_effort(module_path=None):
-    return "high" if _is_installed_mms_layout(module_path=module_path) else "xhigh"
+    from mms_command_tools import default_gpt_reasoning_effort
+
+    return default_gpt_reasoning_effort(
+        module_path=module_path or __file__,
+        is_installed_mms_layout=lambda path: _is_installed_mms_layout(module_path=path),
+    )
 
 
 def _default_reasoning_effort_for_model_info(model_info):
-    values = []
-    if isinstance(model_info, dict):
-        values.extend(str(v or "") for k, v in model_info.items() if k != "subagent")
-    else:
-        values.append(str(model_info or ""))
-    for item in values:
-        normalized = str(item or "").strip().lower()
-        if "/" in normalized:
-            normalized = normalized.rsplit("/", 1)[-1]
-        if _model_matches_account_cli("codex", normalized):
-            return _default_gpt_reasoning_effort()
-    return "high"
+    from mms_command_tools import default_reasoning_effort_for_model_info
+
+    return default_reasoning_effort_for_model_info(
+        model_info,
+        model_matches_account_cli=_model_matches_account_cli,
+        default_gpt_reasoning_effort=_default_gpt_reasoning_effort,
+    )
 
 
 def _bridge_clis_for_model(model_name):
@@ -5134,16 +5134,9 @@ def _models_for_cli_family(cli_name, models):
 
 
 def _model_matches_account_cli(cli_name, model_name):
-    normalized = str(model_name or "").strip().lower()
-    if not normalized:
-        return False
-    if cli_name == "claude":
-        return normalized.startswith("claude-")
-    if cli_name == "codex":
-        return normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-"))
-    if cli_name == "gemini":
-        return normalized.startswith("gemini-")
-    return False
+    from mms_command_tools import model_matches_account_cli
+
+    return model_matches_account_cli(cli_name, model_name)
 
 
 def _provider_supports_cli_name(provider, cli_name):

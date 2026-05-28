@@ -2556,6 +2556,36 @@ def test_model_capability_helpers_preserve_native_bridge_and_tags():
     assert mms_command_tools.native_clis_for_model("claude-sonnet-4.5") == ["claude"]
     assert mms_command_tools.native_clis_for_model("gpt-5.5") == ["codex"]
     assert mms_command_tools.native_clis_for_model("gemini-3.1-pro-preview") == []
+    assert mms_command_tools.model_matches_account_cli("claude", "Claude-Sonnet-4.5") is True
+    assert mms_command_tools.model_matches_account_cli("codex", "openai/gpt-5.5") is False
+    assert mms_command_tools.model_matches_account_cli("gemini", "gemini-3.1-pro-preview") is True
+    assert mms_command_tools.model_matches_account_cli("agy", "gpt-5.5") is False
+    assert mms_command_tools.is_installed_mms_layout(
+        "/Users/xin/.mms/mms_core.py",
+        real_user_home=lambda: "/Users/xin",
+    ) is True
+    assert mms_command_tools.is_installed_mms_layout(
+        "/repo/multi-model-switch/mms_core.py",
+        real_user_home=lambda: "/Users/xin",
+    ) is False
+    assert mms_command_tools.default_gpt_reasoning_effort(
+        module_path="/repo/mms_core.py",
+        is_installed_mms_layout=lambda _path: False,
+    ) == "xhigh"
+    assert mms_command_tools.default_gpt_reasoning_effort(
+        module_path="/Users/xin/.mms/mms_core.py",
+        is_installed_mms_layout=lambda _path: True,
+    ) == "high"
+    assert mms_command_tools.default_reasoning_effort_for_model_info(
+        {"model": "openai/gpt-5.5", "subagent": "claude-sonnet-4.5"},
+        model_matches_account_cli=mms_command_tools.model_matches_account_cli,
+        default_gpt_reasoning_effort=lambda: "xhigh",
+    ) == "xhigh"
+    assert mms_command_tools.default_reasoning_effort_for_model_info(
+        {"model": "claude-sonnet-4.5", "subagent": "gpt-5.5"},
+        model_matches_account_cli=mms_command_tools.model_matches_account_cli,
+        default_gpt_reasoning_effort=lambda: "xhigh",
+    ) == "high"
     assert mms_command_tools.bridge_clis_for_model("qwen3.6-plus", infer_model_family=infer_family) == ["claude", "codex"]
     assert mms_command_tools.model_cli_modes("gpt-5.5", infer_model_family=infer_family) == {
         "claude": "bridge",
