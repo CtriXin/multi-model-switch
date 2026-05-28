@@ -7805,29 +7805,17 @@ def handle_config(cfg, args_rest):
 
 
 def _handle_api_config(key_path, args_rest):
-    base_url, api_key, _ = load_api_credentials()
+    from mms_command_tools import handle_api_config
 
-    if key_path == "api.base_url":
-        if not args_rest:
-            display = base_url or "(未设置)"
-            console.print(f"[cyan]{key_path}[/cyan] = {display}")
-            return
-        save_api_credentials(args_rest[0].rstrip("/"), api_key)
-        console.print(f"[green]✓ {key_path} = {args_rest[0].rstrip('/')}[/green]")
-        return
-
-    if key_path == "api.api_key":
-        if not args_rest:
-            display = _mask_key(api_key) if api_key else "(未设置)"
-            console.print(f"[cyan]{key_path}[/cyan] = {display}")
-            console.print(f"[dim]真实值保存在 {CREDENTIALS_PATH}，这里始终只显示掩码。[/dim]")
-            return
-        save_api_credentials(base_url, args_rest[0])
-        console.print(f"[green]✓ {key_path} = {_mask_key(args_rest[0])}[/green]")
-        console.print(f"[dim]真实值已保存到 {CREDENTIALS_PATH}，这里显示为掩码。[/dim]")
-        return
-
-    console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
+    return handle_api_config(
+        key_path,
+        args_rest,
+        load_api_credentials=load_api_credentials,
+        save_api_credentials=save_api_credentials,
+        credentials_path=CREDENTIALS_PATH,
+        mask_key=_mask_key,
+        console=console,
+    )
 
 
 def _validate_user_role(raw_value):
@@ -8438,7 +8426,9 @@ def _handle_config_unset(cfg, args_rest):
 
 
 def _handle_config_file():
-    console.print(CONFIG_PATH)
+    from mms_command_tools import handle_config_file
+
+    return handle_config_file(config_path=CONFIG_PATH, console=console)
 
 
 def _handle_config_validate(cfg):

@@ -3914,6 +3914,45 @@ def handle_config_validate(cfg, *, validate_config, console):
     console.print("[green]✓ 配置校验通过[/green]")
 
 
+def handle_config_file(*, config_path, console):
+    console.print(config_path)
+
+
+def handle_api_config(
+    key_path,
+    args_rest,
+    *,
+    load_api_credentials,
+    save_api_credentials,
+    credentials_path,
+    mask_key,
+    console,
+):
+    base_url, api_key, _ = load_api_credentials()
+
+    if key_path == "api.base_url":
+        if not args_rest:
+            display = base_url or "(未设置)"
+            console.print(f"[cyan]{key_path}[/cyan] = {display}")
+            return
+        save_api_credentials(args_rest[0].rstrip("/"), api_key)
+        console.print(f"[green]✓ {key_path} = {args_rest[0].rstrip('/')}[/green]")
+        return
+
+    if key_path == "api.api_key":
+        if not args_rest:
+            display = mask_key(api_key) if api_key else "(未设置)"
+            console.print(f"[cyan]{key_path}[/cyan] = {display}")
+            console.print(f"[dim]真实值保存在 {credentials_path}，这里始终只显示掩码。[/dim]")
+            return
+        save_api_credentials(base_url, args_rest[0])
+        console.print(f"[green]✓ {key_path} = {mask_key(args_rest[0])}[/green]")
+        console.print(f"[dim]真实值已保存到 {credentials_path}，这里显示为掩码。[/dim]")
+        return
+
+    console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
+
+
 def handle_config_migrate(
     *,
     backup_config_tree,

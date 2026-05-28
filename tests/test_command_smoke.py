@@ -4061,6 +4061,81 @@ def test_config_validate_handler_prints_success_and_failure():
     assert any("bad provider" in str(item) for item in console.items)
 
 
+def test_api_and_config_file_handlers_preserve_masking_and_save_flow():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    saved = []
+    load_credentials = lambda: ("https://api.example/v1", "abcd1234efgh", "extra")
+
+    mms_command_tools.handle_config_file(config_path="/tmp/config.toml", console=console)
+    assert "/tmp/config.toml" in console.items
+
+    console.items.clear()
+    mms_command_tools.handle_api_config(
+        "api.base_url",
+        [],
+        load_api_credentials=load_credentials,
+        save_api_credentials=lambda base_url, api_key: saved.append((base_url, api_key)),
+        credentials_path="/tmp/credentials.sh",
+        mask_key=mms_command_tools.mask_key,
+        console=console,
+    )
+    assert "[cyan]api.base_url[/cyan] = https://api.example/v1" in console.items
+    assert saved == []
+
+    console.items.clear()
+    mms_command_tools.handle_api_config(
+        "api.base_url",
+        ["https://new.example/v1/"],
+        load_api_credentials=load_credentials,
+        save_api_credentials=lambda base_url, api_key: saved.append((base_url, api_key)),
+        credentials_path="/tmp/credentials.sh",
+        mask_key=mms_command_tools.mask_key,
+        console=console,
+    )
+    assert saved == [("https://new.example/v1", "abcd1234efgh")]
+    assert "[green]✓ api.base_url = https://new.example/v1[/green]" in console.items
+
+    console.items.clear()
+    mms_command_tools.handle_api_config(
+        "api.api_key",
+        [],
+        load_api_credentials=load_credentials,
+        save_api_credentials=lambda base_url, api_key: saved.append((base_url, api_key)),
+        credentials_path="/tmp/credentials.sh",
+        mask_key=mms_command_tools.mask_key,
+        console=console,
+    )
+    assert "[cyan]api.api_key[/cyan] = abcd****efgh" in console.items
+    assert any("/tmp/credentials.sh" in str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.handle_api_config(
+        "api.api_key",
+        ["new-secret-key"],
+        load_api_credentials=load_credentials,
+        save_api_credentials=lambda base_url, api_key: saved.append((base_url, api_key)),
+        credentials_path="/tmp/credentials.sh",
+        mask_key=mms_command_tools.mask_key,
+        console=console,
+    )
+    assert saved[-1] == ("https://api.example/v1", "new-secret-key")
+    assert "[green]✓ api.api_key = new-****-key[/green]" in console.items
+
+    console.items.clear()
+    mms_command_tools.handle_api_config(
+        "api.missing",
+        [],
+        load_api_credentials=load_credentials,
+        save_api_credentials=lambda base_url, api_key: saved.append(("unexpected", base_url, api_key)),
+        credentials_path="/tmp/credentials.sh",
+        mask_key=mms_command_tools.mask_key,
+        console=console,
+    )
+    assert "[red]配置项 'api.missing' 不存在[/red]" in console.items
+
+
 def test_session_list_info_display_helpers():
     import pytest
     import mms_command_tools
