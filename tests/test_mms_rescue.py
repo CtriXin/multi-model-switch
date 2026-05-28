@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import types
 from pathlib import Path
@@ -694,6 +695,86 @@ def test_responses_proxy_hot_fallback_uses_messages_for_cache_sensitive_openai_o
     assert routes[0]["provider_id"] == "newapi-deepseek"
     assert routes[0]["gateway_url"] == "https://deepseek.example/v1"
     assert routes[0]["protocol"] == "anthropic_messages"
+
+
+def _write_latest_approved_router_manifest(config_root: Path, *, router_payload: dict, sha_override: str = "") -> None:
+    generated = config_root / "generated"
+    generated.mkdir(parents=True, exist_ok=True)
+    router_path = generated / "model-routes.json"
+    router_bytes = json.dumps(router_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    router_path.write_bytes(router_bytes)
+    manifest = {
+        "schema": "mms.model_registry.latest_approved.v1",
+        "files": {
+            "router": {
+                "canonical_path": "generated/model-routes.json",
+                "sha256": sha_override or hashlib.sha256(router_bytes).hexdigest(),
+                "sensitivity": "secret",
+            }
+        },
+    }
+    (generated / "model-registry.latest-approved.json").write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
+def test_rescue_hot_fallback_reads_verified_latest_approved_router(tmp_path):
+    import mms_bridge
+
+    config_root = tmp_path / "mms-config"
+    router_payload = {
+        "version": 1,
+        "routes": {
+            "deepseek-v4-flash": {
+                "primary": {
+                    "provider_id": "verified-provider",
+                    "anthropic_base_url": "https://verified.example",
+                    "api_key": "sk-verified",
+                    "model_id": "deepseek-v4-flash",
+                    "protocol": "anthropic_messages",
+                },
+                "fallbacks": [],
+            }
+        },
+    }
+    _write_latest_approved_router_manifest(config_root, router_payload=router_payload)
+    (config_root / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "deepseek-v4-flash": {
+                        "primary": {"provider_id": "stale-root", "anthropic_base_url": "https://stale.example", "api_key": "sk-stale"},
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    routes = mms_bridge._load_rescue_hot_fallback_routes(types.SimpleNamespace(rescue_config_root=str(config_root)), "deepseek-v4-flash")
+
+    assert routes[0]["provider_id"] == "verified-provider"
+    assert routes[0]["gateway_url"] == "https://verified.example"
+
+
+def test_rescue_hot_fallback_fails_closed_on_invalid_latest_approved_manifest(tmp_path):
+    import mms_bridge
+
+    config_root = tmp_path / "mms-config"
+    router_payload = {
+        "version": 1,
+        "routes": {
+            "deepseek-v4-flash": {
+                "primary": {"provider_id": "unverified", "anthropic_base_url": "https://bad.example", "api_key": "sk-bad"},
+                "fallbacks": [],
+            }
+        },
+    }
+    _write_latest_approved_router_manifest(config_root, router_payload=router_payload, sha_override="0" * 64)
+
+    routes = mms_bridge._load_rescue_hot_fallback_routes(types.SimpleNamespace(rescue_config_root=str(config_root)), "deepseek-v4-flash")
+
+    assert routes == []
 
 
 def test_chatcompletions_fallback_retries_messages_when_gateway_requests_messages(monkeypatch, tmp_path):

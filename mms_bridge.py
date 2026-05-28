@@ -1493,6 +1493,27 @@ def _rescue_route_protocol(route, model_id, *, anthropic_url="", openai_url=""):
     return "openai_chat_completions"
 
 
+def _rescue_routes_from_router_payload(payload, fallback_model, seen):
+    model_routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
+    entry = model_routes.get(fallback_model)
+    if not isinstance(entry, dict):
+        return []
+    routes = []
+    leaves = [entry.get("primary")]
+    if isinstance(entry.get("fallbacks"), list):
+        leaves.extend(entry.get("fallbacks") or [])
+    for leaf in leaves:
+        normalized = _rescue_route_from_export(leaf, fallback_model)
+        if not normalized:
+            continue
+        key = (normalized.get("provider_id"), normalized.get("gateway_url"), normalized.get("model"))
+        if key in seen:
+            continue
+        seen.add(key)
+        routes.append(normalized)
+    return routes
+
+
 def _load_rescue_hot_fallback_routes(server, fallback_model):
     explicit_routes = getattr(server, "rescue_hot_fallback_routes", None)
     if isinstance(explicit_routes, list) and explicit_routes:
@@ -1504,6 +1525,18 @@ def _load_rescue_hot_fallback_routes(server, fallback_model):
         return routes
 
     config_root = _rescue_config_root(server)
+    manifest_path = os.path.join(config_root, "generated", "model-registry.latest-approved.json")
+    if os.path.exists(manifest_path):
+        try:
+            import mms_registry
+
+            payload = mms_registry.try_load_latest_approved_payload("router", config_dir=config_root, include_secret=True)
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and payload:
+            return _rescue_routes_from_router_payload(payload, fallback_model, set())
+        return []
+
     candidates = [
         os.path.join(config_root, "generated", "model-routes.json"),
         os.path.join(config_root, "model-routes.json"),
@@ -1515,22 +1548,7 @@ def _load_rescue_hot_fallback_routes(server, fallback_model):
             payload = json.loads(open(path, "r", encoding="utf-8").read())
         except (OSError, json.JSONDecodeError, TypeError):
             continue
-        model_routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
-        entry = model_routes.get(fallback_model)
-        if not isinstance(entry, dict):
-            continue
-        leaves = [entry.get("primary")]
-        if isinstance(entry.get("fallbacks"), list):
-            leaves.extend(entry.get("fallbacks") or [])
-        for leaf in leaves:
-            normalized = _rescue_route_from_export(leaf, fallback_model)
-            if not normalized:
-                continue
-            key = (normalized.get("provider_id"), normalized.get("gateway_url"), normalized.get("model"))
-            if key in seen:
-                continue
-            seen.add(key)
-            routes.append(normalized)
+        routes.extend(_rescue_routes_from_router_payload(payload, fallback_model, seen))
         if routes:
             return routes
     return routes

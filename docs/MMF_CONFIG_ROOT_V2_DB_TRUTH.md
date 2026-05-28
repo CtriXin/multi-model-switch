@@ -439,6 +439,12 @@ Current watchdog consumer implementation:
 - If the manifest is missing, default behavior remains legacy-compatible; `--require-bundle` or `MMS_WATCHDOG_REQUIRE_BUNDLE=1` fails closed for preview/v2 operation.
 - Watchdog remains read-only with respect to DB and does not run route export or publish.
 
+Current bridge rescue consumer implementation:
+
+- Rescue hot fallback now checks `<config_root>/generated/model-registry.latest-approved.json` before reading generated/root `model-routes.json`.
+- If the manifest exists, rescue fallback only uses the verified Router payload; invalid or hash-mismatched manifests fail closed for that fallback lookup instead of silently using unverified generated routes.
+- If the manifest is missing, default behavior remains legacy-compatible and reads generated/root route files in the previous order.
+
 ### Stage 4 - Write Path And Publish
 
 - WebUI Save writes DB + secret backend.
