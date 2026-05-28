@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
@@ -3850,6 +3851,142 @@ def list_stale_gateway_sessions(
             )
     rows.sort(key=lambda item: (int(item.get("size") or 0), str(item.get("mtime") or "")), reverse=True)
     return rows
+
+
+def split_cli_prefixed_resume_ref(session_ref):
+    ref = str(session_ref or "").strip()
+    if ":" not in ref:
+        return "", ref
+    prefix, rest = ref.split(":", 1)
+    prefix = prefix.strip().lower()
+    rest = rest.strip()
+    if prefix in {"codex", "claude"} and rest:
+        return prefix, rest
+    return "", ref
+
+
+def codex_resume_roots(env, *, real_home):
+    roots = []
+
+    def add(path):
+        normalized = str(path or "").strip()
+        if not normalized:
+            return
+        expanded = os.path.abspath(os.path.expanduser(normalized))
+        if expanded not in roots:
+            roots.append(expanded)
+
+    for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
+        add(env.get(env_name))
+    add(os.path.join(real_home, ".config", "mms", "codex-gateway", ".codex"))
+    add(os.path.join(real_home, ".codex"))
+    return roots
+
+
+def iter_codex_index_records(roots):
+    seen = set()
+    for root in roots:
+        path = os.path.join(root, "session_index.jsonl")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except Exception:
+                        continue
+                    session_id = str(item.get("id") or "").strip()
+                    if not session_id or session_id in seen:
+                        continue
+                    seen.add(session_id)
+                    payload = dict(item)
+                    payload["_root"] = root
+                    yield payload
+        except OSError:
+            continue
+
+
+def resolve_codex_resume_ref(session_ref, *, iter_codex_index_records, allow_passthrough=False):
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None, None, "session id 不能为空"
+    records = list(iter_codex_index_records())
+    exact = [item for item in records if str(item.get("id") or "").strip() == ref]
+    if exact:
+        return str(exact[0]["id"]), exact[0], None
+    matches = [item for item in records if str(item.get("id") or "").strip().startswith(ref)]
+    if len(matches) == 1:
+        return str(matches[0]["id"]), matches[0], None
+    if len(matches) > 1:
+        return None, None, f"Codex session 前缀不唯一: {ref}"
+    if allow_passthrough:
+        return ref, {"id": ref, "_unindexed": True}, None
+    return None, None, f"找不到 Codex session: {ref}"
+
+
+def resolve_claude_resume_ref(session_ref, *, list_indexed_sessions, allow_passthrough=False):
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None, None, "session id 不能为空"
+    sessions = [
+        item for item in list_indexed_sessions(cli_name="claude")
+        if str(item.get("session_id") or "").strip()
+    ]
+    if ref.isdigit():
+        index = int(ref)
+        if 1 <= index <= len(sessions):
+            item = sessions[index - 1]
+            return str(item.get("session_id") or "").strip(), item, None
+        return None, None, f"找不到第 {index} 条 Claude session"
+    exact = [item for item in sessions if str(item.get("session_id") or "").strip() == ref]
+    if exact:
+        return str(exact[0].get("session_id") or "").strip(), exact[0], None
+    matches = [item for item in sessions if str(item.get("session_id") or "").strip().startswith(ref)]
+    if len(matches) == 1:
+        return str(matches[0].get("session_id") or "").strip(), matches[0], None
+    if len(matches) > 1:
+        return None, None, f"Claude session 前缀不唯一: {ref}"
+    if allow_passthrough:
+        return ref, {"session_id": ref, "_unindexed": True}, None
+    return None, None, f"找不到 Claude session: {ref}"
+
+
+def uuid_resume_cli_hint(session_ref):
+    ref = str(session_ref or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", ref):
+        return ""
+    version = ref.split("-", 3)[2][:1]
+    if version == "7":
+        return "codex"
+    if version == "4":
+        return "claude"
+    return ""
+
+
+def first_resume_model(cli_models, default_models, recommend=None):
+    names = []
+    for item in list(cli_models or []) + list(default_models or []):
+        name = str(item.get("model") if isinstance(item, dict) else item or "").strip()
+        if name and name not in names:
+            names.append(name)
+    for preferred in recommend or []:
+        if preferred in names:
+            return preferred
+    return names[0] if names else ""
+
+
+def session_resume_model(session_record):
+    if not isinstance(session_record, dict):
+        return ""
+    for key in ("resume_model", "selected_model", "display_model", "model"):
+        value = str(session_record.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def handle_session_prune(

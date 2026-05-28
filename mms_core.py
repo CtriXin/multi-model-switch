@@ -8712,108 +8712,42 @@ def handle_session_command(argv):
 
 
 def _split_cli_prefixed_resume_ref(session_ref):
-    ref = str(session_ref or "").strip()
-    if ":" not in ref:
-        return "", ref
-    prefix, rest = ref.split(":", 1)
-    prefix = prefix.strip().lower()
-    rest = rest.strip()
-    if prefix in {"codex", "claude"} and rest:
-        return prefix, rest
-    return "", ref
+    from mms_command_tools import split_cli_prefixed_resume_ref
+
+    return split_cli_prefixed_resume_ref(session_ref)
 
 
 def _codex_resume_roots():
-    roots = []
+    from mms_command_tools import codex_resume_roots
 
-    def add(path):
-        normalized = str(path or "").strip()
-        if not normalized:
-            return
-        expanded = os.path.abspath(os.path.expanduser(normalized))
-        if expanded not in roots:
-            roots.append(expanded)
-
-    for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
-        add(os.environ.get(env_name))
-    real_home = resolve_real_user_home()
-    add(os.path.join(real_home, ".config", "mms", "codex-gateway", ".codex"))
-    add(os.path.join(real_home, ".codex"))
-    return roots
+    return codex_resume_roots(os.environ, real_home=resolve_real_user_home())
 
 
 def _iter_codex_index_records():
-    seen = set()
-    for root in _codex_resume_roots():
-        path = os.path.join(root, "session_index.jsonl")
-        if not os.path.isfile(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        item = json.loads(line)
-                    except Exception:
-                        continue
-                    session_id = str(item.get("id") or "").strip()
-                    if not session_id or session_id in seen:
-                        continue
-                    seen.add(session_id)
-                    payload = dict(item)
-                    payload["_root"] = root
-                    yield payload
-        except OSError:
-            continue
+    from mms_command_tools import iter_codex_index_records
+
+    yield from iter_codex_index_records(_codex_resume_roots())
 
 
 def _resolve_codex_resume_ref(session_ref, *, allow_passthrough=False):
-    ref = str(session_ref or "").strip()
-    if not ref:
-        return None, None, "session id 不能为空"
-    records = list(_iter_codex_index_records())
-    exact = [item for item in records if str(item.get("id") or "").strip() == ref]
-    if exact:
-        return str(exact[0]["id"]), exact[0], None
-    matches = [item for item in records if str(item.get("id") or "").strip().startswith(ref)]
-    if len(matches) == 1:
-        return str(matches[0]["id"]), matches[0], None
-    if len(matches) > 1:
-        return None, None, f"Codex session 前缀不唯一: {ref}"
-    if allow_passthrough:
-        return ref, {"id": ref, "_unindexed": True}, None
-    return None, None, f"找不到 Codex session: {ref}"
+    from mms_command_tools import resolve_codex_resume_ref
+
+    return resolve_codex_resume_ref(
+        session_ref,
+        iter_codex_index_records=_iter_codex_index_records,
+        allow_passthrough=allow_passthrough,
+    )
 
 
 def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
-    ref = str(session_ref or "").strip()
-    if not ref:
-        return None, None, "session id 不能为空"
     from mms_session_index import list_indexed_sessions
+    from mms_command_tools import resolve_claude_resume_ref
 
-    sessions = [
-        item for item in list_indexed_sessions(cli_name="claude")
-        if str(item.get("session_id") or "").strip()
-    ]
-    if ref.isdigit():
-        index = int(ref)
-        if 1 <= index <= len(sessions):
-            item = sessions[index - 1]
-            return str(item.get("session_id") or "").strip(), item, None
-        return None, None, f"找不到第 {index} 条 Claude session"
-    exact = [item for item in sessions if str(item.get("session_id") or "").strip() == ref]
-    if exact:
-        return str(exact[0].get("session_id") or "").strip(), exact[0], None
-    matches = [item for item in sessions if str(item.get("session_id") or "").strip().startswith(ref)]
-    if len(matches) == 1:
-        return str(matches[0].get("session_id") or "").strip(), matches[0], None
-    if len(matches) > 1:
-        return None, None, f"Claude session 前缀不唯一: {ref}"
-    if allow_passthrough:
-        return ref, {"session_id": ref, "_unindexed": True}, None
-    return None, None, f"找不到 Claude session: {ref}"
+    return resolve_claude_resume_ref(
+        session_ref,
+        list_indexed_sessions=list_indexed_sessions,
+        allow_passthrough=allow_passthrough,
+    )
 
 
 def _resolve_resume_target(session_ref, cli_hint="auto"):
@@ -8848,37 +8782,21 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
 
 
 def _uuid_resume_cli_hint(session_ref):
-    ref = str(session_ref or "").strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", ref):
-        return ""
-    version = ref.split("-", 3)[2][:1]
-    if version == "7":
-        return "codex"
-    if version == "4":
-        return "claude"
-    return ""
+    from mms_command_tools import uuid_resume_cli_hint
+
+    return uuid_resume_cli_hint(session_ref)
 
 
 def _first_resume_model(cli_models, default_models, recommend=None):
-    names = []
-    for item in list(cli_models or []) + list(default_models or []):
-        name = str(item.get("model") if isinstance(item, dict) else item or "").strip()
-        if name and name not in names:
-            names.append(name)
-    for preferred in recommend or []:
-        if preferred in names:
-            return preferred
-    return names[0] if names else ""
+    from mms_command_tools import first_resume_model
+
+    return first_resume_model(cli_models, default_models, recommend)
 
 
 def _session_resume_model(session_record):
-    if not isinstance(session_record, dict):
-        return ""
-    for key in ("resume_model", "selected_model", "display_model", "model"):
-        value = str(session_record.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    from mms_command_tools import session_resume_model
+
+    return session_resume_model(session_record)
 
 
 def _resolve_resume_runtime_and_model(

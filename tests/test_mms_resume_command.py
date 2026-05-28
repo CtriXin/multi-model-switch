@@ -13,11 +13,73 @@ class _FakeConsole:
 
 
 def test_split_cli_prefixed_resume_ref():
+    import mms_command_tools
     import mms_core
 
+    assert mms_command_tools.split_cli_prefixed_resume_ref("codex:abc") == ("codex", "abc")
     assert mms_core._split_cli_prefixed_resume_ref("codex:abc") == ("codex", "abc")
     assert mms_core._split_cli_prefixed_resume_ref("Claude: session-1 ") == ("claude", "session-1")
     assert mms_core._split_cli_prefixed_resume_ref("other:abc") == ("", "other:abc")
+
+
+def test_codex_resume_helper_reads_bounded_indexes_once(tmp_path):
+    import mms_command_tools
+
+    first_root = tmp_path / "codex-a"
+    second_root = tmp_path / "codex-b"
+    first_root.mkdir()
+    second_root.mkdir()
+    (first_root / "session_index.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "019e3990-4e86-7591-abca-d59641c6173a", "thread_name": "demo"}),
+                "{not json}",
+                json.dumps({"id": ""}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (second_root / "session_index.jsonl").write_text(
+        json.dumps({"id": "019e3990-4e86-7591-abca-d59641c6173a", "thread_name": "duplicate"}) + "\n",
+        encoding="utf-8",
+    )
+
+    roots = mms_command_tools.codex_resume_roots(
+        {"MMS_CODEX_RESUME_WRITEBACK_ROOT": str(first_root), "CODEX_HOME": str(first_root)},
+        real_home=str(tmp_path / "home"),
+    )
+    assert roots[0] == str(first_root)
+    assert roots.count(str(first_root)) == 1
+
+    records = list(mms_command_tools.iter_codex_index_records([str(first_root), str(second_root)]))
+    assert len(records) == 1
+    assert records[0]["_root"] == str(first_root)
+
+    session_id, record, error = mms_command_tools.resolve_codex_resume_ref(
+        "019e3990",
+        iter_codex_index_records=lambda: records,
+    )
+    assert error is None
+    assert session_id == "019e3990-4e86-7591-abca-d59641c6173a"
+    assert record["thread_name"] == "demo"
+
+
+def test_resume_model_and_uuid_helpers_preserve_preference_order():
+    import mms_command_tools
+
+    assert mms_command_tools.uuid_resume_cli_hint("019e3990-4e86-7591-abca-d59641c6173a") == "codex"
+    assert mms_command_tools.uuid_resume_cli_hint("2ea6c1bc-8632-4d5c-94ba-672b4a744871") == "claude"
+    assert mms_command_tools.uuid_resume_cli_hint("not-a-uuid") == ""
+    assert (
+        mms_command_tools.first_resume_model(
+            [{"model": "gpt-5.3"}, "gpt-5.5"],
+            ["gpt-5.4"],
+            recommend=["gpt-5.5"],
+        )
+        == "gpt-5.5"
+    )
+    assert mms_command_tools.session_resume_model({"selected_model": "gpt-5.4", "model": "gpt-5.3"}) == "gpt-5.4"
+    assert mms_command_tools.session_resume_model(None) == ""
 
 
 def test_resolve_codex_resume_ref_from_bounded_index(monkeypatch, tmp_path):
