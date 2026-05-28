@@ -540,6 +540,31 @@ def test_append_codex_mcp_servers_includes_installed_plugin_http_server(monkeypa
     assert 'url = "https://mcp.figma.com/mcp"' in rendered
 
 
+def test_append_codex_mcp_servers_skips_http_plugin_when_real_codex_plugin_enabled(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    codex_dir = real_home / ".codex"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "config.toml").write_text(
+        '[plugins."figma@openai-curated"]\n'
+        'enabled = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.figma]" not in rendered
+
+
 def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallback(monkeypatch, tmp_path):
     import mms_launchers
 

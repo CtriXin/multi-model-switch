@@ -5275,6 +5275,40 @@ def _installed_claude_plugin_mcp_servers():
     return servers
 
 
+def _enabled_real_codex_plugin_names():
+    import re
+
+    config_path = _real_user_path(".codex", "config.toml")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception:
+        return set()
+
+    header_pattern = re.compile(
+        r'^\[plugins\."((?:\\.|[^"\\])*)"\]\s*$',
+        flags=re.MULTILINE,
+    )
+    matches = list(header_pattern.finditer(text))
+    enabled = set()
+    for index, match in enumerate(matches):
+        plugin_id = _decode_toml_basic_key(match.group(1))
+        block_start = match.end()
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[block_start:block_end]
+        enabled_match = re.search(
+            r'^\s*enabled\s*=\s*(true|false)\s*$',
+            block,
+            flags=re.MULTILINE | re.IGNORECASE,
+        )
+        if not enabled_match or enabled_match.group(1).lower() != "true":
+            continue
+        plugin_name = str(plugin_id or "").split("@", 1)[0].strip().lower()
+        if plugin_name:
+            enabled.add(plugin_name)
+    return enabled
+
+
 def _resolve_hive_root(module_path=None):
     candidates = []
     explicit = str(os.environ.get("MMS_HIVE_ROOT") or "").strip()
@@ -8276,7 +8310,15 @@ def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_
     servers = loaded.get("mcpServers", {}) if isinstance(loaded, dict) else {}
 
     servers = copy.deepcopy(servers) if isinstance(servers, dict) else {}
+    enabled_codex_plugins = _enabled_real_codex_plugin_names()
     for name, spec in _installed_claude_plugin_mcp_servers().items():
+        if (
+            isinstance(spec, dict)
+            and isinstance(spec.get("url"), str)
+            and spec.get("url").strip()
+            and str(name or "").strip().lower() in enabled_codex_plugins
+        ):
+            continue
         servers.setdefault(name, copy.deepcopy(spec))
     hive_spec = _default_hive_session_mcp_server()
     if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
