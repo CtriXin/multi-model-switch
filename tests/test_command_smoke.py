@@ -3149,6 +3149,81 @@ def test_run_manage_channels_helper_and_wrapper_preserve_loop(monkeypatch):
     ]
 
 
+def test_run_connect_wizard_helper_and_wrapper_preserve_actions(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    cfg = {"version": 1}
+    calls = []
+    console = _CollectingConsole()
+
+    assert mms_command_tools.run_connect_wizard(
+        cfg,
+        ensure_interactive_terminal=lambda label: calls.append(("interactive", label)),
+        use_tui=lambda: False,
+        load_select_connect_tui=lambda: (_ for _ in ()).throw(AssertionError("tui not expected")),
+        prompt_ask=lambda label, **kwargs: calls.append(("prompt", label, kwargs)) or "1",
+        quick_connect_gateway=lambda current: calls.append(("gateway", current)) or ({"gateway": True}, True),
+        quick_connect_official=lambda current: calls.append(("official", current)) or ({"official": True}, True),
+        run_manage_channels=lambda current: calls.append(("manage", current)) or ({"manage": True}, True),
+        handle_config_migrate=lambda: calls.append("migrate"),
+        load_config=lambda: {"loaded": True},
+        console=console,
+    ) == ({"gateway": True}, True)
+    assert calls == [
+        ("interactive", "新通道接入"),
+        ("prompt", "选择操作", {"choices": ["1", "2", "3", "4", "5"], "default": "1"}),
+        ("gateway", cfg),
+    ]
+    assert console.items[:2] == ["\n[bold]接入新通道[/bold]", "  1. 添加网关通道"]
+
+    calls.clear()
+    console.items.clear()
+    assert mms_command_tools.run_connect_wizard(
+        cfg,
+        ensure_interactive_terminal=lambda label: calls.append(("interactive", label)),
+        use_tui=lambda: True,
+        load_select_connect_tui=lambda: (lambda: "fallback"),
+        prompt_ask=lambda *_args, **_kwargs: "4",
+        quick_connect_gateway=lambda current: calls.append(("gateway", current)) or (current, False),
+        quick_connect_official=lambda current: calls.append(("official", current)) or (current, False),
+        run_manage_channels=lambda current: calls.append(("manage", current)) or (current, False),
+        handle_config_migrate=lambda: calls.append("migrate"),
+        load_config=lambda: None,
+        console=console,
+    ) == (cfg, True)
+    assert calls == [("interactive", "新通道接入"), "migrate"]
+
+    calls.clear()
+    console.items.clear()
+    assert mms_command_tools.run_connect_wizard(
+        cfg,
+        ensure_interactive_terminal=lambda label: calls.append(("interactive", label)),
+        use_tui=lambda: True,
+        load_select_connect_tui=lambda: (lambda: None),
+        prompt_ask=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("prompt not expected")),
+        quick_connect_gateway=lambda current: calls.append(("gateway", current)) or (current, False),
+        quick_connect_official=lambda current: calls.append(("official", current)) or (current, False),
+        run_manage_channels=lambda current: calls.append(("manage", current)) or (current, False),
+        handle_config_migrate=lambda: calls.append("migrate"),
+        load_config=lambda: {"loaded": True},
+        console=console,
+    ) == (cfg, False)
+    assert calls == [("interactive", "新通道接入")]
+    assert console.items == ["[yellow]已取消接入[/yellow]"]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda label: calls.append(("core-interactive", label)))
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: False)
+    monkeypatch.setattr(mms_core, "Prompt", type("Prompt", (), {"ask": staticmethod(lambda *args, **kwargs: "3")}))
+    monkeypatch.setattr(mms_core, "run_manage_channels", lambda current: calls.append(("core-manage", current)) or ({"managed": True}, True))
+    monkeypatch.setattr(mms_core, "_quick_connect_gateway", lambda current: calls.append("unexpected-gateway"))
+    monkeypatch.setattr(mms_core, "_quick_connect_official", lambda current: calls.append("unexpected-official"))
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+    assert mms_core.run_connect_wizard(cfg) == ({"managed": True}, True)
+    assert calls == [("core-interactive", "新通道接入"), ("core-manage", cfg)]
+
+
 def test_manage_provider_target_helper_and_wrapper_preserve_actions(monkeypatch):
     import mms_command_tools
     import mms_core

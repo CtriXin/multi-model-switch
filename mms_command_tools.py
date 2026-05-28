@@ -2344,6 +2344,64 @@ def run_manage_channels(
         changed = changed or did_change
 
 
+def run_connect_wizard(
+    cfg,
+    *,
+    ensure_interactive_terminal,
+    use_tui,
+    load_select_connect_tui,
+    prompt_ask,
+    quick_connect_gateway,
+    quick_connect_official,
+    run_manage_channels,
+    handle_config_migrate,
+    load_config,
+    console,
+):
+    ensure_interactive_terminal("新通道接入")
+    action_id = None
+    tui_attempted = False
+    if use_tui():
+        try:
+            select_connect_tui = load_select_connect_tui()
+        except ImportError:
+            select_connect_tui = None
+        if select_connect_tui is not None:
+            tui_attempted = True
+            action_id = select_connect_tui()
+    if action_id == "fallback":
+        action_id = None
+    elif action_id is None and tui_attempted:
+        action_id = "cancel"
+    if not action_id:
+        console.print("\n[bold]接入新通道[/bold]")
+        console.print("  1. 添加网关通道")
+        console.print("  2. 添加官方通道")
+        console.print("  3. 管理现有通道")
+        console.print("  4. 迁移配置到 mms")
+        console.print("  5. 返回")
+        action_id = prompt_ask("选择操作", choices=["1", "2", "3", "4", "5"], default="1")
+        action_id = {
+            "1": "connect_gateway",
+            "2": "connect_official",
+            "3": "manage_channels",
+            "4": "migrate_config",
+            "5": "cancel",
+        }[action_id]
+
+    if action_id == "connect_gateway":
+        return quick_connect_gateway(cfg)
+    if action_id == "connect_official":
+        return quick_connect_official(cfg)
+    if action_id == "manage_channels":
+        return run_manage_channels(cfg)
+    if action_id == "migrate_config":
+        handle_config_migrate()
+        return load_config() or cfg, True
+    console.print("[yellow]已取消接入[/yellow]")
+    return cfg, False
+
+
 def manage_provider_target(
     cfg,
     provider_id,
