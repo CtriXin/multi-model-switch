@@ -476,6 +476,69 @@ def test_mms_config_guard_renderers_preserve_human_gate_text():
     assert "before/after values" in claude_text
 
 
+def test_manage_target_helpers_build_sorted_targets_and_fallback_selection():
+    import mms_command_tools
+
+    cfg = {
+        "provider": {"default": "relay"},
+        "account": {"defaults": {"claude": "claude-main"}},
+        "providers": [
+            {"id": "backup", "name": "Backup"},
+            {"id": "relay", "name": "Relay"},
+        ],
+        "accounts": [
+            {"id": "codex-alt", "cli": "codex", "name": "Codex Alt"},
+            {"id": "claude-main", "cli": "claude", "name": "Claude Main"},
+        ],
+    }
+    usage = {
+        ("provider", "relay"): (2, "2026-05-28"),
+        ("provider", "backup"): (5, "2026-05-27"),
+        ("account", "claude-main"): (3, "2026-05-28"),
+        ("account", "codex-alt"): (1, "2026-05-26"),
+    }
+    targets = mms_command_tools.build_manage_targets(
+        cfg,
+        default_provider_id="relay",
+        resolve_provider_context=lambda _cfg, provider_id: {"base_url": "https://relay", "api_key": "k"} if provider_id == "relay" else {},
+        usage_summary_for_runtime=lambda kind, runtime_id: usage[(kind, runtime_id)],
+        probe_account_status=lambda account: {"summary": f"{account['cli']}:ok"},
+    )
+
+    assert [item["id"] for item in targets] == ["claude-main", "relay", "codex-alt", "backup"]
+    assert targets[0]["summary"] == "官方通道 · CLAUDE / 默认"
+    assert targets[1]["summary"] == "默认网关通道"
+    assert targets[1]["status"] == "已配置"
+    assert targets[3]["status"] == "未配置"
+
+    class FakePanel:
+        def __init__(self, body, **kwargs):
+            self.body = body
+            self.kwargs = kwargs
+
+    class FakePrompt:
+        calls = ["9", "2"]
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return cls.calls.pop(0)
+
+    console = _CollectingConsole()
+    selected = mms_command_tools.select_manage_target_fallback(
+        targets,
+        ensure_rich=lambda: None,
+        panel_cls=FakePanel,
+        table_cls=_FakeTable,
+        prompt_cls=FakePrompt,
+        console=console,
+    )
+
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.rows[0][0] == ("1", "官方", "Claude Main", "CLAUDE", "claude:ok", "3")
+    assert selected["id"] == "relay"
+    assert any("请输入 1-4 的编号" in str(item) for item in console.items)
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

@@ -5074,62 +5074,17 @@ def _display_runtime_usage(runtime_kind, runtime_id, title):
 
 
 def _list_manage_targets(cfg):
-    targets = []
+    from mms_command_tools import build_manage_targets
+
     default_provider_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
-    account_defaults = cfg.get("account", {}).get("defaults", {})
 
-    for provider in cfg.get("providers", []):
-        if not isinstance(provider, dict):
-            continue
-        provider_id = str(provider.get("id", "")).strip()
-        if not provider_id:
-            continue
-        provider_ctx = resolve_provider_context(cfg, provider_id)
-        launches, last_used_at = _usage_summary_for_runtime("provider", provider_id)
-        targets.append({
-            "kind": "provider",
-            "id": provider_id,
-            "title": provider.get("name", provider_id),
-            "summary": "默认网关通道" if provider_id == default_provider_id else "网关通道",
-            "is_default": provider_id == default_provider_id,
-            "default_label": "网关" if provider_id == default_provider_id else "备选",
-            "status": "已配置" if provider_ctx.get("base_url") and provider_ctx.get("api_key") else "未配置",
-            "launches": launches,
-            "last_used_at": last_used_at,
-        })
-
-    for account in cfg.get("accounts", []):
-        if not isinstance(account, dict):
-            continue
-        account_id = str(account.get("id", "")).strip()
-        if not account_id:
-            continue
-        cli_name = str(account.get("cli", "")).strip()
-        launches, last_used_at = _usage_summary_for_runtime("account", account_id)
-        login_state = _probe_account_status(account)
-        default_tag = " / 默认" if account_defaults.get(cli_name) == account_id else ""
-        targets.append({
-            "kind": "account",
-            "id": account_id,
-            "cli": cli_name,
-            "title": account.get("name", account_id),
-            "summary": f"官方通道 · {cli_name.upper()}{default_tag}",
-            "is_default": account_defaults.get(cli_name) == account_id,
-            "default_label": cli_name.upper() if account_defaults.get(cli_name) == account_id else "备选",
-            "status": login_state.get("summary") or login_state.get("state", ""),
-            "launches": launches,
-            "last_used_at": last_used_at,
-        })
-    targets.sort(
-        key=lambda item: (
-            0 if item.get("is_default") else 1,
-            0 if item.get("kind") == "account" else 1,
-            -int(item.get("launches", 0)),
-            item.get("last_used_at", ""),
-            item.get("title", ""),
-        )
+    return build_manage_targets(
+        cfg,
+        default_provider_id=default_provider_id,
+        resolve_provider_context=resolve_provider_context,
+        usage_summary_for_runtime=_usage_summary_for_runtime,
+        probe_account_status=_probe_account_status,
     )
-    return targets
 
 
 def _select_manage_target(cfg):
@@ -5148,39 +5103,16 @@ def _select_manage_target(cfg):
         except (ImportError, Exception):
             pass
 
-    # fallback: rich 表格
-    _ensure_rich()
-    console.print(Panel(
-        f"[bold]通道总数:[/bold] {len(targets)} 个",
-        title="管理现有通道",
-        border_style="cyan",
-    ))
-    table = Table(show_lines=True)
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("类型", style="green")
-    table.add_column("显示名", style="yellow")
-    table.add_column("默认入口", style="white", width=10)
-    table.add_column("状态", style="magenta")
-    table.add_column("启动", style="cyan", width=6)
-    for index, target in enumerate(targets, 1):
-        target_type = "官方" if target.get("kind") == "account" else "网关"
-        table.add_row(
-            str(index), target_type, target.get("title", ""),
-            target.get("default_label", ""), target.get("status", ""),
-            str(target.get("launches", 0)),
-        )
-    console.print(table)
+    from mms_command_tools import select_manage_target_fallback
 
-    while True:
-        _ensure_rich()
-        raw = Prompt.ask("选择要管理的通道，直接回车返回", default="")
-        if not raw:
-            return None
-        if raw.isdigit():
-            idx = int(raw)
-            if 1 <= idx <= len(targets):
-                return targets[idx - 1]
-        console.print(f"[red]请输入 1-{len(targets)} 的编号[/red]")
+    return select_manage_target_fallback(
+        targets,
+        ensure_rich=_ensure_rich,
+        panel_cls=Panel,
+        table_cls=Table,
+        prompt_cls=Prompt,
+        console=console,
+    )
 
 
 def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hidden_models=None, models_endpoint=None):
