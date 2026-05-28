@@ -4206,26 +4206,25 @@ def ensure_api_credentials():
 
 
 def setup_wizard(ui_language=None):
-    ui_language = normalize_language(ui_language) or "zh"
-    set_language(ui_language)
-    title = display_title()
-    console.print(Panel(
-        f"[bold cyan]{_L(f'欢迎使用 {title} — AI Coding CLI 统一启动器', f'Welcome to {title} — unified AI coding CLI launcher')}[/bold cyan]\n\n"
-        f"{_L(f'{title} 帮你一键启动 AI 编程助手', f'{title} helps you launch AI coding assistants from one entrypoint')}\n"
-        f"{_L('首次使用，需要配置 API 地址和认证信息', 'First-time setup needs an API endpoint and credentials')}",
-        title=f"{title} Setup",
-    ))
+    from mms_command_tools import setup_wizard as setup_wizard_impl
 
-    cfg = _default_config()
-    cfg.setdefault("ui", {})["language"] = ui_language
-    setup_provider_credentials(get_provider_definition(cfg))
-
-    role = Prompt.ask(_L("模型模式", "Model mode"), choices=[MODE_ALL, MODE_RECOMMENDED], default=MODE_ALL)
-    cfg = _default_config(role)
-    cfg.setdefault("ui", {})["language"] = ui_language
-    save_config(cfg)
-    console.print(f"\n[green]✓ {_L('配置已保存到', 'Config saved to')} {CONFIG_PATH}[/green]\n")
-    return cfg
+    return setup_wizard_impl(
+        ui_language,
+        normalize_language=normalize_language,
+        set_language=set_language,
+        display_title=display_title,
+        localize=_L,
+        panel_cls=Panel,
+        default_config=_default_config,
+        setup_provider_credentials=setup_provider_credentials,
+        get_provider_definition=get_provider_definition,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        mode_all=MODE_ALL,
+        mode_recommended=MODE_RECOMMENDED,
+        save_config=save_config,
+        config_path=CONFIG_PATH,
+        console=console,
+    )
 
 
 # ── Model Fetching ──────────────────────────────────────

@@ -4037,6 +4037,80 @@ def test_default_config_helper_preserves_baseline_shape_and_defaults():
     }
 
 
+def test_setup_wizard_helper_and_wrapper_preserve_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    class FakePanel:
+        def __init__(self, body, **kwargs):
+            self.body = body
+            self.kwargs = kwargs
+
+    console = _CollectingConsole()
+    calls = []
+
+    def default_config(role="all"):
+        calls.append(("default", role))
+        return {"role": role}
+
+    result = mms_command_tools.setup_wizard(
+        " en-US ",
+        normalize_language=lambda value: calls.append(("normalize", value)) or "en",
+        set_language=lambda value: calls.append(("language", value)),
+        display_title=lambda: "MMG",
+        localize=lambda zh, en: en,
+        panel_cls=FakePanel,
+        default_config=default_config,
+        setup_provider_credentials=lambda provider: calls.append(("setup-creds", provider)),
+        get_provider_definition=lambda cfg: calls.append(("provider", cfg.copy())) or {"id": "relay"},
+        prompt_ask=lambda label, **kwargs: calls.append(("prompt", label, kwargs)) or "recommended",
+        mode_all="all",
+        mode_recommended="recommended",
+        save_config=lambda cfg: calls.append(("save", cfg.copy())),
+        config_path="/tmp/config.toml",
+        console=console,
+    )
+
+    assert result == {"role": "recommended", "ui": {"language": "en"}}
+    assert calls == [
+        ("normalize", " en-US "),
+        ("language", "en"),
+        ("default", "all"),
+        ("provider", {"role": "all", "ui": {"language": "en"}}),
+        ("setup-creds", {"id": "relay"}),
+        ("prompt", "Model mode", {"choices": ["all", "recommended"], "default": "all"}),
+        ("default", "recommended"),
+        ("save", {"role": "recommended", "ui": {"language": "en"}}),
+    ]
+    assert isinstance(console.items[0], FakePanel)
+    assert console.items[0].kwargs == {"title": "MMG Setup"}
+    assert console.items[-1] == "\n[green]✓ Config saved to /tmp/config.toml[/green]\n"
+
+    calls.clear()
+    console = _CollectingConsole()
+    monkeypatch.setattr(mms_core, "normalize_language", lambda value: calls.append(("core-normalize", value)) or "zh")
+    monkeypatch.setattr(mms_core, "set_language", lambda value: calls.append(("core-language", value)))
+    monkeypatch.setattr(mms_core, "display_title", lambda: "MMS")
+    monkeypatch.setattr(mms_core, "_L", lambda zh, en: zh)
+    monkeypatch.setattr(mms_core, "Panel", FakePanel)
+    monkeypatch.setattr(mms_core, "_default_config", lambda role="all": calls.append(("core-default", role)) or {"role": role})
+    monkeypatch.setattr(mms_core, "setup_provider_credentials", lambda provider: calls.append(("core-creds", provider)))
+    monkeypatch.setattr(mms_core, "get_provider_definition", lambda cfg: calls.append(("core-provider", cfg.copy())) or {"id": "core"})
+    monkeypatch.setattr(
+        mms_core,
+        "Prompt",
+        type("Prompt", (), {"ask": staticmethod(lambda label, **kwargs: calls.append(("core-prompt", label, kwargs)) or "recommended")}),
+    )
+    monkeypatch.setattr(mms_core, "save_config", lambda cfg: calls.append(("core-save", cfg.copy())))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", "/tmp/core-config.toml")
+    monkeypatch.setattr(mms_core, "console", console)
+
+    assert mms_core.setup_wizard("zh") == {"role": "recommended", "ui": {"language": "zh"}}
+    assert ("core-creds", {"id": "core"}) in calls
+    assert calls[-1] == ("core-save", {"role": "recommended", "ui": {"language": "zh"}})
+    assert console.items[-1] == "\n[green]✓ 配置已保存到 /tmp/core-config.toml[/green]\n"
+
+
 def test_legacy_api_migration_helper_preserves_credential_and_config_save_flow():
     import mms_command_tools
 

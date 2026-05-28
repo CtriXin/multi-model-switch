@@ -4089,6 +4089,46 @@ def ensure_api_credentials(*, default_config, ensure_provider_credentials):
     return provider_ctx["base_url"], provider_ctx["api_key"]
 
 
+def setup_wizard(
+    ui_language=None,
+    *,
+    normalize_language,
+    set_language,
+    display_title,
+    localize,
+    panel_cls,
+    default_config,
+    setup_provider_credentials,
+    get_provider_definition,
+    prompt_ask,
+    mode_all,
+    mode_recommended,
+    save_config,
+    config_path,
+    console,
+):
+    ui_language = normalize_language(ui_language) or "zh"
+    set_language(ui_language)
+    title = display_title()
+    console.print(panel_cls(
+        f"[bold cyan]{localize(f'欢迎使用 {title} — AI Coding CLI 统一启动器', f'Welcome to {title} — unified AI coding CLI launcher')}[/bold cyan]\n\n"
+        f"{localize(f'{title} 帮你一键启动 AI 编程助手', f'{title} helps you launch AI coding assistants from one entrypoint')}\n"
+        f"{localize('首次使用，需要配置 API 地址和认证信息', 'First-time setup needs an API endpoint and credentials')}",
+        title=f"{title} Setup",
+    ))
+
+    cfg = default_config()
+    cfg.setdefault("ui", {})["language"] = ui_language
+    setup_provider_credentials(get_provider_definition(cfg))
+
+    role = prompt_ask(localize("模型模式", "Model mode"), choices=[mode_all, mode_recommended], default=mode_all)
+    cfg = default_config(role)
+    cfg.setdefault("ui", {})["language"] = ui_language
+    save_config(cfg)
+    console.print(f"\n[green]✓ {localize('配置已保存到', 'Config saved to')} {config_path}[/green]\n")
+    return cfg
+
+
 def provider_supports_mimo_anthropic_selectors(provider):
     provider = provider if isinstance(provider, dict) else {}
     identity = " ".join(
