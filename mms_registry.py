@@ -1398,14 +1398,25 @@ def _build_preview_bundle_payloads_from_route_revision(
     for info in routes.values():
         leaves.extend(info.get("fallbacks") or [])
     missing_api_key_count = sum(1 for item in leaves if not str(item.get("api_key") or "").strip())
-    runtime_ready = bool(leaves) and missing_api_key_count == 0
+    missing_base_url_count = sum(
+        1
+        for item in leaves
+        if not str(item.get("anthropic_base_url") or "").strip()
+        and not str(item.get("openai_base_url") or "").strip()
+    )
+    runtime_ready = bool(leaves) and missing_api_key_count == 0 and missing_base_url_count == 0
+    not_ready_reasons = []
+    if missing_api_key_count:
+        not_ready_reasons.append("missing plaintext secrets in preview secret backend")
+    if missing_base_url_count:
+        not_ready_reasons.append("missing route base URLs")
     router_payload = {
         "version": 1,
         "generated_at": generated_at,
         "source": source_label,
         "route_revision": route_revision_id,
         "runtime_ready": runtime_ready,
-        "runtime_ready_reason": "" if runtime_ready else "missing plaintext secrets in preview secret backend",
+        "runtime_ready_reason": "" if runtime_ready else "; ".join(not_ready_reasons),
         "routes": routes,
     }
     lineup_payload = {
@@ -1454,6 +1465,7 @@ def _build_preview_bundle_payloads_from_route_revision(
         "provider_route_count": len(rows),
         "runtime_ready": runtime_ready,
         "missing_api_key_count": missing_api_key_count,
+        "missing_base_url_count": missing_base_url_count,
     }
 
 
@@ -1670,6 +1682,7 @@ def publish_latest_approved_bundle_from_legacy_candidates(
             "runtime_ready": payloads["runtime_ready"],
             "runtime_ready_reason": str((payloads.get("router") or {}).get("runtime_ready_reason") or ""),
             "missing_api_key_count": payloads["missing_api_key_count"],
+            "missing_base_url_count": payloads["missing_base_url_count"],
             "files": {name: str(path) for name, path in output_files.items()},
         }
     finally:

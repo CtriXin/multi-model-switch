@@ -1413,6 +1413,7 @@ def test_publish_preview_bundle_from_legacy_candidates_verifies_manifest(tmp_pat
     assert status["generated_bundle"]["runtime_ready"] is False
     assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
     assert status["generated_bundle"]["router_missing_api_key_count"] == 2
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 0
     assert status["generated_bundle"]["router_secret_ref_count"] == 2
     assert router["runtime_ready"] is False
     assert router["routes"]["shared-model"]["primary"]["provider_id"] == "primary-local"
@@ -1478,11 +1479,13 @@ def test_preview_include_secrets_enables_runtime_ready_publish_without_db_plaint
     assert "sk-secret-fallback-value" not in import_text
     assert publish_summary["runtime_ready"] is True
     assert publish_summary["missing_api_key_count"] == 0
+    assert publish_summary["missing_base_url_count"] == 0
     assert router["runtime_ready"] is True
     assert router["routes"]["secret-model"]["primary"]["api_key"] == "sk-secret-primary-value"
     assert router["routes"]["secret-model"]["fallbacks"][0]["api_key"] == "sk-secret-fallback-value"
     assert status["generated_bundle"]["runtime_ready"] is True
     assert status["generated_bundle"]["router_missing_api_key_count"] == 0
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 0
     assert status["generated_bundle"]["router_secret_ref_count"] == 2
 
     db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
@@ -1493,6 +1496,111 @@ def test_preview_include_secrets_enables_runtime_ready_publish_without_db_plaint
         assert leaked == 0
     finally:
         db.close()
+
+
+def test_preview_include_secrets_without_route_url_is_not_runtime_ready(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "missing-url"
+        api_key = "sk-missing-url-value"
+        fallback_models = ["secret-model"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert publish_summary["runtime_ready"] is False
+    assert publish_summary["missing_api_key_count"] == 0
+    assert publish_summary["missing_base_url_count"] == 1
+    assert "missing route base URLs" in publish_summary["runtime_ready_reason"]
+    assert router["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
+    assert status["generated_bundle"]["router_missing_api_key_count"] == 0
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 1
+    doctor = mms_registry_cli.preview_doctor(config_dir=config_dir, command_name="mmf config doctor")
+    assert doctor["counts"]["missing_api_keys"] == 0
+    assert doctor["counts"]["missing_base_urls"] == 1
+    assert doctor["next_actions"][0]["command"] == "./mmf config source --json"
+
+
+def test_model_source_status_downgrades_stale_runtime_ready_when_route_url_missing(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    generated = config_dir / "generated"
+    generated.mkdir(parents=True)
+    router = generated / "model-routes.json"
+    lineup = generated / "model-routes.lineup.json"
+    profile = generated / "provider-profiles.generated.json"
+    policy = generated / "model-policy.effective.json"
+    capabilities = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(
+        router,
+        {
+            "version": 1,
+            "runtime_ready": True,
+            "routes": {
+                "missing-url-model": {
+                    "primary": {
+                        "provider_id": "missing-url",
+                        "model_id": "missing-url-model",
+                        "api_key": "sk-present",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        lineup,
+        {
+            "version": 1,
+            "routes": {
+                "missing-url-model": {
+                    "primary": {"provider_id": "missing-url", "model_id": "missing-url-model"},
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(profile, {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_missing_url_test",
+        capability_revision="cap_missing_url_test",
+        route_revision="route_missing_url_test",
+        policy_revision="policy_missing_url_test",
+        profile_revision="profile_missing_url_test",
+        files={
+            "router": {"path": router, "canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+            "lineup": {"path": lineup, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+        },
+    )
+
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+
+    assert status["generated_bundle"]["verified"] is True
+    assert status["generated_bundle"]["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 1
 
 
 def test_mmf_preview_publish_wrapper_fails_closed_without_candidates(tmp_path: Path) -> None:
@@ -1675,7 +1783,9 @@ def test_preview_doctor_reports_verified_not_runtime_ready_without_secret_backen
     assert summary["bundle"]["verified"] is True
     assert summary["bundle"]["runtime_ready"] is False
     assert summary["counts"]["missing_api_keys"] == 1
+    assert summary["counts"]["missing_base_urls"] == 0
     assert summary["secrets"]["status"] == "missing"
+    assert summary["next_actions"][0]["command"].startswith("./mmf preview import-legacy")
 
 
 def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: Path) -> None:

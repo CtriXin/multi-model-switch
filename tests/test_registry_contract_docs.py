@@ -110,6 +110,8 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "respects `MMS_CONFIG_ROOT` and `MMS_CONFIG_DIR`",
         "explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle",
         "MMS_WATCHDOG_REQUIRE_BUNDLE=0",
+        "missing route base URLs",
+        "every route leaf has an `anthropic_base_url` or `openai_base_url`",
         "`stable_legacy_writes`",
         "`preview_v2_writes`",
         "TUI Settings labels direct `model-routes.json` export as `Legacy",

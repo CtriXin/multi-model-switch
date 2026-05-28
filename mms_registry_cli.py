@@ -510,22 +510,38 @@ def _generated_router_runtime_summary(verified: dict[str, Any]) -> dict[str, Any
         fallbacks = route.get("fallbacks") if isinstance(route.get("fallbacks"), list) else []
         leaves.extend(item for item in fallbacks if isinstance(item, dict))
     missing_api_key_count = sum(1 for item in leaves if not str(item.get("api_key") or "").strip())
+    missing_base_url_count = sum(
+        1
+        for item in leaves
+        if not str(item.get("anthropic_base_url") or "").strip()
+        and not str(item.get("openai_base_url") or "").strip()
+    )
     secret_ref_count = sum(1 for item in leaves if str(item.get("secret_ref") or "").strip())
     runtime_ready = payload.get("runtime_ready")
+    derived_ready = bool(leaves) and missing_api_key_count == 0 and missing_base_url_count == 0
     if isinstance(runtime_ready, bool):
-        ready_value: bool | None = runtime_ready
+        ready_value: bool | None = runtime_ready and derived_ready
     elif leaves:
-        ready_value = missing_api_key_count == 0
+        ready_value = derived_ready
     else:
         ready_value = None
     status = "ready" if ready_value is True else "not_ready" if ready_value is False else "unknown"
+    runtime_ready_reason = str(payload.get("runtime_ready_reason") or "")
+    derived_reasons = []
+    if missing_api_key_count:
+        derived_reasons.append("missing plaintext secrets in preview secret backend")
+    if missing_base_url_count:
+        derived_reasons.append("missing route base URLs")
+    if ready_value is False and not runtime_ready_reason:
+        runtime_ready_reason = "; ".join(derived_reasons)
     return {
         "runtime_ready": ready_value,
         "runtime_ready_status": status,
-        "runtime_ready_reason": str(payload.get("runtime_ready_reason") or ""),
+        "runtime_ready_reason": runtime_ready_reason,
         "router_route_count": len(routes),
         "router_leaf_count": len(leaves),
         "router_missing_api_key_count": missing_api_key_count,
+        "router_missing_base_url_count": missing_base_url_count,
         "router_secret_ref_count": secret_ref_count,
     }
 
@@ -726,7 +742,12 @@ def preview_doctor(
         next_actions.append({"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"})
     elif bundle.get("runtime_ready") is not True:
         overall = "verified_not_runtime_ready"
-        next_actions.append({"label": "Optional: import keys into preview secret backend", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json"})
+        if int(bundle.get("router_missing_base_url_count") or 0) > 0:
+            next_actions.append({"label": "Review missing route base URLs before runtime launch", "command": "./mmf config source --json"})
+        elif int(bundle.get("router_missing_api_key_count") or 0) > 0:
+            next_actions.append({"label": "Optional: import keys into preview secret backend", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json"})
+        else:
+            next_actions.append({"label": "Inspect preview bundle readiness", "command": "./mmf config doctor --json"})
     else:
         overall = "ready"
         next_actions.append({"label": "Optional: run read-only watchdog check", "command": "scripts/mms_health_watchdog.py --config-dir \"$MMS_CONFIG_ROOT\" --require-bundle --dry-run --print-json"})
@@ -745,6 +766,7 @@ def preview_doctor(
             "bundle_files": bundle.get("file_count", 0),
             "bundle_routes": bundle.get("router_route_count", 0),
             "missing_api_keys": bundle.get("router_missing_api_key_count", 0),
+            "missing_base_urls": bundle.get("router_missing_base_url_count", 0),
             "preview_secret_count": secrets.get("secret_count", 0),
         },
         "bundle": {
@@ -818,6 +840,7 @@ def preview_prepare(
                 "provider_route_count": publish_summary.get("provider_route_count", 0),
                 "runtime_ready": publish_summary.get("runtime_ready"),
                 "missing_api_key_count": publish_summary.get("missing_api_key_count", 0),
+                "missing_base_url_count": publish_summary.get("missing_base_url_count", 0),
             },
             "verify": {
                 "verified": bool(verify_summary.get("verified")),
@@ -2594,6 +2617,7 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     print(f"bundle_runtime_ready={bundle.get('runtime_ready')}")
     print(f"bundle_runtime_ready_status={bundle.get('runtime_ready_status', 'unknown')}")
     print(f"bundle_router_missing_api_key_count={bundle.get('router_missing_api_key_count', 0)}")
+    print(f"bundle_router_missing_base_url_count={bundle.get('router_missing_base_url_count', 0)}")
     print(f"read_only={summary.get('read_only', False)}")
 
 
@@ -2667,6 +2691,7 @@ def _print_preview_doctor(summary: dict[str, Any]) -> None:
     print(f"candidate_provider_routes={counts.get('candidate_provider_routes', 0)}")
     print(f"bundle_routes={counts.get('bundle_routes', 0)}")
     print(f"missing_api_keys={counts.get('missing_api_keys', 0)}")
+    print(f"missing_base_urls={counts.get('missing_base_urls', 0)}")
     print(f"preview_secret_count={counts.get('preview_secret_count', 0)}")
     bundle = summary.get("bundle") if isinstance(summary.get("bundle"), dict) else {}
     print(f"bundle_verified={bundle.get('verified', False)}")
