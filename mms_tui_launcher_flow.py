@@ -296,6 +296,69 @@ def provider_browse_launch_context(
     return model_info, runtime
 
 
+def handle_tui_provider_browse_action(
+    cfg,
+    cli_name,
+    current_provider,
+    default_models,
+    *,
+    select_provider_browse_tui,
+    select_provider_models_tui,
+    provider_candidates,
+    default_provider_id,
+    provider_supports_cli_name,
+    provider_label,
+    resolve_provider_context,
+    probe_models,
+    filter_visible_models,
+    trace_record,
+    trace_runtime_choice,
+):
+    browse_providers = provider_browse_options(
+        cfg,
+        current_provider,
+        default_models,
+        cli_name,
+        provider_candidates=provider_candidates,
+        default_provider_id=default_provider_id,
+        provider_supports_cli_name=provider_supports_cli_name,
+        provider_label=provider_label,
+    )
+    if not browse_providers:
+        return {"status": "continue", "message": "没有可用的 Provider"}
+
+    prov_result = safe_tui_call(select_provider_browse_tui, browse_providers)
+    if prov_result is None or prov_result == "__interrupt__":
+        return {"status": "continue"}
+    selected_pid, selected_pname = prov_result
+
+    selected_prov, prov_models = provider_browse_model_options(
+        cfg,
+        selected_pid,
+        resolve_provider_context=resolve_provider_context,
+        probe_models=probe_models,
+        filter_visible_models=filter_visible_models,
+    )
+    if not prov_models:
+        return {"status": "continue", "message": f"{selected_pname} 没有可用模型"}
+
+    model_result = safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
+    if model_result is None:
+        return {"status": "continue"}
+    if model_result == "__exit__":
+        return {"status": "exit"}
+
+    model_info, runtime = provider_browse_launch_context(
+        cli_name,
+        selected_pid,
+        selected_prov,
+        model_result,
+        trace_record=trace_record,
+        trace_runtime_choice=trace_runtime_choice,
+    )
+    return {"status": "launch", "model_info": model_info, "runtime": runtime}
+
+
 def load_balance_tui_payload(
     cfg,
     cli_name,

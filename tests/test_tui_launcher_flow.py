@@ -8,6 +8,7 @@ from mms_tui_launcher_flow import (
     confirm_agent_pack,
     confirm_tui_options,
     handle_tui_connect_action,
+    handle_tui_provider_browse_action,
     last_used_model_info,
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
@@ -138,6 +139,128 @@ def test_provider_browse_launch_context_traces_selection() -> None:
     assert runtime is provider
     assert trace_records == [(("provider browse",), {"cli": "codex", "provider": "p1", "model": "gpt-5.4"})]
     assert trace_choices == [(("runtime resolve", provider), {"launch_cli": "codex", "choice": "provider browse"})]
+
+
+def test_handle_tui_provider_browse_action_reports_no_providers() -> None:
+    result = handle_tui_provider_browse_action(
+        {},
+        "codex",
+        {},
+        [],
+        select_provider_browse_tui=lambda _providers: (_ for _ in ()).throw(AssertionError("unused")),
+        select_provider_models_tui=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        provider_candidates=lambda *_args: [],
+        default_provider_id="default",
+        provider_supports_cli_name=lambda *_args: True,
+        provider_label=lambda provider: provider.get("name") or provider.get("id"),
+        resolve_provider_context=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        filter_visible_models=lambda _models: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_record=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert result == {"status": "continue", "message": "没有可用的 Provider"}
+
+
+def test_handle_tui_provider_browse_action_launches_selected_model() -> None:
+    calls = []
+    cfg = {"cfg": True}
+    current_provider = {"id": "current"}
+    default_models = ["gpt-5.4"]
+    selected_provider = {"id": "p1"}
+    trace_records = []
+    trace_choices = []
+
+    def provider_candidates(arg_cfg, arg_provider, arg_models):
+        calls.append(("candidates", arg_cfg, arg_provider, arg_models))
+        return [
+            (
+                {
+                    "id": "p1",
+                    "name": "Provider One",
+                    "api_key": "k",
+                    "supported_clis": ["codex"],
+                },
+                False,
+            )
+        ]
+
+    def select_provider(providers):
+        calls.append(("select_provider", providers))
+        return "p1", "Provider One"
+
+    def resolve_provider_context(arg_cfg, provider_id):
+        calls.append(("resolve", arg_cfg, provider_id))
+        return selected_provider
+
+    def probe_models(provider, *, emit_output):
+        calls.append(("probe", provider, emit_output))
+        return {"models": ["gpt-5.4", "hidden-model"]}
+
+    def select_model(provider_name, models):
+        calls.append(("select_model", provider_name, models))
+        return {"model": "gpt-5.4"}
+
+    result = handle_tui_provider_browse_action(
+        cfg,
+        "codex",
+        current_provider,
+        default_models,
+        select_provider_browse_tui=select_provider,
+        select_provider_models_tui=select_model,
+        provider_candidates=provider_candidates,
+        default_provider_id="default",
+        provider_supports_cli_name=lambda provider, cli: cli in provider.get("supported_clis", []),
+        provider_label=lambda provider: provider.get("name") or provider.get("id"),
+        resolve_provider_context=resolve_provider_context,
+        probe_models=probe_models,
+        filter_visible_models=lambda models: [model for model in models if model != "hidden-model"],
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert result == {
+        "status": "launch",
+        "model_info": {"model": "gpt-5.4"},
+        "runtime": selected_provider,
+    }
+    assert calls == [
+        ("candidates", cfg, current_provider, default_models),
+        (
+            "select_provider",
+            [{"id": "p1", "name": "Provider One", "role": "auto", "priority": 100}],
+        ),
+        ("resolve", cfg, "p1"),
+        ("probe", selected_provider, False),
+        ("select_model", "Provider One", ["gpt-5.4"]),
+    ]
+    assert trace_records == [(("provider browse",), {"cli": "codex", "provider": "p1", "model": "gpt-5.4"})]
+    assert trace_choices == [(("runtime resolve", selected_provider), {"launch_cli": "codex", "choice": "provider browse"})]
+
+
+def test_handle_tui_provider_browse_action_exits_on_model_escape() -> None:
+    result = handle_tui_provider_browse_action(
+        {},
+        "codex",
+        {},
+        [],
+        select_provider_browse_tui=lambda _providers: ("p1", "Provider One"),
+        select_provider_models_tui=lambda *_args: "__exit__",
+        provider_candidates=lambda *_args: [
+            ({"id": "p1", "name": "Provider One", "api_key": "k", "supported_clis": ["codex"]}, False)
+        ],
+        default_provider_id="default",
+        provider_supports_cli_name=lambda provider, cli: cli in provider.get("supported_clis", []),
+        provider_label=lambda provider: provider.get("name") or provider.get("id"),
+        resolve_provider_context=lambda *_args: {"id": "p1"},
+        probe_models=lambda *_args, **_kwargs: {"models": ["gpt-5.4"]},
+        filter_visible_models=lambda models: models,
+        trace_record=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert result == {"status": "exit"}
 
 
 def test_safe_tui_call_normalizes_keyboard_interrupt() -> None:

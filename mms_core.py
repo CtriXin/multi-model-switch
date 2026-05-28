@@ -9853,48 +9853,31 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         if action_type == "provider_browse":
             from mms_tui import select_provider_browse_tui, select_provider_models_tui
 
-            browse_providers = tui_flow.provider_browse_options(
+            browse_result = tui_flow.handle_tui_provider_browse_action(
                 current_cfg,
+                cli,
                 current_provider,
                 default_models,
-                cli,
+                select_provider_browse_tui=select_provider_browse_tui,
+                select_provider_models_tui=select_provider_models_tui,
                 provider_candidates=_provider_candidates,
                 default_provider_id=DEFAULT_PROVIDER_ID,
                 provider_supports_cli_name=_provider_supports_cli_name,
                 provider_label=_provider_label,
-            )
-            if not browse_providers:
-                console.print("[yellow]没有可用的 Provider[/yellow]")
-                continue
-            prov_result = tui_flow.safe_tui_call(select_provider_browse_tui, browse_providers)
-            if prov_result is None or prov_result == "__interrupt__":
-                continue
-            selected_pid, selected_pname = prov_result
-
-            selected_prov, prov_models = tui_flow.provider_browse_model_options(
-                current_cfg,
-                selected_pid,
                 resolve_provider_context=resolve_provider_context,
                 probe_models=_probe_models,
                 filter_visible_models=_filter_visible_models,
-            )
-            if not prov_models:
-                console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
-                continue
-            model_result = tui_flow.safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
-            if model_result is None:
-                continue  # B 返回 provider 列表
-            if model_result == "__exit__":
-                return True  # Esc 完全退出
-
-            model_info, runtime_runtime = tui_flow.provider_browse_launch_context(
-                cli,
-                selected_pid,
-                selected_prov,
-                model_result,
                 trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,
             )
+            if browse_result.get("message"):
+                console.print(f"[yellow]{browse_result['message']}[/yellow]")
+            if browse_result["status"] == "exit":
+                return True
+            if browse_result["status"] != "launch":
+                continue
+            model_info = browse_result["model_info"]
+            runtime_runtime = browse_result["runtime"]
             # fall through to confirm
 
         # ── 负载模式 ──
