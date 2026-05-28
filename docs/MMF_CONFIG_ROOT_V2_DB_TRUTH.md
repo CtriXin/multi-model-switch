@@ -479,6 +479,7 @@ Current bridge rescue consumer implementation:
 - If the manifest is missing, preview/MMF roots fail closed instead of reading stale generated/root route files; default stable behavior remains legacy-compatible and reads generated/root route files in the previous order.
 - TUI Rescue routed fallback candidate lists use the same boundary: when a latest-approved manifest exists, candidates are read only from the verified Router payload; missing or invalid preview/MMF manifests return no routed candidates instead of falling back to stale legacy files.
 - If selected-root resolution fails during bridge rescue fallback lookup, the bridge returns no config-root fallback instead of silently reading stable `~/.config/mms/config.toml`; explicit server/env fallback fields may still be used.
+- Launcher-injected rescue default fallback settings no longer read legacy `[rescue]` from `config.toml` for preview/MMF roots. Explicit `MMS_RESCUE_FALLBACK_MODEL` / `MMS_RESCUE_FALLBACK_CLI` env overrides still win when a human/runtime passes them intentionally.
 - Same-vendor native fallback discovery does not load legacy `config.toml` provider lists for preview/MMF roots. Until a bundle-backed native fallback resolver exists, preview roots fail closed for that automatic fallback path rather than mixing stale config truth into bridge retries.
 
 ### Stage 4 - Write Path And Publish

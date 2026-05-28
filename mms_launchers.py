@@ -112,7 +112,7 @@ from mms_provider_profiles import profile_context_window
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
-from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file, resolve_mms_config_dir as _resolve_mms_config_dir
+from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file, mms_config_root_mode, resolve_mms_config_dir as _resolve_mms_config_dir
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 _build_gateway_url = None
@@ -949,12 +949,18 @@ def _truthy(value):
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}
 
 
-def _rescue_default_fallback_config():
-    env_model = str(os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
-    env_cli = str(os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
-    env_hot = os.environ.get("MMS_RESCUE_HOT_FALLBACK")
+def _rescue_default_fallback_config(env=None):
+    environ = env if isinstance(env, dict) else os.environ
+    env_model = str(environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
+    env_cli = str(environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
+    env_hot = environ.get("MMS_RESCUE_HOT_FALLBACK")
     if env_model:
         return {"model": env_model, "cli": env_cli, "hot_fallback_enabled": _truthy(env_hot)}
+    try:
+        if mms_config_root_mode(env=environ) == "preview":
+            return {"model": "", "cli": "", "hot_fallback_enabled": False}
+    except Exception:
+        pass
     try:
         cfg = load_config() or {}
     except Exception:
@@ -1015,7 +1021,7 @@ def _inject_rescue_launch_env(env):
         env["MMS_PROJECT_ROOT"] = project_root
         env["MMS_CWD"] = project_root
     env.setdefault("MMS_RESCUE_CONFIG_ROOT", _selected_mms_config_root(env))
-    fallback = _rescue_default_fallback_config()
+    fallback = _rescue_default_fallback_config(env)
     if fallback.get("model"):
         env["MMS_RESCUE_FALLBACK_MODEL"] = str(fallback.get("model") or "")
         if fallback.get("cli"):

@@ -1348,3 +1348,37 @@ def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_pat
     assert server.rescue_fallback_model == "fallback-model"
     assert server.rescue_fallback_cli == "codex"
     assert server.rescue_hot_fallback_enabled is True
+
+
+def test_launcher_rescue_default_fallback_skips_legacy_config_for_preview_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "mms-next"))
+    monkeypatch.delenv("MMS_RESCUE_FALLBACK_MODEL", raising=False)
+    monkeypatch.delenv("MMS_RESCUE_FALLBACK_CLI", raising=False)
+    load_called = {"value": False}
+
+    def fake_load_config():
+        load_called["value"] = True
+        return {"rescue": {"fallback_model": "legacy-fallback", "fallback_cli": "codex"}}
+
+    monkeypatch.setattr(mms_launchers, "load_config", fake_load_config)
+
+    fallback = mms_launchers._rescue_default_fallback_config()
+
+    assert fallback == {"model": "", "cli": "", "hot_fallback_enabled": False}
+    assert load_called["value"] is False
+
+
+def test_launcher_rescue_default_fallback_env_wins_for_preview_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "mms-next"))
+    monkeypatch.setenv("MMS_RESCUE_FALLBACK_MODEL", "explicit-fallback")
+    monkeypatch.setenv("MMS_RESCUE_FALLBACK_CLI", "codex")
+    monkeypatch.setenv("MMS_RESCUE_HOT_FALLBACK", "1")
+    monkeypatch.setattr(mms_launchers, "load_config", lambda: {"rescue": {"fallback_model": "legacy-fallback"}})
+
+    fallback = mms_launchers._rescue_default_fallback_config()
+
+    assert fallback == {"model": "explicit-fallback", "cli": "codex", "hot_fallback_enabled": True}
