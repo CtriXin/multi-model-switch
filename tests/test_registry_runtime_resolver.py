@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import mms_registry
+from mms_capability_resolver import CapabilityBundleError
 from mms_capability_resolver import resolve_model_capabilities
 
 
@@ -235,10 +238,9 @@ def test_capability_resolver_uses_verified_latest_approved_by_default(monkeypatc
 
     generated_caps = tmp_path / "generated" / "model-capabilities.approved.json"
     generated_caps.write_text(json.dumps({"models": []}), encoding="utf-8")
-    fallback = resolve_model_capabilities("approved-model")
 
-    assert fallback["context_window_tokens"] == 8_192
-    assert fallback["sources"]["context_window_tokens"] == "conservative_fallback"
+    with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
+        resolve_model_capabilities("approved-model")
 
 
 def test_runtime_context_helpers_accept_only_approved_context_facts(monkeypatch, tmp_path: Path) -> None:
