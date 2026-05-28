@@ -5134,6 +5134,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 from pathlib import Path
                 from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
 
+                def _apply_rescue_default_action(fallback_model, *, cleared=False):
+                    return tui_flow.apply_rescue_default_fallback_action(
+                        current_cfg,
+                        fallback_model,
+                        cleared=cleared,
+                        set_rescue_default_fallback=_set_rescue_default_fallback,
+                        save_config=save_config,
+                        rescue_default_fallback_report_payload=_rescue_default_fallback_report_payload,
+                        rescue_hot_fallback_enabled_cfg=_rescue_hot_fallback_enabled_cfg,
+                        print_settings_result_report=_print_settings_result_report,
+                        pause_after_tui_report=_pause_after_tui_report,
+                    )
+
                 default_fallback = _rescue_default_fallback(current_cfg)
                 default_label = default_fallback.get("model") or "未设置"
                 hot_fallback_enabled = _rescue_hot_fallback_enabled_cfg(current_cfg)
@@ -5161,15 +5174,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         _ensure_rich()
                         fallback_model = Prompt.ask("全局默认 fallback model", default=default_fallback.get("model") or "").strip()
                     if fallback_model:
-                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
-                        save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(
-                            *_rescue_default_fallback_report_payload(
-                                fallback_model,
-                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
-                            )
-                        )
-                        _pause_after_tui_report("按 Enter 返回设置")
+                        current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
                     continue
                 if landing_action == "choose_route_default":
                     from mms_tui import select_model_tui
@@ -5180,15 +5185,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         title="选择全局默认 fallback model",
                     )
                     if fallback_model:
-                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
-                        save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(
-                            *_rescue_default_fallback_report_payload(
-                                fallback_model,
-                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
-                            )
-                        )
-                        _pause_after_tui_report("按 Enter 返回设置")
+                        current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
                     continue
                 if landing_action in {"enable_hot_fallback", "disable_hot_fallback"}:
                     enable_hot = landing_action == "enable_hot_fallback"
@@ -5204,10 +5201,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "clear_default":
-                    current_cfg = _set_rescue_default_fallback(current_cfg, model="")
-                    save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
-                    _print_settings_result_report(*_rescue_default_fallback_report_payload("", cleared=True))
-                    _pause_after_tui_report("按 Enter 返回设置")
+                    current_cfg = _apply_rescue_default_action("", cleared=True)["cfg"]
                     continue
                 if landing_action == "create_demo":
                     payload = write_demo_rescue_packet(repo_root=os.getcwd())
@@ -5325,15 +5319,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         _ensure_rich()
                         fallback_model = Prompt.ask("全局默认 fallback model", default=default_fallback.get("model") or "").strip()
                     if fallback_model:
-                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
-                        save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(
-                            *_rescue_default_fallback_report_payload(
-                                fallback_model,
-                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
-                            )
-                        )
-                        _pause_after_tui_report("按 Enter 返回设置")
+                        current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
 
@@ -5343,20 +5329,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         title="选择全局默认 fallback model",
                     )
                     if fallback_model:
-                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
-                        save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(
-                            *_rescue_default_fallback_report_payload(
-                                fallback_model,
-                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
-                            )
-                        )
-                        _pause_after_tui_report("按 Enter 返回设置")
+                        current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
                 elif rescue_action == "clear_default":
-                    current_cfg = _set_rescue_default_fallback(current_cfg, model="")
-                    save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
-                    _print_settings_result_report(*_rescue_default_fallback_report_payload("", cleared=True))
-                    _pause_after_tui_report("按 Enter 返回设置")
+                    current_cfg = _apply_rescue_default_action("", cleared=True)["cfg"]
             continue
 
         # ── 上次使用 ──

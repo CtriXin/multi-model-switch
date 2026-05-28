@@ -6,6 +6,7 @@ from mms_tui_launcher_flow import (
     apply_confirm_runtime_preferences,
     apply_launch_runtime_preferences,
     apply_opencode_profile_for_launch,
+    apply_rescue_default_fallback_action,
     apply_tui_priority_changes,
     build_confirm_capability_context,
     confirm_agent_pack,
@@ -1832,6 +1833,58 @@ def test_handle_tui_account_mgmt_settings_action_delegates() -> None:
 
     assert result == {"status": "continue"}
     assert calls == [("account_mgmt", cfg)]
+
+
+def test_apply_rescue_default_fallback_action_saves_reports_and_pauses() -> None:
+    calls = []
+    cfg = {"rescue": {}}
+    updated_cfg = {"rescue": {"fallback_model": "fallback-model", "hot_fallback_enabled": True}}
+
+    result = apply_rescue_default_fallback_action(
+        cfg,
+        "fallback-model",
+        set_rescue_default_fallback=lambda cfg_arg, *, model: calls.append(("set", cfg_arg, model)) or updated_cfg,
+        save_config=lambda cfg_arg, *, reason: calls.append(("save", cfg_arg, reason)),
+        rescue_default_fallback_report_payload=lambda model, **kwargs: ("title", [("model", model), ("kwargs", kwargs)]),
+        rescue_hot_fallback_enabled_cfg=lambda cfg_arg: calls.append(("hot", cfg_arg)) or True,
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue", "cfg": updated_cfg}
+    assert calls == [
+        ("set", cfg, "fallback-model"),
+        ("save", updated_cfg, "tui:rescue_default_fallback"),
+        ("hot", updated_cfg),
+        ("report", ("title", [("model", "fallback-model"), ("kwargs", {"hot_fallback_enabled": True})]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_apply_rescue_default_fallback_action_clears_default() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "old"}}
+    cleared_cfg = {"rescue": {}}
+
+    result = apply_rescue_default_fallback_action(
+        cfg,
+        "",
+        cleared=True,
+        set_rescue_default_fallback=lambda cfg_arg, *, model: calls.append(("set", cfg_arg, model)) or cleared_cfg,
+        save_config=lambda cfg_arg, *, reason: calls.append(("save", cfg_arg, reason)),
+        rescue_default_fallback_report_payload=lambda model, **kwargs: ("clear title", [("model", model), ("kwargs", kwargs)]),
+        rescue_hot_fallback_enabled_cfg=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue", "cfg": cleared_cfg}
+    assert calls == [
+        ("set", cfg, ""),
+        ("save", cleared_cfg, "tui:clear_rescue_default_fallback"),
+        ("report", ("clear title", [("model", ""), ("kwargs", {"cleared": True})]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

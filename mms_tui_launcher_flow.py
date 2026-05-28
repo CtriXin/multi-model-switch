@@ -1075,6 +1075,38 @@ def handle_tui_account_mgmt_settings_action(
     return {"status": "continue"}
 
 
+def apply_rescue_default_fallback_action(
+    cfg,
+    fallback_model,
+    *,
+    cleared=False,
+    save_reason=None,
+    set_rescue_default_fallback,
+    save_config,
+    rescue_default_fallback_report_payload,
+    rescue_hot_fallback_enabled_cfg,
+    print_settings_result_report,
+    pause_after_tui_report,
+):
+    cfg = set_rescue_default_fallback(cfg, model=fallback_model)
+    save_config(
+        cfg,
+        reason=save_reason
+        or ("tui:clear_rescue_default_fallback" if cleared else "tui:rescue_default_fallback"),
+    )
+    if cleared:
+        print_settings_result_report(*rescue_default_fallback_report_payload("", cleared=True))
+    else:
+        print_settings_result_report(
+            *rescue_default_fallback_report_payload(
+                fallback_model,
+                hot_fallback_enabled=rescue_hot_fallback_enabled_cfg(cfg),
+            )
+        )
+    pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue", "cfg": cfg}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}
