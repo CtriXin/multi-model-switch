@@ -262,34 +262,14 @@ def _base_user_primary_dir_from_gateway(path):
 
 
 def _merge_base_user_broker_profiles(cfg, config_path):
-    base_config_path = _base_user_config_path_from_gateway(config_path)
-    if not base_config_path:
-        return cfg, False
-    if os.path.normpath(base_config_path) == os.path.normpath(config_path):
-        return cfg, False
-    if not os.path.exists(base_config_path):
-        return cfg, False
+    from mms_command_tools import merge_base_user_broker_profiles
 
-    try:
-        with open(base_config_path, "rb") as f:
-            base_cfg = tomllib.loads(f.read().decode("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
-        return cfg, False
-
-    if not isinstance(base_cfg, dict):
-        return cfg, False
-
-    active_profiles = cfg.get("broker_profiles")
-    base_profiles = base_cfg.get("broker_profiles")
-    if not isinstance(base_profiles, list) or not base_profiles:
-        return cfg, False
-
-    merged = dict(cfg)
-    merged["broker_profiles"] = (
-        list(active_profiles) if isinstance(active_profiles, list) else []
-    ) + list(base_profiles)
-    merged, _ = ensure_broker_config(merged)
-    return merged, merged.get("broker_profiles") != cfg.get("broker_profiles")
+    return merge_base_user_broker_profiles(
+        cfg,
+        config_path,
+        base_user_config_path_from_gateway=_base_user_config_path_from_gateway,
+        ensure_broker_config=ensure_broker_config,
+    )
 DEFAULT_BASE_URL = "https://your-api.example.com"
 API_URL_ENV_NAME = "MMS_API_BASE_URL"
 API_KEY_ENV_NAME = "MMS_API_KEY"

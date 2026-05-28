@@ -181,6 +181,67 @@ def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     ) == str(tmp_path / "plain" / "snapshots" / "startup" / "accepted.json")
 
 
+def test_base_user_broker_profile_merge_helper_preserves_gateway_overlay(tmp_path):
+    import mms_command_tools
+
+    active_config = tmp_path / "gateway" / "config.toml"
+    base_config = tmp_path / "base" / "config.toml"
+    base_config.parent.mkdir()
+    base_config.write_text(
+        """
+[[broker_profiles]]
+id = "base"
+name = "Base"
+
+[[broker_profiles]]
+id = "second"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = {"provider": {"default": "relay"}, "broker_profiles": [{"id": "active"}]}
+    ensure_calls = []
+
+    def ensure_broker_config(merged):
+        ensure_calls.append(merged)
+        return merged, False
+
+    merged, changed = mms_command_tools.merge_base_user_broker_profiles(
+        cfg,
+        str(active_config),
+        base_user_config_path_from_gateway=lambda _path: str(base_config),
+        ensure_broker_config=ensure_broker_config,
+    )
+    assert changed is True
+    assert merged["provider"] == {"default": "relay"}
+    assert merged["broker_profiles"] == [
+        {"id": "active"},
+        {"id": "base", "name": "Base"},
+        {"id": "second"},
+    ]
+    assert ensure_calls == [merged]
+    assert cfg["broker_profiles"] == [{"id": "active"}]
+
+    unchanged, changed = mms_command_tools.merge_base_user_broker_profiles(
+        cfg,
+        str(active_config),
+        base_user_config_path_from_gateway=lambda _path: "",
+        ensure_broker_config=ensure_broker_config,
+    )
+    assert unchanged is cfg
+    assert changed is False
+
+    base_config.write_text("{broken", encoding="utf-8")
+    unchanged, changed = mms_command_tools.merge_base_user_broker_profiles(
+        cfg,
+        str(active_config),
+        base_user_config_path_from_gateway=lambda _path: str(base_config),
+        ensure_broker_config=ensure_broker_config,
+    )
+    assert unchanged is cfg
+    assert changed is False
+
+
 def test_toml_and_existing_path_helpers_preserve_read_and_filtering(tmp_path):
     import tomllib
 

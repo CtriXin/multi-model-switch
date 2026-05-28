@@ -15,6 +15,11 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+
 
 CONFIG_HELP_TOPICS = {
     "-h",
@@ -136,6 +141,45 @@ def active_sibling_path_from_gateway(
         if path_exists(base_path):
             return base_path
     return path
+
+
+def merge_base_user_broker_profiles(
+    cfg,
+    config_path,
+    *,
+    base_user_config_path_from_gateway,
+    ensure_broker_config,
+    path_exists=os.path.exists,
+    normpath=os.path.normpath,
+):
+    base_config_path = base_user_config_path_from_gateway(config_path)
+    if not base_config_path:
+        return cfg, False
+    if normpath(base_config_path) == normpath(config_path):
+        return cfg, False
+    if not path_exists(base_config_path):
+        return cfg, False
+
+    try:
+        with open(base_config_path, "rb") as handle:
+            base_cfg = tomllib.loads(handle.read().decode("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return cfg, False
+
+    if not isinstance(base_cfg, dict):
+        return cfg, False
+
+    active_profiles = cfg.get("broker_profiles")
+    base_profiles = base_cfg.get("broker_profiles")
+    if not isinstance(base_profiles, list) or not base_profiles:
+        return cfg, False
+
+    merged = dict(cfg)
+    merged["broker_profiles"] = (
+        list(active_profiles) if isinstance(active_profiles, list) else []
+    ) + list(base_profiles)
+    merged, _ = ensure_broker_config(merged)
+    return merged, merged.get("broker_profiles") != cfg.get("broker_profiles")
 
 
 def config_guard_root_dir(*, config_path=None, config_write_target_path, base_user_primary_dir_from_gateway):
