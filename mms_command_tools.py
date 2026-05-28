@@ -282,6 +282,16 @@ def handle_config_unset(
     console.print(f"[green]✓ 已移除 {key_path}[/green]")
 
 
+def handle_config_validate(cfg, *, validate_config, console):
+    errors = validate_config(cfg)
+    if errors:
+        console.print("[red]配置校验失败:[/red]")
+        for item in errors:
+            console.print(f"  - {item}")
+        sys.exit(1)
+    console.print("[green]✓ 配置校验通过[/green]")
+
+
 def is_config_help_request(args_rest):
     if not args_rest:
         return False

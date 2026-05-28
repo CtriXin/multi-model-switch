@@ -890,6 +890,23 @@ def test_config_get_set_unset_handlers_use_injected_save():
     assert any("配置项 'missing.path' 不存在" in str(item) for item in console.items)
 
 
+def test_config_validate_handler_prints_success_and_failure():
+    import pytest
+    import mms_command_tools
+
+    console = _CollectingConsole()
+
+    mms_command_tools.handle_config_validate({}, validate_config=lambda cfg: [], console=console)
+    assert any("配置校验通过" in str(item) for item in console.items)
+
+    console.items.clear()
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.handle_config_validate({}, validate_config=lambda cfg: ["bad provider"], console=console)
+    assert exc.value.code == 1
+    assert any("配置校验失败" in str(item) for item in console.items)
+    assert any("bad provider" in str(item) for item in console.items)
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

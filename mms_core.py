@@ -10459,13 +10459,9 @@ def _handle_config_file():
 
 
 def _handle_config_validate(cfg):
-    errors = _validate_config(cfg)
-    if errors:
-        console.print("[red]配置校验失败:[/red]")
-        for item in errors:
-            console.print(f"  - {item}")
-        sys.exit(1)
-    console.print("[green]✓ 配置校验通过[/green]")
+    from mms_command_tools import handle_config_validate
+
+    return handle_config_validate(cfg, validate_config=_validate_config, console=console)
 
 
 # ── Main ────────────────────────────────────────────────
