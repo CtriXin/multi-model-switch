@@ -5314,10 +5314,37 @@ def _registry_v2_save_plan_report_payload(plan):
     )
 
 
+def _preview_doctor_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    bundle = summary.get("bundle") if isinstance(summary.get("bundle"), dict) else {}
+    next_actions = [item for item in (summary.get("next_actions") or []) if isinstance(item, dict)]
+    next_action = next_actions[0] if next_actions else {}
+    rows = [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Ready", "ready"), "yes" if summary.get("ready") else "no"),
+        ("Root", summary.get("config_root") or "-"),
+        (_L("候选 routes", "candidate routes"), counts.get("candidate_provider_routes", 0)),
+        (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
+        (_L("Bundle runtime", "bundle runtime"), bundle.get("runtime_ready_status") or "unknown"),
+        (_L("Router 缺失 key", "router missing keys"), counts.get("missing_api_keys", 0)),
+        (_L("Preview secrets", "preview secrets"), counts.get("preview_secret_count", 0)),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
+    ]
+    return (
+        _L("Preview Doctor", "Preview Doctor"),
+        rows,
+        _L("只读检查：不写 DB、不发布 bundle、不改变 runtime defaults。", "Read-only check: no DB writes, no bundle publish, runtime defaults unchanged."),
+    )
+
+
 def _model_source_status_tui_payload(summary):
     actions = [
         ("model_source_status", _L("查看 Model Source Status", "View Model Source Status")),
         ("registry_v2_save_plan", _L("查看 v2 Save Plan", "View v2 Save Plan")),
+        ("preview_doctor", _L("运行 Preview Doctor", "Run Preview Doctor")),
         ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
         ("refresh_due_sources", _L("刷新到期 Sources", "Refresh Due Sources")),
         ("scheduled_dry_run", _L("定时刷新 Dry Run", "Scheduled Refresh Dry Run")),
@@ -10209,7 +10236,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
+                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, preview_doctor, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
 
                 source_status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
                 registry_title, registry_info, registry_actions = _model_source_status_tui_payload(source_status)
@@ -10227,6 +10254,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif registry_action == "registry_v2_save_plan":
                     plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
                     _print_settings_result_report(*_registry_v2_save_plan_report_payload(plan))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "preview_doctor":
+                    try:
+                        summary = preview_doctor(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} preview doctor")
+                    except Exception as exc:
+                        _print_settings_error_report(_L("Preview Doctor 失败", "Preview Doctor failed"), exc)
+                    else:
+                        _print_settings_result_report(*_preview_doctor_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "check_staleness":
                     try:

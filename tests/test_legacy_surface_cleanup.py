@@ -422,6 +422,7 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     ]
     assert actions[0] == ("model_source_status", "查看 Model Source Status")
     assert actions[1] == ("registry_v2_save_plan", "查看 v2 Save Plan")
+    assert actions[2] == ("preview_doctor", "运行 Preview Doctor")
     assert report_title == "Model Source Status"
     assert ("Legacy 冲突", 2) in rows
     assert ("Legacy 候选状态", "not_imported") in rows
@@ -460,6 +461,25 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("Secret backend", "no") in plan_rows
     assert ("阻塞原因", "-") in plan_rows
     assert "只读计划" in plan_note
+
+    doctor_title, doctor_rows, doctor_note = mms_core._preview_doctor_report_payload(
+        {
+            "result": "NOT_READY",
+            "status": "needs_publish",
+            "ready": False,
+            "config_root": "/tmp/mms-next",
+            "counts": {"candidate_provider_routes": 2, "missing_api_keys": 1, "preview_secret_count": 0},
+            "bundle": {"verified": False, "runtime_ready_status": "unknown"},
+            "next_actions": [{"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"}],
+        }
+    )
+
+    assert doctor_title == "Preview Doctor"
+    assert ("状态", "needs_publish") in doctor_rows
+    assert ("候选 routes", 2) in doctor_rows
+    assert ("Router 缺失 key", 1) in doctor_rows
+    assert ("下一步", "Publish and verify preview bundle") in doctor_rows
+    assert "只读检查" in doctor_note
 
 
 def test_registry_result_payloads_are_chinese_first_and_compact() -> None:
