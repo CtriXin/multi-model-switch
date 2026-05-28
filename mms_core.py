@@ -12142,6 +12142,7 @@ def _display_config_help():
     console.print(f"  {command} config bundle [--json]")
     console.print(f"  {command} config save-plan [--json]")
     console.print(f"  {command} config promote-plan [--json]")
+    console.print(f"  {command} config release-readiness [--json]")
     console.print(f"  {command} config apply-plan --plan-json <file> [--apply --confirm-preview-apply] [--json]")
     console.print(f"  {command} config doctor [--json]")
     console.print(f"  {command} config doctor --strict-exit")
@@ -12309,6 +12310,38 @@ def _display_config_v2_migration_plan(args_rest):
         stable_config_dir=args.stable_config_dir,
         command_name=f"{current_command()} migrate config-v2",
     )
+
+
+def _display_config_v2_release_readiness(args_rest):
+    status = mms_config_root_status(command=current_command())
+    default_preview_root = (
+        status.get("config_root")
+        if status.get("mode") == "preview"
+        else status.get("preview_root")
+    ) or PRIMARY_CONFIG_DIR
+    default_stable_root = status.get("stable_root") or PRIMARY_CONFIG_DIR
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} config release-readiness",
+        description="Read-only config v2 / 4.0 readiness audit; stops at the stable human gate.",
+    )
+    parser.add_argument("--preview-config-dir", "--config-dir", default=default_preview_root)
+    parser.add_argument("--stable-config-dir", default=default_stable_root)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--strict-exit", action="store_true")
+    args = parser.parse_args(args_rest)
+
+    from mms_registry_cli import _print_config_v2_release_readiness, config_v2_release_readiness
+
+    summary = config_v2_release_readiness(
+        preview_config_dir=args.preview_config_dir,
+        stable_config_dir=args.stable_config_dir,
+        command_name=f"{current_command()} config release-readiness",
+    )
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_config_v2_release_readiness(summary)
+    return 0 if not bool(args.strict_exit) or summary.get("ready_for_human_gate") is True else 2
 
 
 def _display_preferences_path():
@@ -13820,6 +13853,10 @@ def _is_config_help_request(args_rest):
         "save-plan",
         "save.plan",
         "v2-save-plan",
+        "release-readiness",
+        "readiness",
+        "v2-readiness",
+        "4.0-readiness",
         "apply-plan",
         "apply.plan",
         "preview-apply",
@@ -13958,6 +13995,12 @@ def _is_config_v2_promotion_plan_request(argv):
     return str(argv[1] or "").strip() in {"promote-plan", "promotion-plan", "promote.check", "promote"}
 
 
+def _is_config_v2_release_readiness_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"release-readiness", "readiness", "v2-readiness", "4.0-readiness", "release.check"}
+
+
 def _is_config_v2_migration_plan_request(argv):
     if len(argv) < 2 or argv[0] != "migrate":
         return False
@@ -14030,6 +14073,11 @@ def main():
         return
     if _is_config_v2_promotion_plan_request(argv):
         code = _display_config_v2_promotion_plan(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
+        if code:
+            raise SystemExit(code)
+        return
+    if _is_config_v2_release_readiness_request(argv):
+        code = _display_config_v2_release_readiness(argv[2:])
         if code:
             raise SystemExit(code)
         return
@@ -14201,6 +14249,7 @@ def main():
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} registry ...    刷新/查看本地 model registry source truth\n"
             f"  {current_command()} migrate config-v2 [--json]  只读 config v2 migration / promotion human gate\n"
+            f"  {current_command()} config release-readiness [--json]  只读 config v2 / 4.0 readiness audit\n"
             f"  {current_command()} broker ...      启动或查看 broker profiles\n"
             f"  {current_command()} doctor [full]   诊断 provider / model / Claude 兼容性（默认 lite）\n"
             f"  {current_command()} exposure ...    审计当前 runtime 对 CLI 暴露的 env/settings/home\n"

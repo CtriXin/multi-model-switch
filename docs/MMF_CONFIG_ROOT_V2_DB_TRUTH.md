@@ -335,6 +335,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf config promote-plan --json
 ./mms config promote-plan --json
 ./mms migrate config-v2 --json
+./mms config release-readiness --json
 ./mmf registry publish-preview --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry verify --config-dir "$MMS_CONFIG_ROOT"
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
@@ -580,6 +581,13 @@ Current Stage 8b public preview docs:
 - `README.md` and `README.zh-CN.md` now include a public Config v2 Preview Root quickstart covering `mms` stable root, `mmf` preview root, preview doctor/prepare/check/bundle/WebUI, and the read-only stable promotion human gate.
 - The installer completion output now prints the two high-signal next commands: `mmf preview doctor --json` and `mms migrate config-v2 --json`.
 - The public docs explicitly state that `mms migrate config-v2 --apply` remains non-mutating with `apply_enabled=false`, and that preview root must not silently fallback to stable credentials, OAuth state, or Claude config.
+
+Current Stage 8c release readiness audit:
+
+- `mms config release-readiness [--json]` / `mms registry release-readiness [--json]` is a read-only 4.0/config-v2 readiness audit.
+- It aggregates preview root mode, preview doctor/check runtime readiness, verified latest-approved consumer bundle, public README/runbook terms, and the stable promotion plan.
+- A successful audit returns `READY_FOR_4_0_HUMAN_GATE`, `ready_for_human_gate=true`, `release_complete=false`, `human_gate_required=true`, and `completion_blocker=stable_promotion_human_gate`.
+- The command intentionally does not prove final migration completion; it proves that automated checks reached the stable human gate without writing stable root, preview root, DB, generated bundle, secret backend, or Claude config.
 
 ## Future LMs Must Not Forget
 

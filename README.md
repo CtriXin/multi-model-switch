@@ -152,12 +152,16 @@ Stable promotion is still human-gated and read-only:
 ```bash
 mmf promote --json
 mms migrate config-v2 --json
+mms config release-readiness --json
 ```
 
 Even with `--apply`, `mms migrate config-v2` currently reports
 `apply_enabled=false` and stops at `stable_root_human_only` /
 `promotion_apply_not_implemented`. There is no silent fallback from the preview
-root into stable credentials, OAuth state, or Claude config.
+root into stable credentials, OAuth state, or Claude config. The release
+readiness audit can return `READY_FOR_4_0_HUMAN_GATE`, but it still reports
+`release_complete=false` until the human-gated stable promotion and post-promotion
+smoke are done.
 
 ## Quick Start
 

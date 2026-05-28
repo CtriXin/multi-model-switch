@@ -2573,6 +2573,129 @@ def test_mms_migrate_config_v2_missing_preview_does_not_create_roots(tmp_path: P
     assert not stable_dir.exists()
 
 
+def test_mms_config_release_readiness_reaches_human_gate_for_ready_preview(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-release-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "config",
+            "release-readiness",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    requirements = {item["id"]: item for item in payload["requirements"]}
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["release_complete"] is False
+    assert payload["result"] == "READY_FOR_4_0_HUMAN_GATE"
+    assert payload["status"] == "human_gate"
+    assert payload["ready_for_human_gate"] is True
+    assert payload["human_gate_required"] is True
+    assert payload["completion_blocker"] == "stable_promotion_human_gate"
+    assert payload["config_root"] == str(config_dir)
+    assert payload["stable_config_root"] == str(stable_dir)
+    assert payload["blocked_requirements"] == []
+    assert all(item["ok"] is True for item in requirements.values())
+    assert requirements["promotion_human_gate"]["ok"] is True
+    assert requirements["stable_no_write_plan"]["ok"] is True
+    assert requirements["no_silent_stable_fallback"]["ok"] is True
+    assert payload["promotion_plan"]["apply_enabled"] is False
+    assert "stable_root_human_only" in payload["promotion_plan"]["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in payload["promotion_plan"]["blocked_reasons"]
+    assert payload["next_action"]["command"] == "./mmf promote --json"
+    assert "sk-release-ready-secret" not in combined
+    assert not stable_dir.exists()
+
+    registry_result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "registry",
+            "release-readiness",
+            "--preview-config-dir",
+            str(config_dir),
+            "--stable-config-dir",
+            str(stable_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    registry_payload = json.loads(registry_result.stdout)
+    assert registry_payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert registry_payload["ready_for_human_gate"] is True
+    assert registry_payload["release_complete"] is False
+    assert "sk-release-ready-secret" not in (registry_result.stdout + registry_result.stderr)
+    assert not stable_dir.exists()
+
+
+def test_mms_config_release_readiness_missing_preview_is_read_only(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "config",
+            "release-readiness",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert payload["status"] == "not_ready"
+    assert payload["ready_for_human_gate"] is False
+    assert payload["release_complete"] is False
+    assert "preview_runtime_ready" in payload["blocked_requirements"]
+    assert "consumer_bundle_verified" in payload["blocked_requirements"]
+    assert payload["promotion_plan"]["apply_enabled"] is False
+    assert not config_dir.exists()
+    assert not stable_dir.exists()
+
+
 def test_mms_config_promote_plan_strict_exit_fails_when_preview_not_ready(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     config_dir.mkdir()
