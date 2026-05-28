@@ -3353,6 +3353,51 @@ def test_provider_default_handler_preserves_show_missing_and_save_refresh_flow()
     assert "[green]✓ provider.default = demo-b[/green]" in console.items
 
 
+def test_account_default_handler_preserves_show_reject_and_save_flow():
+    import mms_command_tools
+
+    cfg = {
+        "account": {"defaults": {"codex": "codex-main"}},
+        "accounts": [
+            {"id": "codex-main", "cli": "codex"},
+            {"id": "gemini-main", "cli": "gemini"},
+        ],
+    }
+    console = _CollectingConsole()
+    saves = []
+    kwargs = {
+        "managed_oauth_clis": ["claude", "codex", "gemini"],
+        "delegated_oauth_clis": {"claude"},
+        "account_map": lambda current: {item["id"]: item for item in current["accounts"]},
+        "save_config": lambda updated: saves.append(dict(updated.get("account", {}).get("defaults", {}))),
+        "command_name": "mmg",
+        "console": console,
+    }
+
+    mms_command_tools.handle_account_default_config(cfg, [], **kwargs)
+    assert "[cyan]account.default.codex[/cyan] = codex-main" in console.items
+    assert any("Claude OAuth 独立入口已下线" in str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.handle_account_default_config(cfg, ["codex"], **kwargs)
+    assert "[red]用法: mmg config account.default <cli> <account_id>[/red]" in console.items
+    mms_command_tools.handle_account_default_config(cfg, ["claude", "claude-main"], **kwargs)
+    assert any("不再支持设置 account.default.claude" in str(item) for item in console.items)
+    mms_command_tools.handle_account_default_config(cfg, ["opencode", "main"], **kwargs)
+    assert any("不支持的 CLI: opencode" in str(item) for item in console.items)
+    mms_command_tools.handle_account_default_config(cfg, ["codex", "missing"], **kwargs)
+    assert any("未找到账号档案: missing" in str(item) for item in console.items)
+    mms_command_tools.handle_account_default_config(cfg, ["codex", "gemini-main"], **kwargs)
+    assert any("绑定的是 gemini" in str(item) for item in console.items)
+    assert saves == []
+
+    console.items.clear()
+    mms_command_tools.handle_account_default_config(cfg, ["gemini", "gemini-main"], **kwargs)
+    assert cfg["account"]["defaults"]["gemini"] == "gemini-main"
+    assert saves == [{"codex": "codex-main", "gemini": "gemini-main"}]
+    assert "[green]✓ account.default.gemini = gemini-main[/green]" in console.items
+
+
 def test_config_normalization_helpers_preserve_legacy_shapes():
     import mms_command_tools
     import mms_core

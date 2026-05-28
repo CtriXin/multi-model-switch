@@ -8035,35 +8035,18 @@ def _handle_openrouter_extension_config(cfg, args_rest):
 
 
 def _handle_account_default_config(cfg, args_rest):
-    defaults = cfg.get("account", {}).get("defaults", {})
-    if not args_rest:
-        for cli_name in MMS_MANAGED_OAUTH_CLIS:
-            value = defaults.get(cli_name, "(未设置)")
-            console.print(f"[cyan]account.default.{cli_name}[/cyan] = {value}")
-        console.print("[dim]Claude OAuth 独立入口已下线，不再支持 account.default.claude。[/dim]")
-        return
-    if len(args_rest) < 2:
-        console.print(f"[red]用法: {current_command()} config account.default <cli> <account_id>[/red]")
-        return
-    cli_name, account_id = args_rest[0].strip(), args_rest[1].strip()
-    if cli_name in MMC_DELEGATED_OAUTH_CLIS:
-        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再支持设置 account.default.claude。[/yellow]")
-        return
-    if cli_name not in MMS_MANAGED_OAUTH_CLIS:
-        console.print(f"[red]不支持的 CLI: {cli_name}[/red]")
-        return
-    accounts = _account_map(cfg)
-    account = accounts.get(account_id)
-    if not account:
-        console.print(f"[red]未找到账号档案: {account_id}[/red]")
-        return
-    if account.get("cli") != cli_name:
-        console.print(f"[red]账号档案 '{account_id}' 绑定的是 {account.get('cli')}，不能设为 {cli_name} 默认账号[/red]")
-        return
-    cfg.setdefault("account", {}).setdefault("defaults", {})
-    cfg["account"]["defaults"][cli_name] = account_id
-    save_config(cfg)
-    console.print(f"[green]✓ account.default.{cli_name} = {account_id}[/green]")
+    from mms_command_tools import handle_account_default_config
+
+    return handle_account_default_config(
+        cfg,
+        args_rest,
+        managed_oauth_clis=MMS_MANAGED_OAUTH_CLIS,
+        delegated_oauth_clis=MMC_DELEGATED_OAUTH_CLIS,
+        account_map=_account_map,
+        save_config=save_config,
+        command_name=current_command(),
+        console=console,
+    )
 
 
 def _handle_account_add_config(cfg, args_rest):

@@ -3976,6 +3976,48 @@ def handle_provider_default_config(
     console.print("[dim]默认模型源已更新[/dim]")
 
 
+def handle_account_default_config(
+    cfg,
+    args_rest,
+    *,
+    managed_oauth_clis,
+    delegated_oauth_clis,
+    account_map,
+    save_config,
+    command_name,
+    console,
+):
+    defaults = cfg.get("account", {}).get("defaults", {})
+    if not args_rest:
+        for cli_name in managed_oauth_clis:
+            value = defaults.get(cli_name, "(未设置)")
+            console.print(f"[cyan]account.default.{cli_name}[/cyan] = {value}")
+        console.print("[dim]Claude OAuth 独立入口已下线，不再支持 account.default.claude。[/dim]")
+        return
+    if len(args_rest) < 2:
+        console.print(f"[red]用法: {command_name} config account.default <cli> <account_id>[/red]")
+        return
+    cli_name, account_id = args_rest[0].strip(), args_rest[1].strip()
+    if cli_name in delegated_oauth_clis:
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再支持设置 account.default.claude。[/yellow]")
+        return
+    if cli_name not in managed_oauth_clis:
+        console.print(f"[red]不支持的 CLI: {cli_name}[/red]")
+        return
+    accounts = account_map(cfg)
+    account = accounts.get(account_id)
+    if not account:
+        console.print(f"[red]未找到账号档案: {account_id}[/red]")
+        return
+    if account.get("cli") != cli_name:
+        console.print(f"[red]账号档案 '{account_id}' 绑定的是 {account.get('cli')}，不能设为 {cli_name} 默认账号[/red]")
+        return
+    cfg.setdefault("account", {}).setdefault("defaults", {})
+    cfg["account"]["defaults"][cli_name] = account_id
+    save_config(cfg)
+    console.print(f"[green]✓ account.default.{cli_name} = {account_id}[/green]")
+
+
 def session_status_label(item):
     session_id = str(item.get("session_id") or "").strip()
     if not session_id:
