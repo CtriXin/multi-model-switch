@@ -2641,38 +2641,9 @@ def _sanitize_disabled_session_surfaces(payload):
 
 
 def _sanitize_launch_preferences(payload):
-    payload = payload if isinstance(payload, dict) else {}
-    result = {}
-    thinking_mode = _pref_enable_disable(payload.get("thinking_mode"))
-    if thinking_mode:
-        result["thinking_mode"] = thinking_mode
-    effort = _pref_reasoning_effort(payload.get("reasoning_effort"))
-    if effort:
-        result["reasoning_effort"] = effort
-    caveman_mode = _pref_enable_disable(payload.get("caveman_mode"))
-    if caveman_mode:
-        result["caveman_mode"] = caveman_mode
-    nsr_mode = _pref_enable_disable(payload.get("nsr_mode"))
-    if nsr_mode:
-        result["nsr_mode"] = nsr_mode
-    bypass = _pref_bool(payload.get("bypass"))
-    if bypass is not None:
-        result["bypass"] = bypass
+    from mms_command_tools import sanitize_launch_preferences
 
-    agent_pack = _pref_agent_pack(payload.get("agent_pack"))
-    if not agent_pack and _pref_enable_disable(payload.get("omc_mode")) == "enable":
-        agent_pack = "omc"
-    if not agent_pack and _pref_enable_disable(payload.get("ecc_mode")) == "enable":
-        agent_pack = "ecc"
-    if agent_pack:
-        result["agent_pack"] = agent_pack
-        result["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
-        result["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
-
-    surfaces = _sanitize_disabled_session_surfaces(payload.get("disabled_session_surfaces"))
-    if surfaces:
-        result["disabled_session_surfaces"] = surfaces
-    return result
+    return sanitize_launch_preferences(payload)
 
 
 _PREFERENCE_ASSET_ROOT_KEYS = {
@@ -2695,40 +2666,15 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
 
 
 def _sanitize_asset_roots(payload):
-    payload = payload if isinstance(payload, dict) else {}
-    result = {}
-    for key, value in payload.items():
-        normalized_key = _PREFERENCE_ASSET_ROOT_KEYS.get(str(key or "").strip().lower())
-        path = str(value or "").strip()
-        if not normalized_key or not path:
-            continue
-        result[normalized_key] = os.path.abspath(os.path.expanduser(path))
-    return result
+    from mms_command_tools import sanitize_asset_roots
+
+    return sanitize_asset_roots(payload, asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS)
 
 
 def _sanitize_user_preferences(raw):
-    raw = raw if isinstance(raw, dict) else {}
-    launch = raw.get("launch") if isinstance(raw.get("launch"), dict) else {}
-    session_surfaces = raw.get("session_surfaces") if isinstance(raw.get("session_surfaces"), dict) else {}
-    assets = raw.get("assets") if isinstance(raw.get("assets"), dict) else {}
+    from mms_command_tools import sanitize_user_preferences
 
-    result = {"launch": {"defaults": {}, "cli": {}}, "session_surfaces": {"disabled": {}}, "assets": {"roots": {}}}
-    result["launch"]["defaults"] = _sanitize_launch_preferences(launch.get("defaults"))
-    cli_tables = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
-    for cli_name, table in cli_tables.items():
-        normalized_cli = str(cli_name or "").strip().lower()
-        if normalized_cli not in set(CLI_NAMES) | {"gemini"}:
-            continue
-        cleaned = _sanitize_launch_preferences(table)
-        if cleaned:
-            result["launch"]["cli"][normalized_cli] = cleaned
-    global_disabled = _sanitize_disabled_session_surfaces(session_surfaces.get("disabled"))
-    if global_disabled:
-        result["session_surfaces"]["disabled"] = global_disabled
-    roots = _sanitize_asset_roots(assets.get("roots"))
-    if roots:
-        result["assets"]["roots"] = roots
-    return result
+    return sanitize_user_preferences(raw, cli_names=CLI_NAMES, asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS)
 
 
 def load_user_preferences():

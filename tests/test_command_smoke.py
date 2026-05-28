@@ -786,6 +786,69 @@ def test_preference_primitive_helpers_preserve_allowlist_semantics():
     }
 
 
+def test_preference_allowlist_sanitizers_preserve_runtime_shape(tmp_path):
+    import mms_command_tools
+
+    skill_root = tmp_path / "web-access"
+    asset_keys = {"web_access": "web_access", "web-access": "web_access", "xmem": "xmem"}
+    raw = {
+        "launch": {
+            "defaults": {
+                "thinking_mode": "enabled",
+                "reasoning_effort": "xhigh",
+                "caveman_mode": "off",
+                "nsr_mode": True,
+                "bypass": "no",
+                "agent_pack": "oh-my-claude-code",
+                "api_key": "ignored",
+            },
+            "cli": {
+                "Codex": {"reasoning_effort": "low", "disabled_session_surfaces": {"skills": ["agent-browser"]}},
+                "gemini": {"bypass": True},
+                "unknown": {"bypass": True},
+            },
+        },
+        "session_surfaces": {"disabled": {"mcps": ["pilot"], "hook": "/tmp/drop.sh"}},
+        "assets": {"roots": {"web-access": str(skill_root), "credentials": "/tmp/ignored"}},
+        "provider": {"base_url": "https://ignored.example"},
+    }
+
+    assert mms_command_tools.sanitize_launch_preferences(raw["launch"]["defaults"]) == {
+        "thinking_mode": "enable",
+        "reasoning_effort": "xhigh",
+        "caveman_mode": "disable",
+        "nsr_mode": "enable",
+        "bypass": False,
+        "agent_pack": "omc",
+        "ecc_mode": "disable",
+        "omc_mode": "enable",
+    }
+    assert mms_command_tools.sanitize_asset_roots(
+        {"web-access": str(skill_root), "credentials": "/tmp/ignored"},
+        asset_root_keys=asset_keys,
+    ) == {"web_access": str(skill_root)}
+    assert mms_command_tools.sanitize_user_preferences(raw, cli_names=["claude", "codex"], asset_root_keys=asset_keys) == {
+        "launch": {
+            "defaults": {
+                "thinking_mode": "enable",
+                "reasoning_effort": "xhigh",
+                "caveman_mode": "disable",
+                "nsr_mode": "enable",
+                "bypass": False,
+                "agent_pack": "omc",
+                "ecc_mode": "disable",
+                "omc_mode": "enable",
+            },
+            "cli": {
+                "codex": {"reasoning_effort": "low", "disabled_session_surfaces": {"skills": ["agent-browser"]}},
+                "gemini": {"bypass": True},
+            },
+        },
+        "session_surfaces": {"disabled": {"mcp": ["pilot"], "hooks": ["/tmp/drop.sh"]}},
+        "assets": {"roots": {"web_access": str(skill_root)}},
+    }
+
+
 def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
     import mms_command_tools
 
