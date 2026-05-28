@@ -1418,74 +1418,24 @@ def _normalize_provider(provider):
 
 
 def _ensure_provider_config(cfg):
-    cfg = dict(cfg)
-    raw_providers = cfg.get("providers")
-    normalized = []
-    seen_ids = set()
+    from mms_command_tools import ensure_provider_config
 
-    if isinstance(raw_providers, list):
-        for item in raw_providers:
-            if not isinstance(item, dict):
-                continue
-            provider = _normalize_provider(item)
-            if provider["id"] in seen_ids:
-                continue
-            normalized.append(provider)
-            seen_ids.add(provider["id"])
-
-    if not normalized:
-        normalized = [_default_provider()]
-
-    provider_cfg = cfg.get("provider", {})
-    default_provider = DEFAULT_PROVIDER_ID
-    if isinstance(provider_cfg, dict):
-        default_provider = str(provider_cfg.get("default") or DEFAULT_PROVIDER_ID).strip() or DEFAULT_PROVIDER_ID
-    if default_provider not in seen_ids and default_provider not in {p["id"] for p in normalized}:
-        default_provider = normalized[0]["id"]
-
-    new_cfg = dict(cfg)
-    new_cfg["providers"] = normalized
-    new_cfg["provider"] = {"default": default_provider}
-    changed = new_cfg != cfg
-    return new_cfg, changed
+    return ensure_provider_config(
+        cfg,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        default_provider=_default_provider,
+        normalize_provider=_normalize_provider,
+    )
 
 
 def _ensure_account_config(cfg):
-    cfg = dict(cfg)
-    raw_accounts = cfg.get("accounts")
-    normalized = []
-    seen_ids = set()
+    from mms_command_tools import ensure_account_config
 
-    if isinstance(raw_accounts, list):
-        for item in raw_accounts:
-            if not isinstance(item, dict):
-                continue
-            account = _normalize_account(item)
-            if account["id"] in seen_ids:
-                continue
-            normalized.append(account)
-            seen_ids.add(account["id"])
-
-    raw_defaults = cfg.get("account", {})
-    defaults = {}
-    if isinstance(raw_defaults, dict):
-        raw_cli_defaults = raw_defaults.get("defaults", raw_defaults)
-        if isinstance(raw_cli_defaults, dict):
-            for cli in OAUTH_CAPABLE_CLIS:
-                account_id = str(raw_cli_defaults.get(cli, "")).strip()
-                if account_id:
-                    defaults[cli] = account_id
-
-    defaults = {
-        cli: account_id for cli, account_id in defaults.items()
-        if account_id in seen_ids
-    }
-
-    new_cfg = dict(cfg)
-    new_cfg["accounts"] = normalized
-    new_cfg["account"] = {"defaults": defaults}
-    changed = new_cfg != cfg
-    return new_cfg, changed
+    return ensure_account_config(
+        cfg,
+        oauth_capable_clis=OAUTH_CAPABLE_CLIS,
+        normalize_account=_normalize_account,
+    )
 
 
 def _normalize_preset_entry(name, preset):

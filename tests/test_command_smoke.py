@@ -1974,6 +1974,39 @@ def test_config_nested_helpers_and_coercion():
     assert mms_core._mask_key("abcd1234efgh") == "abcd****efgh"
 
 
+def test_config_ensure_helpers_dedupe_and_repair_defaults():
+    import mms_command_tools
+
+    providers_cfg, changed = mms_command_tools.ensure_provider_config(
+        {
+            "providers": [{"id": "relay-b"}, {"id": "relay-b"}, {"id": "relay-a"}],
+            "provider": {"default": "missing"},
+        },
+        default_provider_id="default",
+        default_provider=lambda: {"id": "default", "enabled": True},
+        normalize_provider=lambda item: {"id": item["id"], "enabled": bool(item.get("enabled", True))},
+    )
+    assert changed is True
+    assert [item["id"] for item in providers_cfg["providers"]] == ["relay-b", "relay-a"]
+    assert providers_cfg["provider"] == {"default": "relay-b"}
+
+    accounts_cfg, changed = mms_command_tools.ensure_account_config(
+        {
+            "accounts": [
+                {"id": "codex-main", "cli": "codex"},
+                {"id": "codex-main", "cli": "codex"},
+                {"id": "gemini-old", "cli": "gemini"},
+            ],
+            "account": {"defaults": {"claude": "missing", "codex": "codex-main", "gemini": "gemini-old"}},
+        },
+        oauth_capable_clis=("claude", "codex", "gemini"),
+        normalize_account=lambda item: dict(item),
+    )
+    assert changed is True
+    assert [item["id"] for item in accounts_cfg["accounts"]] == ["codex-main", "gemini-old"]
+    assert accounts_cfg["account"] == {"defaults": {"codex": "codex-main", "gemini": "gemini-old"}}
+
+
 def test_config_normalization_helpers_preserve_legacy_shapes():
     import mms_command_tools
     import mms_core
