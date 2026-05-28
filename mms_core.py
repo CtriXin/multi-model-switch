@@ -5892,56 +5892,37 @@ def _provider_effective_models(provider, cached_models, cfg=None):
 
 
 def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models):
-    merged = []
-    seen = set()
-    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
-        if not provider.get("enabled", True):
-            continue
-        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
-            continue
-        models = _provider_effective_models(provider, cached_models, cfg)
-        for model_name in models:
-            normalized = str(model_name or "").strip()
-            if not normalized or normalized in seen:
-                continue
-            if not _mms_model_visible(normalized):
-                continue
-            if not _provider_supports_model_for_cli(provider, cli_name, normalized):
-                continue
-            seen.add(normalized)
-            merged.append(normalized)
-    return merged
+    from mms_command_tools import all_provider_models_for_cli
+
+    return all_provider_models_for_cli(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        provider_candidates=_provider_candidates,
+        provider_has_configured_base_url=_provider_has_configured_base_url,
+        provider_effective_models=_provider_effective_models,
+        mms_model_visible=_mms_model_visible,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+    )
 
 
 def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
-    """聚合所有 provider 的模型，保留来源信息（不去重）。
+    from mms_command_tools import aggregate_provider_models
 
-    Returns:
-        List[dict]: [{"model": str, "provider_id": str, "provider_name": str}, ...]
-    """
-    aggregated = []
-    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
-        if not provider.get("enabled", True):
-            continue
-        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
-            continue
-        models = _provider_effective_models(provider, cached_models, cfg)
-        pid = provider.get("id", DEFAULT_PROVIDER_ID)
-        pname = _provider_label(provider)
-        for model_name in models:
-            normalized = str(model_name or "").strip()
-            if not normalized:
-                continue
-            if not _mms_model_visible(normalized):
-                continue
-            if not _provider_supports_model_for_cli(provider, cli_name, normalized):
-                continue
-            aggregated.append({
-                "model": normalized,
-                "provider_id": pid,
-                "provider_name": pname,
-            })
-    return aggregated
+    return aggregate_provider_models(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        provider_candidates=_provider_candidates,
+        provider_has_configured_base_url=_provider_has_configured_base_url,
+        provider_effective_models=_provider_effective_models,
+        provider_label=_provider_label,
+        mms_model_visible=_mms_model_visible,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+    )
 
 
 def _resolve_best_provider(cfg, model_name, default_provider, default_models,

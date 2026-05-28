@@ -2473,6 +2473,78 @@ def resolve_last_used_runtime(
     return None, None, None
 
 
+def all_provider_models_for_cli(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    *,
+    provider_candidates,
+    provider_has_configured_base_url,
+    provider_effective_models,
+    mms_model_visible,
+    provider_supports_model_for_cli,
+):
+    merged = []
+    seen = set()
+    for provider, cached_models in provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if not provider_has_configured_base_url(provider) or not provider.get("api_key"):
+            continue
+        models = provider_effective_models(provider, cached_models, cfg)
+        for model_name in models:
+            normalized = str(model_name or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            if not mms_model_visible(normalized):
+                continue
+            if not provider_supports_model_for_cli(provider, cli_name, normalized):
+                continue
+            seen.add(normalized)
+            merged.append(normalized)
+    return merged
+
+
+def aggregate_provider_models(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    *,
+    provider_candidates,
+    provider_has_configured_base_url,
+    provider_effective_models,
+    provider_label,
+    mms_model_visible,
+    provider_supports_model_for_cli,
+    default_provider_id,
+):
+    aggregated = []
+    for provider, cached_models in provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if not provider_has_configured_base_url(provider) or not provider.get("api_key"):
+            continue
+        models = provider_effective_models(provider, cached_models, cfg)
+        provider_id = provider.get("id", default_provider_id)
+        provider_name = provider_label(provider)
+        for model_name in models:
+            normalized = str(model_name or "").strip()
+            if not normalized:
+                continue
+            if not mms_model_visible(normalized):
+                continue
+            if not provider_supports_model_for_cli(provider, cli_name, normalized):
+                continue
+            aggregated.append({
+                "model": normalized,
+                "provider_id": provider_id,
+                "provider_name": provider_name,
+            })
+    return aggregated
+
+
 def build_model_families_for_cli(
     cfg,
     cli_name,

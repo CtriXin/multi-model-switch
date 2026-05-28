@@ -1550,6 +1550,67 @@ def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths()
     ) == (None, None, None)
 
 
+def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
+    import mms_command_tools
+
+    providers = [
+        {
+            "id": "relay-a",
+            "name": "Relay A",
+            "enabled": True,
+            "api_key": "sk-a",
+            "models": ["gpt-5.5", "hidden-model", "qwen3.6-plus"],
+            "supported_clis": ["codex"],
+        },
+        {
+            "id": "relay-b",
+            "name": "Relay B",
+            "enabled": True,
+            "api_key": "sk-b",
+            "models": ["gpt-5.5", "claude-sonnet-4.5"],
+            "supported_clis": ["claude"],
+        },
+        {
+            "id": "disabled",
+            "name": "Disabled",
+            "enabled": False,
+            "api_key": "sk-disabled",
+            "models": ["gpt-5.4"],
+            "supported_clis": ["codex"],
+        },
+    ]
+
+    kwargs = {
+        "provider_candidates": lambda cfg, _default_provider, _default_models: [
+            (provider, provider["models"]) for provider in cfg["providers"]
+        ],
+        "provider_has_configured_base_url": lambda _provider: True,
+        "provider_effective_models": lambda _provider, cached_models, _cfg: list(cached_models or []),
+        "mms_model_visible": lambda model_name: model_name != "hidden-model",
+        "provider_supports_model_for_cli": lambda provider, cli_name, _model_name: cli_name in provider["supported_clis"],
+    }
+
+    assert mms_command_tools.all_provider_models_for_cli(
+        {"providers": providers},
+        "codex",
+        {},
+        [],
+        **kwargs,
+    ) == ["gpt-5.5", "qwen3.6-plus"]
+    assert mms_command_tools.aggregate_provider_models(
+        {"providers": providers},
+        "claude",
+        {},
+        [],
+        provider_label=lambda provider: provider["name"],
+        default_provider_id="default",
+        **kwargs,
+    ) == [
+        {"model": "gpt-5.5", "provider_id": "relay-b", "provider_name": "Relay B"},
+        {"model": "claude-sonnet-4.5", "provider_id": "relay-b", "provider_name": "Relay B"},
+    ]
+
+
 def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
     import mms_command_tools
 
