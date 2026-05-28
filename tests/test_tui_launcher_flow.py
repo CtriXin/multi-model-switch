@@ -32,6 +32,7 @@ from mms_tui_launcher_flow import (
     handle_tui_routes_export_settings_action,
     handle_tui_selected_model_action,
     handle_tui_submodel_action,
+    handle_rescue_view_markdown_action,
     last_used_model_info,
     normalize_confirm_result,
     official_account_profile_context,
@@ -1973,6 +1974,63 @@ def test_show_rescue_no_packets_report_prints_error_and_pauses() -> None:
             ("zh:没有 rescue packet", [("zh:状态", "zh:当前没有可查看记录")]),
             {"ok": False},
         ),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_handle_rescue_view_markdown_action_prints_content_and_pauses(tmp_path) -> None:
+    calls = []
+    md_path = tmp_path / "rescue.md"
+    md_path.write_text("rescue body", encoding="utf-8")
+
+    class Console:
+        @staticmethod
+        def clear():
+            calls.append(("clear",))
+
+        @staticmethod
+        def print(message):
+            calls.append(("print", message))
+
+    result = handle_rescue_view_markdown_action(
+        {"artifact_markdown": str(md_path)},
+        localize=lambda zh, _en: f"zh:{zh}",
+        console=Console(),
+        print_settings_error_report=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [
+        ("clear",),
+        ("print", "rescue body"),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_handle_rescue_view_markdown_action_reports_read_error_and_pauses(tmp_path) -> None:
+    calls = []
+
+    class Console:
+        @staticmethod
+        def clear():
+            raise AssertionError("unused")
+
+        @staticmethod
+        def print(_message):
+            raise AssertionError("unused")
+
+    result = handle_rescue_view_markdown_action(
+        {"artifact_markdown": str(tmp_path / "missing.md")},
+        localize=lambda zh, _en: f"zh:{zh}",
+        console=Console(),
+        print_settings_error_report=lambda title, exc: calls.append(("error", title, type(exc).__name__)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [
+        ("error", "zh:无法读取 rescue.md", "FileNotFoundError"),
         ("pause", "按 Enter 返回设置"),
     ]
 

@@ -5131,7 +5131,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     run_account_mgmt_tui=_run_account_mgmt_tui,
                 )
             elif settings_action == "rescue":
-                from pathlib import Path
                 from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
 
                 def _apply_rescue_default_action(fallback_model, *, cleared=False):
@@ -5265,18 +5264,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if rescue_action == "__interrupt__":
                     return True
                 if rescue_action == "view_md":
-                    md_path = Path(str(selected_rescue.get("artifact_markdown") or ""))
-                    try:
-                        content = md_path.read_text(encoding="utf-8")
-                    except OSError as exc:
-                        _print_settings_error_report(_L("无法读取 rescue.md", "Cannot read rescue.md"), exc)
-                    else:
-                        try:
-                            console.clear()
-                        except Exception:
-                            pass
-                        console.print(content)
-                    _pause_after_tui_report("按 Enter 返回设置")
+                    tui_flow.handle_rescue_view_markdown_action(
+                        selected_rescue,
+                        localize=_L,
+                        console=console,
+                        print_settings_error_report=_print_settings_error_report,
+                        pause_after_tui_report=_pause_after_tui_report,
+                    )
                 elif rescue_action == "show_paths":
                     _print_settings_result_report(*_rescue_paths_report_payload(selected_rescue))
                     _pause_after_tui_report("按 Enter 返回设置")

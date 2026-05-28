@@ -1159,6 +1159,31 @@ def show_rescue_no_packets_report(
     return {"status": "continue"}
 
 
+def handle_rescue_view_markdown_action(
+    selected_rescue,
+    *,
+    localize,
+    console,
+    print_settings_error_report,
+    pause_after_tui_report,
+):
+    from pathlib import Path
+
+    md_path = Path(str(selected_rescue.get("artifact_markdown") or ""))
+    try:
+        content = md_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print_settings_error_report(localize("无法读取 rescue.md", "Cannot read rescue.md"), exc)
+    else:
+        try:
+            console.clear()
+        except Exception:
+            pass
+        console.print(content)
+    pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue"}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}
