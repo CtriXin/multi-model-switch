@@ -1334,31 +1334,30 @@ def _accounts_for_cli(cfg, cli_name):
 
 
 def get_provider_definition(cfg, provider_id=None):
-    providers = _provider_map(cfg)
-    resolved_id = provider_id or cfg.get("provider", {}).get("default") or DEFAULT_PROVIDER_ID
-    provider = providers.get(resolved_id)
-    if provider:
-        return provider
-    if provider_id:
-        console.print(f"[red]未找到 provider: {provider_id}[/red]")
-        sys.exit(1)
-    if providers:
-        return next(iter(providers.values()))
-    return _default_provider()
+    from mms_command_tools import get_provider_definition as get_provider_definition_helper
+
+    return get_provider_definition_helper(
+        cfg,
+        provider_id,
+        provider_map=_provider_map,
+        default_provider=_default_provider,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        console=console,
+        exit_func=sys.exit,
+    )
 
 
 def get_account_definition(cfg, account_id=None, cli_name=None):
-    accounts = _account_map(cfg)
-    resolved_id = account_id
-    if not resolved_id and cli_name:
-        resolved_id = cfg.get("account", {}).get("defaults", {}).get(cli_name)
-    if resolved_id:
-        account = accounts.get(resolved_id)
-        if account:
-            return account
-        console.print(f"[red]未找到账号档案: {resolved_id}[/red]")
-        sys.exit(1)
-    return None
+    from mms_command_tools import get_account_definition as get_account_definition_helper
+
+    return get_account_definition_helper(
+        cfg,
+        account_id=account_id,
+        cli_name=cli_name,
+        account_map=_account_map,
+        console=console,
+        exit_func=sys.exit,
+    )
 
 
 # ── Config ──────────────────────────────────────────────

@@ -2608,6 +2608,81 @@ def test_runtime_context_resolvers_preserve_provider_credentials_and_account_hom
     }
 
 
+def test_definition_resolvers_preserve_default_fallbacks_and_missing_exits():
+    import pytest
+
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    providers = {
+        "first": {"id": "first"},
+        "second": {"id": "second"},
+    }
+    cfg = {
+        "provider": {"default": "second"},
+        "account": {"defaults": {"codex": "codex-main"}},
+    }
+
+    assert mms_command_tools.get_provider_definition(
+        cfg,
+        provider_map=lambda _cfg: providers,
+        default_provider=lambda: {"id": "default"},
+        default_provider_id="default",
+        console=console,
+    ) == {"id": "second"}
+    assert mms_command_tools.get_provider_definition(
+        {},
+        provider_map=lambda _cfg: providers,
+        default_provider=lambda: {"id": "default"},
+        default_provider_id="default",
+        console=console,
+    ) == {"id": "first"}
+    assert mms_command_tools.get_provider_definition(
+        {},
+        provider_map=lambda _cfg: {},
+        default_provider=lambda: {"id": "default"},
+        default_provider_id="default",
+        console=console,
+    ) == {"id": "default"}
+
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.get_provider_definition(
+            {},
+            provider_id="missing",
+            provider_map=lambda _cfg: providers,
+            default_provider=lambda: {"id": "default"},
+            default_provider_id="default",
+            console=console,
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        )
+    assert exc_info.value.code == 1
+    assert console.items[-1] == "[red]未找到 provider: missing[/red]"
+
+    accounts = {"codex-main": {"id": "codex-main", "cli": "codex"}}
+    assert mms_command_tools.get_account_definition(
+        cfg,
+        cli_name="codex",
+        account_map=lambda _cfg: accounts,
+        console=console,
+    ) == {"id": "codex-main", "cli": "codex"}
+    assert mms_command_tools.get_account_definition(
+        {},
+        account_map=lambda _cfg: accounts,
+        console=console,
+    ) is None
+
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.get_account_definition(
+            {},
+            account_id="missing",
+            account_map=lambda _cfg: accounts,
+            console=console,
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        )
+    assert exc_info.value.code == 1
+    assert console.items[-1] == "[red]未找到账号档案: missing[/red]"
+
+
 def test_save_provider_credentials_with_probe_preserves_autofix_failure_and_resolve_flow():
     import mms_command_tools
 

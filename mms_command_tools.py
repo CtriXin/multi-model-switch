@@ -3346,6 +3346,51 @@ def accounts_for_cli(cfg, cli_name):
     ]
 
 
+def get_provider_definition(
+    cfg,
+    provider_id=None,
+    *,
+    provider_map,
+    default_provider,
+    default_provider_id,
+    console,
+    exit_func=sys.exit,
+):
+    providers = provider_map(cfg)
+    resolved_id = provider_id or cfg.get("provider", {}).get("default") or default_provider_id
+    provider = providers.get(resolved_id)
+    if provider:
+        return provider
+    if provider_id:
+        console.print(f"[red]未找到 provider: {provider_id}[/red]")
+        exit_func(1)
+    if providers:
+        return next(iter(providers.values()))
+    return default_provider()
+
+
+def get_account_definition(
+    cfg,
+    account_id=None,
+    cli_name=None,
+    *,
+    account_map,
+    console,
+    exit_func=sys.exit,
+):
+    accounts = account_map(cfg)
+    resolved_id = account_id
+    if not resolved_id and cli_name:
+        resolved_id = cfg.get("account", {}).get("defaults", {}).get(cli_name)
+    if resolved_id:
+        account = accounts.get(resolved_id)
+        if account:
+            return account
+        console.print(f"[red]未找到账号档案: {resolved_id}[/red]")
+        exit_func(1)
+    return None
+
+
 def normalize_provider_id_input(provider_id, *, default_provider_id):
     value = "".join(
         ch if ch.isalnum() or ch in {"-", "_"} else "-"
