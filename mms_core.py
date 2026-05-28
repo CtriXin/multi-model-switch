@@ -10422,46 +10422,36 @@ def _validate_config(cfg):
 
 
 def _handle_config_get(cfg, args_rest):
-    if not args_rest:
-        console.print(f"[red]用法: {current_command()} config get <dot.path>[/red]")
-        return
-    key_path = args_rest[0]
-    value, found = _get_nested(cfg, key_path.split("."))
-    if not found:
-        console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
-        return
-    display = _mask_key(str(value)) if "key" in key_path.lower() else str(value)
-    console.print(f"[cyan]{key_path}[/cyan] = {display}")
+    from mms_command_tools import handle_config_get
+
+    return handle_config_get(cfg, args_rest, command_name=current_command(), console=console)
 
 
 def _handle_config_set(cfg, args_rest):
-    if len(args_rest) < 2:
-        console.print(f"[red]用法: {current_command()} config set <dot.path> <value>[/red]")
-        return
-    key_path = args_rest[0]
-    raw_value = args_rest[1]
-    new_val = _coerce_config_value(key_path, raw_value)
-    updated_cfg = dict(cfg)
-    _set_nested(updated_cfg, key_path.split("."), new_val)
-    updated_cfg = _normalize_config_sections(updated_cfg)
-    save_config(updated_cfg)
-    display = _mask_key(str(new_val)) if "key" in key_path.lower() else str(new_val)
-    console.print(f"[green]✓ {key_path} = {display}[/green]")
+    from mms_command_tools import handle_config_set
+
+    return handle_config_set(
+        cfg,
+        args_rest,
+        command_name=current_command(),
+        coerce_config_value=_coerce_config_value,
+        normalize_config_sections=_normalize_config_sections,
+        save_config=save_config,
+        console=console,
+    )
 
 
 def _handle_config_unset(cfg, args_rest):
-    if not args_rest:
-        console.print(f"[red]用法: {current_command()} config unset <dot.path>[/red]")
-        return
-    key_path = args_rest[0]
-    updated_cfg = dict(cfg)
-    removed = _unset_nested(updated_cfg, key_path.split("."))
-    if not removed:
-        console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
-        return
-    updated_cfg = _normalize_config_sections(updated_cfg)
-    save_config(updated_cfg)
-    console.print(f"[green]✓ 已移除 {key_path}[/green]")
+    from mms_command_tools import handle_config_unset
+
+    return handle_config_unset(
+        cfg,
+        args_rest,
+        command_name=current_command(),
+        normalize_config_sections=_normalize_config_sections,
+        save_config=save_config,
+        console=console,
+    )
 
 
 def _handle_config_file():

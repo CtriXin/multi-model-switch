@@ -222,6 +222,66 @@ def validate_config(
     return errors
 
 
+def handle_config_get(cfg, args_rest, *, command_name, console):
+    if not args_rest:
+        console.print(f"[red]用法: {command_name} config get <dot.path>[/red]")
+        return
+    key_path = args_rest[0]
+    value, found = get_nested(cfg, key_path.split("."))
+    if not found:
+        console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
+        return
+    display = mask_key(str(value)) if "key" in key_path.lower() else str(value)
+    console.print(f"[cyan]{key_path}[/cyan] = {display}")
+
+
+def handle_config_set(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    coerce_config_value,
+    normalize_config_sections,
+    save_config,
+    console,
+):
+    if len(args_rest) < 2:
+        console.print(f"[red]用法: {command_name} config set <dot.path> <value>[/red]")
+        return
+    key_path = args_rest[0]
+    raw_value = args_rest[1]
+    new_value = coerce_config_value(key_path, raw_value)
+    updated_cfg = dict(cfg)
+    set_nested(updated_cfg, key_path.split("."), new_value)
+    updated_cfg = normalize_config_sections(updated_cfg)
+    save_config(updated_cfg)
+    display = mask_key(str(new_value)) if "key" in key_path.lower() else str(new_value)
+    console.print(f"[green]✓ {key_path} = {display}[/green]")
+
+
+def handle_config_unset(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    normalize_config_sections,
+    save_config,
+    console,
+):
+    if not args_rest:
+        console.print(f"[red]用法: {command_name} config unset <dot.path>[/red]")
+        return
+    key_path = args_rest[0]
+    updated_cfg = dict(cfg)
+    removed = unset_nested(updated_cfg, key_path.split("."))
+    if not removed:
+        console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
+        return
+    updated_cfg = normalize_config_sections(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已移除 {key_path}[/green]")
+
+
 def is_config_help_request(args_rest):
     if not args_rest:
         return False

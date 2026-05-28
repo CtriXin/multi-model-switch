@@ -842,6 +842,54 @@ def test_config_validator_reports_provider_account_errors():
     assert mms_core._validate_config({"provider": {"default": "relay"}, "providers": [{"id": "relay"}]}) == []
 
 
+def test_config_get_set_unset_handlers_use_injected_save():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    saved = []
+    cfg = {"provider": {"default": "relay"}, "secret": {"api_key": "abcd1234efgh"}}
+
+    mms_command_tools.handle_config_get(cfg, ["secret.api_key"], command_name="mmg", console=console)
+    assert any("abcd****efgh" in str(item) for item in console.items)
+
+    mms_command_tools.handle_config_set(
+        cfg,
+        ["cache.probe_async_min_interval_sec", "0"],
+        command_name="mmg",
+        coerce_config_value=lambda key, value: 1 if key == "cache.probe_async_min_interval_sec" else value,
+        normalize_config_sections=lambda current: current,
+        save_config=lambda current: saved.append(("set", current)),
+        console=console,
+    )
+    assert saved[-1][0] == "set"
+    assert saved[-1][1]["cache"]["probe_async_min_interval_sec"] == 1
+    assert any("cache.probe_async_min_interval_sec = 1" in str(item) for item in console.items)
+
+    mms_command_tools.handle_config_unset(
+        saved[-1][1],
+        ["cache.probe_async_min_interval_sec"],
+        command_name="mmg",
+        normalize_config_sections=lambda current: current,
+        save_config=lambda current: saved.append(("unset", current)),
+        console=console,
+    )
+    assert saved[-1][0] == "unset"
+    assert "probe_async_min_interval_sec" not in saved[-1][1]["cache"]
+    assert any("已移除 cache.probe_async_min_interval_sec" in str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.handle_config_unset(
+        cfg,
+        ["missing.path"],
+        command_name="mmg",
+        normalize_config_sections=lambda current: current,
+        save_config=lambda current: saved.append(("unexpected", current)),
+        console=console,
+    )
+    assert saved[-1][0] == "unset"
+    assert any("配置项 'missing.path' 不存在" in str(item) for item in console.items)
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 
