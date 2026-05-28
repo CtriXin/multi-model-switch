@@ -519,6 +519,89 @@ def test_pi_anthropic_local_thinking_alias_uses_wire_model_id(monkeypatch, tmp_p
     assert model_by_id["claude-opus-4-6-thinking"]["name"] == "claude-opus-4-6"
 
 
+def test_pi_local_selector_alias_uses_routed_wire_model_id(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {
+            "models": ["mimo-v2.5-pro[1m]", "mimo-v2.5-pro"],
+        },
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "newapi-tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-openai",
+            "openai_base_url": "https://relay.example.com/v1",
+            "anthropic_base_url": "https://relay.example.com/v1",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "mimo-v2.5-pro[1m]"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    model_by_id = {item["id"]: item for item in provider["models"]}
+    assert "mimo-v2.5-pro[1m]" not in model_by_id
+    assert model_by_id["mimo-v2.5-pro"]["name"] == "mimo-v2.5-pro[1m]"
+
+
+def test_pi_mimo_plain_1m_alias_strips_to_base_wire_model_id(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {
+            "models": ["mimo-v2.5[1m]", "mimo-v2.5"],
+        },
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "mimo-direct-anthropic",
+            "name": "direct-mimo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-anthropic",
+            "anthropic_base_url": "https://relay.example.com/anthropic",
+            "protocols": ["anthropic_messages"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "mimo-v2.5[1m]"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    model_by_id = {item["id"]: item for item in provider["models"]}
+    assert "mimo-v2.5[1m]" not in model_by_id
+    assert model_by_id["mimo-v2.5"]["name"] == "mimo-v2.5[1m]"
+
+
 def test_pi_rejects_selected_image_generation_only_model(monkeypatch):
     import mms_launchers
     import pytest

@@ -11109,30 +11109,57 @@ def _pi_model_thinking_level_map(profile_id, protocol, model_name, caps):
 
 
 def _pi_wire_model_name(runtime, model_name, protocol):
-    if str(protocol or "").strip() != "anthropic_messages":
-        return str(model_name or "").strip(), ""
+    protocol_name = str(protocol or "").strip()
+    runtime = runtime if isinstance(runtime, dict) else {}
+    original_model = str(model_name or "").strip()
+
+    if original_model.lower().endswith(_ONE_M_CONTEXT_SUFFIX):
+        base_model = original_model[: -len(_ONE_M_CONTEXT_SUFFIX)].strip()
+        normalized_base = _pi_normalize_model_key(base_model)
+        if normalized_base in _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS:
+            available = {}
+            for candidate in _pi_runtime_model_names(runtime, selected_model=model_name):
+                normalized_candidate = _pi_normalize_model_key(candidate)
+                if normalized_candidate and normalized_candidate not in available:
+                    available[normalized_candidate] = str(candidate or "").strip()
+            return available.get(normalized_base) or base_model, original_model
+
     runtime_id = str((runtime or {}).get("id") or (runtime or {}).get("provider_id") or "").strip().lower()
-    if not runtime_id:
-        return str(model_name or "").strip(), ""
     reference_row = _pi_reference_model_row(model_name)
     routed_model = str(reference_row.get("routed_model_id") or "").strip()
     alias_status = str(reference_row.get("alias_status") or "").strip().lower()
     provider_hint = str(reference_row.get("provider_id") or "").strip().lower()
-    if alias_status != "local_thinking_alias" or provider_hint != runtime_id:
-        return str(model_name or "").strip(), ""
     normalized_original = _pi_normalize_model_key(model_name)
     normalized_routed = _pi_normalize_model_key(routed_model)
     if not normalized_routed or normalized_routed == normalized_original:
-        return str(model_name or "").strip(), ""
+        return original_model, ""
+
+    allow_reference_fallback = False
+    if alias_status == "local_selector":
+        # Local selectors like `[1m]` are MMS surface sugar and should not leak
+        # through to Pi's upstream-facing wire model id.
+        allow_reference_fallback = True
+    elif (
+        protocol_name == "anthropic_messages"
+        and alias_status == "local_thinking_alias"
+        and runtime_id
+        and provider_hint == runtime_id
+    ):
+        pass
+    else:
+        return original_model, ""
+
     available = {}
     for candidate in _pi_runtime_model_names(runtime, selected_model=model_name):
         normalized_candidate = _pi_normalize_model_key(candidate)
         if normalized_candidate and normalized_candidate not in available:
             available[normalized_candidate] = str(candidate or "").strip()
     wire_model = available.get(normalized_routed)
+    if not wire_model and allow_reference_fallback:
+        wire_model = routed_model
     if not wire_model:
-        return str(model_name or "").strip(), ""
-    return wire_model, str(model_name or "").strip()
+        return original_model, ""
+    return wire_model, original_model
 
 
 def _pi_model_entry(runtime, model_name):
