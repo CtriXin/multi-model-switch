@@ -5272,8 +5272,12 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         pause_after_tui_report=_pause_after_tui_report,
                     )
                 elif rescue_action == "show_paths":
-                    _print_settings_result_report(*_rescue_paths_report_payload(selected_rescue))
-                    _pause_after_tui_report("按 Enter 返回设置")
+                    tui_flow.show_rescue_paths_action(
+                        selected_rescue,
+                        rescue_paths_report_payload=_rescue_paths_report_payload,
+                        print_settings_result_report=_print_settings_result_report,
+                        pause_after_tui_report=_pause_after_tui_report,
+                    )
                 elif str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
                     fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("handover::") else ""
                     if not fallback_model:

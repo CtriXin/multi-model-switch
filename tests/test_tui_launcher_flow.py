@@ -48,6 +48,7 @@ from mms_tui_launcher_flow import (
     safe_tui_call,
     selected_model_launch_context,
     show_rescue_no_packets_report,
+    show_rescue_paths_action,
 )
 
 
@@ -2031,6 +2032,25 @@ def test_handle_rescue_view_markdown_action_reports_read_error_and_pauses(tmp_pa
     assert result == {"status": "continue"}
     assert calls == [
         ("error", "zh:无法读取 rescue.md", "FileNotFoundError"),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_show_rescue_paths_action_reports_paths_and_pauses() -> None:
+    calls = []
+    selected_rescue = {"artifact_markdown": "/tmp/rescue.md"}
+
+    result = show_rescue_paths_action(
+        selected_rescue,
+        rescue_paths_report_payload=lambda rescue: calls.append(("payload", rescue)) or ("paths", [("md", rescue["artifact_markdown"])]),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [
+        ("payload", selected_rescue),
+        ("report", ("paths", [("md", "/tmp/rescue.md")]), {}),
         ("pause", "按 Enter 返回设置"),
     ]
 

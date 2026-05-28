@@ -1184,6 +1184,18 @@ def handle_rescue_view_markdown_action(
     return {"status": "continue"}
 
 
+def show_rescue_paths_action(
+    selected_rescue,
+    *,
+    rescue_paths_report_payload,
+    print_settings_result_report,
+    pause_after_tui_report,
+):
+    print_settings_result_report(*rescue_paths_report_payload(selected_rescue))
+    pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue"}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}
