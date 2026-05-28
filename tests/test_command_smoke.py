@@ -2560,6 +2560,23 @@ def test_model_capability_helpers_preserve_native_bridge_and_tags():
     assert mms_command_tools.model_matches_account_cli("codex", "openai/gpt-5.5") is False
     assert mms_command_tools.model_matches_account_cli("gemini", "gemini-3.1-pro-preview") is True
     assert mms_command_tools.model_matches_account_cli("agy", "gpt-5.5") is False
+    hints = {"codex": ("gpt-", "codex-"), "claude": ("claude-",)}
+    models = ["gpt-5.5", "claude-sonnet-4.5", "qwen3.6-plus", "codex-mini"]
+    assert mms_command_tools.model_matches_cli_family(
+        "codex",
+        "openai/gpt-5.5",
+        cli_model_family_hints=hints,
+    ) is True
+    assert mms_command_tools.models_for_cli_family(
+        "codex",
+        models,
+        cli_model_family_hints=hints,
+    ) == ["gpt-5.5", "codex-mini"]
+    assert mms_command_tools.provider_models_for_cli(
+        "opencode",
+        models,
+        cli_model_family_hints=hints,
+    ) == models
     assert mms_command_tools.is_installed_mms_layout(
         "/Users/xin/.mms/mms_core.py",
         real_user_home=lambda: "/Users/xin",

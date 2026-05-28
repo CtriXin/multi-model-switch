@@ -2615,6 +2615,34 @@ def model_matches_account_cli(cli_name, model_name):
     return False
 
 
+def model_matches_cli_family(cli_name, model_name, *, cli_model_family_hints):
+    hints = cli_model_family_hints.get(cli_name, ())
+    normalized = str(model_name or "").lower()
+    return any(hint in normalized for hint in hints)
+
+
+def models_for_cli_family(
+    cli_name,
+    models,
+    *,
+    cli_model_family_hints,
+    model_matches_cli_family=model_matches_cli_family,
+):
+    if cli_name not in cli_model_family_hints:
+        return list(models or [])
+    return [
+        model_name
+        for model_name in (models or [])
+        if model_matches_cli_family(cli_name, model_name, cli_model_family_hints=cli_model_family_hints)
+    ]
+
+
+def provider_models_for_cli(cli_name, models, *, cli_model_family_hints):
+    if cli_name in cli_model_family_hints:
+        return models_for_cli_family(cli_name, models, cli_model_family_hints=cli_model_family_hints)
+    return list(models or [])
+
+
 def is_installed_mms_layout(
     module_path,
     *,

@@ -5122,15 +5122,24 @@ def _ensure_models_cache_available(models_cache):
 
 
 def _model_matches_cli_family(cli_name, model_name):
-    hints = CLI_MODEL_FAMILY_HINTS.get(cli_name, ())
-    normalized = str(model_name or "").lower()
-    return any(hint in normalized for hint in hints)
+    from mms_command_tools import model_matches_cli_family
+
+    return model_matches_cli_family(
+        cli_name,
+        model_name,
+        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
+    )
 
 
 def _models_for_cli_family(cli_name, models):
-    if cli_name not in CLI_MODEL_FAMILY_HINTS:
-        return list(models or [])
-    return [model_name for model_name in (models or []) if _model_matches_cli_family(cli_name, model_name)]
+    from mms_command_tools import models_for_cli_family
+
+    return models_for_cli_family(
+        cli_name,
+        models,
+        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
+        model_matches_cli_family=lambda name, model, *, cli_model_family_hints: _model_matches_cli_family(name, model),
+    )
 
 
 def _model_matches_account_cli(cli_name, model_name):
@@ -5195,9 +5204,13 @@ def _provider_candidates(cfg, default_provider, default_models):
 
 
 def _provider_models_for_cli(cli_name, models):
-    if cli_name in CLI_MODEL_FAMILY_HINTS:
-        return _models_for_cli_family(cli_name, models)
-    return list(models or [])
+    from mms_command_tools import provider_models_for_cli
+
+    return provider_models_for_cli(
+        cli_name,
+        models,
+        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
+    )
 
 
 def _provider_effective_models(provider, cached_models, cfg=None):
