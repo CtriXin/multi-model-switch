@@ -3632,6 +3632,29 @@ def test_openrouter_extension_arg_and_provider_helpers_preserve_detection_rules(
         {"id": "fallback", "base_url": "https://openrouter.example/v1"},
     ]
     assert calls == ["or", "fallback"]
+    assert mms_command_tools.openrouter_extension_provider(
+        cfg,
+        "",
+        provider_map=lambda current_cfg: {item["id"]: item for item in current_cfg["providers"]},
+        resolve_provider_context=resolve_provider_context,
+        openrouter_provider_candidates=lambda _cfg: [{"id": "or", "resolved": True}],
+    ) == ({"id": "or", "resolved": True}, "")
+    provider, warning = mms_command_tools.openrouter_extension_provider(
+        cfg,
+        "plain",
+        provider_map=lambda current_cfg: {item["id"]: item for item in current_cfg["providers"]},
+        resolve_provider_context=lambda _cfg, provider_id: {"id": provider_id, "base_url": "https://example.com/v1"},
+        openrouter_provider_candidates=lambda _cfg: [],
+    )
+    assert provider == {"id": "plain", "base_url": "https://example.com/v1"}
+    assert "不是 OpenRouter 模板" in warning
+    assert mms_command_tools.openrouter_extension_provider(
+        cfg,
+        "missing",
+        provider_map=lambda current_cfg: {item["id"]: item for item in current_cfg["providers"]},
+        resolve_provider_context=resolve_provider_context,
+        openrouter_provider_candidates=lambda _cfg: [],
+    ) == (None, "未找到 provider: missing")
 
     assert mms_command_tools.parse_openrouter_extension_args(
         ["list", "or", "--limit", "0", "--assume-paid", "--json"]

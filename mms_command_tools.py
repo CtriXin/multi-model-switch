@@ -2952,6 +2952,29 @@ def parse_openrouter_extension_args(args_rest):
     }
 
 
+def openrouter_extension_provider(
+    cfg,
+    provider_id="",
+    *,
+    provider_map,
+    resolve_provider_context,
+    provider_looks_openrouter=provider_looks_openrouter,
+    openrouter_provider_candidates,
+):
+    providers = provider_map(cfg)
+    if provider_id:
+        if provider_id not in providers:
+            return None, f"未找到 provider: {provider_id}"
+        provider = resolve_provider_context(cfg, provider_id)
+        if not provider_looks_openrouter(provider):
+            return provider, f"provider '{provider_id}' 不是 OpenRouter 模板，但仍可用其 Key 做探测"
+        return provider, ""
+    candidates = openrouter_provider_candidates(cfg)
+    if candidates:
+        return candidates[0], ""
+    return None, ""
+
+
 def parse_usage_timestamp(value):
     raw = str(value or "").strip()
     if not raw:

@@ -7977,18 +7977,16 @@ def _display_openrouter_extension_help():
 
 
 def _openrouter_extension_provider(cfg, provider_id=""):
-    providers = _provider_map(cfg)
-    if provider_id:
-        if provider_id not in providers:
-            return None, f"未找到 provider: {provider_id}"
-        provider = resolve_provider_context(cfg, provider_id)
-        if not _provider_looks_openrouter(provider):
-            return provider, f"provider '{provider_id}' 不是 OpenRouter 模板，但仍可用其 Key 做探测"
-        return provider, ""
-    candidates = _openrouter_provider_candidates(cfg)
-    if candidates:
-        return candidates[0], ""
-    return None, ""
+    from mms_command_tools import openrouter_extension_provider
+
+    return openrouter_extension_provider(
+        cfg,
+        provider_id,
+        provider_map=_provider_map,
+        resolve_provider_context=resolve_provider_context,
+        provider_looks_openrouter=_provider_looks_openrouter,
+        openrouter_provider_candidates=_openrouter_provider_candidates,
+    )
 
 
 def _display_openrouter_model_rows(title, rows, *, limit):
