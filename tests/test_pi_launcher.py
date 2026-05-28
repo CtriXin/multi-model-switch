@@ -283,6 +283,85 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
     }
 
 
+def test_pi_shared_root_openai_base_url_is_normalized_to_v1(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["gpt-5.4", "mimo-v2.5-pro"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "relay-root",
+            "name": "Relay Root",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com",
+            "anthropic_base_url": "https://relay.example.com",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "gpt-5.4"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    openai_providers = [provider for provider in payload["providers"].values() if provider["api"].startswith("openai-")]
+    assert openai_providers
+    assert {provider["baseUrl"] for provider in openai_providers} == {"https://relay.example.com/v1"}
+
+
+def test_pi_mimo_openai_provider_disables_developer_role(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["mimo-v2.5-pro"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "NewAPI Tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com",
+            "anthropic_base_url": "https://relay.example.com",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "mimo-v2.5-pro"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert provider["compat"]["supportsDeveloperRole"] is False
+
+
 def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -397,6 +476,47 @@ def test_pi_skips_image_generation_only_models(monkeypatch, tmp_path):
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
     assert [item["id"] for item in provider["models"]] == ["gpt-5.4"]
+
+
+def test_pi_anthropic_local_thinking_alias_uses_wire_model_id(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {
+            "models": ["claude-opus-4-6-thinking", "claude-opus-4-6"],
+        },
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "us-cpa-local-antigravity",
+            "name": "Antigravity",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-anthropic",
+            "anthropic_base_url": "https://relay.example.com/v1",
+            "protocols": ["anthropic_messages"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "claude-opus-4-6"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    model_by_id = {item["id"]: item for item in provider["models"]}
+    assert "claude-opus-4-6" not in model_by_id
+    assert model_by_id["claude-opus-4-6-thinking"]["name"] == "claude-opus-4-6"
 
 
 def test_pi_rejects_selected_image_generation_only_model(monkeypatch):

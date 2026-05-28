@@ -10669,10 +10669,12 @@ _PI_OPENAI_PROFILE_COMPAT = {
     },
     "mimo": {
         "requiresReasoningContentOnAssistantMessages": True,
+        "supportsDeveloperRole": False,
         "thinkingFormat": "deepseek",
     },
     "mimo-openai": {
         "requiresReasoningContentOnAssistantMessages": True,
+        "supportsDeveloperRole": False,
         "thinkingFormat": "deepseek",
     },
     "qwen-chat-template": {
@@ -10940,6 +10942,24 @@ def _pi_anthropic_base_root(base_url):
     return url
 
 
+def _pi_openai_base_url(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    base_url = str(_openai_base_url(runtime) or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    parsed = urlsplit(base_url)
+    path = parsed.path.rstrip("/")
+    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
+    if last_segment == "v1":
+        return base_url
+    anthropic_root = _pi_anthropic_base_root(_anthropic_base_url(runtime))
+    if anthropic_root and anthropic_root.rstrip("/") == base_url:
+        return f"{base_url}/v1"
+    if not path:
+        return f"{base_url}/v1"
+    return base_url
+
+
 def _pi_protocol_variant(runtime, protocol):
     runtime = runtime if isinstance(runtime, dict) else {}
     protocol_name = str(protocol or "").strip()
@@ -10954,7 +10974,7 @@ def _pi_protocol_variant(runtime, protocol):
             }
         return None
     if protocol_name == "responses":
-        base_url = str(_openai_base_url(runtime) or "").strip()
+        base_url = _pi_openai_base_url(runtime)
         if base_url:
             return {
                 "protocol": "responses",
@@ -10964,7 +10984,7 @@ def _pi_protocol_variant(runtime, protocol):
             }
         return None
     if protocol_name == "openai_chat_completions":
-        base_url = str(_openai_base_url(runtime) or "").strip()
+        base_url = _pi_openai_base_url(runtime)
         if base_url:
             return {
                 "protocol": "openai_chat_completions",
@@ -11088,12 +11108,42 @@ def _pi_model_thinking_level_map(profile_id, protocol, model_name, caps):
     }
 
 
+def _pi_wire_model_name(runtime, model_name, protocol):
+    if str(protocol or "").strip() != "anthropic_messages":
+        return str(model_name or "").strip(), ""
+    runtime_id = str((runtime or {}).get("id") or (runtime or {}).get("provider_id") or "").strip().lower()
+    if not runtime_id:
+        return str(model_name or "").strip(), ""
+    reference_row = _pi_reference_model_row(model_name)
+    routed_model = str(reference_row.get("routed_model_id") or "").strip()
+    alias_status = str(reference_row.get("alias_status") or "").strip().lower()
+    provider_hint = str(reference_row.get("provider_id") or "").strip().lower()
+    if alias_status != "local_thinking_alias" or provider_hint != runtime_id:
+        return str(model_name or "").strip(), ""
+    normalized_original = _pi_normalize_model_key(model_name)
+    normalized_routed = _pi_normalize_model_key(routed_model)
+    if not normalized_routed or normalized_routed == normalized_original:
+        return str(model_name or "").strip(), ""
+    available = {}
+    for candidate in _pi_runtime_model_names(runtime, selected_model=model_name):
+        normalized_candidate = _pi_normalize_model_key(candidate)
+        if normalized_candidate and normalized_candidate not in available:
+            available[normalized_candidate] = str(candidate or "").strip()
+    wire_model = available.get(normalized_routed)
+    if not wire_model:
+        return str(model_name or "").strip(), ""
+    return wire_model, str(model_name or "").strip()
+
+
 def _pi_model_entry(runtime, model_name):
     variant, caps = _pi_pick_protocol(runtime, model_name)
     profile_id = _pi_profile_id(runtime, model_name, base_url=variant["base_url"])
+    wire_model_name, display_name = _pi_wire_model_name(runtime, model_name, variant["protocol"])
+    if not wire_model_name:
+        wire_model_name = model_name
     entry = {
-        "id": model_name,
-        "name": model_name,
+        "id": wire_model_name,
+        "name": display_name or model_name,
         "input": _pi_model_input_types(model_name),
         "contextWindow": int(caps.get("context_window_tokens") or 128000),
         "maxTokens": int(caps.get("max_output_tokens") or 16384),
@@ -11166,10 +11216,14 @@ def _pi_build_models_payload(runtime, model_name):
                 "provider_compat": provider_compat,
                 "compat_slug": "default" if not provider_compat else compat_key,
                 "models": [],
+                "_model_ids": set(),
             }
             groups_by_key[group_key] = group
             groups.append(group)
-        group["models"].append(resolved["model"])
+        model_id = str(resolved["model"].get("id") or "").strip()
+        if model_id not in group["_model_ids"]:
+            group["models"].append(resolved["model"])
+            group["_model_ids"].add(model_id)
         if model_name_item == model:
             selected_group_key = group_key
 
