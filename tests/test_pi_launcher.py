@@ -93,7 +93,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     models_path = real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-a"]
-    assert provider["api"] == "openai-completions"
+    assert provider["api"] == "openai-responses"
     assert provider["baseUrl"] == "https://relay.example.com/v1"
     assert provider["apiKey"] == "sk-openai"
     assert provider["models"][0]["id"] == "gpt-5.4"
@@ -140,6 +140,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert provider["baseUrl"] == "https://relay.example.com/anthropic"
     assert provider["models"][0]["id"] == "claude-sonnet-4-6"
     assert provider["models"][1]["id"] == "claude-opus-4-7"
+    assert provider["models"][0]["input"] == ["text", "image"]
     assert provider["models"][0]["reasoning"] is True
     assert provider["models"][0]["contextWindow"] == 1_000_000
     assert provider["models"][0]["maxTokens"] == 64_000
@@ -179,7 +180,7 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
     models_path = Path(exports["MMS_PI_MODELS_JSON"])
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-c"]
-    assert provider["api"] == "openai-completions"
+    assert provider["api"] == "openai-responses"
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
 
@@ -220,16 +221,17 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     assert set(payload["providers"]) == {
         "mms-newapi-personal-tokyo-anthropic",
-        "mms-newapi-personal-tokyo-openai",
+        "mms-newapi-personal-tokyo-responses",
     }
     assert exports["MMS_PI_PROVIDER"] == "mms-newapi-personal-tokyo-anthropic"
     anthropic_models = payload["providers"]["mms-newapi-personal-tokyo-anthropic"]["models"]
-    openai_models = payload["providers"]["mms-newapi-personal-tokyo-openai"]["models"]
+    openai_models = payload["providers"]["mms-newapi-personal-tokyo-responses"]["models"]
     assert [item["id"] for item in anthropic_models] == ["qwen3.6-plus"]
     assert [item["id"] for item in openai_models] == ["gpt-5.4"]
     assert anthropic_models[0]["reasoning"] is True
     assert anthropic_models[0]["contextWindow"] == 1_000_000
     assert anthropic_models[0]["maxTokens"] == 65_536
+    assert openai_models[0]["input"] == ["text", "image"]
     assert openai_models[0]["maxTokens"] == 128_000
 
 
@@ -317,8 +319,157 @@ def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
     assert provider["models"][0]["id"] == "kimi-for-coding"
+    assert provider["models"][0]["input"] == ["text", "image"]
     assert provider["models"][0]["contextWindow"] == 262_144
     assert provider["models"][0]["maxTokens"] == 32_768
+
+
+def test_pi_normalizes_anthropic_base_url_before_export(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["claude-sonnet-4-6"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "relay-anthropic-v1",
+            "name": "Relay Anthropic V1",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-anthropic",
+            "anthropic_base_url": "https://relay.example.com/v1",
+            "protocols": ["anthropic_messages"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "claude-sonnet-4-6"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "anthropic-messages"
+    assert provider["baseUrl"] == "https://relay.example.com"
+
+
+def test_pi_skips_image_generation_only_models(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["gpt-image-2", "gpt-5.4"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "codex-relay",
+            "name": "Codex Relay",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-openai",
+            "openai_base_url": "https://relay.example.com/v1",
+            "protocols": ["openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "gpt-5.4"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert [item["id"] for item in provider["models"]] == ["gpt-5.4"]
+
+
+def test_pi_rejects_selected_image_generation_only_model(monkeypatch):
+    import mms_launchers
+    import pytest
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["gpt-image-2"]},
+    )
+
+    with pytest.raises(RuntimeError, match="image-generation-only model"):
+        mms_launchers._pi_build_models_payload(
+            {
+                "id": "codex-relay",
+                "name": "Codex Relay",
+                "enabled": True,
+                "auth_mode": "api_key",
+                "api_key": "sk-openai",
+                "openai_base_url": "https://relay.example.com/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["pi"],
+            },
+            "gpt-image-2",
+        )
+
+
+def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["qwen3.6-flash", "qwen3.7-max"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "qwen-relay",
+            "name": "Qwen Relay",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-qwen",
+            "openai_base_url": "https://relay.example.com/v1",
+            "anthropic_base_url": "https://relay.example.com/anthropic",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "qwen3.6-flash"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    models = []
+    for provider in payload["providers"].values():
+        models.extend(provider["models"])
+    model_by_id = {item["id"]: item for item in models}
+
+    assert model_by_id["qwen3.6-flash"]["contextWindow"] == 1_000_000
+    assert model_by_id["qwen3.6-flash"]["maxTokens"] == 65_536
+    assert model_by_id["qwen3.6-flash"]["input"] == ["text", "image"]
+    assert model_by_id["qwen3.7-max"]["contextWindow"] == 1_000_000
+    assert model_by_id["qwen3.7-max"]["maxTokens"] == 65_536
+    assert model_by_id["qwen3.7-max"]["input"] == ["text"]
 
 
 def test_preset_export_runtime_passes_pi_model_info(monkeypatch):

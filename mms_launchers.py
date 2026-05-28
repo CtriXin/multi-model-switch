@@ -10688,6 +10688,8 @@ _PI_CAPABILITY_REFERENCE_PATH = (
 _PI_MODEL_MAX_TOKENS_HINTS = {
     "deepseek-v4-flash": 384000,
     "deepseek-v4-pro": 384000,
+    "gpt-5.3-codex": 128000,
+    "gpt-5.3-codex-spark": 32000,
     "k2.6": 32768,
     "k2.6-code-preview": 32768,
     "kimi-for-coding": 32768,
@@ -10700,7 +10702,35 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
     "mimo-v2.5-pro[1m]": 131072,
     "mimo-v2.5[1m]": 131072,
     "qwen3.5-plus": 65536,
+    "qwen3.6-flash": 65536,
     "qwen3.6-plus": 65536,
+    "qwen3.7-max": 65536,
+}
+
+_PI_MODEL_CONTEXT_WINDOW_HINTS = {
+    "gpt-5.3-codex": 400000,
+    "gpt-5.3-codex-spark": 128000,
+    "qwen3.6-flash": 1000000,
+    "qwen3.7-max": 1000000,
+}
+
+_PI_MODEL_INPUT_HINTS = {
+    "claude-opus-4-6-thinking": ["text", "image"],
+    "claude-sonnet-4-6": ["text", "image"],
+    "gpt-5.3-codex": ["text", "image"],
+    "gpt-5.3-codex-spark": ["text", "image"],
+    "kimi-for-coding": ["text", "image"],
+    "minimax-m2.7": ["text"],
+    "qwen3.6-flash": ["text", "image"],
+    "qwen3.7-max": ["text"],
+}
+
+_PI_MODEL_UNSUPPORTED_HINTS = {
+    "gemini-3.1-flash-image",
+    "gpt-draw-1024x1024",
+    "gpt-draw-1024x1536",
+    "gpt-draw-1536x1024",
+    "gpt-image-2",
 }
 
 _PI_CAPABILITY_REFERENCE_CACHE = None
@@ -10775,6 +10805,54 @@ def _pi_hint_max_tokens(model_name):
     return None
 
 
+def _pi_hint_context_window(model_name):
+    normalized = _pi_normalize_model_key(model_name)
+    direct = _PI_MODEL_CONTEXT_WINDOW_HINTS.get(normalized)
+    if direct:
+        return direct
+    for key, value in _PI_MODEL_CONTEXT_WINDOW_HINTS.items():
+        if normalized.startswith(key):
+            return value
+    return None
+
+
+def _pi_reference_supports_vision(model_name):
+    row = _pi_reference_model_row(model_name)
+    value = row.get("supports_vision")
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text == "image_generation":
+        return "image_generation"
+    if text in {"true", "false"}:
+        return text == "true"
+    return None
+
+
+def _pi_model_supported(model_name):
+    normalized = _pi_normalize_model_key(model_name)
+    if normalized in _PI_MODEL_UNSUPPORTED_HINTS:
+        return False
+    return _pi_reference_supports_vision(model_name) != "image_generation"
+
+
+def _pi_model_input_types(model_name):
+    normalized = _pi_normalize_model_key(model_name)
+    hint = _PI_MODEL_INPUT_HINTS.get(normalized)
+    if isinstance(hint, list) and hint:
+        return list(hint)
+    if normalized.startswith(("claude-", "gpt-5", "gemini-")):
+        return ["text", "image"]
+    vision_state = _pi_reference_supports_vision(model_name)
+    if vision_state is True:
+        return ["text", "image"]
+    if vision_state == "image_generation":
+        return ["text"]
+    if _model_supports_vision(model_name):
+        return ["text", "image"]
+    return ["text"]
+
+
 def _pi_model_capabilities(runtime, model_name):
     runtime = runtime if isinstance(runtime, dict) else {}
     provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip()
@@ -10829,6 +10907,12 @@ def _pi_model_capabilities(runtime, model_name):
             caps["context_window_tokens"] = reference_context
             caps["sources"]["context_window_tokens"] = "pi_reference_fallback"
 
+    if caps.get("sources", {}).get("context_window_tokens") == "conservative_fallback":
+        hinted_context = _pi_hint_context_window(model_name)
+        if hinted_context:
+            caps["context_window_tokens"] = hinted_context
+            caps["sources"]["context_window_tokens"] = "pi_builtin_hint"
+
     if caps.get("sources", {}).get("max_output_tokens") == "conservative_fallback":
         reference_max = _pi_first_positive_int(
             reference_row,
@@ -10847,17 +10931,36 @@ def _pi_model_capabilities(runtime, model_name):
     return caps
 
 
+def _pi_anthropic_base_root(base_url):
+    url = str(base_url or "").strip().rstrip("/")
+    if url.endswith("/v1/messages"):
+        return url[:-12]
+    if url.endswith("/v1"):
+        return url[:-3]
+    return url
+
+
 def _pi_protocol_variant(runtime, protocol):
     runtime = runtime if isinstance(runtime, dict) else {}
     protocol_name = str(protocol or "").strip()
     if protocol_name == "anthropic_messages":
-        base_url = str(_anthropic_base_url(runtime) or "").strip()
+        base_url = _pi_anthropic_base_root(_anthropic_base_url(runtime))
         if base_url:
             return {
                 "protocol": "anthropic_messages",
                 "api": "anthropic-messages",
                 "base_url": base_url,
                 "label": "Anthropic",
+            }
+        return None
+    if protocol_name == "responses":
+        base_url = str(_openai_base_url(runtime) or "").strip()
+        if base_url:
+            return {
+                "protocol": "responses",
+                "api": "openai-responses",
+                "base_url": base_url,
+                "label": "OpenAI Responses",
             }
         return None
     if protocol_name == "openai_chat_completions":
@@ -10875,7 +10978,7 @@ def _pi_protocol_variant(runtime, protocol):
 
 def _pi_protocol_variants(runtime):
     variants = []
-    for protocol in ("anthropic_messages", "openai_chat_completions"):
+    for protocol in ("anthropic_messages", "responses", "openai_chat_completions"):
         variant = _pi_protocol_variant(runtime, protocol)
         if variant:
             variants.append(variant)
@@ -10931,13 +11034,19 @@ def _pi_pick_protocol(runtime, model_name):
     caps = _pi_model_capabilities(runtime, model_name)
     hints = caps.get("protocol_hints") if isinstance(caps.get("protocol_hints"), dict) else {}
     preferred = str(hints.get("preferred_protocol") or "").strip()
-    if preferred == "responses" and "openai_chat_completions" in available:
-        return variant_by_protocol["openai_chat_completions"], caps
+    if preferred == "responses":
+        if "responses" in available:
+            return variant_by_protocol["responses"], caps
+        if "openai_chat_completions" in available:
+            return variant_by_protocol["openai_chat_completions"], caps
     if preferred in available:
         return variant_by_protocol[preferred], caps
     for protocol_name in hints.get("protocols") or []:
-        if protocol_name == "responses" and "openai_chat_completions" in available:
-            return variant_by_protocol["openai_chat_completions"], caps
+        if protocol_name == "responses":
+            if "responses" in available:
+                return variant_by_protocol["responses"], caps
+            if "openai_chat_completions" in available:
+                return variant_by_protocol["openai_chat_completions"], caps
         if protocol_name in available:
             return variant_by_protocol[protocol_name], caps
     if "anthropic_messages" in available:
@@ -10946,7 +11055,7 @@ def _pi_pick_protocol(runtime, model_name):
 
 
 def _pi_provider_compat(profile_id, protocol):
-    if str(protocol or "").strip() != "openai_chat_completions":
+    if str(protocol or "").strip() not in {"openai_chat_completions", "responses"}:
         return {}
     compat = _PI_OPENAI_PROFILE_COMPAT.get(str(profile_id or "").strip(), {})
     return copy.deepcopy(compat) if compat else {}
@@ -10985,7 +11094,7 @@ def _pi_model_entry(runtime, model_name):
     entry = {
         "id": model_name,
         "name": model_name,
-        "input": ["text", "image"] if _model_supports_vision(model_name) else ["text"],
+        "input": _pi_model_input_types(model_name),
         "contextWindow": int(caps.get("context_window_tokens") or 128000),
         "maxTokens": int(caps.get("max_output_tokens") or 16384),
     }
@@ -11011,7 +11120,12 @@ def _pi_group_provider_ref(base_ref, providers_meta, group_index):
     if len(providers_meta) == 1:
         return base_ref
     meta = providers_meta[group_index]
-    protocol_slug = "anthropic" if meta["protocol"] == "anthropic_messages" else "openai"
+    if meta["protocol"] == "anthropic_messages":
+        protocol_slug = "anthropic"
+    elif meta["protocol"] == "responses":
+        protocol_slug = "responses"
+    else:
+        protocol_slug = "openai"
     compat_slug = _opencode_config_slug(meta["compat_slug"], "compat")
     if compat_slug == "default":
         return f"{base_ref}-{protocol_slug}"
@@ -11026,6 +11140,8 @@ def _pi_build_models_payload(runtime, model_name):
     model_names = _pi_runtime_model_names(runtime, selected_model=model)
     if not model_names:
         raise RuntimeError("Pi runtime requires at least one available model")
+    if not _pi_model_supported(model):
+        raise RuntimeError(f"Pi runner does not support image-generation-only model '{model}'")
 
     base_ref = _pi_provider_ref(runtime)
     base_name = str(runtime.get("name") or runtime.get("id") or base_ref).strip() or base_ref
@@ -11035,6 +11151,8 @@ def _pi_build_models_payload(runtime, model_name):
     selected_group_key = None
 
     for model_name_item in model_names:
+        if not _pi_model_supported(model_name_item):
+            continue
         resolved = _pi_model_entry(runtime, model_name_item)
         provider_compat = resolved["provider_compat"] if isinstance(resolved["provider_compat"], dict) else {}
         compat_key = json.dumps(provider_compat, sort_keys=True, ensure_ascii=True)
@@ -11073,6 +11191,8 @@ def _pi_build_models_payload(runtime, model_name):
             payload["compat"] = group["provider_compat"]
         providers[provider_ref] = payload
 
+    if not providers:
+        raise RuntimeError("Pi runtime did not find any conversational models for the selected provider")
     if not selected_provider_ref:
         selected_provider_ref = next(iter(providers.keys()), base_ref)
     return {"providers": providers}, selected_provider_ref
