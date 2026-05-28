@@ -8176,60 +8176,25 @@ def _handle_provider_rename_config(cfg, args_rest):
 
 
 def _handle_account_rename_config(cfg, args_rest):
-    if len(args_rest) < 2:
-        console.print(f"[red]用法: {current_command()} config account.rename <old_id> <new_id>[/red]")
-        return
-    old_id = args_rest[0].strip()
-    new_id = _normalize_account_id(args_rest[1].strip())
-    accounts = _account_map(cfg)
-    account = accounts.get(old_id)
-    if not account:
-        console.print(f"[red]未找到账号档案: {old_id}[/red]")
-        return
-    if old_id == new_id:
-        console.print("[yellow]新旧文件夹名相同，无需重命名[/yellow]")
-        return
-    if new_id in accounts:
-        console.print(f"[red]目标文件夹名已存在: {new_id}[/red]")
-        return
+    from mms_command_tools import handle_account_rename_config
 
-    backup_dir = _backup_config_tree("account-rename")
-    old_home = os.path.expanduser(str(account.get("home_dir", "")).strip())
-    new_home = _target_account_home(old_home, new_id)
-    if os.path.exists(new_home):
-        console.print(f"[red]目标目录已存在: {new_home}[/red]")
-        console.print(f"[dim]备份目录: {backup_dir}[/dim]")
-        return
-
-    updated_cfg = dict(cfg)
-    updated_accounts = []
-    for item in cfg.get("accounts", []):
-        if item.get("id") != old_id:
-            updated_accounts.append(item)
-            continue
-        renamed = dict(item)
-        renamed["id"] = new_id
-        renamed["name"] = new_id
-        renamed["home_dir"] = new_home
-        updated_accounts.append(_normalize_account(renamed))
-    updated_cfg["accounts"] = updated_accounts
-
-    defaults = dict(cfg.get("account", {}).get("defaults", {}))
-    for cli_name, value in defaults.items():
-        if value == old_id:
-            defaults[cli_name] = new_id
-    updated_cfg["account"] = {"defaults": defaults}
-    updated_cfg, _ = _ensure_account_config(updated_cfg)
-
-    if os.path.exists(old_home):
-        os.makedirs(os.path.dirname(new_home), exist_ok=True)
-        shutil.move(old_home, new_home)
-
-    save_config(updated_cfg)
-    _rename_usage_account(old_id, new_id, new_id, account.get("cli", ""))
-    console.print(f"[green]✓ 已重命名账号档案: {old_id} -> {new_id}[/green]")
-    console.print(f"[dim]新目录: {new_home}[/dim]")
-    console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+    return handle_account_rename_config(
+        cfg,
+        args_rest,
+        command_name=current_command(),
+        normalize_account_id=_normalize_account_id,
+        account_map=_account_map,
+        backup_config_tree=_backup_config_tree,
+        target_account_home=_target_account_home,
+        path_exists=os.path.exists,
+        makedirs=os.makedirs,
+        move=shutil.move,
+        normalize_account=_normalize_account,
+        ensure_account_config=_ensure_account_config,
+        save_config=save_config,
+        rename_usage_account=_rename_usage_account,
+        console=console,
+    )
 
 
 def _migrate_accounts_dirs(cfg):

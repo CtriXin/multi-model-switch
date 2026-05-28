@@ -3752,6 +3752,78 @@ def test_account_edit_remove_handlers_preserve_validation_and_defaults_cleanup()
     assert "[yellow]已取消删除[/yellow]" in console.items
 
 
+def test_account_rename_handler_preserves_backup_move_defaults_and_usage_flow():
+    import mms_command_tools
+
+    cfg = {
+        "accounts": [
+            {"id": "codex-main", "cli": "codex", "name": "Codex", "home_dir": "/old/codex-main"},
+            {"id": "gemini-main", "cli": "gemini", "name": "Gemini", "home_dir": "/old/gemini-main"},
+        ],
+        "account": {"defaults": {"codex": "codex-main", "gemini": "gemini-main"}},
+    }
+    console = _CollectingConsole()
+    calls = []
+    accounts = lambda current: {item["id"]: item for item in current.get("accounts", [])}
+    common = {
+        "command_name": "mmg",
+        "normalize_account_id": lambda value: value.lower().replace("_", "-"),
+        "account_map": accounts,
+        "backup_config_tree": lambda label: calls.append(("backup", label)) or "/tmp/backup",
+        "target_account_home": lambda old_home, new_id: f"/new/{new_id}",
+        "path_exists": lambda path: path == "/old/codex-main",
+        "makedirs": lambda path, exist_ok=False: calls.append(("makedirs", path, exist_ok)),
+        "move": lambda old, new: calls.append(("move", old, new)),
+        "normalize_account": lambda account: {**account, "normalized": True},
+        "ensure_account_config": lambda current: (current, True),
+        "save_config": lambda updated: calls.append(("save", updated)),
+        "rename_usage_account": lambda old_id, new_id, new_name, cli_name: calls.append(
+            ("usage", old_id, new_id, new_name, cli_name)
+        ),
+        "console": console,
+    }
+
+    mms_command_tools.handle_account_rename_config(cfg, ["codex-main"], **common)
+    assert "[red]用法: mmg config account.rename <old_id> <new_id>[/red]" in console.items
+    mms_command_tools.handle_account_rename_config(cfg, ["missing", "new"], **common)
+    assert any("未找到账号档案: missing" in str(item) for item in console.items)
+    mms_command_tools.handle_account_rename_config(cfg, ["codex-main", "codex-main"], **common)
+    assert "[yellow]新旧文件夹名相同，无需重命名[/yellow]" in console.items
+    mms_command_tools.handle_account_rename_config(cfg, ["codex-main", "gemini-main"], **common)
+    assert "[red]目标文件夹名已存在: gemini-main[/red]" in console.items
+    assert calls == []
+
+    console.items.clear()
+    mms_command_tools.handle_account_rename_config(cfg, ["codex-main", "Codex_New"], **common)
+    assert calls[0] == ("backup", "account-rename")
+    assert calls[1] == ("makedirs", "/new", True)
+    assert calls[2] == ("move", "/old/codex-main", "/new/codex-new")
+    assert calls[3][0] == "save"
+    saved_cfg = calls[3][1]
+    assert saved_cfg["account"] == {"defaults": {"codex": "codex-new", "gemini": "gemini-main"}}
+    assert saved_cfg["accounts"][0] == {
+        "id": "codex-new",
+        "cli": "codex",
+        "name": "codex-new",
+        "home_dir": "/new/codex-new",
+        "normalized": True,
+    }
+    assert calls[4] == ("usage", "codex-main", "codex-new", "codex-new", "codex")
+    assert "[green]✓ 已重命名账号档案: codex-main -> codex-new[/green]" in console.items
+    assert "[dim]新目录: /new/codex-new[/dim]" in console.items
+    assert "[dim]备份目录: /tmp/backup[/dim]" in console.items
+
+    console.items.clear()
+    calls.clear()
+    mms_command_tools.handle_account_rename_config(
+        cfg,
+        ["codex-main", "codex-new"],
+        **{**common, "path_exists": lambda path: path == "/new/codex-new"},
+    )
+    assert calls == [("backup", "account-rename")]
+    assert "[red]目标目录已存在: /new/codex-new[/red]" in console.items
+
+
 def test_config_normalization_helpers_preserve_legacy_shapes():
     import mms_command_tools
     import mms_core
