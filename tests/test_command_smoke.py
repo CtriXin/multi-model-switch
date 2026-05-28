@@ -5280,6 +5280,68 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     assert detail == "HTTP 404"
 
 
+def test_prompt_validated_proxy_fields_helper_and_wrapper_preserve_retry_confirm_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    console = _CollectingConsole()
+    prompts = iter(["bad-proxy", "http://proxy:7890", "localhost"])
+    validate_calls = []
+    test_calls = []
+    result = mms_command_tools.prompt_validated_proxy_fields(
+        "http://current:7890",
+        "current.local",
+        target_url="https://target.example",
+        wizard=False,
+        wizard_prompt=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("wizard prompt not expected")),
+        prompt_ask=lambda *args, **kwargs: next(prompts),
+        localize=lambda zh, _en: zh,
+        validate_proxy_url=lambda proxy: validate_calls.append(proxy) or ("bad proxy" if proxy == "bad-proxy" else None),
+        test_proxy_connectivity=lambda proxy, **kwargs: test_calls.append((proxy, kwargs)) or (True, "ok"),
+        confirm_ask=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("confirm not expected")),
+        console=console,
+    )
+    assert result == ("http://proxy:7890", "localhost")
+    assert validate_calls == ["bad-proxy", "http://proxy:7890"]
+    assert test_calls == [
+        (
+            "http://proxy:7890",
+            {"no_proxy": "localhost", "target_url": "https://target.example", "force_ipv4": True},
+        )
+    ]
+    assert console.items == [
+        "[red]bad proxy[/red]",
+        "[dim]正在测试代理连通性: https://target.example[/dim]",
+        "[green]✓ ok[/green]",
+    ]
+
+    prompts = iter(["http://bad:7890", "localhost", "http://bad:7890", "localhost"])
+    confirms = iter([False, True])
+    console = _CollectingConsole()
+    assert mms_command_tools.prompt_validated_proxy_fields(
+        wizard=True,
+        target_url="https://target.example",
+        wizard_prompt=lambda *args, **kwargs: next(prompts),
+        prompt_ask=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("plain prompt not expected")),
+        localize=lambda zh, _en: zh,
+        validate_proxy_url=lambda _proxy: None,
+        test_proxy_connectivity=lambda *_args, **_kwargs: (False, "blocked"),
+        confirm_ask=lambda *_args, **_kwargs: next(confirms),
+        console=console,
+    ) == ("http://bad:7890", "localhost")
+    assert any("代理测试未通过" in str(item) for item in console.items)
+
+    monkeypatch.setattr(mms_core, "_wizard_prompt", lambda *_args, **_kwargs: "http://wrapped:7890")
+    monkeypatch.setattr(mms_core, "_L", lambda zh, _en: zh)
+    monkeypatch.setattr(mms_core, "_validate_proxy_url", lambda _proxy: None)
+    monkeypatch.setattr(mms_core, "_test_proxy_connectivity", lambda proxy, **kwargs: (True, f"{proxy}:{kwargs['target_url']}"))
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+    assert mms_core._prompt_validated_proxy_fields(wizard=True, target_url="https://wrapped.example") == (
+        "http://wrapped:7890",
+        "http://wrapped:7890",
+    )
+
+
 def test_account_normalization_helpers_preserve_oauth_profile_shape(tmp_path):
     import mms_command_tools
 
