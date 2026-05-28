@@ -11,8 +11,6 @@ import logging
 import threading
 import time
 import inspect
-import hashlib
-import tempfile
 import re
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
@@ -1812,18 +1810,9 @@ def _append_config_audit_entry(entry, *, config_path):
 
 
 def _atomic_write_toml(path, cfg):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path))
-    try:
-        with os.fdopen(fd, "wb") as f:
-            tomli_w.dump(cfg, f)
-        os.replace(temp_path, path)
-    finally:
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+    from mms_command_tools import atomic_write_toml
+
+    return atomic_write_toml(path, cfg, tomli_w_module=tomli_w)
 
 
 def save_config(cfg, *, reason=None):

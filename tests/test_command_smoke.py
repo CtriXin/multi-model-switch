@@ -298,6 +298,27 @@ def test_config_backup_and_audit_helpers_preserve_files(tmp_path, monkeypatch):
     assert json.loads(core_audit_path.read_text(encoding="utf-8").strip()) == {"reason": "core"}
 
 
+def test_atomic_write_toml_helper_preserves_replace_and_temp_cleanup(tmp_path, monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    class Writer:
+        @staticmethod
+        def dump(cfg, handle):
+            handle.write(f'message = "{cfg["message"]}"\n'.encode("utf-8"))
+
+    target_path = tmp_path / "nested" / "config.toml"
+    mms_command_tools.atomic_write_toml(str(target_path), {"message": "ok"}, tomli_w_module=Writer)
+    assert target_path.read_text(encoding="utf-8") == 'message = "ok"\n'
+    assert list(target_path.parent.glob("config.toml.*.tmp")) == []
+
+    core_path = tmp_path / "core" / "config.toml"
+    monkeypatch.setattr(mms_core, "tomli_w", Writer)
+    mms_core._atomic_write_toml(str(core_path), {"message": "core"})
+    assert core_path.read_text(encoding="utf-8") == 'message = "core"\n'
+    assert list(core_path.parent.glob("config.toml.*.tmp")) == []
+
+
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 
