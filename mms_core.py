@@ -11226,6 +11226,7 @@ def handle_activate_command(cfg, argv):
 
 def handle_config(cfg, args_rest):
     """处理 config 子命令"""
+    _guard_preview_legacy_config_mutation(args_rest)
     if not args_rest:
         _display_config(cfg)
         return
@@ -12657,6 +12658,8 @@ def _handle_config_validate(cfg):
 def _load_command_config():
     cfg = load_config()
     if cfg is None:
+        if _preview_root_missing_legacy_config():
+            _exit_preview_legacy_config_disabled(["launch"])
         cfg = _default_config()
         save_config(cfg)
     return apply_local_overrides(cfg)
@@ -13636,6 +13639,88 @@ def _is_config_help_request(args_rest):
     }
 
 
+_PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS = {
+    "migrate",
+    "set",
+    "unset",
+    "load-balance.default",
+    "load-balance.profile.add",
+    "load-balance.profile.remove",
+    "provider.default",
+    "provider.add",
+    "provider.edit",
+    "provider.rename",
+    "provider.remove",
+    "provider.credentials",
+    "account.default",
+    "account.add",
+    "account.edit",
+    "account.remove",
+    "account.rename",
+    "account.login",
+    "connect",
+}
+
+
+def _preview_root_mode():
+    try:
+        return mms_config_root_status(command=current_command()).get("mode") == "preview"
+    except Exception:
+        return False
+
+
+def _preview_root_missing_legacy_config():
+    return _preview_root_mode() and not os.path.exists(CONFIG_PATH)
+
+
+def _config_subcommand_mutates_legacy_config(args_rest):
+    if not args_rest:
+        return False
+    key_path = str(args_rest[0] or "").strip()
+    if not key_path or key_path in {"-h", "--help", "help"}:
+        return False
+    if key_path in _PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS:
+        return True
+    if key_path in {"api.setup", "api.edit"}:
+        return True
+    if key_path in {"api.base_url", "api.api_key"}:
+        return len(args_rest) > 1
+    if key_path.startswith("api."):
+        return True
+    if key_path in {"extension.openrouter", "openrouter"}:
+        action = str(args_rest[1] if len(args_rest) > 1 else "").strip()
+        return action in {"add", "enable"}
+    if len(args_rest) == 2 and key_path not in {
+        "get",
+        "provider.list",
+        "account.list",
+        "account.status",
+        "load-balance.show",
+        "validate",
+    }:
+        return True
+    return False
+
+
+def _exit_preview_legacy_config_disabled(args_rest=None):
+    status = mms_config_root_status(command=current_command())
+    root = status.get("config_root") or CONFIG_DIR
+    console.print("[red]Preview root uses v2 DB truth; legacy config.toml writes are disabled.[/red]")
+    console.print(f"[dim]config_root={root}[/dim]")
+    console.print(f"[cyan]下一步:[/cyan] {current_command()} config doctor --json")
+    console.print("[dim]准备预览 root: mmf preview prepare --from ~/.config/mms --json[/dim]")
+    console.print(
+        f"[dim]已审核 plan 后写入预览 DB: {current_command()} config apply-plan "
+        "--plan-json <plan.json> --apply --confirm-preview-apply --json[/dim]"
+    )
+    raise SystemExit(2)
+
+
+def _guard_preview_legacy_config_mutation(args_rest):
+    if _preview_root_mode() and _config_subcommand_mutates_legacy_config(args_rest):
+        _exit_preview_legacy_config_disabled(args_rest)
+
+
 def _is_config_root_status_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
@@ -13805,7 +13890,9 @@ def main():
             cfg = bootstrap_cfg
             if cfg is None:
                 cfg = _default_config()
-                if not _is_config_help_request(argv[1:]):
+                if _preview_root_mode():
+                    _guard_preview_legacy_config_mutation(argv[1:])
+                elif not _is_config_help_request(argv[1:]):
                     save_config(cfg)
             handle_config(cfg, argv[1:])
             return
@@ -14016,6 +14103,8 @@ def main():
 
     # Load or create config
     if user_cfg is None:
+        if _preview_root_missing_legacy_config():
+            _exit_preview_legacy_config_disabled(["launch"])
         user_cfg = setup_wizard(_resolve_ui_language(None, args.lang or lang_override))
 
     cfg = apply_local_overrides(user_cfg)

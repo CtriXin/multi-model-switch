@@ -970,6 +970,58 @@ def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
     assert calls == ["tui"]
 
 
+def test_mmf_missing_preview_config_does_not_run_legacy_setup(monkeypatch, tmp_path, capsys) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+    monkeypatch.setattr(sys, "argv", ["mmf"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: None)
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "setup_wizard", lambda *_args, **_kwargs: pytest.fail("legacy setup must not run for preview root"))
+    monkeypatch.setattr(mms_core, "save_config", lambda *_args, **_kwargs: pytest.fail("preview root must not get legacy config.toml"))
+
+    with pytest.raises(SystemExit) as exc:
+        mms_core.main()
+
+    assert exc.value.code == 2
+    assert not (preview_root / "config.toml").exists()
+    out = capsys.readouterr().out
+    assert "Preview root uses v2 DB truth" in out
+    assert "mmf preview prepare" in out
+
+
+def test_mmf_config_mutation_is_blocked_from_legacy_config_path(monkeypatch, tmp_path, capsys) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+    monkeypatch.setattr(sys, "argv", ["mmf", "config", "provider.default", "demo"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: None)
+    monkeypatch.setattr(mms_core, "save_config", lambda *_args, **_kwargs: pytest.fail("legacy config write must be blocked"))
+
+    with pytest.raises(SystemExit) as exc:
+        mms_core.main()
+
+    assert exc.value.code == 2
+    assert not (preview_root / "config.toml").exists()
+    out = capsys.readouterr().out
+    assert "legacy config.toml writes are disabled" in out
+    assert "config apply-plan" in out
+
+
 def test_mms_numeric_target_no_longer_launches_builtin_scene(monkeypatch, capsys) -> None:
     import mms_core
 
