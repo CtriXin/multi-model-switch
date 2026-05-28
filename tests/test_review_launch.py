@@ -534,6 +534,52 @@ def test_review_launch_latest_approved_router_fails_closed_on_invalid_manifest(m
     assert "latest-approved bundle invalid" in error
 
 
+def test_review_launch_latest_approved_router_fails_closed_on_missing_manifest(monkeypatch, tmp_path):
+    import mms_core
+    from mms_review_launch import _resolve_review_launch_candidates
+
+    config_root = tmp_path / "mms-next"
+    legacy_provider = {
+        "id": "legacy-review-provider",
+        "enabled": True,
+        "role": "auto",
+        "priority": 120,
+        "protocols": ["anthropic_messages"],
+        "anthropic_base_url": "https://legacy.example",
+        "api_key": "legacy-key",
+    }
+    cfg = {"provider": {"default": "legacy-review-provider"}, "providers": [legacy_provider]}
+
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda loaded: loaded)
+    monkeypatch.setattr(mms_core, "_default_config", lambda: {})
+    monkeypatch.setattr(
+        mms_core,
+        "resolve_provider_context",
+        lambda _loaded, _provider_id: legacy_provider,
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_load_probe_file_cache",
+        lambda _provider_id, allow_stale=False: {"raw_models": ["review-model"]},
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda _loaded, default, default_models: [(default, default_models)],
+    )
+    monkeypatch.setattr(mms_core, "_provider_effective_models", lambda _provider, cached, _cfg=None: list(cached or []))
+
+    candidates, error = _resolve_review_launch_candidates(
+        "review-model",
+        {"MMS_CONFIG_ROOT": str(config_root)},
+    )
+
+    assert candidates == []
+    assert "latest-approved bundle missing" in error
+    assert str(config_root / "generated" / "model-registry.latest-approved.json") in error
+
+
 def test_review_launch_gpt_auto_uses_openai_chat_on_dual_provider(monkeypatch):
     import mms_core
     from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
