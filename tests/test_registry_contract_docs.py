@@ -12,6 +12,12 @@ CONTRACT_DOCS = [
 ]
 MMF_V2_DOC = ROOT / "docs/MMF_CONFIG_ROOT_V2_DB_TRUTH.md"
 RESCUE_DOC = ROOT / "docs/RESCUE_FALLBACK.md"
+LLM_OPERATION_GUIDE = ROOT / "docs/LLM_OPERATION_GUIDE.md"
+ARCHITECTURE_DOCS = [
+    ROOT / "docs/images/architecture-mainline.mmd",
+    ROOT / "docs/images/architecture-mainline-en.html",
+    ROOT / "docs/images/architecture-mainline-cn.html",
+]
 
 
 def _contract_text() -> str:
@@ -24,6 +30,14 @@ def _mmf_v2_text() -> str:
 
 def _rescue_text() -> str:
     return RESCUE_DOC.read_text(encoding="utf-8")
+
+
+def _llm_operation_text() -> str:
+    return LLM_OPERATION_GUIDE.read_text(encoding="utf-8")
+
+
+def _architecture_text() -> str:
+    return "\n".join(path.read_text(encoding="utf-8") for path in ARCHITECTURE_DOCS)
 
 
 def test_registry_contract_docs_define_latest_approved_bundle_terms() -> None:
@@ -151,6 +165,48 @@ def test_rescue_docs_record_latest_approved_route_boundary() -> None:
 
     missing = [term for term in required_terms if term not in text]
     assert missing == []
+
+
+def test_llm_operation_guide_points_profile_and_policy_to_registry_v2() -> None:
+    text = _llm_operation_text()
+
+    required_terms = [
+        "Registry v2 Profile through TUI / `mms config` / WebUI",
+        "legacy `provider-profiles.json` overlays are import/export compatibility",
+        "Registry v2 Policy through TUI / `mms config` / WebUI",
+        "legacy `model-policy.json` is compatibility/import-export only",
+        "downstream consumers read the latest-approved bundle",
+    ]
+    forbidden_guidance = [
+        "| Model visibility / favorite / project policy | `model-policy.json` |",
+        "Use `~/.config/mms/provider-profiles.json` or `~/.config/mms/model-profiles.json` only as human-managed local overlays.",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    present = [phrase for phrase in forbidden_guidance if phrase in text]
+    assert missing == []
+    assert present == []
+
+
+def test_architecture_images_show_latest_approved_bundle_not_legacy_route_truth() -> None:
+    text = _architecture_text()
+
+    required_terms = [
+        "generated/model-registry.latest-approved.json",
+        "compatibility exports",
+        "latest-approved",
+    ]
+    forbidden_guidance = [
+        "persistent truth",
+        "`model-routes.json`, route keyword files, gateway slots, and speed stats expose the current runtime picture.",
+        "<code>model-routes.json</code>, route keyword files, gateway slots, and speed stats expose the current runtime picture.",
+        "<code>model-routes.json</code>、route keyword 文件、gateway slots、speed stats 共同暴露当前 runtime picture。",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    present = [phrase for phrase in forbidden_guidance if phrase in text]
+    assert missing == []
+    assert present == []
 
 
 def test_reference_snapshot_schema_and_source_keys_are_readable() -> None:

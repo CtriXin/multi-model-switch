@@ -3532,7 +3532,7 @@ def _trigger_routes_export_after_usage_write():
 
 
 def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False):
-    """Synchronously refresh the Hive-facing routes export from current config."""
+    """Synchronously refresh the legacy route export from current config."""
     try:
         from mms_router import export_model_routes
 
@@ -3549,7 +3549,7 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startu
         return True
     except Exception as exc:
         if not quiet:
-            console.print(f"[yellow]⚠ Hive routes export 刷新失败: {exc}[/yellow]")
+            console.print(f"[yellow]⚠ Legacy routes export 刷新失败: {exc}[/yellow]")
         return False
 
 
