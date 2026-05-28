@@ -12,7 +12,7 @@
 
 MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`opencode`、`agy` 等本地 AI coding CLI 前面的控制面；Qwen/Kimi/Gemini 保留为 provider model，不再作为独立 CLI 启动。
 
-MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review helper 属于 legacy / maintenance-only 表面，除非直接支持 launcher/session 验证，否则不继续扩展；长期规划、执行、压缩策略和 run authority 应放在 Moebius、Pilot、Ant 或 addons。
+MMS 的主线是 launcher-first。旧的内置 `chat` / `discuss` 客户端已删除；`review-launch` 只保留为窄口径 multi-review adapter handshake。长期规划、执行、压缩策略和 run authority 应放在 Moebius、Pilot、Ant 或 addons。
 
 它解决这些问题：
 
@@ -31,7 +31,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 - Codex primary/rescue fallback 遇到 GLM/DeepSeek/Qwen-compatible prompt-cache-sensitive route 拒绝 `/v1/chat/completions` 时，会自动改走 Anthropic `/v1/messages`
 - provider profiles 覆盖 OpenAI、Qwen/DashScope、MiMo、MiniMax、DeepSeek、Kimi Code、GLM/Z.ai
-- bridge / launcher / chat / discuss / router 共享 profile-driven auth/body/thinking/effort patch
+- launcher / bridge / router / dispatch paths 共享 profile-driven auth/body/thinking/effort patch
 - Claude 通过 `.claude/projects` 恢复项目级 resume
 - mmd 启动 Claude 时恢复 vision sidecar：text-only 国产模型遇到截图/图片会 fail closed，或委托已配置的 Kimi/MiMo/Qwen-compatible sidecar 先读图，避免卡死
 - Codex 在隔离的 MMS-managed launch 之间做 bounded resume write-back

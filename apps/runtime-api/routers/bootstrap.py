@@ -13,11 +13,9 @@ async def get_bootstrap():
     return {
         "version": "0.1.0",
         "features": [
-            "chat",
-            "discuss",
-            "multi-model",
-            "sse-streaming",
-            "phase-discuss",
+            "launcher-runtime",
+            "model-routing",
+            "gateway-proxy",
             "model-presets",
         ],
         "providers": [p.model_dump() for p in MOCK_PROVIDERS],
@@ -25,7 +23,5 @@ async def get_bootstrap():
         "presets": [p.model_dump() for p in MOCK_PRESETS],
         "limits": {
             "maxModels": 5,
-            "minModelsChat": 2,
-            "minModelsDiscuss": 2,
         },
     }

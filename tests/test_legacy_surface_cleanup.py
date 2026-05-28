@@ -472,22 +472,24 @@ def test_about_tui_payload_surfaces_upgrade_actions_for_outdated_versions() -> N
     assert ("upgrade_mms_clis", "升级 MMS + Codex/Claude CLI") not in actions
 
 
-def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:
-    import mms_chat
-    import mms_discuss
+def test_legacy_chat_discuss_modules_are_physically_removed() -> None:
+    for filename in ("mms_chat.py", "mms_discuss.py", "mms_action_bar.py", "mms_session.py"):
+        assert not (ROOT / filename).exists()
 
-    with pytest.raises(SystemExit) as chat_exit:
-        mms_chat.parse_chat_args(["--help"])
-    with pytest.raises(SystemExit) as discuss_exit:
-        mms_discuss.parse_discuss_args(["--help"])
+    for module_name in ("mms_chat", "mms_discuss", "mms_action_bar", "mms_session"):
+        with pytest.raises(ModuleNotFoundError):
+            __import__(module_name)
 
-    assert chat_exit.value.code == 0
-    assert discuss_exit.value.code == 0
-    out = capsys.readouterr().out
-    assert "mms chat 是 legacy/maintenance-only 子命令" in out
-    assert "mms discuss 是 legacy/maintenance-only 子命令" in out
-    assert "`mms` TUI" in out
-    assert "TUI Settings / Maintenance" in out
+
+def test_legacy_chat_discuss_product_docs_are_removed() -> None:
+    removed_docs = (
+        ROOT / "docs" / "JUDGE_MODULE_BRIEF.md",
+        ROOT / "docs" / "MOBILE_ADVANCED_DIRECTIONS.md",
+        ROOT / "docs" / "legacy" / "CHAT_DISCUSS_PRODUCT_SPEC.md",
+    )
+
+    for path in removed_docs:
+        assert not path.exists()
 
 
 def test_mmc_help_is_migration_shim_not_live_launch(capsys) -> None:
@@ -515,25 +517,24 @@ def test_mms_help_keeps_review_launch_outside_legacy_bucket(monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "registry ..." in out
     assert "review-launch" in out
-    assert "Legacy / emergency-only 模块（默认入口已下线）" in out
-    assert "chat/discuss    默认拒绝直接启动" in out
-    assert "MMS_ENABLE_LEGACY_CHAT_DISCUSS=1" in out
+    assert "Legacy / emergency-only 模块" not in out
+    assert "chat/discuss" not in out
+    assert "MMS_ENABLE_LEGACY_CHAT_DISCUSS" not in out
 
 
-def test_mms_chat_discuss_direct_commands_are_disabled_by_default(monkeypatch, capsys) -> None:
+def test_mms_chat_discuss_commands_are_unknown_after_delete(monkeypatch, capsys) -> None:
     import mms_core
 
-    monkeypatch.delenv("MMS_ENABLE_LEGACY_CHAT_DISCUSS", raising=False)
     monkeypatch.setattr(sys, "argv", ["mms", "chat"])
     monkeypatch.setattr(mms_core, "load_config", lambda: {"user": {}, "recommend": {}})
-    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: pytest.fail("snapshot should not run"))
-    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: pytest.fail("routes export should not run"))
+    monkeypatch.setattr(mms_core, "_load_command_config", lambda: {"user": {}, "recommend": {}})
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: None)
 
     mms_core.main()
 
     out = capsys.readouterr().out
-    assert "`mms chat` 已从默认入口下线" in out
-    assert "MMS_ENABLE_LEGACY_CHAT_DISCUSS=1" in out
+    assert "未知目标: chat" in out
 
 
 def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
@@ -603,20 +604,14 @@ def test_review_launch_is_not_legacy_cleanup_target() -> None:
         for replacement in descriptor.replacement_for
     }
 
-    assert "| Review launch |" in text
-    assert "not a legacy chat/discuss cleanup target" in text
+    assert "| `mms review-launch` |" in text
+    assert "kept as future multi-review adapter" in text
     assert "mms review-launch" not in replacements
 
 
-def test_legacy_modules_remain_importable_until_physical_delete_phase() -> None:
+def test_non_chat_legacy_helpers_remain_importable() -> None:
     import mmc_core
-    import mms_action_bar
-    import mms_chat
-    import mms_discuss
     import mms_usage
 
-    assert mms_chat.chat_main
-    assert mms_discuss.discuss_main
-    assert mms_action_bar.run_chat_loop
     assert mms_usage.usage_main
     assert mmc_core.main

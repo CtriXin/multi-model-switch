@@ -30,10 +30,10 @@
 - `mms_tui.py`
 - `mms_bridge.py`
 - `mms_account_state.py`
-- `mms_session.py`
+- `mms_session_index.py`
 - `mms_adapter_registry.py`
 - `mms`
-- retired `ccs` 入口相关清理逻辑
+- retired `ccs` 入口和 deleted legacy `mms_session.py` 相关清理逻辑
 
 如果任务涉及这些文件，agent 必须先说明改动边界，再动手。
 
@@ -132,7 +132,7 @@
 - 私自改变默认模型、默认 provider、默认 account、默认 bridge 策略
 - 私自改变已有字段语义，尤其是 `model_info`、`runtime`、`provider`、`account` 相关字段
 - 把显示层需要的数据和启动层需要的数据混在一起，导致 UI 选项和实际执行不一致
-- 重新引入已退休的 legacy `ccs` shim、`~/.config/ccs` 旧配置 fallback 或 `CCS_*` 环境变量兼容
+- 重新引入已退休的 legacy `ccs` shim、`~/.config/ccs` 旧配置 fallback、`CCS_*` 环境变量兼容，或已删除的 legacy chat session module
 - 在未验证的情况下改动 HOME/XDG/状态目录隔离逻辑
 - 为了实现新功能，直接覆盖已有选择流程、确认流程或 bridge 路由
 - 把一次性的实验逻辑直接变成默认行为，且没有显式开关或任务上下文说明

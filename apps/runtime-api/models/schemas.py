@@ -1,7 +1,7 @@
 """
 Pydantic schemas for API
 """
-from typing import List, Optional, Literal
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -58,79 +58,12 @@ class AccountInfo(BaseModel):
 
 class Session(BaseModel):
     id: str
-    mode: Literal["chat", "discuss"]
+    mode: str
     title: str
     models: List[str]
     createdAt: str
     updatedAt: str
     messageCount: int
-
-
-# ============================================================================
-# Chat Schemas
-# ============================================================================
-
-class Brief(BaseModel):
-    approach: str
-    reasoning: str
-    risks: List[str]
-    keyDecisions: List[str]
-    nextStep: str
-
-
-class ChatRequest(BaseModel):
-    models: List[str]
-    prompt: str
-    sessionId: Optional[str] = None
-    images: Optional[List[str]] = None
-
-
-class ChatResponse(BaseModel):
-    model: str
-    content: str
-    displayText: str
-    brief: Optional[Brief] = None
-    elapsed: float
-    status: str
-    error: Optional[str] = None
-    timestamp: str
-
-
-# ============================================================================
-# Discuss Schemas
-# ============================================================================
-
-class DiscussRequest(BaseModel):
-    models: List[str]
-    prompt: str
-    cross: bool = True
-    sessionId: Optional[str] = None
-
-
-class Phase1Summary(BaseModel):
-    model: str
-    ok: bool
-    brief: Optional[Brief] = None
-    content: Optional[str] = None
-    error: Optional[str] = None
-    elapsed: float
-
-
-class Phase2Review(BaseModel):
-    reviewer: str
-    target: str
-    ok: bool
-    agreement: Optional[str] = None
-    challenge: Optional[str] = None
-    betterOption: Optional[str] = None
-    error: Optional[str] = None
-    skipped: bool = False
-
-
-class Phase3Synthesis(BaseModel):
-    synthesizer: str
-    content: str
-    elapsed: float
 
 
 # ============================================================================

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from routers import bootstrap, models, sessions, chat, discuss, gateway
+from routers import bootstrap, models, sessions, gateway
 from services.gateway_state import init_gateway_state
 
 
@@ -45,8 +45,6 @@ app.add_middleware(
 app.include_router(bootstrap.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
-app.include_router(chat.router, prefix="/api")
-app.include_router(discuss.router, prefix="/api")
 app.include_router(gateway.router)
 
 

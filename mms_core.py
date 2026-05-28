@@ -11924,7 +11924,7 @@ def handle_session_command(argv):
     _ensure_rich()
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} session",
-        description="查看 MMS 托管 session，或恢复 legacy chat session",
+        description="查看 MMS 托管 CLI session",
     )
     subparsers = parser.add_subparsers(dest="subcommand")
 
@@ -11934,10 +11934,6 @@ def handle_session_command(argv):
     info_parser = subparsers.add_parser("info", help="查看单个 session 详情")
     info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
     info_parser.add_argument("--cli", default="claude", choices=["claude"])
-
-    resume_parser = subparsers.add_parser("resume", help="恢复 legacy chat session")
-    resume_parser.add_argument("session_ref", help="session id / 前缀 / 最近列表序号")
-    resume_parser.add_argument("--provider", help="临时指定 provider")
 
     prune_parser = subparsers.add_parser("prune", help="列出或删除 stale MMS gateway session")
     prune_parser.add_argument("--cli", default="all", choices=["claude", "codex", "opencode", "all"])
@@ -11955,21 +11951,6 @@ def handle_session_command(argv):
     if args.subcommand == "prune":
         _handle_session_prune(args.cli, apply=bool(args.apply), yes=bool(args.yes))
         return
-    if args.subcommand == "resume":
-        from mms_chat import chat_main
-        from mms_session import resolve_session_ref
-
-        resolved_id, error = resolve_session_ref(args.session_ref, cwd=_safe_getcwd())
-        if not resolved_id:
-            console.print(f"[red]{error or f'找不到 session: {args.session_ref}'}[/red]")
-            return
-
-        chat_argv = ["--resume", resolved_id]
-        if args.provider:
-            chat_argv.extend(["--provider", args.provider])
-        chat_main(_load_command_config(), chat_argv)
-        return
-
     parser.print_help()
 
 
@@ -12678,24 +12659,6 @@ def _is_session_prune_dry_run(argv):
     return "--apply" not in argv
 
 
-def _legacy_chat_discuss_enabled():
-    value = str(os.environ.get("MMS_ENABLE_LEGACY_CHAT_DISCUSS") or "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
-
-
-def _handle_disabled_legacy_chat_discuss(command):
-    command = str(command or "").strip()
-    if command not in {"chat", "discuss"}:
-        return False
-    if _legacy_chat_discuss_enabled():
-        return False
-    _ensure_rich()
-    console.print(f"[yellow]`{current_command()} {command}` 已从默认入口下线。[/yellow]")
-    console.print("[cyan]新会话请直接运行 `mms` / `mmd`，通过 TUI 选择 CLI、模型、fallback 与设置。[/cyan]")
-    console.print("[dim]兼容模块暂时保留给内部依赖；如确需一次性旧入口，可设置 MMS_ENABLE_LEGACY_CHAT_DISCUSS=1。[/dim]")
-    return True
-
-
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
     help_request = _is_help_request(argv) or _is_setup_web_request(argv)
@@ -12727,9 +12690,10 @@ def main():
         if _is_session_prune_dry_run(argv):
             handle_session_command(argv[1:])
             return
-
-    if len(argv) >= 1 and _handle_disabled_legacy_chat_discuss(argv[0]):
-        return
+        if command in {"chat", "discuss"}:
+            _ensure_rich()
+            console.print(f"[red]未知目标: {command}[/red]")
+            return
 
     if not help_request:
         _ensure_startup_snapshot_guard(
@@ -12772,16 +12736,6 @@ def main():
                 config_path=_config_write_target_path(),
                 preferences_path=PREFERENCES_PATHS[0],
             ))
-        if command == "chat":
-            from mms_chat import chat_main
-
-            chat_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
-            return
-        if command == "discuss":
-            from mms_discuss import discuss_main
-
-            discuss_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
-            return
         if command == "usage":
             from mms_usage import usage_main
 
@@ -12827,17 +12781,6 @@ def main():
             handle_activate_command(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
 
-    if len(argv) >= 1 and argv[0] == "discuss":
-        from mms_discuss import discuss_main
-
-        cfg = bootstrap_cfg
-        if cfg is None:
-            cfg = _default_config()
-            save_config(cfg)
-        cfg = apply_local_overrides(cfg)
-        discuss_main(cfg, argv[1:])
-        return
-
     parser = argparse.ArgumentParser(
         prog=current_command(),
         description=f"{display_title()} — AI Coding CLI 统一启动器",
@@ -12865,10 +12808,7 @@ def main():
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
-            f"  {current_command()} usage ...       查看 usage 统计\n\n"
-            "Legacy / emergency-only 模块（默认入口已下线）:\n"
-            f"  {current_command()} chat/discuss    默认拒绝直接启动；新会话请用 TUI launcher\n"
-            "  MMS_ENABLE_LEGACY_CHAT_DISCUSS=1 可临时打开旧入口"
+            f"  {current_command()} usage ...       查看 usage 统计"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

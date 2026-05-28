@@ -12,7 +12,7 @@
 
 MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `agy`; Qwen/Kimi/Gemini remain provider models, not standalone CLI launchers.
 
-Scope note: MMS is intentionally launcher-first. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
+Scope note: MMS is intentionally launcher-first. The old native `chat` / `discuss` client is removed; `review-launch` remains only as a narrow multi-review adapter handshake. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
 
 It helps you:
 
@@ -31,7 +31,7 @@ Key changes in this generation:
 
 - Codex primary/rescue fallback now retries prompt-cache-sensitive GLM/DeepSeek/Qwen-compatible routes over Anthropic `/v1/messages` when a gateway rejects `/v1/chat/completions`
 - provider profiles for OpenAI, Qwen/DashScope, MiMo, MiniMax, DeepSeek, Kimi Code, and GLM/Z.ai
-- profile-driven auth/body/thinking/effort patching across bridge and dispatch paths
+- profile-driven auth/body/thinking/effort patching across launcher, bridge, router, and dispatch paths
 - Claude resume persistence through `.claude/projects`
 - Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
 - Codex resume write-back across isolated MMS-managed launches

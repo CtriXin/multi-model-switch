@@ -261,23 +261,4 @@ MOCK_ACCOUNTS: list[AccountInfo] = [
 ]
 
 
-MOCK_SESSIONS: list[dict] = [
-    {
-        "id": "sess-001",
-        "mode": "chat",
-        "title": "前端架构讨论",
-        "models": ["claude-sonnet-4-6", "gpt-4.1-mini"],
-        "createdAt": "2024-03-15T10:00:00Z",
-        "updatedAt": "2024-03-15T10:30:00Z",
-        "messageCount": 5,
-    },
-    {
-        "id": "sess-002",
-        "mode": "discuss",
-        "title": "API 设计方案评审",
-        "models": ["claude-opus-4-6", "deepseek-r1", "gemini-2.5-pro"],
-        "createdAt": "2024-03-14T15:00:00Z",
-        "updatedAt": "2024-03-14T16:00:00Z",
-        "messageCount": 1,
-    },
-]
+MOCK_SESSIONS: list[dict] = []

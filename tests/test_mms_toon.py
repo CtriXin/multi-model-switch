@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import io
 
 
@@ -68,63 +67,3 @@ def test_mms_toon_cli_reads_json_from_stdin(monkeypatch, capsys):
     assert captured.out.startswith("TOON:\n")
     assert "rows[2]{id,ok}:" in captured.out
     assert "  a,true" in captured.out
-
-
-def test_phase3_synthesize_formats_structured_payload_as_toon(monkeypatch, tmp_path):
-    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path / "mms-config"))
-
-    import mms_discuss
-
-    captured = {}
-
-    async def fake_stream_model(_client, _base_url, _api_key, _model, messages, max_tokens, **_kwargs):
-        captured["messages"] = messages
-        captured["max_tokens"] = max_tokens
-        yield "done"
-
-    class FakeLive:
-        def __init__(self, *_args, **_kwargs):
-            self.renderables = []
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def update(self, renderable):
-            self.renderables.append(renderable)
-
-    monkeypatch.setattr(mms_discuss, "stream_model", fake_stream_model)
-    monkeypatch.setattr(mms_discuss, "Live", FakeLive)
-
-    summaries = {
-        f"model-{index}": {
-            "ok": True,
-            "data": {
-                "approach": "short plan",
-                "reasoning": "because it is smaller",
-                "risks": ["schema drift", "unknown model familiarity"],
-                "key_decisions": ["fallback to JSON", "measure chars"],
-                "next_step": "ship adapter",
-            },
-        }
-        for index in range(8)
-    }
-
-    result = asyncio.run(
-        mms_discuss.phase3_synthesize(
-            {"base_url": "https://example.invalid", "api_key": "test"},
-            object(),
-            "judge-model",
-            "compare structured payload formats",
-            summaries,
-        )
-    )
-
-    assert result == "done"
-    assert captured["max_tokens"] == 1400
-    user_message = captured["messages"][1]["content"]
-    assert user_message.startswith("TOON:\n")
-    assert "summaries:" in user_message
-    assert "model-0:" in user_message
