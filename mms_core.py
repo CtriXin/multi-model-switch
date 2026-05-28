@@ -5312,6 +5312,8 @@ def _registry_v2_save_plan_rows(plan):
     db = plan.get("db") if isinstance(plan.get("db"), dict) else {}
     would_write = plan.get("would_write") if isinstance(plan.get("would_write"), dict) else {}
     legacy = would_write.get("legacy_compat_files") if isinstance(would_write.get("legacy_compat_files"), dict) else {}
+    plan_json = plan.get("plan_json") if isinstance(plan.get("plan_json"), dict) else {}
+    apply_plan = plan.get("apply_plan") if isinstance(plan.get("apply_plan"), dict) else {}
     blocked = ", ".join(str(item) for item in (plan.get("blocked_reasons") or [])) or "-"
     steps = " -> ".join(str(item) for item in (plan.get("ordered_steps") or [])) or "-"
     return [
@@ -5330,6 +5332,10 @@ def _registry_v2_save_plan_rows(plan):
         (_L("Legacy model-policy.json", "legacy model-policy.json"), "yes" if legacy.get("model_policy_json") else "no"),
         (_L("Legacy credentials.sh", "legacy credentials.sh"), "yes" if legacy.get("credentials_sh") else "no"),
         (_L("阻塞原因", "blocked reasons"), blocked),
+        (_L("Plan JSON", "Plan JSON"), plan_json.get("name") or "-"),
+        (_L("Plan JSON 密钥", "Plan JSON secrets"), "redacted" if plan_json.get("redacted") else ("included" if plan_json.get("secrets_included") else "-")),
+        (_L("WebUI 写入", "WebUI apply"), apply_plan.get("webui_button") or "-"),
+        (_L("CLI 写入命令", "CLI apply command"), apply_plan.get("cli_apply_command") or "-"),
         (_L("步骤", "steps"), steps),
         (_L("下一步", "next step"), plan.get("next_implementation_step") or "-"),
     ]

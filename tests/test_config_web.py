@@ -156,6 +156,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "missing keys" in html
     assert "registry_v2_save_plan" in html
     assert "applyV2Preview" in html
+    assert "downloadPlanJson" in html
+    assert "copyApplyCommand" in html
+    assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
+    assert "function planJsonHint(plan)" in html
+    assert "currentApplyCommand()" in html
     assert "/api/registry-v2/apply" in html
     assert "写入预览DB" in html
     assert "Preview root 下 legacy 确认保存会被阻止" in html
@@ -460,6 +465,13 @@ def test_config_web_plan_includes_read_only_registry_v2_save_plan(tmp_path):
     assert v2_plan["would_write"]["generated_latest_approved_bundle"] is True
     assert v2_plan["blocked_reasons"] == []
     assert "rollback" in " ".join(v2_plan["ordered_steps"])
+    assert v2_plan["plan_json"]["name"] == "webui-plan.json"
+    assert v2_plan["plan_json"]["redacted"] is True
+    assert v2_plan["plan_json"]["secrets_included"] is False
+    assert v2_plan["apply_plan"]["webui_endpoint"] == "/api/registry-v2/apply"
+    assert v2_plan["apply_plan"]["confirm_phrase"] == "写入预览DB"
+    assert "--confirm-preview-apply" in v2_plan["apply_plan"]["cli_apply_command"]
+    assert "credential updates should be applied through WebUI" in v2_plan["apply_plan"]["credential_note"]
     assert "WebUI and mms config apply-plan are wired" in v2_plan["next_implementation_step"]
     assert "sk-super-secret-value" not in encoded
 

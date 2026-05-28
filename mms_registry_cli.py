@@ -659,6 +659,8 @@ def registry_v2_save_plan(
         blocked_reasons.append("stable_root_human_only")
     if not has_changes:
         blocked_reasons.append("no_draft_changes")
+    plan_json_name = "webui-plan.json"
+    cli_apply_command = f"./mmf config apply-plan --plan-json <{plan_json_name}> --apply --confirm-preview-apply --json"
     return {
         "schema": REGISTRY_V2_SAVE_PLAN_SCHEMA,
         "read_only": True,
@@ -690,6 +692,24 @@ def registry_v2_save_plan(
             "rollback to backup on failure",
         ],
         "blocked_reasons": blocked_reasons,
+        "plan_json": {
+            "name": plan_json_name,
+            "source": "WebUI /api/plan response or mms config save-plan --json output",
+            "redacted": True,
+            "secrets_included": False,
+            "safe_to_share": False,
+            "note": "Review artifact; WebUI /api/plan redacts API keys. Use the WebUI apply button when credential updates need plaintext transfer.",
+        },
+        "apply_plan": {
+            "webui_endpoint": "/api/registry-v2/apply",
+            "webui_button": "写入预览 DB + 发布",
+            "confirm_phrase": "写入预览DB",
+            "cli_apply_command": cli_apply_command,
+            "cli_dry_run_command": f"./mmf config apply-plan --plan-json <{plan_json_name}> --json",
+            "requires_preview_root": True,
+            "blocked_in_current_root": mode != "preview",
+            "credential_note": "Downloaded WebUI plan JSON is redacted; credential updates should be applied through WebUI or a local secret-bearing plan file that is not shared.",
+        },
         "next_implementation_step": "WebUI and mms config apply-plan are wired; next: TUI/native save and stable promotion after human-gated validation",
     }
 
@@ -2990,6 +3010,12 @@ def _print_registry_v2_save_plan(plan: dict[str, Any]) -> None:
     print(f"would_write_legacy_model_policy_json={legacy.get('model_policy_json', False)}")
     print(f"would_write_legacy_credentials_sh={legacy.get('credentials_sh', False)}")
     print(f"blocked_reasons={','.join(str(item) for item in (plan.get('blocked_reasons') or []))}")
+    plan_json = plan.get("plan_json") if isinstance(plan.get("plan_json"), dict) else {}
+    apply_plan = plan.get("apply_plan") if isinstance(plan.get("apply_plan"), dict) else {}
+    print(f"plan_json_name={plan_json.get('name', '')}")
+    print(f"plan_json_redacted={plan_json.get('redacted', False)}")
+    print(f"webui_apply_endpoint={apply_plan.get('webui_endpoint', '')}")
+    print(f"cli_apply_command={apply_plan.get('cli_apply_command', '')}")
     for index, step in enumerate(plan.get("ordered_steps") or [], start=1):
         print(f"step_{index}={step}")
     print(f"next_implementation_step={plan.get('next_implementation_step', '')}")

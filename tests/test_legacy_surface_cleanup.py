@@ -568,6 +568,11 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
             },
             "ordered_steps": ["backup preview registry DB", "verify manifest hashes"],
             "blocked_reasons": [],
+            "plan_json": {"name": "webui-plan.json", "redacted": True, "secrets_included": False},
+            "apply_plan": {
+                "webui_button": "写入预览 DB + 发布",
+                "cli_apply_command": "./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json",
+            },
             "next_implementation_step": "wire save later",
         }
     )
@@ -578,6 +583,10 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("将备份 DB", "yes") in plan_rows
     assert ("Secret backend", "no") in plan_rows
     assert ("阻塞原因", "-") in plan_rows
+    assert ("Plan JSON", "webui-plan.json") in plan_rows
+    assert ("Plan JSON 密钥", "redacted") in plan_rows
+    assert ("WebUI 写入", "写入预览 DB + 发布") in plan_rows
+    assert ("CLI 写入命令", "./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json") in plan_rows
     assert "只读计划" in plan_note
 
     doctor_title, doctor_rows, doctor_note = mms_core._preview_doctor_report_payload(

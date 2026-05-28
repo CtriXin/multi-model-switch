@@ -699,6 +699,13 @@ def test_registry_v2_save_plan_reports_preview_backup_sequence_without_secrets(t
     assert plan["would_write"]["legacy_compat_files"]["credentials_sh"] is True
     assert plan["blocked_reasons"] == []
     assert "rollback" in " ".join(plan["ordered_steps"])
+    assert plan["plan_json"]["name"] == "webui-plan.json"
+    assert plan["plan_json"]["redacted"] is True
+    assert plan["plan_json"]["secrets_included"] is False
+    assert plan["apply_plan"]["webui_endpoint"] == "/api/registry-v2/apply"
+    assert plan["apply_plan"]["confirm_phrase"] == "写入预览DB"
+    assert "--confirm-preview-apply" in plan["apply_plan"]["cli_apply_command"]
+    assert "Downloaded WebUI plan JSON is redacted" in plan["apply_plan"]["credential_note"]
     assert "WebUI and mms config apply-plan are wired" in plan["next_implementation_step"]
     assert "wire WebUI" not in plan["next_implementation_step"]
     assert "sk-preview-secret" not in encoded
