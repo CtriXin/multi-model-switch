@@ -5138,32 +5138,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     _print_settings_result_report(*_registry_doctor_report_payload(status))
                     _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "about":
-                while True:
-                    about_snapshot = _about_status_snapshot(force_update=False)
-                    about_title, about_lines, about_actions = _about_tui_payload(about_snapshot)
-                    about_action = tui_flow.safe_tui_call(
-                        select_channel_action_tui,
-                        about_title,
-                        about_lines,
-                        about_actions,
-                    )
-                    if about_action == "__interrupt__":
-                        return True
-                    if about_action in {None, "back"}:
-                        break
-                    if about_action == "refresh_versions":
-                        console.print("[cyan]正在刷新 MMS / Codex / Claude 版本检查...[/cyan]")
-                        _about_status_snapshot(force_update=True)
-                        continue
-                    if about_action in {"upgrade_mms", "upgrade_codex_cli", "upgrade_claude_cli"}:
-                        upgrade_target = {
-                            "upgrade_mms": "mms",
-                            "upgrade_codex_cli": "codex",
-                            "upgrade_claude_cli": "claude",
-                        }[about_action]
-                        _run_about_upgrade(target=upgrade_target)
-                        _pause_after_tui_report("按 Enter 返回关于")
-                        continue
+                about_result = tui_flow.handle_tui_about_settings_action(
+                    about_status_snapshot=_about_status_snapshot,
+                    about_tui_payload=_about_tui_payload,
+                    select_channel_action_tui=select_channel_action_tui,
+                    run_about_upgrade=_run_about_upgrade,
+                    pause_after_tui_report=_pause_after_tui_report,
+                    console=console,
+                )
+                if about_result["status"] == "interrupt":
+                    return True
             elif settings_action == "guard":
                 guard_result = tui_flow.handle_tui_guard_settings_action(
                     current_cfg,

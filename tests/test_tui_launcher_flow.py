@@ -7,6 +7,7 @@ from mms_tui_launcher_flow import (
     build_confirm_capability_context,
     confirm_agent_pack,
     confirm_tui_options,
+    handle_tui_about_settings_action,
     handle_tui_connect_action,
     handle_tui_guard_settings_action,
     handle_tui_last_used_action,
@@ -1170,6 +1171,81 @@ def test_handle_tui_guard_settings_action_handles_accept_interrupt_and_back() ->
         select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
         handle_guard_command=lambda *_args, **_kwargs: calls.append(("guard",)),
         confirm_guard_accept_from_tui=lambda _cfg: calls.append(("confirm",)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
+    ) == {"status": "interrupt"}
+
+
+def test_handle_tui_about_settings_action_handles_back_refresh_and_upgrade() -> None:
+    calls = []
+    actions = iter(["refresh_versions", "upgrade_codex_cli", "back"])
+
+    class Console:
+        @staticmethod
+        def print(message):
+            calls.append(("print", message))
+
+    def about_status_snapshot(*, force_update):
+        calls.append(("snapshot", force_update))
+        return {"force": force_update}
+
+    def about_tui_payload(snapshot):
+        calls.append(("payload", snapshot))
+        return ("About", ["line"], [{"id": "back"}])
+
+    result = handle_tui_about_settings_action(
+        about_status_snapshot=about_status_snapshot,
+        about_tui_payload=about_tui_payload,
+        select_channel_action_tui=lambda title, lines, actions_arg: calls.append(("select", title, lines, actions_arg)) or next(actions),
+        run_about_upgrade=lambda *, target: calls.append(("upgrade", target)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=Console(),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [
+        ("snapshot", False),
+        ("payload", {"force": False}),
+        ("select", "About", ["line"], [{"id": "back"}]),
+        ("print", "[cyan]正在刷新 MMS / Codex / Claude 版本检查...[/cyan]"),
+        ("snapshot", True),
+        ("snapshot", False),
+        ("payload", {"force": False}),
+        ("select", "About", ["line"], [{"id": "back"}]),
+        ("upgrade", "codex"),
+        ("pause", "按 Enter 返回关于"),
+        ("snapshot", False),
+        ("payload", {"force": False}),
+        ("select", "About", ["line"], [{"id": "back"}]),
+    ]
+
+
+def test_handle_tui_about_settings_action_handles_interrupt_and_none() -> None:
+    calls = []
+
+    def about_status_snapshot(*, force_update):
+        calls.append(("snapshot", force_update))
+        return {}
+
+    def about_tui_payload(snapshot):
+        calls.append(("payload", snapshot))
+        return ("About", [], [])
+
+    assert handle_tui_about_settings_action(
+        about_status_snapshot=about_status_snapshot,
+        about_tui_payload=about_tui_payload,
+        select_channel_action_tui=lambda *_args: None,
+        run_about_upgrade=lambda *, target: calls.append(("upgrade", target)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
+    ) == {"status": "continue"}
+    assert calls == [("snapshot", False), ("payload", {})]
+
+    assert handle_tui_about_settings_action(
+        about_status_snapshot=lambda *, force_update: {},
+        about_tui_payload=lambda snapshot: ("About", [], []),
+        select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
+        run_about_upgrade=lambda *, target: calls.append(("upgrade", target)),
         pause_after_tui_report=lambda message: calls.append(("pause", message)),
         console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
     ) == {"status": "interrupt"}

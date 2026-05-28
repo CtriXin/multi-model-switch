@@ -792,6 +792,43 @@ def handle_tui_guard_settings_action(
     return {"status": "continue"}
 
 
+def handle_tui_about_settings_action(
+    *,
+    about_status_snapshot,
+    about_tui_payload,
+    select_channel_action_tui,
+    run_about_upgrade,
+    pause_after_tui_report,
+    console,
+):
+    while True:
+        about_snapshot = about_status_snapshot(force_update=False)
+        about_title, about_lines, about_actions = about_tui_payload(about_snapshot)
+        about_action = safe_tui_call(
+            select_channel_action_tui,
+            about_title,
+            about_lines,
+            about_actions,
+        )
+        if about_action == "__interrupt__":
+            return {"status": "interrupt"}
+        if about_action in {None, "back"}:
+            return {"status": "continue"}
+        if about_action == "refresh_versions":
+            console.print("[cyan]正在刷新 MMS / Codex / Claude 版本检查...[/cyan]")
+            about_status_snapshot(force_update=True)
+            continue
+        if about_action in {"upgrade_mms", "upgrade_codex_cli", "upgrade_claude_cli"}:
+            upgrade_target = {
+                "upgrade_mms": "mms",
+                "upgrade_codex_cli": "codex",
+                "upgrade_claude_cli": "claude",
+            }[about_action]
+            run_about_upgrade(target=upgrade_target)
+            pause_after_tui_report("按 Enter 返回关于")
+            continue
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:
