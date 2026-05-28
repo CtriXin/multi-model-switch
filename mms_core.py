@@ -4692,43 +4692,31 @@ def ensure_models_ready(cfg, provider):
 
 
 def categorize_models(models):
-    categorized = {}
-    for m in _filter_visible_models(models):
-        _, category = _infer_model_family(m)
-        categorized.setdefault(category, []).append(m)
-    return categorized
+    from mms_command_tools import categorize_models as categorize_models_impl
+
+    return categorize_models_impl(
+        models,
+        filter_visible_models=_filter_visible_models,
+        infer_model_family=_infer_model_family,
+    )
 
 
 def display_models(models, role=MODE_ALL, recommend=None):
-    _ensure_rich()
-    categorized = categorize_models(models)
-    table = Table(title="可用模型", show_lines=True)
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("模型", style="green")
-    table.add_column("分类", style="yellow")
-    table.add_column("能力", style="magenta")
-    table.add_column("CLI", style="dim")
+    from mms_command_tools import display_models as display_models_impl
 
-    flat = []
-    for cat, cat_models in categorized.items():
-        for m in cat_models:
-            flat.append((m, cat))
-
-    if normalize_user_role(role) == MODE_RECOMMENDED and recommend:
-        flat = [(m, c) for m, c in flat if m in recommend]
-
-    for i, (m, c) in enumerate(flat, 1):
-        tag = " ⭐" if recommend and m in recommend else ""
-        table.add_row(
-            str(i),
-            m + tag,
-            c,
-            _model_capability_summary(m),
-            _model_cli_summary(m),
-        )
-
-    console.print(table)
-    return [m for m, _ in flat]
+    return display_models_impl(
+        models,
+        role,
+        recommend,
+        ensure_rich=_ensure_rich,
+        categorize_models=categorize_models,
+        normalize_user_role=normalize_user_role,
+        mode_recommended=MODE_RECOMMENDED,
+        model_capability_summary=_model_capability_summary,
+        model_cli_summary=_model_cli_summary,
+        table_cls=Table,
+        console=console,
+    )
 
 
 def _filter_models_for_display(models, role=MODE_ALL, recommend=None):

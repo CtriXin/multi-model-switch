@@ -4961,6 +4961,59 @@ def aggregate_provider_models(
     return aggregated
 
 
+def categorize_models(models, *, filter_visible_models, infer_model_family):
+    categorized = {}
+    for model_name in filter_visible_models(models):
+        _, category = infer_model_family(model_name)
+        categorized.setdefault(category, []).append(model_name)
+    return categorized
+
+
+def display_models(
+    models,
+    role,
+    recommend,
+    *,
+    ensure_rich,
+    categorize_models,
+    normalize_user_role,
+    mode_recommended,
+    model_capability_summary,
+    model_cli_summary,
+    table_cls,
+    console,
+):
+    ensure_rich()
+    categorized = categorize_models(models)
+    table = table_cls(title="可用模型", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("模型", style="green")
+    table.add_column("分类", style="yellow")
+    table.add_column("能力", style="magenta")
+    table.add_column("CLI", style="dim")
+
+    flat = []
+    for category, category_models in categorized.items():
+        for model_name in category_models:
+            flat.append((model_name, category))
+
+    if normalize_user_role(role) == mode_recommended and recommend:
+        flat = [(model_name, category) for model_name, category in flat if model_name in recommend]
+
+    for index, (model_name, category) in enumerate(flat, 1):
+        tag = " ⭐" if recommend and model_name in recommend else ""
+        table.add_row(
+            str(index),
+            model_name + tag,
+            category,
+            model_capability_summary(model_name),
+            model_cli_summary(model_name),
+        )
+
+    console.print(table)
+    return [model_name for model_name, _ in flat]
+
+
 def filter_models_for_display(models, role, recommend, *, categorize_models, normalize_user_role, mode_recommended):
     categorized = categorize_models(models)
     flat = []

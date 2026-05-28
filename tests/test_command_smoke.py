@@ -4177,6 +4177,44 @@ def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
 def test_model_display_grouping_helpers_preserve_recommend_and_provider_dedupe():
     import mms_command_tools
 
+    def infer_display(model_name):
+        if "qwen" in model_name:
+            return ("Qwen", "Qwen 系")
+        return ("GPT", "GPT 系")
+
+    assert mms_command_tools.categorize_models(
+        ["gpt-5.5", "hidden-model", "qwen3.6-plus"],
+        filter_visible_models=lambda models: [item for item in models if item != "hidden-model"],
+        infer_model_family=infer_display,
+    ) == {"GPT 系": ["gpt-5.5"], "Qwen 系": ["qwen3.6-plus"]}
+
+    rich_calls = []
+    console = _CollectingConsole()
+    displayed = mms_command_tools.display_models(
+        ["gpt-5.5", "hidden-model", "qwen3.6-plus"],
+        "recommended",
+        ["qwen3.6-plus"],
+        ensure_rich=lambda: rich_calls.append("rich"),
+        categorize_models=lambda models: mms_command_tools.categorize_models(
+            models,
+            filter_visible_models=lambda values: [item for item in values if item != "hidden-model"],
+            infer_model_family=infer_display,
+        ),
+        normalize_user_role=lambda role: role,
+        mode_recommended="recommended",
+        model_capability_summary=lambda model: f"caps:{model}",
+        model_cli_summary=lambda model: f"cli:{model}",
+        table_cls=_FakeTable,
+        console=console,
+    )
+    assert rich_calls == ["rich"]
+    assert displayed == ["qwen3.6-plus"]
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "可用模型", "show_lines": True}
+    assert table.rows == [
+        (("1", "qwen3.6-plus ⭐", "Qwen 系", "caps:qwen3.6-plus", "cli:qwen3.6-plus"), {})
+    ]
+
     def categorize(models):
         buckets = {"GPT 系": [], "Qwen 系": []}
         for model in models:
