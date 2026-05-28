@@ -1225,6 +1225,53 @@ def create_rescue_handover_action(
     return result
 
 
+def rescue_packet_action_menu_context(
+    cfg,
+    selected_rescue,
+    default_label,
+    *,
+    rescue_fallback_model_candidates,
+    rescue_route_fallback_model_candidates,
+):
+    info_lines = [
+        ("时间", selected_rescue.get("created_at") or "-"),
+        ("模型", selected_rescue.get("failed_model") or "-"),
+        ("Provider", selected_rescue.get("failed_provider_id") or "-"),
+        ("状态", selected_rescue.get("status_code") or selected_rescue.get("failure_kind") or "-"),
+        ("原因", selected_rescue.get("failure_kind") or "-"),
+        ("Repo", selected_rescue.get("repo_path") or "-"),
+        ("全局默认", default_label),
+    ]
+    fallback_candidates = rescue_fallback_model_candidates(cfg, selected_rescue, limit=8)
+    route_fallback_candidates = rescue_route_fallback_model_candidates(
+        failed_model=selected_rescue.get("failed_model") or "",
+        limit=120,
+    )
+    fallback_actions = [
+        (f"handover::{model}", f"生成 fallback handover -> {model}")
+        for model in fallback_candidates
+    ]
+    default_actions = [
+        (f"default::{model}", f"设为全局默认 fallback -> {model}")
+        for model in fallback_candidates
+    ]
+    return {
+        "info_lines": info_lines,
+        "fallback_candidates": fallback_candidates,
+        "route_fallback_candidates": route_fallback_candidates,
+        "actions": fallback_actions + default_actions + [
+            ("choose_route_handover", "从 routed models 选择 handover"),
+            ("choose_route_default", "设置全局默认 fallback（routed models）"),
+            ("manual_handover", "手动输入 fallback model"),
+            ("manual_default", "手动输入全局默认 fallback"),
+            ("clear_default", "清除全局默认 fallback"),
+            ("view_md", "查看 rescue.md"),
+            ("show_paths", "显示文件路径"),
+            ("back", "返回"),
+        ],
+    }
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

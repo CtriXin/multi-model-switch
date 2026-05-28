@@ -42,6 +42,7 @@ from mms_tui_launcher_flow import (
     provider_browse_launch_context,
     provider_browse_model_options,
     provider_browse_options,
+    rescue_packet_action_menu_context,
     refresh_tui_runtime_state_after_config_change,
     resolve_last_used_launch_context,
     resolve_confirm_launch_action,
@@ -2102,6 +2103,59 @@ def test_create_rescue_handover_action_reports_error_and_pauses() -> None:
         ("write", selected_rescue, "fallback-model"),
         ("error", "zh:生成 fallback handover 失败", failure),
         ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_rescue_packet_action_menu_context_builds_info_actions_and_candidates() -> None:
+    calls = []
+    cfg = {"rescue": True}
+    selected_rescue = {
+        "created_at": "2026-05-29T01:02:03Z",
+        "failed_model": "gpt-5.5",
+        "failed_provider_id": "relay",
+        "status_code": 429,
+        "failure_kind": "rate_limit",
+        "repo_path": "/repo",
+    }
+
+    result = rescue_packet_action_menu_context(
+        cfg,
+        selected_rescue,
+        "default-model",
+        rescue_fallback_model_candidates=lambda cfg_arg, rescue_arg, *, limit: calls.append(("fallbacks", cfg_arg, rescue_arg, limit)) or ["fb1", "fb2"],
+        rescue_route_fallback_model_candidates=lambda *, failed_model, limit: calls.append(("routes", failed_model, limit)) or ["route1"],
+    )
+
+    assert result == {
+        "info_lines": [
+            ("时间", "2026-05-29T01:02:03Z"),
+            ("模型", "gpt-5.5"),
+            ("Provider", "relay"),
+            ("状态", 429),
+            ("原因", "rate_limit"),
+            ("Repo", "/repo"),
+            ("全局默认", "default-model"),
+        ],
+        "fallback_candidates": ["fb1", "fb2"],
+        "route_fallback_candidates": ["route1"],
+        "actions": [
+            ("handover::fb1", "生成 fallback handover -> fb1"),
+            ("handover::fb2", "生成 fallback handover -> fb2"),
+            ("default::fb1", "设为全局默认 fallback -> fb1"),
+            ("default::fb2", "设为全局默认 fallback -> fb2"),
+            ("choose_route_handover", "从 routed models 选择 handover"),
+            ("choose_route_default", "设置全局默认 fallback（routed models）"),
+            ("manual_handover", "手动输入 fallback model"),
+            ("manual_default", "手动输入全局默认 fallback"),
+            ("clear_default", "清除全局默认 fallback"),
+            ("view_md", "查看 rescue.md"),
+            ("show_paths", "显示文件路径"),
+            ("back", "返回"),
+        ],
+    }
+    assert calls == [
+        ("fallbacks", cfg, selected_rescue, 8),
+        ("routes", "gpt-5.5", 120),
     ]
 
 

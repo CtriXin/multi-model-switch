@@ -5224,42 +5224,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     return True
                 if not selected_rescue:
                     continue
-                info_lines = [
-                    ("时间", selected_rescue.get("created_at") or "-"),
-                    ("模型", selected_rescue.get("failed_model") or "-"),
-                    ("Provider", selected_rescue.get("failed_provider_id") or "-"),
-                    ("状态", selected_rescue.get("status_code") or selected_rescue.get("failure_kind") or "-"),
-                    ("原因", selected_rescue.get("failure_kind") or "-"),
-                    ("Repo", selected_rescue.get("repo_path") or "-"),
-                    ("全局默认", default_label),
-                ]
-                fallback_candidates = _rescue_fallback_model_candidates(current_cfg, selected_rescue, limit=8)
-                route_fallback_candidates = _rescue_route_fallback_model_candidates(
-                    failed_model=selected_rescue.get("failed_model") or "",
-                    limit=120,
+                packet_menu = tui_flow.rescue_packet_action_menu_context(
+                    current_cfg,
+                    selected_rescue,
+                    default_label,
+                    rescue_fallback_model_candidates=_rescue_fallback_model_candidates,
+                    rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
                 )
-                fallback_actions = [
-                    (f"handover::{model}", f"生成 fallback handover -> {model}")
-                    for model in fallback_candidates
-                ]
-                default_actions = [
-                    (f"default::{model}", f"设为全局默认 fallback -> {model}")
-                    for model in fallback_candidates
-                ]
+                route_fallback_candidates = packet_menu["route_fallback_candidates"]
                 rescue_action = tui_flow.safe_tui_call(
                     select_channel_action_tui,
                     "Rescue Packet",
-                    info_lines,
-                    fallback_actions + default_actions + [
-                        ("choose_route_handover", "从 routed models 选择 handover"),
-                        ("choose_route_default", "设置全局默认 fallback（routed models）"),
-                        ("manual_handover", "手动输入 fallback model"),
-                        ("manual_default", "手动输入全局默认 fallback"),
-                        ("clear_default", "清除全局默认 fallback"),
-                        ("view_md", "查看 rescue.md"),
-                        ("show_paths", "显示文件路径"),
-                        ("back", "返回"),
-                    ],
+                    packet_menu["info_lines"],
+                    packet_menu["actions"],
                 )
                 if rescue_action == "__interrupt__":
                     return True
