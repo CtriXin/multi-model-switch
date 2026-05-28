@@ -1499,6 +1499,81 @@ def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths()
     ) == (None, None, None)
 
 
+def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
+    import mms_command_tools
+
+    providers = [
+        {
+            "id": "auto-a",
+            "name": "Auto A",
+            "enabled": True,
+            "api_key": "sk-a",
+            "role": "auto",
+            "priority": 500,
+            "models": ["gpt-5.5", "hidden-model"],
+            "supported_clis": ["codex"],
+        },
+        {
+            "id": "primary-b",
+            "name": "Primary B",
+            "enabled": True,
+            "api_key": "sk-b",
+            "role": "primary",
+            "priority": 1,
+            "models": ["gpt-5.5", "qwen3.6-plus"],
+            "supported_clis": ["codex"],
+        },
+    ]
+    stats = {
+        "sources": {
+            "provider:codex:auto-a": {
+                "cli": "codex",
+                "models": {"gpt-5.5": 2},
+                "model_last_used_at": {"gpt-5.5": "2026-05-27T10:00:00Z"},
+            },
+            "provider:codex:primary-b": {
+                "cli": "codex",
+                "models": {"gpt-5.5": 3, "qwen3.6-plus": 1},
+                "last_model": "qwen3.6-plus",
+                "last_used_at": "2026-05-28T10:00:00Z",
+            },
+        }
+    }
+
+    families = mms_command_tools.build_model_families_for_cli(
+        {"providers": providers},
+        "codex",
+        {},
+        [],
+        provider_candidates=lambda cfg, _default_provider, _default_models: [
+            (provider, provider["models"]) for provider in cfg["providers"]
+        ],
+        provider_has_configured_base_url=lambda provider: True,
+        provider_effective_models=lambda _provider, cached_models, _cfg: list(cached_models or []),
+        normalize_role=lambda role: role if role in {"primary", "auto", "fallback"} else "auto",
+        runtime_priority_for_model=lambda provider, _model_name: provider.get("priority", 100),
+        runtime_with_priority=lambda provider, model_name="": {**provider, "runtime_model": model_name},
+        provider_label=lambda provider: provider["name"],
+        mms_model_visible=lambda model_name: model_name != "hidden-model",
+        infer_model_family=lambda model_name: ("GPT", "GPT") if model_name.startswith("gpt-") else ("Qwen", "Qwen"),
+        load_usage_stats=lambda: stats,
+        provider_supports_model_for_cli=lambda provider, cli_name, _model_name: cli_name in provider["supported_clis"],
+        role_weights={"primary": 0, "auto": 1, "fallback": 2},
+        default_provider_id="default",
+    )
+
+    gpt_model = families[0]["models"][0]
+    assert families[0]["family"] == "GPT"
+    assert gpt_model["provider_id"] == "primary-b"
+    assert gpt_model["provider_name"] == "Primary B"
+    assert gpt_model["provider_ctx"]["runtime_model"] == "gpt-5.5"
+    assert gpt_model["use_count"] == 5
+    assert gpt_model["last_used_at"] == "2026-05-27T10:00:00Z"
+    assert families[1]["models"][0]["model"] == "qwen3.6-plus"
+    assert families[1]["models"][0]["last_used_at"] == "2026-05-28T10:00:00Z"
+    assert all(item["model"] != "hidden-model" for family in families for item in family["models"])
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

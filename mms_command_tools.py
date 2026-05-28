@@ -2372,6 +2372,108 @@ def resolve_last_used_runtime(
     return None, None, None
 
 
+def build_model_families_for_cli(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    *,
+    provider_candidates,
+    provider_has_configured_base_url,
+    provider_effective_models,
+    normalize_role,
+    runtime_priority_for_model,
+    runtime_with_priority,
+    provider_label,
+    mms_model_visible,
+    infer_model_family,
+    load_usage_stats,
+    provider_supports_model_for_cli,
+    role_weights,
+    default_provider_id,
+):
+    """Aggregate provider models by family and attach the best runtime provider."""
+    model_best = {}
+    for provider, cached_models in provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if not provider_has_configured_base_url(provider):
+            continue
+        if not provider.get("api_key"):
+            continue
+
+        models = provider_effective_models(provider, cached_models, cfg)
+        if not models:
+            continue
+
+        role = normalize_role(provider.get("role", "auto"))
+        provider_id = provider.get("id", default_provider_id)
+        provider_name = provider_label(provider)
+
+        for model_name in models:
+            normalized = str(model_name or "").strip()
+            if not normalized:
+                continue
+            if not provider_supports_model_for_cli(provider, cli_name, normalized):
+                continue
+            priority = runtime_priority_for_model(provider, normalized)
+            score = (role_weights.get(role, 1), -priority)
+            existing = model_best.get(normalized)
+            if existing is None or score < existing[0]:
+                model_best[normalized] = (
+                    score,
+                    runtime_with_priority(provider, model_name=normalized),
+                    provider_name,
+                    provider_id,
+                )
+
+    use_counts = {}
+    last_used_at_by_model = {}
+    stats = load_usage_stats()
+    for source in stats.get("sources", {}).values():
+        if str(source.get("cli") or "").strip() != str(cli_name or "").strip():
+            continue
+        used_at = str(source.get("last_used_at") or "").strip()
+        model_last_used_at = source.get("model_last_used_at")
+        if not isinstance(model_last_used_at, dict):
+            model_last_used_at = {}
+        for model_name, count in source.get("models", {}).items():
+            use_counts[model_name] = use_counts.get(model_name, 0) + count
+            model_used_at = str(model_last_used_at.get(model_name) or "").strip()
+            if model_used_at and model_used_at > last_used_at_by_model.get(model_name, ""):
+                last_used_at_by_model[model_name] = model_used_at
+        last_model = str(source.get("last_model") or "").strip()
+        if (
+            last_model
+            and used_at
+            and last_model not in model_last_used_at
+            and used_at > last_used_at_by_model.get(last_model, "")
+        ):
+            last_used_at_by_model[last_model] = used_at
+
+    family_map = {}
+    family_order = []
+
+    for model_name, (_, provider_ctx, provider_name, provider_id) in model_best.items():
+        if not mms_model_visible(model_name):
+            continue
+        family, _ = infer_model_family(model_name)
+        if family not in family_map:
+            family_map[family] = []
+            family_order.append(family)
+        family_map[family].append({
+            "model": model_name,
+            "family": family,
+            "provider_id": provider_id,
+            "provider_name": provider_name,
+            "provider_ctx": provider_ctx,
+            "use_count": use_counts.get(model_name, 0),
+            "last_used_at": last_used_at_by_model.get(model_name, ""),
+        })
+
+    return [{"family": family, "models": family_map[family]} for family in family_order]
+
+
 def http_status_is_success(value):
     try:
         status_code = int(str(value or "").strip())

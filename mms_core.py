@@ -6038,102 +6038,27 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
 
 
 def _build_model_families_for_cli(cfg, cli_name, default_provider, default_models):
-    """聚合所有 provider 的模型，按 MODEL_FAMILIES 分组，每个模型附带最优 provider。
+    from mms_command_tools import build_model_families_for_cli
 
-    Returns:
-        List[dict]: [{
-            "family": str,       # e.g. "Claude"
-            "models": [{
-                "model": str,
-                "provider_id": str,
-                "provider_name": str,
-                "provider_ctx": dict,  # 完整 runtime context
-            }],
-        }]
-    """
-    # 聚合所有模型（去重，取最优 provider）
-    model_best = {}  # model_name -> (provider_ctx, provider_name, provider_id)
-    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
-        if not provider.get("enabled", True):
-            continue
-        if not _provider_has_configured_base_url(provider):
-            continue
-        if not provider.get("api_key"):
-            continue
-
-        models = _provider_effective_models(provider, cached_models, cfg)
-        if not models:
-            continue
-
-        role = _normalize_role(provider.get("role", "auto"))
-        pid = provider.get("id", DEFAULT_PROVIDER_ID)
-        pname = _provider_label(provider)
-
-        for m in models:
-            normalized = str(m or "").strip()
-            if not normalized:
-                continue
-            if not _provider_supports_model_for_cli(provider, cli_name, normalized):
-                continue
-            priority = _runtime_priority_for_model(provider, normalized)
-            score = (ROLE_WEIGHTS.get(role, 1), -priority)
-            existing = model_best.get(normalized)
-            if existing is None or score < existing[0]:
-                model_best[normalized] = (
-                    score,
-                    _runtime_with_priority(provider, model_name=normalized),
-                    pname,
-                    pid,
-                )
-
-    # 注入当前 CLI 的使用信息（用于 TUI 排序）。
-    use_counts = {}
-    last_used_at_by_model = {}
-    stats = _load_usage_stats()
-    for src in stats.get("sources", {}).values():
-        if str(src.get("cli") or "").strip() != str(cli_name or "").strip():
-            continue
-        used_at = str(src.get("last_used_at") or "").strip()
-        model_last_used_at = src.get("model_last_used_at")
-        if not isinstance(model_last_used_at, dict):
-            model_last_used_at = {}
-        for mname, cnt in src.get("models", {}).items():
-            use_counts[mname] = use_counts.get(mname, 0) + cnt
-            model_used_at = str(model_last_used_at.get(mname) or "").strip()
-            if model_used_at and model_used_at > last_used_at_by_model.get(mname, ""):
-                last_used_at_by_model[mname] = model_used_at
-        last_model = str(src.get("last_model") or "").strip()
-        # Legacy usage files only had source-level last_model/last_used_at.
-        if (
-            last_model
-            and used_at
-            and last_model not in model_last_used_at
-            and used_at > last_used_at_by_model.get(last_model, "")
-        ):
-            last_used_at_by_model[last_model] = used_at
-
-    # 按 family 分组
-    family_map = {}  # family_name -> [model_entry]
-    family_order = []
-
-    for model_name, (_, provider_ctx, pname, pid) in model_best.items():
-        if not _mms_model_visible(model_name):
-            continue
-        family, _ = _infer_model_family(model_name)
-        if family not in family_map:
-            family_map[family] = []
-            family_order.append(family)
-        family_map[family].append({
-            "model": model_name,
-            "family": family,
-            "provider_id": pid,
-            "provider_name": pname,
-            "provider_ctx": provider_ctx,
-            "use_count": use_counts.get(model_name, 0),
-            "last_used_at": last_used_at_by_model.get(model_name, ""),
-        })
-
-    return [{"family": f, "models": family_map[f]} for f in family_order]
+    return build_model_families_for_cli(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        provider_candidates=_provider_candidates,
+        provider_has_configured_base_url=_provider_has_configured_base_url,
+        provider_effective_models=_provider_effective_models,
+        normalize_role=_normalize_role,
+        runtime_priority_for_model=_runtime_priority_for_model,
+        runtime_with_priority=_runtime_with_priority,
+        provider_label=_provider_label,
+        mms_model_visible=_mms_model_visible,
+        infer_model_family=_infer_model_family,
+        load_usage_stats=_load_usage_stats,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+        role_weights=ROLE_WEIGHTS,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+    )
 
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
