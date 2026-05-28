@@ -5205,23 +5205,18 @@ def _pick_recovery_actions(findings, actions):
 
 
 def _run_recovery_action(cfg, provider, probe, action_id):
-    if action_id == "show_details":
-        _print_model_probe_details(probe)
-        return provider, False
-    if action_id == "edit_credentials":
-        return setup_provider_credentials(
-            provider,
-            provider.get("base_url", ""),
-            provider.get("api_key", ""),
-            allow_keep=True,
-        ), False
-    if action_id == "switch_provider":
-        selected = _select_provider_interactive(cfg, provider.get("id"))
-        return (selected or provider), False
-    if action_id == "continue_without_validation":
-        console.print("[yellow]已跳过模型校验。模型浏览将暂时不可用，但预设和直接 CLI 启动仍可继续。[/yellow]")
-        return provider, True
-    return provider, False
+    from mms_command_tools import run_recovery_action
+
+    return run_recovery_action(
+        cfg,
+        provider,
+        probe,
+        action_id,
+        display_model_probe_details=_print_model_probe_details,
+        setup_provider_credentials=setup_provider_credentials,
+        select_provider_interactive=_select_provider_interactive,
+        console=console,
+    )
 
 
 def setup_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):

@@ -270,6 +270,36 @@ def pick_recovery_actions(findings, actions, *, use_tui=False, select_actions_tu
             console.print(f"[red]请输入 1-{len(actions)} 的编号，可用逗号分隔多选[/red]")
 
 
+def run_recovery_action(
+    cfg,
+    provider,
+    probe,
+    action_id,
+    *,
+    display_model_probe_details,
+    setup_provider_credentials,
+    select_provider_interactive,
+    console,
+):
+    if action_id == "show_details":
+        display_model_probe_details(probe)
+        return provider, False
+    if action_id == "edit_credentials":
+        return setup_provider_credentials(
+            provider,
+            provider.get("base_url", ""),
+            provider.get("api_key", ""),
+            allow_keep=True,
+        ), False
+    if action_id == "switch_provider":
+        selected = select_provider_interactive(cfg, provider.get("id"))
+        return (selected or provider), False
+    if action_id == "continue_without_validation":
+        console.print("[yellow]已跳过模型校验。模型浏览将暂时不可用，但预设和直接 CLI 启动仍可继续。[/yellow]")
+        return provider, True
+    return provider, False
+
+
 def rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False, localize):
     if cleared:
         return (

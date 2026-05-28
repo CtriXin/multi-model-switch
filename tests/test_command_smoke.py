@@ -533,6 +533,83 @@ def test_pick_recovery_actions_preserves_tui_and_prompt_fallback():
     assert any("请输入 1-2" in str(item) for item in console.items)
 
 
+def test_run_recovery_action_preserves_dispatch_and_callbacks():
+    import mms_command_tools
+
+    cfg = {"providers": [{"id": "relay"}, {"id": "backup"}]}
+    provider = {"id": "relay", "base_url": "https://relay.example", "api_key": "sk-test"}
+    probe = {"details": ["failure"]}
+    calls = []
+
+    def display_details(received_probe):
+        calls.append(("details", received_probe))
+
+    def edit_credentials(received_provider, base_url, api_key, *, allow_keep=False):
+        calls.append(("edit", received_provider, base_url, api_key, allow_keep))
+        return {"id": "relay", "base_url": "https://new.example"}
+
+    def select_provider(received_cfg, current_provider_id):
+        calls.append(("select", received_cfg, current_provider_id))
+        return {"id": "backup"}
+
+    console = _CollectingConsole()
+    selected, skip = mms_command_tools.run_recovery_action(
+        cfg,
+        provider,
+        probe,
+        "show_details",
+        display_model_probe_details=display_details,
+        setup_provider_credentials=edit_credentials,
+        select_provider_interactive=select_provider,
+        console=console,
+    )
+    assert selected is provider
+    assert skip is False
+    assert calls[-1] == ("details", probe)
+
+    selected, skip = mms_command_tools.run_recovery_action(
+        cfg,
+        provider,
+        probe,
+        "edit_credentials",
+        display_model_probe_details=display_details,
+        setup_provider_credentials=edit_credentials,
+        select_provider_interactive=select_provider,
+        console=console,
+    )
+    assert selected["base_url"] == "https://new.example"
+    assert skip is False
+    assert calls[-1] == ("edit", provider, "https://relay.example", "sk-test", True)
+
+    selected, skip = mms_command_tools.run_recovery_action(
+        cfg,
+        provider,
+        probe,
+        "switch_provider",
+        display_model_probe_details=display_details,
+        setup_provider_credentials=edit_credentials,
+        select_provider_interactive=select_provider,
+        console=console,
+    )
+    assert selected == {"id": "backup"}
+    assert skip is False
+    assert calls[-1] == ("select", cfg, "relay")
+
+    selected, skip = mms_command_tools.run_recovery_action(
+        cfg,
+        provider,
+        probe,
+        "continue_without_validation",
+        display_model_probe_details=display_details,
+        setup_provider_credentials=edit_credentials,
+        select_provider_interactive=select_provider,
+        console=console,
+    )
+    assert selected is provider
+    assert skip is True
+    assert "已跳过模型校验" in console.items[-1]
+
+
 def test_rescue_report_payload_helpers_preserve_safe_local_outputs():
     import mms_command_tools
 
