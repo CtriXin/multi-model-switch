@@ -1494,8 +1494,9 @@ def _config_snapshot_path(snapshot_kind, filename="latest.json", *, config_path=
 
 
 def _is_snapshot_ignored_file(path):
-    name = os.path.basename(str(path or ""))
-    return name in SNAPSHOT_IGNORED_FILES
+    from mms_command_tools import is_snapshot_ignored_file
+
+    return is_snapshot_ignored_file(path, ignored_files=SNAPSHOT_IGNORED_FILES)
 
 
 def _render_mms_config_agents_guard():
@@ -1546,7 +1547,9 @@ def _ensure_mms_config_guard_files(config_path=None):
 
 
 def _sha256_text(value):
-    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+    from mms_command_tools import sha256_text
+
+    return sha256_text(value)
 
 
 def _snapshot_proxy_fingerprint(proxy_url):
@@ -1607,68 +1610,46 @@ def _snapshot_file_content_bytes(path):
 
 
 def _snapshot_account_entry(account):
-    account = account if isinstance(account, dict) else {}
-    proxy_value = str(account.get("proxy") or "").strip()
-    home_dir = os.path.expanduser(str(account.get("home_dir") or "").strip())
-    identity = _snapshot_claude_identity_entry(home_dir) if str(account.get("cli") or "").strip() == "claude" else {}
-    return {
-        "id": str(account.get("id") or "").strip(),
-        "cli": str(account.get("cli") or "").strip(),
-        "enabled": bool(account.get("enabled", True)),
-        "home_dir": home_dir,
-        "priority": _normalize_priority(account.get("priority", DEFAULT_PRIORITY)),
-        "claude_1m_mode": str(account.get("claude_1m_mode") or "auto").strip(),
-        "timezone": _normalize_timezone_name(account.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE),
-        "force_ipv4": bool(_runtime_force_ipv4(account)),
-        "no_proxy": str(account.get("no_proxy") or "").strip(),
-        "proxy_fingerprint": _snapshot_proxy_fingerprint(proxy_value),
-        "proxy_sha256": _sha256_text(proxy_value),
-        "identity_fingerprint": identity.get("fingerprint", ""),
-        "identity_sha256": identity.get("sha256", ""),
-    }
+    from mms_command_tools import snapshot_account_entry
+
+    return snapshot_account_entry(
+        account,
+        default_priority=DEFAULT_PRIORITY,
+        default_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        normalize_priority=_normalize_priority,
+        normalize_timezone_name=_normalize_timezone_name,
+        runtime_force_ipv4=_runtime_force_ipv4,
+        snapshot_proxy_fingerprint=_snapshot_proxy_fingerprint,
+        sha256_text=_sha256_text,
+        snapshot_claude_identity_entry=_snapshot_claude_identity_entry,
+    )
 
 
 def _snapshot_claude_identity_entry(home_dir):
-    home_dir = os.path.expanduser(str(home_dir or "").strip())
-    target = os.path.join(home_dir, ".claude.json")
-    if not target or not os.path.exists(target):
-        return {"fingerprint": "", "sha256": ""}
-    try:
-        with open(target, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {"fingerprint": "", "sha256": ""}
-    normalized = _normalize_claude_state_snapshot_payload(data)
-    oauth = normalized.get("oauthAccount") if isinstance(normalized.get("oauthAccount"), dict) else {}
-    fingerprint = "|".join(
-        [
-            _mask_identity_value(normalized.get("userID") or "", keep=4),
-            _mask_identity_value(oauth.get("accountUuid") or "", keep=4),
-            _mask_identity_value(oauth.get("organizationUuid") or "", keep=4),
-            _mask_email_value(oauth.get("emailAddress") or ""),
-        ]
+    from mms_command_tools import snapshot_claude_identity_entry
+
+    return snapshot_claude_identity_entry(
+        home_dir,
+        normalize_claude_state_snapshot_payload=_normalize_claude_state_snapshot_payload,
+        mask_identity_value=_mask_identity_value,
+        mask_email_value=_mask_email_value,
+        sha256_text=_sha256_text,
     )
-    return {
-        "fingerprint": fingerprint,
-        "sha256": _sha256_text(json.dumps(normalized, ensure_ascii=False, sort_keys=True)),
-    }
 
 
 def _snapshot_provider_entry(provider):
-    provider = provider if isinstance(provider, dict) else {}
-    proxy_value = str(provider.get("proxy") or "").strip()
-    return {
-        "id": str(provider.get("id") or "").strip(),
-        "name": str(provider.get("name") or "").strip(),
-        "enabled": bool(provider.get("enabled", True)),
-        "priority": _normalize_priority(provider.get("priority", DEFAULT_PRIORITY)),
-        "models_endpoint": str(provider.get("models_endpoint") or "").strip(),
-        "timezone": _normalize_timezone_name(provider.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE),
-        "force_ipv4": bool(_runtime_force_ipv4(provider)),
-        "no_proxy": str(provider.get("no_proxy") or "").strip(),
-        "proxy_fingerprint": _snapshot_proxy_fingerprint(proxy_value),
-        "proxy_sha256": _sha256_text(proxy_value),
-    }
+    from mms_command_tools import snapshot_provider_entry
+
+    return snapshot_provider_entry(
+        provider,
+        default_priority=DEFAULT_PRIORITY,
+        default_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        normalize_priority=_normalize_priority,
+        normalize_timezone_name=_normalize_timezone_name,
+        runtime_force_ipv4=_runtime_force_ipv4,
+        snapshot_proxy_fingerprint=_snapshot_proxy_fingerprint,
+        sha256_text=_sha256_text,
+    )
 
 
 def _build_config_guard_snapshot(cfg, *, config_path=None):

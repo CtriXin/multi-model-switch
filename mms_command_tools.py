@@ -110,6 +110,15 @@ def snapshot_proxy_fingerprint(proxy_url):
     return f"{scheme}://{host}{port}{auth}"
 
 
+def is_snapshot_ignored_file(path, *, ignored_files):
+    name = os.path.basename(str(path or ""))
+    return name in ignored_files
+
+
+def sha256_text(value):
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
 def snapshot_cli_state(home_dir, cli_name):
     home_dir = os.path.expanduser(str(home_dir or "").strip())
     if not home_dir:
@@ -167,6 +176,99 @@ def normalize_claude_settings_snapshot_payload(data, *, session_env_keys):
         else:
             data.pop("env", None)
     return data
+
+
+def snapshot_claude_identity_entry(
+    home_dir,
+    *,
+    normalize_claude_state_snapshot_payload,
+    mask_identity_value,
+    mask_email_value,
+    sha256_text,
+):
+    home_dir = os.path.expanduser(str(home_dir or "").strip())
+    target = os.path.join(home_dir, ".claude.json")
+    if not target or not os.path.exists(target):
+        return {"fingerprint": "", "sha256": ""}
+    try:
+        with open(target, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {"fingerprint": "", "sha256": ""}
+    normalized = normalize_claude_state_snapshot_payload(data)
+    oauth = normalized.get("oauthAccount") if isinstance(normalized.get("oauthAccount"), dict) else {}
+    fingerprint = "|".join(
+        [
+            mask_identity_value(normalized.get("userID") or "", keep=4),
+            mask_identity_value(oauth.get("accountUuid") or "", keep=4),
+            mask_identity_value(oauth.get("organizationUuid") or "", keep=4),
+            mask_email_value(oauth.get("emailAddress") or ""),
+        ]
+    )
+    return {
+        "fingerprint": fingerprint,
+        "sha256": sha256_text(json.dumps(normalized, ensure_ascii=False, sort_keys=True)),
+    }
+
+
+def snapshot_account_entry(
+    account,
+    *,
+    default_priority,
+    default_timezone,
+    normalize_priority,
+    normalize_timezone_name,
+    runtime_force_ipv4,
+    snapshot_proxy_fingerprint,
+    sha256_text,
+    snapshot_claude_identity_entry,
+):
+    account = account if isinstance(account, dict) else {}
+    proxy_value = str(account.get("proxy") or "").strip()
+    home_dir = os.path.expanduser(str(account.get("home_dir") or "").strip())
+    identity = snapshot_claude_identity_entry(home_dir) if str(account.get("cli") or "").strip() == "claude" else {}
+    return {
+        "id": str(account.get("id") or "").strip(),
+        "cli": str(account.get("cli") or "").strip(),
+        "enabled": bool(account.get("enabled", True)),
+        "home_dir": home_dir,
+        "priority": normalize_priority(account.get("priority", default_priority)),
+        "claude_1m_mode": str(account.get("claude_1m_mode") or "auto").strip(),
+        "timezone": normalize_timezone_name(account.get("timezone"), default_timezone),
+        "force_ipv4": bool(runtime_force_ipv4(account)),
+        "no_proxy": str(account.get("no_proxy") or "").strip(),
+        "proxy_fingerprint": snapshot_proxy_fingerprint(proxy_value),
+        "proxy_sha256": sha256_text(proxy_value),
+        "identity_fingerprint": identity.get("fingerprint", ""),
+        "identity_sha256": identity.get("sha256", ""),
+    }
+
+
+def snapshot_provider_entry(
+    provider,
+    *,
+    default_priority,
+    default_timezone,
+    normalize_priority,
+    normalize_timezone_name,
+    runtime_force_ipv4,
+    snapshot_proxy_fingerprint,
+    sha256_text,
+):
+    provider = provider if isinstance(provider, dict) else {}
+    proxy_value = str(provider.get("proxy") or "").strip()
+    return {
+        "id": str(provider.get("id") or "").strip(),
+        "name": str(provider.get("name") or "").strip(),
+        "enabled": bool(provider.get("enabled", True)),
+        "priority": normalize_priority(provider.get("priority", default_priority)),
+        "models_endpoint": str(provider.get("models_endpoint") or "").strip(),
+        "timezone": normalize_timezone_name(provider.get("timezone"), default_timezone),
+        "force_ipv4": bool(runtime_force_ipv4(provider)),
+        "no_proxy": str(provider.get("no_proxy") or "").strip(),
+        "proxy_fingerprint": snapshot_proxy_fingerprint(proxy_value),
+        "proxy_sha256": sha256_text(proxy_value),
+    }
 
 
 def snapshot_file_content_bytes(path, *, session_env_keys):

@@ -137,6 +137,9 @@ def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
         mms_command_tools.snapshot_proxy_fingerprint("http://user:pass@proxy.local:8080")
         == "http://proxy.local:8080+auth"
     )
+    assert mms_command_tools.is_snapshot_ignored_file("/tmp/usage.json", ignored_files={"usage.json"}) is True
+    assert mms_core._is_snapshot_ignored_file("/tmp/usage.json") is True
+    assert mms_command_tools.sha256_text("中文") == mms_core._sha256_text("中文")
 
     home_dir = str(tmp_path / "home")
     assert mms_command_tools.snapshot_cli_state(home_dir, "codex") == [
@@ -172,6 +175,62 @@ def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     assert mms_core._normalize_claude_settings_snapshot_payload(
         {"env": {"HTTP_PROXY": "http://proxy", "NO_PROXY": "localhost"}}
     ) == {}
+
+    identity_home = tmp_path / "identity-home"
+    identity_home.mkdir()
+    (identity_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "userID": "user-abcdef",
+                "oauthAccount": {
+                    "accountUuid": "acct-123456",
+                    "organizationUuid": "org-654321",
+                    "emailAddress": "me@example.com",
+                },
+                "sessionToken": "ignored",
+            }
+        ),
+        encoding="utf-8",
+    )
+    identity_entry = mms_command_tools.snapshot_claude_identity_entry(
+        str(identity_home),
+        normalize_claude_state_snapshot_payload=mms_command_tools.normalize_claude_state_snapshot_payload,
+        mask_identity_value=lambda value, keep=4: f"id:{str(value)[-keep:]}",
+        mask_email_value=lambda value: f"mail:{value}",
+        sha256_text=mms_command_tools.sha256_text,
+    )
+    assert identity_entry["fingerprint"] == "id:cdef|id:3456|id:4321|mail:me@example.com"
+    assert identity_entry["sha256"]
+
+    account_entry = mms_command_tools.snapshot_account_entry(
+        {"id": "claude-a", "cli": "claude", "home_dir": str(identity_home), "proxy": "http://proxy:8080"},
+        default_priority=10,
+        default_timezone="UTC",
+        normalize_priority=lambda value: int(value),
+        normalize_timezone_name=lambda value, default: value or default,
+        runtime_force_ipv4=lambda runtime: runtime.get("force_ipv4", False),
+        snapshot_proxy_fingerprint=mms_command_tools.snapshot_proxy_fingerprint,
+        sha256_text=mms_command_tools.sha256_text,
+        snapshot_claude_identity_entry=lambda _home: {"fingerprint": "fp", "sha256": "sha"},
+    )
+    assert account_entry["priority"] == 10
+    assert account_entry["timezone"] == "UTC"
+    assert account_entry["identity_fingerprint"] == "fp"
+    assert account_entry["proxy_fingerprint"] == "http://proxy:8080"
+
+    provider_entry = mms_command_tools.snapshot_provider_entry(
+        {"id": "relay", "name": "Relay", "priority": 11, "models_endpoint": "/models", "force_ipv4": True},
+        default_priority=10,
+        default_timezone="UTC",
+        normalize_priority=lambda value: int(value),
+        normalize_timezone_name=lambda value, default: value or default,
+        runtime_force_ipv4=lambda runtime: runtime.get("force_ipv4", False),
+        snapshot_proxy_fingerprint=mms_command_tools.snapshot_proxy_fingerprint,
+        sha256_text=mms_command_tools.sha256_text,
+    )
+    assert provider_entry["priority"] == 11
+    assert provider_entry["force_ipv4"] is True
+    assert mms_core._snapshot_provider_entry({"id": "relay", "name": "Relay"})["id"] == "relay"
 
     claude_state = tmp_path / ".claude.json"
     claude_state.write_text(
