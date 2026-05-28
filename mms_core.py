@@ -5035,6 +5035,11 @@ def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="",
         if isinstance(payload, dict) and payload:
             add_from_router_payload(payload)
         return candidates[: max(1, int(limit or 1))]
+    try:
+        if mms_config_root_status(config_dir=root).get("mode") == "preview":
+            return []
+    except Exception:
+        pass
 
     paths = [
         os.path.join(root, "generated", "model-routes.json"),

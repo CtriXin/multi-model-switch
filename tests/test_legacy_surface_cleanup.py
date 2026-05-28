@@ -283,6 +283,37 @@ def test_rescue_route_candidates_fail_closed_on_invalid_latest_approved_manifest
     assert candidates == []
 
 
+def test_rescue_route_candidates_fail_closed_on_missing_preview_manifest(tmp_path: Path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    generated = preview_root / "generated"
+    generated.mkdir(parents=True)
+    (generated / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "stale-preview-route": {
+                        "primary": {
+                            "provider_id": "stale",
+                            "openai_base_url": "https://stale.example/v1",
+                            "api_key": "sk-test-stale",
+                            "model_id": "stale-preview-route",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = mms_core._rescue_route_fallback_model_candidates(config_dir=preview_root)
+
+    assert candidates == []
+
+
 def test_rescue_default_fallback_config_roundtrip() -> None:
     import mms_core
 
