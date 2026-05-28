@@ -575,6 +575,12 @@ Current Stage 8a implementation:
 - Promotion preflight commands include `mmf config check`, `mmf config bundle`, and a read-only watchdog dry-run against the preview root.
 - Actual stable-root migration remains a future human-gated flow after merge/release planning, backup verification, smoke tests, and rollback instructions.
 
+Current Stage 8b public preview docs:
+
+- `README.md` and `README.zh-CN.md` now include a public Config v2 Preview Root quickstart covering `mms` stable root, `mmf` preview root, preview doctor/prepare/check/bundle/WebUI, and the read-only stable promotion human gate.
+- The installer completion output now prints the two high-signal next commands: `mmf preview doctor --json` and `mms migrate config-v2 --json`.
+- The public docs explicitly state that `mms migrate config-v2 --apply` remains non-mutating with `apply_enabled=false`, and that preview root must not silently fallback to stable credentials, OAuth state, or Claude config.
+
 ## Future LMs Must Not Forget
 
 - Human-facing config must be TUI / `mms config` / WebUI only.

@@ -4567,6 +4567,8 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms test --provider <id> --cli codex   $(t "验证 Codex 实际链路" "verify the real Codex message path")"
     echo "    mms ls                              $(t "查看可见模型" "list visible models")"
     echo "    mmf config root                     $(t "确认 preview root" "confirm the preview root")"
+    echo "    mmf preview doctor --json           $(t "查看 config v2 preview 下一步" "show the next config v2 preview action")"
+    echo "    mms migrate config-v2 --json        $(t "只读查看 stable promotion human gate" "review the stable promotion human gate read-only")"
     echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""

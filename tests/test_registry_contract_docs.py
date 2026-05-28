@@ -218,6 +218,29 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
     assert missing == []
 
 
+def test_public_readmes_explain_config_v2_preview_gate() -> None:
+    text = _readme_text()
+
+    required_terms = [
+        "Config V2 Preview Root",
+        "mms -> ~/.config/mms",
+        "mmf -> ~/.config/mms-next",
+        "mmf preview doctor --json",
+        "mmf preview prepare --from ~/.config/mms --include-secrets --json",
+        "mmf config bundle --json",
+        "generated/model-registry.latest-approved.json",
+        "mms migrate config-v2 --json",
+        "apply_enabled=false",
+        "stable_root_human_only",
+        "promotion_apply_not_implemented",
+        "silent fallback",
+        "Claude config",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    assert missing == []
+
+
 def test_rescue_docs_record_latest_approved_route_boundary() -> None:
     text = _rescue_text()
 
