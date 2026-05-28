@@ -4085,6 +4085,66 @@ def handle_provider_credentials_config(
     )
 
 
+def handle_provider_rename_config(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    normalize_provider_id_input,
+    provider_map,
+    normalize_provider,
+    backup_config_tree,
+    save_config,
+    rename_usage_provider,
+    invalidate_probe_cache,
+    refresh_routes_export_for_hive,
+    console,
+):
+    if len(args_rest) < 2:
+        console.print(f"[red]用法: {command_name} config provider.rename <old_id> <new_id> [new_name][/red]")
+        return
+    old_id = args_rest[0].strip()
+    new_id = normalize_provider_id_input(args_rest[1].strip())
+    providers = provider_map(cfg)
+    provider = providers.get(old_id)
+    if not provider:
+        console.print(f"[red]未找到模型源: {old_id}[/red]")
+        return
+    if old_id == new_id and len(args_rest) < 3:
+        console.print("[yellow]名称和标识都未变化，无需重命名[/yellow]")
+        return
+    if new_id != old_id and new_id in providers:
+        console.print(f"[red]目标模型源标识已存在: {new_id}[/red]")
+        return
+
+    new_name = args_rest[2].strip() if len(args_rest) >= 3 else new_id
+    backup_dir = backup_config_tree("provider-rename")
+    updated_cfg = dict(cfg)
+    updated_providers = []
+    for item in cfg.get("providers", []):
+        if item.get("id") != old_id:
+            updated_providers.append(item)
+            continue
+        renamed = dict(item)
+        renamed["id"] = new_id
+        renamed["name"] = new_name
+        updated_providers.append(normalize_provider(renamed))
+    updated_cfg["providers"] = updated_providers
+
+    provider_cfg = dict(cfg.get("provider", {}))
+    if provider_cfg.get("default") == old_id:
+        provider_cfg["default"] = new_id
+    updated_cfg["provider"] = provider_cfg
+    save_config(updated_cfg)
+    rename_usage_provider(old_id, new_id, new_name)
+    invalidate_probe_cache(old_id)
+    invalidate_probe_cache(new_id)
+    refresh_routes_export_for_hive(force=True, quiet=False)
+    console.print(f"[green]✓ 已重命名模型源: {old_id} -> {new_id}[/green]")
+    console.print(f"[dim]显示名: {new_name}[/dim]")
+    console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+
+
 def handle_account_default_config(
     cfg,
     args_rest,

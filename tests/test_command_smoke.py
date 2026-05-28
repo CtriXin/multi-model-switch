@@ -3494,6 +3494,65 @@ def test_provider_edit_remove_handlers_preserve_validation_refresh_and_default_c
     assert any("无法删除最后一个" in str(item) for item in console.items)
 
 
+def test_provider_rename_handler_preserves_backup_default_usage_and_cache_flow():
+    import mms_command_tools
+
+    cfg = {
+        "provider": {"default": "demo-a"},
+        "providers": [
+            {"id": "demo-a", "name": "Demo A", "priority": 5},
+            {"id": "demo-b", "name": "Demo B"},
+        ],
+    }
+    console = _CollectingConsole()
+    calls = []
+    provider_map = lambda current: {item["id"]: item for item in current.get("providers", [])}
+    common = {
+        "command_name": "mmg",
+        "normalize_provider_id_input": lambda value: value.lower().replace("_", "-"),
+        "provider_map": provider_map,
+        "normalize_provider": lambda provider: {**provider, "normalized": True},
+        "backup_config_tree": lambda label: calls.append(("backup", label)) or "/tmp/backup",
+        "save_config": lambda updated: calls.append(("save", updated)),
+        "rename_usage_provider": lambda old_id, new_id, new_name: calls.append(("usage", old_id, new_id, new_name)),
+        "invalidate_probe_cache": lambda provider_id: calls.append(("invalidate", provider_id)),
+        "refresh_routes_export_for_hive": lambda **kwargs: calls.append(("refresh", kwargs)),
+        "console": console,
+    }
+
+    mms_command_tools.handle_provider_rename_config(cfg, ["demo-a"], **common)
+    assert "[red]用法: mmg config provider.rename <old_id> <new_id> [new_name][/red]" in console.items
+    mms_command_tools.handle_provider_rename_config(cfg, ["missing", "new"], **common)
+    assert any("未找到模型源: missing" in str(item) for item in console.items)
+    mms_command_tools.handle_provider_rename_config(cfg, ["demo-a", "demo-a"], **common)
+    assert "[yellow]名称和标识都未变化，无需重命名[/yellow]" in console.items
+    mms_command_tools.handle_provider_rename_config(cfg, ["demo-a", "demo-b"], **common)
+    assert "[red]目标模型源标识已存在: demo-b[/red]" in console.items
+    assert calls == []
+
+    console.items.clear()
+    mms_command_tools.handle_provider_rename_config(cfg, ["demo-a", "Demo_New", "Demo New"], **common)
+    assert calls[0] == ("backup", "provider-rename")
+    assert calls[1][0] == "save"
+    saved_cfg = calls[1][1]
+    assert saved_cfg["provider"] == {"default": "demo-new"}
+    assert saved_cfg["providers"][0] == {
+        "id": "demo-new",
+        "name": "Demo New",
+        "priority": 5,
+        "normalized": True,
+    }
+    assert calls[2:] == [
+        ("usage", "demo-a", "demo-new", "Demo New"),
+        ("invalidate", "demo-a"),
+        ("invalidate", "demo-new"),
+        ("refresh", {"force": True, "quiet": False}),
+    ]
+    assert "[green]✓ 已重命名模型源: demo-a -> demo-new[/green]" in console.items
+    assert "[dim]显示名: Demo New[/dim]" in console.items
+    assert "[dim]备份目录: /tmp/backup[/dim]" in console.items
+
+
 def test_account_default_handler_preserves_show_reject_and_save_flow():
     import mms_command_tools
 
