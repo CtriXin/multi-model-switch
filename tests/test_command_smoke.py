@@ -3037,6 +3037,74 @@ def test_manage_target_helpers_build_sorted_targets_and_fallback_selection():
     assert selected["id"] == "relay"
     assert any("请输入 1-4 的编号" in str(item) for item in console.items)
 
+    console.items.clear()
+    assert mms_command_tools.select_manage_target(
+        {"cfg": True},
+        list_manage_targets=lambda cfg: [],
+        use_tui=lambda: (_ for _ in ()).throw(AssertionError("use_tui not expected")),
+        select_manage_target_tui=lambda targets: targets[0],
+        select_manage_target_fallback=lambda targets: targets[0],
+        console=console,
+    ) is None
+    assert console.items == ["[yellow]当前还没有可管理的通道[/yellow]"]
+
+    tui_target = mms_command_tools.select_manage_target(
+        {"cfg": True},
+        list_manage_targets=lambda cfg: targets,
+        use_tui=lambda: True,
+        select_manage_target_tui=lambda current: current[0],
+        select_manage_target_fallback=lambda current: (_ for _ in ()).throw(AssertionError("fallback not expected")),
+        console=console,
+    )
+    assert tui_target["id"] == "claude-main"
+
+    fallback_target = mms_command_tools.select_manage_target(
+        {"cfg": True},
+        list_manage_targets=lambda cfg: targets,
+        use_tui=lambda: True,
+        select_manage_target_tui=lambda _targets: (_ for _ in ()).throw(RuntimeError("no tui")),
+        select_manage_target_fallback=lambda current: current[1],
+        console=console,
+    )
+    assert fallback_target["id"] == "relay"
+
+
+def test_select_manage_target_wrapper_preserves_core_callbacks(monkeypatch):
+    import mms_core
+
+    targets = [
+        {
+            "kind": "provider",
+            "id": "relay",
+            "title": "Relay",
+            "default_label": "网关",
+            "status": "已配置",
+            "launches": 2,
+        }
+    ]
+
+    class FakePanel:
+        def __init__(self, body, **kwargs):
+            self.body = body
+            self.kwargs = kwargs
+
+    class FakePrompt:
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return "1"
+
+    console = _CollectingConsole()
+    monkeypatch.setattr(mms_core, "_list_manage_targets", lambda cfg: targets)
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: False)
+    monkeypatch.setattr(mms_core, "_ensure_rich", lambda: None)
+    monkeypatch.setattr(mms_core, "Panel", FakePanel)
+    monkeypatch.setattr(mms_core, "Prompt", FakePrompt)
+    monkeypatch.setattr(mms_core, "Table", _FakeTable)
+    monkeypatch.setattr(mms_core, "console", console)
+
+    assert mms_core._select_manage_target({"cfg": True}) == targets[0]
+    assert any(isinstance(item, _FakeTable) for item in console.items)
+
 
 def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
     import mms_command_tools

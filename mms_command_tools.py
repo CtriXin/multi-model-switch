@@ -2296,6 +2296,32 @@ def select_manage_target_fallback(targets, *, ensure_rich, panel_cls, table_cls,
         console.print(f"[red]请输入 1-{len(targets)} 的编号[/red]")
 
 
+def select_manage_target(
+    cfg,
+    *,
+    list_manage_targets,
+    use_tui,
+    select_manage_target_tui,
+    select_manage_target_fallback,
+    console,
+):
+    targets = list_manage_targets(cfg)
+    if not targets:
+        console.print("[yellow]当前还没有可管理的通道[/yellow]")
+        return None
+
+    if use_tui():
+        try:
+            result = select_manage_target_tui(targets)
+            if result is not None:
+                return result
+            return None
+        except (ImportError, Exception):
+            pass
+
+    return select_manage_target_fallback(targets)
+
+
 def format_rescue_hot_fallback_event(event):
     if not isinstance(event, dict) or not event:
         return "-"

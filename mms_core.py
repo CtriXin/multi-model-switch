@@ -3245,29 +3245,25 @@ def _list_manage_targets(cfg):
 
 
 def _select_manage_target(cfg):
-    targets = _list_manage_targets(cfg)
-    if not targets:
-        console.print("[yellow]当前还没有可管理的通道[/yellow]")
-        return None
+    from mms_command_tools import select_manage_target, select_manage_target_fallback
 
-    if _use_tui():
-        try:
-            from mms_tui import select_manage_target_tui
-            result = select_manage_target_tui(targets)
-            if result is not None:
-                return result
-            return None
-        except (ImportError, Exception):
-            pass
+    def select_target_tui(targets):
+        from mms_tui import select_manage_target_tui
+        return select_manage_target_tui(targets)
 
-    from mms_command_tools import select_manage_target_fallback
-
-    return select_manage_target_fallback(
-        targets,
-        ensure_rich=_ensure_rich,
-        panel_cls=Panel,
-        table_cls=Table,
-        prompt_cls=Prompt,
+    return select_manage_target(
+        cfg,
+        list_manage_targets=_list_manage_targets,
+        use_tui=_use_tui,
+        select_manage_target_tui=select_target_tui,
+        select_manage_target_fallback=lambda targets: select_manage_target_fallback(
+            targets,
+            ensure_rich=_ensure_rich,
+            panel_cls=Panel,
+            table_cls=Table,
+            prompt_cls=Prompt,
+            console=console,
+        ),
         console=console,
     )
 
