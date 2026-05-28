@@ -5909,23 +5909,18 @@ def handle_warm_command(cfg, argv):
 
 
 def handle_models_command(cfg, argv):
-    if argv and argv[0] in {"-h", "--help"}:
-        console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} ls [provider_id]"))
-        console.print("[dim]不带参数时先选通道，再进入模型列表与测速页。[/dim]")
-        return
-    provider_id = str(argv[0]).strip() if argv else ""
-    providers = _provider_map(cfg)
-    if provider_id:
-        if provider_id not in providers:
-            console.print(f"[red]未找到模型源: {provider_id}[/red]")
-            console.print(f"[dim]可用模型源: {', '.join(sorted(providers.keys()))}[/dim]")
-            sys.exit(1)
-    else:
-        provider_id = _select_provider_for_models(cfg)
-        if not provider_id:
-            return
+    from mms_command_tools import handle_models_command as handle_models_command_impl
 
-    _manage_provider_models(cfg, provider_id)
+    return handle_models_command_impl(
+        cfg,
+        argv,
+        command_name=current_command(),
+        provider_map=_provider_map,
+        select_provider_for_models=_select_provider_for_models,
+        manage_provider_models=_manage_provider_models,
+        text_cls=Text,
+        console=console,
+    )
 
 
 def _manage_provider_target(cfg, provider_id):

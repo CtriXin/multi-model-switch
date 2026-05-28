@@ -197,6 +197,48 @@ def test_activate_command_outputs_eval_exports(capsys):
     assert "export OPENAI_API_KEY='k v'" in out
 
 
+def test_models_command_dispatches_selected_provider():
+    import mms_command_tools
+
+    calls = []
+
+    mms_command_tools.handle_models_command(
+        {"providers": [{"id": "relay"}]},
+        [],
+        command_name="mmg",
+        provider_map=lambda cfg: {"relay": cfg["providers"][0]},
+        select_provider_for_models=lambda cfg: "relay",
+        manage_provider_models=lambda cfg, provider_id: calls.append((cfg, provider_id)),
+        text_cls=str,
+        console=_CollectingConsole(),
+    )
+
+    assert calls == [({"providers": [{"id": "relay"}]}, "relay")]
+
+
+def test_models_command_unknown_provider_exits_with_available_list():
+    import pytest
+    import mms_command_tools
+
+    console = _CollectingConsole()
+
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.handle_models_command(
+            {"providers": [{"id": "relay"}]},
+            ["missing"],
+            command_name="mmg",
+            provider_map=lambda cfg: {"relay": cfg["providers"][0]},
+            select_provider_for_models=lambda cfg: "relay",
+            manage_provider_models=lambda cfg, provider_id: None,
+            text_cls=str,
+            console=console,
+        )
+
+    assert exc.value.code == 1
+    assert any("未找到模型源: missing" in str(item) for item in console.items)
+    assert any("relay" in str(item) for item in console.items)
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

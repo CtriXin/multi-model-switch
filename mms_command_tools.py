@@ -605,6 +605,36 @@ def handle_activate_command(
         print(f"# ✓ preset '{args.preset_name}' activated", file=sys.stderr)
 
 
+def handle_models_command(
+    cfg,
+    argv,
+    *,
+    command_name,
+    provider_map,
+    select_provider_for_models,
+    manage_provider_models,
+    text_cls,
+    console,
+):
+    if argv and argv[0] in {"-h", "--help"}:
+        console.print("[cyan]用法:[/cyan]", text_cls(f"{command_name} ls [provider_id]"))
+        console.print("[dim]不带参数时先选通道，再进入模型列表与测速页。[/dim]")
+        return
+    provider_id = str(argv[0]).strip() if argv else ""
+    providers = provider_map(cfg)
+    if provider_id:
+        if provider_id not in providers:
+            console.print(f"[red]未找到模型源: {provider_id}[/red]")
+            console.print(f"[dim]可用模型源: {', '.join(sorted(providers.keys()))}[/dim]")
+            sys.exit(1)
+    else:
+        provider_id = select_provider_for_models(cfg)
+        if not provider_id:
+            return
+
+    manage_provider_models(cfg, provider_id)
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):
