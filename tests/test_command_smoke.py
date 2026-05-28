@@ -457,6 +457,45 @@ def test_export_command_rejects_unsupported_cli_before_export_lookup():
     assert any("claude, codex" in str(item) for item in console.items)
 
 
+def test_config_help_display_helpers_render_expected_sections(tmp_path):
+    import mms_command_tools
+
+    active_path = tmp_path / "preferences.toml"
+    active_path.write_text("# prefs\n", encoding="utf-8")
+    missing_path = tmp_path / "missing.toml"
+    console = _CollectingConsole()
+
+    mms_command_tools.display_config_help(command_name="mmg", console=console)
+    mms_command_tools.display_preferences_path(
+        preference_paths=[str(active_path), str(missing_path)],
+        preferences_doc_path="/docs/prefs.md",
+        console=console,
+    )
+    mms_command_tools.display_preferences_help(
+        command_name="mmg",
+        preference_paths=[str(active_path)],
+        preferences_doc_path="/docs/prefs.md",
+        console=console,
+    )
+    mms_command_tools.display_human_gate_help(
+        command_name="mmg",
+        preferences_doc_path="/docs/prefs.md",
+        console=console,
+    )
+    mms_command_tools.display_preferences_example(
+        preferences_example_toml="[launch.defaults]\nreasoning_effort = \"high\"\n",
+        console=console,
+    )
+
+    text = "\n".join(str(item) for item in console.items)
+    assert "mmg config provider.list" in text
+    assert "active" in text
+    assert "create-if-needed" in text
+    assert "preferences.toml" in text
+    assert "human-only" in text
+    assert "[launch.defaults]" in text
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

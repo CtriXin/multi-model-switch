@@ -903,6 +903,88 @@ def handle_presets_command(
         console.print(table)
 
 
+def display_config_help(*, command_name, console):
+    console.print(f"[bold]{command_name} config[/bold] — 配置查看与管理")
+    console.print(f"[dim]用法: {command_name} config [子命令] [参数][/dim]")
+    console.print("\n[bold]常用子命令:[/bold]")
+    console.print(f"  {command_name} config")
+    console.print(f"  {command_name} config file")
+    console.print(f"  {command_name} config validate")
+    console.print(f"  {command_name} config get <dot.path>")
+    console.print(f"  {command_name} config set <dot.path> <value>")
+    console.print(f"  {command_name} config unset <dot.path>")
+    console.print(f"  {command_name} config connect")
+    console.print(f"  {command_name} config web [--no-open]")
+    console.print(f"  {command_name} config preferences.help")
+    console.print(f"  {command_name} config human-gate")
+    console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
+    console.print("\n[bold]Provider:[/bold]")
+    console.print(f"  {command_name} config provider.list")
+    console.print(f"  {command_name} config provider.default [id]")
+    console.print(f"  {command_name} config provider.add [id]")
+    console.print(f"  {command_name} config provider.edit <id>")
+    console.print(f"  {command_name} config provider.remove <id>")
+    console.print(f"  {command_name} config provider.credentials [id]")
+    console.print(f"  {command_name} config extension.openrouter [add|status|models]")
+    console.print("\n[bold]Account:[/bold]")
+    console.print(f"  {command_name} config account.list")
+    console.print(f"  {command_name} config account.add \\[codex|agy]")
+    console.print(f"  {command_name} config account.edit <id>")
+    console.print(f"  {command_name} config account.remove <id>")
+    console.print(f"  {command_name} config account.status [id]")
+    console.print(f"  {command_name} config account.login <id>")
+    console.print(f"  {command_name} config account.default <cli> <id>")
+    console.print("  [dim]Claude OAuth 独立入口已下线；MMS 不再新增/登录/设默认 Claude 官方账号。[/dim]")
+    console.print("\n[bold]其他:[/bold]")
+    console.print(f"  {command_name} config stats")
+    console.print(f"  {command_name} config api.edit")
+
+
+def display_preferences_path(*, preference_paths, preferences_doc_path, console):
+    console.print("[bold]MMS preferences.toml[/bold]")
+    for path in preference_paths:
+        marker = "active" if os.path.exists(path) else "create-if-needed"
+        console.print(f"  {path}  [dim]({marker})[/dim]")
+    console.print(f"[dim]文档: {preferences_doc_path}[/dim]")
+    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms/** without human confirmation.")
+
+
+def display_preferences_example(*, preferences_example_toml, console):
+    console.print(preferences_example_toml.rstrip(), markup=False)
+
+
+def display_human_gate_help(*, command_name, preferences_doc_path, console):
+    console.print("[bold]MMS Human Gate[/bold]")
+    console.print("- real config tree `~/.config/mms/**` is human-only for agents.")
+    console.print("- allowed for agents: inspect, explain, generate manual diff, print examples.")
+    console.print("- blocked without human confirmation: writing config.toml, preferences.toml, override.toml, credentials.sh, accounts/**, env/**, usage/account state, or Claude config.")
+    console.print("- required write flow: plan -> backup -> human double check -> audited write -> post-write human double check.")
+    console.print("- `preferences.toml` is safer than `override.toml`, but it is still real user config and stays behind the same human gate.")
+    console.print(f"[dim]LLM entry: run `{command_name} config preferences.help` and read {preferences_doc_path} before advising config edits.[/dim]")
+
+
+def display_preferences_help(*, command_name, preference_paths, preferences_doc_path, console):
+    console.print("[bold]MMS User Preferences[/bold]")
+    console.print(f"Path: {preference_paths[0]}")
+    console.print("Purpose: user-owned, install-safe, allowlisted launch preference overlay.")
+    console.print("\n[bold]Commands:[/bold]")
+    console.print(f"  {command_name} config preferences.path")
+    console.print(f"  {command_name} config preferences.example")
+    console.print(f"  {command_name} config preferences.doc")
+    console.print(f"  {command_name} config human-gate")
+    console.print("\n[bold]Allowed keys:[/bold]")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, nsr_mode, agent_pack, bypass")
+    console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
+    console.print("  session_surfaces.disabled: skills, mcp, hooks")
+    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
+    console.print("\n[bold]Denied / ignored:[/bold]")
+    console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
+    console.print("\n[bold]Overlay order:[/bold]")
+    console.print("  config.toml -> override.toml -> preferences.toml launch allowlist -> confirm screen changes -> launcher")
+    console.print(f"[dim]Full doc: {preferences_doc_path}[/dim]")
+    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms/** without human confirmation.")
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):

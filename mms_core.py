@@ -10331,88 +10331,46 @@ def _display_accounts(cfg):
 
 
 def _display_config_help():
-    command = current_command()
-    console.print(f"[bold]{command} config[/bold] — 配置查看与管理")
-    console.print(f"[dim]用法: {command} config [子命令] [参数][/dim]")
-    console.print("\n[bold]常用子命令:[/bold]")
-    console.print(f"  {command} config")
-    console.print(f"  {command} config file")
-    console.print(f"  {command} config validate")
-    console.print(f"  {command} config get <dot.path>")
-    console.print(f"  {command} config set <dot.path> <value>")
-    console.print(f"  {command} config unset <dot.path>")
-    console.print(f"  {command} config connect")
-    console.print(f"  {command} config web [--no-open]")
-    console.print(f"  {command} config preferences.help")
-    console.print(f"  {command} config human-gate")
-    console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
-    console.print("\n[bold]Provider:[/bold]")
-    console.print(f"  {command} config provider.list")
-    console.print(f"  {command} config provider.default [id]")
-    console.print(f"  {command} config provider.add [id]")
-    console.print(f"  {command} config provider.edit <id>")
-    console.print(f"  {command} config provider.remove <id>")
-    console.print(f"  {command} config provider.credentials [id]")
-    console.print(f"  {command} config extension.openrouter [add|status|models]")
-    console.print("\n[bold]Account:[/bold]")
-    console.print(f"  {command} config account.list")
-    console.print(f"  {command} config account.add \\[codex|agy]")
-    console.print(f"  {command} config account.edit <id>")
-    console.print(f"  {command} config account.remove <id>")
-    console.print(f"  {command} config account.status [id]")
-    console.print(f"  {command} config account.login <id>")
-    console.print(f"  {command} config account.default <cli> <id>")
-    console.print("  [dim]Claude OAuth 独立入口已下线；MMS 不再新增/登录/设默认 Claude 官方账号。[/dim]")
-    console.print("\n[bold]其他:[/bold]")
-    console.print(f"  {command} config stats")
-    console.print(f"  {command} config api.edit")
+    from mms_command_tools import display_config_help
+
+    return display_config_help(command_name=current_command(), console=console)
 
 
 def _display_preferences_path():
-    console.print("[bold]MMS preferences.toml[/bold]")
-    for path in PREFERENCES_PATHS:
-        marker = "active" if os.path.exists(path) else "create-if-needed"
-        console.print(f"  {path}  [dim]({marker})[/dim]")
-    console.print(f"[dim]文档: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    from mms_command_tools import display_preferences_path
+
+    return display_preferences_path(
+        preference_paths=PREFERENCES_PATHS,
+        preferences_doc_path=PREFERENCES_DOC_PATH,
+        console=console,
+    )
 
 
 def _display_preferences_example():
-    console.print(PREFERENCES_EXAMPLE_TOML.rstrip(), markup=False)
+    from mms_command_tools import display_preferences_example
+
+    return display_preferences_example(preferences_example_toml=PREFERENCES_EXAMPLE_TOML, console=console)
 
 
 def _display_human_gate_help():
-    command = current_command()
-    console.print("[bold]MMS Human Gate[/bold]")
-    console.print("- real config tree `~/.config/mms/**` is human-only for agents.")
-    console.print("- allowed for agents: inspect, explain, generate manual diff, print examples.")
-    console.print("- blocked without human confirmation: writing config.toml, preferences.toml, override.toml, credentials.sh, accounts/**, env/**, usage/account state, or Claude config.")
-    console.print("- required write flow: plan -> backup -> human double check -> audited write -> post-write human double check.")
-    console.print("- `preferences.toml` is safer than `override.toml`, but it is still real user config and stays behind the same human gate.")
-    console.print(f"[dim]LLM entry: run `{command} config preferences.help` and read {PREFERENCES_DOC_PATH} before advising config edits.[/dim]")
+    from mms_command_tools import display_human_gate_help
+
+    return display_human_gate_help(
+        command_name=current_command(),
+        preferences_doc_path=PREFERENCES_DOC_PATH,
+        console=console,
+    )
 
 
 def _display_preferences_help():
-    command = current_command()
-    console.print("[bold]MMS User Preferences[/bold]")
-    console.print(f"Path: {PREFERENCES_PATHS[0]}")
-    console.print("Purpose: user-owned, install-safe, allowlisted launch preference overlay.")
-    console.print("\n[bold]Commands:[/bold]")
-    console.print(f"  {command} config preferences.path")
-    console.print(f"  {command} config preferences.example")
-    console.print(f"  {command} config preferences.doc")
-    console.print(f"  {command} config human-gate")
-    console.print("\n[bold]Allowed keys:[/bold]")
-    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, nsr_mode, agent_pack, bypass")
-    console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
-    console.print("  session_surfaces.disabled: skills, mcp, hooks")
-    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
-    console.print("\n[bold]Denied / ignored:[/bold]")
-    console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
-    console.print("\n[bold]Overlay order:[/bold]")
-    console.print("  config.toml -> override.toml -> preferences.toml launch allowlist -> confirm screen changes -> launcher")
-    console.print(f"[dim]Full doc: {PREFERENCES_DOC_PATH}[/dim]")
-    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms/** without human confirmation.")
+    from mms_command_tools import display_preferences_help
+
+    return display_preferences_help(
+        command_name=current_command(),
+        preference_paths=PREFERENCES_PATHS,
+        preferences_doc_path=PREFERENCES_DOC_PATH,
+        console=console,
+    )
 
 
 
