@@ -6062,71 +6062,29 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
 
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
-    selected_model = _resolve_model_name(model_info) if model_info else ""
-    selected_family, _ = _infer_model_family(selected_model) if selected_model else ("", "")
-    _probe_debug_logger.info("=== _provider_options_for_model(cli=%s, selected_model=%s) ===", cli_name, selected_model)
-    options = []
-    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
-        pid = provider.get("id", "?")
-        if not provider.get("enabled", True):
-            _probe_debug_logger.debug("  %s: SKIP (disabled)", pid)
-            continue
-        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
-            _probe_debug_logger.debug(
-                "  %s: SKIP (no configured base_url=%s or api_key=%s)",
-                pid,
-                _provider_has_configured_base_url(provider),
-                bool(provider.get("api_key")),
-            )
-            continue
+    from mms_command_tools import provider_options_for_model
 
-        models = cached_models
-        if models is None:
-            _probe_debug_logger.debug("  %s: cached_models=None, schedule async refresh", pid)
-            models = _provider_effective_models(provider, None, cfg)
-        else:
-            _probe_debug_logger.debug("  %s: cached_models=%s (len=%d)", pid, type(cached_models).__name__, len(cached_models))
-        models = _provider_effective_models(provider, models, cfg)
-        cli_models = _provider_models_for_cli(cli_name, models)
-
-        if selected_model:
-            if not _provider_supports_model_for_cli(provider, cli_name, selected_model):
-                _probe_debug_logger.info("  %s: SKIP (cli/model incompatible for %s -> %s)", pid, cli_name, selected_model)
-                continue
-            if selected_model not in models:
-                _probe_debug_logger.info("  %s: SKIP (model '%s' not in %s)", pid, selected_model, models[:5])
-                continue
-            option_models = [selected_model]
-        else:
-            if not _provider_supports_cli_name(provider, cli_name):
-                _probe_debug_logger.debug("  %s: SKIP (cli not supported)", pid)
-                continue
-            option_models = cli_models
-
-        if not option_models:
-            _probe_debug_logger.info("  %s: SKIP (no option models for cli=%s)", pid, cli_name)
-            continue
-
-        _probe_debug_logger.info("  %s: ADDED (option_models=%s)", pid, option_models)
-        options.append({
-            "kind": "provider",
-            "id": provider.get("id"),
-            "runtime": _runtime_with_priority(provider, model_name=selected_model, family_name=selected_family),
-            "models": option_models,
-            "label": _runtime_choice_label(provider),
-            "title": _provider_label(provider),
-            "desc": "网关",
-            "icon": "🌐",
-            "priority": (
-                _runtime_priority_for_family(provider, selected_family)
-                if selected_family
-                else provider.get("priority", DEFAULT_PRIORITY)
-            ),
-            "priority_family": selected_family,
-            "is_default": provider.get("id") == default_provider.get("id"),
-            "launch_cli": cli_name,
-        })
-    return options
+    return provider_options_for_model(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        model_info=model_info,
+        resolve_model_name=_resolve_model_name,
+        infer_model_family=_infer_model_family,
+        probe_debug_logger=_probe_debug_logger,
+        provider_candidates=_provider_candidates,
+        provider_has_configured_base_url=_provider_has_configured_base_url,
+        provider_effective_models=_provider_effective_models,
+        provider_models_for_cli=_provider_models_for_cli,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+        provider_supports_cli_name=_provider_supports_cli_name,
+        runtime_with_priority=_runtime_with_priority,
+        runtime_choice_label=_runtime_choice_label,
+        provider_label=_provider_label,
+        runtime_priority_for_family=_runtime_priority_for_family,
+        default_priority=DEFAULT_PRIORITY,
+    )
 
 
 def _account_options_for_model(cfg, cli_name, default_models, model_info=None, allow_selected_model=False):

@@ -1574,6 +1574,77 @@ def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
     assert all(item["model"] != "hidden-model" for family in families for item in family["models"])
 
 
+def test_provider_options_helper_preserves_selected_model_filtering():
+    import mms_command_tools
+
+    class Logger:
+        def debug(self, *_args, **_kwargs):
+            pass
+
+        def info(self, *_args, **_kwargs):
+            pass
+
+    default_provider = {"id": "default"}
+    providers = [
+        {
+            "id": "default",
+            "name": "Default",
+            "enabled": True,
+            "api_key": "sk-default",
+            "priority": 100,
+            "models": ["gpt-5.5", "qwen3.6-plus"],
+            "supported_clis": ["codex"],
+        },
+        {
+            "id": "disabled",
+            "name": "Disabled",
+            "enabled": False,
+            "api_key": "sk-disabled",
+            "priority": 300,
+            "models": ["gpt-5.5"],
+            "supported_clis": ["codex"],
+        },
+    ]
+
+    options = mms_command_tools.provider_options_for_model(
+        {"providers": providers},
+        "codex",
+        default_provider,
+        [],
+        model_info={"model": "gpt-5.5"},
+        infer_model_family=lambda model_name: ("GPT", "GPT") if model_name.startswith("gpt-") else ("Other", "Other"),
+        probe_debug_logger=Logger(),
+        provider_candidates=lambda cfg, _default_provider, _default_models: [
+            (provider, provider["models"]) for provider in cfg["providers"]
+        ],
+        provider_has_configured_base_url=lambda provider: True,
+        provider_effective_models=lambda _provider, cached_models, _cfg: list(cached_models or []),
+        provider_models_for_cli=lambda _cli_name, models: list(models or []),
+        provider_supports_model_for_cli=lambda provider, cli_name, model_name: (
+            cli_name in provider["supported_clis"] and model_name in provider["models"]
+        ),
+        provider_supports_cli_name=lambda provider, cli_name: cli_name in provider["supported_clis"],
+        runtime_with_priority=lambda provider, model_name="", family_name="": {
+            **provider,
+            "runtime_model": model_name,
+            "priority_family": family_name,
+        },
+        runtime_choice_label=lambda provider: f"runtime:{provider['id']}",
+        provider_label=lambda provider: provider["name"],
+        runtime_priority_for_family=lambda provider, _family_name: provider.get("priority", 100),
+        default_priority=100,
+    )
+
+    assert len(options) == 1
+    option = options[0]
+    assert option["id"] == "default"
+    assert option["models"] == ["gpt-5.5"]
+    assert option["runtime"]["runtime_model"] == "gpt-5.5"
+    assert option["priority"] == 100
+    assert option["priority_family"] == "GPT"
+    assert option["is_default"] is True
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
