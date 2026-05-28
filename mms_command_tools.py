@@ -236,6 +236,40 @@ def display_model_probe_details(probe, *, panel_cls, console):
     console.print(panel_cls("\n".join(lines), title="校验详情", border_style="yellow"))
 
 
+def pick_recovery_actions(findings, actions, *, use_tui=False, select_actions_tui=None, panel_cls, prompt_cls, console):
+    if use_tui and select_actions_tui is not None:
+        selected = select_actions_tui(findings, actions, title="处理发现")
+        if selected != "fallback":
+            return selected
+
+    console.print(panel_cls(
+        "\n".join(f"- {item['title']}: {item['summary']}" for item in findings),
+        title="发现",
+        border_style="yellow",
+    ))
+    console.print("[bold]可处理动作：[/bold]")
+    for index, action in enumerate(actions, 1):
+        tag = " [推荐]" if action.get("recommended") else ""
+        console.print(f"  {index}. {action['title']}{tag} — {action['summary']}")
+    console.print("[dim]输入编号，支持逗号分隔多选；直接回车等于取消。[/dim]")
+
+    while True:
+        raw = prompt_cls.ask("选择动作", default="")
+        if not raw:
+            return []
+        try:
+            indexes = []
+            for chunk in raw.split(","):
+                value = int(chunk.strip())
+                if not 1 <= value <= len(actions):
+                    raise ValueError
+                if value not in indexes:
+                    indexes.append(value)
+            return [actions[index - 1]["id"] for index in indexes]
+        except ValueError:
+            console.print(f"[red]请输入 1-{len(actions)} 的编号，可用逗号分隔多选[/red]")
+
+
 def rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False, localize):
     if cleared:
         return (

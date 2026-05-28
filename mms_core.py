@@ -5192,42 +5192,24 @@ def _select_provider_interactive(cfg, current_provider_id):
 
 
 def _pick_recovery_actions(findings, actions):
-    if _use_tui():
+    use_tui = _use_tui()
+    select_actions_tui = None
+    if use_tui:
         try:
             from mms_tui import select_actions_tui
         except ImportError:
             select_actions_tui = None
-        if select_actions_tui is not None:
-            selected = select_actions_tui(findings, actions, title="处理发现")
-            if selected != "fallback":
-                return selected
+    from mms_command_tools import pick_recovery_actions
 
-    console.print(Panel(
-        "\n".join(f"- {item['title']}: {item['summary']}" for item in findings),
-        title="发现",
-        border_style="yellow",
-    ))
-    console.print("[bold]可处理动作：[/bold]")
-    for index, action in enumerate(actions, 1):
-        tag = " [推荐]" if action.get("recommended") else ""
-        console.print(f"  {index}. {action['title']}{tag} — {action['summary']}")
-    console.print("[dim]输入编号，支持逗号分隔多选；直接回车等于取消。[/dim]")
-
-    while True:
-        raw = Prompt.ask("选择动作", default="")
-        if not raw:
-            return []
-        try:
-            indexes = []
-            for chunk in raw.split(","):
-                value = int(chunk.strip())
-                if not 1 <= value <= len(actions):
-                    raise ValueError
-                if value not in indexes:
-                    indexes.append(value)
-            return [actions[index - 1]["id"] for index in indexes]
-        except ValueError:
-            console.print(f"[red]请输入 1-{len(actions)} 的编号，可用逗号分隔多选[/red]")
+    return pick_recovery_actions(
+        findings,
+        actions,
+        use_tui=use_tui,
+        select_actions_tui=select_actions_tui,
+        panel_cls=Panel,
+        prompt_cls=Prompt,
+        console=console,
+    )
 
 
 def _run_recovery_action(cfg, provider, probe, action_id):

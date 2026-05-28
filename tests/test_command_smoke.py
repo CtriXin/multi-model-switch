@@ -485,6 +485,54 @@ def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     assert panel.kwargs == {"title": "校验详情", "border_style": "yellow"}
 
 
+def test_pick_recovery_actions_preserves_tui_and_prompt_fallback():
+    import mms_command_tools
+
+    findings = [{"title": "问题", "summary": "说明"}]
+    actions = [
+        {"id": "edit", "title": "编辑", "summary": "修复", "recommended": True},
+        {"id": "details", "title": "详情", "summary": "查看"},
+    ]
+
+    selected = mms_command_tools.pick_recovery_actions(
+        findings,
+        actions,
+        use_tui=True,
+        select_actions_tui=lambda *args, **kwargs: ["details"],
+        panel_cls=_FakeTable,
+        prompt_cls=None,
+        console=_CollectingConsole(),
+    )
+    assert selected == ["details"]
+
+    class FakePanel:
+        def __init__(self, body, **kwargs):
+            self.body = body
+            self.kwargs = kwargs
+
+    class FakePrompt:
+        values = iter(["3", "2,1,2"])
+
+        @classmethod
+        def ask(cls, *args, **kwargs):
+            return next(cls.values)
+
+    console = _CollectingConsole()
+    selected = mms_command_tools.pick_recovery_actions(
+        findings,
+        actions,
+        use_tui=True,
+        select_actions_tui=lambda *args, **kwargs: "fallback",
+        panel_cls=FakePanel,
+        prompt_cls=FakePrompt,
+        console=console,
+    )
+    assert selected == ["details", "edit"]
+    assert isinstance(console.items[0], FakePanel)
+    assert console.items[0].body == "- 问题: 说明"
+    assert any("请输入 1-2" in str(item) for item in console.items)
+
+
 def test_rescue_report_payload_helpers_preserve_safe_local_outputs():
     import mms_command_tools
 
