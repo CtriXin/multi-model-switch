@@ -6460,15 +6460,19 @@ def run_manage_channels(cfg):
 def run_connect_wizard(cfg):
     _ensure_interactive_terminal("新通道接入")
     action_id = None
+    tui_attempted = False
     if _use_tui():
         try:
             from mms_tui import select_connect_tui
         except ImportError:
             select_connect_tui = None
         if select_connect_tui is not None:
+            tui_attempted = True
             action_id = select_connect_tui()
     if action_id == "fallback":
         action_id = None
+    elif action_id is None and tui_attempted:
+        action_id = "cancel"
     if not action_id:
         console.print("\n[bold]接入新通道[/bold]")
         console.print("  1. 添加网关通道")

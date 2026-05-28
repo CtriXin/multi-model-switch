@@ -91,3 +91,61 @@ def test_quick_connect_gateway_prompts_name_url_key_before_advanced_fields(monke
             "https://relay.example.com/v1",
         )
     ]
+
+
+def test_run_connect_wizard_tui_escape_cancels_without_text_fallback(monkeypatch):
+    import mms_core
+    import mms_tui
+
+    messages = []
+    cfg = {"providers": []}
+
+    class _Console:
+        @staticmethod
+        def print(*args, **_kwargs):
+            messages.append(" ".join(str(arg) for arg in args))
+
+    class _Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            raise AssertionError("text fallback prompt should not open after TUI cancel")
+
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda _label: None)
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: True)
+    monkeypatch.setattr(mms_tui, "select_connect_tui", lambda: None)
+    monkeypatch.setattr(mms_core, "console", _Console())
+    monkeypatch.setattr(mms_core, "Prompt", _Prompt)
+
+    updated_cfg, changed = mms_core.run_connect_wizard(cfg)
+
+    assert updated_cfg is cfg
+    assert changed is False
+    assert any("已取消接入" in message for message in messages)
+
+
+def test_run_connect_wizard_tui_error_still_uses_text_fallback(monkeypatch):
+    import mms_core
+    import mms_tui
+
+    messages = []
+
+    class _Console:
+        @staticmethod
+        def print(*args, **_kwargs):
+            messages.append(" ".join(str(arg) for arg in args))
+
+    class _Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            return "5"
+
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda _label: None)
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: True)
+    monkeypatch.setattr(mms_tui, "select_connect_tui", lambda: "fallback")
+    monkeypatch.setattr(mms_core, "console", _Console())
+    monkeypatch.setattr(mms_core, "Prompt", _Prompt)
+
+    _updated_cfg, changed = mms_core.run_connect_wizard({"providers": []})
+
+    assert changed is False
+    assert any("接入新通道" in message for message in messages)
