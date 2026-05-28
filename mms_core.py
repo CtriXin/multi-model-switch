@@ -3630,150 +3630,29 @@ def _apply_provider_model_patch(provider, base_result):
 
 
 def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=False):
-    provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
-    if force_refresh:
-        _invalidate_probe_cache(provider_id)
+    from mms_command_tools import probe_models
 
-    import time as _time
-    if not skip_cache:
-        # 1. 内存缓存命中
-        cached = _PROBE_CACHE.get(provider_id)
-        if cached:
-            cached_at, cached_result = cached
-            if _time.time() - cached_at < _PROBE_CACHE_TTL:
-                patched_cached = _apply_provider_model_patch(provider, cached_result)
-                if emit_output and cached_result.get("error"):
-                    style = "yellow" if cached_result.get("error_kind") == "protocol_unsupported" else "red"
-                    console.print(f"[{style}]{cached_result['error']}[/{style}]")
-                return patched_cached
-
-        # 2. 文件缓存命中（24h TTL）
-        file_cached = _load_probe_file_cache(provider_id)
-        if file_cached:
-            base_result = _base_probe_result_from_cache(provider_id, file_cached)
-            _PROBE_CACHE[provider_id] = (_time.time(), base_result)
-            return _apply_provider_model_patch(provider, base_result)
-
-    protocols = provider.get("protocols", [])
-    base_url = _provider_openai_base_url(provider)
-    api_key = provider.get("api_key", "")
-    result = {
-        "provider_id": provider_id,
-        "models": None,
-        "raw_models": None,
-        "error": None,
-        "error_kind": None,
-        "working_url": None,
-        "details": [],
-        "working_url": None,
-        "base_source": "remote",
-    }
-
-    _ensure_httpx()
-    if "openai_chat_completions" not in protocols:
-        result["error_kind"] = "protocol_unsupported"
-        models_endpoint = provider.get("models_endpoint", "/models")
-        result["error"] = f"provider '{provider_id}' 未声明 openai_chat_completions，无法探测 {models_endpoint}"
-    elif httpx is None:
-        result["error_kind"] = "missing_httpx"
-        result["error"] = "缺少 httpx，请执行: pip install httpx"
-    elif not base_url and not api_key:
-        result["error_kind"] = "missing_credentials"
-        result["error"] = "当前 provider 还没有配置 API 地址和 API Key"
-    elif not base_url:
-        result["error_kind"] = "missing_base_url"
-        result["error"] = "当前 provider 缺少 API 地址"
-    elif not api_key:
-        result["error_kind"] = "missing_api_key"
-        result["error"] = "当前 provider 缺少 API Key"
-    else:
-        # 尝试 base_url 和 alt_url（/v1 互转），以第一个能返回有效 JSON 的为准
-        alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
-        last_exc = None
-        models_endpoint = provider.get("models_endpoint", "/models")
-        if models_endpoint == "manual":
-            fallback = provider.get("fallback_models") or []
-            result["raw_models"] = list(fallback)
-            result["models"] = list(fallback)
-            result["working_url"] = base_url
-            result["error"] = None
-            result["error_kind"] = None
-            result["base_source"] = "manual"
-            if emit_output:
-                console.print("[dim]已跳过远端 /models 探测，直接使用手工模型列表[/dim]")
-        else:
-            if not models_endpoint.startswith("/"):
-                models_endpoint = "/" + models_endpoint
-            for try_url in [base_url, alt_url]:
-                try:
-                    if "{key}" in models_endpoint:
-                        endpoint_url = models_endpoint.replace("{key}", api_key)
-                    elif "?" in models_endpoint:
-                        endpoint_url = f"{models_endpoint}&key={api_key}"
-                    else:
-                        endpoint_url = models_endpoint
-                    full_url = f"{try_url}{endpoint_url}"
-                    headers = {}
-                    if "/api/models/info" not in models_endpoint:
-                        headers["Authorization"] = f"Bearer {api_key}"
-                    response = _runtime_httpx_request(
-                        "GET",
-                        full_url,
-                        runtime=provider,
-                        headers=headers,
-                        timeout=15,
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    models = [m["id"] for m in data.get("data", [])]
-                    models.sort()
-                    result["raw_models"] = models
-                    result["models"] = models
-                    result["working_url"] = try_url
-                    if try_url != base_url and emit_output:
-                        console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
-                    if not models:
-                        # 模型列表为空，继续尝试 alt URL 再判断
-                        continue
-                    break
-                except Exception as exc:
-                    last_exc = exc
-            if result["models"] is not None and not result["models"]:
-                result["error_kind"] = "empty_models"
-                result["error"] = "接口返回成功，但模型列表为空"
-            elif result["models"] is None and last_exc is not None:
-                # 网络请求失败，尝试 fallback 到内置模型列表
-                fallback = provider.get("fallback_models")
-                if fallback:
-                    result["raw_models"] = list(fallback)
-                    result["models"] = list(fallback)
-                    result["working_url"] = base_url
-                    result["error"] = None
-                    result["error_kind"] = None
-                    result["base_source"] = "fallback"
-                    if emit_output:
-                        console.print(f"[dim]该来源不支持 /models 端点，使用内置模型列表 ({len(fallback)} 个模型)[/dim]")
-                else:
-                    result["error_kind"] = "request_failed"
-                    result["error"] = f"拉取模型列表失败: {last_exc}"
-
-    details = [
-        f"provider: {_provider_label(provider)} ({provider_id})",
-        f"openai_base_url: {base_url or '(未设置)'}",
-        f"protocols: {', '.join(protocols) if protocols else '(未声明)'}",
-    ]
-    if result["error"]:
-        details.append(f"error: {result['error']}")
-    result["details"] = details
-
-    if emit_output and result["error"]:
-        style = "yellow" if result["error_kind"] == "protocol_unsupported" else "red"
-        console.print(f"[{style}]{result['error']}[/{style}]")
-
-    # 写入缓存（成功或失败都缓存，避免重复请求）
-    _PROBE_CACHE[provider_id] = (_time.time(), result)
-    _save_probe_file_cache(provider_id, result)
-    return _apply_provider_model_patch(provider, result)
+    return probe_models(
+        provider,
+        emit_output=emit_output,
+        force_refresh=force_refresh,
+        skip_cache=skip_cache,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        probe_cache=_PROBE_CACHE,
+        probe_cache_ttl=_PROBE_CACHE_TTL,
+        invalidate_probe_cache=_invalidate_probe_cache,
+        load_probe_file_cache=_load_probe_file_cache,
+        base_probe_result_from_cache=_base_probe_result_from_cache,
+        apply_provider_model_patch=_apply_provider_model_patch,
+        provider_openai_base_url=_provider_openai_base_url,
+        ensure_httpx=_ensure_httpx,
+        get_httpx=lambda: httpx,
+        runtime_httpx_request=_runtime_httpx_request,
+        save_probe_file_cache=_save_probe_file_cache,
+        provider_label=_provider_label,
+        console=console,
+        time_func=time.time,
+    )
 
 
 def _warm_probe_cache_async(cfg, default_provider):

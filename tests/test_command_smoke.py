@@ -5712,6 +5712,170 @@ def test_probe_file_cache_helpers_preserve_ttl_normalization_and_cleanup(tmp_pat
     assert not os.path.exists(cache_path("relay"))
 
 
+def test_probe_models_helper_preserves_cache_manual_remote_and_core_wrapper(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    console = _CollectingConsole()
+
+    def patch(provider, result):
+        return {**result, "patched_for": provider["id"]}
+
+    probe_cache = {
+        "cached": (
+            100.0,
+            {
+                "provider_id": "cached",
+                "models": [],
+                "raw_models": [],
+                "error": "unsupported",
+                "error_kind": "protocol_unsupported",
+                "base_source": "remote",
+            },
+        )
+    }
+    assert mms_command_tools.probe_models(
+        {"id": "cached"},
+        default_provider_id="default",
+        probe_cache=probe_cache,
+        probe_cache_ttl=300,
+        invalidate_probe_cache=lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected invalidate")),
+        load_probe_file_cache=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected file cache")),
+        base_probe_result_from_cache=mms_command_tools.base_probe_result_from_cache,
+        apply_provider_model_patch=patch,
+        provider_openai_base_url=lambda provider: provider.get("base_url", ""),
+        ensure_httpx=lambda: (_ for _ in ()).throw(AssertionError("unexpected httpx")),
+        get_httpx=lambda: object(),
+        runtime_httpx_request=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected request")),
+        save_probe_file_cache=lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected save")),
+        provider_label=lambda provider: provider["id"],
+        console=console,
+        time_func=lambda: 120.0,
+    )["patched_for"] == "cached"
+    assert "[yellow]unsupported[/yellow]" in console.items
+
+    saved = []
+    probe_cache = {}
+    manual = mms_command_tools.probe_models(
+        {
+            "id": "manual",
+            "protocols": ["openai_chat_completions"],
+            "base_url": "https://manual.example/v1",
+            "api_key": "key",
+            "models_endpoint": "manual",
+            "fallback_models": ["manual-b", "manual-a"],
+        },
+        emit_output=True,
+        skip_cache=True,
+        default_provider_id="default",
+        probe_cache=probe_cache,
+        probe_cache_ttl=300,
+        invalidate_probe_cache=lambda *_args: None,
+        load_probe_file_cache=lambda *_args, **_kwargs: None,
+        base_probe_result_from_cache=mms_command_tools.base_probe_result_from_cache,
+        apply_provider_model_patch=patch,
+        provider_openai_base_url=lambda provider: provider.get("base_url", ""),
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: object(),
+        runtime_httpx_request=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("manual should not request")),
+        save_probe_file_cache=lambda provider_id, result: saved.append((provider_id, result)),
+        provider_label=lambda provider: provider["id"],
+        console=console,
+        time_func=lambda: 200.0,
+    )
+    assert manual["models"] == ["manual-b", "manual-a"]
+    assert manual["base_source"] == "manual"
+    assert probe_cache["manual"][0] == 200.0
+    assert saved[-1][0] == "manual"
+    assert any("已跳过远端 /models 探测" in str(item) for item in console.items)
+
+    class Response:
+        def __init__(self, data):
+            self._data = data
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._data
+
+    request_calls = []
+
+    def request(method, url, **kwargs):
+        request_calls.append((method, url, kwargs))
+        if len(request_calls) == 1:
+            raise RuntimeError("first failed")
+        return Response({"data": [{"id": "z-model"}, {"id": "a-model"}]})
+
+    remote = mms_command_tools.probe_models(
+        {
+            "id": "remote",
+            "protocols": ["openai_chat_completions"],
+            "base_url": "https://remote.example",
+            "api_key": "key-123",
+            "models_endpoint": "models?kind=text",
+        },
+        emit_output=True,
+        skip_cache=True,
+        default_provider_id="default",
+        probe_cache={},
+        probe_cache_ttl=300,
+        invalidate_probe_cache=lambda *_args: None,
+        load_probe_file_cache=lambda *_args, **_kwargs: None,
+        base_probe_result_from_cache=mms_command_tools.base_probe_result_from_cache,
+        apply_provider_model_patch=patch,
+        provider_openai_base_url=lambda provider: provider.get("base_url", ""),
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: object(),
+        runtime_httpx_request=request,
+        save_probe_file_cache=lambda provider_id, result: saved.append((provider_id, result)),
+        provider_label=lambda provider: provider["id"],
+        console=console,
+        time_func=lambda: 300.0,
+    )
+    assert remote["models"] == ["a-model", "z-model"]
+    assert remote["working_url"] == "https://remote.example/v1"
+    assert request_calls == [
+        (
+            "GET",
+            "https://remote.example/models?kind=text&key=key-123",
+            {
+                "runtime": {
+                    "id": "remote",
+                    "protocols": ["openai_chat_completions"],
+                    "base_url": "https://remote.example",
+                    "api_key": "key-123",
+                    "models_endpoint": "models?kind=text",
+                },
+                "headers": {"Authorization": "Bearer key-123"},
+                "timeout": 15,
+            },
+        ),
+        (
+            "GET",
+            "https://remote.example/v1/models?kind=text&key=key-123",
+            {
+                "runtime": {
+                    "id": "remote",
+                    "protocols": ["openai_chat_completions"],
+                    "base_url": "https://remote.example",
+                    "api_key": "key-123",
+                    "models_endpoint": "models?kind=text",
+                },
+                "headers": {"Authorization": "Bearer key-123"},
+                "timeout": 15,
+            },
+        ),
+    ]
+    assert any("已自动用 https://remote.example/v1 连接成功" in str(item) for item in console.items)
+
+    monkeypatch.setattr(mms_core, "_PROBE_CACHE", {"core": (100.0, {"models": ["wrapped"], "base_source": "remote"})})
+    monkeypatch.setattr(mms_core, "_PROBE_CACHE_TTL", 300)
+    monkeypatch.setattr(mms_core.time, "time", lambda: 120.0)
+    monkeypatch.setattr(mms_core, "_apply_provider_model_patch", patch)
+    assert mms_core._probe_models({"id": "core"}, emit_output=False)["models"] == ["wrapped"]
+
+
 def test_probe_startup_helper_preserves_memory_file_stale_and_live_paths(monkeypatch):
     import mms_command_tools
     import mms_core
