@@ -3494,6 +3494,67 @@ def test_provider_edit_remove_handlers_preserve_validation_refresh_and_default_c
     assert any("无法删除最后一个" in str(item) for item in console.items)
 
 
+def test_provider_upsert_and_credentials_cleanup_helpers_preserve_rewrite_rules(tmp_path):
+    import mms_command_tools
+
+    cfg = {"providers": [{"id": "demo-a", "name": "A"}], "provider": {"default": "demo-a"}}
+    normalized_calls = []
+    updated = mms_command_tools.upsert_provider(
+        cfg,
+        {"id": "demo-a", "name": "A2"},
+        ensure_provider_config=lambda current: normalized_calls.append(current) or (current, True),
+    )
+    assert updated["providers"] == [{"id": "demo-a", "name": "A2"}]
+    appended = mms_command_tools.upsert_provider(
+        cfg,
+        {"id": "demo-b", "name": "B"},
+        ensure_provider_config=lambda current: (current, True),
+    )
+    assert appended["providers"] == [{"id": "demo-a", "name": "A"}, {"id": "demo-b", "name": "B"}]
+
+    credentials = tmp_path / "credentials.sh"
+    values = {
+        "MMS_PROVIDER_DEMO_A_BASE_URL": "https://a.example",
+        "MMS_PROVIDER_DEMO_A_API_KEY": "key-a",
+        "MMS_PROVIDER_DEMO_B_API_KEY": "key-b",
+        "MMS_API_BASE_URL": "https://default.example",
+        "MMS_API_KEY": "default-key",
+    }
+    credentials.write_text("# old\n", encoding="utf-8")
+    chmod_calls = []
+    mms_command_tools.delete_provider_credentials(
+        "demo-a",
+        credentials_path=str(credentials),
+        load_env_file=lambda path: dict(values),
+        provider_env_name=lambda provider_id, suffix: f"MMS_PROVIDER_{provider_id.upper().replace('-', '_')}_{suffix}",
+        default_provider_id="default",
+        api_url_env_name="MMS_API_BASE_URL",
+        api_key_env_name="MMS_API_KEY",
+        shell_quote=lambda value: f"'{value}'",
+        chmod=lambda path, mode: chmod_calls.append((path, mode)),
+    )
+    text = credentials.read_text(encoding="utf-8")
+    assert "MMS_PROVIDER_DEMO_A_BASE_URL" not in text
+    assert "MMS_PROVIDER_DEMO_A_API_KEY" not in text
+    assert "MMS_PROVIDER_DEMO_B_API_KEY='key-b'" in text
+    assert "MMS_API_KEY='default-key'" in text
+    assert chmod_calls == [(str(credentials), 0o600)]
+
+    chmod_calls.clear()
+    mms_command_tools.delete_provider_credentials(
+        "missing",
+        credentials_path=str(credentials),
+        load_env_file=lambda path: {"KEEP": "1"},
+        provider_env_name=lambda provider_id, suffix: f"{provider_id}_{suffix}",
+        default_provider_id="default",
+        api_url_env_name="MMS_API_BASE_URL",
+        api_key_env_name="MMS_API_KEY",
+        shell_quote=lambda value: value,
+        chmod=lambda path, mode: chmod_calls.append((path, mode)),
+    )
+    assert chmod_calls == []
+
+
 def test_provider_rename_handler_preserves_backup_default_usage_and_cache_flow():
     import mms_command_tools
 
