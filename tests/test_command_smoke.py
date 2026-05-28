@@ -1732,6 +1732,45 @@ def test_provider_options_map_helper_preserves_provider_and_account_alternatives
     assert calls == [("gpt-5.5",)]
 
 
+def test_apply_runtime_priority_changes_preserves_runtime_and_family_overrides():
+    import mms_command_tools
+
+    cfg = {
+        "providers": [
+            {"id": "relay", "priority": 100, "family_priority_overrides": {"GPT": 200}},
+        ],
+        "accounts": [
+            {"id": "codex-main", "priority": 150, "family_priority_overrides": {"Claude": 90}},
+        ],
+    }
+
+    changed = mms_command_tools.apply_runtime_priority_changes(
+        cfg,
+        {
+            "relay": "300",
+            "relay||gpt": 400,
+            "codex-main||claude": "500",
+            "missing": 999,
+        },
+        canonical_model_family=lambda family: {"gpt": "GPT", "claude": "Claude"}.get(str(family).lower(), ""),
+        normalize_family_priority_overrides=lambda value: dict(value or {}),
+        normalize_priority=lambda value: int(value),
+    )
+
+    assert changed is True
+    assert cfg["providers"][0]["priority"] == 300
+    assert cfg["providers"][0]["family_priority_overrides"] == {"GPT": 400}
+    assert cfg["accounts"][0]["priority"] == 150
+    assert cfg["accounts"][0]["family_priority_overrides"] == {"Claude": 500}
+    assert mms_command_tools.apply_runtime_priority_changes(
+        cfg,
+        {},
+        canonical_model_family=lambda family: family,
+        normalize_family_priority_overrides=lambda value: dict(value or {}),
+        normalize_priority=lambda value: int(value),
+    ) is False
+
+
 def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
     import mms_command_tools
 

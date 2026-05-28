@@ -2679,6 +2679,55 @@ def make_provider_options_loader(cfg, cli_name, default_provider, default_models
     return _loader
 
 
+def apply_runtime_priority_changes(
+    cfg,
+    pri_changes,
+    *,
+    canonical_model_family,
+    normalize_family_priority_overrides,
+    normalize_priority,
+):
+    changed = False
+    if not pri_changes:
+        return changed
+
+    for runtime_id, new_priority in pri_changes.items():
+        family_name = ""
+        actual_runtime_id = runtime_id
+        if "||" in str(runtime_id):
+            actual_runtime_id, family_name = str(runtime_id).split("||", 1)
+            family_name = canonical_model_family(family_name)
+        matched = False
+        for provider_def in cfg.get("providers", []):
+            if provider_def.get("id") == actual_runtime_id:
+                if family_name:
+                    overrides = normalize_family_priority_overrides(
+                        provider_def.get("family_priority_overrides", {})
+                    )
+                    overrides[family_name] = normalize_priority(new_priority)
+                    provider_def["family_priority_overrides"] = overrides
+                else:
+                    provider_def["priority"] = normalize_priority(new_priority)
+                changed = True
+                matched = True
+                break
+        if matched:
+            continue
+        for account_def in cfg.get("accounts", []):
+            if account_def.get("id") == actual_runtime_id:
+                if family_name:
+                    overrides = normalize_family_priority_overrides(
+                        account_def.get("family_priority_overrides", {})
+                    )
+                    overrides[family_name] = normalize_priority(new_priority)
+                    account_def["family_priority_overrides"] = overrides
+                else:
+                    account_def["priority"] = normalize_priority(new_priority)
+                changed = True
+                break
+    return changed
+
+
 def build_model_families_for_cli(
     cfg,
     cli_name,

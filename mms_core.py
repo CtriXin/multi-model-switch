@@ -6782,45 +6782,15 @@ def _make_provider_options_loader(cfg, cli_name, default_provider, default_model
 
 
 def _apply_runtime_priority_changes(cfg, pri_changes):
-    changed = False
-    if not pri_changes:
-        return changed
+    from mms_command_tools import apply_runtime_priority_changes
 
-    for runtime_id, new_pri in pri_changes.items():
-        family_name = ""
-        actual_runtime_id = runtime_id
-        if "||" in str(runtime_id):
-            actual_runtime_id, family_name = str(runtime_id).split("||", 1)
-            family_name = _canonical_model_family(family_name)
-        matched = False
-        for pdef in cfg.get("providers", []):
-            if pdef.get("id") == actual_runtime_id:
-                if family_name:
-                    overrides = _normalize_family_priority_overrides(
-                        pdef.get("family_priority_overrides", {})
-                    )
-                    overrides[family_name] = _normalize_priority(new_pri)
-                    pdef["family_priority_overrides"] = overrides
-                else:
-                    pdef["priority"] = _normalize_priority(new_pri)
-                changed = True
-                matched = True
-                break
-        if matched:
-            continue
-        for adef in cfg.get("accounts", []):
-            if adef.get("id") == actual_runtime_id:
-                if family_name:
-                    overrides = _normalize_family_priority_overrides(
-                        adef.get("family_priority_overrides", {})
-                    )
-                    overrides[family_name] = _normalize_priority(new_pri)
-                    adef["family_priority_overrides"] = overrides
-                else:
-                    adef["priority"] = _normalize_priority(new_pri)
-                changed = True
-                break
-    return changed
+    return apply_runtime_priority_changes(
+        cfg,
+        pri_changes,
+        canonical_model_family=_canonical_model_family,
+        normalize_family_priority_overrides=_normalize_family_priority_overrides,
+        normalize_priority=_normalize_priority,
+    )
 
 
 def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=None, provider_id=None):
