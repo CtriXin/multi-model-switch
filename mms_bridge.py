@@ -436,6 +436,7 @@ _DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
 _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
+_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES = ("kimi", "k2.", "mimo")
 _DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo", "kimi", "k2.")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES = {
@@ -843,6 +844,11 @@ def _domestic_model_requires_reasoning_content_roundtrip(model_name):
     return normalized.startswith(_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES)
 
 
+def _domestic_model_requires_anthropic_history_coalescing(model_name):
+    normalized = _normalize_model_name(model_name)
+    return normalized.startswith(_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES)
+
+
 def _model_supports_anthropic_cache_control(model_name):
     normalized = _normalize_model_name(model_name)
     return normalized.startswith(_ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES)
@@ -931,6 +937,96 @@ def _assistant_message_has_tool_use(message):
     return False
 
 
+def _message_has_only_tool_result_blocks(message):
+    if not isinstance(message, dict):
+        return False
+    if str(message.get("role", "")).strip() != "user":
+        return False
+    content = _normalize_message_content(message.get("content"))
+    return bool(content) and all(block.get("type") == "tool_result" for block in content)
+
+
+def _assistant_content_with_reasoning_fallback(message):
+    if not isinstance(message, dict):
+        return []
+    content = _normalize_message_content(message.get("content"))
+    reasoning_content = str(message.get("reasoning_content") or "").strip()
+    if reasoning_content and not _assistant_has_thinking_block(content):
+        return [{"type": "thinking", "thinking": reasoning_content}] + content
+    return content
+
+
+def _merge_assistant_messages(left, right):
+    merged = copy.deepcopy(left) if isinstance(left, dict) else {}
+    left_content = _assistant_content_with_reasoning_fallback(left)
+    right_content = _assistant_content_with_reasoning_fallback(right)
+    merged_content = left_content + right_content
+    merged["role"] = "assistant"
+    merged["content"] = merged_content
+
+    merged_tool_calls = []
+    for tool_calls in ((left or {}).get("tool_calls"), (right or {}).get("tool_calls")):
+        if isinstance(tool_calls, list):
+            merged_tool_calls.extend(item for item in tool_calls if isinstance(item, dict))
+    if merged_tool_calls:
+        merged["tool_calls"] = merged_tool_calls
+    else:
+        merged.pop("tool_calls", None)
+
+    reasoning_content = _assistant_reasoning_content_from_blocks(merged_content)
+    if reasoning_content:
+        merged["reasoning_content"] = reasoning_content
+    else:
+        merged.pop("reasoning_content", None)
+    return merged
+
+
+def _merge_user_tool_result_messages(left, right):
+    merged = copy.deepcopy(left) if isinstance(left, dict) else {}
+    merged["role"] = "user"
+    merged["content"] = _normalize_message_content((left or {}).get("content")) + _normalize_message_content((right or {}).get("content"))
+    return merged
+
+
+def _coalesce_domestic_anthropic_history(payload, model_name):
+    if not _domestic_model_requires_anthropic_history_coalescing(model_name):
+        return
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+
+    coalesced = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role", "")).strip()
+        if not coalesced:
+            coalesced.append(copy.deepcopy(message))
+            continue
+
+        previous = coalesced[-1]
+        previous_role = str(previous.get("role", "")).strip()
+        if role == "assistant" and previous_role == "assistant":
+            coalesced[-1] = _merge_assistant_messages(previous, message)
+            continue
+        if (
+            role == "user"
+            and previous_role == "user"
+            and _message_has_only_tool_result_blocks(previous)
+            and _message_has_only_tool_result_blocks(message)
+        ):
+            coalesced[-1] = _merge_user_tool_result_messages(previous, message)
+            continue
+        coalesced.append(copy.deepcopy(message))
+
+    payload["messages"] = coalesced
+
+
+def _canonicalize_domestic_anthropic_history(payload, model_name):
+    _coalesce_domestic_anthropic_history(payload, model_name)
+    _preserve_domestic_reasoning_roundtrip(payload, model_name)
+
+
 def _apply_domestic_thinking_toggle(payload, model_name, *, thinking_enabled):
     if not _domestic_model_supports_thinking(model_name):
         return
@@ -997,7 +1093,7 @@ def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=
         next_config = dict(output_config) if isinstance(output_config, dict) else {}
         next_config["effort"] = _normalize_domestic_reasoning_effort(reasoning_effort, default="high")
         payload["output_config"] = next_config
-    _preserve_domestic_reasoning_roundtrip(payload, model_name)
+    _canonicalize_domestic_anthropic_history(payload, model_name)
 
 
 def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses_payload, error_text):
@@ -3317,8 +3413,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
                     reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
                 )
-                if _domestic_model_requires_reasoning_content_roundtrip(resolved_model):
-                    _preserve_domestic_reasoning_roundtrip(route_payload, resolved_model)
+                if profile_id:
+                    _canonicalize_domestic_anthropic_history(route_payload, resolved_model)
                 if not profile_id and _is_domestic_model(resolved_model):
                     _apply_domestic_reasoning_controls(
                         route_payload,
@@ -5096,8 +5192,8 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             thinking_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
         )
-        if _domestic_model_requires_reasoning_content_roundtrip(model_name):
-            _preserve_domestic_reasoning_roundtrip(anthropic_payload, model_name)
+        if profile_id:
+            _canonicalize_domestic_anthropic_history(anthropic_payload, model_name)
         if not profile_id and _is_domestic_model(model_name):
             _apply_domestic_reasoning_controls(
                 anthropic_payload,
