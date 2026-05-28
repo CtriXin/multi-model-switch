@@ -29,6 +29,7 @@ REGISTRY_V2_SAVE_PLAN_SCHEMA = "mms.setup_web.registry_v2_save_plan.v1"
 REGISTRY_V2_SAVE_CANDIDATE_SCHEMA = "mms.registry_v2_save_candidate.v1"
 REGISTRY_V2_APPLY_PLAN_SCHEMA = "mms.registry_v2_apply_plan.v1"
 PREVIEW_CHECK_SCHEMA = "mms.preview_check.v1"
+CONSUMER_BUNDLE_STATUS_SCHEMA = "mms.consumer_bundle_status.v1"
 REGISTRY_V2_GENERATED_FILES = (
     "model-registry.latest-approved.json",
     "model-routes.json",
@@ -927,6 +928,86 @@ def preview_check(
         },
         "read_only": True,
     }
+
+
+def consumer_bundle_status(
+    *,
+    config_dir: str | Path | None = None,
+    manifest_path: str | Path | None = None,
+    command_name: str = "mms config bundle",
+) -> dict[str, Any]:
+    """Verify and describe the single downstream consumer bundle entrypoint."""
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
+    manifest = Path(manifest_path).expanduser() if manifest_path is not None else root / "generated" / "model-registry.latest-approved.json"
+    summary: dict[str, Any] = {
+        "schema": CONSUMER_BUNDLE_STATUS_SCHEMA,
+        "read_only": True,
+        "root": root_status,
+        "config_root": str(root),
+        "consumer_entrypoint": str(manifest),
+        "manifest_path": str(manifest),
+        "verified": False,
+        "status": "missing" if not manifest.exists() else "invalid",
+        "result": "NOT_READY",
+        "files": {},
+        "component_revisions": {},
+        "consumer_rules": [
+            "read manifest first",
+            "verify every referenced file hash",
+            "do not query SQLite directly",
+            "do not mix files from different bundle revisions",
+        ],
+        "next_action": {"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"},
+    }
+    if not manifest.exists():
+        summary["error"] = "latest-approved manifest is missing"
+        return summary
+    try:
+        verified = mms_registry.verify_latest_approved_bundle(config_dir=root, manifest_path=manifest)
+    except Exception as exc:
+        summary["error"] = f"{type(exc).__name__}: {exc}"
+        return summary
+    manifest_payload = verified.get("manifest") if isinstance(verified.get("manifest"), dict) else {}
+    manifest_files = manifest_payload.get("files") if isinstance(manifest_payload.get("files"), dict) else {}
+    files: dict[str, dict[str, Any]] = {}
+    for name, info in (verified.get("verified_files") or {}).items():
+        if not isinstance(info, Mapping):
+            continue
+        manifest_entry = manifest_files.get(name) if isinstance(manifest_files.get(name), Mapping) else {}
+        files[str(name)] = {
+            "path": info.get("path") or "",
+            "canonical_path": manifest_entry.get("canonical_path") or "",
+            "legacy_alias_path": manifest_entry.get("legacy_alias_path") or "",
+            "legacy_alias_compat": bool(manifest_entry.get("legacy_alias_compat", False)),
+            "sha256": info.get("sha256") or "",
+            "sensitivity": info.get("sensitivity") or manifest_entry.get("sensitivity") or "",
+        }
+    summary.update(
+        {
+            "verified": True,
+            "status": "ok",
+            "result": "READY",
+            "manifest": {
+                "schema": manifest_payload.get("schema") or "",
+                "generated_at": manifest_payload.get("generated_at") or "",
+                "bundle_revision": manifest_payload.get("bundle_revision") or "",
+                "model_registry_revision": manifest_payload.get("model_registry_revision") or "",
+            },
+            "component_revisions": {
+                "bundle": manifest_payload.get("bundle_revision") or "",
+                "model_registry": manifest_payload.get("model_registry_revision") or "",
+                "capability": manifest_payload.get("capability_revision") or "",
+                "route": manifest_payload.get("route_revision") or "",
+                "policy": manifest_payload.get("policy_revision") or "",
+                "profile": manifest_payload.get("profile_revision") or "",
+            },
+            "files": files,
+            "next_action": {"label": "Consume verified bundle", "command": str(manifest)},
+        }
+    )
+    return summary
 
 
 def preview_prepare(
@@ -3207,6 +3288,34 @@ def _print_preview_check(summary: dict[str, Any]) -> None:
     print(f"next_command={next_action.get('command', '')}")
 
 
+def _print_consumer_bundle_status(summary: dict[str, Any]) -> None:
+    print("MMS Consumer Bundle")
+    print(f"result={summary.get('result')}")
+    print(f"verified={summary.get('verified', False)}")
+    print(f"status={summary.get('status')}")
+    print(f"consumer_entrypoint={summary.get('consumer_entrypoint')}")
+    print(f"config_root={summary.get('config_root')}")
+    print(f"read_only={summary.get('read_only', False)}")
+    revisions = summary.get("component_revisions") if isinstance(summary.get("component_revisions"), dict) else {}
+    for key in ("bundle", "model_registry", "capability", "route", "policy", "profile"):
+        print(f"{key}_revision={revisions.get(key, '')}")
+    files = summary.get("files") if isinstance(summary.get("files"), dict) else {}
+    for name in sorted(files):
+        info = files.get(name) if isinstance(files.get(name), dict) else {}
+        print(
+            "file="
+            f"{name} "
+            f"path={info.get('path', '')} "
+            f"sha256={info.get('sha256', '')} "
+            f"sensitivity={info.get('sensitivity', '')}"
+        )
+    if summary.get("error"):
+        print(f"error={summary.get('error')}")
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    print(f"next_action={next_action.get('label', '')}")
+    print(f"next_command={next_action.get('command', '')}")
+
+
 def _print_preview_prepare(summary: dict[str, Any]) -> None:
     print("MMF Preview Prepare")
     print(f"result={summary.get('result')}")
@@ -3279,6 +3388,11 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     source_status_parser = subparsers.add_parser("source-status", help="Read-only model source status summary")
     source_status_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     source_status_parser.add_argument("--json", action="store_true", help="Print the full status as JSON")
+    consumer_bundle_parser = subparsers.add_parser("consumer-bundle", help="Verify and describe latest-approved downstream bundle")
+    consumer_bundle_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
+    consumer_bundle_parser.add_argument("--manifest", default="", help="Override latest-approved manifest path")
+    consumer_bundle_parser.add_argument("--json", action="store_true", help="Print the full bundle status as JSON")
+    consumer_bundle_parser.add_argument("--no-strict-exit", action="store_true", help="Return zero even when bundle is missing or invalid")
     save_plan_parser = subparsers.add_parser("save-plan", help="Read-only v2 DB-truth save plan; does not write")
     save_plan_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     save_plan_parser.add_argument("--json", action="store_true", help="Print the full save plan as JSON")
@@ -3420,6 +3534,17 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         else:
             _print_model_source_status(summary)
         return 0
+    if args.subcommand == "consumer-bundle":
+        summary = consumer_bundle_status(
+            config_dir=args.config_dir or None,
+            manifest_path=args.manifest or None,
+            command_name=command_name,
+        )
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_consumer_bundle_status(summary)
+        return 0 if bool(args.no_strict_exit) or summary.get("verified") is True else 2
     if args.subcommand == "save-plan":
         plan = registry_v2_save_plan(config_dir=args.config_dir or None, command_name=command_name)
         if args.json:
@@ -3670,6 +3795,7 @@ __all__ = [
     "import_legacy_config",
     "init_config_root",
     "model_source_status",
+    "consumer_bundle_status",
     "preview_check",
     "preview_doctor",
     "preview_prepare",

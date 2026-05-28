@@ -11994,6 +11994,7 @@ def _display_config_help():
     console.print(f"  {command} config root [--json]")
     console.print(f"  {command} config source [--json]")
     console.print(f"  {command} config check [--json]")
+    console.print(f"  {command} config bundle [--json]")
     console.print(f"  {command} config save-plan [--json]")
     console.print(f"  {command} config apply-plan --plan-json <file> [--apply --confirm-preview-apply] [--json]")
     console.print(f"  {command} config doctor [--json]")
@@ -12066,6 +12067,17 @@ def _display_model_source_status(json_output=False):
         print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_model_source_status(status)
+
+
+def _display_consumer_bundle_status(json_output=False, strict_exit=True):
+    from mms_registry_cli import _print_consumer_bundle_status, consumer_bundle_status
+
+    summary = consumer_bundle_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config bundle")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_consumer_bundle_status(summary)
+    return 0 if not strict_exit or summary.get("verified") is True else 2
 
 
 def _display_registry_v2_save_plan(json_output=False):
@@ -13471,6 +13483,9 @@ def _is_config_help_request(args_rest):
         "preview-check",
         "preview.check",
         "v2-check",
+        "bundle",
+        "consumer-bundle",
+        "manifest",
         "save-plan",
         "save.plan",
         "v2-save-plan",
@@ -13504,6 +13519,12 @@ def _is_config_model_source_status_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
     return str(argv[1] or "").strip() in {"source", "sources", "model-source", "model-sources"}
+
+
+def _is_config_consumer_bundle_status_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"bundle", "consumer-bundle", "manifest"}
 
 
 def _is_config_registry_v2_save_plan_request(argv):
@@ -13568,6 +13589,11 @@ def main():
         return
     if _is_config_model_source_status_request(argv):
         _display_model_source_status(json_output="--json" in argv[2:])
+        return
+    if _is_config_consumer_bundle_status_request(argv):
+        code = _display_consumer_bundle_status(json_output="--json" in argv[2:], strict_exit="--no-strict-exit" not in argv[2:])
+        if code:
+            raise SystemExit(code)
         return
     if _is_config_registry_v2_save_plan_request(argv):
         _display_registry_v2_save_plan(json_output="--json" in argv[2:])

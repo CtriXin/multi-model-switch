@@ -578,6 +578,7 @@ def test_mmf_preview_help_is_short_and_read_only(tmp_path: Path) -> None:
 
     assert "MMF preview commands" in result.stdout
     assert "mmf preview check [--json]" in result.stdout
+    assert "mmf preview bundle [--json]" in result.stdout
     assert "mmf preview doctor [--json]" in result.stdout
     assert "mmf config doctor [--json]" in result.stdout
     assert "mmf preview prepare --from ~/.config/mms --include-secrets --json" in result.stdout
@@ -2259,6 +2260,82 @@ def test_mmf_preview_check_reports_ready_with_strict_success(tmp_path: Path) -> 
     assert payload["bundle"]["runtime_ready"] is True
     assert payload["next_action"]["command"].startswith("scripts/mms_health_watchdog.py")
     assert "sk-check-ready-secret" not in combined
+
+
+def test_mmf_preview_bundle_reports_verified_consumer_entrypoint(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-bundle-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "bundle", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONSUMER_BUNDLE_STATUS_SCHEMA
+    assert payload["result"] == "READY"
+    assert payload["verified"] is True
+    assert payload["status"] == "ok"
+    assert payload["consumer_entrypoint"] == str(config_dir / "generated" / "model-registry.latest-approved.json")
+    assert payload["component_revisions"]["route"]
+    assert payload["files"]["router"]["path"] == str(config_dir / "generated" / "model-routes.json")
+    assert payload["files"]["router"]["sensitivity"] == "secret"
+    assert payload["next_action"]["label"] == "Consume verified bundle"
+    assert "do not query SQLite directly" in payload["consumer_rules"]
+    assert "sk-bundle-ready-secret" not in combined
+
+
+def test_mmf_config_bundle_fails_closed_when_manifest_missing(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    strict = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "bundle", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(strict.stdout)
+
+    assert strict.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONSUMER_BUNDLE_STATUS_SCHEMA
+    assert payload["verified"] is False
+    assert payload["status"] == "missing"
+    assert payload["next_action"]["command"] == "./mmf preview publish --json && ./mmf preview verify --json"
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+    non_strict = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "bundle", "--json", "--no-strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    non_strict_payload = json.loads(non_strict.stdout)
+    assert non_strict.returncode == 0
+    assert non_strict_payload["status"] == "missing"
 
 
 def test_mmf_preview_doctor_strict_exit_distinguishes_ready_state(tmp_path: Path) -> None:

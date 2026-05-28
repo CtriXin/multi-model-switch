@@ -29,6 +29,7 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
                 "",
                 "Read-only:",
                 "  mmf preview check [--json]        one command readiness check; strict exit by default",
+                "  mmf preview bundle [--json]       verify downstream latest-approved bundle",
                 "  mmf preview doctor [--json]       show current state and one next action",
                 "  mmf preview doctor --strict-exit  return non-zero unless runtime-ready",
                 "  mmf preview status [--json]       show full model source status",
@@ -141,6 +142,12 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"status", "source"}:
     forwarded = ["source-status", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"bundle", "consumer-bundle", "manifest"}:
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["consumer-bundle", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"check", "ready", "smoke"}:
     from mms_registry_cli import handle_registry_command
 
@@ -179,6 +186,16 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"source", "sources", "
     else:
         _print_model_source_status(status)
     raise SystemExit(0)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"bundle", "consumer-bundle", "manifest"}:
+    from mms_registry_cli import _print_consumer_bundle_status, consumer_bundle_status
+
+    summary = consumer_bundle_status(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config bundle")
+    if "--json" in argv[2:]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_consumer_bundle_status(summary)
+    raise SystemExit(0 if "--no-strict-exit" in argv[2:] or summary.get("verified") is True else 2)
 
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}:
     from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
