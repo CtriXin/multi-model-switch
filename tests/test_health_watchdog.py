@@ -170,3 +170,16 @@ def test_watchdog_require_bundle_env_can_disable_explicit_root_default(monkeypat
     args = watchdog.parse_args(["--config-dir", str(tmp_path), "--dry-run"])
 
     assert watchdog.resolve_require_bundle(args, tmp_path) is False
+
+
+def test_watchdog_default_config_dir_honors_mms_config_dir(monkeypatch, tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("MMS_WATCHDOG_REQUIRE_BUNDLE", raising=False)
+
+    args = watchdog.parse_args(["--dry-run"])
+    config_dir = Path(args.config_dir)
+
+    assert config_dir == tmp_path
+    assert watchdog.resolve_require_bundle(args, config_dir) is True

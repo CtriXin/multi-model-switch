@@ -93,9 +93,10 @@ def real_home() -> Path:
 
 
 def default_config_dir() -> Path:
-    explicit = os.environ.get("MMS_CONFIG_ROOT", "").strip()
-    if explicit:
-        return Path(explicit).expanduser()
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR"):
+        explicit = os.environ.get(key, "").strip()
+        if explicit:
+            return Path(explicit).expanduser()
     return real_home() / ".config" / "mms"
 
 
