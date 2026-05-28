@@ -444,26 +444,26 @@ def run_case(
 
 
 def _direct_cli_for_case(runtime: dict, model_name: str) -> str:
+    runtime = runtime if isinstance(runtime, dict) else {}
     variant, _caps = mms_launchers._pi_pick_protocol(runtime, model_name)
-    if str(variant.get("protocol") or "").strip() == "anthropic_messages":
+    preferred_cli = "claude" if str(variant.get("protocol") or "").strip() == "anthropic_messages" else "codex"
+    supported_clis = [
+        str(item or "").strip()
+        for item in (runtime.get("supported_clis") or [])
+        if str(item or "").strip() in {"claude", "codex"}
+    ]
+    if not supported_clis:
+        return preferred_cli
+    if preferred_cli in supported_clis:
+        return preferred_cli
+    if "claude" in supported_clis:
         return "claude"
-    return "codex"
+    if "codex" in supported_clis:
+        return "codex"
+    return preferred_cli
 
 
-def run_direct_check(provider_id: str, runtime: dict, model_name: str, timeout_sec: int) -> dict:
-    try:
-        cli = _direct_cli_for_case(runtime, model_name)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "cli": "",
-            "route": "",
-            "status": "direct_pick_fail",
-            "detail": str(exc),
-            "preview": [],
-            "rc": None,
-        }
-
+def _run_single_direct_check(provider_id: str, cli: str, model_name: str, timeout_sec: int) -> dict:
     cmd = [
         str(ROOT / "mms"),
         "test",
@@ -523,6 +523,53 @@ def run_direct_check(provider_id: str, runtime: dict, model_name: str, timeout_s
         "preview": list(row.get("preview") or []),
         "rc": completed.returncode,
     }
+
+
+def run_direct_check(provider_id: str, runtime: dict, model_name: str, timeout_sec: int) -> dict:
+    runtime = runtime if isinstance(runtime, dict) else {}
+    try:
+        preferred_cli = _direct_cli_for_case(runtime, model_name)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "any_ok": False,
+            "preferred_cli": "",
+            "cli": "",
+            "route": "",
+            "status": "direct_pick_fail",
+            "detail": str(exc),
+            "preview": [],
+            "rc": None,
+        }
+
+    supported_clis = [
+        str(item or "").strip()
+        for item in (runtime.get("supported_clis") or [])
+        if str(item or "").strip() in {"claude", "codex"}
+    ]
+    cli_order = []
+    for candidate in [preferred_cli, "claude", "codex"]:
+        if candidate in cli_order:
+            continue
+        if supported_clis and candidate not in supported_clis:
+            continue
+        cli_order.append(candidate)
+    if not cli_order:
+        cli_order = [preferred_cli]
+
+    primary = _run_single_direct_check(provider_id, cli_order[0], model_name, timeout_sec)
+    result = dict(primary)
+    result["preferred_cli"] = preferred_cli
+    result["any_ok"] = bool(primary.get("ok"))
+
+    alternate_checks = []
+    for candidate in cli_order[1:]:
+        alternate = _run_single_direct_check(provider_id, candidate, model_name, timeout_sec)
+        alternate_checks.append(alternate)
+        result["any_ok"] = bool(result["any_ok"] or alternate.get("ok"))
+    if alternate_checks:
+        result["alternate_checks"] = alternate_checks
+    return result
 
 
 def maybe_attach_direct_check(
@@ -686,6 +733,15 @@ def main() -> int:
             )
             if direct_check.get("detail"):
                 print(f"    detail: {direct_check['detail']}")
+            for alternate in direct_check.get("alternate_checks") or []:
+                print(
+                    "    alt: "
+                    f"{alternate.get('cli') or '<no-cli>'} "
+                    f"{alternate.get('status') or '<no-status>'} "
+                    f"{alternate.get('route') or '<no-route>'}"
+                )
+                if alternate.get("detail"):
+                    print(f"      detail: {alternate['detail']}")
 
     summary = summarize_results(results)
     print(json.dumps({"output": str(output_path), "summary": summary, "executed": executed}, ensure_ascii=False))
