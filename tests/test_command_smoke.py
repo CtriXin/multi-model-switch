@@ -3680,6 +3680,77 @@ def test_account_add_status_login_handlers_preserve_guards_and_dispatch():
     assert login_calls == [{"id": "codex-main", "cli": "codex"}]
 
 
+def test_account_status_probe_helper_preserves_delegated_manual_and_cli_states():
+    import subprocess
+    from types import SimpleNamespace
+
+    import mms_command_tools
+
+    assert mms_command_tools.account_status_command("codex") == ["codex", "login", "status"]
+    assert mms_command_tools.account_status_command("gemini") is None
+
+    assert mms_command_tools.probe_account_status(
+        {"cli": "claude"},
+        account_env=lambda account: {},
+    ) == {
+        "state": "delegated",
+        "summary": "Claude OAuth 独立入口已下线；MMS 不再探测或登录这个账号",
+    }
+
+    existing = {"/home/demo/.gemini/oauth_creds.json", "/home/agy/.gemini/antigravity-cli"}
+    assert mms_command_tools.probe_account_status(
+        {"cli": "gemini", "home_dir": "~/demo"},
+        account_env=lambda account: {},
+        expanduser=lambda path: path.replace("~", "/home"),
+        path_exists=lambda path: path in existing,
+    ) == {"state": "configured", "summary": "已配置 OAuth，建议直接启动 Gemini 验证"}
+    assert mms_command_tools.probe_account_status(
+        {"cli": "agy", "home_dir": "/home/agy"},
+        account_env=lambda account: {},
+        path_exists=lambda path: False,
+        path_isdir=lambda path: path in existing,
+    ) == {"state": "manual", "summary": "已初始化，登录状态需启动 agy 验证"}
+
+    run_calls = []
+
+    def run_ok(command, **kwargs):
+        run_calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="logged in\nextra", stderr="")
+
+    assert mms_command_tools.probe_account_status(
+        {"cli": "codex", "home_dir": "/tmp/codex"},
+        account_env=lambda account: {"HOME": account["home_dir"]},
+        run_command=run_ok,
+    ) == {"state": "logged_in", "summary": "logged in"}
+    assert run_calls == [
+        (
+            ["codex", "login", "status"],
+            {
+                "env": {"HOME": "/tmp/codex"},
+                "capture_output": True,
+                "text": True,
+                "timeout": 5,
+            },
+        )
+    ]
+
+    assert mms_command_tools.probe_account_status(
+        {"cli": "unknown"},
+        account_env=lambda account: {},
+        account_status_command=lambda cli: None,
+    ) == {"state": "unsupported", "summary": "不支持状态探测"}
+    assert mms_command_tools.probe_account_status(
+        {"cli": "codex"},
+        account_env=lambda account: {},
+        run_command=lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError()),
+    ) == {"state": "cli_missing", "summary": "codex 未安装"}
+    assert mms_command_tools.probe_account_status(
+        {"cli": "codex"},
+        account_env=lambda account: {},
+        run_command=lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("codex", 5)),
+    ) == {"state": "timeout", "summary": "状态探测超时"}
+
+
 def test_account_edit_remove_handlers_preserve_validation_and_defaults_cleanup():
     import mms_command_tools
 

@@ -1789,6 +1789,91 @@ def normalize_account_id(account_id):
     return value or "account"
 
 
+def account_status_command(cli_name):
+    if cli_name == "claude":
+        return ["claude", "auth", "status"]
+    if cli_name == "codex":
+        return ["codex", "login", "status"]
+    if cli_name == "gemini":
+        return None
+    if cli_name == "agy":
+        return None
+    return None
+
+
+def probe_account_status(
+    account,
+    *,
+    account_env,
+    account_status_command=account_status_command,
+    expanduser=os.path.expanduser,
+    path_exists=os.path.exists,
+    path_isdir=os.path.isdir,
+    run_command=subprocess.run,
+):
+    cli_name = account.get("cli")
+    if cli_name == "claude":
+        return {
+            "state": "delegated",
+            "summary": "Claude OAuth 独立入口已下线；MMS 不再探测或登录这个账号",
+        }
+    if cli_name == "gemini":
+        home_dir = expanduser(str(account.get("home_dir", "")).strip())
+        gemini_dir = os.path.join(home_dir, ".gemini")
+        oauth_path = os.path.join(gemini_dir, "oauth_creds.json")
+        accounts_path = os.path.join(gemini_dir, "google_accounts.json")
+        settings_path = os.path.join(gemini_dir, "settings.json")
+        if path_exists(oauth_path) or path_exists(accounts_path):
+            return {
+                "state": "configured",
+                "summary": "已配置 OAuth，建议直接启动 Gemini 验证",
+            }
+        has_state = path_exists(settings_path)
+        return {
+            "state": "manual",
+            "summary": "已初始化，待登录" if has_state else "待登录",
+        }
+    if cli_name == "agy":
+        home_dir = expanduser(str(account.get("home_dir", "")).strip())
+        agy_dir = os.path.join(home_dir, ".gemini", "antigravity-cli")
+        settings_path = os.path.join(agy_dir, "settings.json")
+        has_state = path_isdir(agy_dir) or path_exists(settings_path)
+        return {
+            "state": "manual",
+            "summary": "已初始化，登录状态需启动 agy 验证" if has_state else "待登录",
+        }
+    command = account_status_command(cli_name)
+    if command is None:
+        return {"state": "unsupported", "summary": "不支持状态探测"}
+    try:
+        result = run_command(
+            command,
+            env=account_env(account),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError:
+        return {"state": "cli_missing", "summary": f"{cli_name} 未安装"}
+    except subprocess.TimeoutExpired:
+        return {"state": "timeout", "summary": "状态探测超时"}
+
+    output_text = (result.stdout or result.stderr or "").strip()
+    output = output_text.splitlines()
+    summary = output[0].strip() if output else ""
+    if cli_name == "claude" and output_text.startswith("{"):
+        try:
+            payload = json.loads(output_text)
+            email = payload.get("email", "")
+            sub = payload.get("subscriptionType", "")
+            summary = " / ".join(part for part in [email, sub] if part) or summary
+        except json.JSONDecodeError:
+            pass
+    if result.returncode == 0:
+        return {"state": "logged_in", "summary": summary or "已登录"}
+    return {"state": "logged_out", "summary": summary or "未登录"}
+
+
 def ensure_provider_config(cfg, *, default_provider_id, default_provider, normalize_provider):
     cfg = dict(cfg)
     raw_providers = cfg.get("providers")
