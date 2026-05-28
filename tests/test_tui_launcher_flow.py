@@ -51,6 +51,7 @@ from mms_tui_launcher_flow import (
     run_confirm_tui_prompt,
     safe_tui_call,
     select_rescue_event_action,
+    select_rescue_menu_action,
     selected_model_launch_context,
     select_rescue_route_fallback_model,
     show_rescue_no_packets_report,
@@ -1932,6 +1933,32 @@ def test_rescue_landing_action_context_collects_state_and_payload() -> None:
         ("latest",),
         ("payload", "fallback-model", events, latest, True),
     ]
+
+
+def test_select_rescue_menu_action_returns_action_continue_or_interrupt() -> None:
+    info = [("k", "v")]
+    actions = [("view_packets", "View")]
+
+    assert select_rescue_menu_action(
+        "Rescue",
+        info,
+        actions,
+        select_channel_action_tui=lambda title, info_arg, actions_arg: "view_packets" if (title, info_arg, actions_arg) == ("Rescue", info, actions) else None,
+    ) == {"status": "action", "action": "view_packets"}
+
+    assert select_rescue_menu_action(
+        "Rescue",
+        info,
+        actions,
+        select_channel_action_tui=lambda *_args: "back",
+    ) == {"status": "continue", "action": None}
+
+    assert select_rescue_menu_action(
+        "Rescue",
+        info,
+        actions,
+        select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
+    ) == {"status": "interrupt", "action": None}
 
 
 def test_apply_rescue_hot_fallback_toggle_action_saves_reports_and_pauses() -> None:

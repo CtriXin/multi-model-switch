@@ -1140,6 +1140,15 @@ def rescue_landing_action_context(
     }
 
 
+def select_rescue_menu_action(title, info_lines, actions, *, select_channel_action_tui):
+    action = safe_tui_call(select_channel_action_tui, title, info_lines, actions)
+    if action == "__interrupt__":
+        return {"status": "interrupt", "action": None}
+    if action in {None, "back"}:
+        return {"status": "continue", "action": None}
+    return {"status": "action", "action": action}
+
+
 def apply_rescue_hot_fallback_toggle_action(
     cfg,
     enable_hot,

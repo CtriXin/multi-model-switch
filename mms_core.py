@@ -5160,16 +5160,17 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 default_label = landing_context["default_label"]
                 route_fallback_candidates = landing_context["route_fallback_candidates"]
                 rescue_events = landing_context["rescue_events"]
-                landing_action = tui_flow.safe_tui_call(
-                    select_channel_action_tui,
+                landing_result = tui_flow.select_rescue_menu_action(
                     "Rescue / Current-session Fallback",
                     landing_context["landing_info"],
                     landing_context["landing_actions"],
+                    select_channel_action_tui=select_channel_action_tui,
                 )
-                if landing_action == "__interrupt__":
+                if landing_result["status"] == "interrupt":
                     return True
-                if landing_action in {None, "back"}:
+                if landing_result["status"] != "action":
                     continue
+                landing_action = landing_result["action"]
                 if str(landing_action or "").startswith("default::") or landing_action == "manual_default":
                     fallback_model = tui_flow.resolve_rescue_action_fallback_model(
                         landing_action,
@@ -5243,14 +5244,17 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
                 )
                 route_fallback_candidates = packet_menu["route_fallback_candidates"]
-                rescue_action = tui_flow.safe_tui_call(
-                    select_channel_action_tui,
+                rescue_result = tui_flow.select_rescue_menu_action(
                     "Rescue Packet",
                     packet_menu["info_lines"],
                     packet_menu["actions"],
+                    select_channel_action_tui=select_channel_action_tui,
                 )
-                if rescue_action == "__interrupt__":
+                if rescue_result["status"] == "interrupt":
                     return True
+                if rescue_result["status"] != "action":
+                    continue
+                rescue_action = rescue_result["action"]
                 if rescue_action == "view_md":
                     tui_flow.handle_rescue_view_markdown_action(
                         selected_rescue,
