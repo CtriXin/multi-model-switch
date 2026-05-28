@@ -1875,6 +1875,131 @@ def normalize_cache_config(
     return new_cfg, True
 
 
+def snapshot_diff_lines(previous_snapshot, current_snapshot, *, is_snapshot_ignored_file):
+    diffs = []
+    previous_snapshot = previous_snapshot if isinstance(previous_snapshot, dict) else {}
+    current_snapshot = current_snapshot if isinstance(current_snapshot, dict) else {}
+
+    previous_defaults = previous_snapshot.get("defaults") or {}
+    current_defaults = current_snapshot.get("defaults") or {}
+    if previous_defaults != current_defaults:
+        diffs.append("default route/account changed")
+
+    previous_accounts = {
+        str(item.get("id") or "").strip(): item
+        for item in previous_snapshot.get("accounts", [])
+        if isinstance(item, dict)
+    }
+    current_accounts = {
+        str(item.get("id") or "").strip(): item
+        for item in current_snapshot.get("accounts", [])
+        if isinstance(item, dict)
+    }
+    for account_id in sorted(set(previous_accounts) | set(current_accounts)):
+        previous_entry = previous_accounts.get(account_id)
+        current_entry = current_accounts.get(account_id)
+        if previous_entry is None:
+            diffs.append(f"account added: {account_id}")
+            continue
+        if current_entry is None:
+            diffs.append(f"account removed: {account_id}")
+            continue
+        field_labels = {
+            "cli": "cli",
+            "enabled": "enabled",
+            "home_dir": "home_dir",
+            "priority": "priority",
+            "claude_1m_mode": "claude_1m_mode",
+            "timezone": "timezone",
+            "force_ipv4": "force_ipv4",
+            "no_proxy": "no_proxy",
+            "proxy_sha256": "proxy",
+            "identity_sha256": "identity",
+        }
+        for field_name, field_label in field_labels.items():
+            if field_name == "identity_sha256":
+                previous_value = previous_entry.get(field_name, "")
+                current_value = current_entry.get(field_name, "")
+            else:
+                previous_value = previous_entry.get(field_name)
+                current_value = current_entry.get(field_name)
+            if field_name == "identity_sha256" and field_name not in previous_entry:
+                continue
+            if previous_value != current_value:
+                if field_name == "proxy_sha256":
+                    old_value = previous_entry.get("proxy_fingerprint")
+                    new_value = current_entry.get("proxy_fingerprint")
+                elif field_name == "identity_sha256":
+                    old_value = previous_entry.get("identity_fingerprint")
+                    new_value = current_entry.get("identity_fingerprint")
+                else:
+                    old_value = previous_entry.get(field_name)
+                    new_value = current_entry.get(field_name)
+                diffs.append(f"account {account_id} {field_label}: {old_value} -> {new_value}")
+
+    previous_providers = {
+        str(item.get("id") or "").strip(): item
+        for item in previous_snapshot.get("providers", [])
+        if isinstance(item, dict)
+    }
+    current_providers = {
+        str(item.get("id") or "").strip(): item
+        for item in current_snapshot.get("providers", [])
+        if isinstance(item, dict)
+    }
+    for provider_id in sorted(set(previous_providers) | set(current_providers)):
+        previous_entry = previous_providers.get(provider_id)
+        current_entry = current_providers.get(provider_id)
+        if previous_entry is None:
+            diffs.append(f"provider added: {provider_id}")
+            continue
+        if current_entry is None:
+            diffs.append(f"provider removed: {provider_id}")
+            continue
+        field_labels = {
+            "enabled": "enabled",
+            "priority": "priority",
+            "models_endpoint": "models_endpoint",
+            "timezone": "timezone",
+            "force_ipv4": "force_ipv4",
+            "no_proxy": "no_proxy",
+            "proxy_sha256": "proxy",
+        }
+        for field_name, field_label in field_labels.items():
+            if previous_entry.get(field_name) != current_entry.get(field_name):
+                old_value = previous_entry.get("proxy_fingerprint") if field_name == "proxy_sha256" else previous_entry.get(field_name)
+                new_value = current_entry.get("proxy_fingerprint") if field_name == "proxy_sha256" else current_entry.get(field_name)
+                diffs.append(f"provider {provider_id} {field_label}: {old_value} -> {new_value}")
+
+    previous_files = {
+        str(item.get("path") or ""): item
+        for item in previous_snapshot.get("files", [])
+        if isinstance(item, dict) and not is_snapshot_ignored_file(item.get("path"))
+    }
+    current_files = {
+        str(item.get("path") or ""): item
+        for item in current_snapshot.get("files", [])
+        if isinstance(item, dict) and not is_snapshot_ignored_file(item.get("path"))
+    }
+    for path in sorted(set(previous_files) | set(current_files)):
+        if os.path.basename(str(path or "")) == ".claude.json":
+            continue
+        previous_entry = previous_files.get(path)
+        current_entry = current_files.get(path)
+        if previous_entry is None:
+            diffs.append(f"file added: {path}")
+            continue
+        if current_entry is None:
+            diffs.append(f"file removed: {path}")
+            continue
+        if bool(previous_entry.get("exists")) != bool(current_entry.get("exists")):
+            diffs.append(f"file presence changed: {path}")
+            continue
+        if previous_entry.get("sha256") != current_entry.get("sha256"):
+            diffs.append(f"file changed: {path}")
+    return diffs
+
+
 def runtime_force_ipv4(runtime):
     raw = False if not isinstance(runtime, dict) else runtime.get("force_ipv4", False)
     if isinstance(raw, bool):

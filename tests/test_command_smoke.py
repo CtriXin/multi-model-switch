@@ -2058,6 +2058,60 @@ def test_config_normalization_helpers_preserve_legacy_shapes():
     assert wrapped_cache_cfg["cache"]["probe_async_refresh_after_sec"] > 0
 
 
+def test_snapshot_diff_lines_reports_guard_drift_without_ignored_files():
+    import mms_command_tools
+
+    previous = {
+        "defaults": {"provider_default": "relay-a"},
+        "accounts": [
+            {
+                "id": "claude-main",
+                "proxy_sha256": "old-proxy",
+                "proxy_fingerprint": "old proxy",
+                "identity_sha256": "old-identity",
+                "identity_fingerprint": "old identity",
+            }
+        ],
+        "providers": [{"id": "relay", "priority": 100}],
+        "files": [
+            {"path": "/tmp/config.toml", "exists": True, "sha256": "old"},
+            {"path": "/tmp/.claude.json", "exists": True, "sha256": "old-runtime"},
+            {"path": "/tmp/ignored", "exists": True, "sha256": "old"},
+        ],
+    }
+    current = {
+        "defaults": {"provider_default": "relay-b"},
+        "accounts": [
+            {
+                "id": "claude-main",
+                "proxy_sha256": "new-proxy",
+                "proxy_fingerprint": "new proxy",
+                "identity_sha256": "new-identity",
+                "identity_fingerprint": "new identity",
+            }
+        ],
+        "providers": [{"id": "relay", "priority": 200}],
+        "files": [
+            {"path": "/tmp/config.toml", "exists": True, "sha256": "new"},
+            {"path": "/tmp/.claude.json", "exists": True, "sha256": "new-runtime"},
+            {"path": "/tmp/ignored", "exists": True, "sha256": "new"},
+        ],
+    }
+
+    diffs = mms_command_tools.snapshot_diff_lines(
+        previous,
+        current,
+        is_snapshot_ignored_file=lambda path: str(path).endswith("/ignored"),
+    )
+
+    assert "default route/account changed" in diffs
+    assert "account claude-main proxy: old proxy -> new proxy" in diffs
+    assert "account claude-main identity: old identity -> new identity" in diffs
+    assert "provider relay priority: 100 -> 200" in diffs
+    assert "file changed: /tmp/config.toml" in diffs
+    assert not any(".claude.json" in item or "ignored" in item for item in diffs)
+
+
 def test_config_validator_reports_provider_account_errors():
     import mms_command_tools
     import mms_core
