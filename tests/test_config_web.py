@@ -737,6 +737,28 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_registry_v2_apply_updates_in_memory_snapshot(tmp_path):
+    config_root = tmp_path / "mms-next"
+    app = mms_config_web.ConfigWebApp(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = app.registry_v2_apply(payload)
+    snapshot = app.snapshot()
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is True
+    assert snapshot["providers"][0]["name"] == "Demo Gateway"
+    assert snapshot["providers"][0]["hidden_models"] == ["noisy-model"]
+    assert snapshot["mode"] == "interactive_audited_save"
+    assert "sk-super-secret-value" not in encoded
+
+
 def test_config_web_registry_v2_apply_rolls_back_on_verify_failure(monkeypatch, tmp_path):
     import mms_registry_cli
 

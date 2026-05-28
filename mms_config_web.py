@@ -2244,7 +2244,11 @@ class ConfigWebApp:
 
     def registry_v2_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            return apply_registry_v2_preview_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+            result = apply_registry_v2_preview_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+            if result.get("ok"):
+                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+                self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
+            return result
 
     def provider_test(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
