@@ -2542,10 +2542,19 @@ def apply_registry_v2_plan(
             "generated_latest_approved_bundle": False,
             "legacy_files": False,
         },
+        "stable_apply_policy": {
+            "apply_enabled": False,
+            "allow_stable_requested": bool(allow_stable),
+            "human_gate_required": root_status.get("mode") != "preview",
+            "promotion_plan_command": "./mmf promote --json",
+            "note": "Stable apply-plan writes are not implemented; review the promotion plan and stop at the human gate.",
+        },
         "blocked_reasons": [],
     }
-    if root_status.get("mode") != "preview" and not allow_stable:
+    if root_status.get("mode") != "preview":
         summary["blocked_reasons"].append("stable_root_human_only")
+        if apply:
+            summary["blocked_reasons"].append("stable_apply_not_implemented")
     if apply and not confirm_preview_apply:
         summary["blocked_reasons"].append("confirm_preview_apply_required")
     if not apply:
@@ -3733,7 +3742,11 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     apply_plan_parser.add_argument("--policy-json", default="", help="Optional model policy JSON object")
     apply_plan_parser.add_argument("--apply", action="store_true", help="Actually write DB candidates, secrets, and generated bundle")
     apply_plan_parser.add_argument("--confirm-preview-apply", action="store_true", help="Required together with --apply")
-    apply_plan_parser.add_argument("--allow-stable", action="store_true", help="Allow writing into a stable root explicitly")
+    apply_plan_parser.add_argument(
+        "--allow-stable",
+        action="store_true",
+        help="Reserved for future audited stable promotion; apply-plan still stops at the stable human gate",
+    )
     apply_plan_parser.add_argument("--json", action="store_true", help="Print the full apply summary as JSON")
     preview_doctor_parser = subparsers.add_parser("preview-doctor", help="Read-only preview root doctor with one next action")
     preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")

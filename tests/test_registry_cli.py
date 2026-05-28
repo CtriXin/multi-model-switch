@@ -1162,6 +1162,45 @@ def test_mmf_config_apply_plan_blocks_apply_without_confirmation(tmp_path: Path)
     assert not (config_dir / "generated").exists()
 
 
+def test_registry_v2_apply_plan_stops_stable_even_with_allow_stable(capsys, tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"config": _registry_v2_candidate_config()}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    rc = mms_registry_cli.handle_registry_command(
+        [
+            "apply-plan",
+            "--config-dir",
+            str(stable_root),
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--confirm-preview-apply",
+            "--allow-stable",
+            "--json",
+        ],
+        command_name="mms registry",
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 2
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_APPLY_PLAN_SCHEMA
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["stable_apply_policy"]["allow_stable_requested"] is True
+    assert payload["stable_apply_policy"]["apply_enabled"] is False
+    assert payload["stable_apply_policy"]["human_gate_required"] is True
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "stable_apply_not_implemented" in payload["blocked_reasons"]
+    assert payload["writes"]["db_candidate_revision"] is False
+    assert payload["writes"]["secret_backend"] is False
+    assert payload["writes"]["generated_latest_approved_bundle"] is False
+    assert not stable_root.exists()
+
+
 def test_registry_v2_apply_plan_rolls_back_on_verify_failure(monkeypatch, tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     plan_path = tmp_path / "plan.json"

@@ -487,8 +487,8 @@ Current bridge rescue consumer implementation:
 Current Stage 4a implementation:
 
 - `mms registry v2-save-candidate` / `mmf registry v2-save-candidate` accepts a WebUI plan JSON (`config`, `model_policy`, `credential_updates`) or direct config/policy JSON and is dry-run unless `--apply`.
-- `mms config apply-plan` / `mmf config apply-plan` is the human-facing CLI wrapper for a reviewed WebUI plan JSON. It is dry-run unless both `--apply` and `--confirm-preview-apply` are present, refuses stable roots by default, writes preview DB candidates + preview secret backend, publishes latest-approved, verifies hashes, and rolls back DB/secret/generated files on failure.
-- `--apply` is preview-root guarded by default; stable roots require explicit `--allow-stable`.
+- `mms config apply-plan` / `mmf config apply-plan` is the human-facing CLI wrapper for a reviewed WebUI plan JSON. It is dry-run unless both `--apply` and `--confirm-preview-apply` are present, refuses stable-root writes, writes preview DB candidates + preview secret backend, publishes latest-approved, verifies hashes, and rolls back DB/secret/generated files on failure.
+- `--apply` is preview-root guarded; stable roots stop at `stable_root_human_only` + `stable_apply_not_implemented` even when `--allow-stable` is passed. Actual stable-root migration remains the future audited promotion flow after `mmf promote --json` review, backup, and human double-check.
 - The command initializes the selected preview root if needed, backs up an existing preview DB before writing, then writes candidate `route`, `policy`, and `profile` revisions into SQLite.
 - Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB; legacy compatibility files are not written in this slice.
 - If candidate write fails after backup, the preview DB is restored from the pre-write backup.
