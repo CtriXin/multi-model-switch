@@ -23,7 +23,7 @@ remain available only for repos that explicitly opt into `--layout legacy-ai-pla
 
 ## Install
 
-### Global Slash Commands
+### Global Skill Aliases
 
 Preferred one-time/idempotent installer:
 
@@ -35,7 +35,7 @@ It installs symlinks for:
 
 - `handover` skill
 - `offduty` / `onduty` skill aliases, so Codex can use `$offduty` / `$onduty`
-- managed `/offduty` and `/onduty` command files for slash-command hosts
+- cleanup of old managed `/offduty` and `/onduty` command symlinks, so the same entry does not appear twice
 
 Targets:
 
@@ -45,13 +45,13 @@ Targets:
 - `~/.config/opencode`
 - `~/.opencode`
 
-The installer only replaces command files that contain its managed marker, then
-turns them into symlinks to this repo. If an unmanaged command or non-symlink
-skill already exists, it is skipped instead of replaced.
+The installer removes old managed command symlinks and keeps unmanaged command
+files untouched. If a non-symlink skill already exists, it is skipped instead of
+replaced.
 
 The `mobius` skill runs this installer as trigger preflight, so after any
-Mobius invocation `$offduty` / `$onduty` and slash commands should be available
-in fresh sessions.
+Mobius invocation `$offduty` / `$onduty` skill aliases should be available in
+fresh sessions.
 
 ### Claude
 

@@ -61,6 +61,17 @@ def _extract_shell_function_body(script_text: str, function_name: str) -> str:
     raise AssertionError(f"Could not find closing brace for {function_name}")
 
 
+def _extract_python_heredoc_after(script_text: str, marker: str) -> str:
+    start = script_text.find(marker)
+    assert start != -1, f"Could not find marker {marker!r}"
+    heredoc_start = script_text.find("<<'PY'", start)
+    assert heredoc_start != -1, f"Could not find Python heredoc after {marker!r}"
+    body_start = script_text.find("\n", heredoc_start) + 1
+    body_end = script_text.find("\nPY\n", body_start)
+    assert body_end != -1, f"Could not find Python heredoc end after {marker!r}"
+    return script_text[body_start:body_end]
+
+
 def _run_handover_installer(home: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["HOME"] = str(home)
@@ -72,6 +83,103 @@ def _run_handover_installer(home: Path) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+def test_cleanup_legacy_global_session_hooks_removes_stale_nsr_and_read_once_dupes(tmp_path):
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    cleanup_py = _extract_python_heredoc_after(script, "cleanup_legacy_global_session_hooks()")
+    claude_settings = tmp_path / ".claude" / "settings.json"
+    codex_hooks = tmp_path / ".codex" / "hooks.json"
+    claude_settings.parent.mkdir(parents=True)
+    codex_hooks.parent.mkdir(parents=True)
+    claude_settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Read",
+                            "hooks": [
+                                {"type": "command", "command": f"READ_ONCE_DIFF=1 {tmp_path}/.claude/read-once/hook.sh"},
+                                {"type": "command", "command": f"READ_ONCE_DIFF=1 /bin/bash {tmp_path}/.claude/read-once/hook.sh"},
+                            ],
+                        },
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "/Users/me/auto-skills/CtriXin-repo/multi-model-switch/.worktrees/old/hooks/nsr-claude-hook.sh",
+                                },
+                                {"type": "command", "command": "node /external/openpets hook"},
+                            ],
+                        },
+                    ],
+                    "PostCompact": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {"type": "command", "command": f"{tmp_path}/.claude/read-once/compact.sh"},
+                                {"type": "command", "command": f"/bin/bash {tmp_path}/.claude/read-once/compact.sh"},
+                            ],
+                        }
+                    ],
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    codex_hooks.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "/bin/bash /Users/me/auto-skills/CtriXin-repo/multi-model-switch/hooks/nsr-codex-hook.sh",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        ["python3", "-", str(claude_settings), str(codex_hooks)],
+        input=cleanup_py,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert "CLEANED:" in completed.stdout
+    cleaned_claude = json.loads(claude_settings.read_text(encoding="utf-8"))
+    cleaned_codex = json.loads(codex_hooks.read_text(encoding="utf-8"))
+    claude_commands = [
+        hook["command"]
+        for groups in cleaned_claude["hooks"].values()
+        for group in groups
+        for hook in group.get("hooks", [])
+    ]
+    codex_commands = [
+        hook["command"]
+        for groups in cleaned_codex.get("hooks", {}).values()
+        for group in groups
+        for hook in group.get("hooks", [])
+    ]
+    assert all("nsr-" not in command for command in claude_commands + codex_commands)
+    assert "node /external/openpets hook" in claude_commands
+    assert claude_commands.count(f"READ_ONCE_DIFF=1 /bin/bash {tmp_path}/.claude/read-once/hook.sh") == 1
+    assert claude_commands.count(f"/bin/bash {tmp_path}/.claude/read-once/compact.sh") == 1
+    assert not any(command == f"READ_ONCE_DIFF=1 {tmp_path}/.claude/read-once/hook.sh" for command in claude_commands)
+    assert not any(command == f"{tmp_path}/.claude/read-once/compact.sh" for command in claude_commands)
 
 
 def test_install_check_prefers_explicit_real_home(tmp_path):
@@ -592,7 +700,7 @@ def test_install_script_brainkeeper_context_flag_remains_optional():
     assert "INSTALL_BRAINKEEPER_CONTEXT=0" in text
 
 
-def test_handover_installer_installs_default_global_surfaces(tmp_path):
+def test_handover_installer_installs_skill_surfaces_without_commands(tmp_path):
     completed = _run_handover_installer(tmp_path)
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
@@ -620,8 +728,8 @@ def test_handover_installer_installs_default_global_surfaces(tmp_path):
         assert (skill_root / "onduty").is_symlink()
 
     for command_root in command_roots:
-        assert (command_root / "offduty.md").is_symlink()
-        assert (command_root / "onduty.md").is_symlink()
+        assert not (command_root / "offduty.md").exists()
+        assert not (command_root / "onduty.md").exists()
 
 
 def test_handover_installer_is_idempotent_on_repeat_runs(tmp_path):
@@ -633,7 +741,54 @@ def test_handover_installer_is_idempotent_on_repeat_runs(tmp_path):
 
     second_payload = json.loads(second.stdout)
     statuses = {item["status"] for item in second_payload["results"]}
-    assert statuses == {"ok"}
+    assert statuses == {"ok", "ok_absent"}
+
+
+def test_handover_installer_removes_legacy_command_symlinks(tmp_path):
+    command_roots = [
+        tmp_path / ".agents" / "commands",
+        tmp_path / ".claude" / "commands",
+        tmp_path / ".codex" / "commands",
+        tmp_path / ".config" / "opencode" / "commands",
+        tmp_path / ".opencode" / "commands",
+    ]
+    legacy_targets = {
+        "offduty.md": ROOT_DIR / "vendor" / "handover" / "commands" / "offduty.md",
+        "onduty.md": ROOT_DIR / "vendor" / "handover" / "commands" / "onduty.md",
+    }
+
+    for command_root in command_roots:
+        command_root.mkdir(parents=True)
+        for name, target in legacy_targets.items():
+            (command_root / name).symlink_to(target)
+
+    completed = _run_handover_installer(tmp_path)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    payload = json.loads(completed.stdout)
+    statuses = {item["status"] for item in payload["results"]}
+    assert "removed_legacy_command_symlink" in statuses
+    for command_root in command_roots:
+        assert not (command_root / "offduty.md").exists()
+        assert not (command_root / "onduty.md").exists()
+
+
+def test_handover_installer_preserves_unmanaged_command_symlink(tmp_path):
+    commands_dir = tmp_path / ".claude" / "commands"
+    commands_dir.mkdir(parents=True)
+    unmanaged_target = tmp_path / "user-offduty.md"
+    unmanaged_target.write_text("# user symlink target\n", encoding="utf-8")
+    unmanaged = commands_dir / "offduty.md"
+    unmanaged.symlink_to(unmanaged_target)
+
+    completed = _run_handover_installer(tmp_path)
+
+    assert completed.returncode == 1
+    payload = json.loads(completed.stdout)
+    skipped = [item for item in payload["results"] if item["path"].endswith(".claude/commands/offduty.md")]
+    assert skipped and skipped[0]["status"] == "skipped_existing_unmanaged"
+    assert unmanaged.is_symlink()
+    assert unmanaged.resolve(strict=False) == unmanaged_target
 
 
 def test_handover_installer_preserves_unmanaged_command_files(tmp_path):
@@ -652,24 +807,27 @@ def test_handover_installer_preserves_unmanaged_command_files(tmp_path):
     assert not unmanaged.is_symlink()
 
 
-def test_install_check_reports_handover_installed_when_all_command_symlinks_present(tmp_path):
-    """--check reports installed only when all managed command surfaces are present."""
+def test_install_check_reports_handover_installed_when_all_skill_symlinks_present(tmp_path):
+    """--check reports installed only when all managed skill surfaces are present."""
     home = tmp_path / "home"
-    command_roots = [
-        home / ".agents" / "commands",
-        home / ".claude" / "commands",
-        home / ".codex" / "commands",
-        home / ".config" / "opencode" / "commands",
-        home / ".opencode" / "commands",
+    skill_roots = [
+        home / ".agents" / "skills",
+        home / ".claude" / "skills",
+        home / ".codex" / "skills",
+        home / ".config" / "opencode" / "skills",
+        home / ".opencode" / "skills",
     ]
-    dummy_target = home / "dummy.md"
-    dummy_target.parent.mkdir(parents=True, exist_ok=True)
-    dummy_target.write_text("# dummy\n", encoding="utf-8")
+    handover_target = home / "handover"
+    offduty_target = home / "offduty"
+    onduty_target = home / "onduty"
+    for target in (handover_target, offduty_target, onduty_target):
+        target.mkdir(parents=True, exist_ok=True)
 
-    for commands_dir in command_roots:
-        commands_dir.mkdir(parents=True)
-        (commands_dir / "offduty.md").symlink_to(dummy_target)
-        (commands_dir / "onduty.md").symlink_to(dummy_target)
+    for skill_dir in skill_roots:
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "handover").symlink_to(handover_target)
+        (skill_dir / "offduty").symlink_to(offduty_target)
+        (skill_dir / "onduty").symlink_to(onduty_target)
 
     output = _run_install_check(
         home=home,
@@ -680,22 +838,26 @@ def test_install_check_reports_handover_installed_when_all_command_symlinks_pres
         },
     )
 
-    assert ("offduty/onduty 命令已安装" in output) or ("offduty/onduty commands installed" in output)
+    assert ("offduty/onduty skill 已安装" in output) or ("offduty/onduty skills installed" in output)
 
 
-def test_install_check_reports_handover_missing_when_opencode_symlinks_absent(tmp_path):
-    """--check stays missing when only Claude/Codex command symlinks exist."""
+def test_install_check_reports_handover_missing_when_opencode_skill_symlinks_absent(tmp_path):
+    """--check stays missing when only Claude/Codex skill symlinks exist."""
     home = tmp_path / "home"
-    claude_cmds = home / ".claude" / "commands"
-    codex_cmds = home / ".codex" / "commands"
-    claude_cmds.mkdir(parents=True)
-    codex_cmds.mkdir(parents=True)
-    dummy_target = home / "dummy.md"
-    dummy_target.write_text("# dummy\n", encoding="utf-8")
+    claude_skills = home / ".claude" / "skills"
+    codex_skills = home / ".codex" / "skills"
+    claude_skills.mkdir(parents=True)
+    codex_skills.mkdir(parents=True)
+    handover_target = home / "handover"
+    offduty_target = home / "offduty"
+    onduty_target = home / "onduty"
+    for target in (handover_target, offduty_target, onduty_target):
+        target.mkdir(parents=True, exist_ok=True)
 
-    for commands_dir in (claude_cmds, codex_cmds):
-        (commands_dir / "offduty.md").symlink_to(dummy_target)
-        (commands_dir / "onduty.md").symlink_to(dummy_target)
+    for skill_dir in (claude_skills, codex_skills):
+        (skill_dir / "handover").symlink_to(handover_target)
+        (skill_dir / "offduty").symlink_to(offduty_target)
+        (skill_dir / "onduty").symlink_to(onduty_target)
 
     output = _run_install_check(
         home=home,
@@ -706,7 +868,7 @@ def test_install_check_reports_handover_missing_when_opencode_symlinks_absent(tm
         },
     )
 
-    assert ("offduty/onduty 命令未安装" in output) or ("offduty/onduty commands not installed" in output)
+    assert ("offduty/onduty skill 未安装" in output) or ("offduty/onduty skills not installed" in output)
 
 
 def test_install_check_reports_handover_missing_when_symlinks_absent(tmp_path):
@@ -716,7 +878,7 @@ def test_install_check_reports_handover_missing_when_symlinks_absent(tmp_path):
 
     output = _run_install_check(home=home)
 
-    assert ("offduty/onduty 命令未安装" in output) or ("offduty/onduty commands not installed" in output)
+    assert ("offduty/onduty skill 未安装" in output) or ("offduty/onduty skills not installed" in output)
 
 
 def test_install_script_dry_run_mentions_offduty_onduty(tmp_path):

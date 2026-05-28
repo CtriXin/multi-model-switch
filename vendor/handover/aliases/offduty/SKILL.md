@@ -41,7 +41,7 @@ Use this alias when the user types `$offduty`, `/offduty`, or asks to 下班交�
 
 - Default output is `.agent.local/continuity/`; legacy `.ai/plan` requires `--layout legacy-ai-plan`.
 - For Codex, `$offduty` is the preferred explicit trigger.
-- For Claude/OpenCode, `/offduty` may be available through command symlinks.
+- For Claude/OpenCode, `/offduty` may route through the skill alias; legacy command symlinks are cleaned to avoid duplicate entries.
 - Root ownership follows actual touched repo/root, not the session launch folder.
 - Task ids must stay short; use a concrete task id, not a long summary.
 - Side sessions should not take the active pointer unless the helper decides the task owns main scope.

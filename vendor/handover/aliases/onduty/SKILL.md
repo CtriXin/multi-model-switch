@@ -26,7 +26,7 @@ Use this alias when the user types `$onduty`, `/onduty`, or asks to resume from 
 
 - Default input is `.agent.local/continuity/`; legacy `.ai/plan` requires `--layout legacy-ai-plan`.
 - For Codex, `$onduty` is the preferred explicit trigger.
-- For Claude/OpenCode, `/onduty` may be available through command symlinks.
+- For Claude/OpenCode, `/onduty` may route through the skill alias; legacy command symlinks are cleaned to avoid duplicate entries.
 - Root ownership follows actual target repo/root, not the session launch folder.
 - Open archive/checkpoint history only for old decision/debug provenance.
 - If git is dirty, inspect diff before editing.

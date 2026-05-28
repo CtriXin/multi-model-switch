@@ -235,18 +235,19 @@ Default `onduty` is intentionally lightweight: it reads `pickup.md`,
 `active.json`, the active checkpoint, and lifeboat/BKC refs. It does not require
 native resume or a full transcript replay.
 
-## Global Slash Command Install
+## Global Skill Alias Install
 
-The managed global command installer is:
+The managed global skill installer is:
 
 ```bash
 python3 /Users/xin/auto-skills/shared-skills/handover/scripts/install_global_commands.py
 ```
 
 It creates or updates `handover` skill symlinks, `offduty` / `onduty` skill
-alias symlinks for Codex `$offduty` / `$onduty`, and managed `/offduty` /
-`/onduty` command-file symlinks for slash-command hosts. It is idempotent and
-skips unmanaged existing files instead of overwriting them.
+alias symlinks for Codex `$offduty` / `$onduty`, and removes old managed
+`/offduty` / `/onduty` command-file symlinks so command/skill pickers do not
+show duplicates. It is idempotent and skips unmanaged existing files instead of
+overwriting them.
 
 The `mobius` skill runs this installer on trigger, so a user who has invoked
 Mobius should get the continuity package loaded globally without extra
