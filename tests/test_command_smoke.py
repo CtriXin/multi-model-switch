@@ -124,6 +124,9 @@ def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeyp
 
 
 def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
+    import hashlib
+    import json
+
     import mms_command_tools
     import mms_core
 
@@ -167,6 +170,43 @@ def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     assert mms_core._normalize_claude_settings_snapshot_payload(
         {"env": {"HTTP_PROXY": "http://proxy", "NO_PROXY": "localhost"}}
     ) == {}
+
+    claude_state = tmp_path / ".claude.json"
+    claude_state.write_text(
+        json.dumps({"userID": "user-1", "oauthAccount": {"emailAddress": "me@example.com"}, "sessionToken": "secret"}),
+        encoding="utf-8",
+    )
+    normalized_bytes, normalized_kind = mms_command_tools.snapshot_file_content_bytes(
+        str(claude_state),
+        session_env_keys={"HTTP_PROXY"},
+    )
+    normalized_state = json.loads(normalized_bytes.decode("utf-8"))
+    assert normalized_kind == "claude_state_identity"
+    assert normalized_state["userID"] == "user-1"
+    assert "sessionToken" not in normalized_state
+
+    claude_settings_dir = tmp_path / ".claude"
+    claude_settings_dir.mkdir()
+    claude_settings = claude_settings_dir / "settings.json"
+    claude_settings.write_text(
+        json.dumps({"env": {"HTTP_PROXY": "http://proxy", "CUSTOM_FLAG": "1"}, "theme": "dark"}),
+        encoding="utf-8",
+    )
+    settings_bytes, settings_kind = mms_core._snapshot_file_content_bytes(str(claude_settings))
+    normalized_settings = json.loads(settings_bytes.decode("utf-8"))
+    assert settings_kind == "claude_settings_runtime_stripped"
+    assert normalized_settings == {"env": {"CUSTOM_FLAG": "1"}, "theme": "dark"}
+
+    plain_file = tmp_path / "plain.txt"
+    plain_file.write_text("payload", encoding="utf-8")
+    entry = mms_command_tools.snapshot_file_entry(
+        str(plain_file),
+        snapshot_file_content_bytes=lambda _path: (b"payload", ""),
+    )
+    assert entry["exists"] is True
+    assert entry["sha256"] == hashlib.sha256(b"payload").hexdigest()
+    assert "normalized_kind" not in entry
+    assert mms_core._snapshot_file_entry(str(tmp_path / "missing.json"))["exists"] is False
 
 
 def test_usage_main_initializes_rich_before_render(monkeypatch):

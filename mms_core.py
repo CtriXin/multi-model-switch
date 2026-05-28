@@ -1562,26 +1562,9 @@ def _snapshot_cli_state(home_dir, cli_name):
 
 
 def _snapshot_file_entry(path):
-    absolute_path = os.path.abspath(os.path.expanduser(str(path)))
-    entry = {"path": absolute_path, "exists": os.path.exists(absolute_path)}
-    if not entry["exists"]:
-        return entry
-    try:
-        stat = os.stat(absolute_path)
-        entry["size"] = int(stat.st_size)
-        entry["mtime"] = int(stat.st_mtime)
-    except OSError:
-        entry["size"] = 0
-        entry["mtime"] = 0
-    try:
-        normalized_bytes, normalized_kind = _snapshot_file_content_bytes(absolute_path)
-    except OSError:
-        entry["read_error"] = True
-        return entry
-    entry["sha256"] = hashlib.sha256(normalized_bytes).hexdigest()
-    if normalized_kind:
-        entry["normalized_kind"] = normalized_kind
-    return entry
+    from mms_command_tools import snapshot_file_entry
+
+    return snapshot_file_entry(path, snapshot_file_content_bytes=_snapshot_file_content_bytes)
 
 
 def _normalize_claude_state_snapshot_payload(data):
@@ -1618,22 +1601,9 @@ def _normalize_claude_settings_snapshot_payload(data):
 
 
 def _snapshot_file_content_bytes(path):
-    absolute_path = os.path.abspath(os.path.expanduser(str(path)))
-    if os.path.basename(absolute_path) == ".claude.json":
-        with open(absolute_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        normalized = _normalize_claude_state_snapshot_payload(data)
-        return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8"), "claude_state_identity"
-    if (
-        os.path.basename(absolute_path) == "settings.json"
-        and os.path.basename(os.path.dirname(absolute_path)) == ".claude"
-    ):
-        with open(absolute_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        normalized = _normalize_claude_settings_snapshot_payload(data)
-        return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8"), "claude_settings_runtime_stripped"
-    with open(absolute_path, "rb") as f:
-        return f.read(), ""
+    from mms_command_tools import snapshot_file_content_bytes
+
+    return snapshot_file_content_bytes(path, session_env_keys=_CLAUDE_SESSION_ENV_KEYS)
 
 
 def _snapshot_account_entry(account):

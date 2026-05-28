@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -166,6 +167,48 @@ def normalize_claude_settings_snapshot_payload(data, *, session_env_keys):
         else:
             data.pop("env", None)
     return data
+
+
+def snapshot_file_content_bytes(path, *, session_env_keys):
+    absolute_path = os.path.abspath(os.path.expanduser(str(path)))
+    if os.path.basename(absolute_path) == ".claude.json":
+        with open(absolute_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        normalized = normalize_claude_state_snapshot_payload(data)
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8"), "claude_state_identity"
+    if (
+        os.path.basename(absolute_path) == "settings.json"
+        and os.path.basename(os.path.dirname(absolute_path)) == ".claude"
+    ):
+        with open(absolute_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        normalized = normalize_claude_settings_snapshot_payload(data, session_env_keys=session_env_keys)
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8"), "claude_settings_runtime_stripped"
+    with open(absolute_path, "rb") as handle:
+        return handle.read(), ""
+
+
+def snapshot_file_entry(path, *, snapshot_file_content_bytes):
+    absolute_path = os.path.abspath(os.path.expanduser(str(path)))
+    entry = {"path": absolute_path, "exists": os.path.exists(absolute_path)}
+    if not entry["exists"]:
+        return entry
+    try:
+        stat = os.stat(absolute_path)
+        entry["size"] = int(stat.st_size)
+        entry["mtime"] = int(stat.st_mtime)
+    except OSError:
+        entry["size"] = 0
+        entry["mtime"] = 0
+    try:
+        normalized_bytes, normalized_kind = snapshot_file_content_bytes(absolute_path)
+    except OSError:
+        entry["read_error"] = True
+        return entry
+    entry["sha256"] = hashlib.sha256(normalized_bytes).hexdigest()
+    if normalized_kind:
+        entry["normalized_kind"] = normalized_kind
+    return entry
 
 
 def load_json_file(path, default):
