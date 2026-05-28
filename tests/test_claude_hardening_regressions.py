@@ -3696,6 +3696,67 @@ def test_preserve_domestic_reasoning_roundtrip_propagates_split_kimi_tool_use_me
     assert payload["messages"][3]["content"][1]["type"] == "tool_use"
 
 
+def test_canonicalize_domestic_anthropic_history_coalesces_split_kimi_tool_roundtrip():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "/work read requirements only"},
+            {"role": "assistant", "content": [{"type": "thinking", "thinking": "carry this forward"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_b", "name": "Read", "input": {"file": "x"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "ok a", "is_error": False}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_b", "content": "ok b", "is_error": False}]},
+        ]
+    }
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "kimi-k2.6")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user"]
+    assert payload["messages"][0]["content"] == "/work read requirements only"
+    assert [block["type"] for block in payload["messages"][1]["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+        "tool_use",
+    ]
+    assert payload["messages"][1]["reasoning_content"] == "carry this forward"
+    assert [block["type"] for block in payload["messages"][2]["content"]] == [
+        "tool_result",
+        "tool_result",
+    ]
+
+
+def test_canonicalize_domestic_anthropic_history_coalesces_split_mimo_tool_history():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": [{"type": "thinking", "thinking": "mimo carry"}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_b", "name": "Bash", "input": {"command": "ls"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "ok a", "is_error": False}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_b", "content": "ok b", "is_error": False}]},
+        ],
+    }
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "mimo-v2.5")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user"]
+    assert [block["type"] for block in payload["messages"][1]["content"]] == [
+        "thinking",
+        "tool_use",
+        "tool_use",
+    ]
+    assert payload["messages"][1]["reasoning_content"] == "mimo carry"
+    assert [block["type"] for block in payload["messages"][2]["content"]] == [
+        "tool_result",
+        "tool_result",
+    ]
+
+
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
     import mms_bridge
 
