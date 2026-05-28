@@ -4131,6 +4131,49 @@ def test_probe_startup_helper_preserves_memory_file_stale_and_live_paths(monkeyp
     assert mms_core._probe_models_for_startup({}, provider)["models"] == ["wrapped"]
 
 
+def test_warm_probe_cache_helper_preserves_skip_and_refresh_rules(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    cfg = {
+        "providers": [
+            {"id": "default"},
+            {"id": "fresh"},
+            {"id": "stale"},
+            {"id": "missing"},
+            {},
+        ]
+    }
+    resolved = {
+        "stale": {"id": "stale", "resolved": True},
+        "missing": {"id": "missing", "resolved": True},
+    }
+    calls = []
+    mms_command_tools.warm_probe_cache_async(
+        cfg,
+        {"id": "default"},
+        probe_async_refresh_after=lambda current: 60,
+        probe_cache_age=lambda provider_id: {"fresh": 30, "stale": 120}.get(provider_id),
+        schedule_probe_refresh=lambda provider, current, reason: calls.append((provider, current, reason)),
+        resolve_provider_context=lambda current, provider_id: resolved[provider_id],
+    )
+    assert calls == [
+        ({"id": "stale", "resolved": True}, cfg, "startup_warm"),
+        ({"id": "missing", "resolved": True}, cfg, "startup_warm"),
+    ]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_probe_async_refresh_after", lambda current: 60)
+    monkeypatch.setattr(mms_core, "_probe_cache_age", lambda provider_id: {"fresh": 30, "stale": 120}.get(provider_id))
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda current, provider_id: resolved[provider_id])
+    monkeypatch.setattr(mms_core, "_schedule_probe_refresh", lambda provider, current, reason: calls.append((provider, current, reason)))
+    assert mms_core._warm_probe_cache_async(cfg, {"id": "default"}) is None
+    assert calls == [
+        ({"id": "stale", "resolved": True}, cfg, "startup_warm"),
+        ({"id": "missing", "resolved": True}, cfg, "startup_warm"),
+    ]
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 

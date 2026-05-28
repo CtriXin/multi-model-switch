@@ -3273,6 +3273,27 @@ def probe_models_for_startup(
     return probe_models(provider, emit_output=emit_output)
 
 
+def warm_probe_cache_async(
+    cfg,
+    default_provider,
+    *,
+    probe_async_refresh_after,
+    probe_cache_age,
+    schedule_probe_refresh,
+    resolve_provider_context,
+):
+    default_id = default_provider.get("id")
+    refresh_after = probe_async_refresh_after(cfg)
+    for provider_def in cfg.get("providers", []):
+        provider_id = provider_def.get("id")
+        if not provider_id or provider_id == default_id:
+            continue
+        age = probe_cache_age(provider_id)
+        if age is not None and age < refresh_after:
+            continue
+        schedule_probe_refresh(resolve_provider_context(cfg, provider_id), cfg, reason="startup_warm")
+
+
 def provider_supports_mimo_anthropic_selectors(provider):
     provider = provider if isinstance(provider, dict) else {}
     identity = " ".join(

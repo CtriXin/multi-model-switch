@@ -4392,16 +4392,16 @@ def _warm_probe_cache_async(cfg, default_provider):
 
     无缓存或缓存过旧的 provider 会被刷新，但不会阻塞当前启动。
     """
-    default_id = default_provider.get("id")
-    refresh_after = _probe_async_refresh_after(cfg)
-    for provider_def in cfg.get("providers", []):
-        pid = provider_def.get("id")
-        if not pid or pid == default_id:
-            continue
-        age = _probe_cache_age(pid)
-        if age is not None and age < refresh_after:
-            continue
-        _schedule_probe_refresh(resolve_provider_context(cfg, pid), cfg, reason="startup_warm")
+    from mms_command_tools import warm_probe_cache_async
+
+    return warm_probe_cache_async(
+        cfg,
+        default_provider,
+        probe_async_refresh_after=_probe_async_refresh_after,
+        probe_cache_age=_probe_cache_age,
+        schedule_probe_refresh=_schedule_probe_refresh,
+        resolve_provider_context=resolve_provider_context,
+    )
 
 
 def fetch_models(provider):
