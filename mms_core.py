@@ -3109,35 +3109,16 @@ def _probe_account_status(account):
 
 
 def _run_account_login(account):
-    cli_name = account.get("cli")
-    if cli_name == "claude":
-        console.print("[yellow]Claude OAuth 独立入口已下线；请使用 provider/API route 启动 Claude。[/yellow]")
-        return
-    env = _account_env(account)
-    os.makedirs(account.get("home_dir", ""), exist_ok=True)
-    if cli_name == "codex":
-        command = ["codex", "login"]
-    elif cli_name == "gemini":
-        command = ["gemini"]
-    elif cli_name == "agy":
-        command = ["agy"]
-    else:
-        console.print(f"[red]不支持的官方账号类型: {cli_name}[/red]")
-        sys.exit(1)
-    env_hint = f"HOME={account.get('home_dir')}"
-    if cli_name == "gemini":
-        env_hint = f"GEMINI_CLI_HOME={account.get('home_dir')}"
-    console.print(
-        f"[cyan]正在为账号档案 {_account_label(account)} 打开 {cli_name} 登录流程[/cyan]\n"
-        f"[dim]{env_hint}[/dim]"
+    from mms_command_tools import run_account_login
+
+    return run_account_login(
+        account,
+        account_env=_account_env,
+        account_label=_account_label,
+        makedirs=os.makedirs,
+        run_command=subprocess.run,
+        console=console,
     )
-    if cli_name == "gemini":
-        console.print("[dim]Gemini 会在自己的 CLI 内引导 Google 登录；登录完成后按提示重启即可。[/dim]")
-    if cli_name == "agy":
-        console.print("[dim]Antigravity CLI 会在自己的流程内引导 Google 登录；登录完成后按提示重启即可。[/dim]")
-    result = subprocess.run(command, env=env)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
 
 
 def _ensure_interactive_terminal(action_hint):

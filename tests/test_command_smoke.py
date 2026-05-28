@@ -3751,6 +3751,76 @@ def test_account_status_probe_helper_preserves_delegated_manual_and_cli_states()
     ) == {"state": "timeout", "summary": "状态探测超时"}
 
 
+def test_account_login_runner_preserves_command_messages_and_exit_handling():
+    import pytest
+    from types import SimpleNamespace
+
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    calls = []
+    mms_command_tools.run_account_login(
+        {"id": "claude-main", "cli": "claude", "home_dir": "/tmp/claude"},
+        account_env=lambda account: calls.append(("unexpected-env", account)) or {},
+        account_label=lambda account: account["id"],
+        makedirs=lambda *args, **kwargs: calls.append(("unexpected-makedirs", args, kwargs)),
+        run_command=lambda *args, **kwargs: calls.append(("unexpected-run", args, kwargs)),
+        console=console,
+    )
+    assert calls == []
+    assert any("Claude OAuth 独立入口已下线" in str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.run_account_login(
+        {"id": "codex-main", "name": "Codex Main", "cli": "codex", "home_dir": "/tmp/codex"},
+        account_env=lambda account: {"HOME": account["home_dir"]},
+        account_label=lambda account: account.get("name", account["id"]),
+        makedirs=lambda path, exist_ok=False: calls.append(("makedirs", path, exist_ok)),
+        run_command=lambda command, env=None: calls.append(("run", command, env)) or SimpleNamespace(returncode=0),
+        console=console,
+    )
+    assert calls[-2:] == [
+        ("makedirs", "/tmp/codex", True),
+        ("run", ["codex", "login"], {"HOME": "/tmp/codex"}),
+    ]
+    assert any("Codex Main" in str(item) and "HOME=/tmp/codex" in str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.run_account_login(
+        {"id": "gemini-main", "cli": "gemini", "home_dir": "/tmp/gemini"},
+        account_env=lambda account: {"GEMINI_CLI_HOME": account["home_dir"]},
+        account_label=lambda account: account["id"],
+        makedirs=lambda *args, **kwargs: None,
+        run_command=lambda command, env=None: calls.append(("run-gemini", command, env)) or SimpleNamespace(returncode=0),
+        console=console,
+    )
+    assert calls[-1] == ("run-gemini", ["gemini"], {"GEMINI_CLI_HOME": "/tmp/gemini"})
+    assert any("GEMINI_CLI_HOME=/tmp/gemini" in str(item) for item in console.items)
+
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.run_account_login(
+            {"id": "bad", "cli": "unknown", "home_dir": "/tmp/bad"},
+            account_env=lambda account: {},
+            account_label=lambda account: account["id"],
+            makedirs=lambda *args, **kwargs: None,
+            run_command=lambda *args, **kwargs: SimpleNamespace(returncode=0),
+            console=console,
+        )
+    assert exc.value.code == 1
+    assert any("不支持的官方账号类型: unknown" in str(item) for item in console.items)
+
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.run_account_login(
+            {"id": "codex-main", "cli": "codex", "home_dir": "/tmp/codex"},
+            account_env=lambda account: {},
+            account_label=lambda account: account["id"],
+            makedirs=lambda *args, **kwargs: None,
+            run_command=lambda *args, **kwargs: SimpleNamespace(returncode=7),
+            console=console,
+        )
+    assert exc.value.code == 7
+
+
 def test_account_edit_remove_handlers_preserve_validation_and_defaults_cleanup():
     import mms_command_tools
 
