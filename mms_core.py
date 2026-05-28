@@ -10403,126 +10403,22 @@ def _coerce_config_value(key_path, raw_value):
 
 
 def _validate_config(cfg):
-    errors = []
+    from mms_command_tools import validate_config
 
-    def _validate_family_priority_overrides(value, label):
-        if value is None:
-            return
-        if not isinstance(value, dict):
-            errors.append(f"{label} 的 family_priority_overrides 必须是对象")
-            return
-        for family_name, priority in value.items():
-            canonical_family = _canonical_model_family(family_name)
-            if not canonical_family:
-                errors.append(f"{label} 的 family_priority_overrides 存在不支持的 family: {family_name}")
-                continue
-            if _normalize_priority(priority) != priority:
-                errors.append(f"{label} 的 family_priority_overrides.{canonical_family} 必须是正整数")
-
-    cache_cfg = cfg.get("cache", {})
-    if cache_cfg and not isinstance(cache_cfg, dict):
-        errors.append("cache 必须是对象")
-    elif isinstance(cache_cfg, dict):
-        for key in ("probe_async_refresh_after_sec", "probe_async_min_interval_sec"):
-            value = cache_cfg.get(key)
-            if value is None:
-                continue
-            try:
-                if int(value) <= 0:
-                    errors.append(f"{key} 必须是正整数")
-            except (TypeError, ValueError):
-                errors.append(f"{key} 必须是正整数")
-    providers = cfg.get("providers", [])
-    if not isinstance(providers, list) or not providers:
-        errors.append("providers 不能为空")
-    else:
-        seen_ids = set()
-        for item in providers:
-            if not isinstance(item, dict):
-                errors.append("providers 中存在非对象条目")
-                continue
-            provider_id = str(item.get("id", "")).strip()
-            if not provider_id:
-                errors.append("存在缺少 id 的模型源")
-                continue
-            if provider_id in seen_ids:
-                errors.append(f"模型源 ID 重复: {provider_id}")
-            seen_ids.add(provider_id)
-
-            protocols = item.get("protocols", [])
-            if isinstance(protocols, str):
-                protocols = [protocols]
-            invalid_protocols = [value for value in protocols if value not in DEFAULT_PROVIDER_PROTOCOLS]
-            if invalid_protocols:
-                errors.append(f"模型源 {provider_id} 存在不支持的协议: {', '.join(invalid_protocols)}")
-
-            supported_clis = item.get("supported_clis", [])
-            if isinstance(supported_clis, str):
-                supported_clis = [supported_clis]
-            invalid_clis = [
-                value for value in supported_clis
-                if value not in CLI_NAMES and value not in LEGACY_PROVIDER_CLI_ALIASES
-            ]
-            if invalid_clis:
-                errors.append(f"模型源 {provider_id} 存在不支持的 CLI: {', '.join(invalid_clis)}")
-            if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
-                errors.append(f"模型源 {provider_id} 的 priority 必须是正整数")
-            _validate_family_priority_overrides(
-                item.get("family_priority_overrides"),
-                f"模型源 {provider_id}",
-            )
-            if _normalize_claude_1m_mode(item.get("claude_1m_mode", "auto")) != item.get("claude_1m_mode", "auto"):
-                errors.append(f"模型源 {provider_id} 的 claude_1m_mode 必须是 auto/enable/disable")
-    default_id = cfg.get("provider", {}).get("default")
-    provider_ids = {item.get("id") for item in providers if isinstance(item, dict)}
-    if default_id and default_id not in provider_ids:
-        errors.append(f"默认模型源不存在: {default_id}")
-
-    accounts = cfg.get("accounts", [])
-    seen_account_ids = set()
-    if not isinstance(accounts, list):
-        errors.append("accounts 必须是列表")
-    else:
-        for item in accounts:
-            if not isinstance(item, dict):
-                errors.append("accounts 中存在非对象条目")
-                continue
-            account_id = str(item.get("id", "")).strip()
-            if not account_id:
-                errors.append("存在缺少 id 的账号档案")
-                continue
-            if account_id in seen_account_ids:
-                errors.append(f"账号档案 ID 重复: {account_id}")
-            seen_account_ids.add(account_id)
-            cli_name = str(item.get("cli", "")).strip()
-            if cli_name not in OAUTH_CAPABLE_CLIS:
-                errors.append(f"账号档案 {account_id} 绑定了不支持的 CLI: {cli_name}")
-            auth_mode = str(item.get("auth_mode", "oauth")).strip()
-            if auth_mode != "oauth":
-                errors.append(f"账号档案 {account_id} 目前只支持 oauth 模式")
-            if not str(item.get("home_dir", "")).strip():
-                errors.append(f"账号档案 {account_id} 缺少 home_dir")
-            if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
-                errors.append(f"账号档案 {account_id} 的 priority 必须是正整数")
-            _validate_family_priority_overrides(
-                item.get("family_priority_overrides"),
-                f"账号档案 {account_id}",
-            )
-            if _normalize_claude_1m_mode(item.get("claude_1m_mode", "auto")) != item.get("claude_1m_mode", "auto"):
-                errors.append(f"账号档案 {account_id} 的 claude_1m_mode 必须是 auto/enable/disable")
-    account_defaults = cfg.get("account", {}).get("defaults", {})
-    if isinstance(account_defaults, dict):
-        for cli_name, account_id in account_defaults.items():
-            if cli_name not in OAUTH_CAPABLE_CLIS:
-                errors.append(f"存在不支持的默认账号 CLI: {cli_name}")
-            elif account_id not in seen_account_ids:
-                errors.append(f"{cli_name} 的默认账号不存在: {account_id}")
-
-    role = cfg.get("user", {}).get("role", MODE_ALL)
-    if normalize_user_role(role) not in {MODE_ALL, MODE_RECOMMENDED}:
-        errors.append(f"不支持的模型模式: {role}")
-
-    return errors
+    return validate_config(
+        cfg,
+        default_provider_protocols=DEFAULT_PROVIDER_PROTOCOLS,
+        cli_names=CLI_NAMES,
+        legacy_provider_cli_aliases=LEGACY_PROVIDER_CLI_ALIASES,
+        default_priority=DEFAULT_PRIORITY,
+        oauth_capable_clis=OAUTH_CAPABLE_CLIS,
+        mode_all=MODE_ALL,
+        mode_recommended=MODE_RECOMMENDED,
+        canonical_model_family=_canonical_model_family,
+        normalize_priority=_normalize_priority,
+        normalize_claude_1m_mode=_normalize_claude_1m_mode,
+        normalize_user_role=normalize_user_role,
+    )
 
 
 def _handle_config_get(cfg, args_rest):

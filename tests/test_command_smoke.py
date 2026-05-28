@@ -775,6 +775,73 @@ def test_config_nested_helpers_and_coercion():
     assert mms_core._mask_key("abcd1234efgh") == "abcd****efgh"
 
 
+def test_config_validator_reports_provider_account_errors():
+    import mms_command_tools
+    import mms_core
+
+    kwargs = {
+        "default_provider_protocols": {"openai", "anthropic"},
+        "cli_names": ["claude", "codex"],
+        "legacy_provider_cli_aliases": {"legacy"},
+        "default_priority": 100,
+        "oauth_capable_clis": {"codex", "agy"},
+        "mode_all": "all",
+        "mode_recommended": "recommended",
+        "canonical_model_family": lambda name: {"GPT": "GPT"}.get(name),
+        "normalize_priority": lambda value: value if isinstance(value, int) and value > 0 else 100,
+        "normalize_claude_1m_mode": lambda value: value if value in {"auto", "enable", "disable"} else "auto",
+        "normalize_user_role": lambda value: value if value in {"all", "recommended"} else "all",
+    }
+    cfg = {
+        "cache": {"probe_async_refresh_after_sec": 0},
+        "provider": {"default": "missing"},
+        "providers": [
+            {
+                "id": "relay",
+                "protocols": ["bad"],
+                "supported_clis": ["badcli"],
+                "priority": -1,
+                "family_priority_overrides": {"Bad": 1},
+                "claude_1m_mode": "bad",
+            },
+            {"id": "relay"},
+        ],
+        "accounts": [
+            {
+                "id": "acct",
+                "cli": "claude",
+                "auth_mode": "api_key",
+                "priority": 0,
+                "claude_1m_mode": "bad",
+            },
+            {"id": "acct", "cli": "codex", "home_dir": "/tmp/a"},
+        ],
+        "account": {"defaults": {"badcli": "acct", "codex": "missing"}},
+    }
+
+    errors = mms_command_tools.validate_config(cfg, **kwargs)
+    assert "probe_async_refresh_after_sec 必须是正整数" in errors
+    assert "模型源 ID 重复: relay" in errors
+    assert "模型源 relay 存在不支持的协议: bad" in errors
+    assert "模型源 relay 存在不支持的 CLI: badcli" in errors
+    assert "默认模型源不存在: missing" in errors
+    assert "账号档案 acct 绑定了不支持的 CLI: claude" in errors
+    assert "账号档案 acct 目前只支持 oauth 模式" in errors
+    assert "账号档案 acct 缺少 home_dir" in errors
+    assert "存在不支持的默认账号 CLI: badcli" in errors
+    assert "codex 的默认账号不存在: missing" in errors
+
+    valid_cfg = {
+        "provider": {"default": "relay"},
+        "providers": [{"id": "relay", "protocols": ["openai"], "supported_clis": ["codex"], "priority": 100}],
+        "accounts": [{"id": "codex-a", "cli": "codex", "auth_mode": "oauth", "home_dir": "/tmp/codex-a"}],
+        "account": {"defaults": {"codex": "codex-a"}},
+        "user": {"role": "all"},
+    }
+    assert mms_command_tools.validate_config(valid_cfg, **kwargs) == []
+    assert mms_core._validate_config({"provider": {"default": "relay"}, "providers": [{"id": "relay"}]}) == []
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 
