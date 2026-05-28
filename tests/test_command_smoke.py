@@ -181,6 +181,32 @@ def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     ) == str(tmp_path / "plain" / "snapshots" / "startup" / "accepted.json")
 
 
+def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
+    import stat
+
+    import mms_command_tools
+
+    (tmp_path / "AGENTS.md").write_text("old agents", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("old claude", encoding="utf-8")
+
+    mms_command_tools.ensure_mms_config_guard_files(
+        config_path=str(tmp_path / "config.toml"),
+        config_guard_root_dir=lambda _path: str(tmp_path),
+        render_agents_guard=lambda: "new agents",
+        render_claude_guard=lambda: "new claude",
+        config_backup_root=lambda _path: str(tmp_path / "backups"),
+        local_now_slug=lambda: "20260528-225100",
+    )
+
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "new agents"
+    assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "new claude"
+    assert stat.S_IMODE((tmp_path / "AGENTS.md").stat().st_mode) == 0o600
+    assert stat.S_IMODE((tmp_path / "CLAUDE.md").stat().st_mode) == 0o600
+    backup_dir = tmp_path / "backups" / "guardrails-20260528-225100"
+    assert (backup_dir / "AGENTS.md").read_text(encoding="utf-8") == "old agents"
+    assert (backup_dir / "CLAUDE.md").read_text(encoding="utf-8") == "old claude"
+
+
 def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     import hashlib
     import json

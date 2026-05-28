@@ -1518,38 +1518,16 @@ def _render_mms_config_claude_guard():
 
 
 def _ensure_mms_config_guard_files(config_path=None):
-    root_dir = _config_guard_root_dir(config_path)
-    os.makedirs(root_dir, exist_ok=True)
-    guard_payloads = {
-        "AGENTS.md": _render_mms_config_agents_guard(),
-        "CLAUDE.md": _render_mms_config_claude_guard(),
-    }
-    backup_dir = ""
-    for filename, content in guard_payloads.items():
-        target_path = os.path.join(root_dir, filename)
-        existing = ""
-        if os.path.exists(target_path):
-            try:
-                with open(target_path, "r", encoding="utf-8") as f:
-                    existing = f.read()
-            except OSError:
-                existing = ""
-        if existing == content:
-            continue
-        if existing:
-            if not backup_dir:
-                backup_dir = os.path.join(
-                    _config_backup_root(os.path.join(root_dir, "config.toml")),
-                    f"guardrails-{_local_now_slug()}",
-                )
-                os.makedirs(backup_dir, exist_ok=True)
-            shutil.copy2(target_path, os.path.join(backup_dir, filename))
-        with open(target_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        try:
-            os.chmod(target_path, 0o600)
-        except OSError:
-            pass
+    from mms_command_tools import ensure_mms_config_guard_files
+
+    return ensure_mms_config_guard_files(
+        config_path=config_path,
+        config_guard_root_dir=_config_guard_root_dir,
+        render_agents_guard=_render_mms_config_agents_guard,
+        render_claude_guard=_render_mms_config_claude_guard,
+        config_backup_root=_config_backup_root,
+        local_now_slug=_local_now_slug,
+    )
 
 
 def _sha256_text(value):

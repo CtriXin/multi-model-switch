@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -157,6 +158,64 @@ def config_snapshot_path(
     config_snapshot_root,
 ):
     return os.path.join(config_snapshot_root(config_path), snapshot_kind, filename)
+
+
+def ensure_mms_config_guard_files(
+    *,
+    config_path=None,
+    config_guard_root_dir,
+    render_agents_guard,
+    render_claude_guard,
+    config_backup_root,
+    local_now_slug,
+    makedirs=os.makedirs,
+    path_exists=os.path.exists,
+    read_text=None,
+    write_text=None,
+    copy2=shutil.copy2,
+    chmod=os.chmod,
+):
+    def default_read_text(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    def default_write_text(path, content):
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+
+    read_text = default_read_text if read_text is None else read_text
+    write_text = default_write_text if write_text is None else write_text
+
+    root_dir = config_guard_root_dir(config_path)
+    makedirs(root_dir, exist_ok=True)
+    guard_payloads = {
+        "AGENTS.md": render_agents_guard(),
+        "CLAUDE.md": render_claude_guard(),
+    }
+    backup_dir = ""
+    for filename, content in guard_payloads.items():
+        target_path = os.path.join(root_dir, filename)
+        existing = ""
+        if path_exists(target_path):
+            try:
+                existing = read_text(target_path)
+            except OSError:
+                existing = ""
+        if existing == content:
+            continue
+        if existing:
+            if not backup_dir:
+                backup_dir = os.path.join(
+                    config_backup_root(os.path.join(root_dir, "config.toml")),
+                    f"guardrails-{local_now_slug()}",
+                )
+                makedirs(backup_dir, exist_ok=True)
+            copy2(target_path, os.path.join(backup_dir, filename))
+        write_text(target_path, content)
+        try:
+            chmod(target_path, 0o600)
+        except OSError:
+            pass
 
 
 def snapshot_proxy_fingerprint(proxy_url):
