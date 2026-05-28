@@ -1159,6 +1159,15 @@ def show_rescue_no_packets_report(
     return {"status": "continue"}
 
 
+def select_rescue_event_action(rescue_events, *, select_rescue_event_tui):
+    selected_rescue = safe_tui_call(select_rescue_event_tui, rescue_events)
+    if selected_rescue == "__interrupt__":
+        return {"status": "interrupt", "selected_rescue": None}
+    if not selected_rescue:
+        return {"status": "continue", "selected_rescue": None}
+    return {"status": "selected", "selected_rescue": selected_rescue}
+
+
 def handle_rescue_view_markdown_action(
     selected_rescue,
     *,

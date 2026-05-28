@@ -5219,11 +5219,15 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         pause_after_tui_report=_pause_after_tui_report,
                     )
                     continue
-                selected_rescue = tui_flow.safe_tui_call(select_rescue_event_tui, rescue_events)
-                if selected_rescue == "__interrupt__":
+                selected_result = tui_flow.select_rescue_event_action(
+                    rescue_events,
+                    select_rescue_event_tui=select_rescue_event_tui,
+                )
+                if selected_result["status"] == "interrupt":
                     return True
-                if not selected_rescue:
+                if selected_result["status"] != "selected":
                     continue
+                selected_rescue = selected_result["selected_rescue"]
                 packet_menu = tui_flow.rescue_packet_action_menu_context(
                     current_cfg,
                     selected_rescue,

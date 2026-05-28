@@ -49,6 +49,7 @@ from mms_tui_launcher_flow import (
     resolve_confirm_launch_action,
     run_confirm_tui_prompt,
     safe_tui_call,
+    select_rescue_event_action,
     selected_model_launch_context,
     select_rescue_route_fallback_model,
     show_rescue_no_packets_report,
@@ -1981,6 +1982,26 @@ def test_show_rescue_no_packets_report_prints_error_and_pauses() -> None:
         ),
         ("pause", "按 Enter 返回设置"),
     ]
+
+
+def test_select_rescue_event_action_returns_selected_continue_or_interrupt() -> None:
+    rescue_events = [{"id": "evt1"}]
+    selected = {"id": "evt1"}
+
+    assert select_rescue_event_action(
+        rescue_events,
+        select_rescue_event_tui=lambda events: selected if events == rescue_events else None,
+    ) == {"status": "selected", "selected_rescue": selected}
+
+    assert select_rescue_event_action(
+        rescue_events,
+        select_rescue_event_tui=lambda _events: None,
+    ) == {"status": "continue", "selected_rescue": None}
+
+    assert select_rescue_event_action(
+        rescue_events,
+        select_rescue_event_tui=lambda _events: (_ for _ in ()).throw(KeyboardInterrupt),
+    ) == {"status": "interrupt", "selected_rescue": None}
 
 
 def test_handle_rescue_view_markdown_action_prints_content_and_pauses(tmp_path) -> None:
