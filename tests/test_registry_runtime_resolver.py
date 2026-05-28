@@ -125,6 +125,31 @@ def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatc
             "approved-model",
             provider_id="approved-provider",
         )
+        is None
+    )
+
+
+def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    legacy_profile = {
+        "schema_version": 1,
+        "profiles": {
+            "legacy-test": {
+                "match": {"provider_id_contains": ["legacy-provider"]},
+                "context_windows": {"legacy-model": 111_000},
+            }
+        },
+    }
+    mms_registry.write_json_atomic(tmp_path / "provider-profiles.json", legacy_profile)
+
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    assert (
+        mms_provider_profiles.profile_context_window(
+            "legacy-model",
+            provider_id="legacy-provider",
+        )
         == 111_000
     )
 
