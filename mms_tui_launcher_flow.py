@@ -827,6 +827,15 @@ def apply_tui_priority_changes(
     return True
 
 
+def select_tui_settings_action(*, select_settings_tui):
+    settings_action = safe_tui_call(select_settings_tui)
+    if settings_action == "__interrupt__":
+        return {"status": "interrupt", "action": None}
+    if settings_action is None:
+        return {"status": "continue", "action": None}
+    return {"status": "action", "action": settings_action}
+
+
 def handle_tui_provider_mgmt_settings_action(
     cfg,
     *,

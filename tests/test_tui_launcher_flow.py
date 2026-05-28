@@ -60,6 +60,7 @@ from mms_tui_launcher_flow import (
     safe_tui_call,
     select_rescue_event_action,
     select_rescue_menu_action,
+    select_tui_settings_action,
     selected_model_launch_context,
     select_rescue_route_fallback_model,
     show_rescue_no_packets_report,
@@ -1966,6 +1967,20 @@ def test_select_rescue_menu_action_returns_action_continue_or_interrupt() -> Non
         info,
         actions,
         select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
+    ) == {"status": "interrupt", "action": None}
+
+
+def test_select_tui_settings_action_returns_action_continue_or_interrupt() -> None:
+    assert select_tui_settings_action(
+        select_settings_tui=lambda: "rescue",
+    ) == {"status": "action", "action": "rescue"}
+
+    assert select_tui_settings_action(
+        select_settings_tui=lambda: None,
+    ) == {"status": "continue", "action": None}
+
+    assert select_tui_settings_action(
+        select_settings_tui=lambda: (_ for _ in ()).throw(KeyboardInterrupt),
     ) == {"status": "interrupt", "action": None}
 
 

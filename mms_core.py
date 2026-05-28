@@ -5028,11 +5028,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 select_settings_tui,
                 select_provider_mgmt_tui,
             )
-            settings_action = tui_flow.safe_tui_call(select_settings_tui)
-            if settings_action == "__interrupt__":
+            settings_result = tui_flow.select_tui_settings_action(
+                select_settings_tui=select_settings_tui,
+            )
+            if settings_result["status"] == "interrupt":
                 return True
-            if settings_action is None:
+            if settings_result["status"] != "action":
                 continue
+            settings_action = settings_result["action"]
             if settings_action == "provider_mgmt":
                 provider_mgmt_result = tui_flow.handle_tui_provider_mgmt_settings_action(
                     current_cfg,
