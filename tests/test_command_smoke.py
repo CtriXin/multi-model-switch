@@ -662,6 +662,85 @@ def test_usage_stats_file_helpers_preserve_defaults_secure_write_and_guard(tmp_p
     assert stat.S_IMODE(written_path.stat().st_mode) == 0o600
 
 
+def test_usage_stats_wrappers_preserve_lock_write_and_trigger(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    class Lock:
+        def __init__(self, path):
+            self.path = path
+
+        def __enter__(self):
+            calls.append(("lock_enter", self.path))
+
+        def __exit__(self, *_args):
+            calls.append(("lock_exit", self.path))
+            return False
+
+    calls = []
+    usage_path = "/tmp/mms-usage.json"
+
+    assert mms_command_tools.load_usage_stats(
+        active_usage_path=lambda: usage_path,
+        load_usage_stats_from_path=lambda path: {"path": path},
+    ) == {"path": usage_path}
+
+    mms_command_tools.save_usage_stats(
+        {"sources": {}},
+        active_usage_path=lambda: usage_path,
+        locked_state_file=lambda path: Lock(path),
+        write_usage_stats_locked=lambda path, data: calls.append(("write", path, data)),
+        trigger_routes_export_after_usage_write=lambda: calls.append(("trigger",)),
+    )
+    assert calls == [
+        ("lock_enter", usage_path),
+        ("write", usage_path, {"sources": {}}),
+        ("lock_exit", usage_path),
+        ("trigger",),
+    ]
+
+    calls.clear()
+
+    def mutate(stats):
+        stats["sources"]["codex"] = {"count": 1}
+        return "mutated"
+
+    assert mms_command_tools.update_usage_stats(
+        mutate,
+        active_usage_path=lambda: usage_path,
+        locked_state_file=lambda path: Lock(path),
+        load_usage_stats_from_path=lambda path: {"sources": {}, "path": path},
+        write_usage_stats_locked=lambda path, data: calls.append(("write", path, dict(data))),
+        trigger_routes_export_after_usage_write=lambda: calls.append(("trigger",)),
+    ) == "mutated"
+    assert calls == [
+        ("lock_enter", usage_path),
+        ("write", usage_path, {"sources": {"codex": {"count": 1}}, "path": usage_path}),
+        ("lock_exit", usage_path),
+        ("trigger",),
+    ]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_active_usage_path", lambda: usage_path)
+    monkeypatch.setattr(mms_core, "_locked_state_file", lambda path: Lock(path))
+    monkeypatch.setattr(mms_core, "_load_usage_stats_from_path", lambda path: {"sources": {}, "path": path})
+    monkeypatch.setattr(mms_core, "_write_usage_stats_locked", lambda path, data: calls.append(("write", path, dict(data))))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_usage_write", lambda: calls.append(("trigger",)))
+    assert mms_core._load_usage_stats() == {"sources": {}, "path": usage_path}
+    mms_core._save_usage_stats({"sources": {"claude": {"count": 2}}})
+    assert mms_core._update_usage_stats(mutate) == "mutated"
+    assert calls == [
+        ("lock_enter", usage_path),
+        ("write", usage_path, {"sources": {"claude": {"count": 2}}}),
+        ("lock_exit", usage_path),
+        ("trigger",),
+        ("lock_enter", usage_path),
+        ("write", usage_path, {"sources": {"codex": {"count": 1}}, "path": usage_path}),
+        ("lock_exit", usage_path),
+        ("trigger",),
+    ]
+
+
 def test_usage_routes_export_trigger_preserves_throttle_running_and_async_reset():
     import mms_command_tools
 

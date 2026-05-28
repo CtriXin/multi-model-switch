@@ -2020,8 +2020,12 @@ def _local_now_slug():
 
 
 def _load_usage_stats():
-    usage_path = _active_usage_path()
-    return _load_usage_stats_from_path(usage_path)
+    from mms_command_tools import load_usage_stats
+
+    return load_usage_stats(
+        active_usage_path=_active_usage_path,
+        load_usage_stats_from_path=_load_usage_stats_from_path,
+    )
 
 
 def _load_usage_stats_from_path(usage_path):
@@ -2042,20 +2046,28 @@ def _write_usage_stats_locked(usage_path, data):
 
 
 def _save_usage_stats(data):
-    usage_path = _active_usage_path()
-    with _locked_state_file(usage_path):
-        _write_usage_stats_locked(usage_path, data)
-    _trigger_routes_export_after_usage_write()
+    from mms_command_tools import save_usage_stats
+
+    return save_usage_stats(
+        data,
+        active_usage_path=_active_usage_path,
+        locked_state_file=_locked_state_file,
+        write_usage_stats_locked=_write_usage_stats_locked,
+        trigger_routes_export_after_usage_write=_trigger_routes_export_after_usage_write,
+    )
 
 
 def _update_usage_stats(mutator):
-    usage_path = _active_usage_path()
-    with _locked_state_file(usage_path):
-        stats = _load_usage_stats_from_path(usage_path)
-        result = mutator(stats)
-        _write_usage_stats_locked(usage_path, stats)
-    _trigger_routes_export_after_usage_write()
-    return result
+    from mms_command_tools import update_usage_stats
+
+    return update_usage_stats(
+        mutator,
+        active_usage_path=_active_usage_path,
+        locked_state_file=_locked_state_file,
+        load_usage_stats_from_path=_load_usage_stats_from_path,
+        write_usage_stats_locked=_write_usage_stats_locked,
+        trigger_routes_export_after_usage_write=_trigger_routes_export_after_usage_write,
+    )
 
 
 _USAGE_ROUTES_EXPORT_LOCK = threading.Lock()

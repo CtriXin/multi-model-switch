@@ -996,6 +996,42 @@ def write_usage_stats_locked(
     chmod(usage_path, 0o600)
 
 
+def load_usage_stats(*, active_usage_path, load_usage_stats_from_path):
+    return load_usage_stats_from_path(active_usage_path())
+
+
+def save_usage_stats(
+    data,
+    *,
+    active_usage_path,
+    locked_state_file,
+    write_usage_stats_locked,
+    trigger_routes_export_after_usage_write,
+):
+    usage_path = active_usage_path()
+    with locked_state_file(usage_path):
+        write_usage_stats_locked(usage_path, data)
+    trigger_routes_export_after_usage_write()
+
+
+def update_usage_stats(
+    mutator,
+    *,
+    active_usage_path,
+    locked_state_file,
+    load_usage_stats_from_path,
+    write_usage_stats_locked,
+    trigger_routes_export_after_usage_write,
+):
+    usage_path = active_usage_path()
+    with locked_state_file(usage_path):
+        stats = load_usage_stats_from_path(usage_path)
+        result = mutator(stats)
+        write_usage_stats_locked(usage_path, stats)
+    trigger_routes_export_after_usage_write()
+    return result
+
+
 def trigger_routes_export_after_usage_write(
     *,
     lock,
