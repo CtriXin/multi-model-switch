@@ -2933,41 +2933,27 @@ def apply_local_overrides(cfg):
 
 
 def _env_file_path(cli_name):
-    return os.path.join(ENV_DIR, f"{cli_name}.sh")
+    from mms_command_tools import env_file_path
+
+    return env_file_path(cli_name, env_dir=ENV_DIR)
 
 
 def _shell_quote(value):
-    return "'" + value.replace("'", "'\"'\"'") + "'"
+    from mms_command_tools import shell_quote
+
+    return shell_quote(value)
 
 
 def _parse_shell_value(raw):
-    raw = raw.strip()
-    if not raw:
-        return ""
-    try:
-        parts = shlex.split(f"v {raw}")
-    except ValueError:
-        return raw.strip("\"'")
-    return parts[1] if len(parts) > 1 else ""
+    from mms_command_tools import parse_shell_value
+
+    return parse_shell_value(raw)
 
 
 def _load_env_file(path):
-    values = {}
-    if not os.path.exists(path):
-        return values
+    from mms_command_tools import load_env_file
 
-    with open(path, "r", encoding="utf-8") as f:
-        for raw_line in f:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export "):]
-            key, sep, raw_value = line.partition("=")
-            if not sep:
-                continue
-            values[key.strip()] = _parse_shell_value(raw_value)
-    return values
+    return load_env_file(path)
 
 
 def _iso_now():

@@ -853,6 +853,44 @@ def resolve_config_provider_id(provider_defs, provider_id):
     return ""
 
 
+def env_file_path(cli_name, *, env_dir):
+    return os.path.join(env_dir, f"{cli_name}.sh")
+
+
+def shell_quote(value):
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def parse_shell_value(raw):
+    raw = raw.strip()
+    if not raw:
+        return ""
+    try:
+        parts = shlex.split(f"v {raw}")
+    except ValueError:
+        return raw.strip("\"'")
+    return parts[1] if len(parts) > 1 else ""
+
+
+def load_env_file(path):
+    values = {}
+    if not os.path.exists(path):
+        return values
+
+    with open(path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):]
+            key, sep, raw_value = line.partition("=")
+            if not sep:
+                continue
+            values[key.strip()] = parse_shell_value(raw_value)
+    return values
+
+
 def account_map(cfg):
     accounts = cfg.get("accounts", [])
     return {account["id"]: account for account in accounts if isinstance(account, dict) and account.get("id")}

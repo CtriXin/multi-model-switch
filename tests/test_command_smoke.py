@@ -654,6 +654,37 @@ def test_provider_endpoint_helpers_preserve_config_resolution_semantics():
     )
 
 
+def test_env_file_helpers_preserve_shell_parsing_and_paths(tmp_path):
+    import mms_command_tools
+
+    env_path = tmp_path / "credentials.sh"
+    env_path.write_text(
+        "\n".join(
+            [
+                "# comment",
+                "export MMS_PROVIDER_RELAY_API_KEY='sk test'",
+                'MMS_PROVIDER_RELAY_BASE_URL=\"https://relay.example/v1\"',
+                "NO_EQUALS",
+                "BROKEN='unterminated",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert mms_command_tools.env_file_path("claude", env_dir=str(tmp_path)) == str(tmp_path / "claude.sh")
+    assert mms_command_tools.shell_quote("a'b") == "'a'\"'\"'b'"
+    assert mms_command_tools.parse_shell_value("'sk test'") == "sk test"
+    assert mms_command_tools.parse_shell_value('"quoted"') == "quoted"
+    assert mms_command_tools.parse_shell_value("'unterminated") == "unterminated"
+    assert mms_command_tools.load_env_file(str(tmp_path / "missing.sh")) == {}
+    assert mms_command_tools.load_env_file(str(env_path)) == {
+        "MMS_PROVIDER_RELAY_API_KEY": "sk test",
+        "MMS_PROVIDER_RELAY_BASE_URL": "https://relay.example/v1",
+        "BROKEN": "unterminated",
+    }
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
