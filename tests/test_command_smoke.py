@@ -3271,6 +3271,80 @@ def test_run_account_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
     assert mms_core.console.items == ["[yellow]当前没有配置任何 OAuth 账号[/yellow]"]
 
 
+def test_run_recommend_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    cfg = {"recommend": {"models": ["model-a"]}}
+    choices = iter(["add", "remove", "clear", "back"])
+    prompts = iter(["model-b, model-a, model-c", "model-a, missing"])
+    rich_calls = []
+    save_calls = []
+    select_calls = []
+    console = _CollectingConsole()
+
+    def select_action(title, info_lines, actions):
+        select_calls.append((title, list(info_lines), list(actions)))
+        return next(choices)
+
+    result = mms_command_tools.run_recommend_mgmt_tui(
+        cfg,
+        use_tui=lambda: True,
+        load_select_channel_action_tui=lambda: select_action,
+        ensure_rich=lambda: rich_calls.append("rich"),
+        prompt_ask=lambda *args, **kwargs: next(prompts),
+        save_config=lambda current: save_calls.append(list(current["recommend"]["models"])),
+        console=console,
+    )
+
+    assert result is cfg
+    assert cfg["recommend"]["models"] == []
+    assert rich_calls == ["rich", "rich"]
+    assert save_calls == [
+        ["model-a", "model-b", "model-c"],
+        ["model-b", "model-c"],
+        [],
+    ]
+    assert select_calls[0] == (
+        "推荐模型",
+        [("1", "model-a")],
+        [("add", "添加模型"), ("remove", "移除模型"), ("clear", "清空列表"), ("back", "返回")],
+    )
+    assert select_calls[-1][1] == [("-", "(空)")]
+    assert console.items == [
+        "[green]已添加: model-b, model-a, model-c[/green]",
+        "[green]已移除: model-a, missing[/green]",
+        "[green]已清空推荐列表[/green]",
+    ]
+
+    cfg = {"recommend": {"models": ["model-a"]}}
+    assert mms_command_tools.run_recommend_mgmt_tui(
+        cfg,
+        use_tui=lambda: False,
+        load_select_channel_action_tui=lambda: (_ for _ in ()).throw(AssertionError("loader not expected")),
+        ensure_rich=lambda: (_ for _ in ()).throw(AssertionError("rich not expected")),
+        prompt_ask=lambda *args, **kwargs: "",
+        save_config=lambda current: save_calls.append(current),
+        console=console,
+    ) is cfg
+    assert cfg["recommend"]["models"] == ["model-a"]
+
+    assert mms_command_tools.run_recommend_mgmt_tui(
+        cfg,
+        use_tui=lambda: True,
+        load_select_channel_action_tui=lambda: (_ for _ in ()).throw(ImportError("no tui")),
+        ensure_rich=lambda: (_ for _ in ()).throw(AssertionError("rich not expected")),
+        prompt_ask=lambda *args, **kwargs: "",
+        save_config=lambda current: save_calls.append(current),
+        console=console,
+    ) is cfg
+
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: False)
+    assert mms_core._run_recommend_mgmt_tui({"recommend": {"models": ["model-a"]}}) == {
+        "recommend": {"models": ["model-a"]}
+    }
+
+
 def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
     import mms_command_tools
 

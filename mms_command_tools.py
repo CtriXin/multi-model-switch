@@ -2416,6 +2416,72 @@ def run_account_mgmt_tui(
             pass
 
 
+def run_recommend_mgmt_tui(
+    cfg,
+    *,
+    use_tui,
+    load_select_channel_action_tui,
+    ensure_rich,
+    prompt_ask,
+    save_config,
+    console,
+):
+    current_list = list(cfg.get("recommend", {}).get("models", []))
+
+    if use_tui():
+        try:
+            select_channel_action_tui = load_select_channel_action_tui()
+        except ImportError:
+            return cfg
+
+        while True:
+            info_lines = []
+            for i, model_name in enumerate(current_list):
+                info_lines.append((str(i + 1), model_name))
+            if not info_lines:
+                info_lines.append(("-", "(空)"))
+
+            actions = [
+                ("add", "添加模型"),
+                ("remove", "移除模型"),
+                ("clear", "清空列表"),
+                ("back", "返回"),
+            ]
+            choice = select_channel_action_tui("推荐模型", info_lines, actions)
+
+            if choice == "add":
+                ensure_rich()
+                raw = prompt_ask("输入模型名（逗号分隔）", default="")
+                additions = [model.strip() for model in raw.split(",") if model.strip()]
+                if additions:
+                    for model_name in additions:
+                        if model_name not in current_list:
+                            current_list.append(model_name)
+                    cfg.setdefault("recommend", {})["models"] = current_list
+                    save_config(cfg)
+                    console.print(f"[green]已添加: {', '.join(additions)}[/green]")
+            elif choice == "remove":
+                if not current_list:
+                    continue
+                ensure_rich()
+                raw = prompt_ask("输入要移除的模型名（逗号分隔）", default="")
+                removals = [model.strip() for model in raw.split(",") if model.strip()]
+                if removals:
+                    current_list = [model_name for model_name in current_list if model_name not in removals]
+                    cfg.setdefault("recommend", {})["models"] = current_list
+                    save_config(cfg)
+                    console.print(f"[green]已移除: {', '.join(removals)}[/green]")
+            elif choice == "clear":
+                current_list = []
+                cfg.setdefault("recommend", {})["models"] = []
+                save_config(cfg)
+                console.print("[green]已清空推荐列表[/green]")
+            else:
+                break
+
+    return cfg
+
+
 def format_rescue_hot_fallback_event(event):
     if not isinstance(event, dict) or not event:
         return "-"

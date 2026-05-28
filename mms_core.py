@@ -3788,60 +3788,21 @@ def _run_account_mgmt_tui(cfg):
 
 def _run_recommend_mgmt_tui(cfg):
     """推荐模型管理：查看/添加/移除。"""
-    current_list = list(cfg.get("recommend", {}).get("models", []))
+    from mms_command_tools import run_recommend_mgmt_tui
 
-    if _use_tui():
-        try:
-            from mms_tui import select_channel_action_tui
-        except ImportError:
-            return cfg
+    def load_select_channel_action_tui():
+        from mms_tui import select_channel_action_tui
+        return select_channel_action_tui
 
-        while True:
-            info_lines = []
-            for i, m in enumerate(current_list):
-                info_lines.append((str(i + 1), m))
-            if not info_lines:
-                info_lines.append(("-", "(空)"))
-
-            actions = [
-                ("add", "添加模型"),
-                ("remove", "移除模型"),
-                ("clear", "清空列表"),
-                ("back", "返回"),
-            ]
-            choice = select_channel_action_tui("推荐模型", info_lines, actions)
-
-            if choice == "add":
-                _ensure_rich()
-                raw = Prompt.ask("输入模型名（逗号分隔）", default="")
-                additions = [m.strip() for m in raw.split(",") if m.strip()]
-                if additions:
-                    for m in additions:
-                        if m not in current_list:
-                            current_list.append(m)
-                    cfg.setdefault("recommend", {})["models"] = current_list
-                    save_config(cfg)
-                    console.print(f"[green]已添加: {', '.join(additions)}[/green]")
-            elif choice == "remove":
-                if not current_list:
-                    continue
-                _ensure_rich()
-                raw = Prompt.ask("输入要移除的模型名（逗号分隔）", default="")
-                removals = [m.strip() for m in raw.split(",") if m.strip()]
-                if removals:
-                    current_list = [m for m in current_list if m not in removals]
-                    cfg.setdefault("recommend", {})["models"] = current_list
-                    save_config(cfg)
-                    console.print(f"[green]已移除: {', '.join(removals)}[/green]")
-            elif choice == "clear":
-                current_list = []
-                cfg.setdefault("recommend", {})["models"] = []
-                save_config(cfg)
-                console.print("[green]已清空推荐列表[/green]")
-            else:
-                break
-
-    return cfg
+    return run_recommend_mgmt_tui(
+        cfg,
+        use_tui=_use_tui,
+        load_select_channel_action_tui=load_select_channel_action_tui,
+        ensure_rich=_ensure_rich,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        save_config=save_config,
+        console=console,
+    )
 
 
 def run_manage_channels(cfg):
