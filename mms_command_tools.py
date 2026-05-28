@@ -682,6 +682,52 @@ def existing_paths(paths, *, path_exists=os.path.exists):
     return [path for path in paths if path_exists(path)]
 
 
+def load_user_preferences_from_paths(
+    *,
+    existing_preferences_paths,
+    load_toml_file,
+    merge_dicts,
+    sanitize_user_preferences,
+    console,
+    toml_error_types=(),
+):
+    merged = {}
+    errors = (OSError,) + tuple(toml_error_types or ())
+    for path in existing_preferences_paths():
+        try:
+            prefs = load_toml_file(path)
+        except errors as exc:
+            console.print(f"[yellow]跳过无效 preferences 文件 {path}: {exc}[/yellow]")
+            continue
+        if isinstance(prefs, dict):
+            merged = merge_dicts(merged, prefs)
+    return sanitize_user_preferences(merged)
+
+
+def apply_local_overrides(
+    cfg,
+    *,
+    existing_override_paths,
+    load_toml_file,
+    merge_dicts,
+    load_user_preferences,
+    console,
+    toml_error_types=(),
+):
+    merged = dict(cfg)
+    errors = (OSError,) + tuple(toml_error_types or ())
+    for path in existing_override_paths():
+        try:
+            override_cfg = load_toml_file(path)
+        except errors as exc:
+            console.print(f"[yellow]跳过无效 override 文件 {path}: {exc}[/yellow]")
+            continue
+        if isinstance(override_cfg, dict):
+            merged = merge_dicts(merged, override_cfg)
+    merged["_mms_preferences"] = load_user_preferences()
+    return merged
+
+
 def confirm_guard_accept_from_tui(
     cfg,
     *,

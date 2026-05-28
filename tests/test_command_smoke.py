@@ -199,6 +199,63 @@ def test_toml_and_existing_path_helpers_preserve_read_and_filtering(tmp_path):
     assert mms_command_tools.existing_paths(paths, path_exists=lambda path: path.endswith("prefs.toml")) == [str(toml_path)]
 
 
+def test_preference_and_override_load_helpers_preserve_merge_warning_and_sanitize():
+    import mms_command_tools
+
+    class DecodeError(Exception):
+        pass
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, value):
+            self.items.append(value)
+
+    console = Console()
+    loaded = {
+        "/prefs-a.toml": {"launch": {"defaults": {"bypass": "on"}}, "ignored": True},
+        "/prefs-b.toml": {"launch": {"cli": {"codex": {"reasoning_effort": "high"}}}},
+    }
+
+    prefs = mms_command_tools.load_user_preferences_from_paths(
+        existing_preferences_paths=lambda: ["/prefs-a.toml", "/broken.toml", "/prefs-b.toml"],
+        load_toml_file=lambda path: (_ for _ in ()).throw(DecodeError("bad toml")) if path == "/broken.toml" else loaded[path],
+        merge_dicts=mms_command_tools.merge_dicts,
+        sanitize_user_preferences=lambda payload: mms_command_tools.sanitize_user_preferences(
+            payload,
+            cli_names=["codex"],
+            asset_root_keys={},
+        ),
+        console=console,
+        toml_error_types=(DecodeError,),
+    )
+    assert prefs["launch"]["defaults"]["bypass"] is True
+    assert prefs["launch"]["cli"]["codex"]["reasoning_effort"] == "high"
+    assert any("跳过无效 preferences 文件 /broken.toml" in item for item in console.items)
+
+    console = Console()
+    overrides = {
+        "/override-a.toml": {"provider": {"default": "a"}},
+        "/override-b.toml": {"provider": {"name": "B"}},
+    }
+    merged = mms_command_tools.apply_local_overrides(
+        {"base": True, "provider": {"default": "old"}},
+        existing_override_paths=lambda: ["/override-a.toml", "/broken.toml", "/override-b.toml"],
+        load_toml_file=lambda path: (_ for _ in ()).throw(DecodeError("bad override")) if path == "/broken.toml" else overrides[path],
+        merge_dicts=mms_command_tools.merge_dicts,
+        load_user_preferences=lambda: {"launch": {"defaults": {"bypass": "enable"}}},
+        console=console,
+        toml_error_types=(DecodeError,),
+    )
+    assert merged == {
+        "base": True,
+        "provider": {"default": "a", "name": "B"},
+        "_mms_preferences": {"launch": {"defaults": {"bypass": "enable"}}},
+    }
+    assert any("跳过无效 override 文件 /broken.toml" in item for item in console.items)
+
+
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 

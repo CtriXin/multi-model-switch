@@ -2016,16 +2016,16 @@ def _sanitize_user_preferences(raw):
 
 
 def load_user_preferences():
-    merged = {}
-    for path in _existing_preferences_paths():
-        try:
-            prefs = _load_toml_file(path)
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            console.print(f"[yellow]跳过无效 preferences 文件 {path}: {exc}[/yellow]")
-            continue
-        if isinstance(prefs, dict):
-            merged = _merge_dicts(merged, prefs)
-    return _sanitize_user_preferences(merged)
+    from mms_command_tools import load_user_preferences_from_paths
+
+    return load_user_preferences_from_paths(
+        existing_preferences_paths=_existing_preferences_paths,
+        load_toml_file=_load_toml_file,
+        merge_dicts=_merge_dicts,
+        sanitize_user_preferences=_sanitize_user_preferences,
+        console=console,
+        toml_error_types=(tomllib.TOMLDecodeError,),
+    )
 
 
 def preference_asset_root(asset_name):
@@ -2059,17 +2059,17 @@ def _runtime_with_launch_preferences(cfg, runtime, cli_name):
 
 
 def apply_local_overrides(cfg):
-    merged = dict(cfg)
-    for path in _existing_override_paths():
-        try:
-            override_cfg = _load_toml_file(path)
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            console.print(f"[yellow]跳过无效 override 文件 {path}: {exc}[/yellow]")
-            continue
-        if isinstance(override_cfg, dict):
-            merged = _merge_dicts(merged, override_cfg)
-    merged["_mms_preferences"] = load_user_preferences()
-    return merged
+    from mms_command_tools import apply_local_overrides as apply_local_overrides_impl
+
+    return apply_local_overrides_impl(
+        cfg,
+        existing_override_paths=_existing_override_paths,
+        load_toml_file=_load_toml_file,
+        merge_dicts=_merge_dicts,
+        load_user_preferences=load_user_preferences,
+        console=console,
+        toml_error_types=(tomllib.TOMLDecodeError,),
+    )
 
 
 def _env_file_path(cli_name):
