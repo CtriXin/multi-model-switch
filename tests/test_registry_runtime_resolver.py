@@ -130,7 +130,11 @@ def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatc
 
 
 def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    config_root = tmp_path / "xdg" / "mms"
+    config_root.mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_root.parent))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     legacy_profile = {
         "schema_version": 1,
         "profiles": {
@@ -140,7 +144,7 @@ def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypa
             }
         },
     }
-    mms_registry.write_json_atomic(tmp_path / "provider-profiles.json", legacy_profile)
+    mms_registry.write_json_atomic(config_root / "provider-profiles.json", legacy_profile)
 
     import mms_provider_profiles
 
@@ -155,10 +159,10 @@ def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypa
 
 
 def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: Path) -> None:
-    root_a = tmp_path / "root-a"
-    root_b = tmp_path / "root-b"
-    root_a.mkdir()
-    root_b.mkdir()
+    root_a = tmp_path / "root-a" / "mms"
+    root_b = tmp_path / "root-b" / "mms"
+    root_a.mkdir(parents=True)
+    root_b.mkdir(parents=True)
     mms_registry.write_json_atomic(
         root_a / "provider-profiles.json",
         {
@@ -187,10 +191,12 @@ def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: 
     import mms_provider_profiles
 
     mms_provider_profiles.load_provider_profiles.cache_clear()
-    monkeypatch.setenv("MMS_CONFIG_DIR", str(root_a))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root_a.parent))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 111_000
 
-    monkeypatch.setenv("MMS_CONFIG_DIR", str(root_b))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root_b.parent))
     assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 222_000
 
 

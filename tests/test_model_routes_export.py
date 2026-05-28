@@ -350,6 +350,48 @@ def test_export_model_routes_requires_latest_approved_for_preview_root(monkeypat
     assert "latest-approved manifest is required" in errors[0]["detail"]
 
 
+def test_export_model_routes_requires_latest_approved_for_config_dir_root(monkeypatch, tmp_path):
+    selected_root = tmp_path / "selected-root"
+    selected_root.mkdir()
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    import mms_router
+
+    _patch_export_paths(monkeypatch, selected_root)
+    stale_root = {
+        "version": 1,
+        "routes": {
+            "stale-root": {
+                "primary": {
+                    "provider_id": "stale-root",
+                    "openai_base_url": "https://stale.example/v1",
+                    "api_key": "sk-stale",
+                },
+                "fallbacks": [],
+            }
+        },
+    }
+    (selected_root / "model-routes.json").write_text(json.dumps(stale_root), encoding="utf-8")
+    (selected_root / "model-routes.lineup.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "source_routes_hash": mms_router._content_hash({"version": 1, "routes": stale_root["routes"]}),
+                "routes": {"stale-root": {"primary": {"provider_id": "stale-root"}, "fallbacks": []}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (selected_root / "model-policy.json").write_text(json.dumps({"version": 1, "models": {}}), encoding="utf-8")
+
+    routes = mms_router.export_model_routes({"providers": []}, force=False)
+    errors = [item for item in mms_router.validate_model_config_bundle() if item.get("level") == "error"]
+
+    assert routes == {}
+    assert {item["code"] for item in errors} == {"latest_approved_invalid"}
+    assert "latest-approved manifest is required" in errors[0]["detail"]
+
+
 def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch, tmp_path):
     import mms_router
 

@@ -357,9 +357,36 @@ def test_preview_root_missing_latest_bundle_ignores_legacy_profile_overlay(monke
     assert mms_provider_profiles.profile_context_window("any-model", provider_id="preview-only-provider") is None
 
 
+def test_config_dir_root_missing_latest_bundle_ignores_legacy_profile_overlay(monkeypatch, tmp_path):
+    selected_root = tmp_path / "selected-root"
+    selected_root.mkdir()
+    (selected_root / "provider-profiles.json").write_text(
+        """
+        {
+          "schema_version": 1,
+            "profiles": {
+              "config-dir-legacy-overlay": {
+                "match": {"provider_id_contains": ["config-dir-provider"]},
+              "context_windows": {"any": 24680}
+              }
+            }
+          }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+
+    assert mms_provider_profiles.resolve_provider_profile(provider_id="config-dir-provider")[0] == ""
+    assert mms_provider_profiles.profile_context_window("any-model", provider_id="config-dir-provider") is None
+
+
 def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypatch, tmp_path):
-    stable_root = tmp_path / "mms"
-    stable_root.mkdir()
+    stable_root = tmp_path / "xdg" / "mms"
+    stable_root.mkdir(parents=True)
     (stable_root / "provider-profiles.json").write_text(
         """
         {
@@ -374,7 +401,8 @@ def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypa
         """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("MMS_CONFIG_DIR", str(stable_root))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(stable_root.parent))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     import mms_provider_profiles
 

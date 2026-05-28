@@ -121,7 +121,7 @@ def mms_config_root_source(env=None):
 
 def mms_config_root_is_explicit(env=None):
     env = env or os.environ
-    return bool(str(env.get("MMS_CONFIG_ROOT") or "").strip())
+    return bool(str(env.get("MMS_CONFIG_ROOT") or env.get("MMS_CONFIG_DIR") or "").strip())
 
 
 def mms_config_root_mode(config_dir=None, env=None):

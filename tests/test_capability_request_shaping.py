@@ -3,7 +3,9 @@ import json
 
 
 def _profiles(monkeypatch, tmp_path):
-    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     import mms_provider_profiles
 
     mms_provider_profiles.load_provider_profiles.cache_clear()
@@ -11,7 +13,9 @@ def _profiles(monkeypatch, tmp_path):
 
 
 def test_profile_budget_patch_maps_reasoning_effort(monkeypatch, tmp_path):
-    (tmp_path / "provider-profiles.json").write_text(
+    config_root = tmp_path / "mms"
+    config_root.mkdir()
+    (config_root / "provider-profiles.json").write_text(
         json.dumps(
             {
                 "profiles": {
