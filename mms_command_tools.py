@@ -2730,6 +2730,29 @@ def normalize_semver_tags(raw_tags):
     return [tag for _, tag in normalized]
 
 
+def fetch_latest_semver_tags(*, limit, request_cls, urlopen_func, json_load, normalize_semver_tags):
+    req = request_cls(
+        f"https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page={int(limit)}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "mms-update-check",
+        },
+    )
+    with urlopen_func(req, timeout=3) as resp:
+        data = json_load(resp)
+
+    if not isinstance(data, list):
+        return ""
+
+    semver_tags = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("name") or "").strip()
+        semver_tags.append(tag)
+    return normalize_semver_tags(semver_tags)
+
+
 def extract_semver_text(value):
     match = re.search(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?", str(value or ""))
     return match.group(0) if match else ""

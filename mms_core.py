@@ -391,26 +391,15 @@ def _normalize_semver_tags(raw_tags):
 
 
 def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
-    req = Request(
-        f"https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page={int(limit)}",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "mms-update-check",
-        },
+    from mms_command_tools import fetch_latest_semver_tags
+
+    return fetch_latest_semver_tags(
+        limit=limit,
+        request_cls=Request,
+        urlopen_func=urlopen,
+        json_load=json.load,
+        normalize_semver_tags=_normalize_semver_tags,
     )
-    with urlopen(req, timeout=3) as resp:
-        data = json.load(resp)
-
-    if not isinstance(data, list):
-        return ""
-
-    semver_tags = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        tag = str(item.get("name") or "").strip()
-        semver_tags.append(tag)
-    return _normalize_semver_tags(semver_tags)
 
 
 def _fetch_latest_semver_tag():

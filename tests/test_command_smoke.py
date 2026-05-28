@@ -2038,6 +2038,53 @@ def test_semver_and_http_status_helpers_preserve_update_semantics():
     assert mms_command_tools.http_status_is_success("bad") is False
 
 
+def test_fetch_latest_semver_tags_preserves_request_and_normalization():
+    import mms_command_tools
+
+    requests = []
+
+    class FakeRequest:
+        def __init__(self, url, headers=None):
+            self.url = url
+            self.headers = headers
+            requests.append((url, headers))
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(req, timeout=0):
+        assert req.url.endswith("per_page=7")
+        assert timeout == 3
+        return FakeResponse()
+
+    tags = mms_command_tools.fetch_latest_semver_tags(
+        limit=7,
+        request_cls=FakeRequest,
+        urlopen_func=fake_urlopen,
+        json_load=lambda resp: [{"name": "v1.2.0"}, {"name": "bad"}, "skip", {"name": "v1.3.0"}],
+        normalize_semver_tags=mms_command_tools.normalize_semver_tags,
+    )
+    assert tags == ["v1.3.0", "v1.2.0"]
+    assert requests == [
+        (
+            "https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page=7",
+            {"Accept": "application/vnd.github+json", "User-Agent": "mms-update-check"},
+        )
+    ]
+
+    assert mms_command_tools.fetch_latest_semver_tags(
+        limit=7,
+        request_cls=FakeRequest,
+        urlopen_func=fake_urlopen,
+        json_load=lambda resp: {"name": "v1.2.0"},
+        normalize_semver_tags=mms_command_tools.normalize_semver_tags,
+    ) == ""
+
+
 def test_detect_cli_version_preserves_missing_success_and_failure_paths():
     import mms_command_tools
 
