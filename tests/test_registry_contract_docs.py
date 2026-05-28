@@ -77,6 +77,8 @@ def test_registry_contract_docs_make_latest_approved_downstream_entrypoint() -> 
         "Hive / Pilot / Ant / Moebius / Mobius and future downstream consumers MUST use",
         "from the config root as primary truth",
         "Verify latest-approved manifest",
+        "mms config bundle --json",
+        "mmf config bundle --json",
         "Legacy route/policy/profile files remain compatibility",
     ]
 

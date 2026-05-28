@@ -80,6 +80,13 @@ def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
     assert status["legacy_import"]["candidates"]["status"] == "not_imported"
     assert status["legacy_import"]["candidates"]["provider_route_count"] == 0
     assert status["generated_bundle"]["status"] == "missing"
+    consumer = snapshot["consumer_bundle_status"]
+    assert consumer["schema"] == "mms.consumer_bundle_status.v1"
+    assert consumer["read_only"] is True
+    assert consumer["verified"] is False
+    assert consumer["status"] == "missing"
+    assert consumer["consumer_entrypoint"] == str(config_root / "generated" / "model-registry.latest-approved.json")
+    assert "do not query SQLite directly" in consumer["consumer_rules"]
     assert not (config_root / "registry").exists()
 
 
@@ -157,6 +164,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
     assert "status.headline" in html
+    assert "consumer_bundle_status" in html
+    assert "Consumer Bundle" in html
+    assert "不读 SQLite" in html
+    assert "mmf config bundle --json" in html
     assert "candidate routes" in html
     assert "missing keys" in html
     assert "registry_v2_save_plan" in html

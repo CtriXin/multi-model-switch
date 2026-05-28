@@ -102,6 +102,10 @@ Bundle rules:
 
 - The manifest is the v2 canonical consumer contract; legacy root files remain
   compatibility aliases/copies, not independent truth.
+- Tooling can inspect the same boundary with `mms config bundle --json` or
+  `mmf config bundle --json`; these commands are read-only and fail closed when
+  the manifest is missing or hash-mismatched unless explicitly run in
+  diagnostic non-strict mode.
 - Generated v2 exports MUST carry the same `model_registry_revision` or
   `bundle_revision` when their strict legacy shape allows it. If a legacy root
   file must stay shape-compatible, the manifest hash is the revision tie.
