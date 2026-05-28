@@ -8,6 +8,7 @@ from mms_tui_launcher_flow import (
     apply_opencode_profile_for_launch,
     apply_rescue_default_from_action,
     apply_rescue_default_fallback_action,
+    apply_rescue_default_from_route_selection,
     apply_rescue_demo_packet_action,
     apply_rescue_hot_fallback_toggle_action,
     apply_tui_priority_changes,
@@ -16,6 +17,7 @@ from mms_tui_launcher_flow import (
     confirm_tui_options,
     create_rescue_handover_action,
     create_rescue_handover_from_action,
+    create_rescue_handover_from_route_selection,
     enforce_confirm_bypass_network_guard,
     ensure_cli_installed_for_launch,
     execute_confirmed_launch,
@@ -2361,6 +2363,47 @@ def test_apply_rescue_default_from_action_skips_empty_prompt() -> None:
     ]
 
 
+def test_apply_rescue_default_from_route_selection_applies_selected_model() -> None:
+    calls = []
+    cfg = {"rescue": {}}
+    updated_cfg = {"rescue": {"fallback_model": "route-model"}}
+
+    result = apply_rescue_default_from_route_selection(
+        cfg,
+        ["route-model"],
+        "选择全局默认 fallback model",
+        select_model_tui=lambda candidates, *, title: calls.append(("select", candidates, title)) or "route-model",
+        apply_rescue_default_action=lambda model: calls.append(("apply", model)) or {"cfg": updated_cfg},
+    )
+
+    assert result == {
+        "status": "continue",
+        "cfg": updated_cfg,
+        "fallback_model": "route-model",
+        "applied": True,
+    }
+    assert calls == [
+        ("select", ["route-model"], "选择全局默认 fallback model"),
+        ("apply", "route-model"),
+    ]
+
+
+def test_apply_rescue_default_from_route_selection_skips_empty_selection() -> None:
+    calls = []
+    cfg = {"rescue": {}}
+
+    result = apply_rescue_default_from_route_selection(
+        cfg,
+        ["route-model"],
+        "选择全局默认 fallback model",
+        select_model_tui=lambda candidates, *, title: calls.append(("select", candidates, title)) or None,
+        apply_rescue_default_action=lambda _model: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert result == {"status": "continue", "cfg": cfg, "fallback_model": "", "applied": False}
+    assert calls == [("select", ["route-model"], "选择全局默认 fallback model")]
+
+
 def test_create_rescue_handover_from_action_creates_embedded_model() -> None:
     calls = []
     selected_rescue = {"failed_model": "gpt-5.5"}
@@ -2432,6 +2475,66 @@ def test_create_rescue_handover_from_action_skips_empty_prompt() -> None:
         ("ensure",),
         ("ask", "fallback model", ""),
     ]
+
+
+def test_create_rescue_handover_from_route_selection_creates_selected_model() -> None:
+    calls = []
+    selected_rescue = {"failed_model": "gpt-5.5"}
+    handover = {"path": "/tmp/handover.md"}
+
+    result = create_rescue_handover_from_route_selection(
+        selected_rescue,
+        ["route-model"],
+        "选择 fallback handover model",
+        select_model_tui=lambda candidates, *, title: calls.append(("select", candidates, title)) or "route-model",
+        write_fallback_handover=lambda rescue, *, fallback_model: calls.append(("write", rescue, fallback_model)) or handover,
+        rescue_handover_report_payload=lambda payload, model: calls.append(("payload", payload, model)) or ("handover", [("model", model)]),
+        localize=lambda zh, _en: f"zh:{zh}",
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        print_settings_error_report=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {
+        "status": "continue",
+        "handover": handover,
+        "error": None,
+        "fallback_model": "route-model",
+        "applied": True,
+    }
+    assert calls == [
+        ("select", ["route-model"], "选择 fallback handover model"),
+        ("write", selected_rescue, "route-model"),
+        ("payload", handover, "route-model"),
+        ("report", ("handover", [("model", "route-model")]), {}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_create_rescue_handover_from_route_selection_skips_empty_selection() -> None:
+    calls = []
+    selected_rescue = {"failed_model": "gpt-5.5"}
+
+    result = create_rescue_handover_from_route_selection(
+        selected_rescue,
+        ["route-model"],
+        "选择 fallback handover model",
+        select_model_tui=lambda candidates, *, title: calls.append(("select", candidates, title)) or None,
+        write_fallback_handover=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        rescue_handover_report_payload=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        localize=lambda zh, _en: f"zh:{zh}",
+        print_settings_result_report=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        print_settings_error_report=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        pause_after_tui_report=lambda _message: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert result == {
+        "status": "continue",
+        "handover": None,
+        "fallback_model": "",
+        "applied": False,
+    }
+    assert calls == [("select", ["route-model"], "选择 fallback handover model")]
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

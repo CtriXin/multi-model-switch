@@ -1381,6 +1381,30 @@ def apply_rescue_default_from_action(
     }
 
 
+def apply_rescue_default_from_route_selection(
+    cfg,
+    route_fallback_candidates,
+    title,
+    *,
+    select_model_tui,
+    apply_rescue_default_action,
+):
+    fallback_model = select_rescue_route_fallback_model(
+        route_fallback_candidates,
+        title,
+        select_model_tui=select_model_tui,
+    )
+    if not fallback_model:
+        return {"status": "continue", "cfg": cfg, "fallback_model": "", "applied": False}
+    result = apply_rescue_default_action(fallback_model)
+    return {
+        "status": "continue",
+        "cfg": result["cfg"],
+        "fallback_model": fallback_model,
+        "applied": True,
+    }
+
+
 def create_rescue_handover_from_action(
     selected_rescue,
     action,
@@ -1401,6 +1425,45 @@ def create_rescue_handover_from_action(
         prompt_default="",
         ensure_rich=ensure_rich,
         prompt_cls=prompt_cls,
+    )
+    if not fallback_model:
+        return {"status": "continue", "handover": None, "fallback_model": "", "applied": False}
+    result = create_rescue_handover_action(
+        selected_rescue,
+        fallback_model,
+        write_fallback_handover=write_fallback_handover,
+        rescue_handover_report_payload=rescue_handover_report_payload,
+        localize=localize,
+        print_settings_result_report=print_settings_result_report,
+        print_settings_error_report=print_settings_error_report,
+        pause_after_tui_report=pause_after_tui_report,
+    )
+    return {
+        "status": "continue",
+        "handover": result["handover"],
+        "error": result["error"],
+        "fallback_model": fallback_model,
+        "applied": True,
+    }
+
+
+def create_rescue_handover_from_route_selection(
+    selected_rescue,
+    route_fallback_candidates,
+    title,
+    *,
+    select_model_tui,
+    write_fallback_handover,
+    rescue_handover_report_payload,
+    localize,
+    print_settings_result_report,
+    print_settings_error_report,
+    pause_after_tui_report,
+):
+    fallback_model = select_rescue_route_fallback_model(
+        route_fallback_candidates,
+        title,
+        select_model_tui=select_model_tui,
     )
     if not fallback_model:
         return {"status": "continue", "handover": None, "fallback_model": "", "applied": False}
