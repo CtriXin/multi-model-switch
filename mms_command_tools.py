@@ -3313,6 +3313,78 @@ def check_cli_installed(cli_name, *, resolve_cli_binary):
     return bool(resolve_cli_binary(cli_name))
 
 
+def setup_provider_credentials(
+    provider,
+    existing_base_url="",
+    existing_api_key="",
+    allow_keep=False,
+    *,
+    prompt_provider_credentials,
+    save_provider_credentials_with_probe,
+):
+    base_url, api_key, openai_base_url, anthropic_base_url = prompt_provider_credentials(
+        provider,
+        existing_base_url,
+        existing_api_key,
+        allow_keep,
+    )
+    return save_provider_credentials_with_probe(
+        provider,
+        base_url,
+        api_key,
+        openai_base_url,
+        anthropic_base_url,
+    )
+
+
+def setup_api_credentials(
+    existing_base_url="",
+    existing_api_key="",
+    allow_keep=False,
+    *,
+    default_provider,
+    setup_provider_credentials,
+):
+    provider = default_provider()
+    provider_ctx = setup_provider_credentials(provider, existing_base_url, existing_api_key, allow_keep)
+    return provider_ctx["base_url"], provider_ctx["api_key"]
+
+
+def ensure_provider_credentials(
+    cfg,
+    provider_id=None,
+    *,
+    get_provider_definition,
+    load_provider_credentials,
+    resolve_provider_context,
+    setup_provider_credentials,
+):
+    provider = get_provider_definition(cfg, provider_id)
+    credentials = load_provider_credentials(provider["id"])
+    if (
+        credentials["base_url"]
+        or credentials["openai_base_url"]
+        or credentials["anthropic_base_url"]
+    ) and credentials["api_key"]:
+        return resolve_provider_context(cfg, provider["id"])
+    existing_base = (
+        credentials["base_url"]
+        or credentials["openai_base_url"]
+        or credentials["anthropic_base_url"]
+    )
+    return setup_provider_credentials(
+        provider,
+        existing_base,
+        credentials["api_key"],
+        allow_keep=bool(credentials["api_key"]),
+    )
+
+
+def ensure_api_credentials(*, default_config, ensure_provider_credentials):
+    provider_ctx = ensure_provider_credentials(default_config())
+    return provider_ctx["base_url"], provider_ctx["api_key"]
+
+
 def provider_supports_mimo_anthropic_selectors(provider):
     provider = provider if isinstance(provider, dict) else {}
     identity = " ".join(

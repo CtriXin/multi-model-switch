@@ -4486,37 +4486,50 @@ def _run_recovery_action(cfg, provider, probe, action_id):
 
 
 def setup_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
-    base_url, api_key, openai_base_url, anthropic_base_url = _prompt_provider_credentials(
-        provider, existing_base_url, existing_api_key, allow_keep
-    )
-    return _save_provider_credentials_with_probe(
-        provider, base_url, api_key, openai_base_url, anthropic_base_url
+    from mms_command_tools import setup_provider_credentials as setup_provider_credentials_helper
+
+    return setup_provider_credentials_helper(
+        provider,
+        existing_base_url,
+        existing_api_key,
+        allow_keep,
+        prompt_provider_credentials=_prompt_provider_credentials,
+        save_provider_credentials_with_probe=_save_provider_credentials_with_probe,
     )
 
 
 def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=False):
-    provider = _default_provider()
-    provider_ctx = setup_provider_credentials(provider, existing_base_url, existing_api_key, allow_keep)
-    return provider_ctx["base_url"], provider_ctx["api_key"]
+    from mms_command_tools import setup_api_credentials as setup_api_credentials_helper
+
+    return setup_api_credentials_helper(
+        existing_base_url,
+        existing_api_key,
+        allow_keep,
+        default_provider=_default_provider,
+        setup_provider_credentials=setup_provider_credentials,
+    )
 
 
 def ensure_provider_credentials(cfg, provider_id=None):
-    provider = get_provider_definition(cfg, provider_id)
-    credentials = load_provider_credentials(provider["id"])
-    if (credentials["base_url"] or credentials["openai_base_url"] or credentials["anthropic_base_url"]) and credentials["api_key"]:
-        return resolve_provider_context(cfg, provider["id"])
-    existing_base = credentials["base_url"] or credentials["openai_base_url"] or credentials["anthropic_base_url"]
-    return setup_provider_credentials(
-        provider,
-        existing_base,
-        credentials["api_key"],
-        allow_keep=bool(credentials["api_key"]),
+    from mms_command_tools import ensure_provider_credentials as ensure_provider_credentials_helper
+
+    return ensure_provider_credentials_helper(
+        cfg,
+        provider_id,
+        get_provider_definition=get_provider_definition,
+        load_provider_credentials=load_provider_credentials,
+        resolve_provider_context=resolve_provider_context,
+        setup_provider_credentials=setup_provider_credentials,
     )
 
 
 def ensure_api_credentials():
-    provider_ctx = ensure_provider_credentials(_default_config())
-    return provider_ctx["base_url"], provider_ctx["api_key"]
+    from mms_command_tools import ensure_api_credentials as ensure_api_credentials_helper
+
+    return ensure_api_credentials_helper(
+        default_config=_default_config,
+        ensure_provider_credentials=ensure_provider_credentials,
+    )
 
 
 def setup_wizard(ui_language=None):

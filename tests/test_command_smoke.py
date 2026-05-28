@@ -3261,6 +3261,234 @@ def test_save_provider_credentials_with_probe_preserves_autofix_failure_and_reso
     assert "[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]" in console.items
 
 
+def test_provider_credential_flow_helpers_preserve_delegation():
+    import mms_command_tools
+
+    provider = {"id": "relay"}
+    calls = []
+
+    result = mms_command_tools.setup_provider_credentials(
+        provider,
+        "https://old.example",
+        "sk-old",
+        True,
+        prompt_provider_credentials=lambda *args: calls.append(("prompt", args))
+        or (
+            "https://base.example",
+            "sk-new",
+            "https://openai.example",
+            "https://anthropic.example",
+        ),
+        save_provider_credentials_with_probe=lambda *args: calls.append(("save", args))
+        or {"base_url": args[1], "api_key": args[2]},
+    )
+    assert result == {"base_url": "https://base.example", "api_key": "sk-new"}
+    assert calls == [
+        ("prompt", (provider, "https://old.example", "sk-old", True)),
+        (
+            "save",
+            (
+                provider,
+                "https://base.example",
+                "sk-new",
+                "https://openai.example",
+                "https://anthropic.example",
+            ),
+        ),
+    ]
+
+    calls.clear()
+    assert mms_command_tools.setup_api_credentials(
+        "https://old.example",
+        "sk-old",
+        True,
+        default_provider=lambda: calls.append("default") or provider,
+        setup_provider_credentials=lambda *args: calls.append(("setup", args))
+        or {"base_url": "https://api.example", "api_key": "sk-api"},
+    ) == ("https://api.example", "sk-api")
+    assert calls == ["default", ("setup", (provider, "https://old.example", "sk-old", True))]
+
+    cfg = {"providers": [provider]}
+    calls.clear()
+    assert mms_command_tools.ensure_provider_credentials(
+        cfg,
+        "relay",
+        get_provider_definition=lambda current, provider_id=None: calls.append(("get", current, provider_id)) or provider,
+        load_provider_credentials=lambda provider_id: calls.append(("load", provider_id))
+        or {
+            "base_url": "",
+            "openai_base_url": "",
+            "anthropic_base_url": "https://anthropic.example",
+            "api_key": "sk-existing",
+        },
+        resolve_provider_context=lambda current, provider_id=None: calls.append(("resolve", current, provider_id))
+        or {"id": provider_id, "base_url": "https://resolved.example", "api_key": "sk-existing"},
+        setup_provider_credentials=lambda *_args, **_kwargs: calls.append("unexpected-setup"),
+    ) == {"id": "relay", "base_url": "https://resolved.example", "api_key": "sk-existing"}
+    assert calls == [
+        ("get", cfg, "relay"),
+        ("load", "relay"),
+        ("resolve", cfg, "relay"),
+    ]
+
+    calls.clear()
+    assert mms_command_tools.ensure_provider_credentials(
+        cfg,
+        "relay",
+        get_provider_definition=lambda current, provider_id=None: calls.append(("get", current, provider_id)) or provider,
+        load_provider_credentials=lambda provider_id: calls.append(("load", provider_id))
+        or {
+            "base_url": "",
+            "openai_base_url": "https://openai.example",
+            "anthropic_base_url": "https://anthropic.example",
+            "api_key": "",
+        },
+        resolve_provider_context=lambda *_args: calls.append("unexpected-resolve"),
+        setup_provider_credentials=lambda *args, **kwargs: calls.append(("setup", args, kwargs))
+        or {"base_url": "https://openai.example", "api_key": "sk-new"},
+    ) == {"base_url": "https://openai.example", "api_key": "sk-new"}
+    assert calls == [
+        ("get", cfg, "relay"),
+        ("load", "relay"),
+        ("setup", (provider, "https://openai.example", ""), {"allow_keep": False}),
+    ]
+
+    calls.clear()
+    assert mms_command_tools.ensure_provider_credentials(
+        cfg,
+        get_provider_definition=lambda current, provider_id=None: calls.append(("get", current, provider_id)) or provider,
+        load_provider_credentials=lambda provider_id: calls.append(("load", provider_id))
+        or {
+            "base_url": "",
+            "openai_base_url": "",
+            "anthropic_base_url": "",
+            "api_key": "sk-partial",
+        },
+        resolve_provider_context=lambda *_args: calls.append("unexpected-resolve"),
+        setup_provider_credentials=lambda *args, **kwargs: calls.append(("setup", args, kwargs))
+        or {"base_url": "https://filled.example", "api_key": "sk-partial"},
+    ) == {"base_url": "https://filled.example", "api_key": "sk-partial"}
+    assert calls == [
+        ("get", cfg, None),
+        ("load", "relay"),
+        ("setup", (provider, "", "sk-partial"), {"allow_keep": True}),
+    ]
+
+    calls.clear()
+    assert mms_command_tools.ensure_api_credentials(
+        default_config=lambda: calls.append("config") or cfg,
+        ensure_provider_credentials=lambda current: calls.append(("ensure", current))
+        or {"base_url": "https://api.example", "api_key": "sk-api"},
+    ) == ("https://api.example", "sk-api")
+    assert calls == ["config", ("ensure", cfg)]
+
+
+def test_provider_credential_flow_wrappers_preserve_callbacks(monkeypatch):
+    import mms_core
+
+    provider = {"id": "relay"}
+    cfg = {"providers": [provider]}
+    calls = []
+
+    monkeypatch.setattr(
+        mms_core,
+        "_prompt_provider_credentials",
+        lambda *args: calls.append(("prompt", args))
+        or (
+            "https://base.example",
+            "sk-new",
+            "https://openai.example",
+            "https://anthropic.example",
+        ),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_save_provider_credentials_with_probe",
+        lambda *args: calls.append(("save", args)) or {"base_url": args[1], "api_key": args[2]},
+    )
+
+    assert mms_core.setup_provider_credentials(provider, "https://old.example", "sk-old", True) == {
+        "base_url": "https://base.example",
+        "api_key": "sk-new",
+    }
+    assert calls == [
+        ("prompt", (provider, "https://old.example", "sk-old", True)),
+        (
+            "save",
+            (
+                provider,
+                "https://base.example",
+                "sk-new",
+                "https://openai.example",
+                "https://anthropic.example",
+            ),
+        ),
+    ]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_default_provider", lambda: calls.append("default-provider") or provider)
+    monkeypatch.setattr(
+        mms_core,
+        "setup_provider_credentials",
+        lambda *args: calls.append(("setup-provider", args)) or {"base_url": "https://api.example", "api_key": "sk-api"},
+    )
+    assert mms_core.setup_api_credentials("https://old.example", "sk-old", True) == (
+        "https://api.example",
+        "sk-api",
+    )
+    assert calls == [
+        "default-provider",
+        ("setup-provider", (provider, "https://old.example", "sk-old", True)),
+    ]
+
+    calls.clear()
+    monkeypatch.setattr(
+        mms_core,
+        "get_provider_definition",
+        lambda current, provider_id=None: calls.append(("get", current, provider_id)) or provider,
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "load_provider_credentials",
+        lambda provider_id="default": calls.append(("load", provider_id))
+        or {
+            "base_url": "",
+            "openai_base_url": "",
+            "anthropic_base_url": "https://anthropic.example",
+            "api_key": "sk-existing",
+        },
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "resolve_provider_context",
+        lambda current, provider_id=None: calls.append(("resolve", current, provider_id))
+        or {"id": provider_id, "base_url": "https://resolved.example", "api_key": "sk-existing"},
+    )
+    monkeypatch.setattr(mms_core, "setup_provider_credentials", lambda *_args, **_kwargs: calls.append("unexpected-setup"))
+
+    assert mms_core.ensure_provider_credentials(cfg, "relay") == {
+        "id": "relay",
+        "base_url": "https://resolved.example",
+        "api_key": "sk-existing",
+    }
+    assert calls == [
+        ("get", cfg, "relay"),
+        ("load", "relay"),
+        ("resolve", cfg, "relay"),
+    ]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_default_config", lambda: calls.append("default-config") or cfg)
+    monkeypatch.setattr(
+        mms_core,
+        "ensure_provider_credentials",
+        lambda current: calls.append(("ensure-provider", current))
+        or {"base_url": "https://api.example", "api_key": "sk-api"},
+    )
+    assert mms_core.ensure_api_credentials() == ("https://api.example", "sk-api")
+    assert calls == ["default-config", ("ensure-provider", cfg)]
+
+
 def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     import pytest
 
