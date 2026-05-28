@@ -16,7 +16,7 @@ from mms_registry_schema import (
     REVISION_STATUSES,
     migrate as migrate_schema,
 )
-from mms_state_io import resolve_mms_config_dir
+from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
 
 
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
@@ -1728,6 +1728,15 @@ def publish_latest_approved_bundle(
     aliases such as model-routes.json, and it does not read/write credentials.
     """
     config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    try:
+        root_mode = mms_config_root_mode(config_root)
+    except Exception:
+        root_mode = "stable"
+    if root_mode == "preview":
+        raise RegistryValidationError(
+            "publish-approved from legacy root artifacts is disabled for preview config roots; "
+            "use publish-preview so the latest-approved bundle is generated from DB candidates"
+        )
     generated_dir = config_root / "generated"
     generated = generated_at or utc_now()
     db = open_registry(db_path or default_registry_db_path(config_root))

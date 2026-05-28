@@ -433,6 +433,7 @@ Current legacy import candidate implementation:
 Current preview publish implementation:
 
 - `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB preview route candidate. It supports both legacy import candidates and v2 save candidates.
+- `publish-approved` from root legacy artifacts is disabled for preview roots; preview publishing must go through `publish-preview` so generated latest-approved bundles are sourced from DB candidates, not stale root `model-routes.json` / `model-policy.json`.
 - `mmf preview verify [--json]` verifies manifest hashes for the active preview root; `mmf preview status [--json]` is a wrapper for Model Source status.
 - `mmf preview doctor [--json]` and `mmf config doctor [--json]` are read-only "what next?" commands for preview setup. They check preview root mode, registry DB, legacy import candidates, latest-approved bundle verification, runtime readiness, missing API keys, missing route base URLs, and then print one next action. Missing route URLs point to the single preview rebuild command `mmf preview prepare --from ~/.config/mms --json`; if keys are missing too, the command includes `--include-secrets`. Missing-key-only state points to explicit `--include-secrets` import. Ready-state watchdog hints use the concrete selected config root instead of `$MMS_CONFIG_ROOT`, so copied commands stay self-contained.
 - `mmf preview doctor --strict-exit`, `mmf config doctor --strict-exit`, and `mms config doctor --strict-exit` exit non-zero unless the selected preview root is runtime-ready. This avoids treating "printed something and did not crash" as success through either entry.
@@ -482,7 +483,7 @@ Current bridge rescue consumer implementation:
 ### Stage 4 - Write Path And Publish
 
 - WebUI Save writes DB + secret backend.
-- Save triggers backup, publish-approved, verify.
+- Save triggers backup, latest-approved publish, verify.
 - Generated bundle becomes the only downstream preview output.
 
 Current Stage 4a implementation:

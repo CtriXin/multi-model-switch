@@ -4100,7 +4100,11 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         config_dir = args.config_dir or None
         if args.refresh_sources:
             refresh_source_snapshots(db_path=db_path)
-        summary = publish_approved_bundle(config_dir=config_dir, db_path=db_path)
+        try:
+            summary = publish_approved_bundle(config_dir=config_dir, db_path=db_path)
+        except mms_registry.RegistryValidationError as exc:
+            print(f"error={exc}")
+            return 2
         _print_publish(summary)
         return 0
     if args.subcommand == "publish-preview":

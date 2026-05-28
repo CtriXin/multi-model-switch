@@ -2865,6 +2865,32 @@ def test_publish_approved_bundle_verifies_and_resolves_model(tmp_path: Path) -> 
     assert caps["thinking_control"]["control_type"] == "thinkingLevel"
 
 
+def test_publish_approved_bundle_refuses_preview_root_legacy_artifacts(capsys, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+    db_path = tmp_path / "model-registry.sqlite"
+    _write_config_artifacts(preview_root)
+    mms_registry_cli.refresh_source_snapshots(db_path=db_path, paths=[REFERENCE_JSON])
+
+    try:
+        mms_registry_cli.publish_approved_bundle(config_dir=preview_root, db_path=db_path)
+    except mms_registry.RegistryValidationError as exc:
+        direct_error = str(exc)
+    else:  # pragma: no cover - assertion clarity
+        direct_error = ""
+
+    rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "publish-approved", "--config-dir", str(preview_root)],
+        command_name="mmf registry",
+    )
+    out = capsys.readouterr().out
+
+    assert "publish-approved from legacy root artifacts is disabled" in direct_error
+    assert "publish-preview" in direct_error
+    assert rc == 2
+    assert "publish-preview" in out
+    assert not (preview_root / "generated" / "model-registry.latest-approved.json").exists()
+
+
 def test_registry_command_publish_verify_and_resolve(capsys, tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-config"
     db_path = tmp_path / "model-registry.sqlite"
