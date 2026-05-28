@@ -129,6 +129,22 @@ def test_session_command_parser_dispatches_prune_args():
     assert calls == [("prune", "opencode", True, True)]
 
 
+def test_command_request_classifiers_preserve_help_and_safe_prune_semantics():
+    import mms_command_tools
+    import mms_core
+
+    assert mms_command_tools.is_help_request(["config", "preferences.help"]) is True
+    assert mms_command_tools.is_help_request(["config", "set", "cache.probe_async_min_interval_sec", "5"]) is False
+    assert mms_command_tools.is_setup_web_request(["config", "setup-web"]) is True
+    assert mms_command_tools.is_session_prune_dry_run(["session", "prune"]) is True
+    assert mms_command_tools.is_session_prune_dry_run(["session", "prune", "--apply"]) is False
+
+    assert mms_core._is_help_request(["config", "human-gate"]) is True
+    assert mms_core._is_setup_web_request(["web-setup"]) is True
+    assert mms_core._is_config_help_request(["preferences.example"]) is True
+    assert mms_core._is_session_prune_dry_run(["session", "ls"]) is False
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 
