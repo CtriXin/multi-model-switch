@@ -539,6 +539,52 @@ def test_manage_target_helpers_build_sorted_targets_and_fallback_selection():
     assert any("请输入 1-4 的编号" in str(item) for item in console.items)
 
 
+def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
+    import mms_command_tools
+
+    info_lines, actions = mms_command_tools.rescue_landing_tui_payload(
+        "deepseek-v4-flash",
+        [{"created_at": "2026-05-23T09:10:11+08:00", "failed_model": "gpt-5.5", "status_code": 429}],
+        latest_fallback_event={
+            "at": "2026-05-24T01:02:03+08:00",
+            "model": "deepseek-v4-flash",
+            "note": "rescue_hot_fallback provider=relay",
+        },
+        hot_fallback_enabled=True,
+    )
+    info = dict(info_lines)
+    action_ids = [action_id for action_id, _label in actions]
+
+    assert info["全局默认"] == "deepseek-v4-flash"
+    assert info["Hot fallback"] == "开启"
+    assert "1 个 packet" in info["最近失败"]
+    assert "2026-05-23 09:10:11" in info["最近失败"]
+    assert "2026-05-24 01:02:03" in info["最近 fallback 尝试"]
+    assert "rescue_hot_fallback provider=relay" in info["最近 fallback 尝试"]
+    assert action_ids[:3] == ["choose_route_default", "manual_default", "clear_default"]
+    assert "disable_hot_fallback" in action_ids
+    assert "view_packets" in action_ids
+
+    title, registry_info, registry_actions = mms_command_tools.registry_truth_tui_payload(
+        {
+            "db_path": "/tmp/model-registry.sqlite",
+            "counts": {"source_snapshot": 2, "model_identity": 39, "model_fact": 338},
+            "source_freshness": {"due_count": 1},
+            "latest_source_snapshot": {"source_path": "https://openrouter.ai/api/v1/models"},
+        },
+        localize=lambda zh, en: zh,
+    )
+    assert title == "模型真源 / Registry Truth"
+    assert [label for label, _value in registry_info] == ["DB", "来源快照", "模型身份", "模型事实", "待刷新来源", "最新来源"]
+    assert [action_id for action_id, _label in registry_actions][:4] == [
+        "check_staleness",
+        "refresh_due_sources",
+        "scheduled_dry_run",
+        "scheduled_no_network",
+    ]
+    assert ("doctor", "Registry Doctor / 状态") in registry_actions
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

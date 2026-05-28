@@ -668,6 +668,94 @@ def select_manage_target_fallback(targets, *, ensure_rich, panel_cls, table_cls,
         console.print(f"[red]请输入 1-{len(targets)} 的编号[/red]")
 
 
+def format_rescue_hot_fallback_event(event):
+    if not isinstance(event, dict) or not event:
+        return "-"
+    at = str(event.get("at") or "")[:19].replace("T", " ")
+    model = str(event.get("model") or "").strip()
+    note = str(event.get("note") or "").strip()
+    parts = [item for item in (at, model, note) if item]
+    return " · ".join(parts) if parts else "-"
+
+
+def rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None, hot_fallback_enabled=False):
+    events = list(rescue_events or [])
+    latest = events[0] if events else {}
+    if latest:
+        latest_line = " ".join(
+            item
+            for item in (
+                str(latest.get("created_at") or "")[:19].replace("T", " "),
+                str(latest.get("failed_model") or ""),
+                str(latest.get("status_code") or latest.get("failure_kind") or ""),
+            )
+            if item
+        )
+    else:
+        latest_line = "-"
+    packet_summary = f"{len(events)} 个 packet" if events else "没有 packet"
+    has_default = bool(str(default_label or "").strip() and str(default_label or "").strip() != "未设置")
+    info_lines = [
+        ("全局默认", str(default_label or "未设置")),
+        ("Hot fallback", "开启" if hot_fallback_enabled and has_default else "关闭"),
+        ("生效范围", "MMS 全局默认；bridge 失败时读取"),
+        ("触发时机", "429 / 503 / context / provider failure"),
+        ("最近失败", f"{packet_summary} · {latest_line}" if latest else packet_summary),
+        ("最近 fallback 尝试", format_rescue_hot_fallback_event(latest_fallback_event)),
+        ("安全边界", "只走 routed provider；不使用 global OAuth"),
+    ]
+    actions = [
+        ("choose_route_default", "设置全局默认 fallback（routed models）"),
+        ("manual_default", "手动输入 fallback model"),
+        ("clear_default", "清除全局默认 fallback"),
+    ]
+    if has_default:
+        actions.append(
+            (
+                "disable_hot_fallback" if hot_fallback_enabled else "enable_hot_fallback",
+                "关闭 hot fallback（只记录 handoff）" if hot_fallback_enabled else "开启 hot fallback（当前会话热切）",
+            )
+        )
+    if events:
+        actions.append(("view_packets", "查看最近失败 / rescue packet"))
+    actions.extend(
+        [
+            ("create_demo", "生成测试 rescue packet"),
+            ("back", "返回"),
+        ]
+    )
+    return info_lines, actions
+
+
+def registry_truth_tui_payload(status, *, localize):
+    status = status if isinstance(status, dict) else {}
+    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+    latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
+    freshness = status.get("source_freshness") if isinstance(status.get("source_freshness"), dict) else {}
+    info_lines = [
+        ("DB", status.get("db_path") or "-"),
+        (localize("来源快照", "source snapshots"), counts.get("source_snapshot", 0)),
+        (localize("模型身份", "model identities"), counts.get("model_identity", 0)),
+        (localize("模型事实", "model facts"), counts.get("model_fact", 0)),
+        (localize("待刷新来源", "sources due"), freshness.get("due_count", 0)),
+        (localize("最新来源", "latest source"), latest.get("source_path") or "none"),
+    ]
+    actions = [
+        ("check_staleness", localize("检查 Source Staleness", "Check Source Staleness")),
+        ("refresh_due_sources", localize("刷新到期 Sources", "Refresh Due Sources")),
+        ("scheduled_dry_run", localize("定时刷新 Dry Run", "Scheduled Refresh Dry Run")),
+        ("scheduled_no_network", localize("定时刷新 No Network", "Scheduled Refresh No Network")),
+        ("refresh_sources", localize("刷新全部 Sources", "Refresh Sources")),
+        ("fetch_openrouter", localize("拉取 OpenRouter Catalog", "Fetch OpenRouter Catalog")),
+        ("diff_openrouter", localize("对比 OpenRouter Candidate", "OpenRouter Candidate Diff")),
+        ("publish_approved", localize("发布 Approved Bundle", "Publish Approved Bundle")),
+        ("verify_approved", localize("验证 Approved Bundle", "Verify Approved Bundle")),
+        ("doctor", localize("Registry Doctor / 状态", "Registry Doctor / Status")),
+        ("back", localize("返回", "Back")),
+    ]
+    return localize("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"

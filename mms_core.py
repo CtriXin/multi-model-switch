@@ -4811,93 +4811,28 @@ def _latest_rescue_hot_fallback_event():
 
 
 def _format_rescue_hot_fallback_event(event):
-    if not isinstance(event, dict) or not event:
-        return "-"
-    at = str(event.get("at") or "")[:19].replace("T", " ")
-    model = str(event.get("model") or "").strip()
-    note = str(event.get("note") or "").strip()
-    parts = [item for item in (at, model, note) if item]
-    return " · ".join(parts) if parts else "-"
+    from mms_command_tools import format_rescue_hot_fallback_event
+
+    return format_rescue_hot_fallback_event(event)
 
 
 def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None, hot_fallback_enabled=False):
     """Build the first Rescue settings page before drilling into packet history."""
-    events = list(rescue_events or [])
-    latest = events[0] if events else {}
-    if latest:
-        latest_line = " ".join(
-            item
-            for item in (
-                str(latest.get("created_at") or "")[:19].replace("T", " "),
-                str(latest.get("failed_model") or ""),
-                str(latest.get("status_code") or latest.get("failure_kind") or ""),
-            )
-            if item
-        )
-    else:
-        latest_line = "-"
-    packet_summary = f"{len(events)} 个 packet" if events else "没有 packet"
-    has_default = bool(str(default_label or "").strip() and str(default_label or "").strip() != "未设置")
-    info_lines = [
-        ("全局默认", str(default_label or "未设置")),
-        ("Hot fallback", "开启" if hot_fallback_enabled and has_default else "关闭"),
-        ("生效范围", "MMS 全局默认；bridge 失败时读取"),
-        ("触发时机", "429 / 503 / context / provider failure"),
-        ("最近失败", f"{packet_summary} · {latest_line}" if latest else packet_summary),
-        ("最近 fallback 尝试", _format_rescue_hot_fallback_event(latest_fallback_event)),
-        ("安全边界", "只走 routed provider；不使用 global OAuth"),
-    ]
-    actions = [
-        ("choose_route_default", "设置全局默认 fallback（routed models）"),
-        ("manual_default", "手动输入 fallback model"),
-        ("clear_default", "清除全局默认 fallback"),
-    ]
-    if has_default:
-        actions.append(
-            (
-                "disable_hot_fallback" if hot_fallback_enabled else "enable_hot_fallback",
-                "关闭 hot fallback（只记录 handoff）" if hot_fallback_enabled else "开启 hot fallback（当前会话热切）",
-            )
-        )
-    if events:
-        actions.append(("view_packets", "查看最近失败 / rescue packet"))
-    actions.extend(
-        [
-            ("create_demo", "生成测试 rescue packet"),
-            ("back", "返回"),
-        ]
+    from mms_command_tools import rescue_landing_tui_payload
+
+    return rescue_landing_tui_payload(
+        default_label,
+        rescue_events,
+        latest_fallback_event=latest_fallback_event,
+        hot_fallback_enabled=hot_fallback_enabled,
     )
-    return info_lines, actions
 
 
 def _registry_truth_tui_payload(status):
     """Build localized Registry Truth status/actions for the Settings detail page."""
-    status = status if isinstance(status, dict) else {}
-    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
-    latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
-    freshness = status.get("source_freshness") if isinstance(status.get("source_freshness"), dict) else {}
-    info_lines = [
-        ("DB", status.get("db_path") or "-"),
-        (_L("来源快照", "source snapshots"), counts.get("source_snapshot", 0)),
-        (_L("模型身份", "model identities"), counts.get("model_identity", 0)),
-        (_L("模型事实", "model facts"), counts.get("model_fact", 0)),
-        (_L("待刷新来源", "sources due"), freshness.get("due_count", 0)),
-        (_L("最新来源", "latest source"), latest.get("source_path") or "none"),
-    ]
-    actions = [
-        ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
-        ("refresh_due_sources", _L("刷新到期 Sources", "Refresh Due Sources")),
-        ("scheduled_dry_run", _L("定时刷新 Dry Run", "Scheduled Refresh Dry Run")),
-        ("scheduled_no_network", _L("定时刷新 No Network", "Scheduled Refresh No Network")),
-        ("refresh_sources", _L("刷新全部 Sources", "Refresh Sources")),
-        ("fetch_openrouter", _L("拉取 OpenRouter Catalog", "Fetch OpenRouter Catalog")),
-        ("diff_openrouter", _L("对比 OpenRouter Candidate", "OpenRouter Candidate Diff")),
-        ("publish_approved", _L("发布 Approved Bundle", "Publish Approved Bundle")),
-        ("verify_approved", _L("验证 Approved Bundle", "Verify Approved Bundle")),
-        ("doctor", _L("Registry Doctor / 状态", "Registry Doctor / Status")),
-        ("back", _L("返回", "Back")),
-    ]
-    return _L("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
+    from mms_command_tools import registry_truth_tui_payload
+
+    return registry_truth_tui_payload(status, localize=_L)
 
 
 def _compact_tui_report_value(value, max_len=96):
