@@ -599,6 +599,80 @@ def confirm_startup_snapshot_drift(
     return bool(confirm_ask("是否接受当前快照并继续启动？", default=False))
 
 
+def ensure_startup_snapshot_guard(
+    cfg,
+    *,
+    enforce=True,
+    config_write_target_path,
+    build_config_guard_snapshot,
+    config_snapshot_path,
+    iso_now,
+    snapshot_digest,
+    write_json_snapshot,
+    update_periodic_snapshot,
+    load_json_snapshot,
+    snapshot_diff_lines,
+    confirm_startup_snapshot_drift,
+    command_name,
+    config_guard_exit_code,
+    console,
+    exit_func=sys.exit,
+):
+    config_path = config_write_target_path()
+    current_snapshot = build_config_guard_snapshot(cfg, config_path=config_path)
+    latest_path = config_snapshot_path("startup", "latest.json", config_path=config_path)
+    accepted_path = config_snapshot_path("startup", "accepted.json", config_path=config_path)
+
+    latest_payload = {
+        "kind": "startup",
+        "captured_at": iso_now(),
+        "digest": snapshot_digest(current_snapshot),
+        "snapshot": current_snapshot,
+    }
+    write_json_snapshot(latest_path, latest_payload)
+    update_periodic_snapshot("daily", current_snapshot, config_path=config_path)
+    update_periodic_snapshot("weekly", current_snapshot, config_path=config_path)
+
+    accepted_payload = load_json_snapshot(accepted_path)
+    accepted_snapshot = (accepted_payload or {}).get("snapshot") if isinstance(accepted_payload, dict) else None
+    if not accepted_snapshot:
+        write_json_snapshot(accepted_path, latest_payload)
+        return current_snapshot
+
+    diff_lines = snapshot_diff_lines(accepted_snapshot, current_snapshot)
+    if not diff_lines:
+        write_json_snapshot(accepted_path, latest_payload)
+        return current_snapshot
+
+    pending_path = config_snapshot_path("startup", "pending.json", config_path=config_path)
+    write_json_snapshot(
+        pending_path,
+        {
+            "kind": "startup-pending",
+            "captured_at": iso_now(),
+            "accepted_path": accepted_path,
+            "latest_path": latest_path,
+            "diffs": diff_lines,
+            "accepted": accepted_snapshot,
+            "current": current_snapshot,
+        },
+    )
+    if not enforce:
+        return current_snapshot
+    if confirm_startup_snapshot_drift(diff_lines, accepted_path=accepted_path, latest_path=latest_path):
+        write_json_snapshot(accepted_path, latest_payload)
+        return current_snapshot
+
+    command = command_name() if callable(command_name) else str(command_name)
+    console.print(
+        f"[red]启动已阻止：检测到配置/关键文件漂移，请先确认快照。[/red]\n"
+        f"[dim]漂移详情: {pending_path}[/dim]\n"
+        f"[dim]查看: {command} guard status[/dim]\n"
+        f"[dim]接受: {command} guard accept[/dim]"
+    )
+    exit_func(config_guard_exit_code)
+
+
 def load_json_file(path, default):
     if not os.path.exists(path):
         return default

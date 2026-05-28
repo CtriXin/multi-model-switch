@@ -267,6 +267,71 @@ def test_snapshot_drift_prompt_helpers_preserve_tty_gate_and_preview():
     ) is False
 
 
+def test_startup_snapshot_guard_helper_preserves_bootstrap_pending_and_exit_flow():
+    import mms_command_tools
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, value):
+            self.items.append(value)
+
+    current = {"generation": 1}
+    writes = {}
+    periodic = []
+    console = Console()
+
+    def path_for(kind, name, config_path=None):
+        return f"{config_path}:{kind}:{name}"
+
+    kwargs = {
+        "config_write_target_path": lambda: "/config.toml",
+        "build_config_guard_snapshot": lambda cfg, config_path=None: dict(current),
+        "config_snapshot_path": path_for,
+        "iso_now": lambda: "now",
+        "snapshot_digest": lambda payload: f"digest-{payload['generation']}",
+        "write_json_snapshot": lambda path, payload: writes.__setitem__(path, payload),
+        "update_periodic_snapshot": lambda period, snapshot, config_path=None: periodic.append((period, dict(snapshot), config_path)),
+        "load_json_snapshot": lambda path: writes.get(path),
+        "snapshot_diff_lines": lambda accepted, now: [] if accepted == now else ["generation changed"],
+        "confirm_startup_snapshot_drift": lambda *_args, **_kwargs: False,
+        "command_name": lambda: "mmg",
+        "config_guard_exit_code": 41,
+        "console": console,
+    }
+
+    result = mms_command_tools.ensure_startup_snapshot_guard({}, **kwargs)
+    assert result == {"generation": 1}
+    assert writes["/config.toml:startup:accepted.json"]["digest"] == "digest-1"
+    assert periodic == [
+        ("daily", {"generation": 1}, "/config.toml"),
+        ("weekly", {"generation": 1}, "/config.toml"),
+    ]
+
+    current["generation"] = 2
+    result = mms_command_tools.ensure_startup_snapshot_guard({}, enforce=False, **kwargs)
+    assert result == {"generation": 2}
+    pending = writes["/config.toml:startup:pending.json"]
+    assert pending["diffs"] == ["generation changed"]
+    assert pending["accepted"] == {"generation": 1}
+    assert pending["current"] == {"generation": 2}
+
+    exits = []
+    try:
+        mms_command_tools.ensure_startup_snapshot_guard(
+            {},
+            exit_func=lambda code: exits.append(code) or (_ for _ in ()).throw(SystemExit(code)),
+            **kwargs,
+        )
+        assert False, "expected SystemExit"
+    except SystemExit as exc:
+        assert exc.code == 41
+    assert exits == [41]
+    assert "mmg guard status" in console.items[-1]
+    assert "mmg guard accept" in console.items[-1]
+
+
 def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     import hashlib
     import json

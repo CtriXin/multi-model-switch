@@ -1727,58 +1727,26 @@ def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
 
 
 def _ensure_startup_snapshot_guard(cfg, *, enforce=True):
-    config_path = _config_write_target_path()
-    current_snapshot = _build_config_guard_snapshot(cfg, config_path=config_path)
-    latest_path = _config_snapshot_path("startup", "latest.json", config_path=config_path)
-    accepted_path = _config_snapshot_path("startup", "accepted.json", config_path=config_path)
+    from mms_command_tools import ensure_startup_snapshot_guard
 
-    latest_payload = {
-        "kind": "startup",
-        "captured_at": _iso_now(),
-        "digest": _snapshot_digest(current_snapshot),
-        "snapshot": current_snapshot,
-    }
-    _write_json_snapshot(latest_path, latest_payload)
-    _update_periodic_snapshot("daily", current_snapshot, config_path=config_path)
-    _update_periodic_snapshot("weekly", current_snapshot, config_path=config_path)
-
-    accepted_payload = _load_json_snapshot(accepted_path)
-    accepted_snapshot = (accepted_payload or {}).get("snapshot") if isinstance(accepted_payload, dict) else None
-    if not accepted_snapshot:
-        _write_json_snapshot(accepted_path, latest_payload)
-        return current_snapshot
-
-    diff_lines = _snapshot_diff_lines(accepted_snapshot, current_snapshot)
-    if not diff_lines:
-        _write_json_snapshot(accepted_path, latest_payload)
-        return current_snapshot
-
-    pending_path = _config_snapshot_path("startup", "pending.json", config_path=config_path)
-    _write_json_snapshot(
-        pending_path,
-        {
-            "kind": "startup-pending",
-            "captured_at": _iso_now(),
-            "accepted_path": accepted_path,
-            "latest_path": latest_path,
-            "diffs": diff_lines,
-            "accepted": accepted_snapshot,
-            "current": current_snapshot,
-        },
+    return ensure_startup_snapshot_guard(
+        cfg,
+        enforce=enforce,
+        config_write_target_path=_config_write_target_path,
+        build_config_guard_snapshot=_build_config_guard_snapshot,
+        config_snapshot_path=_config_snapshot_path,
+        iso_now=_iso_now,
+        snapshot_digest=_snapshot_digest,
+        write_json_snapshot=_write_json_snapshot,
+        update_periodic_snapshot=_update_periodic_snapshot,
+        load_json_snapshot=_load_json_snapshot,
+        snapshot_diff_lines=_snapshot_diff_lines,
+        confirm_startup_snapshot_drift=_confirm_startup_snapshot_drift,
+        command_name=current_command,
+        config_guard_exit_code=CONFIG_GUARD_EXIT_CODE,
+        console=console,
     )
-    if not enforce:
-        return current_snapshot
-    if _confirm_startup_snapshot_drift(diff_lines, accepted_path=accepted_path, latest_path=latest_path):
-        _write_json_snapshot(accepted_path, latest_payload)
-        return current_snapshot
 
-    console.print(
-        f"[red]启动已阻止：检测到配置/关键文件漂移，请先确认快照。[/red]\n"
-        f"[dim]漂移详情: {pending_path}[/dim]\n"
-        f"[dim]查看: {current_command()} guard status[/dim]\n"
-        f"[dim]接受: {current_command()} guard accept[/dim]"
-    )
-    sys.exit(CONFIG_GUARD_EXIT_CODE)
 
 def load_config(*, persist=False):
     config_path = _config_write_target_path()
