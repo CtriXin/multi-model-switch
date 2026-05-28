@@ -2399,27 +2399,27 @@ def save_api_credentials(base_url, api_key):
 
 
 def resolve_provider_context(cfg, provider_id=None):
-    provider = _normalize_provider(get_provider_definition(cfg, provider_id))
-    credentials = load_provider_credentials(provider["id"])
-    provider["base_url"] = credentials["base_url"]
-    provider["openai_base_url"] = credentials["openai_base_url"] or provider.get("default_openai_base_url", "")
-    provider["anthropic_base_url"] = credentials["anthropic_base_url"] or provider.get("default_anthropic_base_url", "")
-    provider["api_key"] = credentials["api_key"]
-    provider["openai_api_key"] = credentials.get("openai_api_key", "")
-    provider["auth_mode"] = "api_key"
-    provider["runtime_kind"] = "provider"
-    return provider
+    from mms_command_tools import resolve_provider_context as resolve_provider_context_helper
+
+    return resolve_provider_context_helper(
+        cfg,
+        provider_id,
+        get_provider_definition=get_provider_definition,
+        normalize_provider=_normalize_provider,
+        load_provider_credentials=load_provider_credentials,
+    )
 
 
 def resolve_account_context(cfg, account_id=None, cli_name=None):
-    account = get_account_definition(cfg, account_id=account_id, cli_name=cli_name)
-    if account is None:
-        return None
-    resolved = dict(account)
-    resolved["auth_mode"] = "oauth"
-    resolved["runtime_kind"] = "account"
-    resolved["home_dir"] = os.path.expanduser(resolved.get("home_dir", ""))
-    return resolved
+    from mms_command_tools import resolve_account_context as resolve_account_context_helper
+
+    return resolve_account_context_helper(
+        cfg,
+        account_id=account_id,
+        cli_name=cli_name,
+        get_account_definition=get_account_definition,
+        expanduser=os.path.expanduser,
+    )
 
 
 def _default_config(role=MODE_ALL):

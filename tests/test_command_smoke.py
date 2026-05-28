@@ -2543,6 +2543,71 @@ def test_api_credentials_helpers_preserve_default_provider_delegation():
     assert save_calls == [("default", "https://default.example/v1", "default-key")]
 
 
+def test_runtime_context_resolvers_preserve_provider_credentials_and_account_home():
+    import mms_command_tools
+
+    cfg = {"provider": {"default": "relay"}}
+    provider_calls = []
+
+    provider = mms_command_tools.resolve_provider_context(
+        cfg,
+        "relay",
+        get_provider_definition=lambda received_cfg, provider_id: provider_calls.append((received_cfg, provider_id)) or {
+            "id": "relay",
+            "default_openai_base_url": "https://default-openai.example/v1",
+            "default_anthropic_base_url": "https://default-anthropic.example",
+        },
+        normalize_provider=lambda provider_def: {**provider_def, "normalized": True},
+        load_provider_credentials=lambda provider_id: {
+            "base_url": "https://base.example/v1",
+            "openai_base_url": "",
+            "anthropic_base_url": "https://anthropic.example",
+            "api_key": "sk-relay",
+            "openai_api_key": "sk-openai",
+        },
+    )
+
+    assert provider_calls == [(cfg, "relay")]
+    assert provider == {
+        "id": "relay",
+        "default_openai_base_url": "https://default-openai.example/v1",
+        "default_anthropic_base_url": "https://default-anthropic.example",
+        "normalized": True,
+        "base_url": "https://base.example/v1",
+        "openai_base_url": "https://default-openai.example/v1",
+        "anthropic_base_url": "https://anthropic.example",
+        "api_key": "sk-relay",
+        "openai_api_key": "sk-openai",
+        "auth_mode": "api_key",
+        "runtime_kind": "provider",
+    }
+
+    assert mms_command_tools.resolve_account_context(
+        cfg,
+        account_id="missing",
+        get_account_definition=lambda *_args, **_kwargs: None,
+    ) is None
+
+    account = mms_command_tools.resolve_account_context(
+        cfg,
+        account_id="codex-main",
+        cli_name="codex",
+        get_account_definition=lambda received_cfg, account_id=None, cli_name=None: {
+            "id": account_id,
+            "cli": cli_name,
+            "home_dir": "~/mms-codex",
+        },
+        expanduser=lambda path: path.replace("~", "/home/demo", 1),
+    )
+    assert account == {
+        "id": "codex-main",
+        "cli": "codex",
+        "home_dir": "/home/demo/mms-codex",
+        "auth_mode": "oauth",
+        "runtime_kind": "account",
+    }
+
+
 def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     import pytest
 
