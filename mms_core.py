@@ -1755,32 +1755,23 @@ def _config_write_caller():
 
 @contextmanager
 def _locked_config_write(config_path):
-    lock_path = _config_lock_path(config_path)
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    with _CONFIG_WRITE_PROCESS_LOCK:
-        with open(lock_path, "a+", encoding="utf-8") as lock_file:
-            if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    from mms_command_tools import locked_config_write
+
+    with locked_config_write(
+        config_path,
+        config_lock_path=_config_lock_path,
+        process_lock=_CONFIG_WRITE_PROCESS_LOCK,
+        fcntl_module=fcntl,
+    ):
+        yield
 
 
 @contextmanager
 def _locked_state_file(path):
-    lock_path = os.path.abspath(str(path or "")) + ".lock"
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    with _STATE_FILE_PROCESS_LOCK:
-        with open(lock_path, "a+", encoding="utf-8") as lock_file:
-            if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    from mms_command_tools import locked_state_file
+
+    with locked_state_file(path, process_lock=_STATE_FILE_PROCESS_LOCK, fcntl_module=fcntl):
+        yield
 
 
 def _backup_config_file(config_path):

@@ -369,6 +369,51 @@ def test_config_write_caller_helper_preserves_skip_semantics(tmp_path):
     assert wrapper_result["path"] == os.path.abspath(__file__)
 
 
+def test_locked_file_helpers_preserve_lock_paths_and_flock(tmp_path, monkeypatch):
+    import threading
+
+    import mms_command_tools
+    import mms_core
+
+    class Fcntl:
+        LOCK_EX = 1
+        LOCK_UN = 2
+
+        def __init__(self):
+            self.calls = []
+
+        def flock(self, _fileno, mode):
+            self.calls.append(mode)
+
+    fcntl_stub = Fcntl()
+    lock_path = tmp_path / "locks" / "config.lock"
+    with mms_command_tools.locked_file_context(
+        str(lock_path),
+        process_lock=threading.Lock(),
+        fcntl_module=fcntl_stub,
+    ):
+        assert lock_path.exists()
+        assert fcntl_stub.calls == [Fcntl.LOCK_EX]
+    assert fcntl_stub.calls == [Fcntl.LOCK_EX, Fcntl.LOCK_UN]
+
+    state_path = tmp_path / "state" / "usage.json"
+    with mms_command_tools.locked_state_file(
+        str(state_path),
+        process_lock=threading.RLock(),
+        fcntl_module=None,
+    ):
+        assert (tmp_path / "state" / "usage.json.lock").exists()
+
+    monkeypatch.setattr(mms_core, "_config_lock_path", lambda _path: str(tmp_path / "core" / "config.lock"))
+    monkeypatch.setattr(mms_core, "_CONFIG_WRITE_PROCESS_LOCK", threading.Lock())
+    monkeypatch.setattr(mms_core, "_STATE_FILE_PROCESS_LOCK", threading.RLock())
+    monkeypatch.setattr(mms_core, "fcntl", None)
+    with mms_core._locked_config_write(str(tmp_path / "config.toml")):
+        assert (tmp_path / "core" / "config.lock").exists()
+    with mms_core._locked_state_file(str(tmp_path / "core-state" / "usage.json")):
+        assert (tmp_path / "core-state" / "usage.json.lock").exists()
+
+
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 

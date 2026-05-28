@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -235,6 +236,37 @@ def config_write_caller(
     finally:
         del stack
     return {"path": current, "line": 0, "function": "unknown"}
+
+
+@contextmanager
+def locked_file_context(lock_path, *, process_lock, fcntl_module, makedirs=os.makedirs):
+    makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with process_lock:
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            if fcntl_module is not None:
+                fcntl_module.flock(lock_file.fileno(), fcntl_module.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl_module is not None:
+                    fcntl_module.flock(lock_file.fileno(), fcntl_module.LOCK_UN)
+
+
+@contextmanager
+def locked_config_write(config_path, *, config_lock_path, process_lock, fcntl_module):
+    with locked_file_context(
+        config_lock_path(config_path),
+        process_lock=process_lock,
+        fcntl_module=fcntl_module,
+    ):
+        yield
+
+
+@contextmanager
+def locked_state_file(path, *, process_lock, fcntl_module):
+    lock_path = os.path.abspath(str(path or "")) + ".lock"
+    with locked_file_context(lock_path, process_lock=process_lock, fcntl_module=fcntl_module):
+        yield
 
 
 def config_command_hint(*, current_command):
