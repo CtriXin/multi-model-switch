@@ -6405,6 +6405,40 @@ def uses_managed_entry(runtime, cli, *, oauth_capable_clis):
     return uses_native_account_entry(runtime, cli, oauth_capable_clis=oauth_capable_clis)
 
 
+def resolve_interactive_launch_model(
+    cli,
+    runtime,
+    cli_models,
+    models_cache,
+    role,
+    recommend,
+    *,
+    uses_native_account_entry,
+    uses_broker_entry,
+    ensure_models_cache_available,
+    display_models,
+    select_model_interactive,
+    console,
+):
+    if uses_native_account_entry(runtime, cli):
+        console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
+        return True, None
+
+    if uses_broker_entry(runtime, cli):
+        console.print(f"[cyan]{cli} 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]")
+        available_models = cli_models or models_cache
+        if not ensure_models_cache_available(available_models):
+            return False, None
+        models_list = display_models(available_models, role, recommend)
+        return True, select_model_interactive(models_list)
+
+    available_models = cli_models or models_cache
+    if not ensure_models_cache_available(available_models):
+        return False, None
+    models_list = display_models(available_models, role, recommend)
+    return True, select_model_interactive(models_list)
+
+
 def preset_model_info(preset, *, excluded_keys=frozenset({"cli", "provider", "account", "description", "bridge"})):
     if not isinstance(preset, dict):
         return {}

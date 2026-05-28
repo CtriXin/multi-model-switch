@@ -5402,23 +5402,22 @@ def _uses_managed_entry(runtime, cli):
 
 
 def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, role, recommend):
-    if _uses_native_account_entry(runtime, cli):
-        console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
-        return True, None
+    from mms_command_tools import resolve_interactive_launch_model
 
-    if _uses_broker_entry(runtime, cli):
-        console.print(f"[cyan]{cli} 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]")
-        available_models = cli_models or models_cache
-        if not _ensure_models_cache_available(available_models):
-            return False, None
-        models_list = display_models(available_models, role, recommend)
-        return True, select_model_interactive(models_list)
-
-    available_models = cli_models or models_cache
-    if not _ensure_models_cache_available(available_models):
-        return False, None
-    models_list = display_models(available_models, role, recommend)
-    return True, select_model_interactive(models_list)
+    return resolve_interactive_launch_model(
+        cli,
+        runtime,
+        cli_models,
+        models_cache,
+        role,
+        recommend,
+        uses_native_account_entry=_uses_native_account_entry,
+        uses_broker_entry=_uses_broker_entry,
+        ensure_models_cache_available=_ensure_models_cache_available,
+        display_models=display_models,
+        select_model_interactive=select_model_interactive,
+        console=console,
+    )
 
 
 def _preset_model_info(preset):

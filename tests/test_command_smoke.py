@@ -1640,6 +1640,125 @@ def test_launcher_entry_and_model_info_helpers_preserve_filtering_rules():
     assert mms_command_tools.preset_model_info(None) == {}
 
 
+def test_resolve_interactive_launch_model_helper_preserves_runtime_branches():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    calls = []
+    selected = mms_command_tools.resolve_interactive_launch_model(
+        "claude",
+        {"auth_mode": "oauth"},
+        ["claude-4"],
+        ["fallback"],
+        "all",
+        ["claude-4"],
+        uses_native_account_entry=lambda runtime, cli: calls.append(("native", runtime, cli)) or True,
+        uses_broker_entry=lambda *_args: calls.append("unexpected-broker"),
+        ensure_models_cache_available=lambda *_args: calls.append("unexpected-cache"),
+        display_models=lambda *_args: calls.append("unexpected-display"),
+        select_model_interactive=lambda *_args: calls.append("unexpected-select"),
+        console=console,
+    )
+    assert selected == (True, None)
+    assert calls == [("native", {"auth_mode": "oauth"}, "claude")]
+    assert console.items[-1] == "[cyan]claude 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]"
+
+    calls.clear()
+    selected = mms_command_tools.resolve_interactive_launch_model(
+        "claude",
+        {"runtime_kind": "broker"},
+        [],
+        ["gpt-5.5"],
+        "recommended",
+        ["gpt-5.5"],
+        uses_native_account_entry=lambda *_args: False,
+        uses_broker_entry=lambda runtime, cli: calls.append(("broker", runtime, cli)) or True,
+        ensure_models_cache_available=lambda models: calls.append(("cache", models)) or True,
+        display_models=lambda models, role, recommend: calls.append(("display", models, role, recommend)) or ["shown"],
+        select_model_interactive=lambda models: calls.append(("select", models)) or "shown",
+        console=console,
+    )
+    assert selected == (True, "shown")
+    assert calls == [
+        ("broker", {"runtime_kind": "broker"}, "claude"),
+        ("cache", ["gpt-5.5"]),
+        ("display", ["gpt-5.5"], "recommended", ["gpt-5.5"]),
+        ("select", ["shown"]),
+    ]
+    assert console.items[-1] == "[cyan]claude 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]"
+
+    calls.clear()
+    assert mms_command_tools.resolve_interactive_launch_model(
+        "codex",
+        {"auth_mode": "api_key"},
+        [],
+        [],
+        "all",
+        [],
+        uses_native_account_entry=lambda *_args: False,
+        uses_broker_entry=lambda *_args: False,
+        ensure_models_cache_available=lambda models: calls.append(("cache", models)) or False,
+        display_models=lambda *_args: calls.append("unexpected-display"),
+        select_model_interactive=lambda *_args: calls.append("unexpected-select"),
+        console=console,
+    ) == (False, None)
+    assert calls == [("cache", [])]
+
+    calls.clear()
+    assert mms_command_tools.resolve_interactive_launch_model(
+        "codex",
+        {"auth_mode": "api_key"},
+        ["gpt-5.5"],
+        ["fallback"],
+        "all",
+        [],
+        uses_native_account_entry=lambda *_args: False,
+        uses_broker_entry=lambda *_args: False,
+        ensure_models_cache_available=lambda models: calls.append(("cache", models)) or True,
+        display_models=lambda models, role, recommend: calls.append(("display", models, role, recommend)) or ["visible"],
+        select_model_interactive=lambda models: calls.append(("select", models)) or "visible",
+        console=console,
+    ) == (True, "visible")
+    assert calls == [
+        ("cache", ["gpt-5.5"]),
+        ("display", ["gpt-5.5"], "all", []),
+        ("select", ["visible"]),
+    ]
+
+
+def test_resolve_interactive_launch_model_wrapper_preserves_core_callbacks(monkeypatch):
+    import mms_core
+
+    console = _CollectingConsole()
+    calls = []
+    monkeypatch.setattr(mms_core, "console", console)
+    monkeypatch.setattr(mms_core, "_uses_native_account_entry", lambda runtime, cli: calls.append(("native", runtime, cli)) or False)
+    monkeypatch.setattr(mms_core, "_uses_broker_entry", lambda runtime, cli: calls.append(("broker", runtime, cli)) or False)
+    monkeypatch.setattr(mms_core, "_ensure_models_cache_available", lambda models: calls.append(("cache", models)) or True)
+    monkeypatch.setattr(
+        mms_core,
+        "display_models",
+        lambda models, role, recommend: calls.append(("display", models, role, recommend)) or ["visible"],
+    )
+    monkeypatch.setattr(mms_core, "select_model_interactive", lambda models: calls.append(("select", models)) or "visible")
+
+    assert mms_core._resolve_interactive_launch_model(
+        "codex",
+        {"auth_mode": "api_key"},
+        [],
+        ["gpt-5.5"],
+        "all",
+        [],
+    ) == (True, "visible")
+    assert calls == [
+        ("native", {"auth_mode": "api_key"}, "codex"),
+        ("broker", {"auth_mode": "api_key"}, "codex"),
+        ("cache", ["gpt-5.5"]),
+        ("display", ["gpt-5.5"], "all", []),
+        ("select", ["visible"]),
+    ]
+
+
 def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_config_precedence():
     import mms_command_tools
 
