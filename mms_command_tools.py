@@ -10306,6 +10306,49 @@ def warm_model_request(
         return False, str(exc)
 
 
+def detect_working_base_url(
+    configured_url,
+    path,
+    headers,
+    body=None,
+    timeout=5,
+    runtime=None,
+    *,
+    ensure_httpx,
+    get_httpx,
+    runtime_httpx_request,
+):
+    ensure_httpx()
+    if get_httpx() is None:
+        return None
+    url = configured_url.rstrip("/")
+    candidates = [url[:-3], url] if url.endswith("/v1") else [url, url + "/v1"]
+    for candidate in candidates:
+        try:
+            if body is not None:
+                resp = runtime_httpx_request(
+                    "POST",
+                    f"{candidate}{path}",
+                    runtime=runtime,
+                    headers=headers,
+                    content=body,
+                    timeout=timeout,
+                )
+            else:
+                resp = runtime_httpx_request(
+                    "GET",
+                    f"{candidate}{path}",
+                    runtime=runtime,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            if resp.status_code == 200:
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
 def handle_warm_command(
     cfg,
     argv,

@@ -5720,6 +5720,76 @@ def test_warm_model_request_helper_and_wrapper_preserve_request_shapes(monkeypat
     assert requests[0][0] == ("POST", "https://core-openai.example/v1/chat/completions")
 
 
+def test_detect_working_base_url_helper_and_wrapper_preserve_probe_order(monkeypatch):
+    from types import SimpleNamespace
+
+    import mms_command_tools
+    import mms_core
+
+    assert mms_command_tools.detect_working_base_url(
+        "https://relay.example/v1",
+        "/models",
+        {"H": "1"},
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: None,
+        runtime_httpx_request=lambda *_args, **_kwargs: None,
+    ) is None
+
+    calls = []
+
+    def request(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        if url == "https://relay.example/models":
+            raise RuntimeError("first candidate unavailable")
+        return SimpleNamespace(status_code=200)
+
+    assert mms_command_tools.detect_working_base_url(
+        "https://relay.example/v1",
+        "/models",
+        {"H": "1"},
+        runtime={"id": "relay"},
+        ensure_httpx=lambda: calls.append("ensure"),
+        get_httpx=lambda: object(),
+        runtime_httpx_request=request,
+    ) == "https://relay.example/v1"
+    assert calls[0] == "ensure"
+    assert calls[1][0:2] == ("GET", "https://relay.example/models")
+    assert calls[2][0:2] == ("GET", "https://relay.example/v1/models")
+    assert calls[2][2]["runtime"] == {"id": "relay"}
+    assert calls[2][2]["headers"] == {"H": "1"}
+    assert calls[2][2]["timeout"] == 5
+
+    calls.clear()
+    assert mms_command_tools.detect_working_base_url(
+        "https://relay.example",
+        "/v1/messages",
+        {"H": "1"},
+        body=b"{}",
+        timeout=9,
+        ensure_httpx=lambda: None,
+        get_httpx=lambda: object(),
+        runtime_httpx_request=lambda *args, **kwargs: calls.append((args, kwargs)) or SimpleNamespace(status_code=200),
+    ) == "https://relay.example"
+    assert calls == [
+        (
+            ("POST", "https://relay.example/v1/messages"),
+            {"runtime": None, "headers": {"H": "1"}, "content": b"{}", "timeout": 9},
+        )
+    ]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_ensure_httpx", lambda: calls.append("core-ensure"))
+    monkeypatch.setattr(mms_core, "httpx", object())
+    monkeypatch.setattr(
+        mms_core,
+        "_runtime_httpx_request",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or SimpleNamespace(status_code=200),
+    )
+    assert mms_core.detect_working_base_url("https://core.example", "/models", {"H": "2"}) == "https://core.example"
+    assert calls[0] == "core-ensure"
+    assert calls[1][0] == ("GET", "https://core.example/models")
+
+
 def test_availability_helpers_preserve_cache_warning_and_cli_check(monkeypatch):
     import mms_command_tools
     import mms_core

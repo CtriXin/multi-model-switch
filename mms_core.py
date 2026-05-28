@@ -3744,35 +3744,19 @@ def detect_working_base_url(configured_url, path, headers, body=None, timeout=5,
 
     返回：working_base_url (str) | None
     """
-    _ensure_httpx()
-    if httpx is None:
-        return None
-    url = configured_url.rstrip("/")
-    candidates = [url[:-3], url] if url.endswith("/v1") else [url, url + "/v1"]
-    for candidate in candidates:
-        try:
-            if body is not None:
-                resp = _runtime_httpx_request(
-                    "POST",
-                    f"{candidate}{path}",
-                    runtime=runtime,
-                    headers=headers,
-                    content=body,
-                    timeout=timeout,
-                )
-            else:
-                resp = _runtime_httpx_request(
-                    "GET",
-                    f"{candidate}{path}",
-                    runtime=runtime,
-                    headers=headers,
-                    timeout=timeout,
-                )
-            if resp.status_code == 200:
-                return candidate
-        except Exception:
-            continue
-    return None
+    from mms_command_tools import detect_working_base_url as detect_working_base_url_impl
+
+    return detect_working_base_url_impl(
+        configured_url,
+        path,
+        headers,
+        body=body,
+        timeout=timeout,
+        runtime=runtime,
+        ensure_httpx=_ensure_httpx,
+        get_httpx=lambda: httpx,
+        runtime_httpx_request=_runtime_httpx_request,
+    )
 
 # _probe_models 结果缓存：key = provider_id, value = (timestamp, result)
 _PROBE_CACHE = {}
