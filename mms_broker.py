@@ -19,6 +19,8 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from mms_state_io import resolve_mms_config_dir
+
 
 _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -37,12 +39,27 @@ def _default_broker_repo() -> str:
 
 
 DEFAULT_BROKER_REPO = _default_broker_repo()
-PRIMARY_CREDENTIALS_PATH = os.path.expanduser("~/.config/mms/credentials.sh")
-BROKER_CACHE_DIR = os.path.expanduser("~/.config/mms/cache/broker")
+_DEFAULT_CONFIG_DIR = resolve_mms_config_dir()
+_DEFAULT_PRIMARY_CREDENTIALS_PATH = os.path.join(_DEFAULT_CONFIG_DIR, "credentials.sh")
+_DEFAULT_BROKER_CACHE_DIR = os.path.join(_DEFAULT_CONFIG_DIR, "cache", "broker")
+PRIMARY_CREDENTIALS_PATH = _DEFAULT_PRIMARY_CREDENTIALS_PATH
+BROKER_CACHE_DIR = _DEFAULT_BROKER_CACHE_DIR
 _BROKER_PARENT_ENV_PREFIX_BLOCKLIST = (
     "ANTHROPIC_",
     "CLAUDE_CODE_",
 )
+
+
+def _broker_credentials_path() -> str:
+    if PRIMARY_CREDENTIALS_PATH != _DEFAULT_PRIMARY_CREDENTIALS_PATH:
+        return PRIMARY_CREDENTIALS_PATH
+    return os.path.join(resolve_mms_config_dir(), "credentials.sh")
+
+
+def _broker_cache_dir() -> str:
+    if BROKER_CACHE_DIR != _DEFAULT_BROKER_CACHE_DIR:
+        return BROKER_CACHE_DIR
+    return os.path.join(resolve_mms_config_dir(), "cache", "broker")
 
 
 def _normalize_broker_profile_id(profile_id: str) -> str:
@@ -99,7 +116,7 @@ def _resolve_profile_value(profile: dict[str, Any], direct_key: str, env_key: st
     if env_name:
         if env_name in os.environ:
             return str(os.environ.get(env_name, "")).strip(), True
-        for credentials_path in (PRIMARY_CREDENTIALS_PATH,):
+        for credentials_path in (_broker_credentials_path(),):
             values = _load_env_file(credentials_path)
             if env_name in values:
                 return str(values.get(env_name, "")).strip(), True
@@ -311,8 +328,9 @@ def _start_broker_live_background(profile: dict[str, Any]) -> dict[str, Any]:
     if not os.path.exists(entry_path):
         raise RuntimeError(f"未找到 broker launcher: {entry_path}")
 
-    os.makedirs(BROKER_CACHE_DIR, exist_ok=True)
-    log_path = os.path.join(BROKER_CACHE_DIR, f"{profile['id']}.log")
+    broker_cache_dir = _broker_cache_dir()
+    os.makedirs(broker_cache_dir, exist_ok=True)
+    log_path = os.path.join(broker_cache_dir, f"{profile['id']}.log")
     log_handle = open(log_path, "ab")
     process = subprocess.Popen(
         [node, entry_path, "broker:live", profile["id"]],

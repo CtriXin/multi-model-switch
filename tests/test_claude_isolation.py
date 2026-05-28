@@ -406,6 +406,53 @@ def test_runtime_events_use_selected_config_root(monkeypatch, tmp_path):
         importlib.reload(mms_events)
 
 
+def test_broker_credentials_and_cache_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_broker
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (stable_root / "credentials.sh").write_text(
+        "export MMS_TEST_BROKER_DEVICE_KEY='stable-secret'\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("MMS_TEST_BROKER_DEVICE_KEY", raising=False)
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_broker)
+    profile = {
+        "id": "broker-a",
+        "broker_base_url": "http://127.0.0.1:17777",
+        "device_key_env": "MMS_TEST_BROKER_DEVICE_KEY",
+    }
+    try:
+        env = reloaded._build_broker_env(profile, workspace_root=str(tmp_path))
+        assert env["CC_BROKER_DEVICE_KEY"] == ""
+        assert reloaded._broker_credentials_path() == str(preview_root / "credentials.sh")
+        assert reloaded._broker_cache_dir() == str(preview_root / "cache" / "broker")
+
+        (preview_root / "credentials.sh").write_text(
+            "export MMS_TEST_BROKER_DEVICE_KEY='preview-secret'\n",
+            encoding="utf-8",
+        )
+        reloaded._load_env_file.cache_clear()
+        env = reloaded._build_broker_env(profile, workspace_root=str(tmp_path))
+        assert env["CC_BROKER_DEVICE_KEY"] == "preview-secret"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        reloaded._load_env_file.cache_clear()
+        importlib.reload(mms_broker)
+
+
 def test_rescue_launch_env_uses_selected_config_root(monkeypatch, tmp_path):
     import mms_launchers
 
