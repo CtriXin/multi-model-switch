@@ -4,6 +4,7 @@ from mms_tui_launcher_flow import (
     apply_confirm_bypass_flag,
     apply_claude_network_guard_preview,
     apply_confirm_runtime_preferences,
+    apply_opencode_profile_for_launch,
     apply_tui_priority_changes,
     build_confirm_capability_context,
     confirm_agent_pack,
@@ -147,6 +148,35 @@ def test_ensure_cli_installed_for_launch_skips_or_offers_install() -> None:
         ("offer", "claude"),
         ("check", "opencode"),
         ("offer", "opencode"),
+    ]
+
+
+def test_apply_opencode_profile_for_launch_only_applies_for_opencode() -> None:
+    calls = []
+    runtime = {"id": "p1"}
+    selected = {"id": "p2"}
+
+    assert apply_opencode_profile_for_launch(
+        runtime,
+        "codex",
+        select_and_apply_opencode_profile=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+    ) == {"status": "continue", "runtime": runtime}
+
+    assert apply_opencode_profile_for_launch(
+        runtime,
+        "opencode",
+        select_and_apply_opencode_profile=lambda runtime_arg, *, use_tui: calls.append((runtime_arg, use_tui)) or selected,
+    ) == {"status": "continue", "runtime": selected, "cancelled": False}
+
+    assert apply_opencode_profile_for_launch(
+        runtime,
+        "opencode",
+        select_and_apply_opencode_profile=lambda runtime_arg, *, use_tui: calls.append((runtime_arg, use_tui)) or None,
+    ) == {"status": "continue", "runtime": None, "cancelled": True}
+
+    assert calls == [
+        (runtime, True),
+        (runtime, True),
     ]
 
 

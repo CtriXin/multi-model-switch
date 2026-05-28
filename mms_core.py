@@ -5457,10 +5457,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         if install_result["status"] == "exit":
             return True
 
-        if cli == "opencode":
-            runtime_runtime = _select_and_apply_opencode_profile(runtime_runtime, use_tui=True)
-            if runtime_runtime is None:
-                continue
+        opencode_profile_result = tui_flow.apply_opencode_profile_for_launch(
+            runtime_runtime,
+            cli,
+            select_and_apply_opencode_profile=_select_and_apply_opencode_profile,
+        )
+        if opencode_profile_result.get("cancelled"):
+            continue
+        runtime_runtime = opencode_profile_result["runtime"]
         runtime_runtime = _runtime_with_launch_preferences(current_cfg, runtime_runtime, cli)
         if cli == "claude":
             runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)

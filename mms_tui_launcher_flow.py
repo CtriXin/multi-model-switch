@@ -1084,6 +1084,15 @@ def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_
     return {"status": "continue"}
 
 
+def apply_opencode_profile_for_launch(runtime, cli_name, *, select_and_apply_opencode_profile):
+    if cli_name != "opencode":
+        return {"status": "continue", "runtime": runtime}
+    runtime = select_and_apply_opencode_profile(runtime, use_tui=True)
+    if runtime is None:
+        return {"status": "continue", "runtime": None, "cancelled": True}
+    return {"status": "continue", "runtime": runtime, "cancelled": False}
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:
