@@ -777,15 +777,15 @@ def _mms_update_status(version_info, cache):
 
 
 def _about_status_snapshot(force_update=False):
-    version_info = _release_version_info()
-    cache = _refresh_update_cache_for_about(force_update=force_update)
-    cli_status = _cli_version_status(force_update=force_update)
-    return {
-        "version_info": version_info,
-        "mms": _mms_update_status(version_info, cache),
-        "clis": cli_status,
-        "checked_at": cache.get("checked_at"),
-    }
+    from mms_command_tools import about_status_snapshot
+
+    return about_status_snapshot(
+        force_update=force_update,
+        release_version_info=_release_version_info,
+        refresh_update_cache_for_about=_refresh_update_cache_for_about,
+        cli_version_status=_cli_version_status,
+        mms_update_status=_mms_update_status,
+    )
 
 
 def _short_update_status_label(status):

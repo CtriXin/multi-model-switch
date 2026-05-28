@@ -2078,6 +2078,32 @@ def test_update_status_helpers_preserve_install_and_about_status_semantics():
     assert mms_command_tools.mms_update_status({"installed_version": "v1.2.4"}, {"latest_tag": "v1.2.4"}, localize=localize)["status"] == "最新"
 
 
+def test_about_status_snapshot_preserves_callback_flow():
+    import mms_command_tools
+
+    calls = []
+    snapshot = mms_command_tools.about_status_snapshot(
+        force_update=True,
+        release_version_info=lambda: calls.append(("version",)) or {"release": "v1.2.3"},
+        refresh_update_cache_for_about=lambda force_update=False: calls.append(("cache", force_update)) or {"latest_tag": "v1.2.4", "checked_at": 123},
+        cli_version_status=lambda force_update=False: calls.append(("cli", force_update)) or {"codex": {"version": "1.0.0"}},
+        mms_update_status=lambda version_info, cache: calls.append(("mms", version_info, cache)) or {"status": "有新版 v1.2.4"},
+    )
+
+    assert snapshot == {
+        "version_info": {"release": "v1.2.3"},
+        "mms": {"status": "有新版 v1.2.4"},
+        "clis": {"codex": {"version": "1.0.0"}},
+        "checked_at": 123,
+    }
+    assert calls == [
+        ("version",),
+        ("cache", True),
+        ("cli", True),
+        ("mms", {"release": "v1.2.3"}, {"latest_tag": "v1.2.4", "checked_at": 123}),
+    ]
+
+
 def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
     import mms_command_tools
 

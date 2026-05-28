@@ -2823,6 +2823,18 @@ def mms_update_status(version_info, cache, *, localize):
     }
 
 
+def about_status_snapshot(*, force_update=False, release_version_info, refresh_update_cache_for_about, cli_version_status, mms_update_status):
+    version_info = release_version_info()
+    cache = refresh_update_cache_for_about(force_update=force_update)
+    cli_status = cli_version_status(force_update=force_update)
+    return {
+        "version_info": version_info,
+        "mms": mms_update_status(version_info, cache),
+        "clis": cli_status,
+        "checked_at": cache.get("checked_at"),
+    }
+
+
 def runtime_usage_key(runtime, cli_name):
     kind = runtime.get("runtime_kind", "provider")
     runtime_id = runtime.get("id", "default")
