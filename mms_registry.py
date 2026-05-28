@@ -1715,6 +1715,24 @@ def publish_latest_approved_bundle_from_legacy_candidates(
         db.close()
 
 
+def assert_legacy_artifact_publish_allowed(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+) -> Path:
+    """Return config root or reject legacy-artifact publish for preview roots."""
+    config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    try:
+        root_mode = mms_config_root_mode(config_root)
+    except Exception:
+        root_mode = "stable"
+    if root_mode == "preview":
+        raise RegistryValidationError(
+            "publish-approved from legacy root artifacts is disabled for preview config roots; "
+            "use publish-preview so the latest-approved bundle is generated from DB candidates"
+        )
+    return config_root
+
+
 def publish_latest_approved_bundle(
     *,
     config_dir: str | os.PathLike[str] | None = None,
@@ -1727,16 +1745,7 @@ def publish_latest_approved_bundle(
     This writes generated/* and the manifest only. It does not alter live root
     aliases such as model-routes.json, and it does not read/write credentials.
     """
-    config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
-    try:
-        root_mode = mms_config_root_mode(config_root)
-    except Exception:
-        root_mode = "stable"
-    if root_mode == "preview":
-        raise RegistryValidationError(
-            "publish-approved from legacy root artifacts is disabled for preview config roots; "
-            "use publish-preview so the latest-approved bundle is generated from DB candidates"
-        )
+    config_root = assert_legacy_artifact_publish_allowed(config_dir=config_dir)
     generated_dir = config_root / "generated"
     generated = generated_at or utc_now()
     db = open_registry(db_path or default_registry_db_path(config_root))

@@ -2891,6 +2891,23 @@ def test_publish_approved_bundle_refuses_preview_root_legacy_artifacts(capsys, t
     assert not (preview_root / "generated" / "model-registry.latest-approved.json").exists()
 
 
+def test_publish_approved_preview_gate_runs_before_refresh_sources(capsys, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+    db_path = tmp_path / "model-registry.sqlite"
+    _write_config_artifacts(preview_root)
+
+    rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "publish-approved", "--config-dir", str(preview_root), "--refresh-sources"],
+        command_name="mmf registry",
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 2
+    assert "publish-preview" in out
+    assert not db_path.exists()
+    assert not (preview_root / "generated" / "model-registry.latest-approved.json").exists()
+
+
 def test_registry_command_publish_verify_and_resolve(capsys, tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-config"
     db_path = tmp_path / "model-registry.sqlite"
