@@ -4958,7 +4958,10 @@ def _opencode_route_health_allows_route(row, *, now=None):
 
 
 def _opencode_resolver_deps():
-    return _OpenCodeResolverDeps(
+    from mms_command_tools import build_opencode_resolver_deps
+
+    return build_opencode_resolver_deps(
+        resolver_deps_cls=_OpenCodeResolverDeps,
         provider_candidates=_provider_candidates,
         provider_effective_models=_provider_effective_models,
         provider_supports_cli_name=_provider_supports_cli_name,
@@ -4994,12 +4997,15 @@ def _find_opencode_model_route(
     profile_id=_OPENCODE_AGENT_PROFILE_ID,
     provider_id="",
 ):
-    return _find_opencode_model_route_impl(
+    from mms_command_tools import find_opencode_model_route
+
+    return find_opencode_model_route(
         cfg,
         default_provider,
         default_models,
         model_names,
-        deps=_opencode_resolver_deps(),
+        opencode_resolver_deps=_opencode_resolver_deps,
+        find_opencode_model_route_impl=_find_opencode_model_route_impl,
         route_key=route_key,
         route_policy=route_policy,
         profile_id=profile_id,

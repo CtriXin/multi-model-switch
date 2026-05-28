@@ -1823,8 +1823,9 @@ def test_save_preset_interactive_helper_and_wrapper_preserve_prompt_save_flow(mo
     }
 
 
-def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_config_precedence():
+def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_config_precedence(monkeypatch):
     import mms_command_tools
+    import mms_core
 
     assert mms_command_tools.available_broker_profiles_for_cli({}, "claude") == []
     assert mms_command_tools.broker_enabled_by_cli({}, ["claude", "codex"]) == {
@@ -1892,6 +1893,99 @@ def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_confi
         opencode_profile_selection=profile_selection,
     ) == {"profile": "default"}
     assert seen == ["agent", None]
+
+    class FakeResolverDeps:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    deps = mms_command_tools.build_opencode_resolver_deps(
+        resolver_deps_cls=FakeResolverDeps,
+        provider_candidates="provider_candidates",
+        provider_effective_models="provider_effective_models",
+        provider_supports_cli_name="provider_supports_cli_name",
+        provider_supports_model_for_cli="provider_supports_model_for_cli",
+        provider_label="provider_label",
+        provider_openai_base_url="provider_openai_base_url",
+        provider_anthropic_base_url="provider_anthropic_base_url",
+        infer_model_family="infer_model_family",
+        normalize_role="normalize_role",
+        runtime_priority_for_model="runtime_priority_for_model",
+        runtime_with_priority="runtime_with_priority",
+        mms_model_visible="mms_model_visible",
+        load_route_health_latest="load_route_health_latest",
+        route_health_for_route="route_health_for_route",
+        route_health_allows_route="route_health_allows_route",
+        route_health_sort_key="route_health_sort_key",
+        apply_profile="apply_profile",
+        apply_entrypoint="apply_entrypoint",
+        role_weights={"primary": 2},
+        default_priority=100,
+        default_provider_id="default",
+    )
+    assert deps.kwargs["provider_candidates"] == "provider_candidates"
+    assert deps.kwargs["role_weights"] == {"primary": 2}
+    assert deps.kwargs["default_provider_id"] == "default"
+
+    route_calls = []
+    assert mms_command_tools.find_opencode_model_route(
+        {"cfg": True},
+        {"id": "relay"},
+        ["gpt-5.5"],
+        ("gpt-5.5",),
+        opencode_resolver_deps=lambda: route_calls.append("deps") or deps,
+        find_opencode_model_route_impl=lambda *args, **kwargs: route_calls.append((args, kwargs)) or {"route": True},
+        route_key="builder",
+        route_policy="gpt",
+        profile_id="agent",
+        provider_id="relay",
+    ) == {"route": True}
+    assert route_calls[0] == "deps"
+    assert route_calls[1][0] == ({"cfg": True}, {"id": "relay"}, ["gpt-5.5"], ("gpt-5.5",))
+    assert route_calls[1][1] == {
+        "deps": deps,
+        "route_key": "builder",
+        "route_policy": "gpt",
+        "profile_id": "agent",
+        "provider_id": "relay",
+    }
+
+    monkeypatchable = []
+    monkeypatch.setattr(
+        mms_core,
+        "_OpenCodeResolverDeps",
+        lambda **kwargs: monkeypatchable.append(("deps-class", kwargs)) or FakeResolverDeps(**kwargs),
+    )
+    core_deps = mms_core._opencode_resolver_deps()
+    assert isinstance(core_deps, FakeResolverDeps)
+    assert monkeypatchable[0][0] == "deps-class"
+    assert core_deps.kwargs["default_provider_id"] == mms_core.DEFAULT_PROVIDER_ID
+
+    route_calls.clear()
+    original_impl = mms_core._find_opencode_model_route_impl
+    original_deps = mms_core._opencode_resolver_deps
+    try:
+        mms_core._find_opencode_model_route_impl = lambda *args, **kwargs: route_calls.append((args, kwargs)) or {"core-route": True}
+        mms_core._opencode_resolver_deps = lambda: "core-deps"
+        assert mms_core._find_opencode_model_route(
+            {"cfg": True},
+            {"id": "relay"},
+            ["gpt-5.5"],
+            ("gpt-5.5",),
+            route_key="core",
+            route_policy="policy",
+            profile_id="agent",
+            provider_id="relay",
+        ) == {"core-route": True}
+        assert route_calls[0][1] == {
+            "deps": "core-deps",
+            "route_key": "core",
+            "route_policy": "policy",
+            "profile_id": "agent",
+            "provider_id": "relay",
+        }
+    finally:
+        mms_core._find_opencode_model_route_impl = original_impl
+        mms_core._opencode_resolver_deps = original_deps
 
 
 def test_launch_trace_formatter_preserves_sources_and_override_chain():
