@@ -4045,6 +4045,111 @@ def test_interactive_terminal_and_prompt_csv_helpers_preserve_exit_and_prompt_fl
     assert console.items[-1] == "[red]协议（逗号分隔） 不能为空[/red]"
 
 
+def test_prompt_provider_metadata_helper_and_wrapper_preserve_prompt_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    calls = []
+
+    def prompt_ask(label, **kwargs):
+        calls.append(("prompt", label, kwargs))
+        if label == "系统内部标识（高级）":
+            return "relay"
+        if label == "显示名称 / 列表展示名":
+            return "Relay"
+        if label.startswith("模型列表地址"):
+            return " manual "
+        if label == "优先级（数字越大越优先）":
+            return "80"
+        if label == "Claude 1M 策略（auto/enable/disable）":
+            return "enable"
+        if label == "备注（可选）":
+            return " demo "
+        raise AssertionError(label)
+
+    confirms = iter([True, False])
+    normalized = mms_command_tools.prompt_provider_metadata(
+        {"id": "old", "name": "Old", "models_endpoint": "/old"},
+        ensure_interactive_terminal=lambda label: calls.append(("interactive", label)),
+        normalize_provider=lambda provider: calls.append(("normalize", dict(provider))) or dict(provider),
+        default_provider_id="default",
+        default_provider_protocols=("openai_chat_completions", "anthropic_messages"),
+        provider_capable_clis=("claude", "codex"),
+        prompt_ask=prompt_ask,
+        prompt_csv_values=lambda label, default, allowed: calls.append(("csv", label, default, allowed)) or list(allowed),
+        confirm_ask=lambda label, **kwargs: calls.append(("confirm", label, kwargs)) or next(confirms),
+        normalize_models_endpoint=lambda value: calls.append(("models-endpoint", value)) or value.strip(),
+        normalize_priority=lambda value: calls.append(("priority", value)) or int(value),
+        default_priority=50,
+        normalize_claude_1m_mode=lambda value: calls.append(("claude-1m", value)) or value,
+        prompt_validated_proxy_fields=lambda proxy, no_proxy, **kwargs: calls.append(("proxy", proxy, no_proxy, kwargs))
+        or ("http://proxy:7890", "localhost"),
+        default_account_timezone="Asia/Singapore",
+        prompt_validated_timezone=lambda timezone, **kwargs: calls.append(("timezone", timezone, kwargs)) or "Asia/Singapore",
+    )
+    assert normalized == {
+        "id": "relay",
+        "name": "Relay",
+        "protocols": ["openai_chat_completions", "anthropic_messages"],
+        "supported_clis": ["claude", "codex"],
+        "models_endpoint": "manual",
+        "priority": 80,
+        "claude_1m_mode": "enable",
+        "proxy": "http://proxy:7890",
+        "no_proxy": "localhost",
+        "timezone": "Asia/Singapore",
+        "note": "demo",
+        "enabled": False,
+    }
+    assert calls[0] == ("interactive", "模型源配置编辑")
+    assert ("models-endpoint", " manual ") in calls
+    assert ("proxy", "", "", {"wizard": False}) in calls
+    assert ("timezone", "Asia/Singapore", {"wizard": False}) in calls
+
+    calls.clear()
+    confirms = iter([False, True])
+
+    class FakePrompt:
+        @staticmethod
+        def ask(label, **kwargs):
+            calls.append(("core-prompt", label, kwargs))
+            return {
+                "显示名称 / 列表展示名": "Wrapped Relay",
+                "优先级（数字越大越优先）": "90",
+                "Claude 1M 策略（auto/enable/disable）": "disable",
+                "备注（可选）": "wrapped note",
+            }[label]
+
+    monkeypatch.setattr(mms_core, "Prompt", FakePrompt)
+    monkeypatch.setattr(mms_core, "Confirm", type("Confirm", (), {"ask": staticmethod(lambda label, **kwargs: calls.append(("core-confirm", label, kwargs)) or next(confirms))}))
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda label: calls.append(("core-interactive", label)))
+    monkeypatch.setattr(mms_core, "_normalize_provider", lambda provider: calls.append(("core-normalize", dict(provider))) or dict(provider))
+    monkeypatch.setattr(mms_core, "_prompt_csv_values", lambda label, default, allowed: calls.append(("core-csv", label, default, allowed)) or list(default))
+    monkeypatch.setattr(mms_core, "_normalize_priority", lambda value: int(value))
+    monkeypatch.setattr(mms_core, "_normalize_claude_1m_mode", lambda value: value)
+    monkeypatch.setattr(mms_core, "_prompt_validated_proxy_fields", lambda proxy, no_proxy, **kwargs: ("http://wrapped:7890", "wrapped.local"))
+    monkeypatch.setattr(mms_core, "_prompt_validated_timezone", lambda timezone, **kwargs: "UTC")
+
+    assert mms_core._prompt_provider_metadata(
+        {"id": "old", "protocols": ["openai_chat_completions"], "supported_clis": ["codex"]},
+        preset_id="preset-relay",
+    ) == {
+        "id": "preset-relay",
+        "name": "Wrapped Relay",
+        "protocols": ["openai_chat_completions"],
+        "supported_clis": ["codex"],
+        "models_endpoint": "/models",
+        "priority": 90,
+        "claude_1m_mode": "disable",
+        "proxy": "http://wrapped:7890",
+        "no_proxy": "wrapped.local",
+        "timezone": "UTC",
+        "note": "wrapped note",
+        "enabled": True,
+    }
+    assert ("core-interactive", "模型源配置编辑") in calls
+
+
 def test_provider_template_helpers_preserve_payload_copy_and_generic_collapse():
     import mms_command_tools
 

@@ -2607,61 +2607,27 @@ def _delete_provider_credentials(provider_id):
 
 
 def _prompt_provider_metadata(existing=None, preset_id=None):
-    _ensure_interactive_terminal("模型源配置编辑")
-    current = _normalize_provider(existing or {})
-    provider_id = preset_id or current.get("id") or DEFAULT_PROVIDER_ID
-    if not preset_id:
-        provider_id = Prompt.ask("系统内部标识（高级）", default=provider_id).strip() or DEFAULT_PROVIDER_ID
-    name = Prompt.ask("显示名称 / 列表展示名", default=current.get("name") or provider_id).strip() or provider_id
-    protocols = _prompt_csv_values(
-        "协议（逗号分隔）",
-        current.get("protocols", list(DEFAULT_PROVIDER_PROTOCOLS)),
-        list(DEFAULT_PROVIDER_PROTOCOLS),
+    from mms_command_tools import prompt_provider_metadata
+
+    return prompt_provider_metadata(
+        existing,
+        preset_id,
+        ensure_interactive_terminal=_ensure_interactive_terminal,
+        normalize_provider=_normalize_provider,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        default_provider_protocols=DEFAULT_PROVIDER_PROTOCOLS,
+        provider_capable_clis=PROVIDER_CAPABLE_CLIS,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        prompt_csv_values=_prompt_csv_values,
+        confirm_ask=lambda *args, **kwargs: Confirm.ask(*args, **kwargs),
+        normalize_models_endpoint=_normalize_models_endpoint,
+        normalize_priority=_normalize_priority,
+        default_priority=DEFAULT_PRIORITY,
+        normalize_claude_1m_mode=_normalize_claude_1m_mode,
+        prompt_validated_proxy_fields=_prompt_validated_proxy_fields,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+        prompt_validated_timezone=_prompt_validated_timezone,
     )
-    supported_clis = _prompt_csv_values(
-        "支持的 CLI（逗号分隔）",
-        current.get("supported_clis", list(PROVIDER_CAPABLE_CLIS)),
-        list(PROVIDER_CAPABLE_CLIS),
-    )
-    use_custom_models_endpoint = Confirm.ask(
-        "模型列表地址与接口地址不同？（高级）",
-        default=current.get("models_endpoint", "/models") != "/models",
-    )
-    models_endpoint = "/models"
-    if use_custom_models_endpoint:
-        models_endpoint = _normalize_models_endpoint(
-            Prompt.ask("模型列表地址（高级；仅用于拉取模型列表，输入 manual 表示完全手工维护模型）", default=current.get("models_endpoint", "/models"))
-        )
-    priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
-    claude_1m_mode = _normalize_claude_1m_mode(
-        Prompt.ask(
-            "Claude 1M 策略（auto/enable/disable）",
-            choices=["auto", "enable", "disable"],
-            default=current.get("claude_1m_mode", "auto"),
-        )
-    )
-    proxy, no_proxy = _prompt_validated_proxy_fields(
-        current.get("proxy", ""),
-        current.get("no_proxy", ""),
-        wizard=False,
-    )
-    timezone_name = _prompt_validated_timezone(current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE, wizard=False)
-    note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
-    enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
-    return _normalize_provider({
-        "id": provider_id,
-        "name": name,
-        "protocols": protocols,
-        "supported_clis": supported_clis,
-        "models_endpoint": models_endpoint,
-        "priority": priority,
-        "claude_1m_mode": claude_1m_mode,
-        "proxy": proxy,
-        "no_proxy": no_proxy,
-        "timezone": timezone_name,
-        "note": note,
-        "enabled": enabled,
-    })
 
 
 def _provider_template_payload(template_key):

@@ -2597,6 +2597,83 @@ def prompt_csv_values(
     return values
 
 
+def prompt_provider_metadata(
+    existing=None,
+    preset_id=None,
+    *,
+    ensure_interactive_terminal,
+    normalize_provider,
+    default_provider_id,
+    default_provider_protocols,
+    provider_capable_clis,
+    prompt_ask,
+    prompt_csv_values,
+    confirm_ask,
+    normalize_models_endpoint,
+    normalize_priority,
+    default_priority,
+    normalize_claude_1m_mode,
+    prompt_validated_proxy_fields,
+    default_account_timezone,
+    prompt_validated_timezone,
+):
+    ensure_interactive_terminal("模型源配置编辑")
+    current = normalize_provider(existing or {})
+    provider_id = preset_id or current.get("id") or default_provider_id
+    if not preset_id:
+        provider_id = prompt_ask("系统内部标识（高级）", default=provider_id).strip() or default_provider_id
+    name = prompt_ask("显示名称 / 列表展示名", default=current.get("name") or provider_id).strip() or provider_id
+    protocols = prompt_csv_values(
+        "协议（逗号分隔）",
+        current.get("protocols", list(default_provider_protocols)),
+        list(default_provider_protocols),
+    )
+    supported_clis = prompt_csv_values(
+        "支持的 CLI（逗号分隔）",
+        current.get("supported_clis", list(provider_capable_clis)),
+        list(provider_capable_clis),
+    )
+    use_custom_models_endpoint = confirm_ask(
+        "模型列表地址与接口地址不同？（高级）",
+        default=current.get("models_endpoint", "/models") != "/models",
+    )
+    models_endpoint = "/models"
+    if use_custom_models_endpoint:
+        models_endpoint = normalize_models_endpoint(
+            prompt_ask("模型列表地址（高级；仅用于拉取模型列表，输入 manual 表示完全手工维护模型）", default=current.get("models_endpoint", "/models"))
+        )
+    priority = normalize_priority(prompt_ask("优先级（数字越大越优先）", default=str(current.get("priority", default_priority))))
+    claude_1m_mode = normalize_claude_1m_mode(
+        prompt_ask(
+            "Claude 1M 策略（auto/enable/disable）",
+            choices=["auto", "enable", "disable"],
+            default=current.get("claude_1m_mode", "auto"),
+        )
+    )
+    proxy, no_proxy = prompt_validated_proxy_fields(
+        current.get("proxy", ""),
+        current.get("no_proxy", ""),
+        wizard=False,
+    )
+    timezone_name = prompt_validated_timezone(current.get("timezone") or default_account_timezone, wizard=False)
+    note = prompt_ask("备注（可选）", default=current.get("note", "")).strip()
+    enabled = confirm_ask("启用这个模型源？", default=bool(current.get("enabled", True)))
+    return normalize_provider({
+        "id": provider_id,
+        "name": name,
+        "protocols": protocols,
+        "supported_clis": supported_clis,
+        "models_endpoint": models_endpoint,
+        "priority": priority,
+        "claude_1m_mode": claude_1m_mode,
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
+        "note": note,
+        "enabled": enabled,
+    })
+
+
 def merge_dicts(base, override):
     merged = dict(base)
     for key, value in override.items():
