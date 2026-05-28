@@ -27,14 +27,18 @@ $onduty
 Direct script commands:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty
-/Users/xin/auto-skills/shared-skills/handover/scripts/onduty
+<offduty-skill-dir>/offduty
+<onduty-skill-dir>/onduty
 ```
+
+The installed alias directories include these wrappers; they resolve the real
+helper path relative to the alias target. Do not use a developer-machine
+absolute path.
 
 Global skill alias install is idempotent:
 
 ```bash
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/install_global_commands.py
+python3 <handover-root>/scripts/install_global_commands.py
 ```
 
 Mobius runs that installer as trigger preflight, so invoking Mobius should make
@@ -49,7 +53,7 @@ type.
 Machine/script overrides remain available:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --task-id <task-id> --summary "<current truth>" --next-action "<next>"
+<offduty-skill-dir>/offduty --task-id <task-id> --summary "<current truth>" --next-action "<next>"
 ```
 
 Useful options:
@@ -89,8 +93,8 @@ git -C "<candidate>" rev-parse --show-toplevel
 If one session started in repo A but worked on repo B and repo C, run:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<repo-B-root>"
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<repo-C-root>"
+<offduty-skill-dir>/offduty --root "<repo-B-root>"
+<offduty-skill-dir>/offduty --root "<repo-C-root>"
 ```
 
 Do not write to repo A unless A was actually touched. If no actual root can be
@@ -100,7 +104,7 @@ Record actual work cwd separately from root. If the command runs from a helper
 directory, pass:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>"
+<offduty-skill-dir>/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>"
 ```
 
 Each checkpoint records cwd, root, session id, session hash, checkpoint hash,

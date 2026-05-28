@@ -161,6 +161,18 @@ ensure_install_ref_resolved() {
     fi
 }
 
+resolve_builtin_handover_root() {
+    local candidate
+    for candidate in \
+        "$MMS_HOME/vendor/handover"; do
+        if [ -f "$candidate/scripts/install_global_commands.py" ]; then
+            (cd "$candidate" 2>/dev/null && pwd -P)
+            return 0
+        fi
+    done
+    return 1
+}
+
 optional_rtk_installed() {
     [ -x "$REAL_HOME/.claude/hooks/rtk-rewrite.sh" ]
 }
@@ -175,6 +187,18 @@ optional_brainkeeper_context_installed() {
 
 optional_handover_continuity_installed() {
     local skill_dir
+    local command_dir
+    local handover_root
+    local expected_handover
+    local expected_offduty
+    local expected_onduty
+
+    handover_root="$(resolve_builtin_handover_root || true)"
+    [ -n "$handover_root" ] || return 1
+    expected_handover="$handover_root"
+    expected_offduty="$handover_root/aliases/offduty"
+    expected_onduty="$handover_root/aliases/onduty"
+
     for skill_dir in \
         "$REAL_HOME/.agents/skills" \
         "$REAL_HOME/.claude/skills" \
@@ -184,6 +208,21 @@ optional_handover_continuity_installed() {
         [ -L "$skill_dir/handover" ] || return 1
         [ -L "$skill_dir/offduty" ] || return 1
         [ -L "$skill_dir/onduty" ] || return 1
+        [ "$(readlink "$skill_dir/handover")" = "$expected_handover" ] || return 1
+        [ "$(readlink "$skill_dir/offduty")" = "$expected_offduty" ] || return 1
+        [ "$(readlink "$skill_dir/onduty")" = "$expected_onduty" ] || return 1
+        [ -x "$skill_dir/offduty/offduty" ] || return 1
+        [ -x "$skill_dir/onduty/onduty" ] || return 1
+    done
+
+    for command_dir in \
+        "$REAL_HOME/.agents/commands" \
+        "$REAL_HOME/.claude/commands" \
+        "$REAL_HOME/.codex/commands" \
+        "$REAL_HOME/.config/opencode/commands" \
+        "$REAL_HOME/.opencode/commands"; do
+        [ ! -e "$command_dir/offduty.md" ] && [ ! -L "$command_dir/offduty.md" ] || return 1
+        [ ! -e "$command_dir/onduty.md" ] && [ ! -L "$command_dir/onduty.md" ] || return 1
     done
 }
 
@@ -4025,17 +4064,10 @@ install_builtin_handover_continuity() {
     echo ""
     echo "$(t "正在安装内置 offduty/onduty（handover continuity）..." "Installing built-in offduty/onduty (handover continuity)...")"
 
-    # Resolve handover root from the installed/bundled MMS vendor pack first.
-    for candidate in \
-        "$MMS_HOME/vendor/handover" \
-        "$SOURCE_DIR/vendor/handover" \
-        "$REAL_HOME/auto-skills/shared-skills/handover" \
-        "$(dirname "$SOURCE_DIR" 2>/dev/null || echo "")/../shared-skills/handover"; do
-        if [ -f "$candidate/scripts/install_global_commands.py" ]; then
-            handover_root="$candidate"
-            break
-        fi
-    done
+    # Resolve handover root only from the installed MMS vendor pack. If the
+    # packaged vendor copy is missing, skip instead of pointing global skills at
+    # a developer checkout or temporary installer source directory.
+    handover_root="$(resolve_builtin_handover_root || true)"
 
     if [ -z "$handover_root" ]; then
         HANDOVER_CONTINUITY_INSTALL_STATUS="missing_source"
