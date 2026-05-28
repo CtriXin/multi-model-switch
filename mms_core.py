@@ -3770,43 +3770,20 @@ def _manage_account_target(cfg, account_id):
 
 def _run_account_mgmt_tui(cfg):
     """账号管理：列表选择 + 详情操作。"""
-    accounts = cfg.get("accounts", [])
-    if not accounts:
-        console.print("[yellow]当前没有配置任何 OAuth 账号[/yellow]")
-        return
+    from mms_command_tools import run_account_mgmt_tui
 
-    account_defaults = cfg.get("account", {}).get("defaults", {})
-    targets = []
-    for acct in accounts:
-        acct_id = str(acct.get("id", "")).strip()
-        if not acct_id:
-            continue
-        cli_name = str(acct.get("cli", "")).strip()
-        is_default = account_defaults.get(cli_name) == acct_id
-        launches, last_used_at = _usage_summary_for_runtime("account", acct_id)
-        targets.append({
-            "kind": "account",
-            "id": acct_id,
-            "title": acct.get("name", acct_id),
-            "summary": f"官方 · {cli_name.upper()}" + (" · 默认" if is_default else ""),
-            "default_label": cli_name.upper() if is_default else "备选",
-            "status": "",
-            "launches": launches,
-            "last_used_at": last_used_at,
-        })
+    def select_target_tui(targets):
+        from mms_tui import select_manage_target_tui
+        return select_manage_target_tui(targets)
 
-    if not targets:
-        console.print("[yellow]当前没有可管理的账号[/yellow]")
-        return
-
-    if _use_tui():
-        try:
-            from mms_tui import select_manage_target_tui
-            target = select_manage_target_tui(targets)
-            if target:
-                _manage_account_target(cfg, target["id"])
-        except (ImportError, Exception):
-            pass
+    return run_account_mgmt_tui(
+        cfg,
+        use_tui=_use_tui,
+        select_manage_target_tui=select_target_tui,
+        manage_account_target=_manage_account_target,
+        usage_summary_for_runtime=_usage_summary_for_runtime,
+        console=console,
+    )
 
 
 def _run_recommend_mgmt_tui(cfg):

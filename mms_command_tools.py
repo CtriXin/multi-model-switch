@@ -2369,6 +2369,53 @@ def prompt_account_rename(
     return updated_cfg, changed
 
 
+def run_account_mgmt_tui(
+    cfg,
+    *,
+    use_tui,
+    select_manage_target_tui,
+    manage_account_target,
+    usage_summary_for_runtime,
+    console,
+):
+    accounts = cfg.get("accounts", [])
+    if not accounts:
+        console.print("[yellow]当前没有配置任何 OAuth 账号[/yellow]")
+        return
+
+    account_defaults = cfg.get("account", {}).get("defaults", {})
+    targets = []
+    for acct in accounts:
+        acct_id = str(acct.get("id", "")).strip()
+        if not acct_id:
+            continue
+        cli_name = str(acct.get("cli", "")).strip()
+        is_default = account_defaults.get(cli_name) == acct_id
+        launches, last_used_at = usage_summary_for_runtime("account", acct_id)
+        targets.append({
+            "kind": "account",
+            "id": acct_id,
+            "title": acct.get("name", acct_id),
+            "summary": f"官方 · {cli_name.upper()}" + (" · 默认" if is_default else ""),
+            "default_label": cli_name.upper() if is_default else "备选",
+            "status": "",
+            "launches": launches,
+            "last_used_at": last_used_at,
+        })
+
+    if not targets:
+        console.print("[yellow]当前没有可管理的账号[/yellow]")
+        return
+
+    if use_tui():
+        try:
+            target = select_manage_target_tui(targets)
+            if target:
+                manage_account_target(cfg, target["id"])
+        except (ImportError, Exception):
+            pass
+
+
 def format_rescue_hot_fallback_event(event):
     if not isinstance(event, dict) or not event:
         return "-"

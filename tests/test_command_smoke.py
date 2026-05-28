@@ -3200,6 +3200,77 @@ def test_prompt_account_rename_helper_and_wrapper_preserve_flow(monkeypatch):
     assert calls == ["core-rich", ("core-rename", cfg, ["codex-main", "agy-main"])]
 
 
+def test_run_account_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    console = _CollectingConsole()
+    assert mms_command_tools.run_account_mgmt_tui(
+        {},
+        use_tui=lambda: (_ for _ in ()).throw(AssertionError("use_tui not expected")),
+        select_manage_target_tui=lambda targets: targets[0],
+        manage_account_target=lambda cfg, account_id: (_ for _ in ()).throw(AssertionError("manage not expected")),
+        usage_summary_for_runtime=lambda *_args: (0, ""),
+        console=console,
+    ) is None
+    assert console.items == ["[yellow]当前没有配置任何 OAuth 账号[/yellow]"]
+
+    console.items.clear()
+    assert mms_command_tools.run_account_mgmt_tui(
+        {"accounts": [{"id": ""}]},
+        use_tui=lambda: (_ for _ in ()).throw(AssertionError("use_tui not expected")),
+        select_manage_target_tui=lambda targets: targets[0],
+        manage_account_target=lambda cfg, account_id: (_ for _ in ()).throw(AssertionError("manage not expected")),
+        usage_summary_for_runtime=lambda *_args: (0, ""),
+        console=console,
+    ) is None
+    assert console.items == ["[yellow]当前没有可管理的账号[/yellow]"]
+
+    cfg = {
+        "account": {"defaults": {"codex": "codex-main"}},
+        "accounts": [
+            {"id": "codex-main", "cli": "codex", "name": "Codex Main"},
+            {"id": "agy-alt", "cli": "agy", "name": "Agy Alt"},
+        ],
+    }
+    seen = []
+    mms_command_tools.run_account_mgmt_tui(
+        cfg,
+        use_tui=lambda: True,
+        select_manage_target_tui=lambda targets: seen.append(("targets", targets)) or targets[1],
+        manage_account_target=lambda current, account_id: seen.append(("manage", current, account_id)),
+        usage_summary_for_runtime=lambda kind, runtime_id: (3, "2026-05-29") if runtime_id == "codex-main" else (1, ""),
+        console=console,
+    )
+    assert seen[0][0] == "targets"
+    assert seen[0][1][0] == {
+        "kind": "account",
+        "id": "codex-main",
+        "title": "Codex Main",
+        "summary": "官方 · CODEX · 默认",
+        "default_label": "CODEX",
+        "status": "",
+        "launches": 3,
+        "last_used_at": "2026-05-29",
+    }
+    assert seen[1] == ("manage", cfg, "agy-alt")
+
+    seen.clear()
+    mms_command_tools.run_account_mgmt_tui(
+        cfg,
+        use_tui=lambda: True,
+        select_manage_target_tui=lambda _targets: (_ for _ in ()).throw(RuntimeError("no tui")),
+        manage_account_target=lambda *_args: seen.append("unexpected-manage"),
+        usage_summary_for_runtime=lambda *_args: (0, ""),
+        console=console,
+    )
+    assert seen == []
+
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+    assert mms_core._run_account_mgmt_tui({}) is None
+    assert mms_core.console.items == ["[yellow]当前没有配置任何 OAuth 账号[/yellow]"]
+
+
 def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
     import mms_command_tools
 
