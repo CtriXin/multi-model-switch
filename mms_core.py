@@ -8176,64 +8176,47 @@ def _handle_account_login_config(cfg, args_rest):
 
 
 def _usage_key(runtime_kind, cli_name, runtime_id):
-    return f"{runtime_kind}:{cli_name}:{runtime_id}"
+    from mms_command_tools import usage_key
+
+    return usage_key(runtime_kind, cli_name, runtime_id)
 
 
 def _rename_usage_account(old_id, new_id, new_name, cli_name):
-    usage_path = _active_usage_path()
-    if not os.path.exists(usage_path):
-        return False
+    from mms_command_tools import rename_usage_account
 
-    def _mutate(stats):
-        sources = stats.get("sources", {})
-        old_key = _usage_key("account", cli_name, old_id)
-        entry = sources.pop(old_key, None)
-        if entry is None:
-            return False
-        entry["id"] = new_id
-        entry["name"] = new_name
-        sources[_usage_key("account", cli_name, new_id)] = entry
-        return True
-
-    return bool(_update_usage_stats(_mutate))
+    return rename_usage_account(
+        old_id,
+        new_id,
+        new_name,
+        cli_name,
+        usage_path=_active_usage_path(),
+        update_usage_stats=_update_usage_stats,
+        usage_key=_usage_key,
+    )
 
 
 def _rename_usage_provider(old_id, new_id, new_name):
-    usage_path = _active_usage_path()
-    if not os.path.exists(usage_path):
-        return False
+    from mms_command_tools import rename_usage_provider
 
-    def _mutate(stats):
-        sources = stats.get("sources", {})
-        changed = False
-        rewritten = {}
-        for key, entry in list(sources.items()):
-            if entry.get("runtime_kind") != "provider" or entry.get("id") != old_id:
-                continue
-            sources.pop(key, None)
-            updated = dict(entry)
-            updated["id"] = new_id
-            updated["name"] = new_name
-            cli_name = str(updated.get("cli", "default")).strip() or "default"
-            rewritten[_usage_key("provider", cli_name, new_id)] = updated
-            changed = True
-        sources.update(rewritten)
-        return changed
-
-    return bool(_update_usage_stats(_mutate))
+    return rename_usage_provider(
+        old_id,
+        new_id,
+        new_name,
+        usage_path=_active_usage_path(),
+        update_usage_stats=_update_usage_stats,
+        usage_key=_usage_key,
+    )
 
 
 def _target_account_home(old_home, new_id):
-    expanded = os.path.expanduser(str(old_home or "").strip())
-    if not expanded:
-        return _default_account_home(new_id)
-    known_roots = {
-        os.path.realpath(ACCOUNTS_DIR),
-    }
-    parent = os.path.realpath(os.path.dirname(expanded))
-    if parent in known_roots:
-        return os.path.join(ACCOUNTS_DIR, new_id)
-    return os.path.join(os.path.dirname(expanded), new_id)
+    from mms_command_tools import target_account_home
+
+    return target_account_home(
+        old_home,
+        new_id,
+        accounts_dir=ACCOUNTS_DIR,
+        default_account_home=_default_account_home,
+    )
 
 
 def _handle_provider_rename_config(cfg, args_rest):

@@ -1652,6 +1652,94 @@ def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
     assert last_by_cli["claude"]["runtime_hint"]["account_id"] == "claude-main"
 
 
+def test_usage_rename_and_target_home_helpers_preserve_keys_and_paths(tmp_path):
+    import os
+
+    import mms_command_tools
+    import mms_core
+
+    stats = {
+        "sources": {
+            "account:claude:old-account": {
+                "runtime_kind": "account",
+                "cli": "claude",
+                "id": "old-account",
+                "name": "Old Account",
+            },
+            "provider:codex:old-provider": {
+                "runtime_kind": "provider",
+                "cli": "codex",
+                "id": "old-provider",
+                "name": "Old Provider",
+            },
+            "provider:claude:other-provider": {
+                "runtime_kind": "provider",
+                "cli": "claude",
+                "id": "other-provider",
+                "name": "Other Provider",
+            },
+        }
+    }
+
+    def update_usage_stats(mutator):
+        return mutator(stats)
+
+    assert mms_command_tools.usage_key("provider", "codex", "relay") == "provider:codex:relay"
+    assert mms_core._usage_key("provider", "codex", "relay") == "provider:codex:relay"
+    assert mms_command_tools.rename_usage_account(
+        "old-account",
+        "new-account",
+        "New Account",
+        "claude",
+        usage_path="/tmp/usage.json",
+        path_exists=lambda _path: True,
+        update_usage_stats=update_usage_stats,
+    )
+    assert "account:claude:old-account" not in stats["sources"]
+    assert stats["sources"]["account:claude:new-account"]["name"] == "New Account"
+    assert mms_command_tools.rename_usage_provider(
+        "old-provider",
+        "new-provider",
+        "New Provider",
+        usage_path="/tmp/usage.json",
+        path_exists=lambda _path: True,
+        update_usage_stats=update_usage_stats,
+    )
+    assert "provider:codex:old-provider" not in stats["sources"]
+    assert stats["sources"]["provider:codex:new-provider"]["id"] == "new-provider"
+    assert mms_command_tools.rename_usage_account(
+        "missing",
+        "new",
+        "New",
+        "claude",
+        usage_path="/tmp/missing.json",
+        path_exists=lambda _path: False,
+        update_usage_stats=update_usage_stats,
+    ) is False
+
+    accounts_dir = tmp_path / "accounts"
+    accounts_dir.mkdir()
+    assert mms_command_tools.target_account_home(
+        "",
+        "new-account",
+        accounts_dir=str(accounts_dir),
+        default_account_home=lambda account_id: str(accounts_dir / account_id),
+    ) == str(accounts_dir / "new-account")
+    assert mms_command_tools.target_account_home(
+        str(accounts_dir / "old-account"),
+        "new-account",
+        accounts_dir=str(accounts_dir),
+        default_account_home=lambda account_id: str(accounts_dir / account_id),
+    ) == os.path.join(str(accounts_dir), "new-account")
+    custom_parent = tmp_path / "custom"
+    assert mms_command_tools.target_account_home(
+        str(custom_parent / "old-account"),
+        "new-account",
+        accounts_dir=str(accounts_dir),
+        default_account_home=lambda account_id: str(accounts_dir / account_id),
+    ) == os.path.join(str(custom_parent), "new-account")
+
+
 def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths():
     import mms_command_tools
 

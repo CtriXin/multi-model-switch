@@ -2802,6 +2802,84 @@ def preset_model_info(preset, *, excluded_keys=frozenset({"cli", "provider", "ac
     return {key: value for key, value in preset.items() if key not in excluded_keys}
 
 
+def usage_key(runtime_kind, cli_name, runtime_id):
+    return f"{runtime_kind}:{cli_name}:{runtime_id}"
+
+
+def rename_usage_account(
+    old_id,
+    new_id,
+    new_name,
+    cli_name,
+    *,
+    usage_path,
+    path_exists=os.path.exists,
+    update_usage_stats,
+    usage_key=usage_key,
+):
+    if not path_exists(usage_path):
+        return False
+
+    def _mutate(stats):
+        sources = stats.get("sources", {})
+        old_key = usage_key("account", cli_name, old_id)
+        entry = sources.pop(old_key, None)
+        if entry is None:
+            return False
+        entry["id"] = new_id
+        entry["name"] = new_name
+        sources[usage_key("account", cli_name, new_id)] = entry
+        return True
+
+    return bool(update_usage_stats(_mutate))
+
+
+def rename_usage_provider(
+    old_id,
+    new_id,
+    new_name,
+    *,
+    usage_path,
+    path_exists=os.path.exists,
+    update_usage_stats,
+    usage_key=usage_key,
+):
+    if not path_exists(usage_path):
+        return False
+
+    def _mutate(stats):
+        sources = stats.get("sources", {})
+        changed = False
+        rewritten = {}
+        for key, entry in list(sources.items()):
+            if entry.get("runtime_kind") != "provider" or entry.get("id") != old_id:
+                continue
+            sources.pop(key, None)
+            updated = dict(entry)
+            updated["id"] = new_id
+            updated["name"] = new_name
+            cli_name = str(updated.get("cli", "default")).strip() or "default"
+            rewritten[usage_key("provider", cli_name, new_id)] = updated
+            changed = True
+        sources.update(rewritten)
+        return changed
+
+    return bool(update_usage_stats(_mutate))
+
+
+def target_account_home(old_home, new_id, *, accounts_dir, default_account_home):
+    expanded = os.path.expanduser(str(old_home or "").strip())
+    if not expanded:
+        return default_account_home(new_id)
+    known_roots = {
+        os.path.realpath(accounts_dir),
+    }
+    parent = os.path.realpath(os.path.dirname(expanded))
+    if parent in known_roots:
+        return os.path.join(accounts_dir, new_id)
+    return os.path.join(os.path.dirname(expanded), new_id)
+
+
 def provider_looks_openrouter(provider):
     if not isinstance(provider, dict):
         return False
