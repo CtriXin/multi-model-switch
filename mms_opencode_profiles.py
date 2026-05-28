@@ -221,6 +221,17 @@ def apply_opencode_profile(runtime, profile_id):
     return runtime
 
 
+def select_and_apply_opencode_profile(runtime, *, use_tui=False, select_opencode_profile, apply_opencode_profile):
+    if not isinstance(runtime, dict):
+        return runtime
+    profile_id = runtime.get("opencode_profile")
+    if not profile_id:
+        profile_id = select_opencode_profile(use_tui=use_tui)
+    if not profile_id:
+        return None
+    return apply_opencode_profile(runtime, profile_id)
+
+
 __all__ = [
     "OPENCODE_AGENT_PROFILE_ID",
     "OPENCODE_BASE_PROFILE_OPTIONS",
@@ -237,4 +248,5 @@ __all__ = [
     "opencode_profile_label",
     "opencode_profile_selection",
     "opencode_profile_selection_ids",
+    "select_and_apply_opencode_profile",
 ]

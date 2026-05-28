@@ -631,6 +631,7 @@ def test_core_provider_supports_opencode_cli():
 
 def test_core_opencode_profiles_are_fixed_launch_shapes():
     import mms_core
+    import mms_opencode_profiles
 
     assert mms_core._normalize_opencode_profile_id("lite-pro") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("agent") == "lite_pro_orchestrated"
@@ -663,6 +664,34 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert raw["opencode_pure"] is True
     assert raw["opencode_agent"] == ""
     assert raw["opencode_lite_agents"] is False
+
+    calls = []
+    assert mms_opencode_profiles.select_and_apply_opencode_profile(
+        {"id": "plain"},
+        use_tui=True,
+        select_opencode_profile=lambda **kwargs: calls.append(("select", kwargs)) or "raw",
+        apply_opencode_profile=lambda runtime, profile_id: calls.append(("apply", runtime, profile_id))
+        or {"applied": profile_id, **runtime},
+    ) == {"id": "plain", "applied": "raw"}
+    assert calls == [("select", {"use_tui": True}), ("apply", {"id": "plain"}, "raw")]
+    calls.clear()
+    assert mms_opencode_profiles.select_and_apply_opencode_profile(
+        {"id": "preset", "opencode_profile": "agent"},
+        select_opencode_profile=lambda **_kwargs: calls.append("unexpected-select"),
+        apply_opencode_profile=lambda runtime, profile_id: calls.append(("apply", runtime, profile_id))
+        or {"applied": profile_id, **runtime},
+    ) == {"id": "preset", "opencode_profile": "agent", "applied": "agent"}
+    assert calls == [("apply", {"id": "preset", "opencode_profile": "agent"}, "agent")]
+    assert mms_opencode_profiles.select_and_apply_opencode_profile(
+        "not-runtime",
+        select_opencode_profile=lambda **_kwargs: "raw",
+        apply_opencode_profile=lambda *_args: {"unexpected": True},
+    ) == "not-runtime"
+    assert mms_opencode_profiles.select_and_apply_opencode_profile(
+        {"id": "cancel"},
+        select_opencode_profile=lambda **_kwargs: "",
+        apply_opencode_profile=lambda *_args: {"unexpected": True},
+    ) is None
 
 
 def test_core_opencode_profile_runtime_uses_fixed_safe_gpt_not_kimi():

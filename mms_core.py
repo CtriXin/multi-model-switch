@@ -5356,14 +5356,14 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
 
 
 def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
-    if not isinstance(runtime, dict):
-        return runtime
-    profile_id = runtime.get("opencode_profile")
-    if not profile_id:
-        profile_id = _select_opencode_profile(use_tui=use_tui)
-    if not profile_id:
-        return None
-    return _apply_opencode_profile(runtime, profile_id)
+    from mms_opencode_profiles import select_and_apply_opencode_profile
+
+    return select_and_apply_opencode_profile(
+        runtime,
+        use_tui=use_tui,
+        select_opencode_profile=_select_opencode_profile,
+        apply_opencode_profile=_apply_opencode_profile,
+    )
 
 
 def save_preset_interactive(cfg, cli, model_info):
