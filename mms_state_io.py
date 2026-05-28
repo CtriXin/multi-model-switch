@@ -16,6 +16,7 @@ _STATE_FILE_PROCESS_LOCK = threading.RLock()
 _GATEWAY_SESSION_MARKERS = (
     os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
     os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+    os.path.join(".config", "mms", "accounts") + os.sep,
 )
 
 
