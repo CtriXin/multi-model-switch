@@ -2072,35 +2072,15 @@ def _is_snapshot_ignored_file(path):
 
 
 def _render_mms_config_agents_guard():
-    return """# AGENTS.md
+    from mms_command_tools import render_mms_config_agents_guard
 
-This folder stores the real MMS user config.
-
-## MMS Config Human Gate
-
-- Any agent, any repo, any automation touching this folder must stop and require human confirmation before write.
-- Before every write, create a timestamped backup first. Never overwrite in place without a backup.
-- Applies to the whole MMS config tree, including `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and any account state under this folder.
-- Agents may inspect, diff, and propose changes, but must not auto-apply user config edits without human confirmation.
-- Any proposed change must show target path, affected fields/files, before/after values, and reason.
-- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms`.
-"""
+    return render_mms_config_agents_guard()
 
 
 def _render_mms_config_claude_guard():
-    return """# CLAUDE.md
+    from mms_command_tools import render_mms_config_claude_guard
 
-This folder stores the real MMS user config.
-
-## Claude Hard Rule
-
-- Claude must treat this folder as human-only config.
-- Claude must never auto-write MMS user config without explicit human confirmation.
-- Before every write, Claude must create a timestamped backup first.
-- Claude may only inspect, explain, and generate manual diffs for changes to this folder until the human confirms.
-- This applies to the full MMS config tree, including `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and account state files.
-- If Claude is about to touch these files, it must stop and report the exact path, intended change, before/after values, and reason.
-"""
+    return render_mms_config_claude_guard()
 
 
 def _ensure_mms_config_guard_files(config_path=None):

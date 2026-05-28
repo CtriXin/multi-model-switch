@@ -460,6 +460,22 @@ def test_about_and_snapshot_payload_helpers_preserve_version_actions():
     assert console.items == ["[cyan]关于 / About[/cyan]", "[cyan]MMS[/cyan] dev"]
 
 
+def test_mms_config_guard_renderers_preserve_human_gate_text():
+    import mms_command_tools
+
+    agents_text = mms_command_tools.render_mms_config_agents_guard()
+    claude_text = mms_command_tools.render_mms_config_claude_guard()
+
+    assert agents_text.startswith("# AGENTS.md")
+    assert "human confirmation before write" in agents_text
+    assert "Never overwrite in place without a backup" in agents_text
+    assert "`~/.config/mms`" in agents_text
+    assert claude_text.startswith("# CLAUDE.md")
+    assert "human-only config" in claude_text
+    assert "Claude must never auto-write MMS user config" in claude_text
+    assert "before/after values" in claude_text
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
