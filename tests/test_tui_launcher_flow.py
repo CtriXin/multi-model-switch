@@ -8,6 +8,7 @@ from mms_tui_launcher_flow import (
     build_confirm_capability_context,
     confirm_agent_pack,
     confirm_tui_options,
+    ensure_cli_installed_for_launch,
     handle_tui_account_mgmt_settings_action,
     handle_tui_about_settings_action,
     handle_tui_broker_action,
@@ -117,6 +118,36 @@ def test_apply_claude_network_guard_preview_skips_non_claude_or_non_auth_mode() 
             cli_name,
             network_guard_preview_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         ) is runtime
+
+
+def test_ensure_cli_installed_for_launch_skips_or_offers_install() -> None:
+    calls = []
+
+    assert ensure_cli_installed_for_launch(
+        "codex",
+        check_cli_installed=lambda cli: calls.append(("check", cli)) or True,
+        check_and_offer_install_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+    ) == {"status": "continue"}
+
+    assert ensure_cli_installed_for_launch(
+        "claude",
+        check_cli_installed=lambda cli: calls.append(("check", cli)) or False,
+        check_and_offer_install_loader=lambda: (lambda cli: calls.append(("offer", cli)) or True),
+    ) == {"status": "continue"}
+
+    assert ensure_cli_installed_for_launch(
+        "opencode",
+        check_cli_installed=lambda cli: calls.append(("check", cli)) or False,
+        check_and_offer_install_loader=lambda: (lambda cli: calls.append(("offer", cli)) or False),
+    ) == {"status": "exit"}
+
+    assert calls == [
+        ("check", "codex"),
+        ("check", "claude"),
+        ("offer", "claude"),
+        ("check", "opencode"),
+        ("offer", "opencode"),
+    ]
 
 
 def test_handle_tui_broker_action_delegates_and_maps_status() -> None:

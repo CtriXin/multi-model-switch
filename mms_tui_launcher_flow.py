@@ -1075,6 +1075,15 @@ def handle_tui_account_mgmt_settings_action(
     return {"status": "continue"}
 
 
+def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
+    if check_cli_installed(cli_name):
+        return {"status": "continue"}
+    check_and_offer_install = check_and_offer_install_loader()
+    if not check_and_offer_install(cli_name):
+        return {"status": "exit"}
+    return {"status": "continue"}
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:

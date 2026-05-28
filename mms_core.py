@@ -5446,10 +5446,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             continue
 
         # ── 公共：确认页 + 启动 ──
-        if not check_cli_installed(cli):
-            from mms_installer import check_and_offer_install
-            if not check_and_offer_install(cli):
-                return True
+        install_result = tui_flow.ensure_cli_installed_for_launch(
+            cli,
+            check_cli_installed=check_cli_installed,
+            check_and_offer_install_loader=lambda: __import__(
+                "mms_installer",
+                fromlist=["check_and_offer_install"],
+            ).check_and_offer_install,
+        )
+        if install_result["status"] == "exit":
+            return True
 
         if cli == "opencode":
             runtime_runtime = _select_and_apply_opencode_profile(runtime_runtime, use_tui=True)
