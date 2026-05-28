@@ -3150,6 +3150,71 @@ def normalize_account_id(account_id):
     return value or "account"
 
 
+def account_label(account):
+    return account.get("name", account.get("id", "account"))
+
+
+def scrub_account_command_env(
+    env,
+    *,
+    prefix_blocklist,
+    proxy_env_keys,
+    fake_env_keys,
+    ca_env_keys,
+):
+    env = env if isinstance(env, dict) else {}
+    for key in list(env.keys()):
+        normalized = str(key or "").strip()
+        if not normalized:
+            continue
+        if any(normalized.startswith(prefix) for prefix in prefix_blocklist):
+            env.pop(key, None)
+            continue
+        if normalized in proxy_env_keys or normalized in fake_env_keys or normalized in ca_env_keys:
+            env.pop(key, None)
+    return env
+
+
+def account_env(
+    account,
+    *,
+    scrub_account_command_env,
+    seed_claude_state,
+    seed_agy_state,
+    seed_gemini_state,
+    environ=os.environ,
+    expanduser=os.path.expanduser,
+    path_join=os.path.join,
+):
+    home_dir = expanduser(str(account.get("home_dir", "")).strip())
+    cli_name = account.get("cli")
+    if cli_name == "claude":
+        seed_claude_state(home_dir)
+    elif cli_name == "agy":
+        seed_agy_state(home_dir)
+    env = dict(environ)
+    scrub_account_command_env(env)
+    if cli_name == "gemini":
+        seed_gemini_state(home_dir)
+        env["GEMINI_CLI_HOME"] = home_dir
+    else:
+        xdg_config_home = path_join(home_dir, ".config")
+        env["HOME"] = home_dir
+        env["XDG_CONFIG_HOME"] = xdg_config_home
+    proxy = str(account.get("proxy", "")).strip()
+    no_proxy = str(account.get("no_proxy", "")).strip()
+    timezone_name = str(account.get("timezone", "")).strip()
+    if proxy:
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            env[key] = proxy
+        for key in ("NO_PROXY", "no_proxy"):
+            env[key] = no_proxy
+    if timezone_name:
+        env["TZ"] = timezone_name
+    env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
+    return env
+
+
 def account_status_command(cli_name):
     if cli_name == "claude":
         return ["claude", "auth", "status"]

@@ -5541,6 +5541,89 @@ def test_account_add_status_login_handlers_preserve_guards_and_dispatch():
     assert login_calls == [{"id": "codex-main", "cli": "codex"}]
 
 
+def test_account_env_helpers_preserve_scrub_seed_proxy_and_home_behavior():
+    import mms_command_tools
+
+    base_env = {
+        "KEEP": "1",
+        "ANTHROPIC_AUTH_TOKEN": "secret",
+        "CLAUDE_CODE_TOKEN": "secret",
+        "OPENAI_API_KEY": "secret",
+        "HTTP_PROXY": "ambient",
+        "NO_PROXY": "ambient",
+        "MMS_FAKE_UPSTREAM_MODE": "1",
+        "SSL_CERT_FILE": "/tmp/ca.pem",
+    }
+    scrubbed = mms_command_tools.scrub_account_command_env(
+        dict(base_env),
+        prefix_blocklist=("ANTHROPIC_", "CLAUDE_CODE_", "OPENAI_"),
+        proxy_env_keys=("HTTP_PROXY", "NO_PROXY"),
+        fake_env_keys=("MMS_FAKE_UPSTREAM_MODE",),
+        ca_env_keys=("SSL_CERT_FILE",),
+    )
+    assert scrubbed == {"KEEP": "1"}
+
+    seeds = []
+    env = mms_command_tools.account_env(
+        {
+            "id": "codex-main",
+            "cli": "codex",
+            "home_dir": "~/codex",
+            "proxy": "http://proxy",
+            "no_proxy": "localhost",
+            "timezone": "Asia/Singapore",
+        },
+        environ=base_env,
+        expanduser=lambda path: path.replace("~", "/home/xin"),
+        scrub_account_command_env=lambda value: mms_command_tools.scrub_account_command_env(
+            value,
+            prefix_blocklist=("ANTHROPIC_", "CLAUDE_CODE_", "OPENAI_"),
+            proxy_env_keys=("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"),
+            fake_env_keys=("MMS_FAKE_UPSTREAM_MODE",),
+            ca_env_keys=("SSL_CERT_FILE",),
+        ),
+        seed_claude_state=lambda home: seeds.append(("claude", home)),
+        seed_agy_state=lambda home: seeds.append(("agy", home)),
+        seed_gemini_state=lambda home: seeds.append(("gemini", home)),
+    )
+    assert seeds == []
+    assert env["KEEP"] == "1"
+    assert env["HOME"] == "/home/xin/codex"
+    assert env["XDG_CONFIG_HOME"] == "/home/xin/codex/.config"
+    assert env["HTTP_PROXY"] == "http://proxy"
+    assert env["HTTPS_PROXY"] == "http://proxy"
+    assert env["NO_PROXY"] == "localhost"
+    assert env["TZ"] == "Asia/Singapore"
+    assert env["MMS_ACCOUNT_ID"] == "codex-main"
+    assert "OPENAI_API_KEY" not in env
+    assert base_env["HTTP_PROXY"] == "ambient"
+
+    gemini_env = mms_command_tools.account_env(
+        {"id": "gemini-main", "cli": "gemini", "home_dir": "/tmp/gemini"},
+        environ={},
+        scrub_account_command_env=lambda value: value,
+        seed_claude_state=lambda home: seeds.append(("claude", home)),
+        seed_agy_state=lambda home: seeds.append(("agy", home)),
+        seed_gemini_state=lambda home: seeds.append(("gemini", home)),
+    )
+    assert gemini_env["GEMINI_CLI_HOME"] == "/tmp/gemini"
+    assert "HOME" not in gemini_env
+    assert seeds[-1] == ("gemini", "/tmp/gemini")
+
+    claude_env = mms_command_tools.account_env(
+        {"id": "claude-main", "cli": "claude", "home_dir": "/tmp/claude"},
+        environ={},
+        scrub_account_command_env=lambda value: value,
+        seed_claude_state=lambda home: seeds.append(("claude", home)),
+        seed_agy_state=lambda home: seeds.append(("agy", home)),
+        seed_gemini_state=lambda home: seeds.append(("gemini", home)),
+    )
+    assert claude_env["HOME"] == "/tmp/claude"
+    assert seeds[-1] == ("claude", "/tmp/claude")
+    assert mms_command_tools.account_label({"id": "codex-main", "name": "Codex Main"}) == "Codex Main"
+    assert mms_command_tools.account_label({"id": "codex-main"}) == "codex-main"
+
+
 def test_account_status_probe_helper_preserves_delegated_manual_and_cli_states():
     import subprocess
     from types import SimpleNamespace

@@ -908,17 +908,15 @@ def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
 
 
 def _scrub_account_command_env(env):
-    env = env if isinstance(env, dict) else {}
-    for key in list(env.keys()):
-        normalized = str(key or "").strip()
-        if not normalized:
-            continue
-        if any(normalized.startswith(prefix) for prefix in _ACCOUNT_ENV_PREFIX_BLOCKLIST):
-            env.pop(key, None)
-            continue
-        if normalized in _ACCOUNT_PROXY_ENV_KEYS or normalized in _ACCOUNT_FAKE_ENV_KEYS or normalized in _ACCOUNT_CA_ENV_KEYS:
-            env.pop(key, None)
-    return env
+    from mms_command_tools import scrub_account_command_env
+
+    return scrub_account_command_env(
+        env,
+        prefix_blocklist=_ACCOUNT_ENV_PREFIX_BLOCKLIST,
+        proxy_env_keys=_ACCOUNT_PROXY_ENV_KEYS,
+        fake_env_keys=_ACCOUNT_FAKE_ENV_KEYS,
+        ca_env_keys=_ACCOUNT_CA_ENV_KEYS,
+    )
 
 
 def _runtime_httpx_kwargs(runtime, *, target_url=""):
@@ -2660,37 +2658,21 @@ def _runtime_with_vision_sidecar(cfg, runtime):
 
 
 def _account_label(account):
-    return account.get("name", account.get("id", "account"))
+    from mms_command_tools import account_label
+
+    return account_label(account)
 
 
 def _account_env(account):
-    home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
-    cli_name = account.get("cli")
-    if cli_name == "claude":
-        seed_claude_state(home_dir)
-    elif cli_name == "agy":
-        seed_agy_state(home_dir)
-    env = os.environ.copy()
-    _scrub_account_command_env(env)
-    if cli_name == "gemini":
-        seed_gemini_state(home_dir)
-        env["GEMINI_CLI_HOME"] = home_dir
-    else:
-        xdg_config_home = os.path.join(home_dir, ".config")
-        env["HOME"] = home_dir
-        env["XDG_CONFIG_HOME"] = xdg_config_home
-    proxy = str(account.get("proxy", "")).strip()
-    no_proxy = str(account.get("no_proxy", "")).strip()
-    timezone_name = str(account.get("timezone", "")).strip()
-    if proxy:
-        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-            env[key] = proxy
-        for key in ("NO_PROXY", "no_proxy"):
-            env[key] = no_proxy
-    if timezone_name:
-        env["TZ"] = timezone_name
-    env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
-    return env
+    from mms_command_tools import account_env
+
+    return account_env(
+        account,
+        scrub_account_command_env=_scrub_account_command_env,
+        seed_claude_state=seed_claude_state,
+        seed_agy_state=seed_agy_state,
+        seed_gemini_state=seed_gemini_state,
+    )
 
 
 def _account_status_command(cli_name):
