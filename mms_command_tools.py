@@ -791,6 +791,23 @@ def tps_label(tps_value):
     return "很慢"
 
 
+def provider_map(cfg):
+    providers = cfg.get("providers", [])
+    return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
+
+
+def account_map(cfg):
+    accounts = cfg.get("accounts", [])
+    return {account["id"]: account for account in accounts if isinstance(account, dict) and account.get("id")}
+
+
+def accounts_for_cli(cfg, cli_name):
+    return [
+        account for account in account_map(cfg).values()
+        if account.get("cli") == cli_name and account.get("enabled", True)
+    ]
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"

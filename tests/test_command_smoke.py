@@ -607,6 +607,30 @@ def test_model_source_and_speed_labels_preserve_thresholds():
     assert mms_command_tools.tps_label(19.9) == "很慢"
 
 
+def test_runtime_map_helpers_filter_invalid_and_disabled_entries():
+    import mms_command_tools
+
+    cfg = {
+        "providers": [
+            {"id": "relay", "name": "Relay"},
+            {"name": "Missing ID"},
+            "bad",
+        ],
+        "accounts": [
+            {"id": "claude-main", "cli": "claude", "enabled": True},
+            {"id": "claude-off", "cli": "claude", "enabled": False},
+            {"id": "codex-main", "cli": "codex"},
+            {"cli": "claude"},
+            "bad",
+        ],
+    }
+
+    assert list(mms_command_tools.provider_map(cfg)) == ["relay"]
+    assert list(mms_command_tools.account_map(cfg)) == ["claude-main", "claude-off", "codex-main"]
+    assert [item["id"] for item in mms_command_tools.accounts_for_cli(cfg, "claude")] == ["claude-main"]
+    assert [item["id"] for item in mms_command_tools.accounts_for_cli(cfg, "codex")] == ["codex-main"]
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

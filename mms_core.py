@@ -1819,8 +1819,9 @@ def _normalize_cache_config(cfg):
 
 
 def _provider_map(cfg):
-    providers = cfg.get("providers", [])
-    return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
+    from mms_command_tools import provider_map
+
+    return provider_map(cfg)
 
 
 def _model_context_window(model_name):
@@ -1964,15 +1965,15 @@ def _model_capability_summary(model_name):
 
 
 def _account_map(cfg):
-    accounts = cfg.get("accounts", [])
-    return {account["id"]: account for account in accounts if isinstance(account, dict) and account.get("id")}
+    from mms_command_tools import account_map
+
+    return account_map(cfg)
 
 
 def _accounts_for_cli(cfg, cli_name):
-    return [
-        account for account in _account_map(cfg).values()
-        if account.get("cli") == cli_name and account.get("enabled", True)
-    ]
+    from mms_command_tools import accounts_for_cli
+
+    return accounts_for_cli(cfg, cli_name)
 
 
 def get_provider_definition(cfg, provider_id=None):
