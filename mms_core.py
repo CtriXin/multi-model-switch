@@ -2642,46 +2642,26 @@ def _record_usage(runtime, cli_name, model_info):
 
 
 def _record_scene_usage(scene_name, cli_name, model_info):
-    """记录 legacy 场景级启动统计，保留旧 usage.json 兼容。"""
-    if not scene_name or scene_name.startswith("__"):
-        return
-    def _mutate(stats):
-        scene_stats = stats.setdefault("scenes", {})
-        model_name = _resolve_model_name(model_info)
-        entry = scene_stats.setdefault(scene_name, {
-            "launches": 0,
-            "last_used_at": "",
-            "last_cli": "",
-            "last_model": "",
-        })
-        entry["launches"] += 1
-        entry["last_used_at"] = _iso_now()
-        entry["last_cli"] = cli_name
-        entry["last_model"] = model_name
+    from mms_command_tools import record_scene_usage
 
-    _update_usage_stats(_mutate)
+    return record_scene_usage(
+        scene_name,
+        cli_name,
+        model_info,
+        update_usage_stats=_update_usage_stats,
+        iso_now=_iso_now,
+        resolve_model_name=_resolve_model_name,
+    )
 
 
 def _get_scene_usage():
-    """获取上次使用信息（按 CLI 分桶）+ legacy scene counts。"""
-    stats = _load_usage_stats()
-    scene_counts = {}
-    for name, entry in stats.get("scenes", {}).items():
-        scene_counts[name] = entry.get("launches", 0)
-    last_by_cli = {}
-    for cli_name, item in (stats.get("last_by_cli", {}) or {}).items():
-        if not isinstance(item, dict):
-            continue
-        normalized = dict(item)
-        if not isinstance(normalized.get("runtime_hint"), dict):
-            model_name = _resolve_model_name(
-                normalized.get("model_info") if isinstance(normalized.get("model_info"), dict) else normalized.get("model")
-            )
-            inferred = _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name)
-            if inferred:
-                normalized["runtime_hint"] = inferred
-        last_by_cli[cli_name] = normalized
-    return last_by_cli, scene_counts
+    from mms_command_tools import get_scene_usage
+
+    return get_scene_usage(
+        load_usage_stats=_load_usage_stats,
+        resolve_model_name=_resolve_model_name,
+        infer_runtime_hint_from_usage_stats=_infer_runtime_hint_from_usage_stats,
+    )
 
 
 def _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):

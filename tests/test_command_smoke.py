@@ -922,6 +922,12 @@ def test_usage_runtime_helpers_filter_sort_and_summarize_sources():
     import mms_command_tools
 
     stats = {
+        "last_by_cli": {
+            "claude": {
+                "cli": "claude",
+                "model_info": {"model": "gpt-5.5"},
+            }
+        },
         "sources": {
             "old": {
                 "runtime_kind": "provider",
@@ -1418,7 +1424,35 @@ def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
         "gpt-5.5": "2026-05-28T10:00:00Z"
     }
     assert recorded["last_by_cli"]["codex"]["runtime_hint"] == {"runtime_id": "relay", "auth_mode": "api_key"}
+    scene_recorded = {}
+    mms_command_tools.record_scene_usage(
+        "legacy-scene",
+        "claude",
+        {"model": "claude-sonnet-4.5"},
+        update_usage_stats=lambda mutator: mutator(scene_recorded),
+        iso_now=lambda: "2026-05-28T11:00:00Z",
+    )
+    mms_command_tools.record_scene_usage(
+        "__internal",
+        "claude",
+        {"model": "ignore"},
+        update_usage_stats=lambda mutator: mutator(scene_recorded),
+        iso_now=lambda: "2026-05-28T11:01:00Z",
+    )
+    assert scene_recorded["scenes"]["legacy-scene"] == {
+        "launches": 1,
+        "last_used_at": "2026-05-28T11:00:00Z",
+        "last_cli": "claude",
+        "last_model": "claude-sonnet-4.5",
+    }
     stats = {
+        "scenes": {"legacy-scene": scene_recorded["scenes"]["legacy-scene"]},
+        "last_by_cli": {
+            "claude": {
+                "cli": "claude",
+                "model_info": {"model": "gpt-5.5"},
+            }
+        },
         "sources": {
             "old": {
                 "runtime_kind": "provider",
@@ -1450,6 +1484,9 @@ def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
         "account_id": "claude-main",
     }
     assert mms_command_tools.infer_runtime_hint_from_usage_stats(stats, "claude", "missing-model") == {}
+    last_by_cli, scene_counts = mms_command_tools.get_scene_usage(load_usage_stats=lambda: stats)
+    assert scene_counts == {"legacy-scene": 1}
+    assert last_by_cli["claude"]["runtime_hint"]["account_id"] == "claude-main"
 
 
 def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths():

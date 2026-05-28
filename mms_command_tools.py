@@ -2316,6 +2316,35 @@ def record_usage(
     update_usage_stats(_mutate)
 
 
+def record_scene_usage(
+    scene_name,
+    cli_name,
+    model_info,
+    *,
+    update_usage_stats,
+    iso_now,
+    resolve_model_name=resolve_model_name,
+):
+    if not scene_name or str(scene_name).startswith("__"):
+        return
+
+    def _mutate(stats):
+        scene_stats = stats.setdefault("scenes", {})
+        model_name = resolve_model_name(model_info)
+        entry = scene_stats.setdefault(scene_name, {
+            "launches": 0,
+            "last_used_at": "",
+            "last_cli": "",
+            "last_model": "",
+        })
+        entry["launches"] += 1
+        entry["last_used_at"] = iso_now()
+        entry["last_cli"] = cli_name
+        entry["last_model"] = model_name
+
+    update_usage_stats(_mutate)
+
+
 def infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
     latest_entry = None
     latest_at = ""
@@ -2354,6 +2383,32 @@ def infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
     else:
         return {}
     return hint
+
+
+def get_scene_usage(
+    *,
+    load_usage_stats,
+    resolve_model_name=resolve_model_name,
+    infer_runtime_hint_from_usage_stats=infer_runtime_hint_from_usage_stats,
+):
+    stats = load_usage_stats()
+    scene_counts = {}
+    for name, entry in stats.get("scenes", {}).items():
+        scene_counts[name] = entry.get("launches", 0)
+    last_by_cli = {}
+    for cli_name, item in (stats.get("last_by_cli", {}) or {}).items():
+        if not isinstance(item, dict):
+            continue
+        normalized = dict(item)
+        if not isinstance(normalized.get("runtime_hint"), dict):
+            model_name = resolve_model_name(
+                normalized.get("model_info") if isinstance(normalized.get("model_info"), dict) else normalized.get("model")
+            )
+            inferred = infer_runtime_hint_from_usage_stats(stats, cli_name, model_name)
+            if inferred:
+                normalized["runtime_hint"] = inferred
+        last_by_cli[cli_name] = normalized
+    return last_by_cli, scene_counts
 
 
 def resolve_last_used_runtime(
