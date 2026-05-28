@@ -133,6 +133,17 @@ def normalize_config_sections(
     return cfg
 
 
+def load_runtime_config(*, load_config, apply_local_overrides):
+    cfg = load_config()
+    if cfg is None:
+        return None
+    return apply_local_overrides(cfg)
+
+
+def config_write_target_path(*, active_config_path, config_path):
+    return active_config_path() or config_path
+
+
 def config_command_hint(*, current_command):
     return f"{current_command()} config api.edit"
 

@@ -179,6 +179,38 @@ def test_normalize_config_sections_preserves_normalizer_order(monkeypatch):
     assert mms_core._normalize_config_sections({"chain": []})["chain"] == order
 
 
+def test_runtime_config_and_write_target_helpers_preserve_delegation(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    assert mms_command_tools.load_runtime_config(
+        load_config=lambda: None,
+        apply_local_overrides=lambda _cfg: {"should": "not run"},
+    ) is None
+    assert mms_command_tools.load_runtime_config(
+        load_config=lambda: {"base": True},
+        apply_local_overrides=lambda cfg: {**cfg, "override": True},
+    ) == {"base": True, "override": True}
+    assert mms_command_tools.config_write_target_path(
+        active_config_path=lambda: "/tmp/active/config.toml",
+        config_path="/tmp/default/config.toml",
+    ) == "/tmp/active/config.toml"
+    assert mms_command_tools.config_write_target_path(
+        active_config_path=lambda: "",
+        config_path="/tmp/default/config.toml",
+    ) == "/tmp/default/config.toml"
+
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"base": True})
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda cfg: {**cfg, "wrapped": True})
+    assert mms_core.load_runtime_config() == {"base": True, "wrapped": True}
+
+    monkeypatch.setattr(mms_core, "_active_config_path", lambda: "/tmp/active/config.toml")
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", "/tmp/default/config.toml")
+    assert mms_core._config_write_target_path() == "/tmp/active/config.toml"
+    monkeypatch.setattr(mms_core, "_active_config_path", lambda: "")
+    assert mms_core._config_write_target_path() == "/tmp/default/config.toml"
+
+
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 

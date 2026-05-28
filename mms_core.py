@@ -1704,14 +1704,15 @@ def load_config(*, persist=False):
 
 
 def load_runtime_config():
-    cfg = load_config()
-    if cfg is None:
-        return None
-    return apply_local_overrides(cfg)
+    from mms_command_tools import load_runtime_config as load_runtime_config_helper
+
+    return load_runtime_config_helper(load_config=load_config, apply_local_overrides=apply_local_overrides)
 
 
 def _config_write_target_path():
-    return _active_config_path() or CONFIG_PATH
+    from mms_command_tools import config_write_target_path
+
+    return config_write_target_path(active_config_path=_active_config_path, config_path=CONFIG_PATH)
 
 
 def _config_lock_path(config_path=None):
