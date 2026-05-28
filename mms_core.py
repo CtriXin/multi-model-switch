@@ -5029,132 +5029,51 @@ def _rescue_handover_report_payload(handover, fallback_model):
 
 
 def _registry_source_staleness_report_payload(summary):
-    summary = summary if isinstance(summary, dict) else {}
-    rows = [
-        ("DB", summary.get("db_path") or "-"),
-        (_L("到期 Source", "sources due"), f"{summary.get('due_count')} / {summary.get('source_count')}"),
-    ]
-    for idx, item in enumerate((summary.get("sources") or [])[:5], start=1):
-        due = _L("到期", "due") if item.get("due") else _L("未到期", "not due")
-        rows.append(
-            (
-                f"Source {idx}",
-                f"{due} · {item.get('reason') or '-'} · {item.get('checked_at') or '-'} · {item.get('source_path') or '-'}",
-            )
-        )
-    hidden = max(0, len(summary.get("sources") or []) - 5)
-    if hidden:
-        rows.append((_L("更多 Source", "more sources"), hidden))
-    return _L("模型真源 Source Staleness", "Registry Source Staleness"), rows, ""
+    from mms_command_tools import registry_source_staleness_report_payload
+
+    return registry_source_staleness_report_payload(summary, localize=_L)
 
 
 def _registry_refresh_sources_report_payload(summary):
-    summary = summary if isinstance(summary, dict) else {}
-    return (
-        _L("刷新 Sources 完成", "Refresh Sources Complete"),
-        [
-            ("DB", summary.get("db_path") or "-"),
-            (_L("导入", "imported"), summary.get("imported_count")),
-            (_L("跳过", "skipped"), summary.get("skipped_count", 0)),
-            (_L("模型", "models"), summary.get("model_count")),
-            (_L("事实", "facts"), summary.get("fact_count")),
-        ],
-        _L("只写 source truth / candidate evidence；不改变当前 runtime defaults。", "Writes source truth / candidate evidence only; runtime defaults unchanged."),
-    )
+    from mms_command_tools import registry_refresh_sources_report_payload
+
+    return registry_refresh_sources_report_payload(summary, localize=_L)
 
 
 def _registry_scheduled_refresh_report_payload(summary):
-    summary = summary if isinstance(summary, dict) else {}
-    source_refresh = summary.get("source_refresh") if isinstance(summary.get("source_refresh"), dict) else {}
-    openrouter_fetch = summary.get("openrouter_fetch") if isinstance(summary.get("openrouter_fetch"), dict) else {}
-    return (
-        _L("定时刷新结果", "Scheduled Refresh Result"),
-        [
-            ("DB", summary.get("db_path") or "-"),
-            ("Dry Run", summary.get("dry_run")),
-            (_L("到期 Source", "source due"), summary.get("source_due_count")),
-            (_L("导入 Source", "source imported"), source_refresh.get("imported_count", 0)),
-            (_L("OpenRouter 到期", "OpenRouter due"), summary.get("openrouter_due")),
-            ("OpenRouter", openrouter_fetch.get("reason") or _L("No Network 模式未拉取", "not fetched in no-network mode")),
-        ],
-        _L("安全 schedule wrapper：不接入 startup，不发布 latest-approved。", "Safe schedule wrapper: no startup hook and no latest-approved publish."),
-    )
+    from mms_command_tools import registry_scheduled_refresh_report_payload
+
+    return registry_scheduled_refresh_report_payload(summary, localize=_L)
 
 
 def _registry_openrouter_fetch_report_payload(summary):
-    summary = summary if isinstance(summary, dict) else {}
-    return (
-        _L("OpenRouter Catalog 拉取完成", "OpenRouter Catalog Fetch Complete"),
-        [
-            ("DB", summary.get("db_path") or "-"),
-            ("Snapshot", summary.get("snapshot_id") or "-"),
-            (_L("模型", "models"), summary.get("model_count")),
-        ],
-        _L("只写 provider_catalog source snapshot；不改变当前 runtime defaults。", "Writes provider_catalog source snapshot only; runtime defaults unchanged."),
-    )
+    from mms_command_tools import registry_openrouter_fetch_report_payload
+
+    return registry_openrouter_fetch_report_payload(summary, localize=_L)
 
 
 def _registry_openrouter_diff_report_payload(summary):
-    summary = summary if isinstance(summary, dict) else {}
-    rows = [
-        (_L("变化", "changes"), f"{summary.get('change_count')} stored={summary.get('stored_count')}"),
-        (_L("缺少 reference", "missing reference"), summary.get("missing_reference_count")),
-        (_L("未追踪 catalog", "untracked catalog"), summary.get("untracked_catalog_count")),
-    ]
-    for idx, item in enumerate((summary.get("changes") or [])[:5], start=1):
-        rows.append(
-            (
-                f"Change {idx}",
-                f"{item.get('field_key') or '-'} · {item.get('model_key') or '-'} -> {item.get('provider_model_id') or '-'}",
-            )
-        )
-    hidden = max(0, len(summary.get("changes") or []) - 5)
-    if hidden:
-        rows.append((_L("更多变化", "more changes"), hidden))
-    return (
-        _L("OpenRouter Candidate Diff", "OpenRouter Candidate Diff"),
-        rows,
-        _L("只写 candidate_change evidence；不改变当前 runtime defaults。", "Writes candidate_change evidence only; runtime defaults unchanged."),
-    )
+    from mms_command_tools import registry_openrouter_diff_report_payload
+
+    return registry_openrouter_diff_report_payload(summary, localize=_L)
 
 
 def _registry_publish_approved_report_payload(summary):
-    summary = summary if isinstance(summary, dict) else {}
-    return (
-        _L("发布 Approved Bundle 完成", "Publish Approved Bundle Complete"),
-        [
-            ("Manifest", summary.get("manifest_path") or "-"),
-            ("Bundle", summary.get("bundle_revision") or "-"),
-        ],
-        _L("发布 generated/latest-approved bundle；不改 root aliases，不改 runtime defaults。", "Publishes generated/latest-approved bundle; root aliases and runtime defaults unchanged."),
-    )
+    from mms_command_tools import registry_publish_approved_report_payload
+
+    return registry_publish_approved_report_payload(summary, localize=_L)
 
 
 def _registry_verify_approved_report_payload(summary):
-    summary = summary if isinstance(summary, dict) else {}
-    manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
-    files = summary.get("verified_files") if isinstance(summary.get("verified_files"), dict) else {}
-    return (
-        _L("Latest-approved hash 验证完成", "Latest-approved hash verified"),
-        [
-            ("Manifest", summary.get("manifest_path") or "-"),
-            ("Bundle", manifest.get("bundle_revision") or "-"),
-            (_L("文件", "files"), len(files)),
-        ],
-        "",
-    )
+    from mms_command_tools import registry_verify_approved_report_payload
+
+    return registry_verify_approved_report_payload(summary, localize=_L)
 
 
 def _registry_doctor_report_payload(status):
-    status = status if isinstance(status, dict) else {}
-    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
-    rows = [
-        ("DB", status.get("db_path") or "-"),
-        ("user_version", status.get("user_version") or "-"),
-    ]
-    for key in sorted(counts):
-        rows.append((key, counts[key]))
-    return _L("Registry Doctor / 状态", "Registry Doctor / Status"), rows, ""
+    from mms_command_tools import registry_doctor_report_payload
+
+    return registry_doctor_report_payload(status, localize=_L)
 
 
 def _about_tui_payload(about_snapshot):

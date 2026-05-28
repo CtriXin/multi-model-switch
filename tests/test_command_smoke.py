@@ -309,6 +309,98 @@ def test_rescue_report_payload_helpers_preserve_safe_local_outputs():
     assert "不切换当前 session" in handover_note
 
 
+def test_registry_report_payload_helpers_preserve_compact_outputs():
+    import mms_command_tools
+
+    localize = lambda zh, en: zh
+    source_title, source_rows, _source_note = mms_command_tools.registry_source_staleness_report_payload(
+        {
+            "db_path": "/tmp/model-registry.sqlite",
+            "due_count": 2,
+            "source_count": 6,
+            "sources": [
+                {"due": True, "reason": "age", "checked_at": "2026-05-28", "source_path": f"/tmp/source-{idx}"}
+                for idx in range(6)
+            ],
+        },
+        localize=localize,
+    )
+    refresh_title, refresh_rows, refresh_note = mms_command_tools.registry_refresh_sources_report_payload(
+        {"db_path": "/tmp/db.sqlite", "imported_count": 1, "model_count": 2, "fact_count": 3},
+        localize=localize,
+    )
+    scheduled_title, scheduled_rows, scheduled_note = mms_command_tools.registry_scheduled_refresh_report_payload(
+        {
+            "db_path": "/tmp/db.sqlite",
+            "dry_run": True,
+            "source_due_count": 2,
+            "source_refresh": {"imported_count": 0},
+            "openrouter_due": False,
+            "openrouter_fetch": {},
+        },
+        localize=localize,
+    )
+    fetch_title, fetch_rows, fetch_note = mms_command_tools.registry_openrouter_fetch_report_payload(
+        {"db_path": "/tmp/db.sqlite", "snapshot_id": "snap-1", "model_count": 9},
+        localize=localize,
+    )
+    diff_title, diff_rows, diff_note = mms_command_tools.registry_openrouter_diff_report_payload(
+        {
+            "change_count": 6,
+            "stored_count": 6,
+            "missing_reference_count": 1,
+            "untracked_catalog_count": 3,
+            "changes": [
+                {"field_key": "context_window", "model_key": f"gpt-{idx}", "provider_model_id": f"openai/gpt-{idx}"}
+                for idx in range(6)
+            ],
+        },
+        localize=localize,
+    )
+    publish_title, publish_rows, publish_note = mms_command_tools.registry_publish_approved_report_payload(
+        {"manifest_path": "/tmp/manifest.json", "bundle_revision": "rev-1"},
+        localize=localize,
+    )
+    verify_title, verify_rows, verify_note = mms_command_tools.registry_verify_approved_report_payload(
+        {
+            "manifest_path": "/tmp/manifest.json",
+            "manifest": {"bundle_revision": "rev-1"},
+            "verified_files": {"a": "hash", "b": "hash"},
+        },
+        localize=localize,
+    )
+    doctor_title, doctor_rows, doctor_note = mms_command_tools.registry_doctor_report_payload(
+        {"db_path": "/tmp/db.sqlite", "user_version": 1, "counts": {"models": 2, "facts": 3}},
+        localize=localize,
+    )
+
+    assert source_title == "模型真源 Source Staleness"
+    assert ("到期 Source", "2 / 6") in source_rows
+    assert ("更多 Source", 1) in source_rows
+    assert refresh_title == "刷新 Sources 完成"
+    assert ("跳过", 0) in refresh_rows
+    assert "不改变当前 runtime defaults" in refresh_note
+    assert scheduled_title == "定时刷新结果"
+    assert ("OpenRouter", "No Network 模式未拉取") in scheduled_rows
+    assert "不接入 startup" in scheduled_note
+    assert fetch_title == "OpenRouter Catalog 拉取完成"
+    assert ("Snapshot", "snap-1") in fetch_rows
+    assert "provider_catalog source snapshot" in fetch_note
+    assert diff_title == "OpenRouter Candidate Diff"
+    assert ("缺少 reference", 1) in diff_rows
+    assert ("更多变化", 1) in diff_rows
+    assert "candidate_change evidence" in diff_note
+    assert publish_title == "发布 Approved Bundle 完成"
+    assert ("Bundle", "rev-1") in publish_rows
+    assert "不改 root aliases" in publish_note
+    assert verify_title == "Latest-approved hash 验证完成"
+    assert ("文件", 2) in verify_rows
+    assert verify_note == ""
+    assert doctor_title == "Registry Doctor / 状态"
+    assert doctor_rows == [("DB", "/tmp/db.sqlite"), ("user_version", 1), ("facts", 3), ("models", 2)]
+    assert doctor_note == ""
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

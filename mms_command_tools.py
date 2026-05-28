@@ -319,6 +319,135 @@ def rescue_handover_report_payload(handover, fallback_model, *, localize):
     )
 
 
+def registry_source_staleness_report_payload(summary, *, localize):
+    summary = summary if isinstance(summary, dict) else {}
+    rows = [
+        ("DB", summary.get("db_path") or "-"),
+        (localize("到期 Source", "sources due"), f"{summary.get('due_count')} / {summary.get('source_count')}"),
+    ]
+    for idx, item in enumerate((summary.get("sources") or [])[:5], start=1):
+        due = localize("到期", "due") if item.get("due") else localize("未到期", "not due")
+        rows.append(
+            (
+                f"Source {idx}",
+                f"{due} · {item.get('reason') or '-'} · {item.get('checked_at') or '-'} · {item.get('source_path') or '-'}",
+            )
+        )
+    hidden = max(0, len(summary.get("sources") or []) - 5)
+    if hidden:
+        rows.append((localize("更多 Source", "more sources"), hidden))
+    return localize("模型真源 Source Staleness", "Registry Source Staleness"), rows, ""
+
+
+def registry_refresh_sources_report_payload(summary, *, localize):
+    summary = summary if isinstance(summary, dict) else {}
+    return (
+        localize("刷新 Sources 完成", "Refresh Sources Complete"),
+        [
+            ("DB", summary.get("db_path") or "-"),
+            (localize("导入", "imported"), summary.get("imported_count")),
+            (localize("跳过", "skipped"), summary.get("skipped_count", 0)),
+            (localize("模型", "models"), summary.get("model_count")),
+            (localize("事实", "facts"), summary.get("fact_count")),
+        ],
+        localize("只写 source truth / candidate evidence；不改变当前 runtime defaults。", "Writes source truth / candidate evidence only; runtime defaults unchanged."),
+    )
+
+
+def registry_scheduled_refresh_report_payload(summary, *, localize):
+    summary = summary if isinstance(summary, dict) else {}
+    source_refresh = summary.get("source_refresh") if isinstance(summary.get("source_refresh"), dict) else {}
+    openrouter_fetch = summary.get("openrouter_fetch") if isinstance(summary.get("openrouter_fetch"), dict) else {}
+    return (
+        localize("定时刷新结果", "Scheduled Refresh Result"),
+        [
+            ("DB", summary.get("db_path") or "-"),
+            ("Dry Run", summary.get("dry_run")),
+            (localize("到期 Source", "source due"), summary.get("source_due_count")),
+            (localize("导入 Source", "source imported"), source_refresh.get("imported_count", 0)),
+            (localize("OpenRouter 到期", "OpenRouter due"), summary.get("openrouter_due")),
+            ("OpenRouter", openrouter_fetch.get("reason") or localize("No Network 模式未拉取", "not fetched in no-network mode")),
+        ],
+        localize("安全 schedule wrapper：不接入 startup，不发布 latest-approved。", "Safe schedule wrapper: no startup hook and no latest-approved publish."),
+    )
+
+
+def registry_openrouter_fetch_report_payload(summary, *, localize):
+    summary = summary if isinstance(summary, dict) else {}
+    return (
+        localize("OpenRouter Catalog 拉取完成", "OpenRouter Catalog Fetch Complete"),
+        [
+            ("DB", summary.get("db_path") or "-"),
+            ("Snapshot", summary.get("snapshot_id") or "-"),
+            (localize("模型", "models"), summary.get("model_count")),
+        ],
+        localize("只写 provider_catalog source snapshot；不改变当前 runtime defaults。", "Writes provider_catalog source snapshot only; runtime defaults unchanged."),
+    )
+
+
+def registry_openrouter_diff_report_payload(summary, *, localize):
+    summary = summary if isinstance(summary, dict) else {}
+    rows = [
+        (localize("变化", "changes"), f"{summary.get('change_count')} stored={summary.get('stored_count')}"),
+        (localize("缺少 reference", "missing reference"), summary.get("missing_reference_count")),
+        (localize("未追踪 catalog", "untracked catalog"), summary.get("untracked_catalog_count")),
+    ]
+    for idx, item in enumerate((summary.get("changes") or [])[:5], start=1):
+        rows.append(
+            (
+                f"Change {idx}",
+                f"{item.get('field_key') or '-'} · {item.get('model_key') or '-'} -> {item.get('provider_model_id') or '-'}",
+            )
+        )
+    hidden = max(0, len(summary.get("changes") or []) - 5)
+    if hidden:
+        rows.append((localize("更多变化", "more changes"), hidden))
+    return (
+        localize("OpenRouter Candidate Diff", "OpenRouter Candidate Diff"),
+        rows,
+        localize("只写 candidate_change evidence；不改变当前 runtime defaults。", "Writes candidate_change evidence only; runtime defaults unchanged."),
+    )
+
+
+def registry_publish_approved_report_payload(summary, *, localize):
+    summary = summary if isinstance(summary, dict) else {}
+    return (
+        localize("发布 Approved Bundle 完成", "Publish Approved Bundle Complete"),
+        [
+            ("Manifest", summary.get("manifest_path") or "-"),
+            ("Bundle", summary.get("bundle_revision") or "-"),
+        ],
+        localize("发布 generated/latest-approved bundle；不改 root aliases，不改 runtime defaults。", "Publishes generated/latest-approved bundle; root aliases and runtime defaults unchanged."),
+    )
+
+
+def registry_verify_approved_report_payload(summary, *, localize):
+    summary = summary if isinstance(summary, dict) else {}
+    manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
+    files = summary.get("verified_files") if isinstance(summary.get("verified_files"), dict) else {}
+    return (
+        localize("Latest-approved hash 验证完成", "Latest-approved hash verified"),
+        [
+            ("Manifest", summary.get("manifest_path") or "-"),
+            ("Bundle", manifest.get("bundle_revision") or "-"),
+            (localize("文件", "files"), len(files)),
+        ],
+        "",
+    )
+
+
+def registry_doctor_report_payload(status, *, localize):
+    status = status if isinstance(status, dict) else {}
+    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+    rows = [
+        ("DB", status.get("db_path") or "-"),
+        ("user_version", status.get("user_version") or "-"),
+    ]
+    for key in sorted(counts):
+        rows.append((key, counts[key]))
+    return localize("Registry Doctor / 状态", "Registry Doctor / Status"), rows, ""
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"
