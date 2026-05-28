@@ -3786,6 +3786,16 @@ def _normalize_session_mcp_server_spec(name, spec, *, env=None):
     return normalized
 
 
+def _mcp_server_spec_has_entrypoint(spec):
+    if not isinstance(spec, dict):
+        return False
+    url = spec.get("url")
+    if isinstance(url, str) and url.strip():
+        return True
+    command = str(spec.get("command") or "").strip()
+    return bool(command)
+
+
 def _normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=None, env=None):
     filtered = _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces)
     normalized = {}
@@ -5141,6 +5151,85 @@ def _default_session_mcp_servers():
     return servers
 
 
+def _installed_claude_plugin_paths():
+    plugins_root = _real_user_path(".claude", "plugins")
+    installed_path = os.path.join(plugins_root, "installed_plugins.json")
+    loaded = _load_json_dict_unlocked(installed_path)
+    plugins = loaded.get("plugins") if isinstance(loaded, dict) else {}
+    if not isinstance(plugins, dict):
+        return []
+
+    resolved_paths = []
+    seen = set()
+    for records in plugins.values():
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            install_path = os.path.abspath(
+                os.path.expanduser(str(record.get("installPath") or "").strip())
+            )
+            if not install_path or install_path in seen:
+                continue
+            if not os.path.isdir(install_path):
+                continue
+            if not _path_under(install_path, plugins_root):
+                continue
+            seen.add(install_path)
+            resolved_paths.append(install_path)
+    return resolved_paths
+
+
+def _installed_claude_plugin_mcp_manifest_paths(install_path):
+    install_root = os.path.abspath(os.path.expanduser(str(install_path or "").strip()))
+    if not install_root:
+        return []
+
+    candidates = []
+    metadata_paths = (
+        os.path.join(install_root, ".cursor-plugin", "plugin.json"),
+        os.path.join(install_root, ".claude-plugin", "plugin.json"),
+    )
+    for metadata_path in metadata_paths:
+        metadata = _load_json_dict_unlocked(metadata_path)
+        manifest_rel = metadata.get("mcpServers")
+        if not isinstance(manifest_rel, str) or not manifest_rel.strip():
+            continue
+        manifest_path = os.path.abspath(os.path.join(install_root, manifest_rel.strip()))
+        if _path_under(manifest_path, install_root):
+            candidates.append(manifest_path)
+
+    candidates.append(os.path.join(install_root, ".mcp.json"))
+
+    manifests = []
+    seen = set()
+    for candidate in candidates:
+        normalized = os.path.abspath(os.path.expanduser(str(candidate or "").strip()))
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        if os.path.isfile(normalized):
+            manifests.append(normalized)
+    return manifests
+
+
+def _installed_claude_plugin_mcp_servers():
+    servers = {}
+    for install_path in _installed_claude_plugin_paths():
+        for manifest_path in _installed_claude_plugin_mcp_manifest_paths(install_path):
+            payload = _load_json_dict_unlocked(manifest_path)
+            plugin_servers = payload.get("mcpServers") if isinstance(payload, dict) else {}
+            if not isinstance(plugin_servers, dict):
+                continue
+            for name, spec in plugin_servers.items():
+                key = str(name or "").strip()
+                if not key or key in servers or not _mcp_server_spec_has_entrypoint(spec):
+                    continue
+                servers[key] = copy.deepcopy(spec)
+    return servers
+
+
 def _resolve_hive_root(module_path=None):
     candidates = []
     explicit = str(os.environ.get("MMS_HIVE_ROOT") or "").strip()
@@ -5327,7 +5416,7 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
     if isinstance(mcp_servers, dict):
         for name in allowlist:
             spec = mcp_servers.get(name)
-            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+            if _mcp_server_spec_has_entrypoint(spec):
                 inherited[name] = copy.deepcopy(spec)
 
     fallback = _default_session_mcp_servers()
@@ -5335,6 +5424,8 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
         if name not in inherited and isinstance(fallback.get(name), dict):
             inherited[name] = copy.deepcopy(fallback[name])
     if allow_execution_surfaces:
+        for name, spec in _installed_claude_plugin_mcp_servers().items():
+            inherited.setdefault(name, copy.deepcopy(spec))
         hive_spec = _default_hive_session_mcp_server()
         if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
             inherited.setdefault("hive", copy.deepcopy(hive_spec))
@@ -5369,12 +5460,14 @@ def _inject_managed_mcp_servers_into_claude_state(
     allowlist = _session_managed_mcp_server_allowlist(
         allow_execution_surfaces=allow_execution_surfaces
     )
+    managed_names = set(allowlist)
+    managed_names.update(merged.keys())
     if isinstance(existing, dict):
-        for name in allowlist:
+        for name in managed_names:
             if _session_surface_disabled(disabled_session_surfaces, "mcp", name):
                 continue
             spec = existing.get(name)
-            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+            if _mcp_server_spec_has_entrypoint(spec):
                 merged[name] = copy.deepcopy(spec)
     merged = _normalize_session_mcp_servers(merged, disabled_session_surfaces=disabled_session_surfaces)
     if merged:
@@ -8120,23 +8213,17 @@ def _strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces=None):
 
 def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_surfaces=None):
     """Translate Claude-style mcpServers into Codex [mcp_servers.*] sections."""
-    import json as _json
     import re
 
     config_text = _strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces)
 
     real_json = _real_user_path(".claude.json")
-    if not os.path.exists(real_json):
-        return config_text
-
-    try:
-        with open(real_json, "r", encoding="utf-8") as f:
-            loaded = _json.load(f)
-        servers = loaded.get("mcpServers", {}) if isinstance(loaded, dict) else {}
-    except Exception:
-        return config_text
+    loaded = _load_json_dict_unlocked(real_json)
+    servers = loaded.get("mcpServers", {}) if isinstance(loaded, dict) else {}
 
     servers = copy.deepcopy(servers) if isinstance(servers, dict) else {}
+    for name, spec in _installed_claude_plugin_mcp_servers().items():
+        servers.setdefault(name, copy.deepcopy(spec))
     hive_spec = _default_hive_session_mcp_server()
     if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
         servers.setdefault("hive", hive_spec)
