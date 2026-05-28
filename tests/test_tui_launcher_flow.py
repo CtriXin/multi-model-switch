@@ -21,6 +21,7 @@ from mms_tui_launcher_flow import (
     handle_tui_registry_settings_action,
     handle_tui_routes_export_settings_action,
     handle_tui_selected_model_action,
+    handle_tui_submodel_action,
     last_used_model_info,
     normalize_confirm_result,
     official_account_profile_context,
@@ -708,6 +709,53 @@ def test_handle_tui_family_action_handles_empty_cancel_interrupt_and_missing_las
         **base_kwargs,
         select_submodel_tui=lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
     ) == {"status": "interrupt", "families_dirty": False}
+
+
+def test_handle_tui_submodel_action_uses_family_name_and_copies_action_data() -> None:
+    trace_records = []
+    runtime = {"id": "p1"}
+    action_data = {"model": "gpt-5.4", "_family_name": "GPT", "priority_changes": [{"id": "p1"}]}
+
+    result = handle_tui_submodel_action(
+        {"cfg": True},
+        "codex",
+        action_data,
+        {"id": "current"},
+        ["gpt-5.4"],
+        apply_priority_changes=lambda _cfg, changes: bool(changes),
+        resolve_best_provider=lambda *_args, **_kwargs: (runtime, None),
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    )
+
+    assert result == {
+        "status": "launch",
+        "model_info": {"model": "gpt-5.4"},
+        "runtime": runtime,
+        "families_dirty": True,
+    }
+    assert action_data == {"model": "gpt-5.4", "_family_name": "GPT", "priority_changes": [{"id": "p1"}]}
+    assert trace_records == [(('family "GPT"',), {"cli": "codex", "model": "gpt-5.4", "provider": "p1"})]
+
+
+def test_handle_tui_submodel_action_defaults_family_name() -> None:
+    result = handle_tui_submodel_action(
+        {},
+        "claude",
+        {"model": "missing"},
+        {},
+        [],
+        apply_priority_changes=lambda *_args: False,
+        resolve_best_provider=lambda *_args, **_kwargs: (None, None),
+        trace_record=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    )
+
+    assert result == {
+        "status": "continue",
+        "message": "没有可用 provider 承载 missing",
+        "families_dirty": False,
+    }
 
 
 def test_opencode_profile_launch_context_traces_resolved_runtime() -> None:

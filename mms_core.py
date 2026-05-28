@@ -5387,18 +5387,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── 品类选择 → 子模型 ──
         elif action_type == "submodel":
-            selected = dict(action_data or {})
-            family_name = selected.pop("_family_name", "模型")
-
-            selected_action = tui_flow.handle_tui_selected_model_action(
+            selected_action = tui_flow.handle_tui_submodel_action(
                 current_cfg,
                 cli,
-                selected,
-                family_name,
+                action_data,
                 current_provider,
                 default_models,
                 apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
-                selected_model_launch_context=tui_flow.selected_model_launch_context,
                 resolve_best_provider=_resolve_best_provider,
                 trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,

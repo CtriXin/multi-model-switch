@@ -595,6 +595,35 @@ def handle_tui_family_action(
     )
 
 
+def handle_tui_submodel_action(
+    cfg,
+    cli_name,
+    action_data,
+    current_provider,
+    default_models,
+    *,
+    apply_priority_changes,
+    resolve_best_provider,
+    trace_record,
+    trace_runtime_choice,
+):
+    selected = dict(action_data or {})
+    family_name = selected.pop("_family_name", "模型")
+    return handle_tui_selected_model_action(
+        cfg,
+        cli_name,
+        selected,
+        family_name,
+        current_provider,
+        default_models,
+        apply_priority_changes=apply_priority_changes,
+        selected_model_launch_context=selected_model_launch_context,
+        resolve_best_provider=resolve_best_provider,
+        trace_record=trace_record,
+        trace_runtime_choice=trace_runtime_choice,
+    )
+
+
 def opencode_profile_launch_context(
     cfg,
     current_provider,
