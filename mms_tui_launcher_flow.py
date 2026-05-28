@@ -1331,3 +1331,19 @@ def apply_claude_network_guard_preview(runtime, cli_name, *, network_guard_previ
             "no_proxy_conflicts": [],
         }
     return runtime
+
+
+def enforce_confirm_bypass_network_guard(runtime, cli_name, bypass, *, network_guard_enforcer_loader):
+    if not (
+        bypass
+        and cli_name == "claude"
+        and runtime
+        and runtime.get("auth_mode") in {"oauth", "api_key"}
+    ):
+        return {"status": "continue"}
+    enforce_claude_network_guard_or_exit, claude_bypass_requires_proxy = network_guard_enforcer_loader()
+    enforce_claude_network_guard_or_exit(
+        runtime,
+        require_proxy=claude_bypass_requires_proxy(runtime),
+    )
+    return {"status": "continue"}

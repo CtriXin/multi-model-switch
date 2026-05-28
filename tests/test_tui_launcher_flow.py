@@ -9,6 +9,7 @@ from mms_tui_launcher_flow import (
     build_confirm_capability_context,
     confirm_agent_pack,
     confirm_tui_options,
+    enforce_confirm_bypass_network_guard,
     ensure_cli_installed_for_launch,
     handle_tui_account_mgmt_settings_action,
     handle_tui_about_settings_action,
@@ -149,6 +150,40 @@ def test_ensure_cli_installed_for_launch_skips_or_offers_install() -> None:
         ("check", "opencode"),
         ("offer", "opencode"),
     ]
+
+
+def test_enforce_confirm_bypass_network_guard_runs_only_for_claude_auth_bypass() -> None:
+    calls = []
+    runtime = {"auth_mode": "api_key"}
+
+    assert enforce_confirm_bypass_network_guard(
+        runtime,
+        "claude",
+        True,
+        network_guard_enforcer_loader=lambda: (
+            lambda runtime_arg, *, require_proxy: calls.append(("enforce", runtime_arg, require_proxy)),
+            lambda runtime_arg: calls.append(("requires_proxy", runtime_arg)) or True,
+        ),
+    ) == {"status": "continue"}
+
+    assert calls == [
+        ("requires_proxy", runtime),
+        ("enforce", runtime, True),
+    ]
+
+    skip_cases = [
+        ("claude", False, {"auth_mode": "api_key"}),
+        ("codex", True, {"auth_mode": "api_key"}),
+        ("claude", True, {"auth_mode": "managed"}),
+        ("claude", True, None),
+    ]
+    for cli_name, bypass, case_runtime in skip_cases:
+        assert enforce_confirm_bypass_network_guard(
+            case_runtime,
+            cli_name,
+            bypass,
+            network_guard_enforcer_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        ) == {"status": "continue"}
 
 
 def test_apply_opencode_profile_for_launch_only_applies_for_opencode() -> None:

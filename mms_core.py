@@ -5540,13 +5540,17 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             continue
 
         tui_flow.apply_confirm_bypass_flag(runtime_runtime, cli, bypass)
-        if bypass:
-            if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
-                from mms_launchers import _enforce_claude_network_guard_or_exit, _claude_bypass_requires_proxy
-                _enforce_claude_network_guard_or_exit(
-                    runtime_runtime,
-                    require_proxy=_claude_bypass_requires_proxy(runtime_runtime),
+        tui_flow.enforce_confirm_bypass_network_guard(
+            runtime_runtime,
+            cli,
+            bypass,
+            network_guard_enforcer_loader=lambda: (
+                lambda launchers: (
+                    launchers._enforce_claude_network_guard_or_exit,
+                    launchers._claude_bypass_requires_proxy,
                 )
+            )(__import__("mms_launchers", fromlist=["_enforce_claude_network_guard_or_exit", "_claude_bypass_requires_proxy"])),
+        )
 
         tui_flow.apply_confirm_runtime_preferences(
             runtime_runtime,
