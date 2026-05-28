@@ -555,7 +555,8 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert actions[0] == ("model_source_status", "查看 Model Source Status")
     assert actions[1] == ("consumer_bundle_status", "查看 Consumer Bundle")
     assert actions[2] == ("registry_v2_save_plan", "查看 v2 Save Plan")
-    assert actions[3] == ("preview_doctor", "运行 Preview Doctor")
+    assert actions[3] == ("config_v2_promotion_plan", "查看 Promote Plan")
+    assert actions[4] == ("preview_doctor", "运行 Preview Doctor")
     assert report_title == "Model Source Status"
     assert ("Legacy 冲突", 2) in rows
     assert ("Legacy 候选状态", "not_imported") in rows
@@ -645,6 +646,37 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("WebUI 写入", "写入预览 DB + 发布") in plan_rows
     assert ("CLI 写入命令", "./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json") in plan_rows
     assert "只读计划" in plan_note
+
+    promotion_title, promotion_rows, promotion_note = mms_core._config_v2_promotion_plan_report_payload(
+        {
+            "result": "READY_FOR_HUMAN_PROMOTION_REVIEW",
+            "status": "human_gate",
+            "ready_for_human_review": True,
+            "preview": {
+                "root": {"config_root": "/tmp/mms-next"},
+                "check": {"result": "READY", "ready": True},
+                "bundle": {
+                    "verified": True,
+                    "entrypoint": "/tmp/mms-next/generated/model-registry.latest-approved.json",
+                },
+            },
+            "stable": {"root": {"config_root": "/tmp/mms"}},
+            "blocked_reasons": ["stable_root_human_only", "promotion_apply_not_implemented"],
+            "next_action": {"label": "Human gate: review promotion plan", "command": "./mmf promote --json"},
+        }
+    )
+
+    assert promotion_title == "Config v2 Promote Plan"
+    assert ("结果", "READY_FOR_HUMAN_PROMOTION_REVIEW") in promotion_rows
+    assert ("状态", "human_gate") in promotion_rows
+    assert ("Ready for review", "yes") in promotion_rows
+    assert ("Preview root", "/tmp/mms-next") in promotion_rows
+    assert ("Stable root", "/tmp/mms") in promotion_rows
+    assert ("Bundle 校验", "yes") in promotion_rows
+    assert ("阻塞原因", "stable_root_human_only, promotion_apply_not_implemented") in promotion_rows
+    assert ("下一步", "Human gate: review promotion plan") in promotion_rows
+    assert "human gate" in promotion_note
+    assert "不写 stable root" in promotion_note
 
     doctor_title, doctor_rows, doctor_note = mms_core._preview_doctor_report_payload(
         {

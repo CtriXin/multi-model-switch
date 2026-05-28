@@ -330,6 +330,9 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf preview verify --json
 ./mmf preview status --json
 ./mmf preview doctor --json
+./mmf promote --json
+./mmf config promote-plan --json
+./mms config promote-plan --json
 ./mmf registry publish-preview --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry verify --config-dir "$MMS_CONFIG_ROOT"
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
@@ -544,6 +547,16 @@ Stage 7 safety status:
 - Add `mms migrate config-v2` / `mmf promote` flow.
 - Publish preview docs.
 - Later deprecate `mmf` into an alias once v2 becomes default.
+
+Current Stage 8a implementation:
+
+- `mmf promote [--json]` / `mmf promote plan [--json]` is a read-only stable promotion plan.
+- `mmf config promote-plan [--json]`, `mms config promote-plan [--json]`, and `mms registry promotion-plan [--json]` expose the same plan through the human-facing config/registry surfaces.
+- The plan verifies preview readiness through `preview-check` plus the consumer bundle verifier, inspects the protected stable root paths, and reports `READY_FOR_HUMAN_PROMOTION_REVIEW` only when the selected preview root is runtime-ready.
+- It always reports `apply_enabled=false` and includes `stable_root_human_only` / `promotion_apply_not_implemented` in `blocked_reasons`; there is no command path that writes stable `~/.config/mms/**` in this slice.
+- Human gates listed by the plan: stable root write approval, stable backup, plaintext secret confirmation, Claude config human-only boundary, and rollback review.
+- Promotion preflight commands include `mmf config check`, `mmf config bundle`, and a read-only watchdog dry-run against the preview root.
+- Actual stable-root migration remains a future human-gated flow after merge/release planning, backup verification, smoke tests, and rollback instructions.
 
 ## Future LMs Must Not Forget
 

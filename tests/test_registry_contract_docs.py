@@ -203,6 +203,14 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "not presented as the v2 truth/publish path",
         "./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json",
         "rolls back DB/secret/generated files on failure",
+        "`mmf promote [--json]`",
+        "`mms config promote-plan [--json]`",
+        "`mms registry promotion-plan [--json]`",
+        "`READY_FOR_HUMAN_PROMOTION_REVIEW`",
+        "`apply_enabled=false`",
+        "`promotion_apply_not_implemented`",
+        "stable root write approval",
+        "Actual stable-root migration remains a future human-gated flow",
     ]
 
     missing = [term for term in required_terms if term not in text]

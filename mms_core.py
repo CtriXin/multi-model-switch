@@ -5414,11 +5414,41 @@ def _preview_doctor_report_payload(summary):
     )
 
 
+def _config_v2_promotion_plan_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    preview = summary.get("preview") if isinstance(summary.get("preview"), dict) else {}
+    stable = summary.get("stable") if isinstance(summary.get("stable"), dict) else {}
+    preview_root = preview.get("root") if isinstance(preview.get("root"), dict) else {}
+    stable_root = stable.get("root") if isinstance(stable.get("root"), dict) else {}
+    preview_check_summary = preview.get("check") if isinstance(preview.get("check"), dict) else {}
+    bundle = preview.get("bundle") if isinstance(preview.get("bundle"), dict) else {}
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    rows = [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Ready for review", "Ready for review"), "yes" if summary.get("ready_for_human_review") else "no"),
+        (_L("Preview root", "Preview root"), preview_root.get("config_root") or "-"),
+        (_L("Stable root", "Stable root"), stable_root.get("config_root") or "-"),
+        (_L("Preview check", "Preview check"), preview_check_summary.get("result") or "-"),
+        (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
+        (_L("Bundle 入口", "bundle entrypoint"), bundle.get("entrypoint") or "-"),
+        (_L("阻塞原因", "blocked reasons"), ", ".join(str(item) for item in (summary.get("blocked_reasons") or [])) or "-"),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
+    ]
+    return (
+        _L("Config v2 Promote Plan", "Config v2 Promote Plan"),
+        rows,
+        _L("只读计划：停止在 human gate；不写 stable root、不改 Claude config、不发布 stable bundle。", "Read-only plan: stops at the human gate; no stable-root writes, no Claude config writes, no stable bundle publish."),
+    )
+
+
 def _model_source_status_tui_payload(summary):
     actions = [
         ("model_source_status", _L("查看 Model Source Status", "View Model Source Status")),
         ("consumer_bundle_status", _L("查看 Consumer Bundle", "View Consumer Bundle")),
         ("registry_v2_save_plan", _L("查看 v2 Save Plan", "View v2 Save Plan")),
+        ("config_v2_promotion_plan", _L("查看 Promote Plan", "View Promote Plan")),
         ("preview_doctor", _L("运行 Preview Doctor", "Run Preview Doctor")),
         ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
         ("refresh_due_sources", _L("刷新到期 Sources", "Refresh Due Sources")),
@@ -10311,7 +10341,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import consumer_bundle_status, diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, preview_doctor, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
+                from mms_registry_cli import config_v2_promotion_plan, consumer_bundle_status, diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, preview_doctor, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
 
                 source_status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
                 registry_title, registry_info, registry_actions = _model_source_status_tui_payload(source_status)
@@ -10333,6 +10363,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif registry_action == "registry_v2_save_plan":
                     plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
                     _print_settings_result_report(*_registry_v2_save_plan_report_payload(plan))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "config_v2_promotion_plan":
+                    plan = config_v2_promotion_plan(preview_config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config promote-plan")
+                    _print_settings_result_report(*_config_v2_promotion_plan_report_payload(plan))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "preview_doctor":
                     try:
@@ -12033,6 +12067,7 @@ def _display_config_help():
     console.print(f"  {command} config check [--json]")
     console.print(f"  {command} config bundle [--json]")
     console.print(f"  {command} config save-plan [--json]")
+    console.print(f"  {command} config promote-plan [--json]")
     console.print(f"  {command} config apply-plan --plan-json <file> [--apply --confirm-preview-apply] [--json]")
     console.print(f"  {command} config doctor [--json]")
     console.print(f"  {command} config doctor --strict-exit")
@@ -12147,6 +12182,17 @@ def _display_preview_check(json_output=False, strict_exit=True):
     else:
         _print_preview_check(summary)
     return 0 if not strict_exit or summary.get("ready") is True else 2
+
+
+def _display_config_v2_promotion_plan(json_output=False, strict_exit=False):
+    from mms_registry_cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
+
+    summary = config_v2_promotion_plan(preview_config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config promote-plan")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_config_v2_promotion_plan(summary)
+    return 0 if not strict_exit or summary.get("ready_for_human_review") is True else 2
 
 
 def _display_preferences_path():
@@ -13576,6 +13622,12 @@ def _is_config_preview_check_request(argv):
     return str(argv[1] or "").strip() in {"check", "preview-check", "preview.check", "v2-check"}
 
 
+def _is_config_v2_promotion_plan_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"promote-plan", "promotion-plan", "promote.check", "promote"}
+
+
 def _is_config_registry_v2_apply_plan_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
@@ -13637,6 +13689,11 @@ def main():
         return
     if _is_config_preview_check_request(argv):
         code = _display_preview_check(json_output="--json" in argv[2:], strict_exit="--no-strict-exit" not in argv[2:])
+        if code:
+            raise SystemExit(code)
+        return
+    if _is_config_v2_promotion_plan_request(argv):
+        code = _display_config_v2_promotion_plan(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
         if code:
             raise SystemExit(code)
         return

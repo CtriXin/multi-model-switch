@@ -34,7 +34,9 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
                 "  mmf preview doctor --strict-exit  return non-zero unless runtime-ready",
                 "  mmf preview status [--json]       show full model source status",
                 "  mmf preview verify [--json]       verify latest-approved bundle hashes",
+                "  mmf promote [--json]              show human-gated stable promotion plan",
                 "  mmf config save-plan [--json]     show future DB-truth save sequence",
+                "  mmf config promote-plan [--json]  show same promotion plan",
                 "  mmf config doctor [--json]        show preview readiness and one next action",
                 "  mmf config doctor --strict-exit   return non-zero unless runtime-ready",
                 "",
@@ -160,6 +162,15 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "doctor":
     forwarded = ["preview-doctor", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
+if argv and argv[0] == "promote":
+    from mms_registry_cli import handle_registry_command
+
+    translated = argv[1:]
+    if translated and translated[0] in {"plan", "check", "status"}:
+        translated = translated[1:]
+    forwarded = ["promotion-plan", "--preview-config-dir", os.environ["MMS_CONFIG_ROOT"], *translated]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf promote"))
+
 if argv and argv[0] == "registry":
     from mms_registry_cli import handle_registry_command
 
@@ -226,6 +237,16 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"check", "preview-chec
     else:
         _print_preview_check(summary)
     raise SystemExit(0 if "--no-strict-exit" in argv[2:] or summary.get("ready") is True else 2)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"promote-plan", "promotion-plan", "promote.check", "promote"}:
+    from mms_registry_cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
+
+    summary = config_v2_promotion_plan(preview_config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config promote-plan")
+    if "--json" in argv[2:]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_config_v2_promotion_plan(summary)
+    raise SystemExit(0 if "--strict-exit" not in argv[2:] or summary.get("ready_for_human_review") is True else 2)
 
 from mms_core import main
 

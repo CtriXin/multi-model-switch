@@ -30,6 +30,7 @@ REGISTRY_V2_SAVE_CANDIDATE_SCHEMA = "mms.registry_v2_save_candidate.v1"
 REGISTRY_V2_APPLY_PLAN_SCHEMA = "mms.registry_v2_apply_plan.v1"
 PREVIEW_CHECK_SCHEMA = "mms.preview_check.v1"
 CONSUMER_BUNDLE_STATUS_SCHEMA = "mms.consumer_bundle_status.v1"
+CONFIG_V2_PROMOTION_PLAN_SCHEMA = "mms.config_v2_promotion_plan.v1"
 REGISTRY_V2_GENERATED_FILES = (
     "model-registry.latest-approved.json",
     "model-routes.json",
@@ -927,6 +928,121 @@ def preview_check(
             "status": source.get("status"),
         },
         "read_only": True,
+    }
+
+
+def config_v2_promotion_plan(
+    *,
+    preview_config_dir: str | Path | None = None,
+    stable_config_dir: str | Path | None = None,
+    command_name: str = "mmf promote",
+) -> dict[str, Any]:
+    """Describe the human-gated stable promotion path without writing anything."""
+    preview_root = Path(preview_config_dir) if preview_config_dir is not None else Path(resolve_mms_config_dir())
+    preview_root = preview_root.expanduser()
+    preview_root_status = mms_config_root_status(
+        command=command_name.split()[0] if command_name else "mmf",
+        config_dir=preview_root,
+    )
+    stable_root = (
+        Path(stable_config_dir).expanduser()
+        if stable_config_dir is not None
+        else Path(str(preview_root_status.get("stable_root") or "")).expanduser()
+    )
+    stable_root_status = mms_config_root_status(command="mms", config_dir=stable_root, env={})
+    check = preview_check(config_dir=preview_root, command_name=command_name)
+    bundle = consumer_bundle_status(config_dir=preview_root, command_name=command_name)
+    preview_ready = check.get("ready") is True and bundle.get("verified") is True
+    stable_files = {
+        "config_toml": stable_root / "config.toml",
+        "credentials_sh": stable_root / "credentials.sh",
+        "model_policy_json": stable_root / "model-policy.json",
+        "provider_profiles_json": stable_root / "provider-profiles.json",
+        "legacy_model_routes_json": stable_root / "model-routes.json",
+        "latest_approved_manifest": stable_root / "generated" / "model-registry.latest-approved.json",
+        "registry_db": stable_root / "registry" / "model-registry.sqlite",
+    }
+    blocked_reasons = ["stable_root_human_only", "promotion_apply_not_implemented"]
+    if preview_root_status.get("mode") != "preview":
+        blocked_reasons.append("preview_root_required")
+    if not preview_ready:
+        blocked_reasons.append("preview_not_runtime_ready")
+    result = "READY_FOR_HUMAN_PROMOTION_REVIEW" if preview_ready and preview_root_status.get("mode") == "preview" else "NOT_READY"
+    if preview_ready and preview_root_status.get("mode") == "preview":
+        next_action = {
+            "label": "Human gate: review promotion plan",
+            "command": "./mmf promote --json",
+        }
+    else:
+        next_action = check.get("next_action") if isinstance(check.get("next_action"), dict) else {
+            "label": "Run preview readiness check",
+            "command": "./mmf config check --json",
+        }
+    return {
+        "schema": CONFIG_V2_PROMOTION_PLAN_SCHEMA,
+        "read_only": True,
+        "apply_enabled": False,
+        "status": "human_gate" if result == "READY_FOR_HUMAN_PROMOTION_REVIEW" else "not_ready",
+        "result": result,
+        "ready_for_human_review": result == "READY_FOR_HUMAN_PROMOTION_REVIEW",
+        "blocked_reasons": blocked_reasons,
+        "preview": {
+            "root": preview_root_status,
+            "check": {
+                "result": check.get("result"),
+                "ready": check.get("ready"),
+                "status": check.get("status"),
+                "counts": check.get("counts") if isinstance(check.get("counts"), dict) else {},
+            },
+            "bundle": {
+                "verified": bundle.get("verified"),
+                "status": bundle.get("status"),
+                "entrypoint": bundle.get("consumer_entrypoint"),
+                "component_revisions": bundle.get("component_revisions") if isinstance(bundle.get("component_revisions"), dict) else {},
+            },
+        },
+        "stable": {
+            "root": stable_root_status,
+            "protected": True,
+            "files": {
+                name: {"path": str(path), "exists": path.exists()}
+                for name, path in stable_files.items()
+            },
+        },
+        "would_write": {
+            "stable_config_root": False,
+            "stable_registry_db": False,
+            "stable_secret_backend": False,
+            "stable_generated_bundle": False,
+            "claude_config": False,
+        },
+        "human_gates": [
+            "human must approve any stable ~/.config/mms write",
+            "backup stable config root and generated bundle before promotion",
+            "plaintext secrets require explicit human confirmation",
+            "Claude config remains human-only and must not be auto-written",
+            "rollback instructions must be reviewed before promotion",
+        ],
+        "preflight_commands": [
+            "./mmf config check --json",
+            "./mmf config bundle --json",
+            f"scripts/mms_health_watchdog.py --config-dir {shlex.quote(str(preview_root))} --require-bundle --dry-run --print-json",
+        ],
+        "manual_promotion_outline": [
+            "freeze launch/background writes during the promotion window",
+            "create audited backups of stable config files, registry DB, generated bundle, and secret backend",
+            "copy/import preview DB truth and secret backend through the audited config writer",
+            "publish and verify stable latest-approved bundle",
+            "run stable mms config bundle/check plus launcher smoke tests",
+            "rollback from the pre-promotion backup if any verification fails",
+        ],
+        "rollback_outline": [
+            "restore stable registry DB backup",
+            "restore stable generated bundle snapshot",
+            "restore stable config/secret backend backup if touched",
+            "rerun mms config bundle/check and watchdog dry-run",
+        ],
+        "next_action": next_action,
     }
 
 
@@ -3288,6 +3404,36 @@ def _print_preview_check(summary: dict[str, Any]) -> None:
     print(f"next_command={next_action.get('command', '')}")
 
 
+def _print_config_v2_promotion_plan(summary: dict[str, Any]) -> None:
+    preview = summary.get("preview") if isinstance(summary.get("preview"), dict) else {}
+    stable = summary.get("stable") if isinstance(summary.get("stable"), dict) else {}
+    preview_root = preview.get("root") if isinstance(preview.get("root"), dict) else {}
+    stable_root = stable.get("root") if isinstance(stable.get("root"), dict) else {}
+    preview_check_summary = preview.get("check") if isinstance(preview.get("check"), dict) else {}
+    preview_bundle = preview.get("bundle") if isinstance(preview.get("bundle"), dict) else {}
+    print("MMS Config v2 Promotion Plan")
+    print(f"schema={summary.get('schema')}")
+    print(f"read_only={summary.get('read_only', False)}")
+    print(f"apply_enabled={summary.get('apply_enabled', False)}")
+    print(f"result={summary.get('result')}")
+    print(f"status={summary.get('status')}")
+    print(f"ready_for_human_review={summary.get('ready_for_human_review')}")
+    print(f"preview_root={preview_root.get('config_root', '')}")
+    print(f"stable_root={stable_root.get('config_root', '')}")
+    print(f"preview_check_result={preview_check_summary.get('result', '')}")
+    print(f"preview_check_ready={preview_check_summary.get('ready')}")
+    print(f"bundle_verified={preview_bundle.get('verified')}")
+    print(f"bundle_entrypoint={preview_bundle.get('entrypoint', '')}")
+    print(f"blocked_reasons={','.join(str(item) for item in (summary.get('blocked_reasons') or []))}")
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    print(f"next_action={next_action.get('label', '')}")
+    print(f"next_command={next_action.get('command', '')}")
+    for index, gate in enumerate(summary.get("human_gates") or [], start=1):
+        print(f"human_gate_{index}={gate}")
+    for index, command in enumerate(summary.get("preflight_commands") or [], start=1):
+        print(f"preflight_{index}={command}")
+
+
 def _print_consumer_bundle_status(summary: dict[str, Any]) -> None:
     print("MMS Consumer Bundle")
     print(f"result={summary.get('result')}")
@@ -3427,6 +3573,11 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     preview_check_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     preview_check_parser.add_argument("--json", action="store_true", help="Print the full check summary as JSON")
     preview_check_parser.add_argument("--no-strict-exit", action="store_true", help="Return zero even when preview is not ready")
+    promotion_plan_parser = subparsers.add_parser("promotion-plan", aliases=["promote-plan"], help="Read-only config v2 promotion plan; stops at human gate")
+    promotion_plan_parser.add_argument("--preview-config-dir", "--config-dir", dest="preview_config_dir", default="", help="Preview root to inspect")
+    promotion_plan_parser.add_argument("--stable-config-dir", default="", help="Stable root to protect/inspect")
+    promotion_plan_parser.add_argument("--json", action="store_true", help="Print the full promotion plan as JSON")
+    promotion_plan_parser.add_argument("--strict-exit", action="store_true", help="Exit non-zero unless preview is ready for human promotion review")
     preview_prepare_parser = subparsers.add_parser("preview-prepare", help="Initialize, import, publish, verify, and doctor a preview root")
     preview_prepare_parser.add_argument("--config-dir", default="", help="Override MMS config dir to prepare")
     preview_prepare_parser.add_argument("--source-config-dir", default="", help="Read legacy config artifacts from this root")
@@ -3619,6 +3770,17 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         else:
             _print_preview_check(summary)
         return 0 if bool(args.no_strict_exit) or summary.get("ready") is True else 2
+    if args.subcommand in {"promotion-plan", "promote-plan"}:
+        summary = config_v2_promotion_plan(
+            preview_config_dir=args.preview_config_dir or None,
+            stable_config_dir=args.stable_config_dir or None,
+            command_name=command_name,
+        )
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_config_v2_promotion_plan(summary)
+        return 0 if not bool(args.strict_exit) or summary.get("ready_for_human_review") is True else 2
     if args.subcommand == "preview-prepare":
         try:
             summary = preview_prepare(
@@ -3796,6 +3958,7 @@ __all__ = [
     "init_config_root",
     "model_source_status",
     "consumer_bundle_status",
+    "config_v2_promotion_plan",
     "preview_check",
     "preview_doctor",
     "preview_prepare",

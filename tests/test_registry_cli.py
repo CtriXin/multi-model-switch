@@ -2338,6 +2338,106 @@ def test_mmf_config_bundle_fails_closed_when_manifest_missing(tmp_path: Path) ->
     assert non_strict_payload["status"] == "missing"
 
 
+def test_config_v2_promotion_plan_stops_at_human_gate_for_ready_preview(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    stable_dir.mkdir()
+    (stable_dir / "config.toml").write_text("[api]\n", encoding="utf-8")
+    _write_preview_doctor_provider(config_dir, api_key="sk-promote-plan-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+
+    summary = mms_registry_cli.config_v2_promotion_plan(
+        preview_config_dir=config_dir,
+        stable_config_dir=stable_dir,
+        command_name="mmf promote",
+    )
+    combined = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+    assert summary["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert summary["read_only"] is True
+    assert summary["apply_enabled"] is False
+    assert summary["status"] == "human_gate"
+    assert summary["result"] == "READY_FOR_HUMAN_PROMOTION_REVIEW"
+    assert summary["ready_for_human_review"] is True
+    assert "stable_root_human_only" in summary["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in summary["blocked_reasons"]
+    assert summary["would_write"]["stable_config_root"] is False
+    assert summary["would_write"]["claude_config"] is False
+    assert summary["preview"]["bundle"]["verified"] is True
+    assert summary["stable"]["files"]["config_toml"]["exists"] is True
+    assert summary["next_action"]["label"].startswith("Human gate")
+    assert any("--dry-run --print-json" in item for item in summary["preflight_commands"])
+    assert "sk-promote-plan-secret" not in combined
+    assert not (stable_dir / "registry").exists()
+
+
+def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-promote-wrapper-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "promote", "--stable-config-dir", str(stable_dir), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["ready_for_human_review"] is True
+    assert payload["status"] == "human_gate"
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert payload["would_write"]["stable_secret_backend"] is False
+    assert "human must approve any stable" in payload["human_gates"][0]
+    assert "sk-promote-wrapper-secret" not in combined
+    assert not stable_dir.exists()
+
+
+def test_mms_config_promote_plan_strict_exit_fails_when_preview_not_ready(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "promote-plan", "--strict-exit", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["ready_for_human_review"] is False
+    assert "preview_not_runtime_ready" in payload["blocked_reasons"]
+    assert payload["would_write"]["stable_config_root"] is False
+    assert not (config_dir / "registry").exists()
+
+
 def test_mmf_preview_doctor_strict_exit_distinguishes_ready_state(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     _write_preview_doctor_provider(config_dir, api_key="sk-doctor-strict-secret")
