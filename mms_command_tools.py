@@ -808,6 +808,69 @@ def accounts_for_cli(cfg, cli_name):
     ]
 
 
+def normalize_provider_id_input(provider_id, *, default_provider_id):
+    value = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "-"
+        for ch in str(provider_id or "").strip().lower()
+    )
+    value = value.strip("-_")
+    return value or default_provider_id
+
+
+def sanitize_provider_id(provider_id, *, default_provider_id):
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(provider_id).upper())
+    cleaned = cleaned.strip("_")
+    return cleaned or default_provider_id.upper()
+
+
+def normalize_model_id_list(values):
+    if isinstance(values, str):
+        values = [chunk.strip() for chunk in values.split(",")]
+    normalized = []
+    seen = set()
+    for item in values or []:
+        model_id = str(item or "").strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        normalized.append(model_id)
+    return normalized
+
+
+def unique_runtime_id(existing_ids, base_id):
+    normalized = str(base_id or "").strip()
+    if not normalized:
+        normalized = "default"
+    if normalized not in existing_ids:
+        return normalized
+    suffix = 2
+    while True:
+        candidate = f"{normalized}-{suffix}"
+        if candidate not in existing_ids:
+            return candidate
+        suffix += 1
+
+
+def normalize_models_endpoint(value):
+    endpoint = str(value or "").strip()
+    if not endpoint:
+        return "/models"
+    if endpoint.lower() in {"manual", "none", "off"}:
+        return "manual"
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return endpoint
+
+
+def provider_env_name(provider_id, field, *, default_provider_id):
+    return f"MMS_PROVIDER_{sanitize_provider_id(provider_id, default_provider_id=default_provider_id)}_{field}"
+
+
+def provider_env_value(provider_id, field, *, default_provider_id, environ=None):
+    environ = os.environ if environ is None else environ
+    return environ.get(provider_env_name(provider_id, field, default_provider_id=default_provider_id), "").strip()
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"

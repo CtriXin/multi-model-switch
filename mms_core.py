@@ -1501,57 +1501,33 @@ def _normalize_account(account):
 
 
 def _normalize_provider_id_input(provider_id):
-    value = "".join(
-        ch if ch.isalnum() or ch in {"-", "_"} else "-"
-        for ch in str(provider_id or "").strip().lower()
-    )
-    value = value.strip("-_")
-    return value or DEFAULT_PROVIDER_ID
+    from mms_command_tools import normalize_provider_id_input
+
+    return normalize_provider_id_input(provider_id, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _sanitize_provider_id(provider_id):
-    cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(provider_id).upper())
-    cleaned = cleaned.strip("_")
-    return cleaned or DEFAULT_PROVIDER_ID.upper()
+    from mms_command_tools import sanitize_provider_id
+
+    return sanitize_provider_id(provider_id, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _normalize_model_id_list(values):
-    if isinstance(values, str):
-        values = [chunk.strip() for chunk in values.split(",")]
-    normalized = []
-    seen = set()
-    for item in values or []:
-        model_id = str(item or "").strip()
-        if not model_id or model_id in seen:
-            continue
-        seen.add(model_id)
-        normalized.append(model_id)
-    return normalized
+    from mms_command_tools import normalize_model_id_list
+
+    return normalize_model_id_list(values)
 
 
 def _unique_runtime_id(existing_ids, base_id):
-    normalized = str(base_id or "").strip()
-    if not normalized:
-        normalized = "default"
-    if normalized not in existing_ids:
-        return normalized
-    suffix = 2
-    while True:
-        candidate = f"{normalized}-{suffix}"
-        if candidate not in existing_ids:
-            return candidate
-        suffix += 1
+    from mms_command_tools import unique_runtime_id
+
+    return unique_runtime_id(existing_ids, base_id)
 
 
 def _normalize_models_endpoint(value):
-    endpoint = str(value or "").strip()
-    if not endpoint:
-        return "/models"
-    if endpoint.lower() in {"manual", "none", "off"}:
-        return "manual"
-    if not endpoint.startswith("/"):
-        endpoint = "/" + endpoint
-    return endpoint
+    from mms_command_tools import normalize_models_endpoint
+
+    return normalize_models_endpoint(value)
 
 
 def _model_source_label(source):
@@ -1573,12 +1549,16 @@ def _tps_label(tps_value):
 
 
 def _provider_env_name(provider_id, field):
-    return f"MMS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
+    from mms_command_tools import provider_env_name
+
+    return provider_env_name(provider_id, field, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _provider_env_value(provider_id, field):
     """读取 provider 环境变量。"""
-    return os.environ.get(_provider_env_name(provider_id, field), "").strip()
+    from mms_command_tools import provider_env_value
+
+    return provider_env_value(provider_id, field, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _normalize_provider(provider):

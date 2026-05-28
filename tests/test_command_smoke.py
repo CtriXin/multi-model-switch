@@ -631,6 +631,36 @@ def test_runtime_map_helpers_filter_invalid_and_disabled_entries():
     assert [item["id"] for item in mms_command_tools.accounts_for_cli(cfg, "codex")] == ["codex-main"]
 
 
+def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
+    import mms_command_tools
+
+    assert mms_command_tools.normalize_provider_id_input(" CRS Oracle! ", default_provider_id="default") == "crs-oracle"
+    assert mms_command_tools.normalize_provider_id_input("!!!", default_provider_id="default") == "default"
+    assert mms_command_tools.sanitize_provider_id("crs-oracle/gpt", default_provider_id="default") == "CRS_ORACLE_GPT"
+    assert mms_command_tools.sanitize_provider_id("!!!", default_provider_id="default") == "DEFAULT"
+    assert mms_command_tools.normalize_model_id_list("gpt-5.5, ,gpt-5.4,gpt-5.5") == ["gpt-5.5", "gpt-5.4"]
+    assert mms_command_tools.normalize_model_id_list([" a ", None, "a", "b"]) == ["a", "b"]
+    assert mms_command_tools.unique_runtime_id({"relay", "relay-2"}, "relay") == "relay-3"
+    assert mms_command_tools.unique_runtime_id(set(), "") == "default"
+    assert mms_command_tools.normalize_models_endpoint("") == "/models"
+    assert mms_command_tools.normalize_models_endpoint("manual") == "manual"
+    assert mms_command_tools.normalize_models_endpoint("api/models") == "/api/models"
+    assert mms_command_tools.normalize_models_endpoint("/v1/models") == "/v1/models"
+    assert (
+        mms_command_tools.provider_env_name("crs-oracle/gpt", "API_KEY", default_provider_id="default")
+        == "MMS_PROVIDER_CRS_ORACLE_GPT_API_KEY"
+    )
+    assert (
+        mms_command_tools.provider_env_value(
+            "crs-oracle/gpt",
+            "API_KEY",
+            default_provider_id="default",
+            environ={"MMS_PROVIDER_CRS_ORACLE_GPT_API_KEY": " key "},
+        )
+        == "key"
+    )
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
