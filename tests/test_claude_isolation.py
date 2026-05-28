@@ -466,6 +466,11 @@ def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
         json.dumps({"tier": "heavy", "model": "claude-stable-20260101"}),
         encoding="utf-8",
     )
+    (gateway_home / ".config" / "mms").mkdir(parents=True)
+    (gateway_home / ".config" / "mms" / "route_status.json").write_text(
+        json.dumps({"tier": "heavy", "model": "claude-session-stable-20260101"}),
+        encoding="utf-8",
+    )
     (preview_root / "route_status.json").write_text(
         json.dumps({"tier": "light", "model": "claude-preview-20260101"}),
         encoding="utf-8",
@@ -517,6 +522,19 @@ def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
     assert "preview" in result.stdout
     assert "stable" not in result.stdout
     assert "●" in result.stdout
+
+
+def test_claude_route_status_path_uses_selected_root_when_explicit(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_launchers._claude_route_status_paths() == [str(preview_root / "route_status.json")]
 
 
 def test_rescue_launch_env_uses_selected_config_root(monkeypatch, tmp_path):

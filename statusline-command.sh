@@ -57,17 +57,27 @@ pick_route_status_file() {
     local primary_user="$config_root/route_status.json"
     local primary_home="$HOME/.config/mms/route_status.json"
     local gateway_sessions="$config_root/claude-gateway/s"
+    local explicit_config_root=0
+    if [ -n "$MMS_CONFIG_ROOT" ] || [ -n "$MMS_CONFIG_DIR" ]; then
+        explicit_config_root=1
+    fi
     local now
     now=$(date +%s)
 
     if [ "$is_gateway_session" -eq 1 ]; then
+        if [ "$explicit_config_root" -eq 1 ] && [ -f "$primary_user" ]; then
+            local mt age
+            mt=$(stat -f %m "$primary_user" 2>/dev/null || echo 0)
+            age=$(( now - mt ))
+            [ "$age" -lt 600 ] && { echo "$primary_user"; return; }
+        fi
         if [ -f "$primary_home" ]; then
             local mt age
             mt=$(stat -f %m "$primary_home" 2>/dev/null || echo 0)
             age=$(( now - mt ))
             [ "$age" -lt 600 ] && { echo "$primary_home"; return; }
         fi
-        if [ -f "$primary_user" ]; then
+        if [ "$explicit_config_root" -ne 1 ] && [ -f "$primary_user" ]; then
             local mt age
             mt=$(stat -f %m "$primary_user" 2>/dev/null || echo 0)
             age=$(( now - mt ))

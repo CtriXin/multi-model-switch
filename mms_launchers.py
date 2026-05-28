@@ -2257,6 +2257,8 @@ def _claude_gateway_home():
 
 
 def _claude_route_status_paths():
+    if str(os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR") or "").strip():
+        return [os.path.join(_resolve_mms_config_dir(), "route_status.json")]
     gateway_home = _claude_gateway_home()
     return [os.path.join(gateway_home, ".config", "mms", "route_status.json")]
 
