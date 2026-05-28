@@ -161,14 +161,19 @@ from mms_state_io import (
 )
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
-# Provider 调试日志（写入文件，不影响 TUI 输出）
+# Provider 调试日志（按需写入文件，不影响 TUI 输出）
 _PROBE_DEBUG_DIR = os.path.join(
     resolve_mms_config_dir(),
     "cache",
 )
 _probe_debug_logger = logging.getLogger("probe_debug")
 _probe_debug_logger.setLevel(logging.DEBUG)
-if not _probe_debug_logger.handlers:
+_probe_debug_logger.propagate = False
+
+
+def _ensure_probe_debug_logger():
+    if _probe_debug_logger.handlers:
+        return _probe_debug_logger
     os.makedirs(_PROBE_DEBUG_DIR, exist_ok=True)
     _dh = logging.FileHandler(
         os.path.join(_PROBE_DEBUG_DIR, "provider_debug.log"),
@@ -176,6 +181,7 @@ if not _probe_debug_logger.handlers:
     )
     _dh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
     _probe_debug_logger.addHandler(_dh)
+    return _probe_debug_logger
 
 APP_NAME = "Multi-Model Switch"
 PRIMARY_COMMAND = "mms"
@@ -8141,15 +8147,16 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
     selected_model = _resolve_model_name(model_info) if model_info else ""
     selected_family, _ = _infer_model_family(selected_model) if selected_model else ("", "")
-    _probe_debug_logger.info("=== _provider_options_for_model(cli=%s, selected_model=%s) ===", cli_name, selected_model)
+    probe_debug_logger = _ensure_probe_debug_logger()
+    probe_debug_logger.info("=== _provider_options_for_model(cli=%s, selected_model=%s) ===", cli_name, selected_model)
     options = []
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         pid = provider.get("id", "?")
         if not provider.get("enabled", True):
-            _probe_debug_logger.debug("  %s: SKIP (disabled)", pid)
+            probe_debug_logger.debug("  %s: SKIP (disabled)", pid)
             continue
         if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
-            _probe_debug_logger.debug(
+            probe_debug_logger.debug(
                 "  %s: SKIP (no configured base_url=%s or api_key=%s)",
                 pid,
                 _provider_has_configured_base_url(provider),
@@ -8159,32 +8166,32 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
 
         models = cached_models
         if models is None:
-            _probe_debug_logger.debug("  %s: cached_models=None, schedule async refresh", pid)
+            probe_debug_logger.debug("  %s: cached_models=None, schedule async refresh", pid)
             models = _provider_effective_models(provider, None, cfg)
         else:
-            _probe_debug_logger.debug("  %s: cached_models=%s (len=%d)", pid, type(cached_models).__name__, len(cached_models))
+            probe_debug_logger.debug("  %s: cached_models=%s (len=%d)", pid, type(cached_models).__name__, len(cached_models))
         models = _provider_effective_models(provider, models, cfg)
         cli_models = _provider_models_for_cli(cli_name, models)
 
         if selected_model:
             if not _provider_supports_model_for_cli(provider, cli_name, selected_model):
-                _probe_debug_logger.info("  %s: SKIP (cli/model incompatible for %s -> %s)", pid, cli_name, selected_model)
+                probe_debug_logger.info("  %s: SKIP (cli/model incompatible for %s -> %s)", pid, cli_name, selected_model)
                 continue
             if selected_model not in models:
-                _probe_debug_logger.info("  %s: SKIP (model '%s' not in %s)", pid, selected_model, models[:5])
+                probe_debug_logger.info("  %s: SKIP (model '%s' not in %s)", pid, selected_model, models[:5])
                 continue
             option_models = [selected_model]
         else:
             if not _provider_supports_cli_name(provider, cli_name):
-                _probe_debug_logger.debug("  %s: SKIP (cli not supported)", pid)
+                probe_debug_logger.debug("  %s: SKIP (cli not supported)", pid)
                 continue
             option_models = cli_models
 
         if not option_models:
-            _probe_debug_logger.info("  %s: SKIP (no option models for cli=%s)", pid, cli_name)
+            probe_debug_logger.info("  %s: SKIP (no option models for cli=%s)", pid, cli_name)
             continue
 
-        _probe_debug_logger.info("  %s: ADDED (option_models=%s)", pid, option_models)
+        probe_debug_logger.info("  %s: ADDED (option_models=%s)", pid, option_models)
         options.append({
             "kind": "provider",
             "id": provider.get("id"),
@@ -12251,15 +12258,57 @@ def _display_preview_check(json_output=False, strict_exit=True):
     return 0 if not strict_exit or summary.get("ready") is True else 2
 
 
-def _display_config_v2_promotion_plan(json_output=False, strict_exit=False):
+def _display_config_v2_promotion_plan(
+    json_output=False,
+    strict_exit=False,
+    *,
+    preview_config_dir=None,
+    stable_config_dir=None,
+    command_name=None,
+):
     from mms_registry_cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
 
-    summary = config_v2_promotion_plan(preview_config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config promote-plan")
+    summary = config_v2_promotion_plan(
+        preview_config_dir=preview_config_dir or PRIMARY_CONFIG_DIR,
+        stable_config_dir=stable_config_dir,
+        command_name=command_name or f"{current_command()} config promote-plan",
+    )
     if json_output:
         print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_config_v2_promotion_plan(summary)
     return 0 if not strict_exit or summary.get("ready_for_human_review") is True else 2
+
+
+def _display_config_v2_migration_plan(args_rest):
+    status = mms_config_root_status(command=current_command())
+    default_preview_root = (
+        status.get("config_root")
+        if status.get("mode") == "preview"
+        else status.get("preview_root")
+    ) or PRIMARY_CONFIG_DIR
+    default_stable_root = status.get("stable_root") or PRIMARY_CONFIG_DIR
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} migrate config-v2",
+        description="Read-only config v2 migration/promotion plan; stops at the human gate.",
+    )
+    parser.add_argument("--preview-config-dir", "--config-dir", default=default_preview_root)
+    parser.add_argument("--stable-config-dir", default=default_stable_root)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--strict-exit", action="store_true")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Reserved; this command remains read-only and reports apply_enabled=false.",
+    )
+    args = parser.parse_args(args_rest)
+    return _display_config_v2_promotion_plan(
+        json_output=bool(args.json),
+        strict_exit=bool(args.strict_exit),
+        preview_config_dir=args.preview_config_dir,
+        stable_config_dir=args.stable_config_dir,
+        command_name=f"{current_command()} migrate config-v2",
+    )
 
 
 def _display_preferences_path():
@@ -13909,6 +13958,12 @@ def _is_config_v2_promotion_plan_request(argv):
     return str(argv[1] or "").strip() in {"promote-plan", "promotion-plan", "promote.check", "promote"}
 
 
+def _is_config_v2_migration_plan_request(argv):
+    if len(argv) < 2 or argv[0] != "migrate":
+        return False
+    return str(argv[1] or "").strip() in {"config-v2", "config.v2", "v2", "config-v2-plan"}
+
+
 def _is_config_registry_v2_apply_plan_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
@@ -13975,6 +14030,11 @@ def main():
         return
     if _is_config_v2_promotion_plan_request(argv):
         code = _display_config_v2_promotion_plan(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
+        if code:
+            raise SystemExit(code)
+        return
+    if _is_config_v2_migration_plan_request(argv):
+        code = _display_config_v2_migration_plan(argv[2:])
         if code:
             raise SystemExit(code)
         return
@@ -14140,6 +14200,7 @@ def main():
             f"  {current_command()} resume <id>     通过 Codex/Claude session id 恢复托管 CLI\n"
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} registry ...    刷新/查看本地 model registry source truth\n"
+            f"  {current_command()} migrate config-v2 [--json]  只读 config v2 migration / promotion human gate\n"
             f"  {current_command()} broker ...      启动或查看 broker profiles\n"
             f"  {current_command()} doctor [full]   诊断 provider / model / Claude 兼容性（默认 lite）\n"
             f"  {current_command()} exposure ...    审计当前 runtime 对 CLI 暴露的 env/settings/home\n"

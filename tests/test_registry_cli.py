@@ -2481,6 +2481,98 @@ def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> Non
     assert not stable_dir.exists()
 
 
+def test_mms_migrate_config_v2_is_read_only_and_human_gated(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-migrate-wrapper-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "migrate",
+            "config-v2",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["apply_enabled"] is False
+    assert payload["status"] == "human_gate"
+    assert payload["ready_for_human_review"] is True
+    assert payload["preview"]["root"]["config_root"] == str(config_dir)
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in payload["blocked_reasons"]
+    assert payload["would_write"]["stable_config_root"] is False
+    assert payload["would_write"]["stable_generated_bundle"] is False
+    assert payload["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert payload["stable_backup_plan"]["would_create_backup"] is False
+    assert payload["bundle_comparison"]["read_only"] is True
+    assert "sk-migrate-wrapper-secret" not in combined
+    assert not stable_dir.exists()
+
+
+def test_mms_migrate_config_v2_missing_preview_does_not_create_roots(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "migrate",
+            "config-v2",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["status"] == "not_ready"
+    assert payload["ready_for_human_review"] is False
+    assert payload["apply_enabled"] is False
+    assert payload["preview"]["root"]["config_root"] == str(config_dir)
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert "preview_not_runtime_ready" in payload["blocked_reasons"]
+    assert payload["would_write"]["stable_config_root"] is False
+    assert not config_dir.exists()
+    assert not stable_dir.exists()
+
+
 def test_mms_config_promote_plan_strict_exit_fails_when_preview_not_ready(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     config_dir.mkdir()
