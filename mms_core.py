@@ -4247,28 +4247,25 @@ def _probe_async_min_interval(cfg=None):
 
 
 def _probe_file_cache_path(provider_id):
-    return os.path.join(_PROBE_FILE_CACHE_DIR, f"models_{provider_id}.json")
+    from mms_command_tools import probe_file_cache_path
+
+    return probe_file_cache_path(provider_id, probe_file_cache_dir=_PROBE_FILE_CACHE_DIR)
 
 
 def _invalidate_probe_cache(provider_id):
-    _PROBE_CACHE.pop(provider_id, None)
-    path = _probe_file_cache_path(provider_id)
-    if os.path.exists(path):
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+    from mms_command_tools import invalidate_probe_cache
+
+    return invalidate_probe_cache(
+        provider_id,
+        probe_cache=_PROBE_CACHE,
+        probe_file_cache_path=_probe_file_cache_path,
+    )
 
 
 def _probe_cache_age(provider_id):
-    path = _probe_file_cache_path(provider_id)
-    if not os.path.exists(path):
-        return None
-    try:
-        import time as _time
-        return max(0.0, _time.time() - os.path.getmtime(path))
-    except OSError:
-        return None
+    from mms_command_tools import probe_cache_age
+
+    return probe_cache_age(provider_id, probe_file_cache_path=_probe_file_cache_path)
 
 
 def _load_probe_file_cache(provider_id, allow_stale=False):
@@ -4277,32 +4274,16 @@ def _load_probe_file_cache(provider_id, allow_stale=False):
     默认仅在 TTL 内返回；allow_stale=True 时，允许读取过期缓存，
     适合启动/TUI 首屏阶段先快速展示，再由后台预热异步刷新。
     """
-    path = _probe_file_cache_path(provider_id)
-    try:
-        import time as _time
-        if not os.path.exists(path):
-            return None
-        with open(path, "r") as f:
-            data = json.load(f)
-        raw_models = _normalize_model_id_list(data.get("raw_models") or data.get("models") or [])
-        error_kind = data.get("error_kind")
-        ttl = _PROBE_FILE_CACHE_NEGATIVE_TTL if error_kind or not raw_models else _PROBE_FILE_CACHE_TTL
-        age = _time.time() - os.path.getmtime(path)
-        is_stale = age > ttl
-        if is_stale and not allow_stale:
-            return None
-        normalized = dict(data)
-        normalized["raw_models"] = raw_models
-        normalized["models"] = list(raw_models)
-        normalized.setdefault("base_source", "remote")
-        normalized.setdefault("error", None)
-        normalized.setdefault("error_kind", None)
-        normalized.setdefault("details", [])
-        normalized["is_stale"] = is_stale
-        return normalized
-    except Exception:
-        pass
-    return None
+    from mms_command_tools import load_probe_file_cache
+
+    return load_probe_file_cache(
+        provider_id,
+        allow_stale=allow_stale,
+        probe_file_cache_path=_probe_file_cache_path,
+        normalize_model_id_list=_normalize_model_id_list,
+        file_cache_ttl=_PROBE_FILE_CACHE_TTL,
+        negative_ttl=_PROBE_FILE_CACHE_NEGATIVE_TTL,
+    )
 
 
 def _save_probe_file_cache(provider_id, result):
@@ -4311,39 +4292,20 @@ def _save_probe_file_cache(provider_id, result):
     remote 成功结果、fallback/manual 模型结果、负缓存都应落盘，
     避免模型选择页反复慢探测。
     """
-    base_source = result.get("base_source")
-    if base_source not in {"remote", "fallback", "manual"}:
-        return
-    try:
-        os.makedirs(_PROBE_FILE_CACHE_DIR, exist_ok=True)
-        path = _probe_file_cache_path(provider_id)
-        with open(path, "w") as f:
-            json.dump(
-                {
-                    "raw_models": result.get("raw_models") or [],
-                    "working_url": result.get("working_url"),
-                    "base_source": base_source or "remote",
-                    "error": result.get("error"),
-                    "error_kind": result.get("error_kind"),
-                },
-                f,
-            )
-    except Exception:
-        pass
+    from mms_command_tools import save_probe_file_cache
+
+    return save_probe_file_cache(
+        provider_id,
+        result,
+        probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
+        probe_file_cache_path=_probe_file_cache_path,
+    )
 
 
 def _base_probe_result_from_cache(provider_id, file_cached):
-    return {
-        "provider_id": provider_id,
-        "raw_models": list(file_cached["raw_models"]),
-        "models": list(file_cached["raw_models"]),
-        "error": file_cached.get("error"),
-        "error_kind": file_cached.get("error_kind"),
-        "working_url": file_cached.get("working_url"),
-        "details": list(file_cached.get("details") or []),
-        "base_source": file_cached.get("base_source", "remote"),
-        "is_stale": bool(file_cached.get("is_stale")),
-    }
+    from mms_command_tools import base_probe_result_from_cache
+
+    return base_probe_result_from_cache(provider_id, file_cached)
 
 
 def _ensure_probe_async_executor():

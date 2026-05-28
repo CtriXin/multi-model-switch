@@ -2719,6 +2719,135 @@ def provider_supports_model_for_cli(
     return False
 
 
+def probe_file_cache_path(provider_id, *, probe_file_cache_dir):
+    return os.path.join(probe_file_cache_dir, f"models_{provider_id}.json")
+
+
+def invalidate_probe_cache(
+    provider_id,
+    *,
+    probe_cache,
+    probe_file_cache_path,
+    path_exists=os.path.exists,
+    remove=os.remove,
+):
+    probe_cache.pop(provider_id, None)
+    path = probe_file_cache_path(provider_id)
+    if path_exists(path):
+        try:
+            remove(path)
+        except OSError:
+            pass
+
+
+def probe_cache_age(
+    provider_id,
+    *,
+    probe_file_cache_path,
+    path_exists=os.path.exists,
+    getmtime=os.path.getmtime,
+    time_func=None,
+):
+    path = probe_file_cache_path(provider_id)
+    if not path_exists(path):
+        return None
+    try:
+        if time_func is None:
+            import time as _time
+
+            time_func = _time.time
+        return max(0.0, time_func() - getmtime(path))
+    except OSError:
+        return None
+
+
+def load_probe_file_cache(
+    provider_id,
+    allow_stale=False,
+    *,
+    probe_file_cache_path,
+    normalize_model_id_list,
+    file_cache_ttl,
+    negative_ttl,
+    path_exists=os.path.exists,
+    getmtime=os.path.getmtime,
+    time_func=None,
+):
+    """Read provider model probe cache without owning global MMS paths."""
+    path = probe_file_cache_path(provider_id)
+    try:
+        if time_func is None:
+            import time as _time
+
+            time_func = _time.time
+        if not path_exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        raw_models = normalize_model_id_list(data.get("raw_models") or data.get("models") or [])
+        error_kind = data.get("error_kind")
+        ttl = negative_ttl if error_kind or not raw_models else file_cache_ttl
+        age = time_func() - getmtime(path)
+        is_stale = age > ttl
+        if is_stale and not allow_stale:
+            return None
+        normalized = dict(data)
+        normalized["raw_models"] = raw_models
+        normalized["models"] = list(raw_models)
+        normalized.setdefault("base_source", "remote")
+        normalized.setdefault("error", None)
+        normalized.setdefault("error_kind", None)
+        normalized.setdefault("details", [])
+        normalized["is_stale"] = is_stale
+        return normalized
+    except Exception:
+        pass
+    return None
+
+
+def save_probe_file_cache(
+    provider_id,
+    result,
+    *,
+    probe_file_cache_dir,
+    probe_file_cache_path,
+    makedirs=os.makedirs,
+):
+    base_source = result.get("base_source")
+    if base_source not in {"remote", "fallback", "manual"}:
+        return
+    try:
+        makedirs(probe_file_cache_dir, exist_ok=True)
+        path = probe_file_cache_path(provider_id)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "raw_models": result.get("raw_models") or [],
+                    "working_url": result.get("working_url"),
+                    "base_source": base_source or "remote",
+                    "error": result.get("error"),
+                    "error_kind": result.get("error_kind"),
+                },
+                handle,
+            )
+    except Exception:
+        pass
+
+
+def base_probe_result_from_cache(provider_id, file_cached):
+    return {
+        "provider_id": provider_id,
+        "raw_models": list(file_cached["raw_models"]),
+        "models": list(file_cached["raw_models"]),
+        "error": file_cached.get("error"),
+        "error_kind": file_cached.get("error_kind"),
+        "working_url": file_cached.get("working_url"),
+        "details": list(file_cached.get("details") or []),
+        "base_source": file_cached.get("base_source", "remote"),
+        "is_stale": bool(file_cached.get("is_stale")),
+    }
+
+
 def provider_candidates(
     cfg,
     default_provider,

@@ -2701,6 +2701,113 @@ def test_model_capability_helpers_preserve_native_bridge_and_tags():
     )
 
 
+def test_probe_file_cache_helpers_preserve_ttl_normalization_and_cleanup(tmp_path):
+    import json
+    import os
+
+    import mms_command_tools
+
+    cache_dir = str(tmp_path / "cache")
+    cache_path = lambda provider_id: mms_command_tools.probe_file_cache_path(
+        provider_id,
+        probe_file_cache_dir=cache_dir,
+    )
+
+    assert cache_path("relay") == str(tmp_path / "cache" / "models_relay.json")
+    assert mms_command_tools.probe_cache_age(
+        "missing",
+        probe_file_cache_path=cache_path,
+        path_exists=lambda _path: False,
+    ) is None
+    assert mms_command_tools.probe_cache_age(
+        "relay",
+        probe_file_cache_path=cache_path,
+        path_exists=lambda _path: True,
+        getmtime=lambda _path: 100.0,
+        time_func=lambda: 130.0,
+    ) == 30.0
+
+    ignored = {"base_source": "live", "raw_models": ["gpt-5.5"]}
+    mms_command_tools.save_probe_file_cache(
+        "relay",
+        ignored,
+        probe_file_cache_dir=cache_dir,
+        probe_file_cache_path=cache_path,
+    )
+    assert not os.path.exists(cache_path("relay"))
+
+    mms_command_tools.save_probe_file_cache(
+        "relay",
+        {
+            "base_source": "remote",
+            "raw_models": [" gpt-5.5 ", "", 42],
+            "working_url": "https://relay.example.com/v1",
+        },
+        probe_file_cache_dir=cache_dir,
+        probe_file_cache_path=cache_path,
+    )
+    assert json.loads(open(cache_path("relay"), encoding="utf-8").read())["base_source"] == "remote"
+
+    def normalize_models(raw):
+        return [str(item).strip() for item in raw if str(item).strip()]
+
+    fresh = mms_command_tools.load_probe_file_cache(
+        "relay",
+        probe_file_cache_path=cache_path,
+        normalize_model_id_list=normalize_models,
+        file_cache_ttl=60,
+        negative_ttl=10,
+        getmtime=lambda _path: 990.0,
+        time_func=lambda: 1000.0,
+    )
+    assert fresh["raw_models"] == ["gpt-5.5", "42"]
+    assert fresh["models"] == ["gpt-5.5", "42"]
+    assert fresh["error"] is None
+    assert fresh["error_kind"] is None
+    assert fresh["details"] == []
+    assert fresh["is_stale"] is False
+    assert mms_command_tools.base_probe_result_from_cache("relay", fresh) == {
+        "provider_id": "relay",
+        "raw_models": ["gpt-5.5", "42"],
+        "models": ["gpt-5.5", "42"],
+        "error": None,
+        "error_kind": None,
+        "working_url": "https://relay.example.com/v1",
+        "details": [],
+        "base_source": "remote",
+        "is_stale": False,
+    }
+    assert mms_command_tools.load_probe_file_cache(
+        "relay",
+        probe_file_cache_path=cache_path,
+        normalize_model_id_list=normalize_models,
+        file_cache_ttl=60,
+        negative_ttl=10,
+        getmtime=lambda _path: 900.0,
+        time_func=lambda: 1000.0,
+    ) is None
+    stale = mms_command_tools.load_probe_file_cache(
+        "relay",
+        allow_stale=True,
+        probe_file_cache_path=cache_path,
+        normalize_model_id_list=normalize_models,
+        file_cache_ttl=60,
+        negative_ttl=10,
+        getmtime=lambda _path: 900.0,
+        time_func=lambda: 1000.0,
+    )
+    assert stale["is_stale"] is True
+
+    probe_cache = {"relay": {"models": ["old"]}}
+    mms_command_tools.invalidate_probe_cache(
+        "relay",
+        probe_cache=probe_cache,
+        probe_file_cache_path=cache_path,
+    )
+    assert probe_cache == {}
+    assert not os.path.exists(cache_path("relay"))
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
