@@ -5168,20 +5168,24 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if landing_action in {None, "back"}:
                     continue
                 if str(landing_action or "").startswith("default::") or landing_action == "manual_default":
-                    fallback_model = str(landing_action or "").split("::", 1)[1] if str(landing_action or "").startswith("default::") else ""
-                    if not fallback_model:
-                        _ensure_rich()
-                        fallback_model = Prompt.ask("全局默认 fallback model", default=default_fallback.get("model") or "").strip()
+                    fallback_model = tui_flow.resolve_rescue_action_fallback_model(
+                        landing_action,
+                        prefix="default::",
+                        prompt_label="全局默认 fallback model",
+                        prompt_default=default_fallback.get("model") or "",
+                        ensure_rich=_ensure_rich,
+                        prompt_cls=Prompt,
+                    )
                     if fallback_model:
                         current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
                     continue
                 if landing_action == "choose_route_default":
                     from mms_tui import select_model_tui
 
-                    fallback_model = tui_flow.safe_tui_call(
-                        select_model_tui,
+                    fallback_model = tui_flow.select_rescue_route_fallback_model(
                         route_fallback_candidates,
-                        title="选择全局默认 fallback model",
+                        "选择全局默认 fallback model",
+                        select_model_tui=select_model_tui,
                     )
                     if fallback_model:
                         current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]
