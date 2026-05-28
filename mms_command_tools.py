@@ -832,6 +832,50 @@ def cli_upgrade_shell_command(cli_name, *, cli_version_packages):
     return "npm install -g " + shlex.quote(f"{package}@latest")
 
 
+def run_about_upgrade(
+    *,
+    target="mms",
+    include_clis=False,
+    ensure_rich,
+    cli_upgrade_shell_command,
+    mms_upgrade_shell_command,
+    confirm_ask,
+    subprocess_run,
+    console,
+    localize,
+):
+    ensure_rich()
+    target = str(target or "mms").strip().lower()
+    if target in {"codex", "claude"}:
+        command = cli_upgrade_shell_command(target)
+        label = "Codex CLI" if target == "codex" else "Claude CLI"
+    else:
+        command = mms_upgrade_shell_command(include_clis=include_clis)
+        label = localize("MMS + Codex/Claude CLI", "MMS + Codex/Claude CLI") if include_clis else "MMS"
+    if not command:
+        console.print(f"[red]{localize('没有可执行的升级命令。', 'No upgrade command available.')}[/red]")
+        return False
+    console.print(f"[yellow]{localize(f'即将升级 {label}', f'About to upgrade {label}')}[/yellow]")
+    console.print(f"[dim]{command}[/dim]")
+    if not confirm_ask(localize("确认执行升级？", "Run upgrade now?"), default=False):
+        console.print(f"[yellow]{localize('已取消升级。', 'Upgrade cancelled.')}[/yellow]")
+        return False
+    result = subprocess_run(
+        ["bash", "-lc", command],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.stdout:
+        console.print(result.stdout)
+    if result.returncode == 0:
+        console.print(f"[green]✓ {localize('升级命令完成。重新打开终端或重新启动 mms 后生效。', 'Upgrade command completed. Restart the terminal or MMS to apply.')}[/green]")
+        return True
+    console.print(f"[red]{localize('升级命令失败', 'Upgrade command failed')} (exit {result.returncode})[/red]")
+    return False
+
+
 def about_tui_payload(about_snapshot, *, config_path, localize):
     about_snapshot = about_snapshot if isinstance(about_snapshot, dict) else {}
     version_info = about_snapshot.get("version_info") if isinstance(about_snapshot.get("version_info"), dict) else {}

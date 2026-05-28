@@ -1083,6 +1083,66 @@ def test_about_upgrade_command_helpers_preserve_shell_commands():
     ) == ""
 
 
+def test_run_about_upgrade_preserves_confirm_gate_and_execution():
+    import mms_command_tools
+
+    class Result:
+        stdout = "ok"
+        returncode = 0
+
+    console = _CollectingConsole()
+    calls = []
+    cancelled = mms_command_tools.run_about_upgrade(
+        target="mms",
+        ensure_rich=lambda: calls.append(("rich",)),
+        cli_upgrade_shell_command=lambda target: "npm",
+        mms_upgrade_shell_command=lambda include_clis=False: "install-mms --latest",
+        confirm_ask=lambda label, default=False: calls.append(("confirm", label, default)) or False,
+        subprocess_run=lambda *args, **kwargs: calls.append(("run", args, kwargs)) or Result(),
+        console=console,
+        localize=lambda zh, en: zh,
+    )
+    assert cancelled is False
+    assert calls == [("rich",), ("confirm", "确认执行升级？", False)]
+    assert console.items == [
+        "[yellow]即将升级 MMS[/yellow]",
+        "[dim]install-mms --latest[/dim]",
+        "[yellow]已取消升级。[/yellow]",
+    ]
+
+    console = _CollectingConsole()
+    calls.clear()
+    succeeded = mms_command_tools.run_about_upgrade(
+        target="codex",
+        ensure_rich=lambda: calls.append(("rich",)),
+        cli_upgrade_shell_command=lambda target: f"upgrade-{target}",
+        mms_upgrade_shell_command=lambda include_clis=False: "install-mms",
+        confirm_ask=lambda label, default=False: True,
+        subprocess_run=lambda *args, **kwargs: calls.append(("run", args, kwargs)) or Result(),
+        console=console,
+        localize=lambda zh, en: zh,
+    )
+    assert succeeded is True
+    assert calls[0] == ("rich",)
+    assert calls[1][0] == "run"
+    assert calls[1][1][0] == ["bash", "-lc", "upgrade-codex"]
+    assert calls[1][2]["stdout"] == mms_command_tools.subprocess.PIPE
+    assert console.items[-1].startswith("[green]✓ 升级命令完成")
+
+    console = _CollectingConsole()
+    assert mms_command_tools.run_about_upgrade(
+        target="missing",
+        ensure_rich=lambda: None,
+        cli_upgrade_shell_command=lambda target: "",
+        mms_upgrade_shell_command=lambda include_clis=False: "",
+        confirm_ask=lambda label, default=False: True,
+        subprocess_run=lambda *args, **kwargs: Result(),
+        console=console,
+        localize=lambda zh, en: zh,
+    ) is False
+    assert console.items == ["[red]没有可执行的升级命令。[/red]"]
+
+
 def test_mms_config_guard_renderers_preserve_human_gate_text():
     import mms_command_tools
 

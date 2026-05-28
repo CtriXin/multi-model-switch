@@ -835,39 +835,19 @@ def _print_about_version_summary(about_snapshot):
 
 
 def _run_about_upgrade(*, target="mms", include_clis=False):
-    _ensure_rich()
-    target = str(target or "mms").strip().lower()
-    if target in {"codex", "claude"}:
-        command = _cli_upgrade_shell_command(target)
-        label = "Codex CLI" if target == "codex" else "Claude CLI"
-    else:
-        command = _mms_upgrade_shell_command(include_clis=include_clis)
-        if include_clis:
-            label = _L("MMS + Codex/Claude CLI", "MMS + Codex/Claude CLI")
-        else:
-            label = "MMS"
-    if not command:
-        console.print(f"[red]{_L('没有可执行的升级命令。', 'No upgrade command available.')}[/red]")
-        return False
-    console.print(f"[yellow]{_L(f'即将升级 {label}', f'About to upgrade {label}')}[/yellow]")
-    console.print(f"[dim]{command}[/dim]")
-    if not Confirm.ask(_L("确认执行升级？", "Run upgrade now?"), default=False):
-        console.print(f"[yellow]{_L('已取消升级。', 'Upgrade cancelled.')}[/yellow]")
-        return False
-    result = subprocess.run(
-        ["bash", "-lc", command],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
+    from mms_command_tools import run_about_upgrade
+
+    return run_about_upgrade(
+        target=target,
+        include_clis=include_clis,
+        ensure_rich=_ensure_rich,
+        cli_upgrade_shell_command=_cli_upgrade_shell_command,
+        mms_upgrade_shell_command=_mms_upgrade_shell_command,
+        confirm_ask=Confirm.ask,
+        subprocess_run=subprocess.run,
+        console=console,
+        localize=_L,
     )
-    if result.stdout:
-        console.print(result.stdout)
-    if result.returncode == 0:
-        console.print(f"[green]✓ {_L('升级命令完成。重新打开终端或重新启动 mms 后生效。', 'Upgrade command completed. Restart the terminal or MMS to apply.')}[/green]")
-        return True
-    console.print(f"[red]{_L('升级命令失败', 'Upgrade command failed')} (exit {result.returncode})[/red]")
-    return False
 
 
 def config_command_hint():
