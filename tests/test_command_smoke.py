@@ -256,6 +256,30 @@ def test_resolve_visible_clis_preserves_oauth_and_family_hint_rules():
     assert [call[1] for call in resolver_calls] == ["missing", "gemini", "codex", "opencode"]
 
 
+def test_use_tui_preserves_tty_width_and_oserror_rules():
+    import mms_command_tools
+
+    class Stdin:
+        def __init__(self, is_tty):
+            self._is_tty = is_tty
+
+        def isatty(self):
+            return self._is_tty
+
+    class Size:
+        def __init__(self, columns):
+            self.columns = columns
+
+    assert mms_command_tools.use_tui(Stdin(False), lambda: Size(120)) is False
+    assert mms_command_tools.use_tui(Stdin(True), lambda: Size(39)) is False
+    assert mms_command_tools.use_tui(Stdin(True), lambda: Size(40)) is True
+
+    def raise_oserror():
+        raise OSError("no tty")
+
+    assert mms_command_tools.use_tui(Stdin(True), raise_oserror) is False
+
+
 def test_launch_trace_formatter_preserves_sources_and_override_chain():
     import mms_command_tools
 

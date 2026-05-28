@@ -2767,6 +2767,16 @@ def resolve_visible_clis(
     return visible
 
 
+def use_tui(stdin, get_terminal_size, *, min_columns=40):
+    if not stdin.isatty():
+        return False
+    try:
+        cols = get_terminal_size().columns
+        return cols >= min_columns
+    except OSError:
+        return False
+
+
 def parse_usage_timestamp(value):
     raw = str(value or "").strip()
     if not raw:

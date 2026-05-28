@@ -6665,13 +6665,9 @@ def select_cli(cli_names=None):
 
 def _use_tui():
     """判断是否可以使用 curses TUI"""
-    if not sys.stdin.isatty():
-        return False
-    try:
-        cols = os.get_terminal_size().columns
-        return cols >= 40
-    except OSError:
-        return False
+    from mms_command_tools import use_tui
+
+    return use_tui(sys.stdin, os.get_terminal_size)
 
 
 _CLI_DEFAULT_FAMILY_FIRST = {
