@@ -5414,73 +5414,36 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             # fall through to confirm
 
         elif action_type == "family":
-            family_name = action_data
-            models = families_detail.get(cli, {}).get(family_name, [])
-            if not models:
-                console.print(f"[yellow]{family_name} 下没有可用模型[/yellow]")
-                continue
-
-            provider_options = provider_options_by_cli.get(cli, {})
-
-            selected = tui_flow.safe_tui_call(
-                select_submodel_tui,
-                family_name,
-                models,
-                provider_options=provider_options,
-                last_used=last_by_cli.get(cli),
+            family_action = tui_flow.handle_tui_family_action(
+                current_cfg,
+                cli,
+                action_data,
+                families_detail,
+                provider_options_by_cli,
+                last_by_cli,
+                current_provider,
+                default_models,
+                select_submodel_tui=select_submodel_tui,
+                account_id=account_id,
+                provider_id=provider_id,
+                apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
+                resolve_last_used_runtime=_resolve_last_used_runtime,
+                resolve_best_provider=_resolve_best_provider,
+                choose_runtime_source=_choose_runtime_source,
+                trace_record=_trace_record,
+                trace_runtime_choice=_trace_runtime_choice,
             )
-            if selected == "__interrupt__":
+            if family_action["status"] == "interrupt":
                 return True
-            if selected is None:
-                continue  # Esc 返回品类列表
-            if selected == "__last__":
-                action_data = last_by_cli.get(cli) or {}
-                if not action_data.get("model"):
-                    continue
-
-                last_action = tui_flow.handle_tui_last_used_action(
-                    current_cfg,
-                    cli,
-                    action_data,
-                    current_provider,
-                    default_models,
-                    account_id=account_id,
-                    provider_id=provider_id,
-                    trace_record=_trace_record,
-                    resolve_last_used_runtime=_resolve_last_used_runtime,
-                    resolve_best_provider=_resolve_best_provider,
-                    choose_runtime_source=_choose_runtime_source,
-                    trace_runtime_choice=_trace_runtime_choice,
-                )
-                if last_action.get("message"):
-                    console.print(f"[yellow]{last_action['message']}[/yellow]")
-                if last_action["status"] != "launch":
-                    continue
-                model_info = last_action["model_info"]
-                runtime_runtime = last_action["runtime"]
-                cli = last_action["cli"]
-            else:
-                selected_action = tui_flow.handle_tui_selected_model_action(
-                    current_cfg,
-                    cli,
-                    selected,
-                    family_name,
-                    current_provider,
-                    default_models,
-                    apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
-                    selected_model_launch_context=tui_flow.selected_model_launch_context,
-                    resolve_best_provider=_resolve_best_provider,
-                    trace_record=_trace_record,
-                    trace_runtime_choice=_trace_runtime_choice,
-                )
-                if selected_action["families_dirty"]:
-                    _families_dirty = True
-                if selected_action.get("message"):
-                    console.print(f"[yellow]{selected_action['message']}[/yellow]")
-                if selected_action["status"] != "launch":
-                    continue
-                model_info = selected_action["model_info"]
-                runtime_runtime = selected_action["runtime"]
+            if family_action["families_dirty"]:
+                _families_dirty = True
+            if family_action.get("message"):
+                console.print(f"[yellow]{family_action['message']}[/yellow]")
+            if family_action["status"] != "launch":
+                continue
+            model_info = family_action["model_info"]
+            runtime_runtime = family_action["runtime"]
+            cli = family_action.get("cli", cli)
             # fall through to confirm
         elif action_type == "profile" and cli not in {"opencode", "agy"}:
             continue

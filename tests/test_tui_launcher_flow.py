@@ -11,6 +11,7 @@ from mms_tui_launcher_flow import (
     handle_tui_about_settings_action,
     handle_tui_broker_action,
     handle_tui_connect_action,
+    handle_tui_family_action,
     handle_tui_guard_settings_action,
     handle_tui_last_used_action,
     handle_tui_language_settings_action,
@@ -572,6 +573,141 @@ def test_handle_tui_selected_model_action_reports_missing_runtime() -> None:
         "families_dirty": False,
     }
     assert trace_records == []
+
+
+def test_handle_tui_family_action_selects_model_and_applies_priority() -> None:
+    calls = []
+    traces = []
+    runtime = {"id": "p1"}
+    selected = {"model": "gpt-5.4", "priority_changes": [{"id": "p1"}]}
+
+    result = handle_tui_family_action(
+        {"cfg": True},
+        "codex",
+        "GPT",
+        {"codex": {"GPT": [{"model": "gpt-5.4"}]}},
+        {"codex": {"provider": "option"}},
+        {"codex": {"model": "last-model"}},
+        {"id": "current"},
+        ["gpt-5.4"],
+        select_submodel_tui=lambda family, models, **kwargs: calls.append(("select", family, models, kwargs)) or selected,
+        apply_priority_changes=lambda cfg, changes: calls.append(("priority", cfg, changes)) or True,
+        resolve_last_used_runtime=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_best_provider=lambda *_args, **_kwargs: (runtime, None),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_record=lambda *args, **kwargs: traces.append(("record", args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: traces.append(("choice", args, kwargs)),
+    )
+
+    assert result == {
+        "status": "launch",
+        "model_info": {"model": "gpt-5.4"},
+        "runtime": runtime,
+        "families_dirty": True,
+    }
+    assert calls == [
+        (
+            "select",
+            "GPT",
+            [{"model": "gpt-5.4"}],
+            {"provider_options": {"provider": "option"}, "last_used": {"model": "last-model"}},
+        ),
+        ("priority", {"cfg": True}, [{"id": "p1"}]),
+    ]
+    assert traces == [
+        ("choice", ("runtime resolve", runtime), {"launch_cli": "codex", "choice": "best provider"}),
+        ("record", ('family "GPT"',), {"cli": "codex", "model": "gpt-5.4", "provider": "p1"}),
+    ]
+
+
+def test_handle_tui_family_action_handles_last_used_selection() -> None:
+    traces = []
+    runtime = {"id": "restored"}
+
+    result = handle_tui_family_action(
+        {"cfg": True},
+        "claude",
+        "Claude",
+        {"claude": {"Claude": [{"model": "claude-sonnet"}]}},
+        {},
+        {"claude": {"model": "claude-sonnet", "model_info": {"model": "claude-sonnet", "source": "last"}}},
+        {"id": "current"},
+        ["claude-sonnet"],
+        select_submodel_tui=lambda *_args, **_kwargs: "__last__",
+        account_id="acc",
+        provider_id="prov",
+        apply_priority_changes=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_last_used_runtime=lambda cfg, cli, action_data, default_models: (
+            runtime,
+            default_models,
+            "restored-choice",
+        ),
+        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_record=lambda *args, **kwargs: traces.append(("record", args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: traces.append(("choice", args, kwargs)),
+    )
+
+    assert result == {
+        "status": "launch",
+        "model_info": {"model": "claude-sonnet", "source": "last"},
+        "runtime": runtime,
+        "cli": "claude",
+        "families_dirty": False,
+    }
+    assert traces == [
+        ("record", ("last used",), {"cli": "claude", "model": "claude-sonnet"}),
+        ("choice", ("runtime resolve", runtime), {"launch_cli": "claude", "choice": "restored-choice"}),
+    ]
+
+
+def test_handle_tui_family_action_handles_empty_cancel_interrupt_and_missing_last() -> None:
+    assert handle_tui_family_action(
+        {},
+        "codex",
+        "Empty",
+        {"codex": {}},
+        {},
+        {},
+        {},
+        [],
+        select_submodel_tui=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        apply_priority_changes=lambda *_args: False,
+        resolve_last_used_runtime=lambda *_args: (None, [], ""),
+        resolve_best_provider=lambda *_args, **_kwargs: (None, None),
+        choose_runtime_source=lambda *_args, **_kwargs: (None, [], "codex"),
+        trace_record=lambda *_args, **_kwargs: None,
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    ) == {"status": "continue", "message": "Empty 下没有可用模型", "families_dirty": False}
+
+    base_kwargs = {
+        "cfg": {},
+        "cli_name": "codex",
+        "family_name": "GPT",
+        "families_detail": {"codex": {"GPT": [{"model": "gpt"}]}},
+        "provider_options_by_cli": {},
+        "last_by_cli": {},
+        "current_provider": {},
+        "default_models": [],
+        "apply_priority_changes": lambda *_args: False,
+        "resolve_last_used_runtime": lambda *_args: (None, [], ""),
+        "resolve_best_provider": lambda *_args, **_kwargs: (None, None),
+        "choose_runtime_source": lambda *_args, **_kwargs: (None, [], "codex"),
+        "trace_record": lambda *_args, **_kwargs: None,
+        "trace_runtime_choice": lambda *_args, **_kwargs: None,
+    }
+    assert handle_tui_family_action(
+        **base_kwargs,
+        select_submodel_tui=lambda *_args, **_kwargs: None,
+    ) == {"status": "continue", "families_dirty": False}
+    assert handle_tui_family_action(
+        **base_kwargs,
+        select_submodel_tui=lambda *_args, **_kwargs: "__last__",
+    ) == {"status": "continue", "families_dirty": False}
+    assert handle_tui_family_action(
+        **base_kwargs,
+        select_submodel_tui=lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
+    ) == {"status": "interrupt", "families_dirty": False}
 
 
 def test_opencode_profile_launch_context_traces_resolved_runtime() -> None:

@@ -520,6 +520,81 @@ def handle_tui_selected_model_action(
     }
 
 
+def handle_tui_family_action(
+    cfg,
+    cli_name,
+    family_name,
+    families_detail,
+    provider_options_by_cli,
+    last_by_cli,
+    current_provider,
+    default_models,
+    *,
+    select_submodel_tui,
+    account_id=None,
+    provider_id=None,
+    apply_priority_changes,
+    resolve_last_used_runtime,
+    resolve_best_provider,
+    choose_runtime_source,
+    trace_record,
+    trace_runtime_choice,
+):
+    models = families_detail.get(cli_name, {}).get(family_name, [])
+    if not models:
+        return {
+            "status": "continue",
+            "message": f"{family_name} 下没有可用模型",
+            "families_dirty": False,
+        }
+
+    provider_options = provider_options_by_cli.get(cli_name, {})
+    selected = safe_tui_call(
+        select_submodel_tui,
+        family_name,
+        models,
+        provider_options=provider_options,
+        last_used=last_by_cli.get(cli_name),
+    )
+    if selected == "__interrupt__":
+        return {"status": "interrupt", "families_dirty": False}
+    if selected is None:
+        return {"status": "continue", "families_dirty": False}
+    if selected == "__last__":
+        action_data = last_by_cli.get(cli_name) or {}
+        if not action_data.get("model"):
+            return {"status": "continue", "families_dirty": False}
+        last_action = handle_tui_last_used_action(
+            cfg,
+            cli_name,
+            action_data,
+            current_provider,
+            default_models,
+            account_id=account_id,
+            provider_id=provider_id,
+            trace_record=trace_record,
+            resolve_last_used_runtime=resolve_last_used_runtime,
+            resolve_best_provider=resolve_best_provider,
+            choose_runtime_source=choose_runtime_source,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+        return {**last_action, "families_dirty": False}
+
+    return handle_tui_selected_model_action(
+        cfg,
+        cli_name,
+        selected,
+        family_name,
+        current_provider,
+        default_models,
+        apply_priority_changes=apply_priority_changes,
+        selected_model_launch_context=selected_model_launch_context,
+        resolve_best_provider=resolve_best_provider,
+        trace_record=trace_record,
+        trace_runtime_choice=trace_runtime_choice,
+    )
+
+
 def opencode_profile_launch_context(
     cfg,
     current_provider,
