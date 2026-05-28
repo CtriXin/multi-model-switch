@@ -990,6 +990,68 @@ def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
     ]
 
 
+def test_runtime_with_vision_sidecar_helper_preserves_selection_rules():
+    import mms_command_tools
+
+    cfg = {
+        "providers": [
+            {"id": "direct-mimo"},
+            {"id": "direct-kimi"},
+        ]
+    }
+    providers = {
+        "direct-mimo": {
+            "id": "direct-mimo",
+            "enabled": True,
+            "api_key": "sk-mimo",
+            "anthropic_base_url": "https://mimo.example/anthropic/",
+            "fallback_models": ["mimo-v2.5"],
+        },
+        "direct-kimi": {
+            "id": "direct-kimi",
+            "enabled": True,
+            "api_key": "sk-kimi",
+            "anthropic_base_url": "https://kimi.example/anthropic/",
+            "fallback_models": ["K2.6"],
+        },
+    }
+    runtime = mms_command_tools.runtime_with_vision_sidecar(
+        cfg,
+        {"id": "relay", "auth_mode": "api_key"},
+        config_truthy=lambda value, default=True: bool(default if value is None else value),
+        provider_map=lambda cfg_arg: {item["id"]: item for item in cfg_arg["providers"]},
+        resolve_config_provider_id=lambda provider_defs, provider_id: provider_id if provider_id in provider_defs else "",
+        resolve_provider_context=lambda _cfg, provider_id: providers[provider_id],
+        provider_anthropic_base_url=lambda provider: str(provider.get("anthropic_base_url") or "").rstrip("/"),
+        load_probe_file_cache=lambda *_args, **_kwargs: None,
+        provider_effective_models=lambda provider, _cached_models, _cfg: provider.get("fallback_models", []),
+        environ={},
+    )
+
+    assert runtime["vision_sidecar"] == {
+        "enabled": True,
+        "provider_id": "direct-mimo",
+        "provider_profile": "",
+        "model": "mimo-v2.5",
+        "anthropic_base_url": "https://mimo.example/anthropic",
+        "api_key": "sk-mimo",
+        "proxy_url": "",
+        "no_proxy": "",
+    }
+    assert mms_command_tools.runtime_with_vision_sidecar(
+        {"vision_sidecar": {"enabled": False}, "providers": [{"id": "direct-mimo"}]},
+        {"id": "relay", "auth_mode": "api_key"},
+        config_truthy=lambda value, default=True: bool(default if value is None else value),
+        provider_map=lambda _cfg: {"direct-mimo": {}},
+        resolve_config_provider_id=lambda _defs, provider_id: provider_id,
+        resolve_provider_context=lambda *_args: providers["direct-mimo"],
+        provider_anthropic_base_url=lambda provider: provider.get("anthropic_base_url", ""),
+        load_probe_file_cache=lambda *_args, **_kwargs: None,
+        provider_effective_models=lambda *_args: [],
+        environ={},
+    ) == {"id": "relay", "auth_mode": "api_key"}
+
+
 def test_model_capability_helpers_preserve_native_bridge_and_tags():
     import mms_command_tools
 

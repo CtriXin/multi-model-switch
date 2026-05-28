@@ -3147,91 +3147,20 @@ def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", exp
 
 
 def _runtime_with_vision_sidecar(cfg, runtime):
-    if not isinstance(runtime, dict) or runtime.get("vision_sidecar"):
-        return runtime
-    raw = cfg.get("vision_sidecar") if isinstance(cfg, dict) else {}
-    raw = raw if isinstance(raw, dict) else {}
-    if raw and not _config_truthy(raw.get("enabled"), default=True):
-        return runtime
+    from mms_command_tools import runtime_with_vision_sidecar
 
-    explicit_model = str(
-        os.environ.get("MMS_VISION_SIDECAR_MODEL")
-        or raw.get("model")
-        or raw.get("vision_model")
-        or ""
-    ).strip()
-    explicit_provider_id = str(
-        os.environ.get("MMS_VISION_SIDECAR_PROVIDER")
-        or raw.get("provider_id")
-        or raw.get("provider")
-        or ""
-    ).strip()
-    preferred_ids = (
-        [explicit_provider_id]
-        if explicit_provider_id
-        else [
-            "mimo-direct-anthropic",
-            "direct-mimo",
-            "direct-kimi",
-            "newapi-personal-kimi",
-            "newapi-personal-tokyo",
-            "xin",
-        ]
+    return runtime_with_vision_sidecar(
+        cfg,
+        runtime,
+        config_truthy=_config_truthy,
+        provider_map=_provider_map,
+        resolve_config_provider_id=_resolve_config_provider_id,
+        vision_sidecar_candidate_pairs=_vision_sidecar_candidate_pairs,
+        resolve_provider_context=resolve_provider_context,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        load_probe_file_cache=_load_probe_file_cache,
+        provider_effective_models=_provider_effective_models,
     )
-    providers = cfg.get("providers", []) if isinstance(cfg, dict) else []
-    provider_defs = _provider_map(cfg) if isinstance(cfg, dict) else {}
-    explicit_provider_id = _resolve_config_provider_id(provider_defs, explicit_provider_id)
-    all_ids = [
-        str(item.get("id") or "").strip()
-        for item in providers
-        if isinstance(item, dict) and item.get("id")
-    ]
-    candidate_ids = []
-    for provider_id in preferred_ids + all_ids:
-        if provider_id and provider_id not in candidate_ids:
-            candidate_ids.append(provider_id)
-
-    for provider_id, model in _vision_sidecar_candidate_pairs(
-        raw,
-        candidate_ids,
-        explicit_model=explicit_model,
-        explicit_provider_id=explicit_provider_id,
-    ):
-        if provider_id not in provider_defs:
-            continue
-        try:
-            provider = resolve_provider_context(cfg, provider_id)
-        except Exception:
-            continue
-        if not provider or not provider.get("enabled", True):
-            continue
-        api_key = str(provider.get("api_key") or provider.get("openai_api_key") or "").strip()
-        anthropic_url = _provider_anthropic_base_url(provider)
-        if not api_key or not anthropic_url:
-            continue
-        if not explicit_provider_id:
-            try:
-                cached = _load_probe_file_cache(provider_id, allow_stale=True)
-                cached_models = (cached or {}).get("raw_models") or (cached or {}).get("models")
-                models = _provider_effective_models(provider, cached_models, cfg)
-            except Exception:
-                models = []
-            model_l = model.lower()
-            if models and model_l not in {str(item or "").strip().lower() for item in models}:
-                continue
-        updated = dict(runtime)
-        updated["vision_sidecar"] = {
-            "enabled": True,
-            "provider_id": provider_id,
-            "provider_profile": str(provider.get("profile") or provider.get("provider_profile") or ""),
-            "model": model,
-            "anthropic_base_url": anthropic_url,
-            "api_key": api_key,
-            "proxy_url": str(provider.get("proxy") or "").strip(),
-            "no_proxy": str(provider.get("no_proxy") or "").strip(),
-        }
-        return updated
-    return runtime
 
 
 def _account_label(account):
