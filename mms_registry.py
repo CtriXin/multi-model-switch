@@ -65,6 +65,7 @@ _SECRET_VALUE_PATTERNS = (
 )
 _MANIFEST_FILE_KEYS = ("router", "lineup", "profile", "policy", "capabilities")
 _OPTIONAL_MANIFEST_FILE_KEYS: tuple[str, ...] = ()
+_MANIFEST_REVISION_KEYS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
 APPROVED_CAPABILITIES_SCHEMA = "mms.model_capabilities.approved.v1"
 
 
@@ -980,6 +981,16 @@ def build_latest_approved_bundle_manifest(
     missing = [key for key in _MANIFEST_FILE_KEYS if key not in files]
     if missing:
         raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
+    revisions = {
+        "bundle_revision": bundle_revision,
+        "capability_revision": capability_revision,
+        "route_revision": route_revision,
+        "policy_revision": policy_revision,
+        "profile_revision": profile_revision,
+    }
+    missing_revisions = [key for key, value in revisions.items() if not str(value or "").strip()]
+    if missing_revisions:
+        raise RegistryValidationError(f"manifest revisions missing: {', '.join(missing_revisions)}")
     manifest_files = {name: _manifest_file_entry(name, files[name]) for name in _MANIFEST_FILE_KEYS}
     for name in _OPTIONAL_MANIFEST_FILE_KEYS:
         if name in files:
@@ -1962,6 +1973,9 @@ def verify_latest_approved_bundle(
     missing = [key for key in _MANIFEST_FILE_KEYS if key not in files]
     if missing:
         raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
+    missing_revisions = [key for key in _MANIFEST_REVISION_KEYS if not str(manifest.get(key) or "").strip()]
+    if missing_revisions:
+        raise RegistryValidationError(f"manifest revisions missing: {', '.join(missing_revisions)}")
     verified_files: dict[str, dict[str, Any]] = {}
     for name, entry in files.items():
         if not isinstance(entry, dict):

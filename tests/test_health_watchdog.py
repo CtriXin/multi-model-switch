@@ -228,6 +228,33 @@ def test_watchdog_fails_closed_on_manifest_path_escape(tmp_path: Path) -> None:
     assert any("manifest file entry escapes config root: router" in item["detail"] for item in report["failures"])
 
 
+def test_watchdog_fails_closed_on_missing_manifest_revision(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("route_revision")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("manifest revisions missing: route_revision" in item["detail"] for item in report["failures"])
+
+
 def test_watchdog_requires_bundle_for_explicit_config_root(monkeypatch, tmp_path: Path) -> None:
     watchdog = _load_watchdog()
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path))

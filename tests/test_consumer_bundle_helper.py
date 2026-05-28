@@ -142,3 +142,11 @@ def test_load_verified_consumer_bundle_fails_closed_for_invalid_manifest(tmp_pat
     paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="missing required files: profile"):
         mms_consumer_bundle.load_verified_consumer_bundle(config_root=incomplete)
+
+    missing_revision = tmp_path / "missing-revision"
+    paths = _write_bundle(missing_revision)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest.pop("route_revision")
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="missing required revisions: route_revision"):
+        mms_consumer_bundle.load_verified_consumer_bundle(config_root=missing_revision)

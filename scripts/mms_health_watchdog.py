@@ -44,6 +44,7 @@ LATEST_FILE_NAME = "latest.json"
 LOG_FILE_NAME = "health-watchdog.log"
 ENV_FILE_NAME = "health-watchdog.env"
 REQUIRED_BUNDLE_FILES = ("router", "lineup", "profile", "policy", "capabilities")
+REQUIRED_REVISION_FIELDS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
 
 OLD_ROUTE_MARKERS = {
     "http://82.156.121.141:4001": "xin fallback should use https://apple.clawopen.online",
@@ -202,6 +203,14 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
             "status": "invalid",
             "manifest_path": str(manifest_path),
             "detail": "manifest files missing: " + ", ".join(missing_files),
+            "payloads": {},
+        }
+    missing_revisions = [name for name in REQUIRED_REVISION_FIELDS if not str(manifest.get(name) or "").strip()]
+    if missing_revisions:
+        return {
+            "status": "invalid",
+            "manifest_path": str(manifest_path),
+            "detail": "manifest revisions missing: " + ", ".join(missing_revisions),
             "payloads": {},
         }
     payloads: dict[str, Any] = {}

@@ -110,7 +110,10 @@ Bundle rules:
   `bundle_revision` when their strict legacy shape allows it. If a legacy root
   file must stay shape-compatible, the manifest hash is the revision tie.
 - Consumers must verify per-file hashes and must not combine route, lineup,
-  profile, or policy files from different bundles.
+  profile, policy, or capability files from different bundles.
+- Consumers must fail closed when any required component revision id is missing;
+  `bundle_revision`, `route_revision`, `policy_revision`, `profile_revision`,
+  and `capability_revision` are part of the contract, not optional metadata.
 - Publishing uses atomic temp-file + rename: write canonical payloads first,
   refresh legacy aliases, then rename the manifest last.
 - `provider-profiles.generated.json` and `model-policy.effective.json` are

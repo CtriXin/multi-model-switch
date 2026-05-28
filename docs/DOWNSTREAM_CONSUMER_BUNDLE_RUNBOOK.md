@@ -50,9 +50,9 @@ Consumer algorithm:
    request URL/path when available, and set
    `route_source=mms:latest-approved:<bundle_revision>`.
 
-Fail closed when the manifest is missing, unreadable, has a wrong schema, points
-to missing files, omits required Router/Lineup/Profile/Policy/Capabilities entries, or any hash mismatches. Do not silently fallback to stable
-`~/.config/mms` credentials, global OAuth state, or root legacy files.
+Fail closed when the manifest is missing, unreadable, has a wrong schema, lacks
+any required revision id, points to missing files, omits required
+Router/Lineup/Profile/Policy/Capabilities entries, or any hash mismatches. Do not silently fallback to stable `~/.config/mms` credentials, global OAuth state, or root legacy files.
 
 ## File Responsibilities
 

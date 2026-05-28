@@ -453,7 +453,7 @@ Current watchdog consumer implementation:
 - It prefers a verified `<config_root>/generated/model-registry.latest-approved.json` bundle over root legacy `model-routes.json` / `model-policy.json`.
 - When using a verified bundle, it reads generated Profile metadata such as `models_endpoint` for provider checks instead of requiring root `config.toml` provider metadata.
 - If a manifest exists but is invalid or hash-mismatched, watchdog reports `stale_or_invalid_bundle` and does not silently fall back to legacy route files.
-- Watchdog rejects incomplete latest-approved manifests and manifest paths that escape the selected config root; it requires Router, Lineup, Profile, Policy, and Capabilities entries.
+- Watchdog rejects incomplete latest-approved manifests, missing revision ids, and manifest paths that escape the selected config root; it requires Router, Lineup, Profile, Policy, and Capabilities entries.
 - If the manifest is missing, explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle and fail closed by default; no-explicit-root stable watchdog behavior remains legacy-compatible.
 - `--require-bundle` still forces fail-closed behavior, and `MMS_WATCHDOG_REQUIRE_BUNDLE=0` remains an explicit diagnostic override for an explicit root.
 - `--dry-run` is read-only for watchdog persistence: it prints JSON and skips `health-watchdog/latest.json`, `health-watchdog/state.json`, and `logs/health-watchdog.log` writes.
@@ -500,7 +500,7 @@ Current Stage 4a implementation:
 - If candidate write fails after backup, the preview DB is restored from the pre-write backup.
 - `publish-preview` now prefers the latest preview route candidate, including `registry-v2-save-candidate`, and reuses matching DB candidate policy/profile revisions when generating the latest-approved bundle.
 - `registry-v2-save-candidate` route/policy/profile revisions share a `candidate_id`; `publish-preview` uses that id to avoid mixing a route revision from one candidate with policy/profile revisions from another candidate.
-- Latest-approved manifest generation and verification require the complete file set: Router, Lineup, Profile, Policy, and Capabilities. Manifest `canonical_path` entries must stay inside the selected config root.
+- Latest-approved manifest generation and verification require the complete file set and revision ids: Router, Lineup, Profile, Policy, Capabilities, plus `bundle_revision`, `route_revision`, `policy_revision`, `profile_revision`, and `capability_revision`. Manifest `canonical_path` entries must stay inside the selected config root.
 - WebUI has a preview-only `写入预览 DB + 发布` action backed by `/api/registry-v2/apply`. It requires the confirmation phrase `写入预览DB`, refuses stable roots, writes DB candidates, writes `<preview-root>/secrets/webui-secrets.json` only when explicit plaintext credential updates are submitted, publishes `generated/model-registry.latest-approved.json`, and verifies hashes.
 - WebUI plaintext credential updates are stored only in the preview secret backend; DB candidate rows keep `secret_ref` / fingerprint, the API response is sanitized, and generated Router entries become `runtime_ready=true` only when matching preview secret values exist and every route leaf has an `anthropic_base_url` or `openai_base_url`.
 - If WebUI preview publish/verify fails, the action attempts to roll back the preview DB candidate, WebUI secret backend file, and generated bundle files from the pre-publish snapshot.

@@ -17,6 +17,7 @@ from typing import Any, Mapping
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
 DEFAULT_MANIFEST_RELATIVE_PATH = Path("generated") / "model-registry.latest-approved.json"
 REQUIRED_BUNDLE_FILES = ("router", "lineup", "profile", "policy", "capabilities")
+REQUIRED_REVISION_FIELDS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
 
 
 class ConsumerBundleError(RuntimeError):
@@ -116,6 +117,9 @@ def load_verified_consumer_bundle(
     missing_files = [name for name in REQUIRED_BUNDLE_FILES if name not in files]
     if missing_files:
         raise ConsumerBundleError("latest-approved manifest missing required files: " + ", ".join(missing_files))
+    missing_revisions = [name for name in REQUIRED_REVISION_FIELDS if not str(manifest_payload.get(name) or "").strip()]
+    if missing_revisions:
+        raise ConsumerBundleError("latest-approved manifest missing required revisions: " + ", ".join(missing_revisions))
 
     verified_files: dict[str, dict[str, Any]] = {}
     payloads: dict[str, Any] = {}
@@ -176,6 +180,7 @@ __all__ = [
     "DEFAULT_MANIFEST_RELATIVE_PATH",
     "LATEST_APPROVED_SCHEMA",
     "REQUIRED_BUNDLE_FILES",
+    "REQUIRED_REVISION_FIELDS",
     "load_verified_consumer_bundle",
     "resolve_consumer_config_root",
 ]
