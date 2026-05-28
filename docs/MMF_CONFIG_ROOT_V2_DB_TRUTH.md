@@ -306,6 +306,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf config root --json
 ./mmf config source --json
 ./mmf config save-plan --json
+./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json
 ./mmf preview --help
 ./mmf preview doctor --strict-exit
 ./mmf preview init --json
@@ -474,6 +475,7 @@ Current bridge rescue consumer implementation:
 Current Stage 4a implementation:
 
 - `mms registry v2-save-candidate` / `mmf registry v2-save-candidate` accepts a WebUI plan JSON (`config`, `model_policy`, `credential_updates`) or direct config/policy JSON and is dry-run unless `--apply`.
+- `mms config apply-plan` / `mmf config apply-plan` is the human-facing CLI wrapper for a reviewed WebUI plan JSON. It is dry-run unless both `--apply` and `--confirm-preview-apply` are present, refuses stable roots by default, writes preview DB candidates + preview secret backend, publishes latest-approved, verifies hashes, and rolls back DB/secret/generated files on failure.
 - `--apply` is preview-root guarded by default; stable roots require explicit `--allow-stable`.
 - The command initializes the selected preview root if needed, backs up an existing preview DB before writing, then writes candidate `route`, `policy`, and `profile` revisions into SQLite.
 - Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB; legacy compatibility files are not written in this slice.

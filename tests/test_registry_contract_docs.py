@@ -155,6 +155,8 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "Preview startup-safe route refresh also skips legacy `model-routes.json` export",
         "TUI Settings labels direct `model-routes.json` export as `Legacy",
         "not presented as the v2 truth/publish path",
+        "./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json",
+        "rolls back DB/secret/generated files on failure",
     ]
 
     missing = [term for term in required_terms if term not in text]

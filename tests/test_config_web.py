@@ -456,7 +456,7 @@ def test_config_web_plan_includes_read_only_registry_v2_save_plan(tmp_path):
     assert v2_plan["would_write"]["generated_latest_approved_bundle"] is True
     assert v2_plan["blocked_reasons"] == []
     assert "rollback" in " ".join(v2_plan["ordered_steps"])
-    assert "WebUI preview apply is wired" in v2_plan["next_implementation_step"]
+    assert "WebUI and mms config apply-plan are wired" in v2_plan["next_implementation_step"]
     assert "sk-super-secret-value" not in encoded
 
 

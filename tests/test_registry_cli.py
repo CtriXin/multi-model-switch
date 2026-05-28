@@ -699,7 +699,7 @@ def test_registry_v2_save_plan_reports_preview_backup_sequence_without_secrets(t
     assert plan["would_write"]["legacy_compat_files"]["credentials_sh"] is True
     assert plan["blocked_reasons"] == []
     assert "rollback" in " ".join(plan["ordered_steps"])
-    assert "WebUI preview apply is wired" in plan["next_implementation_step"]
+    assert "WebUI and mms config apply-plan are wired" in plan["next_implementation_step"]
     assert "wire WebUI" not in plan["next_implementation_step"]
     assert "sk-preview-secret" not in encoded
 
@@ -998,6 +998,142 @@ def test_mmf_registry_v2_save_candidate_cli_accepts_webui_plan_json(tmp_path: Pa
     assert payload["policy_candidate"]["model_count"] == 1
     assert "sk-primary-local-secret" not in combined
     assert (config_dir / "registry" / "model-registry.sqlite").exists()
+
+
+def test_mmf_config_apply_plan_writes_preview_bundle_without_legacy_files(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    secret_value = "sk-preview-apply-secret"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema": "mms.setup_web.plan.v1",
+                "config": _registry_v2_candidate_config(),
+                "model_policy": {"version": 1, "models": {"shared-model": {"visible": True}}},
+                "credential_updates": [{"provider_id": "primary-local", "api_key": secret_value}],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "config",
+            "apply-plan",
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--confirm-preview-apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_APPLY_PLAN_SCHEMA
+    assert payload["ok"] is True
+    assert payload["status"] == "applied"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["candidate_result"]["route_candidates"]["provider_route_count"] == 2
+    assert payload["secret_backend"]["secret_count"] == 1
+    assert payload["publish"]["preview_source"] == "registry-v2-save-candidate"
+    assert payload["verify"]["verified"] is True
+    assert payload["writes"]["legacy_files"] is False
+    assert router["routes"]["shared-model"]["primary"]["api_key"] == secret_value
+    assert not (config_dir / "config.toml").exists()
+    assert not (config_dir / "credentials.sh").exists()
+    assert not (config_dir / "model-policy.json").exists()
+    assert secret_value not in combined
+
+
+def test_mmf_config_apply_plan_blocks_apply_without_confirmation(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"config": _registry_v2_candidate_config()}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "config",
+            "apply-plan",
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_APPLY_PLAN_SCHEMA
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert "confirm_preview_apply_required" in payload["blocked_reasons"]
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "generated").exists()
+
+
+def test_registry_v2_apply_plan_rolls_back_on_verify_failure(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    secret_value = "sk-rollback-apply-secret"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "config": _registry_v2_candidate_config(),
+                "model_policy": {"version": 1, "models": {"shared-model": {"visible": True}}},
+                "credential_updates": [{"provider_id": "primary-local", "api_key": secret_value}],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_registry_cli, "verify_approved_bundle", lambda **_kwargs: {"verified": False, "errors": ["forced verify failure"]})
+
+    result = mms_registry_cli.apply_registry_v2_plan(
+        config_dir=config_dir,
+        plan_json=str(plan_path),
+        apply=True,
+        confirm_preview_apply=True,
+        command_name="mmf config",
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["rollback"]["db"]["removed_new_db"] is True
+    assert result["rollback"]["secret_backend"]["removed_new_file"] is True
+    assert "model-registry.latest-approved.json" in result["rollback"]["generated"]["removed"]
+    assert not (config_dir / "registry" / "model-registry.sqlite").exists()
+    assert not (config_dir / "secrets" / "webui-secrets.json").exists()
+    assert not (config_dir / "generated" / "model-registry.latest-approved.json").exists()
+    assert secret_value not in encoded
 
 
 def test_publish_preview_bundle_prefers_latest_registry_v2_save_candidate(tmp_path: Path) -> None:

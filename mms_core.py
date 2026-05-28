@@ -11981,6 +11981,7 @@ def _display_config_help():
     console.print(f"  {command} config root [--json]")
     console.print(f"  {command} config source [--json]")
     console.print(f"  {command} config save-plan [--json]")
+    console.print(f"  {command} config apply-plan --plan-json <file> [--apply --confirm-preview-apply] [--json]")
     console.print(f"  {command} config doctor [--json]")
     console.print(f"  {command} config doctor --strict-exit")
     console.print(f"  {command} config validate")
@@ -13444,6 +13445,11 @@ def _is_config_help_request(args_rest):
         "save-plan",
         "save.plan",
         "v2-save-plan",
+        "apply-plan",
+        "apply.plan",
+        "preview-apply",
+        "apply-preview",
+        "registry-apply-plan",
         "doctor",
         "preview-doctor",
         "preview.doctor",
@@ -13475,6 +13481,12 @@ def _is_config_registry_v2_save_plan_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
     return str(argv[1] or "").strip() in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}
+
+
+def _is_config_registry_v2_apply_plan_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"apply-plan", "apply.plan", "preview-apply", "apply-preview", "registry-apply-plan"}
 
 
 def _is_config_preview_doctor_request(argv):
@@ -13525,6 +13537,11 @@ def main():
     if _is_config_registry_v2_save_plan_request(argv):
         _display_registry_v2_save_plan(json_output="--json" in argv[2:])
         return
+    if _is_config_registry_v2_apply_plan_request(argv):
+        from mms_registry_cli import handle_registry_command
+
+        registry_args = ["apply-plan", "--config-dir", PRIMARY_CONFIG_DIR] + list(argv[2:])
+        raise SystemExit(handle_registry_command(registry_args, command_name=f"{current_command()} config"))
     if _is_config_preview_doctor_request(argv):
         code = _display_preview_doctor(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
         if code:

@@ -27,6 +27,15 @@ REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA = "mms.registry_v2_webui_secret_backend.
 CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
 REGISTRY_V2_SAVE_PLAN_SCHEMA = "mms.setup_web.registry_v2_save_plan.v1"
 REGISTRY_V2_SAVE_CANDIDATE_SCHEMA = "mms.registry_v2_save_candidate.v1"
+REGISTRY_V2_APPLY_PLAN_SCHEMA = "mms.registry_v2_apply_plan.v1"
+REGISTRY_V2_GENERATED_FILES = (
+    "model-registry.latest-approved.json",
+    "model-routes.json",
+    "model-routes.lineup.json",
+    "model-policy.effective.json",
+    "provider-profiles.generated.json",
+    "model-capabilities.approved.json",
+)
 CONFIG_ROOT_LAYOUT_DIRS = (
     "registry",
     "secrets",
@@ -681,7 +690,7 @@ def registry_v2_save_plan(
             "rollback to backup on failure",
         ],
         "blocked_reasons": blocked_reasons,
-        "next_implementation_step": "WebUI preview apply is wired; next: TUI/mms config DB save and stable promotion after human-gated validation",
+        "next_implementation_step": "WebUI and mms config apply-plan are wired; next: TUI/native save and stable promotion after human-gated validation",
     }
 
 
@@ -1652,6 +1661,157 @@ def write_registry_v2_webui_secret_backend(
     }
 
 
+def _registry_v2_snapshot_generated_bundle(config_root: Path) -> dict[str, Any]:
+    generated_dir = config_root / "generated"
+    summary: dict[str, Any] = {
+        "schema": "mms.registry_v2_generated_snapshot.v1",
+        "generated_dir": str(generated_dir),
+        "file_names": list(REGISTRY_V2_GENERATED_FILES),
+    }
+    if not generated_dir.is_dir():
+        summary.update({"skipped": True, "reason": "missing_generated_dir", "files": []})
+        return summary
+    existing = [name for name in REGISTRY_V2_GENERATED_FILES if (generated_dir / name).is_file()]
+    if not existing:
+        summary.update({"skipped": True, "reason": "no_existing_bundle_files", "files": []})
+        return summary
+    backup_dir = config_root / "backups" / "generated" / f"apply-plan-{_timestamp_slug()}"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for name in existing:
+        mms_registry.copy_file_atomic(generated_dir / name, backup_dir / name, mode=0o600)
+    manifest_path = backup_dir / "manifest.json"
+    mms_registry.write_json_atomic(
+        manifest_path,
+        {
+            "schema": "mms.registry_v2_generated_snapshot_manifest.v1",
+            "created_at": mms_registry.utc_now(),
+            "generated_dir": str(generated_dir),
+            "files": existing,
+        },
+        mode=0o600,
+    )
+    summary.update({"skipped": False, "backup_dir": str(backup_dir), "manifest_path": str(manifest_path), "files": existing})
+    return summary
+
+
+def _registry_v2_restore_generated_bundle(snapshot: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(snapshot, Mapping):
+        return {"attempted": False, "reason": "missing_snapshot"}
+    generated_dir_text = str(snapshot.get("generated_dir") or "")
+    if not generated_dir_text:
+        return {"attempted": False, "reason": "missing_generated_dir"}
+    generated_dir = Path(generated_dir_text)
+    backup_text = str(snapshot.get("backup_dir") or "")
+    backup_dir = Path(backup_text) if backup_text else None
+    file_names = [str(name) for name in (snapshot.get("file_names") or REGISTRY_V2_GENERATED_FILES)]
+    removed: list[str] = []
+    restored: list[str] = []
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    for name in file_names:
+        target = generated_dir / name
+        if target.exists():
+            target.unlink()
+            removed.append(name)
+    for name in [str(item) for item in (snapshot.get("files") or [])]:
+        source = backup_dir / name if backup_dir is not None else None
+        if source is not None and source.is_file():
+            mms_registry.copy_file_atomic(source, generated_dir / name, mode=0o600)
+            restored.append(name)
+    try:
+        if generated_dir.is_dir() and not any(generated_dir.iterdir()):
+            generated_dir.rmdir()
+    except OSError:
+        pass
+    return {
+        "attempted": True,
+        "snapshot_skipped": bool(snapshot.get("skipped")),
+        "removed": removed,
+        "restored": restored,
+        "backup_dir": str(backup_dir) if backup_dir is not None else "",
+    }
+
+
+def _registry_v2_restore_secret_backend(secret_backend: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(secret_backend, Mapping) or bool(secret_backend.get("skipped")):
+        return {"attempted": False, "reason": "not_written"}
+    path_text = str(secret_backend.get("path") or "")
+    if not path_text:
+        return {"attempted": False, "reason": "missing_path"}
+    path = Path(path_text)
+    backup_text = str(secret_backend.get("backup_path") or "")
+    backup_path = Path(backup_text) if backup_text else None
+    if backup_path is not None and backup_path.is_file():
+        mms_registry.copy_file_atomic(backup_path, path, mode=0o600)
+        return {"attempted": True, "restored": True, "removed_new_file": False, "backup_path": str(backup_path)}
+    if path.exists():
+        path.unlink()
+        return {"attempted": True, "restored": False, "removed_new_file": True, "path": str(path)}
+    return {"attempted": True, "restored": False, "removed_new_file": False, "path": str(path)}
+
+
+def _registry_v2_restore_db_candidate(
+    candidate: Mapping[str, Any] | None,
+    *,
+    config_root: Path,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    if not isinstance(candidate, Mapping):
+        return {"attempted": False, "reason": "missing_candidate"}
+    backup = candidate.get("backup") if isinstance(candidate.get("backup"), Mapping) else {}
+    target_db = Path(db_path).expanduser() if db_path is not None else mms_registry.default_registry_db_path(config_dir=config_root)
+    backup_path = str(backup.get("backup_path") or "")
+    if backup_path:
+        restore = mms_registry.restore_registry_db(
+            backup_path,
+            config_dir=config_root,
+            db_path=target_db,
+            apply=True,
+            reason="registry-v2-apply-plan-failure",
+        )
+        return {"attempted": True, "restored": True, "removed_new_db": False, "restore": restore}
+    if backup.get("reason") == "new_db":
+        removed: list[str] = []
+        for suffix in ("", "-wal", "-shm"):
+            target = Path(f"{target_db}{suffix}")
+            if target.exists():
+                target.unlink()
+                removed.append(str(target))
+        return {"attempted": True, "restored": False, "removed_new_db": bool(removed), "removed": removed}
+    return {"attempted": False, "reason": "no_candidate_backup", "db_path": str(target_db)}
+
+
+def _rollback_registry_v2_apply_plan(
+    *,
+    config_root: Path,
+    candidate: Mapping[str, Any] | None,
+    secret_backend: Mapping[str, Any] | None,
+    generated_snapshot: Mapping[str, Any] | None,
+    db_path: str | Path | None = None,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "attempted": True,
+        "reason": reason,
+        "generated": _registry_v2_restore_generated_bundle(generated_snapshot),
+        "secret_backend": _registry_v2_restore_secret_backend(secret_backend),
+        "db": _registry_v2_restore_db_candidate(candidate, config_root=config_root, db_path=db_path),
+    }
+
+
+def _secret_backend_summary(secret_backend: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(secret_backend, Mapping):
+        return {"skipped": True, "reason": "not_written"}
+    return {
+        "schema": secret_backend.get("schema"),
+        "skipped": bool(secret_backend.get("skipped")),
+        "skip_reason": secret_backend.get("skip_reason") or "",
+        "path": secret_backend.get("path") or "",
+        "secret_count": int(secret_backend.get("secret_count") or 0),
+        "backup_path": secret_backend.get("backup_path") or "",
+        "plaintext_secret_store": bool(secret_backend.get("plaintext_secret_store")),
+    }
+
+
 def import_legacy_config(
     *,
     config_dir: str | Path | None = None,
@@ -1849,6 +2009,138 @@ def _registry_v2_candidate_inputs_from_files(
         raise mms_registry.RegistryValidationError("registry v2 save candidate requires --plan-json or --config-json")
     credential_updates = [item for item in credentials if isinstance(item, Mapping)]
     return config_payload, policy_payload, credential_updates
+
+
+def apply_registry_v2_plan(
+    *,
+    config_dir: str | Path | None = None,
+    plan_json: str = "",
+    config_json: str = "",
+    policy_json: str = "",
+    db_path: str | Path | None = None,
+    apply: bool = False,
+    confirm_preview_apply: bool = False,
+    allow_stable: bool = False,
+    command_name: str = "mms config apply-plan",
+) -> dict[str, Any]:
+    """Apply a reviewed v2 plan into preview DB, secrets, and latest-approved bundle."""
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
+    config_payload, policy_payload, credential_updates = _registry_v2_candidate_inputs_from_files(
+        plan_json=plan_json,
+        config_json=config_json,
+        policy_json=policy_json,
+    )
+    candidate_payload = _registry_v2_candidate_payload(
+        config_payload,
+        policy_payload=policy_payload,
+        credential_updates=credential_updates,
+    )
+    route_entries = candidate_payload.get("route_entries") if isinstance(candidate_payload.get("route_entries"), list) else []
+    summary: dict[str, Any] = {
+        "schema": REGISTRY_V2_APPLY_PLAN_SCHEMA,
+        "ok": False,
+        "status": "dry_run" if not apply else "blocked",
+        "apply": bool(apply),
+        "config_root": str(root),
+        "db_path": str(Path(db_path).expanduser() if db_path is not None else mms_registry.default_registry_db_path(config_dir=root)),
+        "root": root_status,
+        "plaintext_secret_in_db": False,
+        "candidate": {
+            "route_entry_count": len(route_entries),
+            "credential_update_count": len(credential_updates),
+            "skipped": candidate_payload.get("skipped") or [],
+        },
+        "writes": {
+            "db_candidate_revision": False,
+            "secret_backend": False,
+            "generated_latest_approved_bundle": False,
+            "legacy_files": False,
+        },
+        "blocked_reasons": [],
+    }
+    if root_status.get("mode") != "preview" and not allow_stable:
+        summary["blocked_reasons"].append("stable_root_human_only")
+    if apply and not confirm_preview_apply:
+        summary["blocked_reasons"].append("confirm_preview_apply_required")
+    if not apply:
+        summary["ok"] = True
+        summary["next_action"] = "rerun with --apply --confirm-preview-apply after reviewing the plan"
+        return summary
+    if summary["blocked_reasons"]:
+        return summary
+
+    candidate: dict[str, Any] | None = None
+    secret_backend: dict[str, Any] | None = None
+    generated_snapshot: dict[str, Any] | None = None
+    try:
+        generated_snapshot = _registry_v2_snapshot_generated_bundle(root)
+        candidate = apply_registry_v2_save_candidate(
+            config_dir=root,
+            config_payload=config_payload,
+            policy_payload=policy_payload,
+            credential_updates=credential_updates,
+            db_path=db_path,
+            apply=True,
+            allow_stable=allow_stable,
+            command_name=command_name,
+        )
+        secret_backend = write_registry_v2_webui_secret_backend(
+            config_dir=root,
+            credential_updates=credential_updates,
+            allow_stable=allow_stable,
+            command_name=command_name,
+        )
+        publish = publish_preview_bundle(config_dir=root, db_path=db_path)
+        verify = verify_approved_bundle(config_dir=root)
+        if not bool(verify.get("verified")):
+            raise mms_registry.RegistryValidationError("latest-approved bundle verification failed after apply-plan")
+    except Exception as exc:
+        rollback = _rollback_registry_v2_apply_plan(
+            config_root=root,
+            candidate=candidate,
+            secret_backend=secret_backend,
+            generated_snapshot=generated_snapshot,
+            db_path=db_path,
+            reason=f"{type(exc).__name__}: {exc}",
+        )
+        summary.update(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {exc}",
+                "candidate_result": candidate,
+                "secret_backend": _secret_backend_summary(secret_backend),
+                "rollback": rollback,
+            }
+        )
+        return summary
+
+    summary.update(
+        {
+            "ok": True,
+            "status": "applied",
+            "candidate_result": candidate,
+            "secret_backend": _secret_backend_summary(secret_backend),
+            "publish": publish,
+            "verify": verify,
+            "generated_snapshot": {
+                "skipped": bool(generated_snapshot.get("skipped")) if isinstance(generated_snapshot, dict) else True,
+                "backup_dir": str(generated_snapshot.get("backup_dir") or "") if isinstance(generated_snapshot, dict) else "",
+                "files": list(generated_snapshot.get("files") or []) if isinstance(generated_snapshot, dict) else [],
+            },
+        }
+    )
+    summary["writes"].update(
+        {
+            "db_candidate_revision": True,
+            "secret_backend": not bool((secret_backend or {}).get("skipped")),
+            "generated_latest_approved_bundle": True,
+            "legacy_files": False,
+        }
+    )
+    return summary
 
 
 def _reference_snapshot_paths(paths: Iterable[str | Path] | None = None) -> list[Path]:
@@ -2842,6 +3134,18 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     save_candidate_parser.add_argument("--apply", action="store_true", help="Actually write candidate revisions into the preview DB")
     save_candidate_parser.add_argument("--allow-stable", action="store_true", help="Allow writing into a stable root explicitly")
     save_candidate_parser.add_argument("--json", action="store_true", help="Print the full candidate summary as JSON")
+    apply_plan_parser = subparsers.add_parser(
+        "apply-plan",
+        help="Apply a reviewed v2 plan into preview DB, secret backend, and latest-approved bundle",
+    )
+    apply_plan_parser.add_argument("--config-dir", default="", help="Override MMS config dir to write")
+    apply_plan_parser.add_argument("--plan-json", default="", help="WebUI build_config_plan JSON containing config/model_policy")
+    apply_plan_parser.add_argument("--config-json", default="", help="Config JSON object to convert into DB candidates")
+    apply_plan_parser.add_argument("--policy-json", default="", help="Optional model policy JSON object")
+    apply_plan_parser.add_argument("--apply", action="store_true", help="Actually write DB candidates, secrets, and generated bundle")
+    apply_plan_parser.add_argument("--confirm-preview-apply", action="store_true", help="Required together with --apply")
+    apply_plan_parser.add_argument("--allow-stable", action="store_true", help="Allow writing into a stable root explicitly")
+    apply_plan_parser.add_argument("--json", action="store_true", help="Print the full apply summary as JSON")
     preview_doctor_parser = subparsers.add_parser("preview-doctor", help="Read-only preview root doctor with one next action")
     preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     preview_doctor_parser.add_argument("--json", action="store_true", help="Print the full doctor summary as JSON")
@@ -2988,6 +3292,31 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         else:
             _print_registry_v2_save_candidate(summary)
         return 0
+    if args.subcommand == "apply-plan":
+        try:
+            summary = apply_registry_v2_plan(
+                config_dir=args.config_dir or None,
+                plan_json=args.plan_json or "",
+                config_json=args.config_json or "",
+                policy_json=args.policy_json or "",
+                db_path=db_path,
+                apply=bool(args.apply),
+                confirm_preview_apply=bool(args.confirm_preview_apply),
+                allow_stable=bool(args.allow_stable),
+                command_name=command_name,
+            )
+        except mms_registry.RegistryValidationError as exc:
+            summary = {"schema": REGISTRY_V2_APPLY_PLAN_SCHEMA, "ok": False, "status": "blocked", "error": str(exc)}
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            print(f"status={summary.get('status', '')}")
+            print(f"ok={summary.get('ok')}")
+            if summary.get("blocked_reasons"):
+                print(f"blocked_reasons={','.join(str(item) for item in summary.get('blocked_reasons') or [])}")
+            if summary.get("error"):
+                print(f"error={summary.get('error')}")
+        return 0 if summary.get("ok") else 2
     if args.subcommand == "preview-doctor":
         summary = preview_doctor(config_dir=args.config_dir or None, command_name=command_name)
         if args.json:
@@ -3173,6 +3502,7 @@ __all__ = [
     "model_source_status",
     "preview_doctor",
     "preview_prepare",
+    "apply_registry_v2_plan",
     "apply_registry_v2_save_candidate",
     "registry_v2_save_plan",
     "scheduled_refresh",
