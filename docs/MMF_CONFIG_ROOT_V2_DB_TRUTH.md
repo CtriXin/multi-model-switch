@@ -450,6 +450,7 @@ Current bridge rescue consumer implementation:
 - Launcher runtime/cache/usage auxiliary paths derive from the selected config root, preventing preview sessions from reading or writing stable-root `runtime/`, `health_check.json`, `cache/anthropic_base_urls.json`, or `usage.json` by default.
 - Local runtime telemetry helpers now follow the selected config root for local `usage.json`, `speed-stats.json`, `health-cache.json`, and `events/`, so preview sessions do not bleed runtime state into stable root by default.
 - Broker profile env resolution reads `credentials.sh` only from the selected config root, and local broker logs use `<config_root>/cache/broker`, so preview broker flows do not silently consume stable credentials/cache.
+- `statusline-command.sh` reads route status and health cache from the selected config root, so `mmf` gateway sessions display preview route/health state instead of stable-root state.
 - Rescue hot fallback now checks `<config_root>/generated/model-registry.latest-approved.json` before reading generated/root `model-routes.json`.
 - If the manifest exists, rescue fallback only uses the verified Router payload; invalid or hash-mismatched manifests fail closed for that fallback lookup instead of silently using unverified generated routes.
 - If the manifest is missing, default behavior remains legacy-compatible and reads generated/root route files in the previous order.
