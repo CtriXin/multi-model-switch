@@ -1012,6 +1012,15 @@ def test_install_script_dry_run_mentions_offduty_onduty(tmp_path):
     )
 
 
+def test_install_completion_hints_include_config_web():
+    """Install completion guide should point users at the browser config center."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "mms config web" in text
+    assert "$BIN_DIR/mms config web" in text
+    assert "打开浏览器配置中心" in text
+
+
 def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):
     """--dry-run does not create .claude/, .codex/, or .config/opencode under temp HOME."""
     env = os.environ.copy()

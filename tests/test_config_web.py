@@ -118,11 +118,13 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     html = mms_config_web._HTML_PAGE
 
-    assert "card span8 provider-editor" in html
-    assert ".provider-editor{position:sticky" in html
+    assert "card provider-editor" in html
+    assert ".provider-editor {" in html
+    assert "position: sticky;" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "通道修改已暂存，生成保存预览后再写入" in html
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
@@ -182,6 +184,7 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     assert "modelOptionValue" in html
     assert "providerOptions(provider,{auto:true,enabledOnly:true})" in html
     assert "modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})" in html
+    assert "const entry=rosterEntry(agent,row);tr.querySelector" in html
     assert "state.opencode.agent_models={};" in html
     assert "state.opencode.agent_roster={};" in html
     assert "session-local opencode.json" in html
