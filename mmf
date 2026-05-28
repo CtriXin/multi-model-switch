@@ -34,6 +34,7 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
                 "  mmf preview verify [--json]       verify latest-approved bundle hashes",
                 "  mmf config save-plan [--json]     show future DB-truth save sequence",
                 "  mmf config doctor [--json]        show preview readiness and one next action",
+                "  mmf config doctor --strict-exit   return non-zero unless runtime-ready",
                 "",
                 "Prepare preview root:",
                 "  mmf preview prepare --from ~/.config/mms --json",
@@ -190,7 +191,7 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"doctor", "preview-doc
         print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_preview_doctor(summary)
-    raise SystemExit(0)
+    raise SystemExit(0 if "--strict-exit" not in argv[2:] or summary.get("ready") is True else 2)
 
 from mms_core import main
 
