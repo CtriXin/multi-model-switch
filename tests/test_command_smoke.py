@@ -4071,6 +4071,51 @@ def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
         {"raw_models": ["cached-model"], "models": ["cached-model"], "base_source": "remote"},
     )
 
+    assert mms_command_tools.provider_supports_mimo_anthropic_selectors(
+        {"id": "mimo-direct", "anthropic_base_url": "https://relay.example/anthropic"}
+    ) is True
+    assert mms_command_tools.provider_supports_mimo_anthropic_selectors(
+        {"id": "mimo-openrouter", "anthropic_base_url": "https://openrouter.ai/api/v1"}
+    ) is False
+    assert mms_command_tools.derived_model_aliases(
+        ["claude-sonnet-4-5-20250929", "mimo-v2.5"],
+        {"id": "mimo-direct", "anthropic_base_url": "https://relay.example/anthropic"},
+    ) == ["claude-sonnet-4-6", "mimo-v2.5[1m]"]
+
+    patched = mms_command_tools.apply_provider_model_patch(
+        {
+            "id": "relay",
+            "extra_models": ["extra-model", "gpt-5.5"],
+            "hidden_models": ["hidden-model", "claude-sonnet-4-6"],
+        },
+        {
+            "raw_models": [
+                "gpt-5.5",
+                "gpt-5.5",
+                "hidden-model",
+                "claude-qwen-legacy",
+                "claude-haiku-4-5-20251001",
+            ],
+            "used_fallback": True,
+        },
+        derived_model_aliases=lambda _models, _provider: ["claude-sonnet-4-6", "extra-model"],
+    )
+    assert patched["raw_models"] == [
+        "gpt-5.5",
+        "hidden-model",
+        "claude-qwen-legacy",
+        "claude-haiku-4-5-20251001",
+    ]
+    assert patched["models"] == ["gpt-5.5", "claude-haiku-4-5-20251001", "extra-model"]
+    assert patched["model_sources"] == {
+        "gpt-5.5": "fallback",
+        "claude-haiku-4-5-20251001": "fallback",
+        "extra-model": "extra",
+    }
+    assert patched["extra_models"] == ["extra-model", "gpt-5.5", "claude-sonnet-4-6"]
+    assert patched["hidden_models"] == ["hidden-model", "claude-sonnet-4-6"]
+    assert patched["base_source"] == "fallback"
+
     providers = [
         {
             "id": "relay-a",

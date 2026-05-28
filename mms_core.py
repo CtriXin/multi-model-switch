@@ -4332,94 +4332,30 @@ def _probe_models_for_startup(cfg, provider, emit_output=True):
 
 
 def _provider_supports_mimo_anthropic_selectors(provider):
-    provider = provider if isinstance(provider, dict) else {}
-    identity = " ".join(
-        str(provider.get(key) or "").strip().lower()
-        for key in ("id", "name", "label", "provider_profile")
-    )
-    urls = " ".join(
-        str(provider.get(key) or "").strip().lower()
-        for key in ("anthropic_base_url", "openai_base_url", "base_url")
-    )
-    if "openrouter" in identity or "openrouter.ai" in urls:
-        return False
-    anthropic_base = str(provider.get("anthropic_base_url") or "").strip().lower()
-    if "xiaomimimo.com" in anthropic_base:
-        return True
-    base_url = str(provider.get("base_url") or "").strip().lower()
-    if "xiaomimimo.com" in base_url and "/anthropic" in base_url:
-        return True
-    return bool(anthropic_base and any(token in identity for token in ("mimo", "xiaomi")))
+    from mms_command_tools import provider_supports_mimo_anthropic_selectors
+
+    return provider_supports_mimo_anthropic_selectors(provider)
 
 
 def _derived_model_aliases(base_models, provider=None):
-    aliases = []
-    if any(model_id.startswith("claude-sonnet-4-") for model_id in base_models):
-        aliases.append("claude-sonnet-4-6")
-    if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
-        aliases.append("claude-opus-4-6")
-    if _provider_supports_mimo_anthropic_selectors(provider):
-        model_set = set(base_models)
-        for model_id in ("mimo-v2.5-pro", "mimo-v2.5"):
-            selector = f"{model_id}[1m]"
-            if model_id in model_set and selector not in model_set:
-                aliases.append(selector)
-    return aliases
+    from mms_command_tools import derived_model_aliases
+
+    return derived_model_aliases(
+        base_models,
+        provider,
+        provider_supports_mimo_anthropic_selectors=_provider_supports_mimo_anthropic_selectors,
+    )
 
 
 def _apply_provider_model_patch(provider, base_result):
-    result = dict(base_result)
-    base_models = _normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
-    extra_models = _normalize_model_id_list(provider.get("extra_models", []))
-    derived_aliases = _derived_model_aliases(base_models, provider)
-    hidden_requested = set(_normalize_model_id_list(provider.get("hidden_models", [])))
-    base_source = result.get("base_source") or ("fallback" if result.get("used_fallback") else "remote")
+    from mms_command_tools import apply_provider_model_patch
 
-    effective_models = []
-    model_sources = {}
-    for model_id in base_models:
-        if model_id in model_sources:
-            continue
-        model_sources[model_id] = base_source
-        effective_models.append(model_id)
-
-    for model_id in extra_models:
-        if model_id in model_sources:
-            continue
-        model_sources[model_id] = "extra"
-        effective_models.append(model_id)
-
-    for model_id in derived_aliases:
-        if model_id in model_sources:
-            continue
-        model_sources[model_id] = "derived_alias"
-        effective_models.append(model_id)
-
-    # 过滤 claude- 前缀国产别名和旧版 Claude 模型
-    _DOMESTIC_KW = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
-    _CLAUDE_KEEP = {
-        "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-sonnet-4-6",
-        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
-        "claude-haiku-4-5-20251001",
-    }
-    effective_models = [
-        m for m in effective_models
-        if not (m.startswith("claude-") and any(kw in m.lower() for kw in _DOMESTIC_KW))
-        and not (m.startswith("claude-") and m not in _CLAUDE_KEEP)
-    ]
-
-    hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
-    if hidden_requested:
-        effective_models = [model_id for model_id in effective_models if model_id not in hidden_requested]
-    visible_sources = {model_id: model_sources.get(model_id, base_source) for model_id in effective_models}
-
-    result["raw_models"] = base_models
-    result["models"] = effective_models
-    result["model_sources"] = visible_sources
-    result["extra_models"] = extra_models + [model_id for model_id in derived_aliases if model_id not in extra_models]
-    result["hidden_models"] = hidden_applied
-    result["base_source"] = base_source
-    return result
+    return apply_provider_model_patch(
+        provider,
+        base_result,
+        normalize_model_id_list=_normalize_model_id_list,
+        derived_model_aliases=_derived_model_aliases,
+    )
 
 
 def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=False):

@@ -2848,6 +2848,109 @@ def base_probe_result_from_cache(provider_id, file_cached):
     }
 
 
+def provider_supports_mimo_anthropic_selectors(provider):
+    provider = provider if isinstance(provider, dict) else {}
+    identity = " ".join(
+        str(provider.get(key) or "").strip().lower()
+        for key in ("id", "name", "label", "provider_profile")
+    )
+    urls = " ".join(
+        str(provider.get(key) or "").strip().lower()
+        for key in ("anthropic_base_url", "openai_base_url", "base_url")
+    )
+    if "openrouter" in identity or "openrouter.ai" in urls:
+        return False
+    anthropic_base = str(provider.get("anthropic_base_url") or "").strip().lower()
+    if "xiaomimimo.com" in anthropic_base:
+        return True
+    base_url = str(provider.get("base_url") or "").strip().lower()
+    if "xiaomimimo.com" in base_url and "/anthropic" in base_url:
+        return True
+    return bool(anthropic_base and any(token in identity for token in ("mimo", "xiaomi")))
+
+
+def derived_model_aliases(
+    base_models,
+    provider=None,
+    *,
+    provider_supports_mimo_anthropic_selectors=provider_supports_mimo_anthropic_selectors,
+):
+    aliases = []
+    if any(model_id.startswith("claude-sonnet-4-") for model_id in base_models):
+        aliases.append("claude-sonnet-4-6")
+    if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
+        aliases.append("claude-opus-4-6")
+    if provider_supports_mimo_anthropic_selectors(provider):
+        model_set = set(base_models)
+        for model_id in ("mimo-v2.5-pro", "mimo-v2.5"):
+            selector = f"{model_id}[1m]"
+            if model_id in model_set and selector not in model_set:
+                aliases.append(selector)
+    return aliases
+
+
+def apply_provider_model_patch(
+    provider,
+    base_result,
+    *,
+    normalize_model_id_list=None,
+    derived_model_aliases=derived_model_aliases,
+):
+    if normalize_model_id_list is None:
+        normalize_model_id_list = globals()["normalize_model_id_list"]
+    result = dict(base_result)
+    base_models = normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
+    extra_models = normalize_model_id_list(provider.get("extra_models", []))
+    aliases = derived_model_aliases(base_models, provider)
+    hidden_requested = set(normalize_model_id_list(provider.get("hidden_models", [])))
+    base_source = result.get("base_source") or ("fallback" if result.get("used_fallback") else "remote")
+
+    effective_models = []
+    model_sources = {}
+    for model_id in base_models:
+        if model_id in model_sources:
+            continue
+        model_sources[model_id] = base_source
+        effective_models.append(model_id)
+
+    for model_id in extra_models:
+        if model_id in model_sources:
+            continue
+        model_sources[model_id] = "extra"
+        effective_models.append(model_id)
+
+    for model_id in aliases:
+        if model_id in model_sources:
+            continue
+        model_sources[model_id] = "derived_alias"
+        effective_models.append(model_id)
+
+    domestic_keywords = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
+    claude_keep = {
+        "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-sonnet-4-6",
+        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+    }
+    effective_models = [
+        model_id for model_id in effective_models
+        if not (model_id.startswith("claude-") and any(kw in model_id.lower() for kw in domestic_keywords))
+        and not (model_id.startswith("claude-") and model_id not in claude_keep)
+    ]
+
+    hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
+    if hidden_requested:
+        effective_models = [model_id for model_id in effective_models if model_id not in hidden_requested]
+    visible_sources = {model_id: model_sources.get(model_id, base_source) for model_id in effective_models}
+
+    result["raw_models"] = base_models
+    result["models"] = effective_models
+    result["model_sources"] = visible_sources
+    result["extra_models"] = extra_models + [model_id for model_id in aliases if model_id not in extra_models]
+    result["hidden_models"] = hidden_applied
+    result["base_source"] = base_source
+    return result
+
+
 def provider_candidates(
     cfg,
     default_provider,
