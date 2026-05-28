@@ -24,6 +24,14 @@ _ALLOWED_CLIS = ("claude", "codex", "opencode", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
 _OPENCODE_REQUIRED_BUILDER_AGENTS = {"mobius-builder-pro", "builder_primary"}
+_REGISTRY_V2_GENERATED_FILES = (
+    "model-routes.json",
+    "model-routes.lineup.json",
+    "provider-profiles.generated.json",
+    "model-policy.effective.json",
+    "model-capabilities.approved.json",
+    "model-registry.latest-approved.json",
+)
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
@@ -1507,6 +1515,167 @@ def _bak_path_for_backup(backup_path: str) -> str:
     return bak_path if bak_path and os.path.exists(bak_path) else ""
 
 
+def _registry_v2_snapshot_generated_bundle(config_root: str) -> dict[str, Any]:
+    generated_dir = os.path.join(config_root, "generated")
+    summary: dict[str, Any] = {
+        "schema": "mms.setup_web.registry_v2_generated_snapshot.v1",
+        "generated_dir": generated_dir,
+        "file_names": list(_REGISTRY_V2_GENERATED_FILES),
+    }
+    if not os.path.isdir(generated_dir):
+        summary.update({"skipped": True, "reason": "missing_generated_dir", "files": []})
+        return summary
+    existing = [name for name in _REGISTRY_V2_GENERATED_FILES if os.path.isfile(os.path.join(generated_dir, name))]
+    if not existing:
+        summary.update({"skipped": True, "reason": "no_existing_bundle_files", "files": []})
+        return summary
+    slug = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = os.path.join(config_root, "backups", "generated", f"webui-apply-{slug}")
+    os.makedirs(backup_dir, exist_ok=True)
+    for name in existing:
+        target = os.path.join(backup_dir, name)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(os.path.join(generated_dir, name), target)
+        try:
+            os.chmod(target, 0o600)
+        except OSError:
+            pass
+    manifest_path = os.path.join(backup_dir, "manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "schema": "mms.setup_web.registry_v2_generated_snapshot_manifest.v1",
+                "created_at": _now_iso(),
+                "generated_dir": generated_dir,
+                "files": existing,
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+    try:
+        os.chmod(manifest_path, 0o600)
+    except OSError:
+        pass
+    summary.update({"skipped": False, "backup_dir": backup_dir, "manifest_path": manifest_path, "files": existing})
+    return summary
+
+
+def _registry_v2_restore_generated_bundle(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        return {"attempted": False, "reason": "missing_snapshot"}
+    generated_dir = str(snapshot.get("generated_dir") or "")
+    if not generated_dir:
+        return {"attempted": False, "reason": "missing_generated_dir"}
+    file_names = [str(name) for name in (snapshot.get("file_names") or _REGISTRY_V2_GENERATED_FILES)]
+    removed: list[str] = []
+    restored: list[str] = []
+    backup_dir = str(snapshot.get("backup_dir") or "")
+    if not os.path.isdir(generated_dir) and not backup_dir:
+        return {
+            "attempted": True,
+            "snapshot_skipped": bool(snapshot.get("skipped")),
+            "removed": removed,
+            "restored": restored,
+            "backup_dir": backup_dir,
+        }
+    os.makedirs(generated_dir, exist_ok=True)
+    for name in file_names:
+        target = os.path.join(generated_dir, name)
+        if os.path.exists(target):
+            os.remove(target)
+            removed.append(name)
+    for name in [str(item) for item in (snapshot.get("files") or [])]:
+        source = os.path.join(backup_dir, name)
+        target = os.path.join(generated_dir, name)
+        if backup_dir and os.path.isfile(source):
+            shutil.copy2(source, target)
+            try:
+                os.chmod(target, 0o600)
+            except OSError:
+                pass
+            restored.append(name)
+    try:
+        if not os.listdir(generated_dir):
+            os.rmdir(generated_dir)
+    except OSError:
+        pass
+    return {
+        "attempted": True,
+        "snapshot_skipped": bool(snapshot.get("skipped")),
+        "removed": removed,
+        "restored": restored,
+        "backup_dir": backup_dir,
+    }
+
+
+def _registry_v2_restore_webui_credential_backend(secret_backend: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(secret_backend, dict) or bool(secret_backend.get("skipped")):
+        return {"attempted": False, "reason": "not_written"}
+    path = str(secret_backend.get("path") or "")
+    if not path:
+        return {"attempted": False, "reason": "missing_path"}
+    backup_path = str(secret_backend.get("backup_path") or "")
+    if backup_path and os.path.isfile(backup_path):
+        shutil.copy2(backup_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return {"attempted": True, "restored": True, "removed_new_file": False, "backup_path": backup_path}
+    if os.path.exists(path):
+        os.remove(path)
+        return {"attempted": True, "restored": False, "removed_new_file": True, "path": path}
+    return {"attempted": True, "restored": False, "removed_new_file": False, "path": path}
+
+
+def _registry_v2_restore_db_candidate(candidate: dict[str, Any] | None, *, config_root: str) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return {"attempted": False, "reason": "missing_candidate"}
+    backup = candidate.get("backup") if isinstance(candidate.get("backup"), dict) else {}
+    backup_path = str(backup.get("backup_path") or "")
+    db_path = str(candidate.get("db_path") or backup.get("source_db_path") or "")
+    if backup_path:
+        from mms_registry_cli import restore_registry_db
+
+        restore = restore_registry_db(
+            backup_path,
+            config_dir=config_root,
+            db_path=db_path or None,
+            apply=True,
+            reason="webui-registry-v2-preview-apply-rollback",
+        )
+        return {"attempted": True, "restored": True, "removed_new_db": False, "restore": restore}
+    if backup.get("reason") == "new_db" and db_path:
+        removed: list[str] = []
+        for suffix in ("", "-wal", "-shm"):
+            target = f"{db_path}{suffix}"
+            if os.path.exists(target):
+                os.remove(target)
+                removed.append(target)
+        return {"attempted": True, "restored": False, "removed_new_db": bool(removed), "removed": removed}
+    return {"attempted": False, "reason": "no_candidate_backup", "db_path": db_path}
+
+
+def _rollback_registry_v2_preview_apply(
+    *,
+    config_root: str,
+    candidate: dict[str, Any] | None,
+    secret_backend: dict[str, Any] | None,
+    generated_snapshot: dict[str, Any] | None,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "attempted": True,
+        "reason": reason,
+        "generated": _registry_v2_restore_generated_bundle(generated_snapshot),
+        "credential_backend": _registry_v2_restore_webui_credential_backend(secret_backend),
+        "db": _registry_v2_restore_db_candidate(candidate, config_root=config_root),
+    }
+
+
 def _append_audit(*, config_path: str, target_path: str, backup_path: str, reason: str, before_sha1: str, after_sha1: str, function: str) -> None:
     mms_core = _load_mms_core()
     mms_core._append_config_audit_entry(  # noqa: SLF001
@@ -1670,10 +1839,14 @@ def apply_registry_v2_preview_plan(
         }
 
     config_root = _config_root_for_snapshot(config_path)
+    candidate: dict[str, Any] | None = None
+    secret_backend: dict[str, Any] | None = None
+    generated_snapshot: dict[str, Any] | None = None
     try:
         from mms_registry_cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle, write_registry_v2_webui_secret_backend
 
         credential_updates = [item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)]
+        generated_snapshot = _registry_v2_snapshot_generated_bundle(config_root)
         candidate = apply_registry_v2_save_candidate(
             config_dir=config_root or None,
             config_payload=plan.get("config") if isinstance(plan.get("config"), dict) else {},
@@ -1690,12 +1863,20 @@ def apply_registry_v2_preview_plan(
         publish = publish_preview_bundle(config_dir=config_root or None)
         verify = verify_approved_bundle(config_dir=config_root or None)
     except Exception as exc:
+        rollback = _rollback_registry_v2_preview_apply(
+            config_root=config_root,
+            candidate=candidate,
+            secret_backend=secret_backend,
+            generated_snapshot=generated_snapshot,
+            reason=f"{type(exc).__name__}: {exc}",
+        )
         return {
             "ok": False,
             "schema": "mms.setup_web.registry_v2_apply_result.v1",
             "status": "failed",
             "error": f"{type(exc).__name__}: {exc}",
             "registry_v2_save_plan": v2_plan,
+            "rollback": rollback,
         }
 
     verified = bool(verify.get("verified"))
@@ -1707,6 +1888,15 @@ def apply_registry_v2_preview_plan(
         "backup_path": secret_backend.get("backup_path", ""),
         "plaintext_store": bool(secret_backend.get("plaintext_secret_store")),
     }
+    rollback: dict[str, Any] = {}
+    if not verified:
+        rollback = _rollback_registry_v2_preview_apply(
+            config_root=config_root,
+            candidate=candidate,
+            secret_backend=secret_backend,
+            generated_snapshot=generated_snapshot,
+            reason="verify_failed",
+        )
     return {
         "ok": verified,
         "schema": "mms.setup_web.registry_v2_apply_result.v1",
@@ -1719,6 +1909,7 @@ def apply_registry_v2_preview_plan(
         "credential_backend": credential_backend,
         "publish": _sanitize_for_output(publish),
         "verify": _sanitize_for_output(verify),
+        "rollback": rollback,
     }
 
 

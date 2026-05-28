@@ -737,6 +737,34 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_registry_v2_apply_rolls_back_on_verify_failure(monkeypatch, tmp_path):
+    import mms_registry_cli
+
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    monkeypatch.setattr(mms_registry_cli, "verify_approved_bundle", lambda **kwargs: {"verified": False, "errors": ["forced verify failure"]})
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is False
+    assert result["status"] == "failed_verify"
+    assert result["rollback"]["db"]["removed_new_db"] is True
+    assert result["rollback"]["credential_backend"]["removed_new_file"] is True
+    assert "model-registry.latest-approved.json" in result["rollback"]["generated"]["removed"]
+    assert not (config_root / "registry" / "model-registry.sqlite").exists()
+    assert not (config_root / "secrets" / "webui-secrets.json").exists()
+    assert not (config_root / "generated" / "model-registry.latest-approved.json").exists()
+    assert "sk-super-secret-value" not in encoded
+
+
 def test_config_web_registry_v2_apply_requires_explicit_preview_confirmation(tmp_path):
     config_root = tmp_path / "mms-next"
     result = mms_config_web.apply_registry_v2_preview_plan(

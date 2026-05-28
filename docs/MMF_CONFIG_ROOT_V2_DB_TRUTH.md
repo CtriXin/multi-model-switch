@@ -454,8 +454,9 @@ Current Stage 4a implementation:
 - `publish-preview` now prefers the latest preview route candidate, including `registry-v2-save-candidate`, and reuses matching DB candidate policy/profile revisions when generating the latest-approved bundle.
 - WebUI has a preview-only `写入预览 DB + 发布` action backed by `/api/registry-v2/apply`. It requires the confirmation phrase `写入预览DB`, refuses stable roots, writes DB candidates, writes `<preview-root>/secrets/webui-secrets.json` only when explicit plaintext credential updates are submitted, publishes `generated/model-registry.latest-approved.json`, and verifies hashes.
 - WebUI plaintext credential updates are stored only in the preview secret backend; DB candidate rows keep `secret_ref` / fingerprint, the API response is sanitized, and generated Router entries become `runtime_ready=true` when matching preview secret values exist.
+- If WebUI preview publish/verify fails, the action attempts to roll back the preview DB candidate, WebUI secret backend file, and generated bundle files from the pre-publish snapshot.
 - This WebUI preview action does not call legacy `/api/save` and does not write `config.toml` / `credentials.sh` / `model-policy.json`.
-- WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after publish/verify rollback is wired.
+- WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after more interactive/browser validation.
 
 ### Stage 5 - Router Export From DB
 
