@@ -5274,10 +5274,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif rescue_action == "choose_route_handover":
                     from mms_tui import select_model_tui
 
-                    fallback_model = tui_flow.safe_tui_call(
-                        select_model_tui,
+                    fallback_model = tui_flow.select_rescue_route_fallback_model(
                         route_fallback_candidates,
-                        title="选择 fallback handover model",
+                        "选择 fallback handover model",
+                        select_model_tui=select_model_tui,
                     )
                     if fallback_model:
                         tui_flow.create_rescue_handover_action(
@@ -5300,10 +5300,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
 
-                    fallback_model = tui_flow.safe_tui_call(
-                        select_model_tui,
+                    fallback_model = tui_flow.select_rescue_route_fallback_model(
                         route_fallback_candidates,
-                        title="选择全局默认 fallback model",
+                        "选择全局默认 fallback model",
+                        select_model_tui=select_model_tui,
                     )
                     if fallback_model:
                         current_cfg = _apply_rescue_default_action(fallback_model)["cfg"]

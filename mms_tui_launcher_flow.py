@@ -1272,6 +1272,19 @@ def rescue_packet_action_menu_context(
     }
 
 
+def select_rescue_route_fallback_model(
+    route_fallback_candidates,
+    title,
+    *,
+    select_model_tui,
+):
+    return safe_tui_call(
+        select_model_tui,
+        route_fallback_candidates,
+        title=title,
+    )
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}

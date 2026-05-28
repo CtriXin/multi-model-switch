@@ -49,6 +49,7 @@ from mms_tui_launcher_flow import (
     run_confirm_tui_prompt,
     safe_tui_call,
     selected_model_launch_context,
+    select_rescue_route_fallback_model,
     show_rescue_no_packets_report,
     show_rescue_paths_action,
 )
@@ -2157,6 +2158,19 @@ def test_rescue_packet_action_menu_context_builds_info_actions_and_candidates() 
         ("fallbacks", cfg, selected_rescue, 8),
         ("routes", "gpt-5.5", 120),
     ]
+
+
+def test_select_rescue_route_fallback_model_delegates_to_model_tui() -> None:
+    calls = []
+
+    result = select_rescue_route_fallback_model(
+        ["route1", "route2"],
+        "选择 fallback handover model",
+        select_model_tui=lambda candidates, *, title: calls.append(("select", candidates, title)) or "route2",
+    )
+
+    assert result == "route2"
+    assert calls == [("select", ["route1", "route2"], "选择 fallback handover model")]
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:
