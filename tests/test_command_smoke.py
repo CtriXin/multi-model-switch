@@ -443,6 +443,41 @@ def test_settings_result_display_helpers_format_payload_and_fallback_report():
     ]
 
 
+def test_settings_result_tui_available_preserves_env_and_tty_checks():
+    import mms_command_tools
+
+    class FakeStream:
+        def __init__(self, result=None, exc=None):
+            self.result = result
+            self.exc = exc
+
+        def isatty(self):
+            if self.exc is not None:
+                raise self.exc
+            return self.result
+
+    assert mms_command_tools.settings_result_tui_available(
+        env={},
+        stdin=FakeStream(True),
+        stdout=FakeStream(True),
+    ) is True
+    assert mms_command_tools.settings_result_tui_available(
+        env={"MMS_DISABLE_SETTINGS_RESULT_TUI": "yes"},
+        stdin=FakeStream(True),
+        stdout=FakeStream(True),
+    ) is False
+    assert mms_command_tools.settings_result_tui_available(
+        env={},
+        stdin=FakeStream(True),
+        stdout=FakeStream(False),
+    ) is False
+    assert mms_command_tools.settings_result_tui_available(
+        env={},
+        stdin=FakeStream(exc=RuntimeError("boom")),
+        stdout=FakeStream(True),
+    ) is False
+
+
 def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     import mms_command_tools
 

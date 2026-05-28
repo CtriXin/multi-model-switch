@@ -127,6 +127,19 @@ def settings_result_tui_payload(title, rows, note="", *, ok=True, localize):
     )
 
 
+def settings_result_tui_available(*, env=None, stdin=None, stdout=None):
+    env = os.environ if env is None else env
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    disabled = str(env.get("MMS_DISABLE_SETTINGS_RESULT_TUI") or "").strip().lower()
+    if disabled in {"1", "true", "yes", "on"}:
+        return False
+    try:
+        return bool(stdin.isatty() and stdout.isatty())
+    except Exception:
+        return False
+
+
 def display_settings_result_report(title, rows, note="", *, ok=True, console):
     color = "green" if ok else "red"
     prefix = "✓ " if ok else "✗ "

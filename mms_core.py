@@ -3711,12 +3711,9 @@ _SETTINGS_RESULT_RENDERED_TUI = False
 
 
 def _settings_result_tui_available():
-    if str(os.environ.get("MMS_DISABLE_SETTINGS_RESULT_TUI") or "").strip().lower() in {"1", "true", "yes", "on"}:
-        return False
-    try:
-        return bool(sys.stdin.isatty() and sys.stdout.isatty())
-    except Exception:
-        return False
+    from mms_command_tools import settings_result_tui_available
+
+    return settings_result_tui_available(env=os.environ, stdin=sys.stdin, stdout=sys.stdout)
 
 
 def _settings_result_tui_payload(title, rows, note="", *, ok=True):
