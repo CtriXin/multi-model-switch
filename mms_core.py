@@ -8230,42 +8230,33 @@ def _preset_model_info(preset):
 
 
 def _emit_preset_error(message, *, stderr_only=False):
-    if stderr_only:
-        print(message, file=sys.stderr)
-    else:
-        console.print(message)
+    from mms_command_tools import emit_preset_error
+
+    return emit_preset_error(message, stderr_only=stderr_only, console=console)
 
 
 def _preset_env_file_path(preset_name):
-    safe_name = "".join(
-        ch if ch.isalnum() or ch in {"-", "_"} else "-"
-        for ch in str(preset_name or "").strip().lower()
-    ).strip("-_")
-    safe_name = safe_name or "preset"
-    return os.path.join(ENV_DIR, f"{safe_name}.sh")
+    from mms_command_tools import preset_env_file_path
+
+    return preset_env_file_path(preset_name, env_dir=ENV_DIR)
 
 
 def _resolve_named_preset(cfg, preset_name, *, stderr_only=False):
-    presets = cfg.get("presets", {})
-    if preset_name not in presets:
-        _emit_preset_error(f"预设 '{preset_name}' 不存在", stderr_only=stderr_only)
-        if presets:
-            _emit_preset_error(f"可用预设: {', '.join(presets.keys())}", stderr_only=stderr_only)
-        return None
-    return _normalize_preset_entry(preset_name, presets[preset_name])
+    from mms_command_tools import resolve_named_preset
+
+    return resolve_named_preset(
+        cfg,
+        preset_name,
+        normalize_preset_entry=_normalize_preset_entry,
+        emit_preset_error=_emit_preset_error,
+        stderr_only=stderr_only,
+    )
 
 
 def _infer_preset_auth_mode(preset):
-    """临时推断 preset 的 auth_mode，仅用于展示和 env/activate 解析，不落盘。"""
-    if not isinstance(preset, dict):
-        return None
-    if preset.get("bridge"):
-        return "oauth_bridge"
-    if preset.get("account"):
-        return "oauth"
-    if preset.get("provider"):
-        return "api_key"
-    return None
+    from mms_command_tools import infer_preset_auth_mode
+
+    return infer_preset_auth_mode(preset)
 
 
 def _available_broker_profiles_for_cli(cfg, cli_name):
@@ -9453,38 +9444,20 @@ def _resolve_preset_export_runtime(cfg, preset, provider_override=None, *, stder
 
     返回 (cli, exports_dict, runtime) 或 None（如果不可导出）。
     """
+    from mms_command_tools import resolve_preset_export_runtime
     from mms_launchers import get_export_env, validate_provider_for_cli
 
-    cli = preset.get("cli", "claude")
-    auth_mode = _infer_preset_auth_mode(preset)
-
-    if auth_mode in ("oauth", "oauth_bridge"):
-        _emit_preset_error(f"此预设使用 {auth_mode} 模式，不支持 env export", stderr_only=stderr_only)
-        return None
-
-    provider_id = provider_override or preset.get("provider") or None
-
-    runtime = ensure_provider_credentials(cfg, provider_id)
-    if runtime is None:
-        _emit_preset_error(f"无法解析 provider: {provider_id or 'default'}", stderr_only=stderr_only)
-        return None
-
-    if not provider_id and sys.stderr.isatty():
-        default_name = runtime.get("id", "default") if isinstance(runtime, dict) else "default"
-        print(f"预设未指定 provider，使用默认: {default_name}", file=sys.stderr)
-
-    try:
-        validate_provider_for_cli(cli, runtime)
-    except Exception as exc:
-        _emit_preset_error(str(exc), stderr_only=stderr_only)
-        return None
-
-    exports = get_export_env(cli, runtime)
-    if not exports:
-        _emit_preset_error(f"{cli} 无需 export；启动时会按 CLI 自己的参数或登录方式处理", stderr_only=stderr_only)
-        return None
-
-    return cli, exports, runtime
+    return resolve_preset_export_runtime(
+        cfg,
+        preset,
+        provider_override=provider_override,
+        stderr_only=stderr_only,
+        infer_preset_auth_mode=_infer_preset_auth_mode,
+        emit_preset_error=_emit_preset_error,
+        ensure_provider_credentials=ensure_provider_credentials,
+        validate_provider_for_cli=validate_provider_for_cli,
+        get_export_env=get_export_env,
+    )
 
 
 def handle_env_command(cfg, argv):

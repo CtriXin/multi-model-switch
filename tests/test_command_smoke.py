@@ -197,6 +197,70 @@ def test_activate_command_outputs_eval_exports(capsys):
     assert "export OPENAI_API_KEY='k v'" in out
 
 
+def test_preset_helper_path_and_missing_preset_message(tmp_path):
+    import mms_command_tools
+
+    messages = []
+    path = mms_command_tools.preset_env_file_path("Demo Preset!", env_dir=str(tmp_path))
+    assert path == str(tmp_path / "demo-preset.sh")
+
+    result = mms_command_tools.resolve_named_preset(
+        {"presets": {"demo": {"cli": "claude"}}},
+        "missing",
+        normalize_preset_entry=lambda name, preset: {"name": name, **preset},
+        emit_preset_error=lambda message, stderr_only=False: messages.append((message, stderr_only)),
+    )
+
+    assert result is None
+    assert messages == [
+        ("预设 'missing' 不存在", False),
+        ("可用预设: demo", False),
+    ]
+
+
+def test_preset_export_runtime_uses_provider_override_and_exports():
+    import mms_command_tools
+
+    calls = []
+
+    result = mms_command_tools.resolve_preset_export_runtime(
+        {"providers": []},
+        {"cli": "claude", "provider": "relay"},
+        provider_override="override",
+        infer_preset_auth_mode=mms_command_tools.infer_preset_auth_mode,
+        emit_preset_error=lambda message, stderr_only=False: calls.append(("error", message, stderr_only)),
+        ensure_provider_credentials=lambda cfg, provider_id: calls.append(("provider", provider_id)) or {"id": provider_id},
+        validate_provider_for_cli=lambda cli, runtime: calls.append(("validate", cli, runtime["id"])),
+        get_export_env=lambda cli, runtime: calls.append(("exports", cli, runtime["id"])) or {"A": "B"},
+    )
+
+    assert result == ("claude", {"A": "B"}, {"id": "override"})
+    assert calls == [
+        ("provider", "override"),
+        ("validate", "claude", "override"),
+        ("exports", "claude", "override"),
+    ]
+
+
+def test_preset_export_runtime_rejects_oauth_without_resolving_provider():
+    import mms_command_tools
+
+    messages = []
+
+    result = mms_command_tools.resolve_preset_export_runtime(
+        {"providers": []},
+        {"cli": "claude", "account": "claude-a"},
+        infer_preset_auth_mode=mms_command_tools.infer_preset_auth_mode,
+        emit_preset_error=lambda message, stderr_only=False: messages.append((message, stderr_only)),
+        ensure_provider_credentials=lambda cfg, provider_id: (_ for _ in ()).throw(AssertionError("must not resolve provider")),
+        validate_provider_for_cli=lambda cli, runtime: None,
+        get_export_env=lambda cli, runtime: {},
+    )
+
+    assert result is None
+    assert messages == [("此预设使用 oauth 模式，不支持 env export", False)]
+
+
 def test_models_command_dispatches_selected_provider():
     import mms_command_tools
 

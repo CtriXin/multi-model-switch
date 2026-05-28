@@ -732,6 +732,95 @@ def handle_warm_command(
     console.print(f"[green]✓ 已完成预热：成功 {success_count} / {len(results)}[/green]")
 
 
+def emit_preset_error(message, *, stderr_only=False, console):
+    if stderr_only:
+        print(message, file=sys.stderr)
+    else:
+        console.print(message)
+
+
+def preset_env_file_path(preset_name, *, env_dir):
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "-"
+        for ch in str(preset_name or "").strip().lower()
+    ).strip("-_")
+    safe_name = safe_name or "preset"
+    return os.path.join(env_dir, f"{safe_name}.sh")
+
+
+def resolve_named_preset(
+    cfg,
+    preset_name,
+    *,
+    normalize_preset_entry,
+    emit_preset_error,
+    stderr_only=False,
+):
+    presets = cfg.get("presets", {})
+    if preset_name not in presets:
+        emit_preset_error(f"预设 '{preset_name}' 不存在", stderr_only=stderr_only)
+        if presets:
+            emit_preset_error(f"可用预设: {', '.join(presets.keys())}", stderr_only=stderr_only)
+        return None
+    return normalize_preset_entry(preset_name, presets[preset_name])
+
+
+def infer_preset_auth_mode(preset):
+    if not isinstance(preset, dict):
+        return None
+    if preset.get("bridge"):
+        return "oauth_bridge"
+    if preset.get("account"):
+        return "oauth"
+    if preset.get("provider"):
+        return "api_key"
+    return None
+
+
+def resolve_preset_export_runtime(
+    cfg,
+    preset,
+    provider_override=None,
+    *,
+    stderr_only=False,
+    infer_preset_auth_mode,
+    emit_preset_error,
+    ensure_provider_credentials,
+    validate_provider_for_cli,
+    get_export_env,
+):
+    cli = preset.get("cli", "claude")
+    auth_mode = infer_preset_auth_mode(preset)
+
+    if auth_mode in ("oauth", "oauth_bridge"):
+        emit_preset_error(f"此预设使用 {auth_mode} 模式，不支持 env export", stderr_only=stderr_only)
+        return None
+
+    provider_id = provider_override or preset.get("provider") or None
+
+    runtime = ensure_provider_credentials(cfg, provider_id)
+    if runtime is None:
+        emit_preset_error(f"无法解析 provider: {provider_id or 'default'}", stderr_only=stderr_only)
+        return None
+
+    if not provider_id and sys.stderr.isatty():
+        default_name = runtime.get("id", "default") if isinstance(runtime, dict) else "default"
+        print(f"预设未指定 provider，使用默认: {default_name}", file=sys.stderr)
+
+    try:
+        validate_provider_for_cli(cli, runtime)
+    except Exception as exc:
+        emit_preset_error(str(exc), stderr_only=stderr_only)
+        return None
+
+    exports = get_export_env(cli, runtime)
+    if not exports:
+        emit_preset_error(f"{cli} 无需 export；启动时会按 CLI 自己的参数或登录方式处理", stderr_only=stderr_only)
+        return None
+
+    return cli, exports, runtime
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):
