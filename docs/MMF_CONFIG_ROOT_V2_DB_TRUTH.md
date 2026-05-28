@@ -441,6 +441,7 @@ Current watchdog consumer implementation:
 - `--require-bundle` still forces fail-closed behavior, and `MMS_WATCHDOG_REQUIRE_BUNDLE=0` remains an explicit diagnostic override for an explicit root.
 - `--dry-run` is read-only for watchdog persistence: it prints JSON and skips `health-watchdog/latest.json`, `health-watchdog/state.json`, and `logs/health-watchdog.log` writes.
 - Watchdog remains read-only with respect to DB and does not run route export or publish.
+- Router export/read helpers also treat an existing invalid latest-approved manifest as fail-closed: they report `latest_approved_invalid` / return no routes instead of falling back to stale root `model-routes.json`.
 
 Current bridge rescue consumer implementation:
 

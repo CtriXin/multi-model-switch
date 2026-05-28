@@ -253,8 +253,59 @@ def test_validate_model_config_bundle_uses_verified_latest_approved_or_legacy_fa
 
     (tmp_path / "generated" / "model-routes.json").write_text(json.dumps({"version": 1, "routes": {}}), encoding="utf-8")
     error_codes = {item["code"] for item in mms_router.validate_model_config_bundle() if item.get("level") == "error"}
+    assert "latest_approved_invalid" in error_codes
     assert "route_missing_primary_provider" not in error_codes
-    assert "route_missing_api_key" in error_codes
+    assert "route_missing_api_key" not in error_codes
+
+
+def test_export_model_routes_fails_closed_on_invalid_latest_approved_bundle(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    import mms_router
+
+    _patch_export_paths(monkeypatch, tmp_path)
+    stale_root = {
+        "version": 1,
+        "routes": {
+            "stale-root": {
+                "primary": {
+                    "provider_id": "stale-root",
+                    "openai_base_url": "https://stale.example/v1",
+                    "api_key": "sk-stale",
+                },
+                "fallbacks": [],
+            }
+        },
+    }
+    (tmp_path / "model-routes.json").write_text(json.dumps(stale_root), encoding="utf-8")
+    (tmp_path / "model-routes.lineup.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "source_routes_hash": mms_router._content_hash({"version": 1, "routes": stale_root["routes"]}),
+                "routes": {"stale-root": {"primary": {"provider_id": "stale-root"}, "fallbacks": []}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "model-policy.json").write_text(json.dumps({"version": 1, "models": {}}), encoding="utf-8")
+    approved_routes = {
+        "approved-model": {
+            "primary": {
+                "provider_id": "approved-provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://approved.example/v1",
+                "api_key": "sk-approved",
+                "model_id": "approved-model",
+            },
+            "fallbacks": [],
+        }
+    }
+    _write_latest_approved_route_bundle(tmp_path, mms_router, routes=approved_routes)
+    (tmp_path / "generated" / "model-routes.json").write_text(json.dumps({"version": 1, "routes": {}}), encoding="utf-8")
+
+    routes = mms_router.export_model_routes({"providers": []}, force=False)
+
+    assert routes == {}
 
 
 def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch, tmp_path):
