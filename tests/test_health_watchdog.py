@@ -106,6 +106,44 @@ def test_watchdog_prefers_verified_latest_bundle_over_stale_root_routes(tmp_path
     assert not any(item["name"] == "http://82.156.121.141:4001" for item in report["failures"])
 
 
+def test_watchdog_verified_bundle_ignores_stale_root_provider_metadata(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    (tmp_path / "config.toml").write_text(
+        """
+[[providers]]
+id = "fresh"
+models_endpoint = "https://stale.example.invalid/models"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+
+    def fail_legacy_probe(*_args, **_kwargs):
+        raise AssertionError("verified bundle must not probe stale root config.toml provider metadata")
+
+    watchdog.tcp_tls_check = fail_legacy_probe
+    watchdog.http_get_json = fail_legacy_probe
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["route_source"] == "latest-approved"
+    assert report["status"] == "ok"
+    assert report["bundle"]["status"] == "ok"
+    assert not any(item.get("url") == "https://stale.example.invalid/models" for item in report["results"])
+
+
 def test_watchdog_fails_closed_on_invalid_latest_bundle(tmp_path: Path) -> None:
     watchdog = _load_watchdog()
     _write_latest_bundle(

@@ -557,11 +557,12 @@ def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -
         policy_payload = read_json(config_dir / "model-policy.json")
         results.append(CheckResult("bundle", "latest_approved", "info", "ok", "latest-approved missing; using legacy root artifacts"))
         route_source = "legacy-root"
-    config_payload = read_toml(config_dir / "config.toml")
-    providers = provider_config_map(config_payload)
     if bundle.get("status") == "ok":
-        for provider_id, profile in provider_profile_map(payloads.get("profile") if isinstance(payloads.get("profile"), dict) else {}).items():
-            providers.setdefault(provider_id, profile)
+        providers = provider_profile_map(payloads.get("profile") if isinstance(payloads.get("profile"), dict) else {})
+    elif route_source == "legacy-root":
+        providers = provider_config_map(read_toml(config_dir / "config.toml"))
+    else:
+        providers = {}
     results.extend(route_source_checks(config_dir, routes_payload, policy_payload))
     endpoint_results, model_sets = endpoint_checks(routes_payload, providers, timeout)
     results.extend(endpoint_results)
