@@ -4018,6 +4018,135 @@ def handle_account_default_config(
     console.print(f"[green]✓ account.default.{cli_name} = {account_id}[/green]")
 
 
+def handle_account_add_config(
+    cfg,
+    args_rest,
+    *,
+    managed_oauth_clis,
+    delegated_oauth_clis,
+    quick_connect_official,
+    console,
+):
+    requested_cli = args_rest[0].strip() if args_rest and args_rest[0].strip() else None
+    if requested_cli in delegated_oauth_clis:
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再管理 Claude 官方登录。[/yellow]")
+        return
+    preset_cli = requested_cli if requested_cli in managed_oauth_clis else None
+    quick_connect_official(cfg, preset_cli=preset_cli)
+
+
+def handle_account_edit_config(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    account_map,
+    delegated_oauth_clis,
+    prompt_account_metadata,
+    ensure_account_config,
+    save_config,
+    console,
+):
+    if not args_rest:
+        console.print(f"[red]用法: {command_name} config account.edit <id>[/red]")
+        return
+    account_id = args_rest[0].strip()
+    accounts = account_map(cfg)
+    if account_id not in accounts:
+        console.print(f"[red]未找到账号档案: {account_id}[/red]")
+        return
+    if accounts[account_id].get("cli") in delegated_oauth_clis:
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再编辑 Claude 官方账号。[/yellow]")
+        return
+    account = prompt_account_metadata(existing=accounts[account_id], preset_id=account_id)
+    updated_cfg = dict(cfg)
+    updated_accounts = []
+    for item in cfg.get("accounts", []):
+        updated_accounts.append(account if item.get("id") == account_id else item)
+    updated_cfg["accounts"] = updated_accounts
+    updated_cfg, _ = ensure_account_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已更新账号档案: {account_id}[/green]")
+
+
+def handle_account_remove_config(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    ensure_interactive_terminal,
+    account_map,
+    confirm_ask,
+    ensure_account_config,
+    save_config,
+    console,
+):
+    if not args_rest:
+        console.print(f"[red]用法: {command_name} config account.remove <id>[/red]")
+        return
+    ensure_interactive_terminal("账号档案删除确认")
+    account_id = args_rest[0].strip()
+    accounts = account_map(cfg)
+    if account_id not in accounts:
+        console.print(f"[red]未找到账号档案: {account_id}[/red]")
+        return
+    if not confirm_ask(f"确认删除账号档案 '{account_id}'？", default=False):
+        console.print("[yellow]已取消删除[/yellow]")
+        return
+    updated_cfg = dict(cfg)
+    updated_cfg["accounts"] = [
+        item for item in cfg.get("accounts", [])
+        if item.get("id") != account_id
+    ]
+    defaults = dict(cfg.get("account", {}).get("defaults", {}))
+    for cli_name, value in list(defaults.items()):
+        if value == account_id:
+            defaults.pop(cli_name, None)
+    updated_cfg["account"] = {"defaults": defaults}
+    updated_cfg, _ = ensure_account_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已删除账号档案: {account_id}[/green]")
+
+
+def handle_account_status_config(
+    cfg,
+    args_rest,
+    *,
+    resolve_account_context,
+    probe_account_status,
+    display_accounts,
+    console,
+):
+    if args_rest:
+        account = resolve_account_context(cfg, account_id=args_rest[0].strip())
+        status = probe_account_status(account)
+        console.print(f"[cyan]{account['id']}[/cyan] = {status['state']}")
+        if status.get("summary"):
+            console.print(f"[dim]{status['summary']}[/dim]")
+        return
+    display_accounts(cfg)
+
+
+def handle_account_login_config(
+    cfg,
+    args_rest,
+    *,
+    command_name,
+    delegated_oauth_clis,
+    resolve_account_context,
+    run_account_login,
+    console,
+):
+    if not args_rest:
+        console.print(f"[red]用法: {command_name} config account.login <id>[/red]")
+        return
+    account = resolve_account_context(cfg, account_id=args_rest[0].strip())
+    if account and account.get("cli") in delegated_oauth_clis:
+        console.print("[yellow]Claude OAuth 独立入口已下线；请使用 provider/API route 启动 Claude。[/yellow]")
+        return
+    run_account_login(account)
+
+
 def session_status_label(item):
     session_id = str(item.get("session_id") or "").strip()
     if not session_id:

@@ -3398,6 +3398,160 @@ def test_account_default_handler_preserves_show_reject_and_save_flow():
     assert "[green]✓ account.default.gemini = gemini-main[/green]" in console.items
 
 
+def test_account_add_status_login_handlers_preserve_guards_and_dispatch():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    connect_calls = []
+    mms_command_tools.handle_account_add_config(
+        {"cfg": True},
+        ["claude"],
+        managed_oauth_clis={"claude", "codex", "agy"},
+        delegated_oauth_clis={"claude"},
+        quick_connect_official=lambda cfg, preset_cli=None: connect_calls.append((cfg, preset_cli)),
+        console=console,
+    )
+    assert connect_calls == []
+    assert any("不再管理 Claude 官方登录" in str(item) for item in console.items)
+    mms_command_tools.handle_account_add_config(
+        {"cfg": True},
+        ["agy"],
+        managed_oauth_clis={"claude", "codex", "agy"},
+        delegated_oauth_clis={"claude"},
+        quick_connect_official=lambda cfg, preset_cli=None: connect_calls.append((cfg, preset_cli)),
+        console=console,
+    )
+    assert connect_calls == [({"cfg": True}, "agy")]
+
+    display_calls = []
+    console.items.clear()
+    mms_command_tools.handle_account_status_config(
+        {"cfg": True},
+        [],
+        resolve_account_context=lambda *_args, **_kwargs: None,
+        probe_account_status=lambda _account: {},
+        display_accounts=lambda cfg: display_calls.append(cfg),
+        console=console,
+    )
+    assert display_calls == [{"cfg": True}]
+    mms_command_tools.handle_account_status_config(
+        {"cfg": True},
+        ["codex-main"],
+        resolve_account_context=lambda cfg, account_id: {"id": account_id, "cli": "codex"},
+        probe_account_status=lambda account: {"state": "ok", "summary": f"{account['cli']}:ready"},
+        display_accounts=lambda cfg: display_calls.append(cfg),
+        console=console,
+    )
+    assert "[cyan]codex-main[/cyan] = ok" in console.items
+    assert "[dim]codex:ready[/dim]" in console.items
+
+    login_calls = []
+    console.items.clear()
+    mms_command_tools.handle_account_login_config(
+        {},
+        [],
+        command_name="mmg",
+        delegated_oauth_clis={"claude"},
+        resolve_account_context=lambda *_args, **_kwargs: None,
+        run_account_login=lambda account: login_calls.append(account),
+        console=console,
+    )
+    assert "[red]用法: mmg config account.login <id>[/red]" in console.items
+    mms_command_tools.handle_account_login_config(
+        {},
+        ["claude-main"],
+        command_name="mmg",
+        delegated_oauth_clis={"claude"},
+        resolve_account_context=lambda *_args, **_kwargs: {"id": "claude-main", "cli": "claude"},
+        run_account_login=lambda account: login_calls.append(account),
+        console=console,
+    )
+    assert login_calls == []
+    assert any("请使用 provider/API route 启动 Claude" in str(item) for item in console.items)
+    mms_command_tools.handle_account_login_config(
+        {},
+        ["codex-main"],
+        command_name="mmg",
+        delegated_oauth_clis={"claude"},
+        resolve_account_context=lambda *_args, **_kwargs: {"id": "codex-main", "cli": "codex"},
+        run_account_login=lambda account: login_calls.append(account),
+        console=console,
+    )
+    assert login_calls == [{"id": "codex-main", "cli": "codex"}]
+
+
+def test_account_edit_remove_handlers_preserve_validation_and_defaults_cleanup():
+    import mms_command_tools
+
+    cfg = {
+        "accounts": [
+            {"id": "codex-main", "cli": "codex", "name": "Codex"},
+            {"id": "claude-main", "cli": "claude", "name": "Claude"},
+        ],
+        "account": {"defaults": {"codex": "codex-main", "claude": "claude-main"}},
+    }
+    console = _CollectingConsole()
+    saved = []
+
+    common = {
+        "command_name": "mmg",
+        "account_map": lambda current: {item["id"]: item for item in current.get("accounts", [])},
+        "delegated_oauth_clis": {"claude"},
+        "prompt_account_metadata": lambda existing=None, preset_id=None: {
+            **existing,
+            "name": f"Edited {preset_id}",
+        },
+        "ensure_account_config": lambda current: (current, True),
+        "save_config": lambda updated: saved.append(updated),
+        "console": console,
+    }
+
+    mms_command_tools.handle_account_edit_config(cfg, [], **common)
+    assert "[red]用法: mmg config account.edit <id>[/red]" in console.items
+    mms_command_tools.handle_account_edit_config(cfg, ["missing"], **common)
+    assert any("未找到账号档案: missing" in str(item) for item in console.items)
+    mms_command_tools.handle_account_edit_config(cfg, ["claude-main"], **common)
+    assert any("不再编辑 Claude 官方账号" in str(item) for item in console.items)
+    assert saved == []
+
+    console.items.clear()
+    mms_command_tools.handle_account_edit_config(cfg, ["codex-main"], **common)
+    assert saved[-1]["accounts"][0]["name"] == "Edited codex-main"
+    assert "[green]✓ 已更新账号档案: codex-main[/green]" in console.items
+
+    console.items.clear()
+    interactive_calls = []
+    mms_command_tools.handle_account_remove_config(
+        cfg,
+        ["codex-main"],
+        command_name="mmg",
+        ensure_interactive_terminal=lambda reason: interactive_calls.append(reason),
+        account_map=lambda current: {item["id"]: item for item in current.get("accounts", [])},
+        confirm_ask=lambda *args, **kwargs: True,
+        ensure_account_config=lambda current: (current, True),
+        save_config=lambda updated: saved.append(updated),
+        console=console,
+    )
+    assert interactive_calls == ["账号档案删除确认"]
+    assert saved[-1]["accounts"] == [{"id": "claude-main", "cli": "claude", "name": "Claude"}]
+    assert saved[-1]["account"] == {"defaults": {"claude": "claude-main"}}
+    assert "[green]✓ 已删除账号档案: codex-main[/green]" in console.items
+
+    console.items.clear()
+    mms_command_tools.handle_account_remove_config(
+        cfg,
+        ["codex-main"],
+        command_name="mmg",
+        ensure_interactive_terminal=lambda reason: None,
+        account_map=lambda current: {item["id"]: item for item in current.get("accounts", [])},
+        confirm_ask=lambda *args, **kwargs: False,
+        ensure_account_config=lambda current: (current, True),
+        save_config=lambda updated: saved.append(updated),
+        console=console,
+    )
+    assert "[yellow]已取消删除[/yellow]" in console.items
+
+
 def test_config_normalization_helpers_preserve_legacy_shapes():
     import mms_command_tools
     import mms_core
