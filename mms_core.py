@@ -3620,105 +3620,26 @@ def _usage_summary_for_runtime(runtime_kind, runtime_id):
 
 
 def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", limit=80):
-    failed = str(failed_model or "").strip().lower()
-    root = os.path.expanduser(str(config_dir or CONFIG_DIR))
-    paths = [
-        os.path.join(root, "generated", "model-routes.json"),
-        os.path.join(root, "model-routes.json"),
-    ]
-    candidates = []
-    seen = set()
+    from mms_command_tools import rescue_route_fallback_model_candidates
 
-    def route_is_openai_usable(route):
-        if not isinstance(route, dict):
-            return False
-        return bool(str(route.get("openai_base_url") or "").strip() and str(route.get("api_key") or "").strip())
-
-    for path in paths:
-        try:
-            payload = json.loads(open(path, "r", encoding="utf-8").read())
-        except (OSError, json.JSONDecodeError, TypeError):
-            continue
-        routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
-        for model_name, entry in routes.items():
-            name = str(model_name or "").strip()
-            if not name or name.lower() == failed or name.lower() in seen:
-                continue
-            if not isinstance(entry, dict):
-                continue
-            leaves = [entry.get("primary")]
-            if isinstance(entry.get("fallbacks"), list):
-                leaves.extend(entry.get("fallbacks") or [])
-            if not any(route_is_openai_usable(route) for route in leaves):
-                continue
-            seen.add(name.lower())
-            candidates.append(name)
-        if candidates:
-            break
-    return candidates[: max(1, int(limit or 1))]
+    return rescue_route_fallback_model_candidates(
+        config_dir,
+        failed_model=failed_model,
+        limit=limit,
+        default_config_dir=CONFIG_DIR,
+    )
 
 
 def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
-    failed_model = str((rescue_event or {}).get("failed_model") or "").strip().lower()
-    rows = {}
+    from mms_command_tools import rescue_fallback_model_candidates
 
-    def add(model, *, last_used_at="", source_rank=1000):
-        name = str(model or "").strip()
-        if not name or name.lower() == failed_model:
-            return
-        key = name.lower()
-        existing = rows.get(key)
-        candidate = {
-            "model": name,
-            "last_used_at": str(last_used_at or "").strip(),
-            "source_rank": int(source_rank),
-        }
-        if existing is None:
-            rows[key] = candidate
-            return
-        existing_key = (str(existing.get("last_used_at") or ""), -int(existing.get("source_rank") or 0))
-        candidate_key = (candidate["last_used_at"], -candidate["source_rank"])
-        if candidate_key > existing_key:
-            rows[key] = candidate
-
-    stats = _load_usage_stats()
-    for item in (stats.get("last_by_cli") or {}).values():
-        if not isinstance(item, dict):
-            continue
-        add(item.get("model"), last_used_at=item.get("last_used_at"), source_rank=0)
-    for source in (stats.get("sources") or {}).values():
-        if not isinstance(source, dict):
-            continue
-        model_last_used = source.get("model_last_used_at") if isinstance(source.get("model_last_used_at"), dict) else {}
-        for model_name in (source.get("models") or {}).keys():
-            add(model_name, last_used_at=model_last_used.get(model_name), source_rank=10)
-        add(source.get("last_model"), last_used_at=source.get("last_used_at"), source_rank=5)
-
-    rank = 100
-    for provider_def in (cfg or {}).get("providers", []) or []:
-        if not isinstance(provider_def, dict) or not provider_def.get("enabled", True):
-            continue
-        for field in ("extra_models", "fallback_models"):
-            for model_name in provider_def.get(field) or []:
-                add(model_name, source_rank=rank)
-                rank += 1
-
-    for model_name in _rescue_route_fallback_model_candidates(failed_model=failed_model, limit=80):
-        add(model_name, source_rank=rank)
-        rank += 1
-
-    values = list(rows.values())
-    recent = sorted(
-        [item for item in values if item.get("last_used_at")],
-        key=lambda item: (str(item.get("last_used_at") or ""), -int(item.get("source_rank") or 0)),
-        reverse=True,
+    return rescue_fallback_model_candidates(
+        cfg,
+        rescue_event,
+        limit=limit,
+        load_usage_stats=_load_usage_stats,
+        rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
     )
-    cold = sorted(
-        [item for item in values if not item.get("last_used_at")],
-        key=lambda item: (int(item.get("source_rank") or 0), str(item.get("model") or "").lower()),
-    )
-    ordered = recent + cold
-    return [item["model"] for item in ordered[: max(int(limit or 1), 1)]]
 
 
 def _rescue_default_fallback(cfg):

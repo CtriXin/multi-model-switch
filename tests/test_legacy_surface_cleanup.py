@@ -65,26 +65,24 @@ def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
 
 
 def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch) -> None:
+    import mms_command_tools
     import mms_core
 
-    monkeypatch.setattr(
-        mms_core,
-        "_load_usage_stats",
-        lambda: {
-            "last_by_cli": {
-                "codex": {"model": "recent-model", "last_used_at": "2026-05-22T10:00:00Z"},
-            },
-            "sources": {
-                "provider:codex:relay": {
-                    "models": {"older-model": 2, "failed-model": 9},
-                    "model_last_used_at": {
-                        "older-model": "2026-05-21T10:00:00Z",
-                        "failed-model": "2026-05-22T11:00:00Z",
-                    },
-                }
-            },
+    stats = {
+        "last_by_cli": {
+            "codex": {"model": "recent-model", "last_used_at": "2026-05-22T10:00:00Z"},
         },
-    )
+        "sources": {
+            "provider:codex:relay": {
+                "models": {"older-model": 2, "failed-model": 9},
+                "model_last_used_at": {
+                    "older-model": "2026-05-21T10:00:00Z",
+                    "failed-model": "2026-05-22T11:00:00Z",
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: stats)
     cfg = {
         "providers": [
             {
@@ -102,9 +100,17 @@ def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch)
     )
 
     assert candidates[:4] == ["recent-model", "older-model", "configured-model", "fallback-model"]
+    assert mms_command_tools.rescue_fallback_model_candidates(
+        cfg,
+        {"failed_model": "failed-model"},
+        limit=4,
+        load_usage_stats=lambda: stats,
+        rescue_route_fallback_model_candidates=lambda **_kwargs: [],
+    )[:4] == ["recent-model", "older-model", "configured-model", "fallback-model"]
 
 
 def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path: Path) -> None:
+    import mms_command_tools
     import mms_core
 
     generated = tmp_path / "generated"
@@ -160,6 +166,10 @@ def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path:
     )
 
     assert "deepseek-v4-flash" in route_candidates
+    assert "deepseek-v4-flash" in mms_command_tools.rescue_route_fallback_model_candidates(
+        config_dir=tmp_path,
+        failed_model="failed-model",
+    )
     assert "deepseek-v4-flash" in all_candidates
     assert "failed-model" not in route_candidates
     assert "no-openai-route" not in route_candidates
