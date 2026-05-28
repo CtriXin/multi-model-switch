@@ -5362,7 +5362,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # ── 上次使用 ──
         elif action_type == "last":
 
-            last_action = tui_flow.handle_tui_last_used_action(
+            last_action = tui_flow.handle_tui_last_action(
                 current_cfg,
                 cli,
                 action_data,

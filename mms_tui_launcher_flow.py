@@ -451,6 +451,37 @@ def handle_tui_last_used_action(
     }
 
 
+def handle_tui_last_action(
+    cfg,
+    cli_name,
+    action_data,
+    current_provider,
+    default_models,
+    *,
+    account_id=None,
+    provider_id=None,
+    trace_record,
+    resolve_last_used_runtime,
+    resolve_best_provider,
+    choose_runtime_source,
+    trace_runtime_choice,
+):
+    return handle_tui_last_used_action(
+        cfg,
+        cli_name,
+        action_data,
+        current_provider,
+        default_models,
+        account_id=account_id,
+        provider_id=provider_id,
+        trace_record=trace_record,
+        resolve_last_used_runtime=resolve_last_used_runtime,
+        resolve_best_provider=resolve_best_provider,
+        choose_runtime_source=choose_runtime_source,
+        trace_runtime_choice=trace_runtime_choice,
+    )
+
+
 def selected_model_launch_context(
     cfg,
     cli_name,

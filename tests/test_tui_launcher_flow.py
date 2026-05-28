@@ -13,6 +13,7 @@ from mms_tui_launcher_flow import (
     handle_tui_connect_action,
     handle_tui_family_action,
     handle_tui_guard_settings_action,
+    handle_tui_last_action,
     handle_tui_last_used_action,
     handle_tui_language_settings_action,
     handle_tui_provider_browse_action,
@@ -659,6 +660,37 @@ def test_handle_tui_family_action_handles_last_used_selection() -> None:
     assert traces == [
         ("record", ("last used",), {"cli": "claude", "model": "claude-sonnet"}),
         ("choice", ("runtime resolve", runtime), {"launch_cli": "claude", "choice": "restored-choice"}),
+    ]
+
+
+def test_handle_tui_last_action_delegates_to_last_used_resolution() -> None:
+    traces = []
+    runtime = {"id": "restored"}
+
+    result = handle_tui_last_action(
+        {"cfg": True},
+        "codex",
+        {"model": "gpt-5.4"},
+        {"id": "current"},
+        ["gpt-5.4"],
+        account_id="acc",
+        provider_id="provider",
+        trace_record=lambda *args, **kwargs: traces.append(("record", args, kwargs)),
+        resolve_last_used_runtime=lambda *_args: (runtime, ["gpt-5.4"], "last-used"),
+        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: traces.append(("choice", args, kwargs)),
+    )
+
+    assert result == {
+        "status": "launch",
+        "model_info": {"model": "gpt-5.4"},
+        "runtime": runtime,
+        "cli": "codex",
+    }
+    assert traces == [
+        ("record", ("last used",), {"cli": "codex", "model": "gpt-5.4"}),
+        ("choice", ("runtime resolve", runtime), {"launch_cli": "codex", "choice": "last-used"}),
     ]
 
 
