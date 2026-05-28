@@ -153,6 +153,8 @@ def test_downstream_consumer_bundle_runbook_is_fail_closed() -> None:
         "cache_transport_evidence.v1",
         "mmf config bundle --json",
         "mms config bundle --json",
+        "from mms_consumer_bundle import load_verified_consumer_bundle",
+        "Falling back to stable `~/.config/mms` is opt-in",
         "missing manifest -> fail closed",
         "hash mismatch -> fail closed",
         "SQLite not queried",

@@ -965,24 +965,24 @@ def consumer_bundle_status(
         summary["error"] = "latest-approved manifest is missing"
         return summary
     try:
-        verified = mms_registry.verify_latest_approved_bundle(config_dir=root, manifest_path=manifest)
+        from mms_consumer_bundle import load_verified_consumer_bundle
+
+        verified = load_verified_consumer_bundle(config_root=root, manifest_path=manifest, include_secret=False)
     except Exception as exc:
         summary["error"] = f"{type(exc).__name__}: {exc}"
         return summary
     manifest_payload = verified.get("manifest") if isinstance(verified.get("manifest"), dict) else {}
-    manifest_files = manifest_payload.get("files") if isinstance(manifest_payload.get("files"), dict) else {}
     files: dict[str, dict[str, Any]] = {}
     for name, info in (verified.get("verified_files") or {}).items():
         if not isinstance(info, Mapping):
             continue
-        manifest_entry = manifest_files.get(name) if isinstance(manifest_files.get(name), Mapping) else {}
         files[str(name)] = {
             "path": info.get("path") or "",
-            "canonical_path": manifest_entry.get("canonical_path") or "",
-            "legacy_alias_path": manifest_entry.get("legacy_alias_path") or "",
-            "legacy_alias_compat": bool(manifest_entry.get("legacy_alias_compat", False)),
+            "canonical_path": info.get("canonical_path") or "",
+            "legacy_alias_path": info.get("legacy_alias_path") or "",
+            "legacy_alias_compat": bool(info.get("legacy_alias_compat", False)),
             "sha256": info.get("sha256") or "",
-            "sensitivity": info.get("sensitivity") or manifest_entry.get("sensitivity") or "",
+            "sensitivity": info.get("sensitivity") or "",
         }
     summary.update(
         {

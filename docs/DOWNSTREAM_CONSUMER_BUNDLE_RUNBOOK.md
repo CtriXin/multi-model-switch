@@ -108,6 +108,22 @@ Consumers may import MMS helper code when available, but the contract above is
 the portable fallback. The helper and the portable verifier must enforce the
 same fail-closed hash boundary.
 
+MMS ships a small helper for consumers that can import this repo:
+
+```python
+from mms_consumer_bundle import load_verified_consumer_bundle
+
+bundle = load_verified_consumer_bundle(
+    config_root="/path/to/selected/mms-root",
+    include_secret=False,
+)
+```
+
+When `config_root` is omitted, the helper requires `MMS_CONFIG_ROOT` or
+`MMS_CONFIG_DIR` by default. Falling back to stable `~/.config/mms` is opt-in,
+so preview consumers do not silently cross into stable credentials or legacy
+root files when their environment is incomplete.
+
 ## Cutover Checklist
 
 For each downstream project:
