@@ -99,6 +99,31 @@ def default_config_dir() -> Path:
     return real_home() / ".config" / "mms"
 
 
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.expanduser().resolve() == right.expanduser().resolve()
+    except Exception:
+        return os.path.abspath(os.path.expanduser(str(left))) == os.path.abspath(os.path.expanduser(str(right)))
+
+
+def default_require_bundle_for_config_dir(config_dir: Path) -> bool:
+    """Explicit preview/root-selected watchdog runs should fail closed."""
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR"):
+        raw = os.environ.get(key, "").strip()
+        if raw and _same_path(config_dir, Path(raw)):
+            return True
+    return False
+
+
+def resolve_require_bundle(args: argparse.Namespace, config_dir: Path) -> bool:
+    if bool(args.require_bundle):
+        return True
+    raw = os.environ.get("MMS_WATCHDOG_REQUIRE_BUNDLE")
+    if raw is not None:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return default_require_bundle_for_config_dir(config_dir)
+
+
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
@@ -769,7 +794,7 @@ def main(argv: list[str]) -> int:
     env_file = Path(args.env_file).expanduser() if args.env_file else config_dir / ENV_FILE_NAME
     load_env_file(env_file)
 
-    require_bundle = bool(args.require_bundle or os.environ.get("MMS_WATCHDOG_REQUIRE_BUNDLE") == "1")
+    require_bundle = resolve_require_bundle(args, config_dir)
     report = build_report(config_dir, max(1, int(args.timeout_sec)), require_bundle=require_bundle)
     latest_path = watchdog_dir / LATEST_FILE_NAME
     state_path = watchdog_dir / STATE_FILE_NAME

@@ -131,3 +131,42 @@ def test_watchdog_fails_closed_on_invalid_latest_bundle(tmp_path: Path) -> None:
     assert report["status"] == "critical"
     assert report["route_source"] == "invalid_latest-approved"
     assert any("stale_or_invalid_bundle" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_requires_bundle_for_explicit_config_root(monkeypatch, tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path))
+    monkeypatch.delenv("MMS_WATCHDOG_REQUIRE_BUNDLE", raising=False)
+
+    args = watchdog.parse_args(["--config-dir", str(tmp_path), "--dry-run"])
+    require_bundle = watchdog.resolve_require_bundle(args, tmp_path)
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=require_bundle)
+
+    assert require_bundle is True
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("stale_or_invalid_bundle" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_stable_default_keeps_legacy_fallback_without_bundle(monkeypatch, tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_WATCHDOG_REQUIRE_BUNDLE", raising=False)
+
+    args = watchdog.parse_args(["--config-dir", str(tmp_path), "--dry-run"])
+    require_bundle = watchdog.resolve_require_bundle(args, tmp_path)
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=require_bundle)
+
+    assert require_bundle is False
+    assert report["route_source"] == "legacy-root"
+
+
+def test_watchdog_require_bundle_env_can_disable_explicit_root_default(monkeypatch, tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path))
+    monkeypatch.setenv("MMS_WATCHDOG_REQUIRE_BUNDLE", "0")
+
+    args = watchdog.parse_args(["--config-dir", str(tmp_path), "--dry-run"])
+
+    assert watchdog.resolve_require_bundle(args, tmp_path) is False
