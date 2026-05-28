@@ -548,11 +548,15 @@ CLI_MODEL_FAMILY_HINTS = {}
 
 
 def current_command():
-    return PRIMARY_COMMAND
+    from mms_command_tools import current_command as current_command_helper
+
+    return current_command_helper(primary_command=PRIMARY_COMMAND)
 
 
 def display_title():
-    return "MMS"
+    from mms_command_tools import display_title as display_title_helper
+
+    return display_title_helper()
 
 
 def _git_output(args):

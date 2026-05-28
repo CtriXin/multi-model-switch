@@ -60,6 +60,19 @@ def test_command_hint_helpers_preserve_current_command_formatting():
     assert mms_command_tools.export_command_hint("claude", current_command=lambda: "mmg") == "mmg --export claude --apply"
 
 
+def test_command_metadata_helpers_preserve_wrapper_values(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    assert mms_command_tools.current_command(primary_command="mmg") == "mmg"
+    assert mms_command_tools.display_title() == "MMS"
+    assert mms_command_tools.display_title("MMG") == "MMG"
+
+    monkeypatch.setattr(mms_core, "PRIMARY_COMMAND", "mmg")
+    assert mms_core.current_command() == "mmg"
+    assert mms_core.display_title() == "MMS"
+
+
 def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeypatch):
     import mms_command_tools
     import mms_core

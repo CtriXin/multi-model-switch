@@ -104,6 +104,14 @@ def extract_global_lang(argv, *, normalize_language):
     return cleaned, lang
 
 
+def current_command(*, primary_command):
+    return primary_command
+
+
+def display_title(title="MMS"):
+    return title
+
+
 def config_command_hint(*, current_command):
     return f"{current_command()} config api.edit"
 
