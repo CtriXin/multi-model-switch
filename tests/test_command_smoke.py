@@ -239,6 +239,83 @@ def test_models_command_unknown_provider_exits_with_available_list():
     assert any("relay" in str(item) for item in console.items)
 
 
+def test_warm_command_uses_recent_models_without_live_requests():
+    import mms_command_tools
+
+    class Panel:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+    class Prompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            return "1"
+
+    class Confirm:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            raise AssertionError("recent warm path should not ask confirm")
+
+    calls = []
+    console = _CollectingConsole()
+    provider = {"id": "relay", "name": "Relay"}
+
+    mms_command_tools.handle_warm_command(
+        {"providers": [provider]},
+        ["relay"],
+        command_name="mmg",
+        provider_map=lambda cfg: {"relay": provider},
+        select_provider_for_warm=lambda cfg: "relay",
+        resolve_provider_context=lambda cfg, provider_id: provider,
+        probe_models=lambda provider_arg, emit_output=False: {"models": ["gpt-5.5", "gpt-5.4"]},
+        recent_models_for_provider=lambda provider_id: ["gpt-5.4"],
+        pick_manual_models=lambda models: (_ for _ in ()).throw(AssertionError("manual picker should not run")),
+        warm_model_request=lambda provider_arg, model_name: calls.append((provider_arg["id"], model_name)) or (True, "ok"),
+        text_cls=str,
+        panel_cls=Panel,
+        prompt_cls=Prompt,
+        confirm_cls=Confirm,
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    assert calls == [("relay", "gpt-5.4")]
+    tables = [item for item in console.items if isinstance(item, _FakeTable)]
+    assert tables
+    assert tables[0].rows[0][0] == ("gpt-5.4", "成功", "ok")
+
+
+def test_warm_command_unknown_provider_exits_before_probe():
+    import pytest
+    import mms_command_tools
+
+    console = _CollectingConsole()
+
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.handle_warm_command(
+            {"providers": [{"id": "relay"}]},
+            ["missing"],
+            command_name="mmg",
+            provider_map=lambda cfg: {"relay": cfg["providers"][0]},
+            select_provider_for_warm=lambda cfg: "relay",
+            resolve_provider_context=lambda cfg, provider_id: (_ for _ in ()).throw(AssertionError("must not resolve")),
+            probe_models=lambda provider, emit_output=False: (_ for _ in ()).throw(AssertionError("must not probe")),
+            recent_models_for_provider=lambda provider_id: [],
+            pick_manual_models=lambda models: [],
+            warm_model_request=lambda provider, model: (True, "ok"),
+            text_cls=str,
+            panel_cls=object,
+            prompt_cls=object,
+            confirm_cls=object,
+            table_cls=_FakeTable,
+            console=console,
+        )
+
+    assert exc.value.code == 1
+    assert any("未找到模型源: missing" in str(item) for item in console.items)
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

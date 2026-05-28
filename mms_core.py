@@ -5830,82 +5830,26 @@ def _warm_model_request(provider, model_name):
 
 
 def handle_warm_command(cfg, argv):
-    if argv and argv[0] in {"-h", "--help"}:
-        console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} warm [provider_id]"))
-        console.print("[dim]不带参数时先选通道，再选择最近使用 / 手动选择 / 全部模型。[/dim]")
-        return
+    from mms_command_tools import handle_warm_command as handle_warm_command_impl
 
-    provider_id = str(argv[0]).strip() if argv else ""
-    providers = _provider_map(cfg)
-    if provider_id:
-        if provider_id not in providers:
-            console.print(f"[red]未找到模型源: {provider_id}[/red]")
-            console.print(f"[dim]可用模型源: {', '.join(sorted(providers.keys()))}[/dim]")
-            sys.exit(1)
-    else:
-        provider_id = _select_provider_for_warm(cfg)
-        if not provider_id:
-            return
-
-    provider = resolve_provider_context(cfg, provider_id)
-    probe = _probe_models(provider, emit_output=False)
-    models = list(probe.get("models") or [])
-    if not models:
-        console.print("[yellow]当前通道没有可预热的模型[/yellow]")
-        return
-
-    recent_models = [item for item in _recent_models_for_provider(provider_id) if item in models]
-
-    console.print(Panel(
-        f"[bold]通道:[/bold] {provider.get('name', provider_id)}\n"
-        f"[bold]可用模型数:[/bold] {len(models)}\n"
-        f"[dim]预热会真实发请求，建议优先预热最近常用模型，不建议默认全量预热。[/dim]",
-        title="模型预热",
-        border_style="cyan",
-    ))
-    console.print("  1. 预热最近使用模型（推荐）")
-    console.print("  2. 手动选择模型")
-    console.print("  3. 预热全部模型（不推荐）")
-    console.print("  4. 返回")
-    choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4"], default="1")
-
-    selected_models = []
-    if choice == "1":
-        selected_models = recent_models
-        if not selected_models:
-            console.print("[yellow]当前没有最近使用模型，已改为手动选择[/yellow]")
-            selected_models = _pick_manual_models(models)
-    elif choice == "2":
-        selected_models = _pick_manual_models(models)
-    elif choice == "3":
-        if not Confirm.ask("确认预热当前通道全部模型？这会产生真实请求成本。", default=False):
-            console.print("[yellow]已取消全量预热[/yellow]")
-            return
-        selected_models = models
-    else:
-        return
-
-    if not selected_models:
-        console.print("[yellow]没有选择任何模型，已取消预热[/yellow]")
-        return
-
-    results = []
-    for model_name in selected_models:
-        console.print(f"[dim]正在预热 {model_name} ...[/dim]")
-        ok, detail = _warm_model_request(provider, model_name)
-        results.append((model_name, ok, detail))
-
-    table = Table(title=f"{provider.get('name', provider_id)} · 预热结果", show_lines=True)
-    table.add_column("模型", style="cyan")
-    table.add_column("结果", style="green")
-    table.add_column("详情", style="yellow")
-    success_count = 0
-    for model_name, ok, detail in results:
-        if ok:
-            success_count += 1
-        table.add_row(model_name, "成功" if ok else "失败", detail)
-    console.print(table)
-    console.print(f"[green]✓ 已完成预热：成功 {success_count} / {len(results)}[/green]")
+    return handle_warm_command_impl(
+        cfg,
+        argv,
+        command_name=current_command(),
+        provider_map=_provider_map,
+        select_provider_for_warm=_select_provider_for_warm,
+        resolve_provider_context=resolve_provider_context,
+        probe_models=_probe_models,
+        recent_models_for_provider=_recent_models_for_provider,
+        pick_manual_models=_pick_manual_models,
+        warm_model_request=_warm_model_request,
+        text_cls=Text,
+        panel_cls=Panel,
+        prompt_cls=Prompt,
+        confirm_cls=Confirm,
+        table_cls=Table,
+        console=console,
+    )
 
 
 def handle_models_command(cfg, argv):
