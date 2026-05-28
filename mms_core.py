@@ -627,20 +627,9 @@ def display_title():
 
 
 def _git_output(args):
-    try:
-        result = subprocess.run(
-            ["git", "-C", os.path.dirname(os.path.abspath(__file__)), *args],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=2,
-            check=False,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    return str(result.stdout or "").strip()
+    from mms_command_tools import git_output
+
+    return git_output(args, subprocess_run=subprocess.run, file_path=__file__)
 
 
 def _release_version_info():

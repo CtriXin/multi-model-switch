@@ -2842,6 +2842,23 @@ def fetch_npm_package_latest_version(package_name, *, which, subprocess_run, ext
     return extract_semver_text(str(result.stdout or "").strip())
 
 
+def git_output(args, *, subprocess_run, file_path):
+    try:
+        result = subprocess_run(
+            ["git", "-C", os.path.dirname(os.path.abspath(file_path)), *args],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
 def semver_tag_gap(installed_version, known_tags, latest_tag=""):
     installed_version = str(installed_version or "").strip()
     tags = normalize_semver_tags(known_tags)

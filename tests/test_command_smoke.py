@@ -2264,6 +2264,39 @@ def test_release_version_info_preserves_installed_and_git_fallbacks():
     assert fallback["installed_version"] == ""
 
 
+def test_git_output_preserves_command_cwd_and_failure_paths():
+    import mms_command_tools
+
+    class Result:
+        stdout = " main \n"
+        returncode = 0
+
+    calls = []
+    value = mms_command_tools.git_output(
+        ["branch", "--show-current"],
+        subprocess_run=lambda *args, **kwargs: calls.append((args, kwargs)) or Result(),
+        file_path="/tmp/project/mms_core.py",
+    )
+    assert value == "main"
+    assert calls[0][0][0] == ["git", "-C", "/tmp/project", "branch", "--show-current"]
+    assert calls[0][1]["timeout"] == 2
+
+    class FailedResult:
+        stdout = "main"
+        returncode = 1
+
+    assert mms_command_tools.git_output(
+        ["branch"],
+        subprocess_run=lambda *args, **kwargs: FailedResult(),
+        file_path="/tmp/project/mms_core.py",
+    ) == ""
+    assert mms_command_tools.git_output(
+        ["branch"],
+        subprocess_run=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+        file_path="/tmp/project/mms_core.py",
+    ) == ""
+
+
 def test_cli_version_status_preserves_cache_refresh_and_labels():
     import mms_command_tools
 
