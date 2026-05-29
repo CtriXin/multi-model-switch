@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 
 
 def truthy(value):
@@ -300,6 +301,26 @@ def real_home_wrapper_search_path(
     except Exception:
         pass
     return os.pathsep.join(dedupe_path_parts(path_parts)) or os.defpath
+
+
+def resolve_real_home_command_path(
+    command_name,
+    env=None,
+    *,
+    environ,
+    real_home_wrapper_search_path,
+    which=shutil.which,
+    defpath=os.defpath,
+):
+    command_name = str(command_name or "").strip()
+    if not command_name:
+        return ""
+    if isinstance(env, dict):
+        session_home = str(env.get("MMS_SESSION_HOME") or environ.get("HOME") or "").strip()
+    else:
+        session_home = environ.get("HOME", "")
+    filtered_path = real_home_wrapper_search_path(session_home, env) or defpath
+    return which(command_name, path=filtered_path) or ""
 
 
 def write_real_home_script(path, lines):

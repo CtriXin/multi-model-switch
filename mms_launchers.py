@@ -4679,15 +4679,17 @@ def _install_session_command_wrappers(session_home, env):
 
 
 def _resolve_real_home_command_path(command_name, env=None):
-    command_name = str(command_name or "").strip()
-    if not command_name:
-        return ""
-    if isinstance(env, dict):
-        session_home = str(env.get("MMS_SESSION_HOME") or os.environ.get("HOME") or "").strip()
-    else:
-        session_home = os.environ.get("HOME", "")
-    filtered_path = _real_home_wrapper_search_path(session_home, env) or os.defpath
-    return shutil.which(command_name, path=filtered_path) or ""
+    """Compatibility wrapper for real-home command lookup."""
+    from mms_launcher_export import resolve_real_home_command_path
+
+    return resolve_real_home_command_path(
+        command_name,
+        env,
+        environ=os.environ,
+        real_home_wrapper_search_path=_real_home_wrapper_search_path,
+        which=shutil.which,
+        defpath=os.defpath,
+    )
 
 
 def _mmc_entry_path():
