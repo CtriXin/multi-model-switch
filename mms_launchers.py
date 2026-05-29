@@ -233,22 +233,16 @@ def _ensure_bridge_helpers():
     global gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
     if _build_gateway_url is not None:
         return
-    from mms_bridge import (
-        _build_gateway_url as _bgw,
-        codex_claude_bridge as _ccb,
-        gemini_claude_bridge as _gcb,
-        gateway_claude_bridge as _gwb,
-        codex_chatcompletions_bridge as _cccb,
-        codex_responses_bridge as _crb,
-        _write_route_status as _wrs,
-    )
-    _build_gateway_url = _bgw
-    codex_claude_bridge = _ccb
-    gemini_claude_bridge = _gcb
-    gateway_claude_bridge = _gwb
-    codex_chatcompletions_bridge = _cccb
-    codex_responses_bridge = _crb
-    _write_route_status = _wrs
+    from mms_launcher_bridge import load_bridge_helpers
+
+    helpers = load_bridge_helpers()
+    _build_gateway_url = helpers["_build_gateway_url"]
+    codex_claude_bridge = helpers["codex_claude_bridge"]
+    gemini_claude_bridge = helpers["gemini_claude_bridge"]
+    gateway_claude_bridge = helpers["gateway_claude_bridge"]
+    codex_chatcompletions_bridge = helpers["codex_chatcompletions_bridge"]
+    codex_responses_bridge = helpers["codex_responses_bridge"]
+    _write_route_status = helpers["_write_route_status"]
 
 
 def _gateway_claude_bridge_context(*args, **kwargs):

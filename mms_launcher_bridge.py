@@ -5,6 +5,28 @@ from __future__ import annotations
 import inspect
 
 
+def load_bridge_helpers():
+    from mms_bridge import (
+        _build_gateway_url as _bgw,
+        _write_route_status as _wrs,
+        codex_chatcompletions_bridge as _cccb,
+        codex_claude_bridge as _ccb,
+        codex_responses_bridge as _crb,
+        gateway_claude_bridge as _gwb,
+        gemini_claude_bridge as _gcb,
+    )
+
+    return {
+        "_build_gateway_url": _bgw,
+        "codex_claude_bridge": _ccb,
+        "gemini_claude_bridge": _gcb,
+        "gateway_claude_bridge": _gwb,
+        "codex_chatcompletions_bridge": _cccb,
+        "codex_responses_bridge": _crb,
+        "_write_route_status": _wrs,
+    }
+
+
 def gateway_claude_bridge_context(target, *args, console, signature_fn=inspect.signature, **kwargs):
     if target is None:
         raise RuntimeError("gateway_claude_bridge 未初始化")
@@ -29,4 +51,4 @@ def gateway_claude_bridge_context(target, *args, console, signature_fn=inspect.s
     return target(*args, **filtered)
 
 
-__all__ = ["gateway_claude_bridge_context"]
+__all__ = ["gateway_claude_bridge_context", "load_bridge_helpers"]
