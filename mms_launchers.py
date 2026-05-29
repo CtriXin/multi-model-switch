@@ -175,6 +175,7 @@ from mms_session_features import (
     normalize_reasoning_effort as _normalize_reasoning_effort_impl,
     normalize_thinking_mode as _normalize_thinking_mode_impl,
     resolve_agent_browser_root as _resolve_agent_browser_root_impl,
+    resolve_auto_github_contributor_root as _resolve_auto_github_contributor_root_impl,
     resolve_caveman_root as _resolve_caveman_root_impl,
     resolve_ecc_root as _resolve_ecc_root_impl,
     resolve_nsr_root as _resolve_nsr_root_impl,
@@ -1969,27 +1970,8 @@ def _xmem_cli_path():
 
 
 def _resolve_auto_github_contributor_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("auto_github_contributor")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        _real_user_path("auto-skills", "installed-skills", "auto-github-contributor"),
-        _real_user_path("auto-skills", "vendor", "auto-github-contributor", "skills", "auto-github-contributor"),
-        _real_user_path("vendor", "auto-github-contributor", "skills", "auto-github-contributor"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
+    """Compatibility wrapper for auto-github-contributor root resolution."""
+    return _resolve_auto_github_contributor_root_impl(**_session_feature_root_kwargs())
 
 
 def _mms_toon_script_path():

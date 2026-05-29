@@ -365,3 +365,16 @@ def resolve_xmem_root(**kwargs):
         ),
         **kwargs,
     )
+
+
+def resolve_auto_github_contributor_root(**kwargs):
+    return resolve_skill_root(
+        env_key="MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT",
+        preference_key="auto_github_contributor",
+        default_parts=(
+            ("real_home", ("auto-skills", "installed-skills", "auto-github-contributor")),
+            ("real_home", ("auto-skills", "vendor", "auto-github-contributor", "skills", "auto-github-contributor")),
+            ("real_home", ("vendor", "auto-github-contributor", "skills", "auto-github-contributor")),
+        ),
+        **kwargs,
+    )
