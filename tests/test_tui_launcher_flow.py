@@ -71,6 +71,7 @@ from mms_tui_launcher_flow import (
     select_rescue_route_fallback_model,
     show_rescue_no_packets_report,
     show_rescue_paths_action,
+    TuiRuntimeRefreshDeps,
     TuiLaunchCandidateDeps,
     TuiLaunchConfirmationDeps,
     TuiSettingsActionDeps,
@@ -1438,12 +1439,14 @@ def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> 
 
     provider, models, clis = refresh_tui_runtime_state_after_config_change(
         {"cfg": True},
-        probe_cache=FakeProbeCache(),
-        probe_file_cache_dir="/tmp/probe-cache",
-        rmtree=fake_rmtree,
-        ensure_provider_credentials=fake_ensure_provider_credentials,
-        probe_models=fake_probe_models,
-        resolve_visible_clis=fake_resolve_visible_clis,
+        deps=TuiRuntimeRefreshDeps(
+            probe_cache=FakeProbeCache(),
+            probe_file_cache_dir="/tmp/probe-cache",
+            rmtree=fake_rmtree,
+            ensure_provider_credentials=fake_ensure_provider_credentials,
+            probe_models=fake_probe_models,
+            resolve_visible_clis=fake_resolve_visible_clis,
+        ),
     )
 
     assert provider == {"id": "provider"}

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from mms_tui import _sort_cli_names_by_last_used, _sort_model_entries_for_tui
 from mms_core import _sort_family_entries_for_tui
-from mms_tui_launcher_flow import build_tui_family_payloads
+from mms_tui_launcher_flow import TuiFamilyPayloadDeps, build_tui_family_payloads
 
 
 NOW = datetime(2026, 5, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -136,11 +136,13 @@ def test_build_tui_family_payloads_preserves_family_metadata() -> None:
         ["codex"],
         provider,
         default_models,
-        build_model_families_for_cli=build_model_families_for_cli,
-        cli_default_family_first={"codex": "GPT"},
-        family_is_cold_for_tui=family_is_cold_for_tui,
-        sort_family_entries_for_tui=sort_family_entries_for_tui,
-        make_provider_options_loader=make_provider_options_loader,
+        deps=TuiFamilyPayloadDeps(
+            build_model_families_for_cli=build_model_families_for_cli,
+            cli_default_family_first={"codex": "GPT"},
+            family_is_cold_for_tui=family_is_cold_for_tui,
+            sort_family_entries_for_tui=sort_family_entries_for_tui,
+            make_provider_options_loader=make_provider_options_loader,
+        ),
     )
 
     assert families_by_cli["codex"] == [

@@ -4854,6 +4854,24 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
     if account_id or provider_id:
         _trace_record("CLI flags", account=account_id, provider=provider_id)
 
+    family_payload_deps = tui_flow.TuiFamilyPayloadDeps(
+        build_model_families_for_cli=_build_model_families_for_cli,
+        cli_default_family_first=_CLI_DEFAULT_FAMILY_FIRST,
+        family_is_cold_for_tui=_family_is_cold_for_tui,
+        sort_family_entries_for_tui=_sort_family_entries_for_tui,
+        make_provider_options_loader=_make_provider_options_loader,
+    )
+
+    def _runtime_refresh_deps(rmtree):
+        return tui_flow.TuiRuntimeRefreshDeps(
+            probe_cache=_PROBE_CACHE,
+            probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
+            rmtree=rmtree,
+            ensure_provider_credentials=ensure_provider_credentials,
+            probe_models=_probe_models,
+            resolve_visible_clis=_resolve_visible_clis,
+        )
+
     # 预构建品类数据（仅在配置变更时重建）
     def _rebuild_families():
         return tui_flow.build_tui_family_payloads(
@@ -4861,11 +4879,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             current_cli_names,
             current_provider,
             default_models,
-            build_model_families_for_cli=_build_model_families_for_cli,
-            cli_default_family_first=_CLI_DEFAULT_FAMILY_FIRST,
-            family_is_cold_for_tui=_family_is_cold_for_tui,
-            sort_family_entries_for_tui=_sort_family_entries_for_tui,
-            make_provider_options_loader=_make_provider_options_loader,
+            deps=family_payload_deps,
         )
 
     def _refresh_runtime_state_after_config_change(updated_cfg):
@@ -4873,12 +4887,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         return tui_flow.refresh_tui_runtime_state_after_config_change(
             updated_cfg,
-            probe_cache=_PROBE_CACHE,
-            probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
-            rmtree=_shutil.rmtree,
-            ensure_provider_credentials=ensure_provider_credentials,
-            probe_models=_probe_models,
-            resolve_visible_clis=_resolve_visible_clis,
+            deps=_runtime_refresh_deps(_shutil.rmtree),
         )
 
     families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()

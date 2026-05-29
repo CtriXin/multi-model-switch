@@ -7,6 +7,25 @@ from typing import Any, Callable
 
 
 @dataclass(frozen=True)
+class TuiFamilyPayloadDeps:
+    build_model_families_for_cli: Callable[..., Any]
+    cli_default_family_first: Any
+    family_is_cold_for_tui: Callable[..., Any]
+    sort_family_entries_for_tui: Callable[..., Any]
+    make_provider_options_loader: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class TuiRuntimeRefreshDeps:
+    probe_cache: Any
+    probe_file_cache_dir: Any
+    rmtree: Callable[..., Any]
+    ensure_provider_credentials: Callable[..., Any]
+    probe_models: Callable[..., Any]
+    resolve_visible_clis: Callable[..., Any]
+
+
+@dataclass(frozen=True)
 class TuiLaunchCandidateDeps:
     select_submodel_tui: Callable[..., Any]
     apply_priority_changes: Callable[..., Any]
@@ -287,22 +306,18 @@ def build_tui_family_payloads(
     current_provider,
     default_models,
     *,
-    build_model_families_for_cli,
-    cli_default_family_first,
-    family_is_cold_for_tui,
-    sort_family_entries_for_tui,
-    make_provider_options_loader,
+    deps,
 ):
     families_by_cli = {}
     families_detail = {}
     provider_options_by_cli = {}
     provider_options_loader_by_cli = {}
     for cli_name in cli_names:
-        raw = build_model_families_for_cli(
+        raw = deps.build_model_families_for_cli(
             cfg, cli_name, current_provider, default_models
         )
         family_entries = []
-        preferred_family = cli_default_family_first.get(cli_name)
+        preferred_family = deps.cli_default_family_first.get(cli_name)
         for family in raw:
             model_entries = [model for model in family["models"] if isinstance(model, dict)]
             total_use = sum(int(model.get("use_count", 0) or 0) for model in model_entries)
@@ -315,20 +330,20 @@ def build_tui_family_payloads(
                 "count": len(family["models"]),
                 "use_count": total_use,
                 "last_used_at": family_last_used_at,
-                "is_cold": family_is_cold_for_tui(
+                "is_cold": deps.family_is_cold_for_tui(
                     family["family"],
                     total_use,
                     family_last_used_at,
                     preferred_family=preferred_family,
                 ),
             })
-        families_by_cli[cli_name] = sort_family_entries_for_tui(
+        families_by_cli[cli_name] = deps.sort_family_entries_for_tui(
             family_entries,
             preferred_family=preferred_family,
         )
         families_detail[cli_name] = {family["family"]: family["models"] for family in raw}
         provider_options_by_cli[cli_name] = {}
-        provider_options_loader_by_cli[cli_name] = make_provider_options_loader(
+        provider_options_loader_by_cli[cli_name] = deps.make_provider_options_loader(
             cfg, cli_name, current_provider, default_models
         )
     return families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli
@@ -1032,18 +1047,13 @@ def handle_tui_launch_candidate_action(
 def refresh_tui_runtime_state_after_config_change(
     cfg,
     *,
-    probe_cache,
-    probe_file_cache_dir,
-    rmtree,
-    ensure_provider_credentials,
-    probe_models,
-    resolve_visible_clis,
+    deps,
 ):
-    probe_cache.clear()
-    rmtree(probe_file_cache_dir, ignore_errors=True)
-    current_provider = ensure_provider_credentials(cfg)
-    default_models = probe_models(current_provider, emit_output=False).get("models")
-    current_cli_names = resolve_visible_clis(cfg, current_provider, default_models)
+    deps.probe_cache.clear()
+    deps.rmtree(deps.probe_file_cache_dir, ignore_errors=True)
+    current_provider = deps.ensure_provider_credentials(cfg)
+    default_models = deps.probe_models(current_provider, emit_output=False).get("models")
+    current_cli_names = deps.resolve_visible_clis(cfg, current_provider, default_models)
     return current_provider, default_models, current_cli_names
 
 
