@@ -314,15 +314,32 @@ def _global_roots(home: str) -> list[dict[str, Any]]:
     return rows
 
 
-def _preference_snippet(prefs: dict[str, Any]) -> str:
+def _disabled_defaults(prefs: dict[str, Any]) -> dict[str, list[str]]:
     disabled = (((prefs.get("session_surfaces") or {}).get("disabled") or {}) if isinstance(prefs, dict) else {})
-
-    def _list(name: str) -> str:
+    result: dict[str, list[str]] = {}
+    for name in SURFACE_KINDS:
         values = disabled.get(name) if isinstance(disabled, dict) else []
         if isinstance(values, str):
             values = [values]
         if not isinstance(values, (list, tuple, set)):
             values = []
+        cleaned = []
+        seen = set()
+        for item in values:
+            text = _safe_text(item)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            cleaned.append(text)
+        result[name] = cleaned
+    return result
+
+
+def _preference_snippet(prefs: dict[str, Any]) -> str:
+    disabled = _disabled_defaults(prefs)
+
+    def _list(name: str) -> str:
+        values = disabled.get(name) or []
         return "[" + ", ".join(f'"{_safe_text(item)}"' for item in values if _safe_text(item)) + "]"
 
     defaults = ((prefs.get("launch") or {}).get("defaults") or {}) if isinstance(prefs, dict) else {}
@@ -418,6 +435,13 @@ def build_session_assets_snapshot(
         "clis": cli_cards,
         "rows": rows,
         "global_roots": _global_roots(home),
+        "launch_defaults": {
+            "caveman_mode": _safe_text(defaults.get("caveman_mode") or "enable"),
+            "nsr_mode": _safe_text(defaults.get("nsr_mode") or "enable"),
+            "agent_pack": _safe_text(defaults.get("agent_pack") or "none"),
+            "bypass": defaults.get("bypass") is not False,
+        },
+        "disabled_defaults": _disabled_defaults(prefs),
         "preference_snippet": _preference_snippet(prefs),
         "configuration_contract": {
             "persistent_path": preferences_path or "~/.config/mms/preferences.toml",

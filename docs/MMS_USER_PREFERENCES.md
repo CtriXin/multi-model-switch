@@ -188,4 +188,6 @@ items by:
 
 The panel is for discovery and snippet generation only. Persistent defaults
 still belong in `preferences.toml`, and real `~/.config/mms/**` writes remain
-under the human gate.
+under the human gate. The WebUI can also build an in-memory "default off" draft
+for displayed skills/MCP/hooks; copying that snippet does not change runtime
+behavior until the human applies it to `preferences.toml`.

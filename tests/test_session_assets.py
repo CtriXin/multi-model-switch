@@ -60,6 +60,9 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert {cli["id"] for cli in snapshot["clis"]} == {"claude", "codex", "opencode", "agy"}
     assert "preferences.toml" in snapshot["configuration_contract"]["persistent_path"]
     assert "[session_surfaces.disabled]" in snapshot["preference_snippet"]
+    assert snapshot["launch_defaults"]["bypass"] is True
+    assert snapshot["disabled_defaults"]["skills"] == ["agent-browser"]
+    assert snapshot["disabled_defaults"]["mcp"] == ["pilot"]
     assert isinstance(snapshot["rows"], list)
     assert isinstance(snapshot["global_roots"], list)
 

@@ -353,6 +353,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Session Skills / MCP / Hooks" in html
     assert "function renderSessionAssets()" in html
     assert "assetPreferenceSnippet" in html
+    assert "默认关闭草稿" in html
+    assert "copyAssetPrefs" in html
+    assert "TUI 启动确认页可临时打开" in html
     assert "Global / inherited" in html
     assert "MMS dynamic" in html
     assert "已发布，但 runtime 未就绪" in html

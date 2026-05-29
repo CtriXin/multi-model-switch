@@ -32,13 +32,15 @@ The first slice adds a read-only **Session Skills / MCP / Hooks** panel:
 - filter by CLI: `Claude`, `Codex`, `OpenCode`, `Antigravity`;
 - filter by surface kind: `Skills`, `MCP`, `Hooks`;
 - show name, description, origin, path/trigger, and `disable_key`;
+- let users tick a **default off** draft for any displayed item and generate the
+  corresponding `preferences.toml` snippet;
 - show common global roots and whether they exist;
 - show the current `preferences.toml` snippet for launch defaults and disabled
   session surfaces.
 
 This slice does not write `~/.config/mms/preferences.toml`. It keeps the
-existing human-gate rule: WebUI can display and explain the target snippet, then
-a later audited preferences writer can be added.
+existing human-gate rule: WebUI can display, edit-in-memory, copy, and explain
+the target snippet, then a later audited preferences writer can be added.
 
 ## TUI Relationship
 
