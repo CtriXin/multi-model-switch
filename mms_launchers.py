@@ -7,7 +7,6 @@ import re
 import shutil
 import sys
 import subprocess
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -1129,7 +1128,6 @@ def _apply_runtime_ip_stack_profile(env, runtime):
     )
 
 
-RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")
 HEALTH_CHECK_PATH = _real_user_path(".config", "mms", "health_check.json")
 ANTHROPIC_URL_CACHE_PATH = _real_user_path(".config", "mms", "cache", "anthropic_base_urls.json")
 
@@ -4329,15 +4327,6 @@ def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
         show_launch_info_fn=_show_launch_info,
         exit_fn=sys.exit,
     )
-
-
-def _write_runtime_config(prefix, content):
-    os.makedirs(RUNTIME_DIR, exist_ok=True)
-    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".toml", dir=RUNTIME_DIR)
-    os.chmod(path, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(content)
-    return path
 
 
 def _print_session_summary(bridge_info):
