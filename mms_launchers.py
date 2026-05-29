@@ -120,6 +120,10 @@ from mms_fake_upstream import (
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_runtime import cli_search_dirs, prepare_cli_command
+from mms_runtime_env import (
+    apply_runtime_locale_profile as _apply_runtime_locale_profile_impl,
+    runtime_locale_env as _runtime_locale_env_impl,
+)
 from mms_runtime_context import (
     DEFAULT_CONTEXT_WINDOW as _DEFAULT_CONTEXT_WINDOW,
     MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS as _MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS,
@@ -346,36 +350,17 @@ def _guard_utc_now():
 
 
 def _runtime_locale_env(runtime=None):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    raw_locale = (
-        str(runtime.get("locale") or "").strip()
-        or str(os.environ.get("MMS_LOCALE") or "").strip()
-        or str(os.environ.get("LC_ALL") or "").strip()
-        or str(os.environ.get("LANG") or "").strip()
-    )
-    normalized_lang = normalize_language(
-        str(runtime.get("language") or "").strip()
-        or str(os.environ.get("MMS_LANG") or "").strip()
-        or raw_locale
-    )
-    if raw_locale and "." in raw_locale and "_" in raw_locale:
-        locale_value = raw_locale
-    elif normalized_lang == "zh":
-        locale_value = "zh_CN.UTF-8"
-    else:
-        locale_value = "en_US.UTF-8"
-    return {
-        "LANG": locale_value,
-        "LC_ALL": locale_value,
-        "LC_CTYPE": locale_value,
-        "LC_MESSAGES": locale_value,
-    }
+    """Compatibility wrapper for runtime locale env projection."""
+    return _runtime_locale_env_impl(runtime, normalize_language_fn=normalize_language)
 
 
 def _apply_runtime_locale_profile(env, runtime=None):
-    env = env if isinstance(env, dict) else {}
-    env.update(_runtime_locale_env(runtime))
-    return env
+    """Compatibility wrapper for applying runtime locale env."""
+    return _apply_runtime_locale_profile_impl(
+        env,
+        runtime,
+        runtime_locale_env_fn=_runtime_locale_env,
+    )
 
 def _provider_id_set_from_env(env_name):
     raw = str(os.environ.get(env_name) or "").strip()
