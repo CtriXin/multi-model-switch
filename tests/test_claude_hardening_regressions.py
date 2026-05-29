@@ -5472,6 +5472,140 @@ def test_gateway_bridge_stream_restores_kimi_reasoning_for_tool_continuation(mon
     ]
 
 
+def test_gateway_bridge_stream_publishes_kimi_reasoning_before_first_stream_finishes(monkeypatch):
+    import mms_bridge
+
+    requests = []
+    ready = threading.Event()
+    release = threading.Event()
+
+    first_stream_lines = [
+        'event: content_block_start',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"carry this forward"}}',
+        "",
+    ]
+
+    class BlockingFirstResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def iter_lines(self):
+            for line in first_stream_lines:
+                yield line
+            ready.set()
+            release.wait(timeout=5)
+            yield 'event: message_stop'
+            yield 'data: {"type":"message_stop"}'
+            yield ""
+
+    class FinalResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        @staticmethod
+        def iter_lines():
+            return iter(
+                [
+                    'event: message_stop',
+                    'data: {"type":"message_stop"}',
+                    "",
+                ]
+            )
+
+    responses = [BlockingFirstResponse(), FinalResponse()]
+
+    def fake_stream(method, url, **kwargs):
+        requests.append({"url": url, "json": json.loads(json.dumps(kwargs.get("json") or {}))})
+        return responses.pop(0)
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+        route_status_paths=[],
+        advertised_models=["kimi-k2.6"],
+        heavy_model="kimi-k2.6",
+        medium_model=None,
+        light_model=None,
+        slot_configs={},
+        openai_url=None,
+        speed_scope=None,
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        native_fallback_routes=[],
+        vision_sidecar={},
+        _last_reasoning_content="",
+    )
+
+    def make_handler(raw_body):
+        handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+        handler.path = "/v1/messages?beta=true"
+        handler.headers = {
+            "content-length": str(len(raw_body)),
+            "x-api-key": "bridge-token",
+        }
+        handler.rfile = io.BytesIO(raw_body)
+        handler.wfile = io.BytesIO()
+        handler.server = server
+        handler.send_response = lambda *_args, **_kwargs: None
+        handler.send_header = lambda *_args, **_kwargs: None
+        handler.end_headers = lambda: None
+        return handler
+
+    first_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    first_handler = make_handler(first_body)
+    first_thread = threading.Thread(target=first_handler.do_POST)
+    first_thread.start()
+
+    assert ready.wait(timeout=5)
+    assert server._last_reasoning_content == "carry this forward"
+
+    second_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "phase: INTAKE", "is_error": False}]},
+            ],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    make_handler(second_body).do_POST()
+
+    forwarded = requests[1]["json"]["messages"]
+    assert [message["role"] for message in forwarded] == ["user", "assistant", "user"]
+    assert forwarded[1]["reasoning_content"] == "carry this forward"
+
+    release.set()
+    first_thread.join(timeout=5)
+    assert not first_thread.is_alive()
+
+
 def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkeypatch):
     import mms_bridge
 

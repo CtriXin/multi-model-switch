@@ -3687,6 +3687,11 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 if first_byte_ms is None:
                                     first_byte_ms = _now_ms()
                                 _feed_anthropic_reasoning_sse_line(raw_line, reasoning_tracker, reasoning_sse_state)
+                                current_reasoning = reasoning_tracker.reasoning_content()
+                                if current_reasoning:
+                                    # Tool-result continuations can race ahead of message_stop.
+                                    # Publish reasoning as soon as it is visible in the stream.
+                                    self.server._last_reasoning_content = current_reasoning
                                 stripped = raw_line.strip()
                                 if stripped.startswith("data:"):
                                     data_str = stripped[5:].strip()
