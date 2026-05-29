@@ -112,6 +112,22 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
     assert "sk-super-secret-value" not in body.decode("utf-8")
 
 
+def test_config_web_secret_ref_without_value_is_not_key_set():
+    summary = mms_config_web._provider_summary(
+        {
+            "id": "secret-ref-only-provider",
+            "enabled": True,
+            "secret_ref": "pending-webui:secret_ref_only_provider:api_key",
+            "openai_base_url": "https://provider.example/v1",
+            "protocols": ["openai_chat_completions"],
+            "fallback_models": ["demo-model"],
+        },
+        policy_payload={},
+    )
+
+    assert summary["has_api_key"] is False
+
+
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
     config_root = tmp_path / "mms-next"
     snapshot = mms_config_web.build_config_snapshot(

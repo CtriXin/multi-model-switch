@@ -388,6 +388,7 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
     profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), dict) else {}
     routes = router_payload.get("routes") if isinstance(router_payload.get("routes"), dict) else {}
     secret_refs = _preview_secret_refs_by_provider(config_root)
+    secret_values = _preview_secret_values_by_ref(config_root)
     provider_models: dict[str, set[str]] = {}
     provider_routes: dict[str, dict[str, Any]] = {}
     for route_model, route in routes.items():
@@ -423,6 +424,7 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
         cached_url = _preview_cached_provider_url(provider_id)
         openai_base_url = _safe_text(route_info.get("openai_base_url"))
         anthropic_base_url = _safe_text(route_info.get("anthropic_base_url"))
+        secret_ref = _safe_text(route_info.get("secret_ref") or secret_refs.get(provider_id))
         protocols = _normalize_model_list(profile.get("protocols"))
         if cached_url:
             if not openai_base_url and "openai_chat_completions" in protocols:
@@ -441,8 +443,8 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
                 "supported_clis": _normalize_model_list(profile.get("supported_clis")),
                 "openai_base_url": openai_base_url,
                 "anthropic_base_url": anthropic_base_url,
-                "has_api_key": bool(route_info.get("has_api_key") or secret_refs.get(provider_id)),
-                "secret_ref": _safe_text(route_info.get("secret_ref") or secret_refs.get(provider_id)),
+                "has_api_key": bool(route_info.get("has_api_key") or (secret_ref and secret_values.get(secret_ref))),
+                "secret_ref": secret_ref,
                 "fallback_models": sorted(provider_models.get(provider_id, set()), key=str.lower),
                 "extra_models": [],
                 "hidden_models": [],
@@ -716,7 +718,7 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "openai_base_url_source": "config" if config_openai_base else ("credentials" if credential_openai_base else ""),
         "anthropic_base_url_source": "config" if config_anthropic_base else ("credentials" if credential_anthropic_base else ""),
         "api_key": "",
-        "has_api_key": bool(api_key or creds.get("has_api_key") or provider.get("has_api_key") or provider.get("secret_ref")),
+        "has_api_key": bool(api_key or creds.get("has_api_key") or provider.get("has_api_key")),
         "update_credentials": False,
         "fallback_models": fallback_models,
         "extra_models": extra_models,
@@ -2343,7 +2345,9 @@ def apply_registry_v2_preview_plan(
         "schema": secret_backend.get("schema"),
         "skipped": bool(secret_backend.get("skipped")),
         "path": secret_backend.get("path"),
-        "count": secret_backend.get("secret_count", 0),
+        "count": secret_backend.get("updated_secret_count", secret_backend.get("secret_count", 0)),
+        "secret_count": secret_backend.get("secret_count", 0),
+        "preserved_count": secret_backend.get("preserved_secret_count", 0),
         "backup_path": secret_backend.get("backup_path", ""),
         "plaintext_store": bool(secret_backend.get("plaintext_secret_store")),
     }

@@ -2298,14 +2298,16 @@ def write_registry_v2_webui_secret_backend(
     root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
     if root_status.get("mode") != "preview" and not allow_stable:
         raise mms_registry.RegistryValidationError("refusing to write registry v2 WebUI secrets into stable config root without --allow-stable")
-    entries = _registry_v2_webui_secret_entries(credential_updates)
-    if not entries:
+    update_entries = _registry_v2_webui_secret_entries(credential_updates)
+    if not update_entries:
         return {
             "schema": REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA,
             "skipped": True,
             "skip_reason": "no_plaintext_credential_updates",
             "path": str(root / "secrets" / "webui-secrets.json"),
             "secret_count": 0,
+            "updated_secret_count": 0,
+            "preserved_secret_count": 0,
             "plaintext_secret_store": True,
         }
     secret_dir = root / "secrets"
@@ -2323,6 +2325,25 @@ def write_registry_v2_webui_secret_backend(
         backup = backup_dir / f"webui-secrets.{_timestamp_slug()}.{digest[:12]}.json"
         mms_registry.copy_file_atomic(path, backup, mode=0o600)
         backup_path = str(backup)
+    existing_entries: list[dict[str, Any]] = []
+    if path.exists():
+        try:
+            existing_payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing_payload = {}
+        for item in existing_payload.get("secrets") if isinstance(existing_payload.get("secrets"), list) else []:
+            if not isinstance(item, Mapping):
+                continue
+            secret_ref = str(item.get("secret_ref") or "").strip()
+            if secret_ref:
+                existing_entries.append(dict(item))
+    merged_by_ref: dict[str, dict[str, Any]] = {}
+    for item in existing_entries:
+        merged_by_ref[str(item.get("secret_ref") or "")] = item
+    for item in update_entries:
+        merged_by_ref[str(item.get("secret_ref") or "")] = dict(item)
+    entries = list(merged_by_ref.values())
+    preserved_count = max(0, len(entries) - len(update_entries))
     payload = {
         "schema": REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA,
         "written_at": mms_registry.utc_now(),
@@ -2335,6 +2356,8 @@ def write_registry_v2_webui_secret_backend(
         "skipped": False,
         "path": str(path),
         "secret_count": len(entries),
+        "updated_secret_count": len(update_entries),
+        "preserved_secret_count": preserved_count,
         "backup_path": backup_path,
         "plaintext_secret_store": True,
     }
