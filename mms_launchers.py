@@ -5353,25 +5353,21 @@ def validate_provider_for_cli(cli, provider):
 
 
 def _scrub_claude_oauth_env(env):
-    env = env if isinstance(env, dict) else {}
-    for key in list(env.keys()):
-        normalized = str(key or "").strip()
-        if any(normalized.startswith(prefix) for prefix in _CLAUDE_OAUTH_ENV_PREFIX_BLOCKLIST):
-            env.pop(key, None)
-    return env
+    """Compatibility wrapper for Claude OAuth env scrubbing."""
+    from mms_runtime_env import scrub_claude_oauth_env
+
+    return scrub_claude_oauth_env(env)
 
 
 def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
-    env = _scrub_claude_oauth_env(env)
-    if strip_openai:
-        for key in list(env.keys()):
-            normalized = str(key or "").strip()
-            if any(normalized.startswith(prefix) for prefix in _OPENAI_ENV_PREFIX_BLOCKLIST):
-                env.pop(key, None)
-    if strip_proxy:
-        for key in (*_RUNTIME_PROXY_ENV_KEYS, *_RUNTIME_FAKE_ENV_KEYS, *_RUNTIME_CA_ENV_KEYS):
-            env.pop(key, None)
-    return env
+    """Compatibility wrapper for inherited runtime env scrubbing."""
+    from mms_runtime_env import scrub_inherited_runtime_env
+
+    return scrub_inherited_runtime_env(
+        env,
+        strip_openai=strip_openai,
+        strip_proxy=strip_proxy,
+    )
 
 
 def _account_env(account, *, validate_proxy=True, model_info=None):
