@@ -1,6 +1,5 @@
 """MMS 启动器：按 provider 或账号档案启动 CLI。"""
 
-from contextlib import contextmanager
 import copy
 import inspect
 import json
@@ -410,80 +409,68 @@ def _runtime_is_sensitive_claude_provider(runtime):
 
 
 
-@contextmanager
 def _launch_status(message, *, spinner="dots"):
     """为启动慢步骤提供可见 spinner，避免用户干等。"""
-    status_cm = None
-    try:
-        status_cm = console.status(f"[cyan]{message}[/cyan]", spinner=spinner)
-        status_cm.__enter__()
-    except Exception:
-        console.print(f"[dim]⏳ {message}[/dim]")
-    start = perf_counter()
-    try:
-        yield start
-    finally:
-        if status_cm is not None:
-            exc_type, exc, tb = sys.exc_info()
-            status_cm.__exit__(exc_type, exc, tb)
+    from mms_launch_display import launch_status
+
+    return launch_status(message, spinner=spinner, console=console)
 
 
 def _print_launch_step_done(label, started_at, detail=None, *, style="dim"):
-    elapsed = perf_counter() - started_at
-    suffix = f" · {detail}" if detail else ""
-    console.print(f"[{style}]· {label} 完成 ({elapsed:.1f}s){suffix}[/{style}]")
+    from mms_launch_display import print_launch_step_done
+
+    return print_launch_step_done(
+        label,
+        started_at,
+        detail,
+        style=style,
+        console=console,
+        perf_counter_fn=perf_counter,
+    )
 
 
 def _launch_timing_threshold_sec():
-    raw = str(os.environ.get("MMS_LAUNCH_TIMING_THRESHOLD_SEC") or "").strip()
-    if not raw:
-        return 5.0
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return 5.0
+    from mms_launch_display import launch_timing_threshold_sec
+
+    return launch_timing_threshold_sec(environ=os.environ)
 
 
 def _launch_timing_enabled():
-    return str(os.environ.get("MMS_LAUNCH_TIMING") or "").strip().lower() in {"1", "true", "yes", "on"}
+    from mms_launch_display import launch_timing_enabled
+
+    return launch_timing_enabled(environ=os.environ)
 
 
-@contextmanager
 def _timed_launch_step(timings, label):
-    start = perf_counter()
-    try:
-        yield
-    finally:
-        if isinstance(timings, list):
-            timings.append((str(label), perf_counter() - start))
+    from mms_launch_display import timed_launch_step
+
+    return timed_launch_step(timings, label, perf_counter_fn=perf_counter)
 
 
 def _print_launch_timing_breakdown(timings, *, total_elapsed):
-    if not isinstance(timings, list) or not timings:
-        return
-    if not _launch_timing_enabled() and total_elapsed < _launch_timing_threshold_sec():
-        return
-    top = sorted(
-        ((label, elapsed) for label, elapsed in timings if elapsed >= 0.05),
-        key=lambda item: item[1],
-        reverse=True,
-    )[:8]
-    if not top:
-        return
-    detail = "；".join(f"{label} {elapsed:.1f}s" for label, elapsed in top)
-    console.print(f"[dim]  慢步骤拆分: {detail}[/dim]")
+    from mms_launch_display import print_launch_timing_breakdown
+
+    return print_launch_timing_breakdown(
+        timings,
+        total_elapsed=total_elapsed,
+        console=console,
+        launch_timing_enabled_fn=_launch_timing_enabled,
+        launch_timing_threshold_sec_fn=_launch_timing_threshold_sec,
+    )
 
 
 def _prepare_claude_env_with_status(runtime, **kwargs):
-    timings = []
-    with _launch_status("准备 Claude 会话环境中...", spinner="dots") as step_start:
-        env = _claude_gateway_env(runtime, _timings=timings, **kwargs)
-    selected = kwargs.get("selected_model") or kwargs.get("heavy_model")
-    detail = selected if selected else runtime.get("id", "provider")
-    total_elapsed = perf_counter() - step_start
-    _print_launch_step_done("Claude 会话环境准备", step_start, detail)
-    _print_launch_timing_breakdown(timings, total_elapsed=total_elapsed)
-    return env
+    from mms_launch_display import prepare_claude_env_with_status
+
+    return prepare_claude_env_with_status(
+        runtime,
+        claude_gateway_env_fn=_claude_gateway_env,
+        launch_status_fn=_launch_status,
+        print_launch_step_done_fn=_print_launch_step_done,
+        print_launch_timing_breakdown_fn=_print_launch_timing_breakdown,
+        perf_counter_fn=perf_counter,
+        **kwargs,
+    )
 
 
 def _real_user_home():

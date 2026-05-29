@@ -4,12 +4,107 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from contextlib import contextmanager
+from time import perf_counter
 
 
 def _launchers():
     import mms_launchers as _module
 
     return _module
+
+
+@contextmanager
+def launch_status(message, *, spinner="dots", console):
+    """Show a best-effort Rich status while preserving non-Rich fallback text."""
+    status_cm = None
+    try:
+        status_cm = console.status(f"[cyan]{message}[/cyan]", spinner=spinner)
+        status_cm.__enter__()
+    except Exception:
+        console.print(f"[dim]⏳ {message}[/dim]")
+    start = perf_counter()
+    try:
+        yield start
+    finally:
+        if status_cm is not None:
+            exc_type, exc, tb = sys.exc_info()
+            status_cm.__exit__(exc_type, exc, tb)
+
+
+def print_launch_step_done(label, started_at, detail=None, *, style="dim", console, perf_counter_fn=perf_counter):
+    elapsed = perf_counter_fn() - started_at
+    suffix = f" · {detail}" if detail else ""
+    console.print(f"[{style}]· {label} 完成 ({elapsed:.1f}s){suffix}[/{style}]")
+
+
+def launch_timing_threshold_sec(*, environ=os.environ):
+    raw = str(environ.get("MMS_LAUNCH_TIMING_THRESHOLD_SEC") or "").strip()
+    if not raw:
+        return 5.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 5.0
+
+
+def launch_timing_enabled(*, environ=os.environ):
+    return str(environ.get("MMS_LAUNCH_TIMING") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@contextmanager
+def timed_launch_step(timings, label, *, perf_counter_fn=perf_counter):
+    start = perf_counter_fn()
+    try:
+        yield
+    finally:
+        if isinstance(timings, list):
+            timings.append((str(label), perf_counter_fn() - start))
+
+
+def print_launch_timing_breakdown(
+    timings,
+    *,
+    total_elapsed,
+    console,
+    launch_timing_enabled_fn,
+    launch_timing_threshold_sec_fn,
+):
+    if not isinstance(timings, list) or not timings:
+        return
+    if not launch_timing_enabled_fn() and total_elapsed < launch_timing_threshold_sec_fn():
+        return
+    top = sorted(
+        ((label, elapsed) for label, elapsed in timings if elapsed >= 0.05),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:8]
+    if not top:
+        return
+    detail = "；".join(f"{label} {elapsed:.1f}s" for label, elapsed in top)
+    console.print(f"[dim]  慢步骤拆分: {detail}[/dim]")
+
+
+def prepare_claude_env_with_status(
+    runtime,
+    *,
+    claude_gateway_env_fn,
+    launch_status_fn,
+    print_launch_step_done_fn,
+    print_launch_timing_breakdown_fn,
+    perf_counter_fn=perf_counter,
+    **kwargs,
+):
+    timings = []
+    with launch_status_fn("准备 Claude 会话环境中...", spinner="dots") as step_start:
+        env = claude_gateway_env_fn(runtime, _timings=timings, **kwargs)
+    selected = kwargs.get("selected_model") or kwargs.get("heavy_model")
+    detail = selected if selected else runtime.get("id", "provider")
+    total_elapsed = perf_counter_fn() - step_start
+    print_launch_step_done_fn("Claude 会话环境准备", step_start, detail)
+    print_launch_timing_breakdown_fn(timings, total_elapsed=total_elapsed)
+    return env
 
 
 def show_launch_info(cli, runtime, auth_mode):
