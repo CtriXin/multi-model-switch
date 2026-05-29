@@ -6,7 +6,181 @@ existing tests and callers that monkeypatch launcher-private names keep working.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
+
+
+def load_claude_settings_template(filename):
+    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    if not os.path.exists(template_path):
+        return {}
+    try:
+        with open(template_path, encoding="utf-8") as f:
+            loaded = json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def load_mms_claude_settings_template():
+    import mms_launchers as _launchers
+
+    return _launchers._load_claude_settings_template("claude-settings.template.json")
+
+
+def load_global_claude_settings_template():
+    import mms_launchers as _launchers
+
+    return _launchers._load_claude_settings_template("claude-settings.global-template.json")
+
+
+def merge_claude_settings(base_settings, template_settings):
+    import mms_launchers as _launchers
+
+    settings_data = dict(base_settings) if isinstance(base_settings, dict) else {}
+    template_settings = template_settings if isinstance(template_settings, dict) else {}
+
+    hooks = _launchers._merge_claude_hooks(settings_data.get("hooks"), template_settings.get("hooks"))
+    if hooks:
+        settings_data["hooks"] = hooks
+
+    if isinstance(template_settings.get("statusLine"), dict):
+        settings_data["statusLine"] = _launchers._merge_claude_statusline(settings_data.get("statusLine"))
+    if isinstance(template_settings.get("permissions"), dict):
+        settings_data["permissions"] = _launchers._merge_claude_permissions(settings_data.get("permissions"))
+
+    settings_data.setdefault(
+        "includeCoAuthoredBy",
+        template_settings.get("includeCoAuthoredBy", False),
+    )
+    settings_data.setdefault(
+        "attribution",
+        template_settings.get("attribution") if isinstance(template_settings.get("attribution"), dict) else {"commit": "", "pr": ""},
+    )
+    settings_data.setdefault(
+        "promptSuggestionEnabled",
+        template_settings.get("promptSuggestionEnabled", False),
+    )
+    if template_settings.get("model") and not settings_data.get("model"):
+        settings_data["model"] = template_settings.get("model")
+    if "skipDangerousModePermissionPrompt" in template_settings:
+        settings_data["skipDangerousModePermissionPrompt"] = bool(
+            template_settings.get("skipDangerousModePermissionPrompt")
+        )
+    return settings_data
+
+
+def merge_claude_hook_groups(existing_groups, template_groups):
+    import mms_launchers as _launchers
+
+    groups = []
+    if isinstance(existing_groups, list):
+        groups.extend(existing_groups)
+    if not isinstance(template_groups, list):
+        return groups
+    for template_group in template_groups:
+        if not isinstance(template_group, dict):
+            continue
+        matcher = str(template_group.get("matcher") or "").strip()
+        template_hooks = template_group.get("hooks")
+        if not isinstance(template_hooks, list):
+            continue
+        target_group = None
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            if str(group.get("matcher") or "").strip() == matcher:
+                target_group = group
+                break
+        if target_group is None:
+            target_group = {"matcher": matcher, "hooks": []}
+            groups.append(target_group)
+        hook_items = target_group.get("hooks")
+        if not isinstance(hook_items, list):
+            hook_items = []
+            target_group["hooks"] = hook_items
+        for hook in template_hooks:
+            if not isinstance(hook, dict):
+                continue
+            command = str(hook.get("command") or "").strip()
+            if not command or _launchers._hook_command_exists(hook_items, command):
+                continue
+            hook_items.append(dict(hook))
+    return groups
+
+
+def merge_claude_hooks(existing_hooks, template_hooks):
+    import mms_launchers as _launchers
+
+    merged = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
+    if not isinstance(template_hooks, dict):
+        return merged
+    for event_name, template_groups in template_hooks.items():
+        merged[event_name] = _launchers._merge_claude_hook_groups(
+            merged.get(event_name),
+            template_groups,
+        )
+    return merged
+
+
+def merge_claude_statusline(existing):
+    import mms_launchers as _launchers
+
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(_launchers._CLAUDE_STATUSLINE_CONFIG)
+    return merged
+
+
+def merge_claude_permissions(existing):
+    import mms_launchers as _launchers
+
+    base = dict(existing) if isinstance(existing, dict) else {}
+    allow_existing = base.get("allow")
+    deny_existing = base.get("deny")
+    allow = []
+    seen_allow = set()
+    for item in list(allow_existing or []) + list(_launchers._CLAUDE_DEFAULT_PERMISSION_ALLOW):
+        value = str(item or "").strip()
+        if not value or value in seen_allow:
+            continue
+        seen_allow.add(value)
+        allow.append(value)
+    deny = []
+    seen_deny = set()
+    for item in list(deny_existing or []) + list(_launchers._CLAUDE_DEFAULT_PERMISSION_DENY):
+        value = str(item or "").strip()
+        if not value or value in seen_deny:
+            continue
+        seen_deny.add(value)
+        deny.append(value)
+    base["allow"] = allow
+    base["deny"] = deny
+    base["defaultMode"] = "bypassPermissions"
+    return base
+
+
+def sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
+    import mms_launchers as _launchers
+
+    settings_data = settings_data if isinstance(settings_data, dict) else {}
+    inherited = {}
+    if allow_execution_surfaces:
+        for key in _launchers._CLAUDE_SETTINGS_INHERIT_KEYS:
+            value = settings_data.get(key)
+            if isinstance(value, dict):
+                inherited[key] = copy.deepcopy(value)
+    for key in _launchers._CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS:
+        value = settings_data.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            inherited[key] = copy.deepcopy(value)
+    return inherited
+
+
+def sanitize_account_claude_settings_payload(settings_data):
+    import mms_launchers as _launchers
+
+    return _launchers._sanitize_claude_inherited_settings_payload(settings_data)
 
 
 def build_claude_session_settings(

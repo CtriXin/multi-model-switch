@@ -2261,25 +2261,24 @@ def _load_claude_settings_from_dir(claude_dir):
 
 
 def _load_claude_settings_template(filename):
-    import json as _json
+    """Compatibility wrapper for Claude settings template loading."""
+    from mms_claude_settings import load_claude_settings_template
 
-    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
-    if not os.path.exists(template_path):
-        return {}
-    try:
-        with open(template_path, encoding="utf-8") as f:
-            loaded = _json.load(f)
-        return loaded if isinstance(loaded, dict) else {}
-    except Exception:
-        return {}
+    return load_claude_settings_template(filename)
 
 
 def _load_mms_claude_settings_template():
-    return _load_claude_settings_template("claude-settings.template.json")
+    """Compatibility wrapper for the MMS Claude session settings template."""
+    from mms_claude_settings import load_mms_claude_settings_template
+
+    return load_mms_claude_settings_template()
 
 
 def _load_global_claude_settings_template():
-    return _load_claude_settings_template("claude-settings.global-template.json")
+    """Compatibility wrapper for the global Claude managed settings template."""
+    from mms_claude_settings import load_global_claude_settings_template
+
+    return load_global_claude_settings_template()
 
 
 def _global_claude_snapshot_path():
@@ -2583,37 +2582,10 @@ def _write_global_claude_snapshot(snapshot_data):
 
 
 def _merge_claude_settings(base_settings, template_settings):
-    settings_data = dict(base_settings) if isinstance(base_settings, dict) else {}
-    template_settings = template_settings if isinstance(template_settings, dict) else {}
+    """Compatibility wrapper for Claude settings template merging."""
+    from mms_claude_settings import merge_claude_settings
 
-    hooks = _merge_claude_hooks(settings_data.get("hooks"), template_settings.get("hooks"))
-    if hooks:
-        settings_data["hooks"] = hooks
-
-    if isinstance(template_settings.get("statusLine"), dict):
-        settings_data["statusLine"] = _merge_claude_statusline(settings_data.get("statusLine"))
-    if isinstance(template_settings.get("permissions"), dict):
-        settings_data["permissions"] = _merge_claude_permissions(settings_data.get("permissions"))
-
-    settings_data.setdefault(
-        "includeCoAuthoredBy",
-        template_settings.get("includeCoAuthoredBy", False),
-    )
-    settings_data.setdefault(
-        "attribution",
-        template_settings.get("attribution") if isinstance(template_settings.get("attribution"), dict) else {"commit": "", "pr": ""},
-    )
-    settings_data.setdefault(
-        "promptSuggestionEnabled",
-        template_settings.get("promptSuggestionEnabled", False),
-    )
-    if template_settings.get("model") and not settings_data.get("model"):
-        settings_data["model"] = template_settings.get("model")
-    if "skipDangerousModePermissionPrompt" in template_settings:
-        settings_data["skipDangerousModePermissionPrompt"] = bool(
-            template_settings.get("skipDangerousModePermissionPrompt")
-        )
-    return settings_data
+    return merge_claude_settings(base_settings, template_settings)
 
 
 def _repair_real_claude_settings():
@@ -2709,81 +2681,31 @@ def _strip_agent_im_hooks(hooks_data):
 
 
 def _merge_claude_hook_groups(existing_groups, template_groups):
-    groups = []
-    if isinstance(existing_groups, list):
-        groups.extend(existing_groups)
-    if not isinstance(template_groups, list):
-        return groups
-    for template_group in template_groups:
-        if not isinstance(template_group, dict):
-            continue
-        matcher = str(template_group.get("matcher") or "").strip()
-        template_hooks = template_group.get("hooks")
-        if not isinstance(template_hooks, list):
-            continue
-        target_group = None
-        for group in groups:
-            if not isinstance(group, dict):
-                continue
-            if str(group.get("matcher") or "").strip() == matcher:
-                target_group = group
-                break
-        if target_group is None:
-            target_group = {"matcher": matcher, "hooks": []}
-            groups.append(target_group)
-        hook_items = target_group.get("hooks")
-        if not isinstance(hook_items, list):
-            hook_items = []
-            target_group["hooks"] = hook_items
-        for hook in template_hooks:
-            if not isinstance(hook, dict):
-                continue
-            command = str(hook.get("command") or "").strip()
-            if not command or _hook_command_exists(hook_items, command):
-                continue
-            hook_items.append(dict(hook))
-    return groups
+    """Compatibility wrapper for Claude hook-group merging."""
+    from mms_claude_settings import merge_claude_hook_groups
+
+    return merge_claude_hook_groups(existing_groups, template_groups)
 
 
 def _merge_claude_hooks(existing_hooks, template_hooks):
-    merged = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
-    if not isinstance(template_hooks, dict):
-        return merged
-    for event_name, template_groups in template_hooks.items():
-        merged[event_name] = _merge_claude_hook_groups(merged.get(event_name), template_groups)
-    return merged
+    """Compatibility wrapper for Claude hook merging."""
+    from mms_claude_settings import merge_claude_hooks
+
+    return merge_claude_hooks(existing_hooks, template_hooks)
 
 
 def _merge_claude_statusline(existing):
-    merged = dict(existing) if isinstance(existing, dict) else {}
-    merged.update(_CLAUDE_STATUSLINE_CONFIG)
-    return merged
+    """Compatibility wrapper for Claude statusline defaults."""
+    from mms_claude_settings import merge_claude_statusline
+
+    return merge_claude_statusline(existing)
 
 
 def _merge_claude_permissions(existing):
-    base = dict(existing) if isinstance(existing, dict) else {}
-    allow_existing = base.get("allow")
-    deny_existing = base.get("deny")
-    allow = []
-    seen_allow = set()
-    for item in list(allow_existing or []) + list(_CLAUDE_DEFAULT_PERMISSION_ALLOW):
-        value = str(item or "").strip()
-        if not value or value in seen_allow:
-            continue
-        seen_allow.add(value)
-        allow.append(value)
-    deny = []
-    seen_deny = set()
-    for item in list(deny_existing or []) + list(_CLAUDE_DEFAULT_PERMISSION_DENY):
-        value = str(item or "").strip()
-        if not value or value in seen_deny:
-            continue
-        seen_deny.add(value)
-        deny.append(value)
-    base["allow"] = allow
-    base["deny"] = deny
-    base["defaultMode"] = "bypassPermissions"
-    return base
+    """Compatibility wrapper for Claude permissions defaults."""
+    from mms_claude_settings import merge_claude_permissions
+
+    return merge_claude_permissions(existing)
 
 
 def _hook_command_exists(hook_items, command_path):
@@ -5092,22 +5014,20 @@ def _session_required_env_from_runtime_env(env):
 
 
 def _sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
-    settings_data = settings_data if isinstance(settings_data, dict) else {}
-    inherited = {}
-    if allow_execution_surfaces:
-        for key in _CLAUDE_SETTINGS_INHERIT_KEYS:
-            value = settings_data.get(key)
-            if isinstance(value, dict):
-                inherited[key] = copy.deepcopy(value)
-    for key in _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS:
-        value = settings_data.get(key)
-        if isinstance(value, (str, int, float, bool)):
-            inherited[key] = copy.deepcopy(value)
-    return inherited
+    """Compatibility wrapper for Claude settings inheritance allowlist."""
+    from mms_claude_settings import sanitize_claude_inherited_settings_payload
+
+    return sanitize_claude_inherited_settings_payload(
+        settings_data,
+        allow_execution_surfaces=allow_execution_surfaces,
+    )
 
 
 def _sanitize_account_claude_settings_payload(settings_data):
-    return _sanitize_claude_inherited_settings_payload(settings_data)
+    """Compatibility wrapper for account-scoped Claude settings sanitization."""
+    from mms_claude_settings import sanitize_account_claude_settings_payload
+
+    return sanitize_account_claude_settings_payload(settings_data)
 
 
 def _default_session_mcp_servers():
