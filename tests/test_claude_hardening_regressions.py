@@ -5358,6 +5358,174 @@ def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkey
     assert sent_headers["Retry-After"] == "3"
 
 
+def test_responses_input_to_messages_preserves_kimi_reasoning_for_split_tool_calls():
+    import mms_bridge
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "carry this forward"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "I will call tools now."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "Bash",
+                "arguments": "{\"command\":\"pwd\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "/tmp",
+            },
+        ],
+        "kimi-k2.6",
+    )
+
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["content"] == "I will call tools now."
+    assert messages[0]["reasoning_content"] == "carry this forward"
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "Bash"
+    assert messages[1]["reasoning_content"] == "carry this forward"
+    assert messages[2] == {"role": "tool", "tool_call_id": "call_1", "content": "/tmp"}
+
+
+def test_responses_payload_to_anthropic_messages_payload_preserves_kimi_reasoning():
+    import mms_bridge
+
+    payload = mms_bridge._responses_payload_to_anthropic_messages_payload(
+        {
+            "instructions": "",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "carry this forward"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I will call tools now."}],
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "Bash",
+                    "arguments": "{\"command\":\"pwd\"}",
+                },
+            ],
+        },
+        "kimi-k2.6",
+    )
+
+    assert payload["messages"][0]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][0]["content"][1] == {"type": "text", "text": "I will call tools now."}
+    assert payload["messages"][1]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][1]["content"][1]["type"] == "tool_use"
+
+
+def test_chatcompletions_fallback_preserves_kimi_reasoning_for_tool_history(monkeypatch):
+    import mms_bridge
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 400
+        headers = {}
+
+        def __init__(self, body):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._body
+
+        @staticmethod
+        def iter_lines():
+            return iter(())
+
+    def fake_stream(method, url, **kwargs):
+        captured["json"] = kwargs.get("json")
+        return FakeResponse(b"missing reasoning_content")
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(
+        mms_bridge,
+        "_build_gateway_candidate_urls",
+        lambda *args, **kwargs: ["https://gw.example.com/chat/completions"],
+    )
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.headers = {}
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        speed_scope=None,
+        provider_id="kimi",
+        provider_profile="kimi-code",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+    )
+    handler.send_response = lambda code: None
+    handler.send_header = lambda name, value: None
+    handler.end_headers = lambda: None
+    handler._json = lambda code, payload: captured.setdefault("error", (code, payload))
+
+    handler._do_chatcompletions_fallback(
+        {
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "carry this forward"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I will call tools now."}],
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "Bash",
+                    "arguments": "{\"command\":\"pwd\"}",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "/tmp",
+                },
+            ],
+            "instructions": "",
+        },
+        "kimi-k2.6",
+        "https://gw.example.com",
+        "gateway-key",
+        0,
+        route={"provider_id": "kimi", "provider_profile": "kimi-code"},
+    )
+
+    messages = captured["json"]["messages"]
+    assert messages[0]["reasoning_content"] == "carry this forward"
+    assert messages[1]["reasoning_content"] == "carry this forward"
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "Bash"
+
+
 def test_build_codex_payload_maps_output_limit():
     import mms_bridge
 
