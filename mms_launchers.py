@@ -2282,283 +2282,66 @@ def _load_global_claude_settings_template():
 
 
 def _global_claude_snapshot_path():
-    state_root = os.environ.get("MMS_HOME") or os.path.join(_real_user_path(".mms"), "state")
-    return os.path.join(state_root, "claude-global-managed-snapshot.json")
+    """Compatibility wrapper for global Claude managed snapshot path."""
+    from mms_claude_settings import global_claude_snapshot_path
+
+    return global_claude_snapshot_path()
 
 
 def _normalize_hook_command(command):
-    return " ".join(str(command or "").strip().split())
+    """Compatibility wrapper for hook command normalization."""
+    from mms_claude_settings import normalize_hook_command
+
+    return normalize_hook_command(command)
 
 
 def _extract_managed_claude_snapshot(settings_data, template_settings):
-    settings_data = settings_data if isinstance(settings_data, dict) else {}
-    template_settings = template_settings if isinstance(template_settings, dict) else {}
-    snapshot = {}
+    """Compatibility wrapper for Claude managed settings snapshot extraction."""
+    from mms_claude_settings import extract_managed_claude_snapshot
 
-    managed_scalar_keys = set(
-        [
-            "includeCoAuthoredBy",
-            "skipDangerousModePermissionPrompt",
-            "model",
-            "promptSuggestionEnabled",
-        ]
-    )
-    if isinstance(template_settings.get("statusLine"), dict):
-        managed_scalar_keys.add("statusLine")
-    if isinstance(template_settings.get("attribution"), dict):
-        managed_scalar_keys.add("attribution")
-    if isinstance(template_settings.get("permissions"), dict):
-        managed_scalar_keys.add("permissions")
-
-    for key in managed_scalar_keys:
-        value = settings_data.get(key)
-        if isinstance(value, dict):
-            snapshot[key] = dict(value)
-        elif isinstance(value, list):
-            snapshot[key] = list(value)
-        else:
-            snapshot[key] = value
-
-    current_hooks = settings_data.get("hooks") or {}
-    template_hooks = template_settings.get("hooks") or {}
-    snapshot_hooks = {}
-
-    for event_name, current_groups in current_hooks.items():
-        event_snapshot = []
-        known_matchers = set()
-        template_groups = template_hooks.get(event_name) or []
-        for template_group in template_groups:
-            if not isinstance(template_group, dict):
-                continue
-            known_matchers.add(str(template_group.get("matcher") or "").strip())
-        for group in current_groups:
-            if not isinstance(group, dict):
-                continue
-            matcher = str(group.get("matcher") or "").strip()
-            commands = []
-            for hook in group.get("hooks") or []:
-                if not isinstance(hook, dict):
-                    continue
-                command = _normalize_hook_command(hook.get("command"))
-                if command:
-                    commands.append(command)
-            if not commands:
-                continue
-            event_snapshot.append({"matcher": matcher, "commands": sorted(set(commands))})
-            known_matchers.add(matcher)
-        if event_snapshot:
-            snapshot_hooks[event_name] = sorted(
-                event_snapshot,
-                key=lambda item: (item.get("matcher") or "", ",".join(item.get("commands") or [])),
-            )
-    snapshot["hooks"] = snapshot_hooks
-    return snapshot
+    return extract_managed_claude_snapshot(settings_data, template_settings)
 
 
 def _snapshot_to_template(snapshot_data, seed_template):
-    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
-    seed_template = seed_template if isinstance(seed_template, dict) else {}
-    template = {}
+    """Compatibility wrapper for snapshot-to-template conversion."""
+    from mms_claude_settings import snapshot_to_template
 
-    for key in [
-        "includeCoAuthoredBy",
-        "skipDangerousModePermissionPrompt",
-        "model",
-        "promptSuggestionEnabled",
-        "statusLine",
-        "attribution",
-        "permissions",
-    ]:
-        if key in snapshot_data:
-            value = snapshot_data.get(key)
-        else:
-            value = seed_template.get(key)
-        if isinstance(value, dict):
-            template[key] = dict(value)
-        elif isinstance(value, list):
-            template[key] = list(value)
-        elif value is not None:
-            template[key] = value
-
-    hooks = {}
-    snapshot_hooks = snapshot_data.get("hooks") or {}
-    seed_hooks = seed_template.get("hooks") or {}
-    all_events = sorted(set(snapshot_hooks.keys()) | set(seed_hooks.keys()))
-    for event_name in all_events:
-        groups = []
-        seen = set()
-        for source_groups in [seed_hooks.get(event_name) or [], snapshot_hooks.get(event_name) or []]:
-            for group in source_groups:
-                if not isinstance(group, dict):
-                    continue
-                matcher = str(group.get("matcher") or "").strip()
-                commands = []
-                if "commands" in group:
-                    commands = [
-                        _normalize_hook_command(command)
-                        for command in group.get("commands") or []
-                        if _normalize_hook_command(command)
-                    ]
-                else:
-                    for hook in group.get("hooks") or []:
-                        if not isinstance(hook, dict):
-                            continue
-                        command = _normalize_hook_command(hook.get("command"))
-                        if command:
-                            commands.append(command)
-                commands = sorted(set(commands))
-                if not commands:
-                    continue
-                group_key = (matcher, tuple(commands))
-                if group_key in seen:
-                    continue
-                seen.add(group_key)
-                groups.append(
-                    {
-                        "matcher": matcher,
-                        "hooks": [
-                            {"type": "command", "command": command} for command in commands
-                        ],
-                    }
-                )
-        if groups:
-            hooks[event_name] = groups
-    if hooks:
-        template["hooks"] = hooks
-    return template
+    return snapshot_to_template(snapshot_data, seed_template)
 
 
 def _merge_snapshot_with_current(snapshot_data, current_settings):
-    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
-    current_snapshot = _extract_managed_claude_snapshot(current_settings, snapshot_data)
-    merged = dict(snapshot_data)
+    """Compatibility wrapper for managed snapshot/current merge."""
+    from mms_claude_settings import merge_snapshot_with_current
 
-    for key, value in current_snapshot.items():
-        if key == "hooks":
-            continue
-        if isinstance(value, dict):
-            merged[key] = dict(value)
-        elif isinstance(value, list):
-            merged[key] = list(value)
-        elif value is not None:
-            merged[key] = value
-
-    merged_hooks = {}
-    known_events = set((snapshot_data.get("hooks") or {}).keys()) | set((current_snapshot.get("hooks") or {}).keys())
-    for event_name in known_events:
-        groups = []
-        seen = set()
-        for source_groups in [snapshot_data.get("hooks", {}).get(event_name) or [], current_snapshot.get("hooks", {}).get(event_name) or []]:
-            for group in source_groups:
-                if not isinstance(group, dict):
-                    continue
-                matcher = str(group.get("matcher") or "").strip()
-                commands = sorted(
-                    set(
-                        _normalize_hook_command(command)
-                        for command in group.get("commands") or []
-                        if _normalize_hook_command(command)
-                    )
-                )
-                if not commands:
-                    continue
-                group_key = (matcher, tuple(commands))
-                if group_key in seen:
-                    continue
-                seen.add(group_key)
-                groups.append({"matcher": matcher, "commands": commands})
-        if groups:
-            merged_hooks[event_name] = groups
-    merged["hooks"] = merged_hooks
-    return merged
+    return merge_snapshot_with_current(snapshot_data, current_settings)
 
 
 def _prune_session_only_snapshot_entries(snapshot_data):
-    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
-    hooks = snapshot_data.get("hooks") or {}
-    local_hooks_dir = _LOCAL_HOOKS_DIR
-    session_only_commands = {
-        _normalize_hook_command(_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK),
-        _normalize_hook_command(f"bash {_CLAUDE_HIVE_COMPACT_HOOK}"),
-        _normalize_hook_command(_CLAUDE_HIVE_COMPACT_HOOK),
-        _normalize_hook_command(_CLAUDE_BRAINKEEPER_SESSION_START_HOOK),
-        _normalize_hook_command(_CLAUDE_BRAINKEEPER_SESSION_END_HOOK),
-        _normalize_hook_command(_CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK),
-        _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_START_HOOK),
-        _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_END_HOOK),
-        _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
-        _normalize_hook_command(_CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK),
-        _normalize_hook_command(_CLAUDE_MMS_RESUME_HINT_HOOK),
-        _normalize_hook_command(_XMEM_SESSION_START_HOOK),
-        _normalize_hook_command(_XMEM_SESSION_END_HOOK),
-        _normalize_hook_command(_XMEM_GATEWAY_HOOK),
-        _normalize_hook_command(_NSR_CLAUDE_HOOK),
-        _normalize_hook_command(_NSR_CODEX_HOOK),
-        _normalize_hook_command(f"python3 {_NSR_BUILTIN_HOOK}"),
-        _normalize_hook_command(_NSR_BUILTIN_HOOK),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
-        _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-start-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-end-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-token-monitor-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-start-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-end-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "claude-codegraph-auto-index.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "mms-resume-hint.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-start-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-end-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-gateway-hook.sh")),
-    }
-    pruned_hooks = {}
-    for event_name, groups in hooks.items():
-        kept_groups = []
-        for group in groups or []:
-            if not isinstance(group, dict):
-                continue
-            commands = [
-                command
-                for command in group.get("commands") or []
-                if _normalize_hook_command(command) not in session_only_commands
-            ]
-            if not commands:
-                continue
-            kept_groups.append({"matcher": str(group.get("matcher") or "").strip(), "commands": commands})
-        if kept_groups:
-            pruned_hooks[event_name] = kept_groups
-    snapshot_data["hooks"] = pruned_hooks
-    return snapshot_data
+    """Compatibility wrapper for pruning session-only snapshot entries."""
+    from mms_claude_settings import prune_session_only_snapshot_entries
+
+    return prune_session_only_snapshot_entries(snapshot_data)
 
 
 def _sanitize_global_snapshot(snapshot_data):
-    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
-    snapshot_data.pop("env", None)
-    snapshot_data = _prune_session_only_snapshot_entries(snapshot_data)
-    mcp_servers = snapshot_data.get("mcpServers")
-    if isinstance(mcp_servers, dict):
-        pruned_servers = {
-            name: copy.deepcopy(spec)
-            for name, spec in mcp_servers.items()
-            if name != "hive"
-        }
-        if pruned_servers:
-            snapshot_data["mcpServers"] = pruned_servers
-        else:
-            snapshot_data.pop("mcpServers", None)
-    return snapshot_data
+    """Compatibility wrapper for global Claude snapshot sanitization."""
+    from mms_claude_settings import sanitize_global_snapshot
+
+    return sanitize_global_snapshot(snapshot_data)
 
 
 def _managed_snapshot_differs(previous_snapshot, current_settings, seed_template):
-    previous_snapshot = _sanitize_global_snapshot(previous_snapshot)
-    current_snapshot = _sanitize_global_snapshot(_extract_managed_claude_snapshot(current_settings, seed_template))
-    return previous_snapshot != current_snapshot
+    """Compatibility wrapper for managed Claude snapshot diffing."""
+    from mms_claude_settings import managed_snapshot_differs
+
+    return managed_snapshot_differs(previous_snapshot, current_settings, seed_template)
 
 
 def _managed_snapshot_template(previous_snapshot, seed_template, current_settings):
-    merged_snapshot = _merge_snapshot_with_current(previous_snapshot, current_settings)
-    sanitized_snapshot = _sanitize_global_snapshot(merged_snapshot)
-    return sanitized_snapshot, _snapshot_to_template(sanitized_snapshot, seed_template)
+    """Compatibility wrapper for managed Claude snapshot template building."""
+    from mms_claude_settings import managed_snapshot_template
+
+    return managed_snapshot_template(previous_snapshot, seed_template, current_settings)
 
 
 def _load_global_claude_snapshot():

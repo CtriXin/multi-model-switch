@@ -35,6 +35,302 @@ def load_global_claude_settings_template():
     return _launchers._load_claude_settings_template("claude-settings.global-template.json")
 
 
+def global_claude_snapshot_path():
+    import mms_launchers as _launchers
+
+    state_root = os.environ.get("MMS_HOME") or os.path.join(_launchers._real_user_path(".mms"), "state")
+    return os.path.join(state_root, "claude-global-managed-snapshot.json")
+
+
+def normalize_hook_command(command):
+    return " ".join(str(command or "").strip().split())
+
+
+def extract_managed_claude_snapshot(settings_data, template_settings):
+    import mms_launchers as _launchers
+
+    settings_data = settings_data if isinstance(settings_data, dict) else {}
+    template_settings = template_settings if isinstance(template_settings, dict) else {}
+    snapshot = {}
+
+    managed_scalar_keys = set(
+        [
+            "includeCoAuthoredBy",
+            "skipDangerousModePermissionPrompt",
+            "model",
+            "promptSuggestionEnabled",
+        ]
+    )
+    if isinstance(template_settings.get("statusLine"), dict):
+        managed_scalar_keys.add("statusLine")
+    if isinstance(template_settings.get("attribution"), dict):
+        managed_scalar_keys.add("attribution")
+    if isinstance(template_settings.get("permissions"), dict):
+        managed_scalar_keys.add("permissions")
+
+    for key in managed_scalar_keys:
+        value = settings_data.get(key)
+        if isinstance(value, dict):
+            snapshot[key] = dict(value)
+        elif isinstance(value, list):
+            snapshot[key] = list(value)
+        else:
+            snapshot[key] = value
+
+    current_hooks = settings_data.get("hooks") or {}
+    template_hooks = template_settings.get("hooks") or {}
+    snapshot_hooks = {}
+
+    for event_name, current_groups in current_hooks.items():
+        event_snapshot = []
+        known_matchers = set()
+        template_groups = template_hooks.get(event_name) or []
+        for template_group in template_groups:
+            if not isinstance(template_group, dict):
+                continue
+            known_matchers.add(str(template_group.get("matcher") or "").strip())
+        for group in current_groups:
+            if not isinstance(group, dict):
+                continue
+            matcher = str(group.get("matcher") or "").strip()
+            commands = []
+            for hook in group.get("hooks") or []:
+                if not isinstance(hook, dict):
+                    continue
+                command = _launchers._normalize_hook_command(hook.get("command"))
+                if command:
+                    commands.append(command)
+            if not commands:
+                continue
+            event_snapshot.append({"matcher": matcher, "commands": sorted(set(commands))})
+            known_matchers.add(matcher)
+        if event_snapshot:
+            snapshot_hooks[event_name] = sorted(
+                event_snapshot,
+                key=lambda item: (item.get("matcher") or "", ",".join(item.get("commands") or [])),
+            )
+    snapshot["hooks"] = snapshot_hooks
+    return snapshot
+
+
+def snapshot_to_template(snapshot_data, seed_template):
+    import mms_launchers as _launchers
+
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    seed_template = seed_template if isinstance(seed_template, dict) else {}
+    template = {}
+
+    for key in [
+        "includeCoAuthoredBy",
+        "skipDangerousModePermissionPrompt",
+        "model",
+        "promptSuggestionEnabled",
+        "statusLine",
+        "attribution",
+        "permissions",
+    ]:
+        if key in snapshot_data:
+            value = snapshot_data.get(key)
+        else:
+            value = seed_template.get(key)
+        if isinstance(value, dict):
+            template[key] = dict(value)
+        elif isinstance(value, list):
+            template[key] = list(value)
+        elif value is not None:
+            template[key] = value
+
+    hooks = {}
+    snapshot_hooks = snapshot_data.get("hooks") or {}
+    seed_hooks = seed_template.get("hooks") or {}
+    all_events = sorted(set(snapshot_hooks.keys()) | set(seed_hooks.keys()))
+    for event_name in all_events:
+        groups = []
+        seen = set()
+        for source_groups in [seed_hooks.get(event_name) or [], snapshot_hooks.get(event_name) or []]:
+            for group in source_groups:
+                if not isinstance(group, dict):
+                    continue
+                matcher = str(group.get("matcher") or "").strip()
+                commands = []
+                if "commands" in group:
+                    commands = [
+                        _launchers._normalize_hook_command(command)
+                        for command in group.get("commands") or []
+                        if _launchers._normalize_hook_command(command)
+                    ]
+                else:
+                    for hook in group.get("hooks") or []:
+                        if not isinstance(hook, dict):
+                            continue
+                        command = _launchers._normalize_hook_command(hook.get("command"))
+                        if command:
+                            commands.append(command)
+                commands = sorted(set(commands))
+                if not commands:
+                    continue
+                group_key = (matcher, tuple(commands))
+                if group_key in seen:
+                    continue
+                seen.add(group_key)
+                groups.append(
+                    {
+                        "matcher": matcher,
+                        "hooks": [
+                            {"type": "command", "command": command} for command in commands
+                        ],
+                    }
+                )
+        if groups:
+            hooks[event_name] = groups
+    if hooks:
+        template["hooks"] = hooks
+    return template
+
+
+def merge_snapshot_with_current(snapshot_data, current_settings):
+    import mms_launchers as _launchers
+
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    current_snapshot = _launchers._extract_managed_claude_snapshot(current_settings, snapshot_data)
+    merged = dict(snapshot_data)
+
+    for key, value in current_snapshot.items():
+        if key == "hooks":
+            continue
+        if isinstance(value, dict):
+            merged[key] = dict(value)
+        elif isinstance(value, list):
+            merged[key] = list(value)
+        elif value is not None:
+            merged[key] = value
+
+    merged_hooks = {}
+    known_events = set((snapshot_data.get("hooks") or {}).keys()) | set((current_snapshot.get("hooks") or {}).keys())
+    for event_name in known_events:
+        groups = []
+        seen = set()
+        for source_groups in [snapshot_data.get("hooks", {}).get(event_name) or [], current_snapshot.get("hooks", {}).get(event_name) or []]:
+            for group in source_groups:
+                if not isinstance(group, dict):
+                    continue
+                matcher = str(group.get("matcher") or "").strip()
+                commands = sorted(
+                    set(
+                        _launchers._normalize_hook_command(command)
+                        for command in group.get("commands") or []
+                        if _launchers._normalize_hook_command(command)
+                    )
+                )
+                if not commands:
+                    continue
+                group_key = (matcher, tuple(commands))
+                if group_key in seen:
+                    continue
+                seen.add(group_key)
+                groups.append({"matcher": matcher, "commands": commands})
+        if groups:
+            merged_hooks[event_name] = groups
+    merged["hooks"] = merged_hooks
+    return merged
+
+
+def prune_session_only_snapshot_entries(snapshot_data):
+    import mms_launchers as _launchers
+
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    hooks = snapshot_data.get("hooks") or {}
+    local_hooks_dir = _launchers._LOCAL_HOOKS_DIR
+    session_only_commands = {
+        _launchers._normalize_hook_command(_launchers._CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK),
+        _launchers._normalize_hook_command(f"bash {_launchers._CLAUDE_HIVE_COMPACT_HOOK}"),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_HIVE_COMPACT_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_MINDKEEPER_SESSION_START_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_MINDKEEPER_SESSION_END_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK),
+        _launchers._normalize_hook_command(_launchers._CLAUDE_MMS_RESUME_HINT_HOOK),
+        _launchers._normalize_hook_command(_launchers._XMEM_SESSION_START_HOOK),
+        _launchers._normalize_hook_command(_launchers._XMEM_SESSION_END_HOOK),
+        _launchers._normalize_hook_command(_launchers._XMEM_GATEWAY_HOOK),
+        _launchers._normalize_hook_command(_launchers._NSR_CLAUDE_HOOK),
+        _launchers._normalize_hook_command(_launchers._NSR_CODEX_HOOK),
+        _launchers._normalize_hook_command(f"python3 {_launchers._NSR_BUILTIN_HOOK}"),
+        _launchers._normalize_hook_command(_launchers._NSR_BUILTIN_HOOK),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
+        _launchers._normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-start-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-end-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-token-monitor-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-start-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-end-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "claude-codegraph-auto-index.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "mms-resume-hint.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-start-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-end-hook.sh")),
+        _launchers._normalize_hook_command(os.path.join(local_hooks_dir, "xmem-gateway-hook.sh")),
+    }
+    pruned_hooks = {}
+    for event_name, groups in hooks.items():
+        kept_groups = []
+        for group in groups or []:
+            if not isinstance(group, dict):
+                continue
+            commands = [
+                command
+                for command in group.get("commands") or []
+                if _launchers._normalize_hook_command(command) not in session_only_commands
+            ]
+            if not commands:
+                continue
+            kept_groups.append({"matcher": str(group.get("matcher") or "").strip(), "commands": commands})
+        if kept_groups:
+            pruned_hooks[event_name] = kept_groups
+    snapshot_data["hooks"] = pruned_hooks
+    return snapshot_data
+
+
+def sanitize_global_snapshot(snapshot_data):
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    snapshot_data.pop("env", None)
+    snapshot_data = prune_session_only_snapshot_entries(snapshot_data)
+    mcp_servers = snapshot_data.get("mcpServers")
+    if isinstance(mcp_servers, dict):
+        pruned_servers = {
+            name: copy.deepcopy(spec)
+            for name, spec in mcp_servers.items()
+            if name != "hive"
+        }
+        if pruned_servers:
+            snapshot_data["mcpServers"] = pruned_servers
+        else:
+            snapshot_data.pop("mcpServers", None)
+    return snapshot_data
+
+
+def managed_snapshot_differs(previous_snapshot, current_settings, seed_template):
+    import mms_launchers as _launchers
+
+    previous_snapshot = _launchers._sanitize_global_snapshot(previous_snapshot)
+    current_snapshot = _launchers._sanitize_global_snapshot(
+        _launchers._extract_managed_claude_snapshot(current_settings, seed_template)
+    )
+    return previous_snapshot != current_snapshot
+
+
+def managed_snapshot_template(previous_snapshot, seed_template, current_settings):
+    import mms_launchers as _launchers
+
+    merged_snapshot = _launchers._merge_snapshot_with_current(previous_snapshot, current_settings)
+    sanitized_snapshot = _launchers._sanitize_global_snapshot(merged_snapshot)
+    return sanitized_snapshot, _launchers._snapshot_to_template(sanitized_snapshot, seed_template)
+
+
 def merge_claude_settings(base_settings, template_settings):
     import mms_launchers as _launchers
 
