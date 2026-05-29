@@ -5526,6 +5526,114 @@ def test_chatcompletions_fallback_preserves_kimi_reasoning_for_tool_history(monk
     assert messages[1]["tool_calls"][0]["function"]["name"] == "Bash"
 
 
+def test_chatcompletions_translator_emits_kimi_reasoning_in_completed_output():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator("kimi-k2.6", response_id="resp_test")
+    completed = None
+
+    chunks = [
+        {"choices": [{"delta": {"reasoning_content": "carry "}, "finish_reason": None}]},
+        {"choices": [{"delta": {"reasoning_content": "this forward"}, "finish_reason": None}]},
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "function": {"name": "Bash", "arguments": ""},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"arguments": "{\"command\":\"pwd\"}"},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+    for chunk in chunks:
+        for event_name, event_payload in translator.process_chunk(chunk):
+            if event_name == "response.completed":
+                completed = event_payload["response"]
+
+    assert completed is not None
+    output = completed["output"]
+    assert output[0]["type"] == "reasoning"
+    assert output[0]["summary"] == [{"type": "summary_text", "text": "carry this forward"}]
+    assert output[1]["type"] == "function_call"
+    assert output[1]["reasoning_content"] == "carry this forward"
+    assert output[1]["call_id"] == "call_1"
+
+
+def test_chatcompletions_translator_completed_output_roundtrips_kimi_tool_reasoning():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator("kimi-k2.6", response_id="resp_test")
+    completed_output = None
+
+    chunks = [
+        {"choices": [{"delta": {"reasoning_content": "carry this forward"}, "finish_reason": None}]},
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "function": {"name": "Bash", "arguments": "{\"command\":\"pwd\"}"},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+    for chunk in chunks:
+        for event_name, event_payload in translator.process_chunk(chunk):
+            if event_name == "response.completed":
+                completed_output = event_payload["response"]["output"]
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        list(completed_output or [])
+        + [
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "/tmp",
+            }
+        ],
+        "kimi-k2.6",
+    )
+
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["tool_calls"][0]["function"]["name"] == "Bash"
+    assert messages[0]["reasoning_content"] == "carry this forward"
+    assert messages[1] == {"role": "tool", "tool_call_id": "call_1", "content": "/tmp"}
+
+
 def test_build_codex_payload_maps_output_limit():
     import mms_bridge
 
