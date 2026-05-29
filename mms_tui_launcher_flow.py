@@ -31,6 +31,54 @@ class TuiLaunchCandidateDeps:
     provider_id: str | None = None
 
 
+@dataclass(frozen=True)
+class TuiSettingsActionDeps:
+    select_settings_tui: Callable[..., Any]
+    select_channel_action_tui: Callable[..., Any]
+    select_language_tui: Callable[..., Any]
+    select_rescue_event_tui: Callable[..., Any]
+    select_provider_mgmt_tui: Callable[..., Any]
+    save_config: Callable[..., Any]
+    probe_cache: Any
+    ensure_provider_credentials: Callable[..., Any]
+    probe_models: Callable[..., Any]
+    provider_mgmt_export_model_routes_loader: Callable[..., Any]
+    routes_export_loader: Callable[..., Any]
+    registry_cli_loader: Callable[..., Any]
+    registry_truth_tui_payload: Callable[..., Any]
+    print_settings_error_report: Callable[..., Any]
+    print_settings_result_report: Callable[..., Any]
+    registry_report_payloads: Any
+    pause_after_tui_report: Callable[..., Any]
+    localize: Callable[..., Any]
+    about_status_snapshot: Callable[..., Any]
+    about_tui_payload: Callable[..., Any]
+    run_about_upgrade: Callable[..., Any]
+    snapshot_guard_tui_payload: Callable[..., Any]
+    handle_guard_command: Callable[..., Any]
+    confirm_guard_accept_from_tui: Callable[..., Any]
+    run_account_mgmt_tui: Callable[..., Any]
+    rescue_tools_loader: Callable[..., Any]
+    rescue_default_fallback: Callable[..., Any]
+    rescue_hot_fallback_enabled_cfg: Callable[..., Any]
+    rescue_route_fallback_model_candidates: Callable[..., Any]
+    latest_rescue_hot_fallback_event: Callable[..., Any]
+    rescue_landing_tui_payload: Callable[..., Any]
+    set_rescue_default_fallback: Callable[..., Any]
+    rescue_default_fallback_report_payload: Callable[..., Any]
+    select_model_tui_loader: Callable[..., Any]
+    set_rescue_hot_fallback_enabled: Callable[..., Any]
+    rescue_hot_fallback_toggle_report_payload: Callable[..., Any]
+    rescue_demo_packet_report_payload: Callable[..., Any]
+    rescue_fallback_model_candidates: Callable[..., Any]
+    rescue_handover_report_payload: Callable[..., Any]
+    rescue_paths_report_payload: Callable[..., Any]
+    console: Any
+    ensure_rich: Callable[..., Any]
+    prompt_cls: Any
+    set_language: Callable[..., Any]
+
+
 def safe_tui_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -1113,53 +1161,10 @@ def handle_tui_settings_action(
     cfg,
     repo_root,
     *,
-    select_settings_tui,
-    select_channel_action_tui,
-    select_language_tui,
-    select_rescue_event_tui,
-    select_provider_mgmt_tui,
-    save_config,
-    probe_cache,
-    ensure_provider_credentials,
-    probe_models,
-    provider_mgmt_export_model_routes_loader,
-    routes_export_loader,
-    registry_cli_loader,
-    registry_truth_tui_payload,
-    print_settings_error_report,
-    print_settings_result_report,
-    registry_report_payloads,
-    pause_after_tui_report,
-    localize,
-    about_status_snapshot,
-    about_tui_payload,
-    run_about_upgrade,
-    snapshot_guard_tui_payload,
-    handle_guard_command,
-    confirm_guard_accept_from_tui,
-    run_account_mgmt_tui,
-    rescue_tools_loader,
-    rescue_default_fallback,
-    rescue_hot_fallback_enabled_cfg,
-    rescue_route_fallback_model_candidates,
-    latest_rescue_hot_fallback_event,
-    rescue_landing_tui_payload,
-    set_rescue_default_fallback,
-    rescue_default_fallback_report_payload,
-    select_model_tui_loader,
-    set_rescue_hot_fallback_enabled,
-    rescue_hot_fallback_toggle_report_payload,
-    rescue_demo_packet_report_payload,
-    rescue_fallback_model_candidates,
-    rescue_handover_report_payload,
-    rescue_paths_report_payload,
-    console,
-    ensure_rich,
-    prompt_cls,
-    set_language,
+    deps,
 ):
     settings_result = select_tui_settings_action(
-        select_settings_tui=select_settings_tui,
+        select_settings_tui=deps.select_settings_tui,
     )
     if settings_result["status"] == "interrupt":
         return {"status": "interrupt", "cfg": cfg, "changed": False}
@@ -1170,20 +1175,20 @@ def handle_tui_settings_action(
     if settings_action == "provider_mgmt":
         provider_mgmt_result = handle_tui_provider_mgmt_settings_action(
             cfg,
-            select_provider_mgmt_tui=select_provider_mgmt_tui,
-            save_config=save_config,
-            probe_cache=probe_cache,
-            ensure_provider_credentials=ensure_provider_credentials,
-            probe_models=probe_models,
-            export_model_routes_loader=provider_mgmt_export_model_routes_loader,
+            select_provider_mgmt_tui=deps.select_provider_mgmt_tui,
+            save_config=deps.save_config,
+            probe_cache=deps.probe_cache,
+            ensure_provider_credentials=deps.ensure_provider_credentials,
+            probe_models=deps.probe_models,
+            export_model_routes_loader=deps.provider_mgmt_export_model_routes_loader,
         )
         return {"cfg": cfg, **provider_mgmt_result}
     if settings_action == "language":
         language_result = handle_tui_language_settings_action(
             cfg,
-            select_language_tui=select_language_tui,
-            save_config=save_config,
-            set_language=set_language,
+            select_language_tui=deps.select_language_tui,
+            save_config=deps.save_config,
+            set_language=deps.set_language,
         )
         return {
             "status": language_result["status"],
@@ -1194,81 +1199,81 @@ def handle_tui_settings_action(
     if settings_action == "routes_export":
         result = handle_tui_routes_export_settings_action(
             cfg,
-            export_model_routes_loader=routes_export_loader,
-            console=console,
+            export_model_routes_loader=deps.routes_export_loader,
+            console=deps.console,
         )
         return {"cfg": cfg, **result}
     if settings_action == "registry":
         registry_result = handle_tui_registry_settings_action(
-            registry_cli_loader=registry_cli_loader,
-            registry_truth_tui_payload=registry_truth_tui_payload,
-            select_channel_action_tui=select_channel_action_tui,
-            print_settings_error_report=print_settings_error_report,
-            print_settings_result_report=print_settings_result_report,
-            registry_report_payloads=registry_report_payloads,
-            pause_after_tui_report=pause_after_tui_report,
-            localize=localize,
+            registry_cli_loader=deps.registry_cli_loader,
+            registry_truth_tui_payload=deps.registry_truth_tui_payload,
+            select_channel_action_tui=deps.select_channel_action_tui,
+            print_settings_error_report=deps.print_settings_error_report,
+            print_settings_result_report=deps.print_settings_result_report,
+            registry_report_payloads=deps.registry_report_payloads,
+            pause_after_tui_report=deps.pause_after_tui_report,
+            localize=deps.localize,
         )
         return {"cfg": cfg, **registry_result}
     if settings_action == "about":
         about_result = handle_tui_about_settings_action(
-            about_status_snapshot=about_status_snapshot,
-            about_tui_payload=about_tui_payload,
-            select_channel_action_tui=select_channel_action_tui,
-            run_about_upgrade=run_about_upgrade,
-            pause_after_tui_report=pause_after_tui_report,
-            console=console,
+            about_status_snapshot=deps.about_status_snapshot,
+            about_tui_payload=deps.about_tui_payload,
+            select_channel_action_tui=deps.select_channel_action_tui,
+            run_about_upgrade=deps.run_about_upgrade,
+            pause_after_tui_report=deps.pause_after_tui_report,
+            console=deps.console,
         )
         return {"cfg": cfg, **about_result}
     if settings_action == "guard":
         guard_result = handle_tui_guard_settings_action(
             cfg,
-            snapshot_guard_tui_payload=snapshot_guard_tui_payload,
-            select_channel_action_tui=select_channel_action_tui,
-            handle_guard_command=handle_guard_command,
-            confirm_guard_accept_from_tui=confirm_guard_accept_from_tui,
-            pause_after_tui_report=pause_after_tui_report,
-            console=console,
+            snapshot_guard_tui_payload=deps.snapshot_guard_tui_payload,
+            select_channel_action_tui=deps.select_channel_action_tui,
+            handle_guard_command=deps.handle_guard_command,
+            confirm_guard_accept_from_tui=deps.confirm_guard_accept_from_tui,
+            pause_after_tui_report=deps.pause_after_tui_report,
+            console=deps.console,
         )
         return {"cfg": cfg, **guard_result}
     if settings_action == "account_mgmt":
         result = handle_tui_account_mgmt_settings_action(
             cfg,
-            run_account_mgmt_tui=run_account_mgmt_tui,
+            run_account_mgmt_tui=deps.run_account_mgmt_tui,
         )
         return {"cfg": cfg, **result}
     if settings_action == "rescue":
-        rescue_tools = rescue_tools_loader()
+        rescue_tools = deps.rescue_tools_loader()
         rescue_result = handle_tui_rescue_settings_action(
             cfg,
             repo_root,
-            rescue_default_fallback=rescue_default_fallback,
-            rescue_hot_fallback_enabled_cfg=rescue_hot_fallback_enabled_cfg,
-            rescue_route_fallback_model_candidates=rescue_route_fallback_model_candidates,
+            rescue_default_fallback=deps.rescue_default_fallback,
+            rescue_hot_fallback_enabled_cfg=deps.rescue_hot_fallback_enabled_cfg,
+            rescue_route_fallback_model_candidates=deps.rescue_route_fallback_model_candidates,
             list_rescue_events=rescue_tools["list_rescue_events"],
-            latest_rescue_hot_fallback_event=latest_rescue_hot_fallback_event,
-            rescue_landing_tui_payload=rescue_landing_tui_payload,
-            select_channel_action_tui=select_channel_action_tui,
-            set_rescue_default_fallback=set_rescue_default_fallback,
-            save_config=save_config,
-            rescue_default_fallback_report_payload=rescue_default_fallback_report_payload,
-            print_settings_result_report=print_settings_result_report,
-            pause_after_tui_report=pause_after_tui_report,
-            select_model_tui_loader=select_model_tui_loader,
-            set_rescue_hot_fallback_enabled=set_rescue_hot_fallback_enabled,
-            rescue_hot_fallback_toggle_report_payload=rescue_hot_fallback_toggle_report_payload,
+            latest_rescue_hot_fallback_event=deps.latest_rescue_hot_fallback_event,
+            rescue_landing_tui_payload=deps.rescue_landing_tui_payload,
+            select_channel_action_tui=deps.select_channel_action_tui,
+            set_rescue_default_fallback=deps.set_rescue_default_fallback,
+            save_config=deps.save_config,
+            rescue_default_fallback_report_payload=deps.rescue_default_fallback_report_payload,
+            print_settings_result_report=deps.print_settings_result_report,
+            pause_after_tui_report=deps.pause_after_tui_report,
+            select_model_tui_loader=deps.select_model_tui_loader,
+            set_rescue_hot_fallback_enabled=deps.set_rescue_hot_fallback_enabled,
+            rescue_hot_fallback_toggle_report_payload=deps.rescue_hot_fallback_toggle_report_payload,
             write_demo_rescue_packet=rescue_tools["write_demo_rescue_packet"],
-            rescue_demo_packet_report_payload=rescue_demo_packet_report_payload,
-            localize=localize,
-            select_rescue_event_tui=select_rescue_event_tui,
-            rescue_fallback_model_candidates=rescue_fallback_model_candidates,
+            rescue_demo_packet_report_payload=deps.rescue_demo_packet_report_payload,
+            localize=deps.localize,
+            select_rescue_event_tui=deps.select_rescue_event_tui,
+            rescue_fallback_model_candidates=deps.rescue_fallback_model_candidates,
             write_fallback_handover=rescue_tools["write_fallback_handover"],
-            rescue_handover_report_payload=rescue_handover_report_payload,
-            rescue_paths_report_payload=rescue_paths_report_payload,
-            console=console,
-            print_settings_error_report=print_settings_error_report,
-            ensure_rich=ensure_rich,
-            prompt_cls=prompt_cls,
+            rescue_handover_report_payload=deps.rescue_handover_report_payload,
+            rescue_paths_report_payload=deps.rescue_paths_report_payload,
+            console=deps.console,
+            print_settings_error_report=deps.print_settings_error_report,
+            ensure_rich=deps.ensure_rich,
+            prompt_cls=deps.prompt_cls,
         )
         return rescue_result
     return {"status": "continue", "cfg": cfg, "changed": False}

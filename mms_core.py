@@ -5023,9 +5023,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 select_provider_mgmt_tui,
             )
 
-            settings_result = tui_flow.handle_tui_settings_action(
-                current_cfg,
-                os.getcwd(),
+            settings_deps = tui_flow.TuiSettingsActionDeps(
                 select_settings_tui=select_settings_tui,
                 select_channel_action_tui=select_channel_action_tui,
                 select_language_tui=select_language_tui,
@@ -5079,6 +5077,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 ensure_rich=_ensure_rich,
                 prompt_cls=Prompt,
                 set_language=set_language,
+            )
+            settings_result = tui_flow.handle_tui_settings_action(
+                current_cfg,
+                os.getcwd(),
+                deps=settings_deps,
             )
             _apply_launcher_state_result(settings_result)
             if settings_result["status"] == "interrupt":

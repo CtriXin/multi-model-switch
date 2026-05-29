@@ -72,6 +72,7 @@ from mms_tui_launcher_flow import (
     show_rescue_no_packets_report,
     show_rescue_paths_action,
     TuiLaunchCandidateDeps,
+    TuiSettingsActionDeps,
 )
 
 
@@ -2330,7 +2331,7 @@ def _settings_action_deps(**overrides):
         "set_language": unused,
     }
     deps.update(overrides)
-    return deps
+    return TuiSettingsActionDeps(**deps)
 
 
 def test_handle_tui_settings_action_handles_interrupt_and_cancel() -> None:
@@ -2339,13 +2340,13 @@ def test_handle_tui_settings_action_handles_interrupt_and_cancel() -> None:
     assert handle_tui_settings_action(
         cfg,
         "/repo",
-        **_settings_action_deps(select_settings_tui=lambda: (_ for _ in ()).throw(KeyboardInterrupt)),
+        deps=_settings_action_deps(select_settings_tui=lambda: (_ for _ in ()).throw(KeyboardInterrupt)),
     ) == {"status": "interrupt", "cfg": cfg, "changed": False}
 
     assert handle_tui_settings_action(
         cfg,
         "/repo",
-        **_settings_action_deps(select_settings_tui=lambda: None),
+        deps=_settings_action_deps(select_settings_tui=lambda: None),
     ) == {"status": "continue", "cfg": cfg, "changed": False}
 
 
@@ -2358,7 +2359,7 @@ def test_handle_tui_settings_action_dispatches_provider_mgmt_changed() -> None:
     result = handle_tui_settings_action(
         cfg,
         "/repo",
-        **_settings_action_deps(
+        deps=_settings_action_deps(
             select_settings_tui=lambda: "provider_mgmt",
             select_provider_mgmt_tui=lambda providers: calls.append(("select_provider", providers)) or [{"id": "p1", "role": "primary", "priority": 99}],
             save_config=lambda cfg_arg: calls.append(("save", cfg_arg.copy())),
@@ -2395,7 +2396,7 @@ def test_handle_tui_settings_action_language_change_does_not_refresh_runtime() -
     result = handle_tui_settings_action(
         cfg,
         "/repo",
-        **_settings_action_deps(
+        deps=_settings_action_deps(
             select_settings_tui=lambda: "language",
             select_language_tui=lambda: calls.append(("select_language",)) or "en",
             save_config=lambda cfg_arg: calls.append(("save", cfg_arg.copy())),
