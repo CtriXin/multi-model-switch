@@ -135,7 +135,10 @@ def _sanitize_for_output(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, child in value.items():
             key_text = str(key or "")
-            if key_text.lower() in _SECRET_KEYS or any(token in key_text.lower() for token in ("token", "secret", "api_key")):
+            key_lower = key_text.lower()
+            if key_lower.endswith(("_count", "_counts")):
+                result[key_text] = child
+            elif key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key")):
                 result[key_text] = _redact(child)
             else:
                 result[key_text] = _sanitize_for_output(child)

@@ -57,6 +57,27 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["save_contract"]["requires_confirm_save"] is True
 
 
+def test_config_web_json_response_keeps_non_secret_counts_visible():
+    _status, body, _content_type = mms_config_web._json_response(
+        {
+            "api_key": "sk-super-secret-value",
+            "missing_api_key_count": 32,
+            "runtime_blockers": {"missing_api_key_count": 32, "missing_base_url_count": 0},
+            "secret_count": 2,
+            "secrets": [{"value": "sk-super-secret-value"}],
+        }
+    )
+    payload = json.loads(body)
+
+    assert payload["api_key"] != "sk-super-secret-value"
+    assert payload["missing_api_key_count"] == 32
+    assert payload["runtime_blockers"]["missing_api_key_count"] == 32
+    assert payload["runtime_blockers"]["missing_base_url_count"] == 0
+    assert payload["secret_count"] == 2
+    assert payload["secrets"] != [{"value": "sk-super-secret-value"}]
+    assert "sk-super-secret-value" not in body.decode("utf-8")
+
+
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
     config_root = tmp_path / "mms-next"
     snapshot = mms_config_web.build_config_snapshot(
