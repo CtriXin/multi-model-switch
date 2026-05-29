@@ -654,9 +654,20 @@ def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dic
                 cached_source = _safe_text(cached.get("base_source") or "remote") or "remote"
         except Exception:
             cached_raw = []
-    base_models = cached_raw or _normalize_model_list(provider.get("fallback_models"))
+    row_models: list[str] = []
+    row_sources: dict[str, str] = {}
+    for item in (provider.get("models") if isinstance(provider.get("models"), list) else []):
+        model_id = _safe_text(item.get("id") or item.get("model")) if isinstance(item, dict) else _safe_text(item)
+        if not model_id:
+            continue
+        row_models.append(model_id)
+        if isinstance(item, dict):
+            row_sources.setdefault(model_id, _safe_text(item.get("source") or "manual") or "manual")
+    fallback_models = _normalize_model_list(provider.get("fallback_models"))
+    base_models = cached_raw or fallback_models or row_models
     for model in base_models:
-        model_sources.setdefault(model, "approved" if bundle_runtime else (cached_source if cached_raw else "fallback"))
+        source = "approved" if bundle_runtime else (cached_source if cached_raw else ("fallback" if fallback_models else row_sources.get(model, "manual")))
+        model_sources.setdefault(model, source)
     for model in _normalize_model_list(provider.get("extra_models")):
         model_sources.setdefault(model, "extra")
     hidden = set(_normalize_model_list(provider.get("hidden_models")))
@@ -1294,6 +1305,7 @@ def _copy_existing_provider(
     provider_payload: dict[str, Any],
     *,
     preserve_model_rows: bool = False,
+    clear_fallback_models: bool = False,
 ) -> dict[str, Any]:
     provider = dict(existing or {})
     provider_id = _slug(provider_payload.get("id") or provider_payload.get("original_id") or provider.get("id"), "provider")
@@ -1343,7 +1355,7 @@ def _copy_existing_provider(
         provider["default_anthropic_base_url"] = ""
     else:
         provider.pop("default_anthropic_base_url", None)
-    provider["fallback_models"] = _normalize_model_list(provider_payload.get("fallback_models"))
+    provider["fallback_models"] = [] if clear_fallback_models else _normalize_model_list(provider_payload.get("fallback_models"))
     provider["extra_models"] = _normalize_model_list(provider_payload.get("extra_models"))
     provider["hidden_models"] = _normalize_model_list(provider_payload.get("hidden_models"))
     if preserve_model_rows:
@@ -1684,6 +1696,7 @@ def _build_registry_v2_save_plan(
     policy_payload: dict[str, Any] | None = None,
     expected_bundle_revision: str = "",
     route_scope_provider_ids: list[str] | None = None,
+    route_refresh_provider_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Describe the future DB-truth save path without writing anything."""
     from mms_registry_cli import registry_v2_route_publish_guard, registry_v2_save_plan
@@ -1698,6 +1711,7 @@ def _build_registry_v2_save_plan(
             credential_updates=credential_updates,
             expected_bundle_revision=expected_bundle_revision,
             route_scope_provider_ids=route_scope_provider_ids,
+            route_refresh_provider_ids=route_refresh_provider_ids,
         )
     except Exception as exc:
         route_publish_guard = {
@@ -1730,6 +1744,8 @@ def build_config_plan(
     providers_payload = draft.get("providers") if isinstance(draft.get("providers"), list) else []
     existing_by_id = {str(item.get("id") or ""): item for item in current_cfg.get("providers", []) if isinstance(item, dict)}
     preserve_model_rows = _is_preview_config_root(config_path, command_name=command_name)
+    route_refresh_provider_ids = _route_refresh_provider_ids_from_payload(payload or {})
+    refreshed_provider_ids = set(route_refresh_provider_ids)
     next_providers: list[dict[str, Any]] = []
     credential_updates: list[dict[str, str]] = []
     errors: list[str] = []
@@ -1739,10 +1755,12 @@ def build_config_plan(
         if not isinstance(provider_payload, dict):
             continue
         original_id = _safe_text(provider_payload.get("original_id") or provider_payload.get("id"))
+        provider_id = _safe_text(provider_payload.get("id") or original_id)
         provider = _copy_existing_provider(
             existing_by_id.get(original_id),
             provider_payload,
             preserve_model_rows=preserve_model_rows,
+            clear_fallback_models=preserve_model_rows and (original_id in refreshed_provider_ids or provider_id in refreshed_provider_ids),
         )
         next_providers.append(provider)
         if _truthy(provider_payload.get("update_credentials"), False):
@@ -1921,6 +1939,8 @@ def build_config_plan(
         "errors": errors,
         "warnings": warnings,
         "expected_bundle_revision": _expected_bundle_revision_from_payload(payload or {}),
+        "route_scope_provider_ids": _route_scope_provider_ids_from_payload(payload or {}),
+        "route_refresh_provider_ids": route_refresh_provider_ids,
         "paths": {
             "config": config_path,
             "preferences": preferences_path,
@@ -1939,6 +1959,7 @@ def build_config_plan(
             policy_payload=policy_after,
             expected_bundle_revision=_expected_bundle_revision_from_payload(payload or {}),
             route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload or {}),
+            route_refresh_provider_ids=route_refresh_provider_ids,
         ),
         "summary": summary,
     }
@@ -1960,6 +1981,24 @@ def _route_scope_provider_ids_from_payload(payload: dict[str, Any] | None) -> li
     draft = _extract_draft(payload)
     for source in (payload, draft):
         values = source.get("route_scope_provider_ids") or source.get("touched_provider_ids")
+        if isinstance(values, list):
+            result = []
+            seen = set()
+            for item in values:
+                provider_id = _safe_text(item)
+                if provider_id and provider_id not in seen:
+                    seen.add(provider_id)
+                    result.append(provider_id)
+            if result:
+                return result
+    return []
+
+
+def _route_refresh_provider_ids_from_payload(payload: dict[str, Any] | None) -> list[str]:
+    payload = payload if isinstance(payload, dict) else {}
+    draft = _extract_draft(payload)
+    for source in (payload, draft):
+        values = source.get("route_refresh_provider_ids") or source.get("refreshed_provider_ids")
         if isinstance(values, list):
             result = []
             seen = set()
@@ -2363,6 +2402,7 @@ def apply_registry_v2_preview_plan(
             credential_updates=[item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)],
             expected_bundle_revision=_expected_bundle_revision_from_payload(payload),
             route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload),
+            route_refresh_provider_ids=_route_refresh_provider_ids_from_payload(payload),
         )
     except Exception as exc:
         route_publish_guard = {
@@ -2396,6 +2436,7 @@ def apply_registry_v2_preview_plan(
             command_name="mms-config-web",
             expected_bundle_revision=_expected_bundle_revision_from_payload(payload),
             route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload),
+            route_refresh_provider_ids=_route_refresh_provider_ids_from_payload(payload),
         )
         secret_backend = write_registry_v2_webui_secret_backend(
             config_dir=config_root or None,
@@ -3685,7 +3726,7 @@ const sections=[
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set();
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set(); let refreshedProviders=new Set();
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -3781,13 +3822,13 @@ function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJ
 function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
 function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
 function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
-function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders]}))}
+function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...refreshedProviders]}))}
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
 $('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
-$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}}
+$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);refreshedProviders.add(p.id);renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models；保存会同步删除该通道不再返回的旧模型`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}}
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
@@ -3795,8 +3836,8 @@ $('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft
 function currentApplyCommand(){return lastPlan?.registry_v2_save_plan?.apply_plan?.cli_apply_command||'./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json'}
 $('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载 redacted plan JSON')}
 $('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
-$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();renderAll();}}
-$('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();renderAll();}}
+$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();refreshedProviders=new Set();renderAll();}}
+$('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();refreshedProviders=new Set();renderAll();}}
 load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:var(--danger);font-family:var(--font-mono)">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
 </body>

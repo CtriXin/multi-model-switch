@@ -1255,6 +1255,68 @@ def test_config_web_registry_v2_apply_scoped_provider_manual_add_preserves_provi
     assert second["candidate"]["route_candidates"]["provider_route_count"] == 6
 
 
+def test_config_web_registry_v2_apply_refreshed_provider_removes_stale_routes(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+
+    def provider(models):
+        return {
+            "original_id": "tokyo",
+            "id": "tokyo",
+            "name": "Tokyo",
+            "enabled": True,
+            "role": "primary",
+            "priority": 200,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "/models",
+            "openai_base_url": "https://tokyo.example/v1",
+            "anthropic_base_url": "https://tokyo.example/v1",
+            "api_key": "sk-tokyo-secret",
+            "update_credentials": True,
+            "fallback_models": ["claude-opus-4.7", "claude-opus-4-6-thinking"],
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [{"id": model, "source": "remote", "visible": True} for model in models],
+        }
+
+    first_payload = {
+        "draft": {
+            "provider_default": "tokyo",
+            "providers": [provider(["claude-opus-4.7", "claude-opus-4-6-thinking"])],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "claude-opus-4-6-thinking"},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        first_payload,
+        config_path=str(config_path),
+    )
+
+    second_payload = json.loads(json.dumps(first_payload))
+    second_payload["draft"]["route_scope_provider_ids"] = ["tokyo"]
+    second_payload["draft"]["route_refresh_provider_ids"] = ["tokyo"]
+    second_payload["draft"]["providers"] = [provider(["claude-opus-4-6-thinking"])]
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        second_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert set(router["routes"]) == {"claude-opus-4-6-thinking"}
+    assert "claude-opus-4.7" not in router["routes"]
+    assert second["candidate"]["route_candidates"]["provider_route_count"] == 1
+    assert second["route_publish_guard"]["diff"]["removed_models_sample"] == ["claude-opus-4.7"]
+
+
 def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"
