@@ -118,6 +118,13 @@ state materialization must stay behavior-preserving during module extraction.
 Account/runtime/model scoping, pid-session exclusion, and newest-session sort
 semantics must stay behavior-preserving during module extraction.
 
+2026-05-29 implementation note: Claude managed MCP injection into `.claude.json`
+may live outside `mms_launchers.py`, but
+`_inject_managed_mcp_servers_into_claude_state` remains the compatibility
+wrapper. Session-managed MCP allowlists, agent-pack MCP merging, disabled MCP
+filtering, and existing allowlisted MCP preservation must stay
+behavior-preserving during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去

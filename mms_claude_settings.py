@@ -1083,6 +1083,51 @@ def session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True,
     )
 
 
+def inject_managed_mcp_servers_into_claude_state(
+    payload,
+    settings_data=None,
+    *,
+    allow_execution_surfaces=True,
+    disabled_session_surfaces=None,
+    agent_pack="none",
+):
+    import mms_launchers as _launchers
+
+    state = dict(payload) if isinstance(payload, dict) else {}
+    managed = _launchers._session_managed_mcp_servers(
+        settings_data if isinstance(settings_data, dict) else _launchers._load_real_claude_settings(),
+        allow_execution_surfaces=allow_execution_surfaces,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+    if allow_execution_surfaces:
+        managed = _launchers._merge_agent_pack_mcp_servers(
+            managed,
+            agent_pack=agent_pack,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+    existing = state.get("mcpServers")
+    merged = copy.deepcopy(managed)
+    allowlist = _launchers._session_managed_mcp_server_allowlist(
+        allow_execution_surfaces=allow_execution_surfaces
+    )
+    if isinstance(existing, dict):
+        for name in allowlist:
+            if _launchers._session_surface_disabled(disabled_session_surfaces, "mcp", name):
+                continue
+            spec = existing.get(name)
+            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+                merged[name] = copy.deepcopy(spec)
+    merged = _launchers._normalize_session_mcp_servers(
+        merged,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+    if merged:
+        state["mcpServers"] = merged
+    else:
+        state.pop("mcpServers", None)
+    return state
+
+
 def build_claude_session_settings(
     base_settings=None,
     *,

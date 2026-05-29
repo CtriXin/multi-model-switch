@@ -4723,36 +4723,16 @@ def _inject_managed_mcp_servers_into_claude_state(
     disabled_session_surfaces=None,
     agent_pack="none",
 ):
-    state = dict(payload) if isinstance(payload, dict) else {}
-    managed = _session_managed_mcp_servers(
-        settings_data if isinstance(settings_data, dict) else _load_real_claude_settings(),
+    """Compatibility wrapper for Claude state managed MCP injection."""
+    from mms_claude_settings import inject_managed_mcp_servers_into_claude_state
+
+    return inject_managed_mcp_servers_into_claude_state(
+        payload,
+        settings_data=settings_data,
         allow_execution_surfaces=allow_execution_surfaces,
         disabled_session_surfaces=disabled_session_surfaces,
+        agent_pack=agent_pack,
     )
-    if allow_execution_surfaces:
-        managed = _merge_agent_pack_mcp_servers(
-            managed,
-            agent_pack=agent_pack,
-            disabled_session_surfaces=disabled_session_surfaces,
-        )
-    existing = state.get("mcpServers")
-    merged = copy.deepcopy(managed)
-    allowlist = _session_managed_mcp_server_allowlist(
-        allow_execution_surfaces=allow_execution_surfaces
-    )
-    if isinstance(existing, dict):
-        for name in allowlist:
-            if _session_surface_disabled(disabled_session_surfaces, "mcp", name):
-                continue
-            spec = existing.get(name)
-            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
-                merged[name] = copy.deepcopy(spec)
-    merged = _normalize_session_mcp_servers(merged, disabled_session_surfaces=disabled_session_surfaces)
-    if merged:
-        state["mcpServers"] = merged
-    else:
-        state.pop("mcpServers", None)
-    return state
 
 
 def _copy_allowed_scalar_fields(payload, allowed_keys):
