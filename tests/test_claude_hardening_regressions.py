@@ -1271,6 +1271,33 @@ def test_builtin_nsr_hook_injects_active_context(monkeypatch, tmp_path):
     assert "Run tests" in payload["hookSpecificOutput"]["additionalContext"]
     assert (session_dir / "events.jsonl").read_text(encoding="utf-8").strip()
 
+    first_stop = subprocess.run(
+        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
+        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    assert first_stop.returncode == 0
+    assert json.loads(first_stop.stdout)["decision"] == "block"
+
+    repeated_stop = subprocess.run(
+        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
+        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    assert repeated_stop.returncode == 0
+    assert json.loads(repeated_stop.stdout)["continue"] is True
+    state = json.loads((session_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["loop"]["status"] == "blocked"
+    assert "infinite hook loop" in state["quality"]["blocker"]
+
 
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
     import mms_launchers

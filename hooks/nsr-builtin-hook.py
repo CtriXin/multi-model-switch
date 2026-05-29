@@ -18,6 +18,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
+STOP_BLOCK_REPEAT_LIMIT = 2
 
 
 def _now_iso() -> str:
@@ -132,6 +133,8 @@ def _save_state(session_id: str, state: dict[str, Any]) -> None:
 def _append_event(session_id: str, state: dict[str, Any], kind: str, summary: str, detail: str = "") -> None:
     session_dir = _session_dir(session_id)
     session_dir.mkdir(parents=True, exist_ok=True)
+    if _clean(kind) != "stop_loop_guard":
+        _clear_stop_block_guard(state)
     entry = {
         "timestamp": _now_iso(),
         "kind": _clean(kind),
@@ -153,6 +156,58 @@ def _append_event(session_id: str, state: dict[str, Any], kind: str, summary: st
         runtime["updated_at"] = _now_iso()
         runtime.setdefault("schema_version", SCHEMA_VERSION)
     _save_state(session_id, state)
+
+
+def _clear_stop_block_guard(state: dict[str, Any]) -> bool:
+    loop = state.get("loop") if isinstance(state.get("loop"), dict) else {}
+    had_guard = bool(
+        _clean(loop.get("stop_block_signature"))
+        or int(loop.get("stop_block_count", 0) or 0)
+        or _clean(loop.get("stop_blocked_at"))
+    )
+    if had_guard:
+        loop["stop_block_signature"] = ""
+        loop["stop_block_count"] = 0
+        loop["stop_blocked_at"] = ""
+    return had_guard
+
+
+def _stop_block_signature(state: dict[str, Any]) -> str:
+    goal = state.get("goal") if isinstance(state.get("goal"), dict) else {}
+    loop = state.get("loop") if isinstance(state.get("loop"), dict) else {}
+    gate = state.get("gate") if isinstance(state.get("gate"), dict) else {}
+    payload = {
+        "objective": goal.get("objective", ""),
+        "slice_id": loop.get("current_slice_id", ""),
+        "slice": loop.get("current_slice", ""),
+        "next_action": loop.get("next_action", ""),
+        "gate_kind": gate.get("kind", ""),
+        "gate_status": gate.get("status", ""),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _guarded_stop_block(session_id: str, state: dict[str, Any], reason: str) -> dict[str, Any]:
+    loop = state.setdefault("loop", {})
+    quality = state.setdefault("quality", {})
+    signature = _stop_block_signature(state)
+    prior_signature = _clean(loop.get("stop_block_signature"))
+    prior_count = int(loop.get("stop_block_count", 0) or 0)
+    count = prior_count + 1 if prior_signature == signature else 1
+    loop["stop_block_signature"] = signature
+    loop["stop_block_count"] = count
+    loop["stop_blocked_at"] = _now_iso()
+    if count >= STOP_BLOCK_REPEAT_LIMIT:
+        loop["status"] = "blocked"
+        quality["blocker"] = (
+            "Repeated NSR stop hook block with unchanged state; "
+            "allowing stop to avoid an infinite hook loop."
+        )
+        _append_event(session_id, state, "stop_loop_guard", quality["blocker"], reason)
+        return {"continue": True}
+    _save_state(session_id, state)
+    return {"decision": "block", "reason": reason}
 
 
 def _active(state: dict[str, Any] | None) -> bool:
@@ -221,6 +276,8 @@ def _handle(host: str, request: dict[str, Any]) -> dict[str, Any]:
         refreshed = _load_state(session_id) or state
         return _output_context(event_name, _context_message(refreshed, event="session_start"))
     if event_name == "UserPromptSubmit":
+        if _clear_stop_block_guard(state):
+            _save_state(session_id, state)
         return _output_context(event_name, _context_message(state, event="user_prompt"))
     if event_name == "PreCompact":
         _append_event(session_id, state, "precompact", f"{host} PreCompact")
@@ -242,7 +299,9 @@ def _handle(host: str, request: dict[str, Any]) -> dict[str, Any]:
         status = _clean(loop.get("status", "running")).lower()
         next_action = _clean(loop.get("next_action"))
         if status not in {"blocked", "complete"} and next_action:
-            return {"decision": "block", "reason": _context_message(state, event="stop")}
+            return _guarded_stop_block(session_id, state, _context_message(state, event="stop"))
+        if _clear_stop_block_guard(state):
+            _save_state(session_id, state)
         return {"continue": True}
     return {"continue": True}
 
