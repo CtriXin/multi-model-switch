@@ -183,6 +183,160 @@ def sanitize_account_claude_settings_payload(settings_data):
     return _launchers._sanitize_claude_inherited_settings_payload(settings_data)
 
 
+def merge_mms_session_hooks(existing_hooks, template_hooks=None):
+    import mms_launchers as _launchers
+
+    hooks_data = _launchers._merge_claude_hooks(existing_hooks, template_hooks)
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "PreToolUse",
+        _launchers._CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
+        matcher="WebFetch",
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "SessionStart",
+        _launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK,
+        matcher="",
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "Stop",
+        _launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
+        matcher="",
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "Stop",
+        _launchers._XMEM_SESSION_END_HOOK,
+        matcher="",
+        timeout=10,
+        status_message="Closing xmem",
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "UserPromptSubmit",
+        _launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK,
+        matcher="",
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "UserPromptSubmit",
+        _launchers._XMEM_GATEWAY_HOOK,
+        matcher="",
+        timeout=10,
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "SessionStart",
+        _launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK,
+        matcher="",
+        timeout=20,
+        status_message="Syncing CodeGraph",
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "SessionStart",
+        _launchers._XMEM_SESSION_START_HOOK,
+        matcher="",
+        timeout=10,
+        status_message="Syncing xmem",
+    )
+    hooks_data = _launchers._append_command_hook(
+        hooks_data,
+        "SessionEnd",
+        _launchers._CLAUDE_MMS_RESUME_HINT_HOOK,
+        matcher="",
+    )
+    return hooks_data
+
+
+def filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
+    import mms_launchers as _launchers
+
+    hooks_data = hooks_data if isinstance(hooks_data, dict) else {}
+    if not allow_execution_surfaces:
+        return {}
+    return _launchers._filter_missing_managed_hook_commands(hooks_data)
+
+
+def configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
+    import mms_launchers as _launchers
+
+    hooks_data = _launchers._filter_hook_commands(hooks_data, _launchers._is_loop_family_hook_command)
+    if not enable_nsr or not _launchers._nsr_available_for_cli("claude"):
+        return hooks_data
+    for event_name, matcher in (
+        ("SessionStart", "startup|resume|clear|compact"),
+        ("UserPromptSubmit", ""),
+        ("PermissionRequest", "*"),
+        ("PreToolUse", "*"),
+        ("PostToolUse", "*"),
+        ("PreCompact", ""),
+        ("PostCompact", ""),
+        ("Stop", ""),
+    ):
+        hooks_data = _launchers._append_shell_command_hook(
+            hooks_data,
+            event_name,
+            _launchers._NSR_CLAUDE_HOOK,
+            matcher=matcher,
+            timeout=10,
+            status_message="Loading NSR",
+        )
+    return hooks_data
+
+
+def configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
+    import mms_launchers as _launchers
+
+    hooks_data = _launchers._filter_hook_commands(hooks_data, _launchers._is_caveman_hook_command)
+    if not enable_caveman:
+        return hooks_data
+    caveman_root = _launchers._resolve_caveman_root()
+    if not caveman_root:
+        return hooks_data
+    hooks_data = _launchers._append_shell_command_hook(
+        hooks_data,
+        "SessionStart",
+        _launchers._caveman_claude_activate_command(caveman_root),
+        timeout=5,
+        status_message="Loading caveman mode...",
+    )
+    hooks_data = _launchers._append_shell_command_hook(
+        hooks_data,
+        "UserPromptSubmit",
+        _launchers._caveman_claude_tracker_command(caveman_root),
+        timeout=5,
+        status_message="Tracking caveman mode...",
+    )
+    return hooks_data
+
+
+def configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
+    import mms_launchers as _launchers
+
+    hooks_data = _launchers._filter_hook_commands(hooks_data, _launchers._is_ecc_hook_command)
+    if not enable_ecc:
+        return hooks_data
+    ecc_hooks = _launchers._load_ecc_claude_hooks()
+    if not ecc_hooks:
+        return hooks_data
+    return _launchers._merge_claude_hooks(hooks_data, ecc_hooks)
+
+
+def configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
+    import mms_launchers as _launchers
+
+    hooks_data = _launchers._filter_hook_commands(hooks_data, _launchers._is_omc_hook_command)
+    if not enable_omc:
+        return hooks_data
+    omc_hooks = _launchers._load_omc_claude_hooks()
+    if not omc_hooks:
+        return hooks_data
+    return _launchers._merge_claude_hooks(hooks_data, omc_hooks)
+
+
 def build_claude_session_settings(
     base_settings=None,
     *,
