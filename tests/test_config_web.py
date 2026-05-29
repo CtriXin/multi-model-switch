@@ -388,10 +388,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "不是待删除列表，也不是全局模型池" in html
     assert "编辑补充模型库" in html
     assert "从补充库移除" in html
-    assert "移除全部通道过期隐藏记录" in html
-    assert "过期隐藏记录（不在当前通道模型列表）" in html
-    assert "移除记录不会影响其他通道" in html
-    assert "移除隐藏记录" in html
+    assert "移除全部通道未匹配隐藏规则" in html
+    assert "未匹配隐藏规则（hidden_models）" in html
+    assert "不等于远端不存在" in html
+    assert "拉取后自动标记缺失旧 route 为待清理" in html
+    assert "移除当前通道未匹配隐藏规则" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
