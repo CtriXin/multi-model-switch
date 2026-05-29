@@ -5292,53 +5292,22 @@ def _exec_or_run(
     force_subprocess=False,
     bridge_info=None,
 ):
-    """默认用 execvp；需要清理临时文件时回退到 subprocess。"""
-    cmd, env, exe = prepare_cli_command(cmd, env)
-    if not exe:
-        console.print(f"[red]{cmd[0]} 未找到，请先安装[/red]")
-        sys.exit(1)
-    session_home = str((env or {}).get("MMS_SESSION_HOME") or "").strip()
+    """Compatibility wrapper for launcher process execution."""
+    from mms_launcher_exec import exec_or_run
 
-    if once or cleanup_path or state_home or cleanup_context or exit_callback or force_subprocess:
-        exit_code = None
-        child = None
-        try:
-            if state_home:
-                with activated_claude_account_state(state_home):
-                    child = subprocess.Popen(cmd, env=env)
-                    if session_home:
-                        _record_session_child_pid(session_home, child.pid)
-                    exit_code = child.wait()
-            else:
-                child = subprocess.Popen(cmd, env=env)
-                if session_home:
-                    _record_session_child_pid(session_home, child.pid)
-                exit_code = child.wait()
-        except KeyboardInterrupt:
-            if child is not None:
-                try:
-                    exit_code = child.wait(timeout=5)
-                except Exception:
-                    exit_code = 130
-            if exit_code is None:
-                exit_code = 130
-        finally:
-            if exit_callback is not None:
-                try:
-                    exit_callback(exit_code)
-                except Exception:
-                    pass
-            if cleanup_path and os.path.exists(cleanup_path):
-                try:
-                    os.remove(cleanup_path)
-                except OSError:
-                    pass
-            if cleanup_context is not None:
-                try:
-                    cleanup_context.__exit__(None, None, None)
-                except (KeyboardInterrupt, Exception):
-                    pass
-            _print_session_summary(bridge_info)
-        sys.exit(exit_code or 0)
-    else:
-        os.execvpe(exe, cmd, env)
+    return exec_or_run(
+        cmd,
+        env,
+        once,
+        cleanup_path=cleanup_path,
+        state_home=state_home,
+        cleanup_context=cleanup_context,
+        exit_callback=exit_callback,
+        force_subprocess=force_subprocess,
+        bridge_info=bridge_info,
+        prepare_cli_command_fn=prepare_cli_command,
+        console=console,
+        activated_state=activated_claude_account_state,
+        record_session_child_pid=_record_session_child_pid,
+        print_session_summary=_print_session_summary,
+    )
