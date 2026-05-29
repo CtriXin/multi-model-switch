@@ -7832,6 +7832,33 @@ def test_model_display_grouping_helpers_preserve_recommend_and_provider_dedupe()
     ]
 
 
+def test_core_display_models_initializes_rich_before_passing_table_class(monkeypatch):
+    import mms_core
+
+    rich_calls = []
+    console = _CollectingConsole()
+
+    def fake_ensure_rich():
+        rich_calls.append("rich")
+        mms_core.Table = _FakeTable
+
+    monkeypatch.setattr(mms_core, "Table", None)
+    monkeypatch.setattr(mms_core, "_ensure_rich", fake_ensure_rich)
+    monkeypatch.setattr(mms_core, "console", console)
+    monkeypatch.setattr(mms_core, "categorize_models", lambda models: {"GPT 系": list(models)})
+    monkeypatch.setattr(mms_core, "normalize_user_role", lambda role: role)
+    monkeypatch.setattr(mms_core, "_model_capability_summary", lambda model: f"caps:{model}")
+    monkeypatch.setattr(mms_core, "_model_cli_summary", lambda model: f"cli:{model}")
+
+    displayed = mms_core.display_models(["gpt-5.5"], "all", [])
+
+    assert rich_calls
+    assert displayed == ["gpt-5.5"]
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.kwargs == {"title": "可用模型", "show_lines": True}
+    assert table.rows == [(("1", "gpt-5.5", "GPT 系", "caps:gpt-5.5", "cli:gpt-5.5"), {})]
+
+
 def test_select_custom_model_helper_preserves_prompt_and_tui_flow():
     import mms_command_tools
 

@@ -3768,6 +3768,7 @@ def categorize_models(models):
 
 
 def display_models(models, role=MODE_ALL, recommend=None):
+    _ensure_rich()
     from mms_command_tools import display_models as display_models_impl
 
     return display_models_impl(
