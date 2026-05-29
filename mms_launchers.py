@@ -3670,25 +3670,11 @@ def _normalized_model_name(model_name):
     return normalized_model_name(model_name)
 
 
-def _strip_one_m_context_suffix(model_name):
-    """Compatibility wrapper for Claude 1M suffix stripping."""
-    from mms_claude_model import strip_one_m_context_suffix
-
-    return strip_one_m_context_suffix(model_name)
-
-
 def _is_claude_family_model_name(model_name):
     """Compatibility wrapper for Claude family model detection."""
     from mms_claude_model import is_claude_family_model_name
 
     return is_claude_family_model_name(model_name)
-
-
-def _is_mimo_one_m_context_selector(model_name):
-    """Compatibility wrapper for MiMo 1M selector detection."""
-    from mms_claude_model import is_mimo_one_m_context_selector
-
-    return is_mimo_one_m_context_selector(model_name)
 
 
 def _claude_visible_model_name(model_name, *, fallback_model=""):
@@ -3710,13 +3696,6 @@ def _claude_resume_model_name(*candidates):
     from mms_claude_model import claude_resume_model_name
 
     return claude_resume_model_name(*candidates)
-
-
-def _primary_claude_model(model_info):
-    """Compatibility wrapper for Claude primary model selection."""
-    from mms_claude_model import primary_claude_model
-
-    return primary_claude_model(model_info)
 
 
 def _with_1m_suffix(model_name, *, enable_1m=True):
