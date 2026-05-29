@@ -632,8 +632,8 @@ def test_pi_local_selector_alias_uses_routed_wire_model_id(monkeypatch, tmp_path
     exports = mms_launchers.get_export_env(
         "pi",
         {
-            "id": "newapi-personal-tokyo",
-            "name": "newapi-tokyo",
+            "id": "relay-root",
+            "name": "relay-root",
             "enabled": True,
             "auth_mode": "api_key",
             "api_key": "sk-openai",
@@ -809,6 +809,20 @@ def test_pi_rejects_selected_runtime_blocked_model(monkeypatch):
             },
             "gemini-3-pro-high",
         )
+
+
+def test_pi_blocks_20260530_live_failures():
+    import mms_launchers
+
+    cases = [
+        ("newapi-personal-tokyo", "mimo-v2.5[1m]"),
+        ("newapi-personal-tokyo", "mimo-v2.5-pro[1m]"),
+        ("us-cpa-local-codex", "gpt-5.3-codex-spark"),
+        ("openrouter", "claude-opus-4-6"),
+    ]
+    for provider_id, model_name in cases:
+        runtime = {"id": provider_id, "protocols": ["anthropic_messages", "openai_chat_completions"]}
+        assert mms_launchers._pi_model_available_for_runtime(runtime, model_name) is False
 
 
 def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
