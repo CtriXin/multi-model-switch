@@ -1091,9 +1091,6 @@ CLI_PROTOCOL_REQUIREMENTS = {
 }
 OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini", "agy"}
 # OpenCode constants and pure config helpers live in mms_opencode_config.
-# agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
-_AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
-_AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
 _LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
 def _resolve_local_hooks_dir(module_file=None):
     """Compatibility wrapper for local hook directory resolution."""
@@ -1379,34 +1376,6 @@ def _remember_anthropic_url(provider_id, configured_url, resolved_url):
     _save_anthropic_url_file_cache(cache_data)
 
 
-def _ensure_agent_im():
-    """如果 agent-im daemon 未运行，自动后台拉起。"""
-    if os.path.exists(_AGENT_IM_SOCK):
-        return
-    main_js = os.path.join(_AGENT_IM_DIR, "dist", "main.js")
-    if not os.path.isfile(main_js):
-        return
-    log_dir = os.path.expanduser("~/.agent-im/logs")
-    os.makedirs(log_dir, exist_ok=True)
-    try:
-        subprocess.Popen(
-            ["node", main_js],
-            stdout=open(os.path.join(log_dir, "daemon.log"), "a"),
-            stderr=open(os.path.join(log_dir, "daemon.err.log"), "a"),
-            start_new_session=True,
-        )
-        # 等 socket 就绪（最多 2 秒）
-        import time
-        for _ in range(20):
-            if os.path.exists(_AGENT_IM_SOCK):
-                console.print("[dim]✓ agent-im daemon 已自动启动[/dim]")
-                return
-            time.sleep(0.1)
-        console.print("[dim]agent-im daemon 启动中（socket 未就绪，不影响启动）[/dim]")
-    except Exception:
-        pass  # daemon 启动失败不阻塞 CLI
-
-
 def _load_real_claude_settings():
     """Compatibility wrapper for reading real Claude settings."""
     from mms_claude_settings import load_real_claude_settings
@@ -1556,14 +1525,6 @@ def _repair_real_claude_settings():
             atomic_write_json(settings_path, repaired, mode=0o600)
     _write_global_claude_snapshot(repaired_snapshot)
     return repaired
-
-
-def _refresh_global_claude_snapshot_from_current_settings():
-    current_settings = _load_real_claude_settings()
-    seed_template = _load_global_claude_settings_template()
-    snapshot_data, _ = _managed_snapshot_template({}, seed_template, current_settings)
-    _write_global_claude_snapshot(snapshot_data)
-    return snapshot_data
 
 
 def repair_real_claude_settings_for_startup():
@@ -3507,18 +3468,6 @@ def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS
     from mms_mmc_launch import exit_oauth_claude_manual_only
 
     return exit_oauth_claude_manual_only(runtime, model_info, caller=caller)
-
-
-def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_claude_1m=True):
-    """Compatibility wrapper for the retired MMC OAuth Claude path."""
-    from mms_mmc_launch import launch_claude_oauth_via_mmc
-
-    return launch_claude_oauth_via_mmc(
-        model_info,
-        runtime,
-        once=once,
-        enable_claude_1m=enable_claude_1m,
-    )
 
 
 def _sync_codex_session_claude_json(session_home, *, disabled_session_surfaces=None):
