@@ -111,6 +111,13 @@ compatibility wrappers. Read-only real-home seed lookup, session-local
 `.claude.json` copy-in sanitization, disabled MCP filtering, and trust dialog
 state materialization must stay behavior-preserving during module extraction.
 
+2026-05-29 implementation note: Claude project-scoped resume lookup and
+`.claude.json` resume pointer overlay may live outside `mms_launchers.py`, but
+`_load_project_scoped_claude_resume_session_id` and
+`_overlay_project_scoped_claude_resume_state` remain the compatibility wrappers.
+Account/runtime/model scoping, pid-session exclusion, and newest-session sort
+semantics must stay behavior-preserving during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去

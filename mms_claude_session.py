@@ -139,6 +139,92 @@ def backfill_claude_project_resume_files(target_projects_dir, current_cwd, accou
             _launchers._copy_tree_files_if_missing(source_projects_dir, target_projects_dir)
 
 
+def load_project_scoped_claude_resume_session_id(
+    project_path,
+    *,
+    account_id="",
+    runtime_kind="",
+    resume_model="",
+):
+    import mms_launchers as _launchers
+
+    normalized_project = os.path.realpath(str(project_path or "").strip())
+    normalized_account_id = str(account_id or "").strip()
+    normalized_runtime_kind = str(runtime_kind or "").strip()
+    normalized_resume_model = _launchers._claude_resume_model_name(resume_model)
+    if not normalized_project or not normalized_account_id:
+        return None
+    try:
+        sessions = _launchers.list_indexed_sessions("claude")
+    except Exception:
+        return None
+
+    candidates: list[tuple[str, str]] = []
+    for session in sessions:
+        if str(session.get("account_id") or "").strip() != normalized_account_id:
+            continue
+        session_project = os.path.realpath(
+            str(session.get("project_path") or session.get("cwd") or "").strip()
+        )
+        if session_project != normalized_project:
+            continue
+        session_runtime_kind = str(session.get("runtime_kind") or "").strip()
+        if normalized_runtime_kind and session_runtime_kind and session_runtime_kind != normalized_runtime_kind:
+            continue
+        if normalized_resume_model:
+            session_resume_model = _launchers._claude_resume_model_name(
+                session.get("resume_model"),
+                session.get("display_model"),
+                session.get("selected_model"),
+            )
+            if session_resume_model != normalized_resume_model:
+                continue
+        session_id = str(session.get("session_id") or "").strip()
+        if not session_id or session_id.startswith("pid-"):
+            continue
+        sort_key = str(session.get("last_active_at") or session.get("started_at") or "").strip()
+        candidates.append((sort_key, session_id))
+
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def overlay_project_scoped_claude_resume_state(
+    data,
+    project_path,
+    *,
+    account_id="",
+    runtime_kind="",
+    resume_model="",
+):
+    import mms_launchers as _launchers
+
+    payload = dict(data) if isinstance(data, dict) else {}
+    normalized_project = os.path.realpath(str(project_path or "").strip())
+    if not normalized_project:
+        return payload
+    session_id = _launchers._load_project_scoped_claude_resume_session_id(
+        normalized_project,
+        account_id=account_id,
+        runtime_kind=runtime_kind,
+        resume_model=resume_model,
+    )
+    if not session_id:
+        return payload
+
+    projects = payload.get("projects")
+    if not isinstance(projects, dict):
+        projects = {}
+    entry = projects.get(normalized_project)
+    next_entry = dict(entry) if isinstance(entry, dict) else {}
+    next_entry["lastSessionId"] = session_id
+    projects[normalized_project] = next_entry
+    payload["projects"] = projects
+    return payload
+
+
 def link_claude_persistent_entry(session_claude_dir, entry, target):
     import mms_launchers as _launchers
 
