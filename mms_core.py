@@ -4473,7 +4473,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         _ecc_available_for_claude,
         _nsr_available_for_cli,
         _omc_available_for_claude,
-        launch_cli,
         get_export_env,
     )
 
@@ -4502,16 +4501,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             resolve_visible_clis=_resolve_visible_clis,
         )
 
-    # 预构建品类数据（仅在配置变更时重建）
-    def _rebuild_families():
-        return tui_flow.build_tui_family_payloads(
-            current_cfg,
-            current_cli_names,
-            current_provider,
-            default_models,
-            deps=family_payload_deps,
-        )
-
     def _refresh_runtime_state_after_config_change(updated_cfg):
         import shutil as _shutil
 
@@ -4520,12 +4509,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             deps=_runtime_refresh_deps(_shutil.rmtree),
         )
 
-    families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
-    _families_dirty = False
-
-    def _apply_tui_priority_changes(priority_changes):
+    def _apply_tui_priority_changes(cfg_arg, priority_changes):
         return tui_flow.apply_tui_priority_changes(
-            current_cfg,
+            cfg_arg,
             priority_changes,
             apply_runtime_priority_changes=_apply_runtime_priority_changes,
             save_config=save_config,
@@ -4536,7 +4522,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         select_submodel_tui=select_submodel_tui,
         account_id=account_id,
         provider_id=provider_id,
-        apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
+        apply_priority_changes=_apply_tui_priority_changes,
         resolve_last_used_runtime=_resolve_last_used_runtime,
         resolve_best_provider=_resolve_best_provider,
         choose_runtime_source=_choose_runtime_source,
@@ -4586,202 +4572,91 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         launch_with_tracking=_launch_with_tracking,
     )
 
-    cli = None
-    model_info = None
-    runtime_runtime = None
-
-    def _apply_launcher_state_result(result):
-        nonlocal current_cfg, current_provider, default_models, current_cli_names, _families_dirty
-
-        current_cfg, current_provider, default_models, current_cli_names, _families_dirty = (
-            tui_flow.apply_tui_launcher_state_result(
-                current_cfg,
-                current_provider,
-                default_models,
-                current_cli_names,
-                _families_dirty,
-                result,
-            )
+    def _settings_action_deps():
+        from mms_tui import (
+            select_channel_action_tui,
+            select_language_tui,
+            select_rescue_event_tui,
+            select_settings_tui,
+            select_provider_mgmt_tui,
         )
 
-    def _apply_action_launch_result(result):
-        nonlocal cli, model_info, runtime_runtime, _families_dirty
-
-        launch_action = tui_flow.resolve_tui_launch_action_result(
-            result,
-            cli,
-            console=console,
-        )
-        if launch_action["families_dirty"]:
-            _families_dirty = True
-        if launch_action["status"] != "launch":
-            return launch_action["status"]
-        model_info = launch_action["model_info"]
-        runtime_runtime = launch_action["runtime"]
-        cli = launch_action["cli"]
-        return "launch"
-
-    while True:
-        if _families_dirty:
-            families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
-            _families_dirty = False
-
-        # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
-        last_by_cli, _ = _get_scene_usage()
-
-        family_selection = tui_flow.select_tui_launcher_family_action(
-            select_family_tui=select_family_tui,
-            families_by_cli=families_by_cli,
-            cli_names=current_cli_names,
-            last_by_cli=last_by_cli,
-            families_detail=families_detail,
-            provider_options_by_cli=provider_options_by_cli,
-            provider_options_loader_by_cli=provider_options_loader_by_cli,
-            broker_enabled_by_cli=_broker_enabled_by_cli(current_cfg, current_cli_names),
-            profile_options_by_cli={
-                "opencode": _opencode_profile_menu_options(),
-                "agy": _official_account_menu_options(current_cfg, "agy"),
+        return tui_flow.TuiSettingsActionDeps(
+            select_settings_tui=select_settings_tui,
+            select_channel_action_tui=select_channel_action_tui,
+            select_language_tui=select_language_tui,
+            select_rescue_event_tui=select_rescue_event_tui,
+            select_provider_mgmt_tui=select_provider_mgmt_tui,
+            save_config=save_config,
+            probe_cache=_PROBE_CACHE,
+            ensure_provider_credentials=ensure_provider_credentials,
+            probe_models=_probe_models,
+            provider_mgmt_export_model_routes_loader=tui_flow.load_export_model_routes,
+            routes_export_loader=tui_flow.load_model_routes_exporter,
+            registry_cli_loader=tui_flow.load_registry_cli_tools,
+            registry_truth_tui_payload=_registry_truth_tui_payload,
+            print_settings_error_report=_print_settings_error_report,
+            print_settings_result_report=_print_settings_result_report,
+            registry_report_payloads={
+                "source_staleness": _registry_source_staleness_report_payload,
+                "refresh_sources": _registry_refresh_sources_report_payload,
+                "scheduled_refresh": _registry_scheduled_refresh_report_payload,
+                "openrouter_fetch": _registry_openrouter_fetch_report_payload,
+                "openrouter_diff": _registry_openrouter_diff_report_payload,
+                "publish_approved": _registry_publish_approved_report_payload,
+                "verify_approved": _registry_verify_approved_report_payload,
+                "doctor": _registry_doctor_report_payload,
             },
+            pause_after_tui_report=_pause_after_tui_report,
+            localize=_L,
+            about_status_snapshot=_about_status_snapshot,
+            about_tui_payload=_about_tui_payload,
+            run_about_upgrade=_run_about_upgrade,
+            snapshot_guard_tui_payload=_snapshot_guard_tui_payload,
+            handle_guard_command=handle_guard_command,
+            confirm_guard_accept_from_tui=_confirm_guard_accept_from_tui,
+            run_account_mgmt_tui=_run_account_mgmt_tui,
+            rescue_tools_loader=tui_flow.load_rescue_tools,
+            rescue_default_fallback=_rescue_default_fallback,
+            rescue_hot_fallback_enabled_cfg=_rescue_hot_fallback_enabled_cfg,
+            rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
+            latest_rescue_hot_fallback_event=_latest_rescue_hot_fallback_event,
+            rescue_landing_tui_payload=_rescue_landing_tui_payload,
+            set_rescue_default_fallback=_set_rescue_default_fallback,
+            rescue_default_fallback_report_payload=_rescue_default_fallback_report_payload,
+            select_model_tui_loader=tui_flow.load_select_model_tui,
+            set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
+            rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
+            rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
+            rescue_fallback_model_candidates=_rescue_fallback_model_candidates,
+            rescue_handover_report_payload=_rescue_handover_report_payload,
+            rescue_paths_report_payload=_rescue_paths_report_payload,
+            console=console,
+            ensure_rich=_ensure_rich,
+            prompt_cls=Prompt,
+            set_language=set_language,
         )
 
-        if family_selection["status"] == "fallback":
-            return False
-        if family_selection["status"] == "exit":
-            return True
-
-        action_type = family_selection["action_type"]
-        cli = family_selection["cli"]
-        action_data = family_selection["action_data"]
-
-        # ── 接入通道 ──
-        if action_type == "connect":
-            connect_result = tui_flow.handle_tui_connect_action(
-                current_cfg,
-                cli,
-                quick_connect_official=_quick_connect_official,
-                run_connect_wizard=run_connect_wizard,
-                refresh_runtime_state=_refresh_runtime_state_after_config_change,
-            )
-            _apply_launcher_state_result(connect_result)
-            continue
-
-        # ── Broker experiment ──
-        if action_type == "broker":
-            broker_result = tui_flow.handle_tui_broker_action(
-                current_cfg,
-                cli,
-                launch_broker_experiment_interactive=_launch_broker_experiment_interactive,
-            )
-            if broker_result["status"] == "exit":
-                return True
-            continue
-
-        # ── 设置 ──
-        if action_type == "settings":
-            from mms_tui import (
-                select_channel_action_tui,
-                select_language_tui,
-                select_rescue_event_tui,
-                select_settings_tui,
-                select_provider_mgmt_tui,
-            )
-
-            settings_deps = tui_flow.TuiSettingsActionDeps(
-                select_settings_tui=select_settings_tui,
-                select_channel_action_tui=select_channel_action_tui,
-                select_language_tui=select_language_tui,
-                select_rescue_event_tui=select_rescue_event_tui,
-                select_provider_mgmt_tui=select_provider_mgmt_tui,
-                save_config=save_config,
-                probe_cache=_PROBE_CACHE,
-                ensure_provider_credentials=ensure_provider_credentials,
-                probe_models=_probe_models,
-                provider_mgmt_export_model_routes_loader=tui_flow.load_export_model_routes,
-                routes_export_loader=tui_flow.load_model_routes_exporter,
-                registry_cli_loader=tui_flow.load_registry_cli_tools,
-                registry_truth_tui_payload=_registry_truth_tui_payload,
-                print_settings_error_report=_print_settings_error_report,
-                print_settings_result_report=_print_settings_result_report,
-                registry_report_payloads={
-                    "source_staleness": _registry_source_staleness_report_payload,
-                    "refresh_sources": _registry_refresh_sources_report_payload,
-                    "scheduled_refresh": _registry_scheduled_refresh_report_payload,
-                    "openrouter_fetch": _registry_openrouter_fetch_report_payload,
-                    "openrouter_diff": _registry_openrouter_diff_report_payload,
-                    "publish_approved": _registry_publish_approved_report_payload,
-                    "verify_approved": _registry_verify_approved_report_payload,
-                    "doctor": _registry_doctor_report_payload,
-                },
-                pause_after_tui_report=_pause_after_tui_report,
-                localize=_L,
-                about_status_snapshot=_about_status_snapshot,
-                about_tui_payload=_about_tui_payload,
-                run_about_upgrade=_run_about_upgrade,
-                snapshot_guard_tui_payload=_snapshot_guard_tui_payload,
-                handle_guard_command=handle_guard_command,
-                confirm_guard_accept_from_tui=_confirm_guard_accept_from_tui,
-                run_account_mgmt_tui=_run_account_mgmt_tui,
-                rescue_tools_loader=tui_flow.load_rescue_tools,
-                rescue_default_fallback=_rescue_default_fallback,
-                rescue_hot_fallback_enabled_cfg=_rescue_hot_fallback_enabled_cfg,
-                rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
-                latest_rescue_hot_fallback_event=_latest_rescue_hot_fallback_event,
-                rescue_landing_tui_payload=_rescue_landing_tui_payload,
-                set_rescue_default_fallback=_set_rescue_default_fallback,
-                rescue_default_fallback_report_payload=_rescue_default_fallback_report_payload,
-                select_model_tui_loader=tui_flow.load_select_model_tui,
-                set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
-                rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
-                rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
-                rescue_fallback_model_candidates=_rescue_fallback_model_candidates,
-                rescue_handover_report_payload=_rescue_handover_report_payload,
-                rescue_paths_report_payload=_rescue_paths_report_payload,
-                console=console,
-                ensure_rich=_ensure_rich,
-                prompt_cls=Prompt,
-                set_language=set_language,
-            )
-            settings_result = tui_flow.handle_tui_settings_action(
-                current_cfg,
-                os.getcwd(),
-                deps=settings_deps,
-            )
-            _apply_launcher_state_result(settings_result)
-            if settings_result["status"] == "interrupt":
-                return True
-            continue
-
-        # ── 选择结果 → 启动候选 ──
-        launch_candidate = tui_flow.handle_tui_launch_candidate_action(
-            current_cfg,
-            action_type,
-            cli,
-            action_data,
-            current_provider,
-            default_models,
-            families_detail=families_detail,
-            provider_options_by_cli=provider_options_by_cli,
-            last_by_cli=last_by_cli,
-            deps=launch_candidate_deps,
-        )
-        _apply_launcher_state_result(launch_candidate)
-        launch_status = _apply_action_launch_result(launch_candidate)
-        if launch_status == "exit":
-            return True
-        if launch_status != "launch":
-            continue
-
-        # ── 公共：确认页 + 启动 ──
-        launch_result = tui_flow.handle_tui_launch_confirmation(
-            current_cfg,
-            cli,
-            model_info,
-            runtime_runtime,
-            deps=launch_confirmation_deps,
-        )
-        if launch_result["status"] == "continue":
-            continue
-        return True
+    return tui_flow.run_tui_launcher_loop(
+        current_cfg,
+        current_provider,
+        default_models,
+        current_cli_names,
+        deps=tui_flow.TuiLauncherLoopDeps(
+            select_family_tui=select_family_tui,
+            get_scene_usage=_get_scene_usage,
+            broker_enabled_by_cli=_broker_enabled_by_cli,
+            opencode_profile_menu_options=_opencode_profile_menu_options,
+            official_account_menu_options=_official_account_menu_options,
+            launch_broker_experiment_interactive=_launch_broker_experiment_interactive,
+            settings_action_deps_loader=_settings_action_deps,
+            settings_repo_root=os.getcwd(),
+            family_payload_deps=family_payload_deps,
+            launch_candidate_deps=launch_candidate_deps,
+            launch_confirmation_deps=launch_confirmation_deps,
+            console=console,
+        ),
+    )
 
 
 

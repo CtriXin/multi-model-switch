@@ -123,6 +123,22 @@ class TuiLaunchConfirmationDeps:
     launch_with_tracking: Callable[..., Any]
 
 
+@dataclass(frozen=True)
+class TuiLauncherLoopDeps:
+    select_family_tui: Callable[..., Any]
+    get_scene_usage: Callable[..., Any]
+    broker_enabled_by_cli: Callable[..., Any]
+    opencode_profile_menu_options: Callable[..., Any]
+    official_account_menu_options: Callable[..., Any]
+    launch_broker_experiment_interactive: Callable[..., Any]
+    settings_action_deps_loader: Callable[..., Any]
+    settings_repo_root: str
+    family_payload_deps: TuiFamilyPayloadDeps
+    launch_candidate_deps: TuiLaunchCandidateDeps
+    launch_confirmation_deps: TuiLaunchConfirmationDeps
+    console: Any
+
+
 def safe_tui_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -1132,6 +1148,161 @@ def resolve_tui_launch_action_result(result, cli_name, *, console):
         "cli": result.get("cli", cli_name),
         "families_dirty": bool(result.get("families_dirty")),
     }
+
+
+def run_tui_launcher_loop(
+    cfg,
+    provider,
+    default_models,
+    cli_names,
+    *,
+    deps,
+):
+    current_cfg = cfg
+    current_provider = provider
+    current_cli_names = cli_names
+    families_dirty = False
+
+    families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = (
+        build_tui_family_payloads(
+            current_cfg,
+            current_cli_names,
+            current_provider,
+            default_models,
+            deps=deps.family_payload_deps,
+        )
+    )
+
+    cli_name = None
+
+    while True:
+        if families_dirty:
+            families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = (
+                build_tui_family_payloads(
+                    current_cfg,
+                    current_cli_names,
+                    current_provider,
+                    default_models,
+                    deps=deps.family_payload_deps,
+                )
+            )
+            families_dirty = False
+
+        last_by_cli, _ = deps.get_scene_usage()
+
+        family_selection = select_tui_launcher_family_action(
+            select_family_tui=deps.select_family_tui,
+            families_by_cli=families_by_cli,
+            cli_names=current_cli_names,
+            last_by_cli=last_by_cli,
+            families_detail=families_detail,
+            provider_options_by_cli=provider_options_by_cli,
+            provider_options_loader_by_cli=provider_options_loader_by_cli,
+            broker_enabled_by_cli=deps.broker_enabled_by_cli(current_cfg, current_cli_names),
+            profile_options_by_cli={
+                "opencode": deps.opencode_profile_menu_options(),
+                "agy": deps.official_account_menu_options(current_cfg, "agy"),
+            },
+        )
+
+        if family_selection["status"] == "fallback":
+            return False
+        if family_selection["status"] == "exit":
+            return True
+
+        action_type = family_selection["action_type"]
+        cli_name = family_selection["cli"]
+        action_data = family_selection["action_data"]
+
+        if action_type == "connect":
+            connect_result = deps.launch_candidate_deps.connect_action(current_cfg, cli_name)
+            current_cfg, current_provider, default_models, current_cli_names, families_dirty = (
+                apply_tui_launcher_state_result(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    current_cli_names,
+                    families_dirty,
+                    connect_result,
+                )
+            )
+            continue
+
+        if action_type == "broker":
+            broker_result = handle_tui_broker_action(
+                current_cfg,
+                cli_name,
+                launch_broker_experiment_interactive=deps.launch_broker_experiment_interactive,
+            )
+            if broker_result["status"] == "exit":
+                return True
+            continue
+
+        if action_type == "settings":
+            settings_result = handle_tui_settings_action(
+                current_cfg,
+                deps.settings_repo_root,
+                deps=deps.settings_action_deps_loader(),
+            )
+            current_cfg, current_provider, default_models, current_cli_names, families_dirty = (
+                apply_tui_launcher_state_result(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    current_cli_names,
+                    families_dirty,
+                    settings_result,
+                )
+            )
+            if settings_result["status"] == "interrupt":
+                return True
+            continue
+
+        launch_candidate = handle_tui_launch_candidate_action(
+            current_cfg,
+            action_type,
+            cli_name,
+            action_data,
+            current_provider,
+            default_models,
+            families_detail=families_detail,
+            provider_options_by_cli=provider_options_by_cli,
+            last_by_cli=last_by_cli,
+            deps=deps.launch_candidate_deps,
+        )
+        current_cfg, current_provider, default_models, current_cli_names, families_dirty = (
+            apply_tui_launcher_state_result(
+                current_cfg,
+                current_provider,
+                default_models,
+                current_cli_names,
+                families_dirty,
+                launch_candidate,
+            )
+        )
+        launch_action = resolve_tui_launch_action_result(
+            launch_candidate,
+            cli_name,
+            console=deps.console,
+        )
+        if launch_action["families_dirty"]:
+            families_dirty = True
+        if launch_action["status"] == "exit":
+            return True
+        if launch_action["status"] != "launch":
+            continue
+
+        cli_name = launch_action["cli"]
+        launch_result = handle_tui_launch_confirmation(
+            current_cfg,
+            cli_name,
+            launch_action["model_info"],
+            launch_action["runtime"],
+            deps=deps.launch_confirmation_deps,
+        )
+        if launch_result["status"] == "continue":
+            continue
+        return True
 
 
 def apply_tui_priority_changes(

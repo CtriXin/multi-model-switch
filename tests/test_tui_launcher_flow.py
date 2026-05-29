@@ -61,6 +61,7 @@ from mms_tui_launcher_flow import (
     resolve_last_used_launch_context,
     resolve_confirm_launch_action,
     resolve_tui_launch_action_result,
+    run_tui_launcher_loop,
     run_confirm_tui_prompt,
     safe_tui_call,
     select_rescue_event_action,
@@ -72,8 +73,10 @@ from mms_tui_launcher_flow import (
     show_rescue_no_packets_report,
     show_rescue_paths_action,
     TuiRuntimeRefreshDeps,
+    TuiFamilyPayloadDeps,
     TuiLaunchCandidateDeps,
     TuiLaunchConfirmationDeps,
+    TuiLauncherLoopDeps,
     TuiSettingsActionDeps,
 )
 
@@ -3877,6 +3880,63 @@ def _launch_confirmation_deps(**overrides):
     }
     deps.update(overrides)
     return TuiLaunchConfirmationDeps(**deps)
+
+
+def _family_payload_deps(**overrides):
+    deps = {
+        "build_model_families_for_cli": lambda *_args, **_kwargs: [
+            {"family": "GPT", "models": [{"model": "gpt-5.4"}]},
+        ],
+        "cli_default_family_first": {},
+        "family_is_cold_for_tui": lambda *_args, **_kwargs: False,
+        "sort_family_entries_for_tui": lambda entries, **_kwargs: entries,
+        "make_provider_options_loader": lambda *_args, **_kwargs: (lambda _model: []),
+    }
+    deps.update(overrides)
+    return TuiFamilyPayloadDeps(**deps)
+
+
+def test_run_tui_launcher_loop_launches_selected_candidate() -> None:
+    calls = []
+    cfg = {"cfg": True}
+    provider = {"id": "provider"}
+    runtime = {"id": "runtime"}
+
+    class Console:
+        @staticmethod
+        def print(message):
+            calls.append(("print", message))
+
+    result = run_tui_launcher_loop(
+        cfg,
+        provider,
+        ["gpt-5.4"],
+        ["codex"],
+        deps=TuiLauncherLoopDeps(
+            select_family_tui=lambda *_args, **_kwargs: ("family", "codex", "GPT"),
+            get_scene_usage=lambda: ({}, {}),
+            broker_enabled_by_cli=lambda _cfg, cli_names: {cli: False for cli in cli_names},
+            opencode_profile_menu_options=lambda: [],
+            official_account_menu_options=lambda *_args, **_kwargs: [],
+            launch_broker_experiment_interactive=lambda *_args, **_kwargs: False,
+            settings_action_deps_loader=lambda: _settings_action_deps(),
+            settings_repo_root="/repo",
+            family_payload_deps=_family_payload_deps(),
+            launch_candidate_deps=_launch_candidate_deps(
+                select_submodel_tui=lambda *_args, **_kwargs: {"model": "gpt-5.4"},
+                resolve_best_provider=lambda *_args, **_kwargs: (runtime, None),
+            ),
+            launch_confirmation_deps=_launch_confirmation_deps(
+                launch_with_tracking=lambda cli, model, runtime_arg, *, once: calls.append(
+                    ("launch", cli, model, runtime_arg["id"], once)
+                ),
+            ),
+            console=Console(),
+        ),
+    )
+
+    assert result is True
+    assert calls == [("launch", "codex", {"model": "gpt-5.4"}, "runtime", False)]
 
 
 def test_handle_tui_launch_confirmation_returns_continue_for_profile_cancel_and_back() -> None:
