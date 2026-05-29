@@ -235,7 +235,12 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
     assert guard["write_policy"] == "manual_cli_human_gate"
     assert "mmf guard status" in guard["commands"]
+    assert guard["blocked_auto_execute"] is True
+    assert guard["manual_steps"]
+    assert any("snapshots/startup/accepted.json" in item for item in guard["writes"])
     assert guard_accept["status"] == "human_gate"
+    assert guard_accept["requires_human_confirmation"] is True
+    assert "mmf guard accept" in guard_accept["commands"]
     assert language["status"] == "native"
     assert load_balance["write_policy"] == "draft_review_confirmed_save"
     assert load_balance["status"] == "native"
@@ -243,8 +248,61 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert channel_status["status"] == "native"
     assert channel_status["provider_default"] == "demo"
     assert official_gate["status"] == "human_gate"
+    assert official_gate["blocked_auto_execute"] is True
+    assert "mmf config account.add codex" in official_gate["commands"]
+    assert "Claude OAuth 独立入口已下线" in " ".join(official_gate["manual_steps"])
     assert autosort_gate["write_policy"] == "speed_stats_write_human_gate"
+    assert "WebUI 已提供手工 family priority 草稿" in autosort_gate["safe_alternative"]
     assert not (tmp_path / "mms-next" / "registry").exists()
+
+
+def test_config_web_human_gate_reports_are_actionable(tmp_path):
+    cfg = {
+        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["gpt-5.5"]}],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex"}],
+    }
+    mapping = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "tui_mapping"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )["mapping"]
+    gate_actions = sorted({row["api_action"] for row in mapping if row["status"] == "human_gate" and row.get("api_action")})
+
+    assert gate_actions
+    assert "about_upgrade_gate" in gate_actions
+    assert "refresh_due_sources_gate" in gate_actions
+    for action in gate_actions:
+        report = mms_config_web.build_settings_report(
+            cfg,
+            {"action": action},
+            config_path=str(tmp_path / "mms-next" / "config.toml"),
+            command_name="mmf",
+        )
+        assert report["ok"] is True
+        assert report["status"] == "human_gate"
+        assert report["blocked_auto_execute"] is True
+        assert report["requires_human_confirmation"] is True
+        assert report["manual_steps"], action
+        assert report["commands"], action
+        assert "risk_level" in report
+
+    scheduled = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "scheduled_refresh_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    publish = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "publish_approved_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert "mmf registry scheduled-refresh --dry-run --no-network" in scheduled["commands"]
+    assert "mmf registry publish-approved" in publish["commands"]
+    assert any("model-registry.latest-approved.json" in item for item in publish["writes"])
 
 
 def test_config_web_json_response_redacts_account_protected_paths():
@@ -622,6 +680,14 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "maintenanceActions" in html
     assert "/api/settings/report" in html
     assert "human-gated" in html
+    assert "Human Gate 操作卡" in html
+    assert "function renderGateReport" in html
+    assert "function copyGateCommand" in html
+    assert "data-copy-gate-command" in html
+    assert "blocked_auto_execute" in html
+    assert "requires_human_confirmation" in html
+    assert "Copyable commands" in html
+    assert "Manual steps" in html
     assert "function renderSettings()" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
     assert "pending key" in html

@@ -3835,14 +3835,300 @@ def run_model_smoke(
         return {"ok": False, "provider_id": provider.get("id"), "model": model, "protocol": protocol, "error": str(exc), "trace": traceback.format_exc(limit=3)}
 
 
-def _settings_gate_report(action: str, *, write_policy: str = "human_gate", note: str = "") -> dict[str, Any]:
+def _about_upgrade_gate_commands() -> list[str]:
+    try:
+        mms_core = _load_mms_core()
+        commands = [
+            mms_core._mms_upgrade_shell_command(include_clis=False),  # noqa: SLF001 - display only
+            mms_core._cli_upgrade_shell_command("codex"),  # noqa: SLF001 - display only
+            mms_core._cli_upgrade_shell_command("claude"),  # noqa: SLF001 - display only
+        ]
+        return [item for item in commands if _safe_text(item)]
+    except Exception:
+        return [
+            "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --latest-tag",
+            "npm install -g @openai/codex@latest",
+            "npm install -g @anthropic-ai/claude-code@latest",
+        ]
+
+
+def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any]]:
+    command = _safe_text(command_name) or "mms"
+    registry = f"{command} registry"
+    webui = f"{command} config web"
+    interactive = command
+    account_writes = [
+        "~/.config/mms/config.toml accounts/account.defaults",
+        "~/.config/mms/accounts/** OAuth/account state",
+        "可能涉及外部浏览器或 CLI login side effects",
+    ]
+    registry_writes = [
+        "<MMS_CONFIG_ROOT>/registry/model-registry.sqlite",
+        "<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json",
+        "<MMS_CONFIG_ROOT>/generated/model-capabilities.approved.json",
+    ]
+    return {
+        "guard_status": {
+            "title": "Snapshot Guard status / accept",
+            "risk_level": "medium",
+            "commands": [f"{command} guard status", f"{command} guard accept"],
+            "manual_steps": [
+                "先运行 status 查看 accepted/latest/pending snapshot 和 drift。",
+                "只有确认当前 config drift 是你要保留的状态后，再手动运行 accept。",
+                "WebUI 只展示 gate，不会替你接受 baseline。",
+            ],
+            "writes": ["<MMS_CONFIG_ROOT>/snapshots/startup/latest.json", "<MMS_CONFIG_ROOT>/snapshots/startup/accepted.json", "<MMS_CONFIG_ROOT>/snapshots/startup/pending.json cleanup"],
+            "safe_alternative": "只点 guard_status 查看状态；不要运行 accept。",
+        },
+        "guard_accept_gate": {
+            "title": "接受当前 Snapshot baseline",
+            "risk_level": "high",
+            "commands": [f"{command} guard status", f"{command} guard accept"],
+            "manual_steps": [
+                "先运行 status，确认 drift 来自你刚刚认可的配置变化。",
+                "再运行 accept；这会把当前 snapshot 设为新的已确认 baseline。",
+                "如果 drift 涉及 Claude account/proxy/home_dir，按 human-only 规则停下人工确认。",
+            ],
+            "writes": ["<MMS_CONFIG_ROOT>/snapshots/startup/latest.json", "<MMS_CONFIG_ROOT>/snapshots/startup/accepted.json", "<MMS_CONFIG_ROOT>/snapshots/startup/pending.json cleanup"],
+            "safe_alternative": "保留 pending drift，只在 WebUI/CLI 里查看 status。",
+        },
+        "connect_official_gate": {
+            "title": "添加官方 OAuth/account 通道",
+            "risk_level": "high",
+            "commands": [f"{command} config account.add codex", f"{command} config account.add agy", f"{command} config account.login <account-id>", f"{command} config account.list"],
+            "manual_steps": [
+                "只对 Codex/AGY 账号执行；Claude OAuth 独立入口已下线，Claude config 仍 human-only。",
+                "添加或 login 前先确认要写入的 account id、CLI、HOME/proxy 边界。",
+                "完成后回到 WebUI 点击 accounts/report 或生成保存预览核对 diff。",
+            ],
+            "writes": account_writes,
+            "safe_alternative": "网关 API Key 通道使用 WebUI Add provider + 保存预览，不走 OAuth。",
+        },
+        "migrate_config_gate": {
+            "title": "迁移旧配置 / v2 promotion human gate",
+            "risk_level": "high",
+            "commands": [f"{command} migrate config-v2 --json", f"{command} config migrate", f"{command} config root --json"],
+            "manual_steps": [
+                "先用 read-only migration/promotion plan 看 preview root 与 stable root 的差异。",
+                "确认 backup、目标 root、secret 处理和 human-only config 边界。",
+                "只有人工确认后才运行实际迁移命令。",
+            ],
+            "writes": ["~/.config/mms/** stable config tree", "<MMS_CONFIG_ROOT>/registry/** preview DB/root artifacts", "config backups / audit logs"],
+            "safe_alternative": "在 WebUI 保存页生成 preview plan，不直接迁移 stable。",
+        },
+        "family_autosort_gate": {
+            "title": "按 speed stats 批量排序 family priority",
+            "risk_level": "medium",
+            "commands": [webui, interactive],
+            "manual_steps": [
+                "先在 WebUI 通道页查看/编辑 provider priority 与 family_priority_overrides。",
+                "生成保存预览，确认每个 family 的排序变化。",
+                "如要使用 TUI speed stats autosort，只能人工打开主 TUI 并逐项确认，不从 WebUI 自动批量改。",
+            ],
+            "writes": ["provider.priority", "provider.family_priority_overrides", "account.family_priority_overrides"],
+            "safe_alternative": "WebUI 已提供手工 family priority 草稿 + diff review，替代自动批量排序。",
+        },
+        "load_balance_recent_delete_gate": {
+            "title": "删除 load_balance 最近记录",
+            "risk_level": "medium",
+            "commands": [f"{command} config load-balance.show", webui],
+            "manual_steps": [
+                "WebUI 支持持久 profile/default/remove 草稿；最近启动历史不静默删除。",
+                "如必须清理 recent history，先人工定位 lb_history.json 所在 config root。",
+                "确认不影响 launcher 最近选择后，再由人工删除对应历史项。",
+            ],
+            "writes": ["<MMS_CONFIG_ROOT>/lb_history.json or equivalent launch history artifact"],
+            "safe_alternative": "使用 WebUI 删除持久 load_balance profile，然后生成保存预览。",
+        },
+        "account_login_gate": {
+            "title": "Account login",
+            "risk_level": "high",
+            "commands": [f"{command} config account.list", f"{command} config account.login <account-id>", f"{command} config account.status <account-id>"],
+            "manual_steps": [
+                "确认 account id 不是 Claude human-only account。",
+                "手动执行 login，并完成外部 OAuth/CLI 交互。",
+                "回到 WebUI 刷新 accounts report，检查默认账号和状态。",
+            ],
+            "writes": account_writes,
+            "safe_alternative": "非 OAuth API Key 通道使用 WebUI provider credentials draft。",
+        },
+        "account_remove_gate": {
+            "title": "Remove account",
+            "risk_level": "high",
+            "commands": [f"{command} config account.list", f"{command} config account.status <account-id>", f"{command} config account.remove <account-id>"],
+            "manual_steps": [
+                "确认该 account 没有作为默认账号或专属 key 绑定使用。",
+                "Claude account/remove 必须停在 human-only gate。",
+                "手动 remove 后回 WebUI accounts report 和保存预览核对。",
+            ],
+            "writes": ["~/.config/mms/config.toml accounts/account.defaults", "~/.config/mms/accounts/<account-id>/**"],
+            "safe_alternative": "先在 WebUI 将非 Claude account disabled/default 草稿调整并 review。",
+        },
+        "refresh_due_sources_gate": {
+            "title": "刷新到期 registry sources",
+            "risk_level": "medium",
+            "commands": [f"{registry} check-staleness", f"{registry} refresh-sources --if-due"],
+            "manual_steps": [
+                "先运行 check-staleness，只读确认哪些 source 到期。",
+                "确认可写 preview registry root 后，再运行 --if-due refresh。",
+                "刷新后运行 source-status/preview-doctor 核对。",
+            ],
+            "writes": registry_writes[:1],
+            "safe_alternative": "WebUI 点击 check_staleness report 只读查看。",
+        },
+        "scheduled_refresh_gate": {
+            "title": "Scheduled registry refresh",
+            "risk_level": "medium",
+            "commands": [f"{registry} scheduled-refresh --dry-run --no-network", f"{registry} scheduled-refresh --no-network", f"{registry} scheduled-refresh"],
+            "manual_steps": [
+                "先 dry-run/no-network，确认 due state 和不会访问外网。",
+                "需要联网 OpenRouter refresh 时，由人工明确运行不带 --no-network 的命令。",
+                "执行后查看 scheduled output、source-status 和 preview doctor。",
+            ],
+            "writes": registry_writes,
+            "safe_alternative": "保留 WebUI read-only report；不要执行 network/write refresh。",
+        },
+        "refresh_sources_gate": {
+            "title": "刷新全部 registry sources",
+            "risk_level": "high",
+            "commands": [f"{registry} refresh-sources", f"{registry} source-status --json"],
+            "manual_steps": [
+                "确认当前 root 是预期 preview/stable root。",
+                "运行 refresh-sources 前先确认 reference snapshots 和写入范围。",
+                "完成后用 source-status/preview-doctor 验证。",
+            ],
+            "writes": registry_writes[:1],
+            "safe_alternative": "只运行 check-staleness 或 source-status。",
+        },
+        "fetch_openrouter_gate": {
+            "title": "Fetch OpenRouter catalog",
+            "risk_level": "medium",
+            "commands": [f"{registry} fetch-openrouter-catalog", f"{registry} fetch-openrouter-catalog --from-file <models.json>"],
+            "manual_steps": [
+                "联网拉取前确认网络可用和 OpenRouter source 仍可信。",
+                "如已有离线 catalog，优先使用 --from-file。",
+                "完成后再运行 diff-openrouter-catalog 查看候选变化。",
+            ],
+            "writes": registry_writes[:1],
+            "safe_alternative": "用 --from-file 导入人工下载的 catalog，避免 WebUI 自动联网。",
+        },
+        "diff_openrouter_gate": {
+            "title": "Diff OpenRouter candidate changes",
+            "risk_level": "medium",
+            "commands": [f"{registry} diff-openrouter-catalog --limit 50", f"{registry} diff-openrouter-catalog --no-store --limit 50"],
+            "manual_steps": [
+                "先用 --no-store 只读查看 diff。",
+                "确认 candidate changes 合理后，再允许 store candidate_change rows。",
+                "后续 publish 前必须走 approved bundle 验证。",
+            ],
+            "writes": ["<MMS_CONFIG_ROOT>/registry/model-registry.sqlite candidate_change rows"],
+            "safe_alternative": "只运行 --no-store diff。",
+        },
+        "publish_approved_gate": {
+            "title": "Publish approved bundle",
+            "risk_level": "high",
+            "commands": [f"{registry} publish-approved", f"{registry} verify --json"],
+            "manual_steps": [
+                "先确认 candidate/bundle revision 和 route shrink guard。",
+                "人工运行 publish-approved 后立刻运行 verify。",
+                "verify 未通过时不要继续把结果交给 launcher/runtime。",
+            ],
+            "writes": registry_writes[1:],
+            "safe_alternative": "WebUI 保存页 preview apply 会在明确 confirm 后 publish/verify preview bundle。",
+        },
+        "verify_approved_gate": {
+            "title": "Verify approved bundle",
+            "risk_level": "low",
+            "commands": [f"{registry} verify --json", f"{registry} consumer-bundle --json --no-strict-exit"],
+            "manual_steps": [
+                "运行 verify 检查 latest-approved manifest/hash。",
+                "再运行 consumer-bundle 查看下游可读状态。",
+                "此 gate 保留 CLI/manual path，WebUI 不替你执行外部命令。",
+            ],
+            "writes": [],
+            "safe_alternative": "WebUI 点击 Consumer Bundle report 读取当前状态。",
+        },
+        "rescue_create_demo_gate": {
+            "title": "生成 demo rescue packet",
+            "risk_level": "medium",
+            "commands": [interactive, webui],
+            "manual_steps": [
+                "打开主 TUI：Settings -> Rescue -> 生成测试 rescue packet。",
+                "确认写入 repo-local .mms/rescue demo artifacts。",
+                "完成后在 WebUI 点击 rescue_events 查看 artifact path。",
+            ],
+            "writes": ["<repo>/.mms/rescue/**", "~/.config/mms/rescue/index.jsonl metadata"],
+            "safe_alternative": "WebUI 只读 rescue_events；不生成 demo artifact。",
+        },
+        "rescue_handover_gate": {
+            "title": "生成 fallback handover",
+            "risk_level": "medium",
+            "commands": [interactive, webui],
+            "manual_steps": [
+                "先在 WebUI rescue_events 找到要处理的 rescue packet。",
+                "打开主 TUI：Settings -> Rescue -> 选择 packet -> handover/manual_handover。",
+                "确认 fallback model 和 artifact path 后再生成。",
+            ],
+            "writes": ["<repo>/.mms/rescue/latest-fallback-handover.json", "<repo>/.mms/rescue/latest-fallback-handover.md"],
+            "safe_alternative": "WebUI 已支持 fallback/hot fallback 持久配置草稿，handover artifact 仍人工生成。",
+        },
+        "about_refresh_gate": {
+            "title": "刷新版本检查",
+            "risk_level": "medium",
+            "commands": [interactive, webui],
+            "manual_steps": [
+                "打开主 TUI：Settings -> About -> 刷新版本检查。",
+                "该动作可能访问 GitHub/npm 并更新本地 version cache。",
+                "WebUI about report 默认只读 cached 状态，不自动联网刷新。",
+            ],
+            "writes": ["~/.config/mms/version.json update cache"],
+            "safe_alternative": "WebUI 点击 about report 读取 cached about status。",
+        },
+        "about_upgrade_gate": {
+            "title": "升级 MMS / Codex / Claude CLI",
+            "risk_level": "critical",
+            "commands": _about_upgrade_gate_commands(),
+            "manual_steps": [
+                "先看当前版本和 latest 版本，确认升级目标。",
+                "手动复制并运行对应升级命令；这会联网并修改本机安装。",
+                "升级后重新打开 WebUI，运行 summary/py_compile/smoke 确认入口可用。",
+            ],
+            "writes": ["MMS install location", "global npm packages for Codex/Claude CLI"],
+            "safe_alternative": "只查看 about cached status，不执行升级。",
+        },
+        "provider_remove_gate": {
+            "title": "Provider remove legacy gate",
+            "risk_level": "medium",
+            "commands": [webui, f"{command} config provider.remove <provider-id>"],
+            "manual_steps": [
+                "WebUI 当前已提供 typed confirm 草稿删除；优先使用 WebUI 保存预览。",
+                "CLI remove 属于 legacy mutating path，执行前先确认 provider 不再被默认/route/fallback 使用。",
+            ],
+            "writes": ["~/.config/mms/config.toml providers/provider.default", "credentials/model-policy related entries"],
+            "safe_alternative": "WebUI typed confirm -> 生成保存预览 -> confirm save。",
+        },
+    }
+
+
+def _settings_gate_report(action: str, *, write_policy: str = "human_gate", note: str = "", command_name: str = "mms") -> dict[str, Any]:
     mapping_rows = [item for item in _tui_webui_mapping() if item.get("api_action") == action]
+    gate = _settings_gate_catalog(command_name).get(action, {})
+    commands = [item for item in (gate.get("commands") or []) if _safe_text(item)]
     return {
         "ok": True,
         "schema": "mms.setup_web.settings_report.v1",
         "action": action,
+        "title": gate.get("title") or action,
         "write_policy": write_policy,
         "status": "human_gate",
+        "risk_level": gate.get("risk_level") or "high",
+        "requires_human_confirmation": True,
+        "blocked_auto_execute": True,
+        "copyable": bool(commands),
+        "commands": commands,
+        "manual_steps": gate.get("manual_steps") or [],
+        "writes": gate.get("writes") or [],
+        "safe_alternative": gate.get("safe_alternative") or "",
         "note": note or "该 TUI 动作会触发 network/write/OAuth/global-config 风险；WebUI 当前只显示 gate，不会自动执行。",
         "mapping": mapping_rows,
     }
@@ -3999,15 +4285,12 @@ def build_settings_report(
             "note": "WebUI Settings 页可暂存 load_balance profile/default/remove；真正写入仍走保存预览与 confirm。",
         }
     if action == "guard_status":
-        return {
-            "ok": True,
-            "schema": "mms.setup_web.settings_report.v1",
-            "action": action,
-            "write_policy": "manual_cli_human_gate",
-            "status": "human_gate",
-            "commands": [f"{command_name} guard status", f"{command_name} guard accept"],
-            "note": "WebUI 当前只显示 Snapshot Guard gate；accept 会改变 config guard baseline，必须 human double-confirm 后走 CLI。",
-        }
+        return _settings_gate_report(
+            action,
+            write_policy="manual_cli_human_gate",
+            note="WebUI 当前只显示 Snapshot Guard gate；accept 会改变 config guard baseline，必须 human double-confirm 后走 CLI。",
+            command_name=command_name,
+        )
     if action == "language_status":
         return {
             "ok": True,
@@ -4067,7 +4350,7 @@ def build_settings_report(
     }
     if action in gate_actions:
         write_policy, note = gate_actions[action]
-        return _settings_gate_report(action, write_policy=write_policy, note=note)
+        return _settings_gate_report(action, write_policy=write_policy, note=note, command_name=command_name)
     return {
         "ok": False,
         "schema": "mms.setup_web.settings_report.v1",
@@ -4475,6 +4758,107 @@ _HTML_PAGE = r"""<!doctype html>
       background: var(--fg-soft);
       color: var(--muted);
       border: 1px dashed color-mix(in oklch, var(--fg) 18%, var(--border));
+    }
+    .gate-report {
+      white-space: normal;
+      font-family: var(--font-body);
+      display: grid;
+      gap: 14px;
+    }
+    .gate-plate {
+      border: 1.5px solid color-mix(in oklch, var(--danger) 38%, var(--border));
+      background:
+        radial-gradient(circle at 0 0, color-mix(in oklch, var(--danger) 14%, transparent), transparent 34%),
+        color-mix(in oklch, var(--surface) 92%, var(--danger-soft));
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .gate-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      border-bottom: 1px solid color-mix(in oklch, var(--danger) 28%, var(--border));
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+    .gate-head h4 {
+      font-size: clamp(18px, 3vw, 28px);
+      line-height: 1;
+      letter-spacing: -.04em;
+      text-transform: uppercase;
+    }
+    .gate-head p {
+      margin-top: 6px;
+      max-width: 740px;
+      color: var(--muted);
+    }
+    .gate-risk {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      padding: 6px 8px;
+      white-space: nowrap;
+    }
+    .gate-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .gate-box {
+      border: 1px solid var(--border);
+      background: color-mix(in oklch, var(--bg) 72%, var(--surface));
+      border-radius: var(--radius);
+      padding: 12px;
+      min-width: 0;
+    }
+    .gate-box h5 {
+      margin: 0 0 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .gate-list {
+      margin: 0;
+      padding-left: 18px;
+      color: color-mix(in oklch, var(--fg) 78%, var(--muted));
+    }
+    .gate-list li { margin: 5px 0; }
+    .gate-command-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      margin: 7px 0;
+      padding: 8px;
+      border: 1px solid color-mix(in oklch, var(--fg) 16%, var(--border));
+      background: var(--surface);
+      border-radius: 8px;
+    }
+    .gate-command-row code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .copy-gate-command {
+      border-radius: 0;
+      padding: 6px 9px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .gate-raw summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      margin-top: 8px;
     }
     .delete-zone {
       border: 1.5px dashed color-mix(in oklch, var(--danger) 42%, var(--border));
@@ -5041,7 +5425,7 @@ _HTML_PAGE = r"""<!doctype html>
       }
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
       .oc-summary { grid-template-columns: 1fr 1fr; }
-      .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head { grid-template-columns: 1fr; }
+      .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid { grid-template-columns: 1fr; }
       .filterbar.compact { justify-content: flex-start; }
       .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
       .settings-stamp { white-space: normal; }
@@ -5285,11 +5669,11 @@ _HTML_PAGE = r"""<!doctype html>
         </div>
         <div class="card span5">
           <h3>维护动作</h3>
-          <p class="muted">按钮只返回 JSON report；真正写入仍走保存页的 diff + confirm，或后续单独 HumanGate flow。</p>
+          <p class="muted">按钮会显示 read-only report 或 Human Gate 操作卡；真实写入仍走保存页 diff + confirm，或人工复制命令执行。</p>
           <div id="maintenanceActions" class="btns"></div>
         </div>
         <div class="card span7">
-          <h3>Report</h3>
+          <h3>Report / Human Gate</h3>
           <div class="result" id="settingsReport">选择一个维护动作查看结果</div>
         </div>
       </div>
@@ -5360,7 +5744,7 @@ const sections=[
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let touchedLoadBalance=false;
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let touchedLoadBalance=false; let lastGateCommands=[];
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -5465,7 +5849,14 @@ function mappingStatusClass(status){return 'status-'+String(status||'missing').r
 function mappingActionButton(row){const parts=[];if(row.webui_section_id){parts.push(`<button class="ghost mapping-action" data-section-jump="${escapeHtml(row.webui_section_id)}">打开</button>`)}if(row.api_action){const label=row.status==='human_gate'?'Gate':(row.status==='missing'?'Gap':'Report');parts.push(`<button class="ghost mapping-action" data-settings-action="${escapeHtml(row.api_action)}">${label}</button>`)}return parts.join(' ')}
 function renderMappingFilters(mapping){const box=$('mappingFilters');if(!box)return;const count=s=>mapping.filter(row=>s==='all'||row.status===s).length;const filters=[['all','全部'],['native','Native'],['report','Report'],['draft_review','Draft'],['human_gate','Gate'],['missing','Missing']];box.innerHTML=filters.map(([id,label])=>`<button class="${settingsMappingFilter===id?'active':''}" data-map-filter="${id}">${label} ${count(id)}</button>`).join('');document.querySelectorAll('[data-map-filter]').forEach(btn=>{btn.onclick=()=>{settingsMappingFilter=btn.dataset.mapFilter;renderSettings()}})}
 function renderTuiMapping(mapping){renderMappingFilters(mapping);const rows=(settingsMappingFilter==='all'?mapping:mapping.filter(row=>row.status===settingsMappingFilter));const body=rows.length?rows.map(row=>`<tr><td class="mono">${escapeHtml(row.tui_area)}<br><span class="muted">${escapeHtml(row.tui_action_id)}</span></td><td>${escapeHtml(row.tui_label)}</td><td>${escapeHtml(row.webui_section)}<br><span class="muted">${escapeHtml(row.webui_control)}</span></td><td><span class="tag ${mappingStatusClass(row.status)}">${mappingStatusLabel(row.status)}</span><br><span class="muted">${escapeHtml(row.write_policy)}</span></td><td class="default-route">${escapeHtml(row.verification||'-')}<br><span class="muted">${escapeHtml(row.manual_check||'')}</span></td><td>${mappingActionButton(row)}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-row">当前筛选没有条目</td></tr>';$('tuiMappingTable').innerHTML=`<thead><tr><th>TUI area/action</th><th>TUI label</th><th>WebUI 落点</th><th>Status</th><th>验证 / check</th><th>操作</th></tr></thead><tbody>${body}</tbody>`}
-function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;$('settingsReport').textContent='读取中...';const data=await api('/api/settings/report',{action});$('settingsReport').textContent=JSON.stringify(data,null,2);toast(data.ok?`${btn.textContent} report 已刷新`:`${btn.textContent} report 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
+function gateArray(items){return Array.isArray(items)?items.filter(x=>String(x??'').trim()).map(x=>String(x)) : []}
+function gateList(items,empty='-'){const rows=gateArray(items);return rows.length?`<ol class="gate-list">${rows.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ol>`:`<p class="muted">${escapeHtml(empty)}</p>`}
+function gateCommands(commands){lastGateCommands=gateArray(commands);if(!lastGateCommands.length)return '<p class="muted">没有安全 one-shot CLI；按人工步骤处理。</p>';return lastGateCommands.map((cmd,i)=>`<div class="gate-command-row"><code>${escapeHtml(cmd)}</code><button class="ghost copy-gate-command" data-copy-gate-command="${i}">Copy</button></div>`).join('')}
+async function copyGateCommand(i){const cmd=lastGateCommands[Number(i)]||'';if(!cmd){toast('没有可复制命令');return}try{await navigator.clipboard.writeText(cmd);toast('已复制 Human Gate 命令')}catch(_err){$('settingsReport').insertAdjacentHTML('afterbegin',`<div class="gate-box"><h5>Clipboard fallback</h5><p class="mono">${escapeHtml(cmd)}</p></div>`);toast('无法访问剪贴板，命令已显示')}}
+function bindGateCopyButtons(){document.querySelectorAll('[data-copy-gate-command]').forEach(btn=>{btn.onclick=()=>copyGateCommand(btn.dataset.copyGateCommand)})}
+function renderGateReport(data){const mapping=data.mapping||[];const mappingHtml=mapping.length?mapping.map(row=>`<span class="chip">${escapeHtml(row.tui_area||'-')} / ${escapeHtml(row.tui_label||row.tui_action_id||'-')}</span>`).join(''):'<span class="chip">无 mapping row</span>';const writes=gateArray(data.writes);const writeText=writes.length?writes:['无直接写入；仍保留人工确认。'];$('settingsReport').innerHTML=`<div class="gate-report"><div class="gate-plate"><div class="gate-head"><div><h4>${escapeHtml(data.title||data.action||'Human Gate')}</h4><p>${escapeHtml(data.note||'该动作需要人工确认，WebUI 不自动执行。')}</p></div><div class="gate-risk">${escapeHtml(data.risk_level||'high')} / blocked</div></div><div class="chips"><span class="chip">${escapeHtml(data.write_policy||'human_gate')}</span><span class="chip">${data.requires_human_confirmation?'requires human':'read-only'}</span><span class="chip">${data.blocked_auto_execute?'auto execute blocked':'auto allowed'}</span><span class="chip">${data.copyable?'copyable command':'manual only'}</span></div></div><div class="gate-grid"><div class="gate-box"><h5>Copyable commands</h5>${gateCommands(data.commands)}</div><div class="gate-box"><h5>Manual steps</h5>${gateList(data.manual_steps,'按项目 human gate 规则人工处理。')}</div><div class="gate-box"><h5>Write scope</h5>${gateList(writeText)}</div><div class="gate-box"><h5>Safer WebUI path</h5><p>${escapeHtml(data.safe_alternative||'使用 read-only report 或保存页 diff preview。')}</p><div class="chips">${mappingHtml}</div></div></div><details class="gate-raw"><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`;bindGateCopyButtons()}
+function renderSettingsReport(data){if(data&&(data.blocked_auto_execute||data.requires_human_confirmation||data.status==='human_gate')){renderGateReport(data);return}$('settingsReport').textContent=JSON.stringify(data,null,2)}
+function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;$('settingsReport').textContent='读取中...';const data=await api('/api/settings/report',{action});renderSettingsReport(data);toast(data.ok?`${btn.textContent} report 已刷新`:`${btn.textContent} report 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
 function syncUiSettings(){state.ui=state.ui||{};state.ui.language=$('uiLanguage')?.value||'zh'}
 function renderUiSettings(mapping){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')};const counts=(state.tui_webui_mapping_summary||{}).counts||{};const missingRows=(mapping||[]).filter(row=>row.status==='missing').map(row=>row.tui_label);if($('settingsGapSummary')){$('settingsGapSummary').innerHTML=`<span class="chip">native ${counts.native||0}</span><span class="chip">report ${counts.report||0}</span><span class="chip">draft ${counts.draft_review||0}</span><span class="chip">gate ${counts.human_gate||0}</span><span class="chip">missing ${counts.missing||0}</span>${missingRows.length?`<span class="chip">仍缺：${escapeHtml(missingRows.join(' / '))}</span>`:'<span class="chip">无 missing 行</span>'}`}}
 function renderEntryAudit(mapping){const box=$('entryAudit');if(!box)return;const specs=[['Main / O 接入','O 接入','add/manage channel'],['Main / P 通道','P 通道','provider browse'],['Main / L 负载','L 负载','load balance'],['Settings','S 设置','settings menu']];box.innerHTML=specs.map(([prefix,label,desc])=>{const rows=(mapping||[]).filter(row=>String(row.tui_area||'').startsWith(prefix));const counts=rows.reduce((acc,row)=>{acc[row.status]=(acc[row.status]||0)+1;return acc},{});const chips=['native','report','draft_review','human_gate','missing'].filter(k=>counts[k]).map(k=>`<span class="chip">${mappingStatusLabel(k)} ${counts[k]}</span>`).join('')||'<span class="chip">无映射</span>';return `<div class="entry-audit-item"><b>${escapeHtml(label)}</b><small>${escapeHtml(desc)}</small><div class="chips">${chips}</div></div>`}).join('')}
