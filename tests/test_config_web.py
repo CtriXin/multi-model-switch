@@ -465,6 +465,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "['settings','能力整合','accounts / reports / parity']" in html
     assert 'data-section="settings"' in html
     assert "Settings / Channel 能力" in html
+    assert "settingsCommand" in html
+    assert "MMX / WEBUI TAKEOVER MAP" in html
+    assert "Settings moved out of TUI" in html
+    assert "当前配置没有 OAuth account" in html
+    assert "function renderSettingsCommand" in html
     assert "accountTable" in html
     assert "function syncAccounts()" in html
     assert "data-account-default" in html

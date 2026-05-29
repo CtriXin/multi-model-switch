@@ -3193,7 +3193,7 @@ _HTML_PAGE = r"""<!doctype html>
       --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.05), 0 2px 4px -2px oklch(0% 0 0 / 0.04);
       --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.05), 0 4px 6px -4px oklch(0% 0 0 / 0.03);
 
-      --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-body: 'Geist', 'Satoshi', 'Avenir Next', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
       --radius:    10px;
@@ -3360,6 +3360,127 @@ _HTML_PAGE = r"""<!doctype html>
     }
     .card:hover {
       border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
+    }
+
+    /* ===== Settings mission control ===== */
+    .settings-command {
+      border: 1.5px solid color-mix(in oklch, var(--fg) 22%, var(--border));
+      background:
+        linear-gradient(90deg, color-mix(in oklch, var(--fg) 4%, transparent) 1px, transparent 1px),
+        linear-gradient(0deg, color-mix(in oklch, var(--fg) 4%, transparent) 1px, transparent 1px),
+        color-mix(in oklch, var(--surface) 86%, var(--bg));
+      background-size: 26px 26px;
+      border-radius: 0;
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: 0 16px 36px color-mix(in oklch, var(--fg) 10%, transparent);
+    }
+    .settings-command-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: start;
+      border-bottom: 1.5px solid var(--fg);
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+    }
+    .settings-kicker {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--danger);
+      margin-bottom: 6px;
+    }
+    .settings-command h3 {
+      font-size: clamp(28px, 4.5vw, 56px);
+      line-height: .92;
+      letter-spacing: -.06em;
+      text-transform: uppercase;
+      max-width: 820px;
+      margin: 0;
+    }
+    .settings-command p {
+      max-width: 760px;
+      color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+    }
+    .settings-stamp {
+      align-self: start;
+      border: 1.5px solid var(--danger);
+      color: var(--danger);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .08em;
+      padding: 8px 10px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .settings-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--fg);
+      margin-bottom: 14px;
+    }
+    .settings-metric {
+      background: var(--surface);
+      padding: 14px;
+      min-height: 92px;
+    }
+    .settings-metric span {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .settings-metric strong {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: clamp(24px, 4vw, 44px);
+      line-height: 1;
+      margin: 10px 0 4px;
+      font-variant-numeric: tabular-nums;
+    }
+    .settings-metric em {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-style: normal;
+    }
+    .settings-route {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .settings-route-card {
+      border-left: 3px solid var(--fg);
+      background: color-mix(in oklch, var(--fg) 5%, transparent);
+      padding: 12px;
+    }
+    .settings-route-card.locked { border-left-color: var(--danger); }
+    .settings-route-card.ready { border-left-color: var(--accent); }
+    .settings-route-card.report { border-left-color: var(--warn); }
+    .settings-route-card b {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .settings-route-card small {
+      display: block;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .settings-empty-note {
+      border: 1px dashed color-mix(in oklch, var(--fg) 26%, var(--border));
+      background: color-mix(in oklch, var(--warn) 9%, transparent);
+      padding: 12px;
+      margin: 12px 0 0;
+      color: color-mix(in oklch, var(--fg) 76%, var(--muted));
     }
 
     /* ===== Grid system ===== */
@@ -3920,6 +4041,9 @@ _HTML_PAGE = r"""<!doctype html>
       }
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
       .oc-summary { grid-template-columns: 1fr 1fr; }
+      .settings-command-head, .settings-metrics, .settings-route { grid-template-columns: 1fr; }
+      .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
+      .settings-stamp { white-space: normal; }
       .panel { padding: 20px; }
     }
   </style>
@@ -4101,6 +4225,7 @@ _HTML_PAGE = r"""<!doctype html>
     <section class="panel" data-section="settings">
       <h2>Settings / Channel 能力</h2>
       <p>这里把 TUI settings/channel 的剩余能力拉到 WebUI：安全项直接展示或调用 read-only report；会写真实账号、Snapshot Guard accept、login/delete 的动作先保持 human-gated，不在页面里静默执行。</p>
+      <div id="settingsCommand" class="settings-command"></div>
       <div class="grid">
         <div class="card span12">
           <h3>账号 / OAuth 通道</h3>
@@ -4282,7 +4407,8 @@ function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function accountLocked(a){return !!a.is_claude_human_only}
 function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100)});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
-function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${escapeHtml(a.timezone||'-')}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="13" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>auth</th><th>home</th><th>proxy</th><th>timezone</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority]').forEach(el=>{el.oninput=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')}});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});const coverage=state.webui_capability_coverage||[];$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;const actions=[['coverage','覆盖矩阵'],['accounts','账号摘要'],['model_source_status','真源状态'],['consumer_bundle_status','Bundle'],['config_v2_promotion_plan','Promotion plan'],['config_v2_release_readiness','Readiness'],['preview_doctor','Preview doctor'],['registry_status','Registry status'],['about','About'],['rescue_events','Rescue events']];$('maintenanceActions').innerHTML=actions.map(([id,label])=>`<button class="ghost" data-settings-action="${id}">${label}</button>`).join('');document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;$('settingsReport').textContent='读取中...';const data=await api('/api/settings/report',{action});$('settingsReport').textContent=JSON.stringify(data,null,2);toast(data.ok?`${btn.textContent} report 已刷新`:`${btn.textContent} report 失败`)}})}
+function renderSettingsCommand(accounts,coverage){const board=$('settingsCommand');if(!board)return;const policy=state.account_write_policy||{};const editable=accounts.filter(a=>!accountLocked(a)).length;const locked=accounts.filter(a=>accountLocked(a)).length;const nativeCount=coverage.filter(r=>String(r.webui||'').includes('native')).length;const reportCount=coverage.filter(r=>String(r.webui||'').includes('read_only')||String(r.webui||'').includes('report')).length;const gateCount=coverage.filter(r=>String(r.webui||'').includes('human_gate')||String(r.webui||'').includes('manual_cli')).length;const empty=accounts.length?'':`<div class="settings-empty-note"><strong>当前配置没有 OAuth account。</strong> 这也是你刚才看不出变化的原因：account draft/default 编辑器只会在存在 account 时出现；本页现在先把能力边界、TUI 降级路径和 human gate 明确展示出来。</div>`;board.innerHTML=`<div class="settings-command-head"><div><div class="settings-kicker">MMX / WEBUI TAKEOVER MAP</div><h3>Settings moved out of TUI</h3><p>这块现在是 settings/channel 迁移指挥台：能在 WebUI 里安全操作的直接显形；会碰真实账号、Claude config 或 Snapshot Guard accept 的动作必须留在 human gate。</p></div><div class="settings-stamp">${escapeHtml(policy.claude||'human_only_locked')}</div></div><div class="settings-metrics"><div class="settings-metric"><span>accounts loaded</span><strong>${accounts.length}</strong><em>${editable} editable / ${locked} Claude locked</em></div><div class="settings-metric"><span>native webui</span><strong>${nativeCount}</strong><em>channel + runtime flows</em></div><div class="settings-metric"><span>report-only</span><strong>${reportCount}</strong><em>safe maintenance surface</em></div><div class="settings-metric"><span>human gates</span><strong>${gateCount}</strong><em>no silent real-config writes</em></div></div><div class="settings-route"><div class="settings-route-card ready"><b>01 / account drafts</b><small>非 Claude account 的 name、enabled、priority、default 会进入保存预览，不会绕过 diff。</small></div><div class="settings-route-card locked"><b>02 / Claude lock</b><small>Claude account default、home_dir、proxy、login/remove 保持 human-only。</small></div><div class="settings-route-card report"><b>03 / reports</b><small>coverage、registry、about、rescue events 只返回 read-only JSON report。</small></div><div class="settings-route-card"><b>04 / TUI downgrade</b><small>WebUI 覆盖后，TUI 退成 emergency/read-only，而不是主配置面。</small></div></div>${empty}`}
+function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];renderSettingsCommand(accounts,coverage);const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${escapeHtml(a.timezone||'-')}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="13" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>auth</th><th>home</th><th>proxy</th><th>timezone</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority]').forEach(el=>{el.oninput=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')}});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;const actions=[['coverage','覆盖矩阵'],['accounts','账号摘要'],['model_source_status','真源状态'],['consumer_bundle_status','Bundle'],['config_v2_promotion_plan','Promotion plan'],['config_v2_release_readiness','Readiness'],['preview_doctor','Preview doctor'],['registry_status','Registry status'],['about','About'],['rescue_events','Rescue events']];$('maintenanceActions').innerHTML=actions.map(([id,label])=>`<button class="ghost" data-settings-action="${id}">${label}</button>`).join('');document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;$('settingsReport').textContent='读取中...';const data=await api('/api/settings/report',{action});$('settingsReport').textContent=JSON.stringify(data,null,2);toast(data.ok?`${btn.textContent} report 已刷新`:`${btn.textContent} report 失败`)}})}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
