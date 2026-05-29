@@ -3763,6 +3763,52 @@ def test_canonicalize_domestic_anthropic_history_coalesces_split_mimo_tool_histo
     ]
 
 
+def test_restore_session_domestic_reasoning_roundtrip_rehydrates_latest_kimi_tool_group():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "/work previous round"},
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "older reasoning"}],
+            },
+            {"role": "assistant", "content": [{"type": "text", "text": "older reply"}]},
+            {"role": "user", "content": "/work current round"},
+            {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "ok", "is_error": False}],
+            },
+        ]
+    }
+
+    restored = mms_bridge._restore_session_domestic_reasoning_roundtrip(
+        payload,
+        "kimi-k2.6",
+        "carry this forward",
+    )
+
+    assert restored is True
+    assert payload["messages"][4]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][4]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert "reasoning_content" not in payload["messages"][5]
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "kimi-k2.6")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user", "assistant", "user"]
+    assert [block["type"] for block in payload["messages"][3]["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+    ]
+    assert payload["messages"][3]["reasoning_content"] == "carry this forward"
+
+
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
     import mms_bridge
 
@@ -5290,6 +5336,140 @@ def test_gateway_bridge_preserves_qwen_anthropic_cache_control(monkeypatch):
     assert captured["url"] == "https://relay.example.com/v1/messages"
     assert captured["json"]["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert captured["json"]["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_gateway_bridge_stream_restores_kimi_reasoning_for_tool_continuation(monkeypatch):
+    import mms_bridge
+
+    requests = []
+
+    def build_sse_lines(message):
+        body = mms_bridge._json_resp_to_sse(json.dumps(message).encode("utf-8")).decode("utf-8")
+        return body.splitlines()
+
+    first_message = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "kimi-k2.6",
+        "content": [
+            {"type": "thinking", "thinking": "carry this forward"},
+            {"type": "text", "text": "I will call tools now."},
+            {"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}},
+        ],
+        "stop_reason": "tool_use",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    second_message = {
+        "id": "msg_2",
+        "type": "message",
+        "role": "assistant",
+        "model": "kimi-k2.6",
+        "content": [{"type": "text", "text": "done"}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+    responses = [
+        FakeResponse(build_sse_lines(first_message)),
+        FakeResponse(build_sse_lines(second_message)),
+    ]
+
+    def fake_stream(method, url, **kwargs):
+        requests.append({"url": url, "json": json.loads(json.dumps(kwargs.get("json") or {}))})
+        return responses.pop(0)
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+        route_status_paths=[],
+        advertised_models=["kimi-k2.6"],
+        heavy_model="kimi-k2.6",
+        medium_model=None,
+        light_model=None,
+        slot_configs={},
+        openai_url=None,
+        speed_scope=None,
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        native_fallback_routes=[],
+        vision_sidecar={},
+        _last_reasoning_content="",
+    )
+
+    def make_handler(raw_body):
+        handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+        handler.path = "/v1/messages?beta=true"
+        handler.headers = {
+            "content-length": str(len(raw_body)),
+            "x-api-key": "bridge-token",
+        }
+        handler.rfile = io.BytesIO(raw_body)
+        handler.wfile = io.BytesIO()
+        handler.server = server
+        handler.send_response = lambda *_args, **_kwargs: None
+        handler.send_header = lambda *_args, **_kwargs: None
+        handler.end_headers = lambda: None
+        return handler
+
+    first_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    make_handler(first_body).do_POST()
+
+    assert server._last_reasoning_content == "carry this forward"
+
+    second_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "phase: INTAKE", "is_error": False}]},
+            ],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    make_handler(second_body).do_POST()
+
+    forwarded = requests[1]["json"]["messages"]
+    assert [message["role"] for message in forwarded] == ["user", "assistant", "user"]
+    assistant_message = forwarded[1]
+    assert assistant_message["reasoning_content"] == "carry this forward"
+    assert [block["type"] for block in assistant_message["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+    ]
 
 
 def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkeypatch):
