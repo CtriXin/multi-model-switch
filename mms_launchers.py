@@ -2709,52 +2709,24 @@ def _merge_claude_permissions(existing):
 
 
 def _hook_command_exists(hook_items, command_path):
-    if not isinstance(hook_items, list):
-        return False
-    for hook in hook_items:
-        if not isinstance(hook, dict):
-            continue
-        if str(hook.get("type") or "").strip() != "command":
-            continue
-        if str(hook.get("command") or "").strip() == command_path:
-            return True
-    return False
+    """Compatibility wrapper for hook command lookup."""
+    from mms_claude_settings import hook_command_exists
+
+    return hook_command_exists(hook_items, command_path)
 
 
 def _append_command_hook(hooks_data, event_name, command_path, matcher=None, timeout=None, status_message=None):
-    if not command_path or not os.path.isfile(command_path):
-        return hooks_data
+    """Compatibility wrapper for appending file-backed command hooks."""
+    from mms_claude_settings import append_command_hook
 
-    merged = dict(hooks_data) if isinstance(hooks_data, dict) else {}
-    event_groups = list(merged.get(event_name) or [])
-    hook_payload = {"type": "command", "command": command_path}
-    if timeout is not None:
-        hook_payload["timeout"] = timeout
-    if status_message:
-        hook_payload["statusMessage"] = str(status_message)
-
-    for group in event_groups:
-        if not isinstance(group, dict):
-            continue
-        existing_matcher = str(group.get("matcher") or "").strip() if matcher is not None else ""
-        target_matcher = str(matcher or "").strip()
-        if existing_matcher != target_matcher:
-            continue
-        hook_items = group.get("hooks")
-        if _hook_command_exists(hook_items, command_path):
-            merged[event_name] = event_groups
-            return merged
-        if isinstance(hook_items, list):
-            hook_items.append(dict(hook_payload))
-            merged[event_name] = event_groups
-            return merged
-
-    new_group = {"hooks": [dict(hook_payload)]}
-    if matcher is not None:
-        new_group["matcher"] = matcher
-    event_groups.append(new_group)
-    merged[event_name] = event_groups
-    return merged
+    return append_command_hook(
+        hooks_data,
+        event_name,
+        command_path,
+        matcher=matcher,
+        timeout=timeout,
+        status_message=status_message,
+    )
 
 
 def _append_shell_command_hook(
@@ -2766,40 +2738,17 @@ def _append_shell_command_hook(
     timeout=None,
     status_message=None,
 ):
-    command_text = str(command_text or "").strip()
-    if not command_text:
-        return hooks_data
+    """Compatibility wrapper for appending shell command hooks."""
+    from mms_claude_settings import append_shell_command_hook
 
-    merged = dict(hooks_data) if isinstance(hooks_data, dict) else {}
-    event_groups = list(merged.get(event_name) or [])
-    target_matcher = str(matcher or "").strip()
-    hook_payload = {"type": "command", "command": command_text}
-    if timeout is not None:
-        hook_payload["timeout"] = timeout
-    if status_message:
-        hook_payload["statusMessage"] = str(status_message)
-
-    for group in event_groups:
-        if not isinstance(group, dict):
-            continue
-        existing_matcher = str(group.get("matcher") or "").strip() if matcher is not None else ""
-        if existing_matcher != target_matcher:
-            continue
-        hook_items = group.get("hooks")
-        if _hook_command_exists(hook_items, command_text):
-            merged[event_name] = event_groups
-            return merged
-        if isinstance(hook_items, list):
-            hook_items.append(dict(hook_payload))
-            merged[event_name] = event_groups
-            return merged
-
-    new_group = {"hooks": [dict(hook_payload)]}
-    if matcher is not None:
-        new_group["matcher"] = matcher
-    event_groups.append(new_group)
-    merged[event_name] = event_groups
-    return merged
+    return append_shell_command_hook(
+        hooks_data,
+        event_name,
+        command_text,
+        matcher=matcher,
+        timeout=timeout,
+        status_message=status_message,
+    )
 
 
 def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
@@ -3487,103 +3436,38 @@ def _hook_command_targets_exist(command_text):
 
 
 def _filter_missing_managed_hook_commands(hooks_data):
-    return _filter_hook_commands(
-        hooks_data,
-        lambda command: _is_mms_managed_hook_command(command)
-        and not _hook_command_targets_exist(command),
-    )
+    """Compatibility wrapper for dropping missing managed hook commands."""
+    from mms_claude_settings import filter_missing_managed_hook_commands
+
+    return filter_missing_managed_hook_commands(hooks_data)
 
 
 def _filter_hook_commands(hooks_data, predicate):
-    hooks_data = hooks_data if isinstance(hooks_data, dict) else {}
-    filtered = {}
-    for event_name, groups in hooks_data.items():
-        if not isinstance(groups, list):
-            continue
-        kept_groups = []
-        for group in groups:
-            if not isinstance(group, dict):
-                kept_groups.append(group)
-                continue
-            hook_items = group.get("hooks")
-            if not isinstance(hook_items, list):
-                kept_groups.append(dict(group))
-                continue
-            kept_hooks = []
-            for hook in hook_items:
-                if not isinstance(hook, dict):
-                    kept_hooks.append(hook)
-                    continue
-                if (
-                    str(hook.get("type") or "").strip() == "command"
-                    and predicate(str(hook.get("command") or ""))
-                ):
-                    continue
-                kept_hooks.append(dict(hook))
-            if not kept_hooks and hook_items:
-                continue
-            next_group = dict(group)
-            next_group["hooks"] = kept_hooks
-            kept_groups.append(next_group)
-        if kept_groups:
-            filtered[event_name] = kept_groups
-    return filtered
+    """Compatibility wrapper for filtering hook commands."""
+    from mms_claude_settings import filter_hook_commands
+
+    return filter_hook_commands(hooks_data, predicate)
 
 
 def _normalize_session_surface_disabled(disabled_session_surfaces):
-    disabled_session_surfaces = disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
-    normalized = {"mcp": set(), "skills": set(), "hooks": set()}
-    aliases = {
-        "mcp": "mcp",
-        "mcps": "mcp",
-        "mcp_servers": "mcp",
-        "skills": "skills",
-        "skill": "skills",
-        "hooks": "hooks",
-        "hook": "hooks",
-    }
-    for raw_key, raw_values in disabled_session_surfaces.items():
-        key = aliases.get(str(raw_key or "").strip().lower())
-        if not key:
-            continue
-        values = raw_values
-        if isinstance(values, str):
-            values = [values]
-        if not isinstance(values, (list, tuple, set)):
-            continue
-        for item in values:
-            value = str(item or "").strip()
-            if not value:
-                continue
-            if key == "hooks":
-                value = _normalize_hook_command(value)
-            normalized[key].add(value)
-    return normalized
+    """Compatibility wrapper for disabled session-surface normalization."""
+    from mms_claude_settings import normalize_session_surface_disabled
+
+    return normalize_session_surface_disabled(disabled_session_surfaces)
 
 
 def _session_surface_disabled(disabled_session_surfaces, surface, value):
-    surface = str(surface or "").strip()
-    value = str(value or "").strip()
-    if not surface or not value:
-        return False
-    disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
-    if surface == "hooks":
-        value = _normalize_hook_command(value)
-    return value in disabled.get(surface, set())
+    """Compatibility wrapper for disabled session-surface lookup."""
+    from mms_claude_settings import session_surface_disabled
+
+    return session_surface_disabled(disabled_session_surfaces, surface, value)
 
 
 def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None):
-    if not isinstance(mcp_servers, dict):
-        return {}
-    disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
-    disabled_names = disabled.get("mcp", set())
-    if not disabled_names:
-        return mcp_servers
-    return {
-        name: spec
-        for name, spec in mcp_servers.items()
-        if str(name or "").strip() not in disabled_names
-    }
+    """Compatibility wrapper for disabled MCP filtering."""
+    from mms_claude_settings import filter_mcp_servers_by_disabled
+
+    return filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces)
 
 
 def _mcp_command_has_path(command):
@@ -3593,62 +3477,34 @@ def _mcp_command_has_path(command):
 
 def _normalize_session_mcp_server_spec(name, spec, *, env=None):
     """Make inherited MCP commands session-safe; drop missing local CLIs."""
-    if not isinstance(spec, dict):
-        return None
-    normalized = copy.deepcopy(spec)
-    url = normalized.get("url")
-    if isinstance(url, str) and url.strip():
-        return normalized
+    from mms_claude_settings import normalize_session_mcp_server_spec
 
-    command = str(normalized.get("command") or "").strip()
-    if not command:
-        return None
-    if _mcp_command_has_path(command):
-        if os.path.isabs(command) and (not os.path.isfile(command) or not os.access(command, os.X_OK)):
-            return None
-        normalized["command"] = command
-        return normalized
-
-    resolved = _resolve_real_home_command_path(command, env)
-    if not resolved:
-        return None
-    normalized["command"] = resolved
-    return normalized
+    return normalize_session_mcp_server_spec(name, spec, env=env)
 
 
 def _normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=None, env=None):
-    filtered = _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces)
-    normalized = {}
-    for name, spec in filtered.items():
-        key = str(name or "").strip()
-        if not key:
-            continue
-        safe_spec = _normalize_session_mcp_server_spec(key, spec, env=env)
-        if safe_spec:
-            normalized[key] = safe_spec
-    return normalized
+    """Compatibility wrapper for session MCP normalization."""
+    from mms_claude_settings import normalize_session_mcp_servers
 
-
-def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
-    if not isinstance(hooks_data, dict):
-        return {}
-    disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
-    disabled_commands = disabled.get("hooks", set())
-    if "xmem" in disabled.get("skills", set()):
-        disabled_commands = set(disabled_commands)
-        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_START_HOOK))
-        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_END_HOOK))
-        disabled_commands.add(_normalize_hook_command(_XMEM_GATEWAY_HOOK))
-    if not disabled_commands:
-        return hooks_data
-    return _filter_hook_commands(
-        hooks_data,
-        lambda command: _normalize_hook_command(command) in disabled_commands,
+    return normalize_session_mcp_servers(
+        mcp_servers,
+        disabled_session_surfaces=disabled_session_surfaces,
+        env=env,
     )
 
 
+def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
+    """Compatibility wrapper for disabled hook filtering."""
+    from mms_claude_settings import filter_hooks_by_disabled
+
+    return filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
+
+
 def _session_skill_disabled(disabled_session_surfaces, skill_name):
-    return _session_surface_disabled(disabled_session_surfaces, "skills", skill_name)
+    """Compatibility wrapper for disabled skill lookup."""
+    from mms_claude_settings import session_skill_disabled
+
+    return session_skill_disabled(disabled_session_surfaces, skill_name)
 
 
 def _caveman_claude_activate_command(caveman_root):

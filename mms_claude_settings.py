@@ -160,6 +160,279 @@ def merge_claude_permissions(existing):
     return base
 
 
+def hook_command_exists(hook_items, command_path):
+    if not isinstance(hook_items, list):
+        return False
+    for hook in hook_items:
+        if not isinstance(hook, dict):
+            continue
+        if str(hook.get("type") or "").strip() != "command":
+            continue
+        if str(hook.get("command") or "").strip() == command_path:
+            return True
+    return False
+
+
+def append_command_hook(hooks_data, event_name, command_path, matcher=None, timeout=None, status_message=None):
+    import mms_launchers as _launchers
+
+    if not command_path or not os.path.isfile(command_path):
+        return hooks_data
+
+    merged = dict(hooks_data) if isinstance(hooks_data, dict) else {}
+    event_groups = list(merged.get(event_name) or [])
+    hook_payload = {"type": "command", "command": command_path}
+    if timeout is not None:
+        hook_payload["timeout"] = timeout
+    if status_message:
+        hook_payload["statusMessage"] = str(status_message)
+
+    for group in event_groups:
+        if not isinstance(group, dict):
+            continue
+        existing_matcher = str(group.get("matcher") or "").strip() if matcher is not None else ""
+        target_matcher = str(matcher or "").strip()
+        if existing_matcher != target_matcher:
+            continue
+        hook_items = group.get("hooks")
+        if _launchers._hook_command_exists(hook_items, command_path):
+            merged[event_name] = event_groups
+            return merged
+        if isinstance(hook_items, list):
+            hook_items.append(dict(hook_payload))
+            merged[event_name] = event_groups
+            return merged
+
+    new_group = {"hooks": [dict(hook_payload)]}
+    if matcher is not None:
+        new_group["matcher"] = matcher
+    event_groups.append(new_group)
+    merged[event_name] = event_groups
+    return merged
+
+
+def append_shell_command_hook(
+    hooks_data,
+    event_name,
+    command_text,
+    *,
+    matcher=None,
+    timeout=None,
+    status_message=None,
+):
+    import mms_launchers as _launchers
+
+    command_text = str(command_text or "").strip()
+    if not command_text:
+        return hooks_data
+
+    merged = dict(hooks_data) if isinstance(hooks_data, dict) else {}
+    event_groups = list(merged.get(event_name) or [])
+    target_matcher = str(matcher or "").strip()
+    hook_payload = {"type": "command", "command": command_text}
+    if timeout is not None:
+        hook_payload["timeout"] = timeout
+    if status_message:
+        hook_payload["statusMessage"] = str(status_message)
+
+    for group in event_groups:
+        if not isinstance(group, dict):
+            continue
+        existing_matcher = str(group.get("matcher") or "").strip() if matcher is not None else ""
+        if existing_matcher != target_matcher:
+            continue
+        hook_items = group.get("hooks")
+        if _launchers._hook_command_exists(hook_items, command_text):
+            merged[event_name] = event_groups
+            return merged
+        if isinstance(hook_items, list):
+            hook_items.append(dict(hook_payload))
+            merged[event_name] = event_groups
+            return merged
+
+    new_group = {"hooks": [dict(hook_payload)]}
+    if matcher is not None:
+        new_group["matcher"] = matcher
+    event_groups.append(new_group)
+    merged[event_name] = event_groups
+    return merged
+
+
+def filter_hook_commands(hooks_data, predicate):
+    hooks_data = hooks_data if isinstance(hooks_data, dict) else {}
+    filtered = {}
+    for event_name, groups in hooks_data.items():
+        if not isinstance(groups, list):
+            continue
+        kept_groups = []
+        for group in groups:
+            if not isinstance(group, dict):
+                kept_groups.append(group)
+                continue
+            hook_items = group.get("hooks")
+            if not isinstance(hook_items, list):
+                kept_groups.append(dict(group))
+                continue
+            kept_hooks = []
+            for hook in hook_items:
+                if not isinstance(hook, dict):
+                    kept_hooks.append(hook)
+                    continue
+                if (
+                    str(hook.get("type") or "").strip() == "command"
+                    and predicate(str(hook.get("command") or ""))
+                ):
+                    continue
+                kept_hooks.append(dict(hook))
+            if not kept_hooks and hook_items:
+                continue
+            next_group = dict(group)
+            next_group["hooks"] = kept_hooks
+            kept_groups.append(next_group)
+        if kept_groups:
+            filtered[event_name] = kept_groups
+    return filtered
+
+
+def filter_missing_managed_hook_commands(hooks_data):
+    import mms_launchers as _launchers
+
+    return _launchers._filter_hook_commands(
+        hooks_data,
+        lambda command: _launchers._is_mms_managed_hook_command(command)
+        and not _launchers._hook_command_targets_exist(command),
+    )
+
+
+def normalize_session_surface_disabled(disabled_session_surfaces):
+    import mms_launchers as _launchers
+
+    disabled_session_surfaces = disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
+    normalized = {"mcp": set(), "skills": set(), "hooks": set()}
+    aliases = {
+        "mcp": "mcp",
+        "mcps": "mcp",
+        "mcp_servers": "mcp",
+        "skills": "skills",
+        "skill": "skills",
+        "hooks": "hooks",
+        "hook": "hooks",
+    }
+    for raw_key, raw_values in disabled_session_surfaces.items():
+        key = aliases.get(str(raw_key or "").strip().lower())
+        if not key:
+            continue
+        values = raw_values
+        if isinstance(values, str):
+            values = [values]
+        if not isinstance(values, (list, tuple, set)):
+            continue
+        for item in values:
+            value = str(item or "").strip()
+            if not value:
+                continue
+            if key == "hooks":
+                value = _launchers._normalize_hook_command(value)
+            normalized[key].add(value)
+    return normalized
+
+
+def session_surface_disabled(disabled_session_surfaces, surface, value):
+    import mms_launchers as _launchers
+
+    surface = str(surface or "").strip()
+    value = str(value or "").strip()
+    if not surface or not value:
+        return False
+    disabled = _launchers._normalize_session_surface_disabled(disabled_session_surfaces)
+    if surface == "hooks":
+        value = _launchers._normalize_hook_command(value)
+    return value in disabled.get(surface, set())
+
+
+def filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None):
+    import mms_launchers as _launchers
+
+    if not isinstance(mcp_servers, dict):
+        return {}
+    disabled = _launchers._normalize_session_surface_disabled(disabled_session_surfaces)
+    disabled_names = disabled.get("mcp", set())
+    if not disabled_names:
+        return mcp_servers
+    return {
+        name: spec
+        for name, spec in mcp_servers.items()
+        if str(name or "").strip() not in disabled_names
+    }
+
+
+def normalize_session_mcp_server_spec(name, spec, *, env=None):
+    import mms_launchers as _launchers
+
+    if not isinstance(spec, dict):
+        return None
+    normalized = copy.deepcopy(spec)
+    url = normalized.get("url")
+    if isinstance(url, str) and url.strip():
+        return normalized
+
+    command = str(normalized.get("command") or "").strip()
+    if not command:
+        return None
+    if _launchers._mcp_command_has_path(command):
+        if os.path.isabs(command) and (not os.path.isfile(command) or not os.access(command, os.X_OK)):
+            return None
+        normalized["command"] = command
+        return normalized
+
+    resolved = _launchers._resolve_real_home_command_path(command, env)
+    if not resolved:
+        return None
+    normalized["command"] = resolved
+    return normalized
+
+
+def normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=None, env=None):
+    import mms_launchers as _launchers
+
+    filtered = _launchers._filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces)
+    normalized = {}
+    for name, spec in filtered.items():
+        key = str(name or "").strip()
+        if not key:
+            continue
+        safe_spec = _launchers._normalize_session_mcp_server_spec(key, spec, env=env)
+        if safe_spec:
+            normalized[key] = safe_spec
+    return normalized
+
+
+def filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
+    import mms_launchers as _launchers
+
+    if not isinstance(hooks_data, dict):
+        return {}
+    disabled = _launchers._normalize_session_surface_disabled(disabled_session_surfaces)
+    disabled_commands = disabled.get("hooks", set())
+    if "xmem" in disabled.get("skills", set()):
+        disabled_commands = set(disabled_commands)
+        disabled_commands.add(_launchers._normalize_hook_command(_launchers._XMEM_SESSION_START_HOOK))
+        disabled_commands.add(_launchers._normalize_hook_command(_launchers._XMEM_SESSION_END_HOOK))
+        disabled_commands.add(_launchers._normalize_hook_command(_launchers._XMEM_GATEWAY_HOOK))
+    if not disabled_commands:
+        return hooks_data
+    return _launchers._filter_hook_commands(
+        hooks_data,
+        lambda command: _launchers._normalize_hook_command(command) in disabled_commands,
+    )
+
+
+def session_skill_disabled(disabled_session_surfaces, skill_name):
+    import mms_launchers as _launchers
+
+    return _launchers._session_surface_disabled(disabled_session_surfaces, "skills", skill_name)
+
+
 def sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
     import mms_launchers as _launchers
 
