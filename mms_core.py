@@ -5255,20 +5255,6 @@ def _openrouter_extension_provider(cfg, provider_id=""):
     )
 
 
-def _display_openrouter_model_rows(title, rows, *, limit):
-    from mms_command_tools import display_openrouter_model_rows
-
-    _ensure_rich()
-    return display_openrouter_model_rows(title, rows, limit=limit, table_cls=Table, console=console)
-
-
-def _display_openrouter_video_rows(rows, *, limit):
-    from mms_command_tools import display_openrouter_video_rows
-
-    _ensure_rich()
-    return display_openrouter_video_rows(rows, limit=limit, table_cls=Table, console=console)
-
-
 def _display_openrouter_extension_summary(summary, *, provider_label="", limit=12, show_models=False):
     from mms_command_tools import display_openrouter_extension_summary
 
