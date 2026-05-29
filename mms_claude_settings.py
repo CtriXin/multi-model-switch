@@ -11,6 +11,24 @@ import json
 import os
 
 
+def load_real_claude_settings():
+    import mms_launchers as _launchers
+
+    return _launchers._load_claude_settings_from_dir(_launchers._real_user_path(".claude"))
+
+
+def load_claude_settings_from_dir(claude_dir):
+    settings_path = os.path.join(str(claude_dir), "settings.json")
+    if not os.path.exists(settings_path):
+        return {}
+    try:
+        with open(settings_path, encoding="utf-8") as f:
+            loaded = json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
 def load_claude_settings_template(filename):
     template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
     if not os.path.exists(template_path):
@@ -331,6 +349,28 @@ def managed_snapshot_template(previous_snapshot, seed_template, current_settings
     return sanitized_snapshot, _launchers._snapshot_to_template(sanitized_snapshot, seed_template)
 
 
+def load_global_claude_snapshot():
+    import mms_launchers as _launchers
+
+    snapshot_path = _launchers._global_claude_snapshot_path()
+    if not os.path.exists(snapshot_path):
+        return {}
+    try:
+        with open(snapshot_path, encoding="utf-8") as f:
+            loaded = json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def write_global_claude_snapshot(snapshot_data):
+    import mms_launchers as _launchers
+
+    snapshot_path = _launchers._global_claude_snapshot_path()
+    with _launchers.locked_state_file(snapshot_path):
+        _launchers.atomic_write_json(snapshot_path, snapshot_data, mode=0o600)
+
+
 def merge_claude_settings(base_settings, template_settings):
     import mms_launchers as _launchers
 
@@ -454,6 +494,10 @@ def merge_claude_permissions(existing):
     base["deny"] = deny
     base["defaultMode"] = "bypassPermissions"
     return base
+
+
+def strip_agent_im_hooks(hooks_data):
+    return hooks_data if isinstance(hooks_data, dict) else None
 
 
 def hook_command_exists(hook_items, command_path):

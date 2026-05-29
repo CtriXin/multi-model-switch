@@ -2243,21 +2243,17 @@ def _ensure_agent_im():
 
 
 def _load_real_claude_settings():
-    return _load_claude_settings_from_dir(_real_user_path(".claude"))
+    """Compatibility wrapper for reading real Claude settings."""
+    from mms_claude_settings import load_real_claude_settings
+
+    return load_real_claude_settings()
 
 
 def _load_claude_settings_from_dir(claude_dir):
-    import json as _json
+    """Compatibility wrapper for reading Claude settings from a directory."""
+    from mms_claude_settings import load_claude_settings_from_dir
 
-    settings_path = os.path.join(str(claude_dir), "settings.json")
-    if not os.path.exists(settings_path):
-        return {}
-    try:
-        with open(settings_path, encoding="utf-8") as f:
-            loaded = _json.load(f)
-        return loaded if isinstance(loaded, dict) else {}
-    except Exception:
-        return {}
+    return load_claude_settings_from_dir(claude_dir)
 
 
 def _load_claude_settings_template(filename):
@@ -2345,23 +2341,17 @@ def _managed_snapshot_template(previous_snapshot, seed_template, current_setting
 
 
 def _load_global_claude_snapshot():
-    import json as _json
+    """Compatibility wrapper for reading the global Claude managed snapshot."""
+    from mms_claude_settings import load_global_claude_snapshot
 
-    snapshot_path = _global_claude_snapshot_path()
-    if not os.path.exists(snapshot_path):
-        return {}
-    try:
-        with open(snapshot_path, encoding="utf-8") as f:
-            loaded = _json.load(f)
-        return loaded if isinstance(loaded, dict) else {}
-    except Exception:
-        return {}
+    return load_global_claude_snapshot()
 
 
 def _write_global_claude_snapshot(snapshot_data):
-    snapshot_path = _global_claude_snapshot_path()
-    with locked_state_file(snapshot_path):
-        atomic_write_json(snapshot_path, snapshot_data, mode=0o600)
+    """Compatibility wrapper for writing the global Claude managed snapshot."""
+    from mms_claude_settings import write_global_claude_snapshot
+
+    return write_global_claude_snapshot(snapshot_data)
 
 
 def _merge_claude_settings(base_settings, template_settings):
@@ -2458,9 +2448,10 @@ def repair_current_session_claude_settings(session_claude_dir):
 
 
 def _strip_agent_im_hooks(hooks_data):
-    # Inherit hooks from global settings as-is
-    # Users control what's in their ~/.claude/settings.json
-    return hooks_data if isinstance(hooks_data, dict) else None
+    """Compatibility wrapper for inherited Claude hook filtering."""
+    from mms_claude_settings import strip_agent_im_hooks
+
+    return strip_agent_im_hooks(hooks_data)
 
 
 def _merge_claude_hook_groups(existing_groups, template_groups):
