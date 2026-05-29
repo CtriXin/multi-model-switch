@@ -483,7 +483,7 @@ def _preset_has_visible_model_options(preset):
     return _model_info_has_visible_models(_preset_model_info(preset))
 
 
-CLI_NAMES = ["claude", "codex", "opencode", "agy"]
+CLI_NAMES = ["claude", "codex", "opencode", "pi", "agy"]
 CLI_MODEL_FAMILY_HINTS = {}
 
 
@@ -1186,6 +1186,16 @@ def _model_capability_tags(model_name):
         model_context_window=_model_context_window,
         reasoning_model_hints=_REASONING_MODEL_HINTS,
         tool_use_families=_TOOL_USE_FAMILIES,
+        vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
+        vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
+    )
+
+
+def _model_supports_vision(model_name):
+    from mms_command_tools import model_supports_vision
+
+    return model_supports_vision(
+        model_name,
         vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
         vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
     )
@@ -4005,6 +4015,7 @@ def _provider_supports_cli_name(provider, cli_name):
 
 def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
     from mms_command_tools import provider_supports_model_for_cli
+    from mms_launchers import _pi_model_available_for_runtime
 
     return provider_supports_model_for_cli(
         provider,
@@ -4013,6 +4024,7 @@ def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
         model_matches_account_cli=_model_matches_account_cli,
         provider_supports_cli_name=_provider_supports_cli_name,
         bridge_clis_for_model=_bridge_clis_for_model,
+        pi_model_available_for_runtime=_pi_model_available_for_runtime,
     )
 
 
@@ -4028,13 +4040,16 @@ def _provider_candidates(cfg, default_provider, default_models):
     )
 
 
-def _provider_models_for_cli(cli_name, models):
+def _provider_models_for_cli(cli_name, models, provider=None):
     from mms_command_tools import provider_models_for_cli
+    from mms_launchers import _pi_model_available_for_runtime
 
     return provider_models_for_cli(
         cli_name,
         models,
         cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
+        provider=provider,
+        pi_model_available_for_runtime=_pi_model_available_for_runtime,
     )
 
 
@@ -4757,7 +4772,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
     )
 
 
-
 # ── Export command ──────────────────────────────────────
 
 def handle_export(cli_name, provider, apply=False):
@@ -4800,6 +4814,7 @@ def _resolve_preset_export_runtime(cfg, preset, provider_override=None, *, stder
         ensure_provider_credentials=ensure_provider_credentials,
         validate_provider_for_cli=validate_provider_for_cli,
         get_export_env=get_export_env,
+        preset_model_info=_preset_model_info,
     )
 
 
@@ -6528,7 +6543,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="CLI 名称(claude/codex/opencode/agy)")
+                        help="CLI 名称(claude/codex/opencode/pi/agy)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
                         help="一次性会话模式（可附带 CLI 名称）")

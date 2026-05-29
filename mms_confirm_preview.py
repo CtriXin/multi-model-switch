@@ -152,7 +152,7 @@ def confirm_launch(
         model_display = model_info or "官方默认"
 
     mode_str = "一次性命令" if once else "交互会话"
-    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "agy") else "无需额外注入"
+    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "pi", "agy") else "无需额外注入"
     source_line = ""
     if runtime:
         source_kind = runtime_source_kind_label(runtime)
@@ -205,7 +205,7 @@ def build_confirm_preview_catalog(
         "hooks": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
     }
 
-    if cli not in {"claude", "codex", "opencode", "agy"}:
+    if cli not in {"claude", "codex", "opencode", "pi", "agy"}:
         return preview
 
     try:

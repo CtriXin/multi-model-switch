@@ -3749,14 +3749,26 @@ def models_for_cli_family(
     ]
 
 
-def provider_models_for_cli(cli_name, models, *, cli_model_family_hints):
+def provider_models_for_cli(
+    cli_name,
+    models,
+    *,
+    cli_model_family_hints,
+    provider=None,
+    pi_model_available_for_runtime=None,
+):
     if cli_name in cli_model_family_hints:
-        return models_for_cli_family(cli_name, models, cli_model_family_hints=cli_model_family_hints)
-    return list(models or [])
+        result = models_for_cli_family(cli_name, models, cli_model_family_hints=cli_model_family_hints)
+    else:
+        result = list(models or [])
+    if cli_name == "pi" and isinstance(provider, dict) and callable(pi_model_available_for_runtime):
+        result = [model_name for model_name in result if pi_model_available_for_runtime(provider, model_name)]
+    return result
 
 
 def provider_supports_cli_name(provider, cli_name):
     provider_id = str(provider.get("id", "")).strip().lower()
+    cli_name = str(cli_name or "").strip().lower()
     if cli_name == "agy":
         return False
     if cli_name == "codex" and provider_id.startswith("kimi"):
@@ -3764,10 +3776,19 @@ def provider_supports_cli_name(provider, cli_name):
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
         supported_clis = [supported_clis]
+    supported_clis = [str(item or "").strip().lower() for item in supported_clis]
+    protocols = provider.get("protocols", [])
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    protocols = [str(item or "").strip() for item in protocols]
+    if cli_name == "pi" and "pi" not in supported_clis:
+        if "openai_chat_completions" in protocols and any(
+            item in supported_clis for item in ("codex", "opencode", "claude")
+        ):
+            return True
+        if "anthropic_messages" in protocols and "claude" in supported_clis:
+            return True
     if cli_name == "opencode" and "opencode" not in supported_clis:
-        protocols = provider.get("protocols", [])
-        if isinstance(protocols, str):
-            protocols = [protocols]
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "claude")
         ):
@@ -3785,8 +3806,12 @@ def provider_supports_model_for_cli(
     model_matches_account_cli,
     provider_supports_cli_name,
     bridge_clis_for_model,
+    pi_model_available_for_runtime=None,
 ):
     normalized_model = str(model_name or "").strip()
+    if cli_name == "pi" and normalized_model and callable(pi_model_available_for_runtime):
+        if not pi_model_available_for_runtime(provider, normalized_model):
+            return False
     if cli_name == "claude" and normalized_model:
         if model_matches_account_cli("claude", normalized_model):
             return provider_supports_cli_name(provider, "claude")
@@ -8475,7 +8500,12 @@ def provider_options_for_model(
         else:
             probe_debug_logger.debug("  %s: cached_models=%s (len=%d)", provider_id, type(cached_models).__name__, len(cached_models))
         models = provider_effective_models(provider, models, cfg)
-        cli_models = provider_models_for_cli(cli_name, models)
+        try:
+            cli_models = provider_models_for_cli(cli_name, models, provider=provider)
+        except TypeError as exc:
+            if "provider" not in str(exc):
+                raise
+            cli_models = provider_models_for_cli(cli_name, models)
 
         if selected_model:
             if not provider_supports_model_for_cli(provider, cli_name, selected_model):
@@ -11450,7 +11480,13 @@ def handle_export(
         console.print(f"支持: {', '.join(cli_names)}")
         return
 
-    exports = get_export_env(cli_name, provider)
+    try:
+        exports = get_export_env(cli_name, provider)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        if cli_name == "pi":
+            console.print("[dim]Pi 的 export 需要先确定 model；请改用带 model 的 preset/env，或在启动前先选定模型。[/dim]")
+        return
     if not exports:
         console.print(f"[yellow]{cli_name} 无需 export；启动时会按 CLI 自己的参数或登录方式处理[/yellow]")
         return
@@ -11533,6 +11569,7 @@ def resolve_preset_export_runtime(
     ensure_provider_credentials,
     validate_provider_for_cli,
     get_export_env,
+    preset_model_info=None,
 ):
     cli = preset.get("cli", "claude")
     auth_mode = infer_preset_auth_mode(preset)
@@ -11558,7 +11595,19 @@ def resolve_preset_export_runtime(
         emit_preset_error(str(exc), stderr_only=stderr_only)
         return None
 
-    exports = get_export_env(cli, runtime)
+    model_info = preset_model_info(preset) if callable(preset_model_info) else None
+    try:
+        if model_info:
+            exports = get_export_env(cli, runtime, model_info=model_info)
+        else:
+            exports = get_export_env(cli, runtime)
+    except TypeError as exc:
+        if "model_info" not in str(exc):
+            raise
+        exports = get_export_env(cli, runtime)
+    except RuntimeError as exc:
+        emit_preset_error(str(exc), stderr_only=stderr_only)
+        return None
     if not exports:
         emit_preset_error(f"{cli} 无需 export；启动时会按 CLI 自己的参数或登录方式处理", stderr_only=stderr_only)
         return None

@@ -2605,7 +2605,7 @@ def apply_confirm_runtime_preferences(
         runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
         runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
         runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
-    if cli_name in {"claude", "codex", "opencode", "agy"}:
+    if cli_name in {"claude", "codex", "opencode", "pi", "agy"}:
         runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
         runtime["nsr_mode"] = "enable" if (has_nsr and nsr_enabled) else "disable"
         if confirm_returned_surfaces:
@@ -2788,7 +2788,7 @@ def resolve_confirm_launch_action(confirm_result, *, has_nsr):
 
 
 def apply_confirm_bypass_flag(runtime, cli_name, bypass):
-    if cli_name in {"claude", "codex", "opencode", "agy"}:
+    if cli_name in {"claude", "codex", "opencode", "pi", "agy"}:
         runtime["bypass"] = bool(bypass)
 
 
@@ -2827,7 +2827,12 @@ def prepare_confirm_prompt_inputs(
     network_guard_preview_loader,
 ):
     clean = clean_model_info(model_info)
-    env_vars = get_export_env(cli_name, runtime)
+    try:
+        env_vars = get_export_env(cli_name, runtime, model_info=clean)
+    except TypeError as exc:
+        if "model_info" not in str(exc):
+            raise
+        env_vars = get_export_env(cli_name, runtime)
     runtime = apply_claude_network_guard_preview(
         runtime,
         cli_name,

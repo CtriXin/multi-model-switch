@@ -98,6 +98,7 @@ from mms_opencode_session import (
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
+    _model_supports_vision,
     _probe_models,
     _runtime_force_ipv4,
     _runtime_httpx_request,
@@ -105,6 +106,7 @@ from mms_core import (
     load_config,
     preference_asset_root,
 )
+from mms_capability_resolver import resolve_model_capabilities
 from mms_fake_upstream import (
     ensure_local_proxy as _ensure_fake_upstream_proxy,
     fake_proxy_probe as _fake_proxy_probe,
@@ -113,6 +115,8 @@ from mms_fake_upstream import (
 )
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_provider_profiles import profile_context_window, resolve_provider_profile
+import mms_pi_support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_runtime_env import (
     apply_runtime_locale_profile as _apply_runtime_locale_profile_impl,
@@ -4118,6 +4122,117 @@ def _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agen
     )
 
 
+def _pi_wrapper_path(*args, **kwargs):
+    return _pi_support._pi_wrapper_path(*args, **kwargs)
+
+def _pi_retry_extension_path(*args, **kwargs):
+    return _pi_support._pi_retry_extension_path(*args, **kwargs)
+
+def _pi_npx_cache_dir(*args, **kwargs):
+    return _pi_support._pi_npx_cache_dir(*args, **kwargs)
+
+def _pi_settings_payload(*args, **kwargs):
+    return _pi_support._pi_settings_payload(*args, **kwargs)
+
+def _pi_provider_ref(*args, **kwargs):
+    return _pi_support._pi_provider_ref(*args, **kwargs)
+
+def _pi_normalize_model_key(*args, **kwargs):
+    return _pi_support._pi_normalize_model_key(*args, **kwargs)
+
+def _pi_reference_payload(*args, **kwargs):
+    return _pi_support._pi_reference_payload(*args, **kwargs)
+
+def _pi_reference_model_row(*args, **kwargs):
+    return _pi_support._pi_reference_model_row(*args, **kwargs)
+
+def _pi_first_positive_int(*args, **kwargs):
+    return _pi_support._pi_first_positive_int(*args, **kwargs)
+
+def _pi_hint_max_tokens(*args, **kwargs):
+    return _pi_support._pi_hint_max_tokens(*args, **kwargs)
+
+def _pi_hint_context_window(*args, **kwargs):
+    return _pi_support._pi_hint_context_window(*args, **kwargs)
+
+def _pi_reference_supports_vision(*args, **kwargs):
+    return _pi_support._pi_reference_supports_vision(*args, **kwargs)
+
+def _pi_model_supported(*args, **kwargs):
+    return _pi_support._pi_model_supported(*args, **kwargs)
+
+def _pi_model_replacement(*args, **kwargs):
+    return _pi_support._pi_model_replacement(*args, **kwargs)
+
+def _pi_model_block_reason(*args, **kwargs):
+    return _pi_support._pi_model_block_reason(*args, **kwargs)
+
+def _pi_model_available_for_runtime(*args, **kwargs):
+    return _pi_support._pi_model_available_for_runtime(*args, **kwargs)
+
+def _pi_exposed_model_names(*args, **kwargs):
+    return _pi_support._pi_exposed_model_names(*args, **kwargs)
+
+def _pi_model_input_types(*args, **kwargs):
+    return _pi_support._pi_model_input_types(*args, **kwargs)
+
+def _pi_model_capabilities(*args, **kwargs):
+    return _pi_support._pi_model_capabilities(*args, **kwargs)
+
+def _pi_anthropic_base_root(*args, **kwargs):
+    return _pi_support._pi_anthropic_base_root(*args, **kwargs)
+
+def _pi_openai_base_url(*args, **kwargs):
+    return _pi_support._pi_openai_base_url(*args, **kwargs)
+
+def _pi_protocol_variant(*args, **kwargs):
+    return _pi_support._pi_protocol_variant(*args, **kwargs)
+
+def _pi_protocol_variants(*args, **kwargs):
+    return _pi_support._pi_protocol_variants(*args, **kwargs)
+
+def _pi_runtime_model_names(*args, **kwargs):
+    return _pi_support._pi_runtime_model_names(*args, **kwargs)
+
+def _pi_profile_id(*args, **kwargs):
+    return _pi_support._pi_profile_id(*args, **kwargs)
+
+def _pi_pick_protocol(*args, **kwargs):
+    return _pi_support._pi_pick_protocol(*args, **kwargs)
+
+def _pi_provider_compat(*args, **kwargs):
+    return _pi_support._pi_provider_compat(*args, **kwargs)
+
+def _pi_model_compat(*args, **kwargs):
+    return _pi_support._pi_model_compat(*args, **kwargs)
+
+def _pi_model_thinking_level_map(*args, **kwargs):
+    return _pi_support._pi_model_thinking_level_map(*args, **kwargs)
+
+def _pi_effective_selected_model(*args, **kwargs):
+    return _pi_support._pi_effective_selected_model(*args, **kwargs)
+
+def _pi_wire_model_name(*args, **kwargs):
+    return _pi_support._pi_wire_model_name(*args, **kwargs)
+
+def _pi_model_entry(*args, **kwargs):
+    return _pi_support._pi_model_entry(*args, **kwargs)
+
+def _pi_group_provider_ref(*args, **kwargs):
+    return _pi_support._pi_group_provider_ref(*args, **kwargs)
+
+def _pi_build_models_payload(*args, **kwargs):
+    return _pi_support._pi_build_models_payload(*args, **kwargs)
+
+def _pi_gateway_env(*args, **kwargs):
+    return _pi_support._pi_gateway_env(*args, **kwargs)
+
+def _pi_provider_export_env(*args, **kwargs):
+    return _pi_support._pi_provider_export_env(*args, **kwargs)
+
+def launch_pi(*args, **kwargs):
+    return _pi_support.launch_pi(*args, **kwargs)
+
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
     return _opencode_launch_impl(
@@ -4178,6 +4293,7 @@ LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
     "opencode": launch_opencode,
+    "pi": launch_pi,
     "gemini": launch_gemini,
     "agy": launch_agy,
 }
@@ -4205,13 +4321,23 @@ def _opencode_provider_export_env(runtime, model):
     )
 
 
-def get_export_env(cli, runtime):
+def _runtime_with_export_model(runtime, model_info=None):
+    runtime = dict(runtime) if isinstance(runtime, dict) else {}
+    resolved_model = _resolve_model(model_info or runtime)
+    if resolved_model and not _resolve_model(runtime):
+        runtime["model"] = resolved_model
+    return runtime
+
+
+def get_export_env(cli, runtime, model_info=None):
     """返回指定 CLI 需要的 export 环境变量字典。"""
     from mms_launcher_export import build_export_env
 
     return build_export_env(
         cli,
         runtime,
+        model_info=model_info,
+        runtime_with_export_model=_runtime_with_export_model,
         is_opencode_global_profile_runtime=_is_opencode_global_profile_runtime,
         opencode_global_export_env=_opencode_global_export_env,
         validate_account_for_cli=validate_account_for_cli,
@@ -4220,6 +4346,7 @@ def get_export_env(cli, runtime):
         openai_base_url=_openai_base_url,
         resolve_model=_resolve_model,
         opencode_provider_export_env=_opencode_provider_export_env,
+        pi_provider_export_env=_pi_provider_export_env,
         inject_host_capability_hints=_inject_host_capability_hints,
         mms_toon_script_path=_mms_toon_script_path,
         mms_context_script_path=_mms_context_script_path,

@@ -13,6 +13,7 @@ def _launchers():
 
 def provider_supports_cli(provider, cli):
     launchers = _launchers()
+    cli = str(cli or "").strip().lower()
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
         supported_clis = [supported_clis]
@@ -28,6 +29,13 @@ def provider_supports_cli(provider, cli):
             continue
         normalized.add(name)
     supported_clis = normalized
+    if cli == "pi" and "pi" not in supported_clis:
+        if "openai_chat_completions" in protocols and any(
+            item in supported_clis for item in ("codex", "opencode", "claude")
+        ):
+            return True
+        if "anthropic_messages" in protocols and "claude" in supported_clis:
+            return True
     if cli == "opencode" and "opencode" not in supported_clis:
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "claude")
@@ -78,6 +86,9 @@ def validate_provider_for_cli(cli, provider):
         sys.exit(1)
     if cli in {"codex", "opencode"} and not launchers._openai_base_url(provider):
         launchers.console.print(f"[red]provider '{provider_id}' 未配置 OpenAI 地址[/red]")
+        sys.exit(1)
+    if cli == "pi" and not launchers._anthropic_base_url(provider) and not launchers._openai_base_url(provider):
+        launchers.console.print(f"[red]provider '{provider_id}' 未配置任何可供 Pi 使用的 API 地址[/red]")
         sys.exit(1)
 
 

@@ -590,6 +590,8 @@ def build_export_env(
     cli,
     runtime,
     *,
+    model_info=None,
+    runtime_with_export_model=None,
     is_opencode_global_profile_runtime,
     opencode_global_export_env,
     validate_account_for_cli,
@@ -598,6 +600,7 @@ def build_export_env(
     openai_base_url,
     resolve_model,
     opencode_provider_export_env,
+    pi_provider_export_env=None,
     inject_host_capability_hints,
     mms_toon_script_path,
     mms_context_script_path,
@@ -607,6 +610,13 @@ def build_export_env(
 ):
     """Build export-only environment variables without launching a CLI."""
     runtime = runtime if isinstance(runtime, dict) else {}
+    if callable(runtime_with_export_model):
+        runtime = runtime_with_export_model(runtime, model_info=model_info)
+    elif model_info and not resolve_model(runtime):
+        runtime = dict(runtime)
+        resolved_model = resolve_model(model_info)
+        if resolved_model:
+            runtime["model"] = resolved_model
     if is_opencode_global_profile_runtime(cli, runtime):
         return opencode_global_export_env(runtime)
 
@@ -630,8 +640,13 @@ def build_export_env(
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = openai_base_url(runtime)
     elif cli == "opencode":
-        model = resolve_model(runtime)
+        model = resolve_model(model_info or runtime)
         exports.update(opencode_provider_export_env(runtime, model))
+    elif cli == "pi":
+        if not callable(pi_provider_export_env):
+            raise RuntimeError("Pi export helper is unavailable")
+        model = resolve_model(model_info or runtime)
+        exports.update(pi_provider_export_env(runtime, model))
     if cli in {"claude", "codex"}:
         inject_host_capability_hints(exports)
 
@@ -639,7 +654,7 @@ def build_export_env(
     context_script = mms_context_script_path()
     token_saver_script = token_saver_script_path()
     xmem_script = xmem_cli_path()
-    if cli in {"claude", "codex", "opencode"}:
+    if cli in {"claude", "codex", "opencode", "pi"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
