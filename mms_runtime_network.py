@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 
 CLAUDE_PROXY_GUARD_TARGETS = [
@@ -31,6 +31,67 @@ FAKE_STATE_KEYS = (
     "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
 )
 CA_KEYS = ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE")
+
+
+def mask_secret(value, *, keep=2):
+    text = str(value or "")
+    if not text:
+        return ""
+    if len(text) <= keep:
+        return "*" * len(text)
+    return text[:keep] + "*" * max(2, len(text) - keep)
+
+
+def mask_proxy_url(proxy_url, *, mask_secret_fn=mask_secret):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return ""
+    try:
+        parsed = urlsplit(proxy_url)
+    except Exception:
+        return proxy_url
+    try:
+        parsed_port = parsed.port
+    except ValueError:
+        return proxy_url
+    username = parsed.username or ""
+    password = parsed.password or ""
+    host = parsed.hostname or ""
+    port = f":{parsed_port}" if parsed_port else ""
+    auth = ""
+    if username:
+        auth = mask_secret_fn(username)
+        if password:
+            auth += ":****"
+        auth += "@"
+    netloc = f"{auth}{host}{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path or "", parsed.query or "", parsed.fragment or ""))
+
+
+def runtime_network_summary(
+    runtime,
+    *,
+    mask_proxy_url_fn,
+    runtime_force_ipv4_fn,
+    fake_upstream_enabled_fn,
+    proxy_dns_mode_fn,
+    runtime_locale_env_fn,
+    default_account_timezone,
+):
+    proxy_url = mask_proxy_url_fn(runtime.get("proxy", ""))
+    timezone_name = str(runtime.get("timezone") or default_account_timezone).strip() or default_account_timezone
+    ipv4_label = "on" if runtime_force_ipv4_fn(runtime) else "off"
+    dns_mode = "fake-local" if fake_upstream_enabled_fn() else proxy_dns_mode_fn(runtime.get("proxy", ""))
+    locale_value = runtime_locale_env_fn(runtime).get("LANG", "en_US.UTF-8")
+    parts = [f"DNS {dns_mode}", f"TZ {timezone_name}", f"LANG {locale_value}", f"IPv4 {ipv4_label}"]
+    if proxy_url:
+        parts.insert(0, f"Proxy {proxy_url}")
+    else:
+        parts.insert(0, "Proxy direct")
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    if no_proxy:
+        parts.append("NO_PROXY set")
+    return " | ".join(parts)
 
 
 def apply_proxy_env(env, proxy_url, no_proxy=""):

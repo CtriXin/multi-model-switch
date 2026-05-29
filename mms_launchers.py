@@ -14,7 +14,6 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from mms_account_state import activated_claude_account_state, seed_agy_state, seed_claude_state, seed_gemini_state
@@ -158,8 +157,11 @@ from mms_runtime_network import (
     claude_no_proxy_conflicts as _claude_no_proxy_conflicts_impl,
     enforce_claude_network_guard_or_exit as _enforce_claude_network_guard_or_exit_impl,
     get_claude_network_guard_preview as _get_claude_network_guard_preview_impl,
+    mask_proxy_url as _mask_proxy_url_impl,
+    mask_secret as _mask_secret_impl,
     proxy_dns_mode as _proxy_dns_mode_impl,
     run_proxy_probe as _run_proxy_probe_impl,
+    runtime_network_summary as _runtime_network_summary_impl,
     split_no_proxy_values as _split_no_proxy_values_impl,
 )
 from mms_session_features import (
@@ -294,55 +296,26 @@ _opencode_apply_agent_bypass_permissions = opencode_apply_agent_bypass_permissio
 
 
 def _mask_secret(value, *, keep=2):
-    text = str(value or "")
-    if not text:
-        return ""
-    if len(text) <= keep:
-        return "*" * len(text)
-    return text[:keep] + "*" * max(2, len(text) - keep)
+    """Compatibility wrapper for secret masking."""
+    return _mask_secret_impl(value, keep=keep)
 
 
 def _mask_proxy_url(proxy_url):
-    proxy_url = str(proxy_url or "").strip()
-    if not proxy_url:
-        return ""
-    try:
-        parsed = urlsplit(proxy_url)
-    except Exception:
-        return proxy_url
-    try:
-        parsed_port = parsed.port
-    except ValueError:
-        return proxy_url
-    username = parsed.username or ""
-    password = parsed.password or ""
-    host = parsed.hostname or ""
-    port = f":{parsed_port}" if parsed_port else ""
-    auth = ""
-    if username:
-        auth = _mask_secret(username)
-        if password:
-            auth += ":****"
-        auth += "@"
-    netloc = f"{auth}{host}{port}"
-    return urlunsplit((parsed.scheme, netloc, parsed.path or "", parsed.query or "", parsed.fragment or ""))
+    """Compatibility wrapper for proxy URL masking."""
+    return _mask_proxy_url_impl(proxy_url, mask_secret_fn=_mask_secret)
 
 
 def _runtime_network_summary(runtime):
-    proxy_url = _mask_proxy_url(runtime.get("proxy", ""))
-    timezone_name = str(runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE).strip() or DEFAULT_ACCOUNT_TIMEZONE
-    ipv4_label = "on" if _runtime_force_ipv4(runtime) else "off"
-    dns_mode = "fake-local" if _fake_upstream_enabled() else _proxy_dns_mode(runtime.get("proxy", ""))
-    locale_value = _runtime_locale_env(runtime).get("LANG", "en_US.UTF-8")
-    parts = [f"DNS {dns_mode}", f"TZ {timezone_name}", f"LANG {locale_value}", f"IPv4 {ipv4_label}"]
-    if proxy_url:
-        parts.insert(0, f"Proxy {proxy_url}")
-    else:
-        parts.insert(0, "Proxy direct")
-    no_proxy = str(runtime.get("no_proxy") or "").strip()
-    if no_proxy:
-        parts.append("NO_PROXY set")
-    return " | ".join(parts)
+    """Compatibility wrapper for runtime network display summaries."""
+    return _runtime_network_summary_impl(
+        runtime,
+        mask_proxy_url_fn=_mask_proxy_url,
+        runtime_force_ipv4_fn=_runtime_force_ipv4,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+        proxy_dns_mode_fn=_proxy_dns_mode,
+        runtime_locale_env_fn=_runtime_locale_env,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+    )
 
 
 def _guard_utc_now():
