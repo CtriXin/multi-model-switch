@@ -187,6 +187,16 @@ from mms_session_features import (
     runtime_thinking_enabled as _runtime_thinking_enabled_impl,
     runtime_vision_sidecar as _runtime_vision_sidecar_impl,
 )
+from mms_session_guard import (
+    read_session_guard_marker as _read_session_guard_marker_impl,
+    reserve_session_home as _reserve_session_home_impl,
+    session_guard_lock_path as _session_guard_lock_path_impl,
+    session_guard_marker_path as _session_guard_marker_path_impl,
+    session_guard_pid_alive as _session_guard_pid_alive_impl,
+    session_guard_process_identity as _session_guard_process_identity_impl,
+    session_home_is_active as _session_home_is_active_impl,
+    write_session_guard_marker as _write_session_guard_marker_impl,
+)
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
@@ -822,92 +832,52 @@ def _install_session_packet_env(
 
 
 def _session_guard_marker_path(session_home):
-    return os.path.join(str(session_home or "").strip(), _SESSION_GUARD_MARKER_NAME)
+    """Compatibility wrapper for session guard marker paths."""
+    return _session_guard_marker_path_impl(session_home, _SESSION_GUARD_MARKER_NAME)
 
 
 def _session_guard_lock_path(sessions_dir):
-    return os.path.join(str(sessions_dir or "").strip(), _SESSION_GUARD_LOCK_NAME)
+    """Compatibility wrapper for session guard lock paths."""
+    return _session_guard_lock_path_impl(sessions_dir, _SESSION_GUARD_LOCK_NAME)
 
 
 def _session_guard_process_identity(pid):
-    try:
-        normalized_pid = int(pid)
-    except (TypeError, ValueError):
-        return ""
-    if normalized_pid <= 0:
-        return ""
-    try:
-        result = subprocess.run(
-            ["ps", "-p", str(normalized_pid), "-o", "comm=,lstart="],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    return str(result.stdout or "").strip()
+    """Compatibility wrapper for process identity snapshots."""
+    return _session_guard_process_identity_impl(pid)
 
 
 def _session_guard_pid_alive(pid, *, identity=""):
-    try:
-        normalized_pid = int(pid)
-    except (TypeError, ValueError):
-        return False
-    if normalized_pid <= 0:
-        return False
-    try:
-        os.kill(normalized_pid, 0)
-    except (ProcessLookupError, FileNotFoundError):
-        return False
-    except PermissionError:
-        return True
-    if identity:
-        return _session_guard_process_identity(normalized_pid) == str(identity or "").strip()
-    return True
+    """Compatibility wrapper for guarded PID liveness checks."""
+    return _session_guard_pid_alive_impl(
+        pid,
+        identity=identity,
+        process_identity_fn=_session_guard_process_identity,
+    )
 
 
 def _read_session_guard_marker(session_home):
-    marker_path = _session_guard_marker_path(session_home)
-    if not marker_path:
-        return {}
-    return _load_json_dict_unlocked(marker_path)
+    """Compatibility wrapper for session guard marker reads."""
+    return _read_session_guard_marker_impl(
+        session_home,
+        marker_path_fn=_session_guard_marker_path,
+        load_json_dict_unlocked_fn=_load_json_dict_unlocked,
+    )
 
 
 def _write_session_guard_marker(session_home, *, account_id="", runtime_kind="", child_pid=None):
-    marker_path = _session_guard_marker_path(session_home)
-    if not marker_path:
-        return
-    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
-    with locked_state_file(marker_path):
-        marker = _load_json_dict_unlocked(marker_path)
-        launcher_pid = int(marker.get("launcher_pid") or os.getpid())
-        marker.update(
-            {
-                "account_id": str(account_id or marker.get("account_id") or "").strip(),
-                "runtime_kind": str(runtime_kind or marker.get("runtime_kind") or "").strip(),
-                "session_home": str(session_home or ""),
-                "launcher_pid": launcher_pid,
-                "launcher_identity": str(
-                    marker.get("launcher_identity")
-                    or _session_guard_process_identity(launcher_pid)
-                    or ""
-                ).strip(),
-                "updated_at": _guard_utc_now(),
-            }
-        )
-        if "created_at" not in marker:
-            marker["created_at"] = marker["updated_at"]
-        if child_pid is not None:
-            try:
-                normalized_child_pid = int(child_pid)
-            except (TypeError, ValueError):
-                normalized_child_pid = 0
-            if normalized_child_pid > 0:
-                marker["child_pid"] = normalized_child_pid
-                marker["child_identity"] = _session_guard_process_identity(normalized_child_pid)
-        atomic_write_json(marker_path, marker, mode=0o600)
+    """Compatibility wrapper for session guard marker writes."""
+    return _write_session_guard_marker_impl(
+        session_home,
+        account_id=account_id,
+        runtime_kind=runtime_kind,
+        child_pid=child_pid,
+        marker_path_fn=_session_guard_marker_path,
+        locked_state_file_fn=locked_state_file,
+        load_json_dict_unlocked_fn=_load_json_dict_unlocked,
+        atomic_write_json_fn=atomic_write_json,
+        guard_utc_now_fn=_guard_utc_now,
+        process_identity_fn=_session_guard_process_identity,
+    )
 
 
 def _record_session_child_pid(session_home, child_pid):
@@ -915,27 +885,12 @@ def _record_session_child_pid(session_home, child_pid):
 
 
 def _session_home_is_active(session_home):
-    session_home = str(session_home or "").strip()
-    if not session_home or not os.path.isdir(session_home):
-        return False
-    marker = _read_session_guard_marker(session_home)
-    if marker:
-        if _session_guard_pid_alive(
-            marker.get("child_pid"),
-            identity=marker.get("child_identity"),
-        ):
-            return True
-        if _session_guard_pid_alive(
-            marker.get("launcher_pid"),
-            identity=marker.get("launcher_identity"),
-        ):
-            return True
-        return False
-    try:
-        pid = int(os.path.basename(session_home))
-    except (TypeError, ValueError):
-        return False
-    return _session_guard_pid_alive(pid)
+    """Compatibility wrapper for active session-home checks."""
+    return _session_home_is_active_impl(
+        session_home,
+        read_marker_fn=_read_session_guard_marker,
+        pid_alive_fn=_session_guard_pid_alive,
+    )
 
 
 def _bounded_env_float(name, default):
@@ -965,33 +920,24 @@ def _reserve_session_home(
     max_live_sessions=None,
     timings=None,
 ):
-    sessions_dir = str(sessions_dir or "").strip()
-    if not sessions_dir:
-        return "", 0, 0
-    os.makedirs(sessions_dir, exist_ok=True)
-    session_home = os.path.join(sessions_dir, str(os.getpid()))
-    with _timed_launch_step(timings, "reserve session lock+cleanup"):
-        with locked_state_file(_session_guard_lock_path(sessions_dir)):
-            with _timed_launch_step(timings, "stale session cleanup"):
-                _cleanup_stale_sessions(
-                    sessions_dir,
-                    stale_callback=stale_callback,
-                    max_entries=_session_cleanup_launch_max_entries(),
-                    max_seconds=_session_cleanup_launch_max_seconds(),
-                )
-            active_before = _count_live_session_dirs(sessions_dir)
-            if _session_home_is_active(session_home):
-                active_before = max(0, active_before - 1)
-            active_after = active_before + 1
-            if max_live_sessions is not None and active_after > int(max_live_sessions):
-                return "", active_before, active_after
-            os.makedirs(session_home, exist_ok=True)
-            _write_session_guard_marker(
-                session_home,
-                account_id=account_id,
-                runtime_kind=runtime_kind,
-            )
-            return session_home, active_before, active_after
+    """Compatibility wrapper for guarded session-home reservation."""
+    return _reserve_session_home_impl(
+        sessions_dir,
+        account_id=account_id,
+        runtime_kind=runtime_kind,
+        stale_callback=stale_callback,
+        max_live_sessions=max_live_sessions,
+        timings=timings,
+        timed_launch_step_fn=_timed_launch_step,
+        locked_state_file_fn=locked_state_file,
+        session_guard_lock_path_fn=_session_guard_lock_path,
+        cleanup_stale_sessions_fn=_cleanup_stale_sessions,
+        session_cleanup_launch_max_entries_fn=_session_cleanup_launch_max_entries,
+        session_cleanup_launch_max_seconds_fn=_session_cleanup_launch_max_seconds,
+        count_live_session_dirs_fn=_count_live_session_dirs,
+        session_home_is_active_fn=_session_home_is_active,
+        write_session_guard_marker_fn=_write_session_guard_marker,
+    )
 
 
 def _real_home_wrapper_scrub_lines():
