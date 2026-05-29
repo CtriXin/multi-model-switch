@@ -11,7 +11,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _write_latest_approved_router_manifest(config_root: Path, *, router_payload: dict, sha_override: str = "") -> None:
+def _write_latest_approved_router_manifest(
+    config_root: Path,
+    *,
+    router_payload: dict,
+    profile_payload: dict | None = None,
+    sha_override: str = "",
+) -> None:
     import mms_registry
 
     generated = config_root / "generated"
@@ -23,7 +29,7 @@ def _write_latest_approved_router_manifest(config_root: Path, *, router_payload:
     mms_registry.write_json_atomic(router_path, router_payload)
     router_hash = hashlib.sha256(router_path.read_bytes()).hexdigest()
     mms_registry.write_json_atomic(lineup_path, {"version": 1, "routes": {}})
-    mms_registry.write_json_atomic(profile_path, {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(profile_path, profile_payload or {"schema_version": 1, "profiles": {}})
     mms_registry.write_json_atomic(policy_path, {"version": 1, "models": {}})
     mms_registry.write_json_atomic(capabilities_path, {"schema": "mms.model_capabilities.approved.v1", "models": []})
     mms_registry.export_latest_approved_bundle_manifest(
@@ -1084,6 +1090,20 @@ def test_mmf_preview_runtime_can_use_verified_bundle_without_legacy_config(monke
                 }
             },
         },
+        profile_payload={
+            "schema_version": 1,
+            "profiles": {
+                "preview-provider": {
+                    "name": "Preview Provider",
+                    "role": "fallback",
+                    "priority": 123,
+                    "models_endpoint": "/api/models/info?",
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                    "enabled": True,
+                }
+            },
+        },
     )
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
     monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
@@ -1098,8 +1118,13 @@ def test_mmf_preview_runtime_can_use_verified_bundle_without_legacy_config(monke
     assert cfg["provider"]["default"] == "preview-provider"
     assert provider["openai_base_url"] == "https://preview.example/v1"
     assert provider["api_key"] == "sk-preview-secret"
-    assert provider["models_endpoint"] == "manual"
+    assert provider["name"] == "Preview Provider"
+    assert provider["role"] == "fallback"
+    assert provider["priority"] == 123
+    assert provider["models_endpoint"] == "/api/models/info?"
+    assert provider["supported_clis"] == ["codex"]
     assert "gpt-preview" in provider["fallback_models"]
+    assert provider["extra_models"] == []
     assert not (preview_root / "config.toml").exists()
 
 

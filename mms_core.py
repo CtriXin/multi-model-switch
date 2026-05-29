@@ -12863,6 +12863,8 @@ def _load_preview_runtime_config_from_latest_bundle():
         return None
     payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
     router = payloads.get("router") if isinstance(payloads.get("router"), dict) else {}
+    profile_payload = payloads.get("profile") if isinstance(payloads.get("profile"), dict) else {}
+    profiles = profile_payload.get("profiles") if isinstance(profile_payload.get("profiles"), dict) else {}
     routes = router.get("routes") if isinstance(router.get("routes"), dict) else {}
     if not routes:
         return None
@@ -12893,6 +12895,7 @@ def _load_preview_runtime_config_from_latest_bundle():
             protocols = _bundle_runtime_protocols(leaf)
             if not provider_id or not model_name or not api_key or not protocols:
                 continue
+            profile = profiles.get(provider_id) if isinstance(profiles.get(provider_id), dict) else {}
             key = (provider_id, anthropic_url, openai_url, api_key)
             provider = providers_by_key.get(key)
             if provider is None:
@@ -12905,13 +12908,16 @@ def _load_preview_runtime_config_from_latest_bundle():
                 provider_ids.add(unique_id)
                 provider = {
                     "id": unique_id,
-                    "name": provider_id if unique_id == provider_id else f"{provider_id} ({unique_id})",
+                    "name": str(profile.get("name") or provider_id) if unique_id == provider_id else f"{provider_id} ({unique_id})",
                     "enabled": True,
-                    "role": "primary" if leaf_kind == "primary" else "fallback",
-                    "priority": max(1, 1000 - route_index),
-                    "protocols": protocols,
-                    "supported_clis": _bundle_runtime_supported_clis(protocols),
-                    "models_endpoint": "manual",
+                    "role": str(profile.get("role") or ("primary" if leaf_kind == "primary" else "fallback")),
+                    "priority": int(profile.get("priority") or max(1, 1000 - route_index)),
+                    "protocols": _normalize_model_id_list(profile.get("protocols")) or protocols,
+                    "supported_clis": _normalize_supported_clis(
+                        profile.get("supported_clis") or _bundle_runtime_supported_clis(protocols),
+                        protocols=protocols,
+                    ),
+                    "models_endpoint": str(profile.get("models_endpoint") or "manual"),
                     "fallback_models": [],
                     "extra_models": [],
                     "hidden_models": [],
@@ -12927,11 +12933,10 @@ def _load_preview_runtime_config_from_latest_bundle():
                 }
                 providers_by_key[key] = provider
                 providers.append(provider)
-            elif leaf_kind == "primary":
+            elif leaf_kind == "primary" and not str(profile.get("role") or "").strip():
                 provider["role"] = "primary"
-            for field in ("fallback_models", "extra_models"):
-                if model_name not in provider[field]:
-                    provider[field].append(model_name)
+            if model_name not in provider["fallback_models"]:
+                provider["fallback_models"].append(model_name)
 
     if not providers:
         return None
@@ -13986,6 +13991,8 @@ def _config_subcommand_mutates_legacy_config(args_rest):
         return False
     key_path = str(args_rest[0] or "").strip()
     if not key_path or key_path in {"-h", "--help", "help"}:
+        return False
+    if key_path in {"web", "webui", "setup.web", "setup-web"}:
         return False
     if key_path in _PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS:
         return True

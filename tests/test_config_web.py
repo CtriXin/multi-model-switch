@@ -57,6 +57,61 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["save_contract"]["requires_confirm_save"] is True
 
 
+def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
+    cfg = {
+        "providers": [
+            {
+                "id": "preview-provider",
+                "name": "Preview Provider",
+                "enabled": True,
+                "api_key": "sk-super-secret-value",
+                "openai_base_url": "https://preview.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "manual",
+                "fallback_models": ["gpt-preview"],
+                "extra_models": [],
+                "_mms_bundle_runtime": True,
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    provider = snapshot["providers"][0]
+
+    assert provider["fallback_models"] == []
+    assert provider["extra_models"] == []
+    assert provider["models"][0]["id"] == "gpt-preview"
+    assert provider["models"][0]["source"] == "approved"
+
+
+def test_config_web_json_response_keeps_non_secret_counts_visible():
+    _status, body, _content_type = mms_config_web._json_response(
+        {
+            "api_key": "sk-super-secret-value",
+            "has_api_key": True,
+            "missing_api_key_count": 32,
+            "runtime_blockers": {"missing_api_key_count": 32, "missing_base_url_count": 0},
+            "secret_count": 2,
+            "secrets": [{"value": "sk-super-secret-value"}],
+        }
+    )
+    payload = json.loads(body)
+
+    assert payload["api_key"] != "sk-super-secret-value"
+    assert payload["has_api_key"] is True
+    assert payload["missing_api_key_count"] == 32
+    assert payload["runtime_blockers"]["missing_api_key_count"] == 32
+    assert payload["runtime_blockers"]["missing_base_url_count"] == 0
+    assert payload["secret_count"] == 2
+    assert payload["secrets"] != [{"value": "sk-super-secret-value"}]
+    assert "sk-super-secret-value" not in body.decode("utf-8")
+
+
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
     config_root = tmp_path / "mms-next"
     snapshot = mms_config_web.build_config_snapshot(
@@ -203,11 +258,17 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "downloadPlanJson" in html
     assert "copyApplyCommand" in html
     assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
+    assert "Advanced / Recovery：plan JSON 与 CLI fallback" in html
+    assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
+    assert "function renderApplyResult(data)" in html
+    assert "已发布，但 runtime 未就绪" in html
+    assert "mmf 会读到这次保存后的最新 bundle" in html
+    assert "missing key/base URL" in html
     assert "currentApplyCommand()" in html
     assert "/api/registry-v2/apply" in html
     assert "写入预览DB" in html
-    assert "Preview root 下 legacy 确认保存会被阻止" in html
+    assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
     assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
@@ -216,8 +277,17 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "保存时更新 credentials.sh（需要填写 API Key；会 backup + audit）" not in html
     assert "function renderSaveControls()" in html
     assert "saveBtn').disabled=preview" in html
+    assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
+    assert "pending key" in html
+    assert "已输入新 key，保存前会保留（不回显）" in html
+    assert "keyEl.dataset.touched='1'" in html
+    assert "p.pending_api_key=true" in html
+    assert "p.update_credentials=!!(updateEl&&updateEl.checked)" in html
+    assert "p.api_key=$('pKey').value" not in html
+    assert "data.ok&&Array.isArray(data.models)" in html
+    assert "模型拉取失败，请看测试结果" in html
     assert "card provider-editor" in html
     assert ".provider-editor {" in html
     assert "position: sticky;" in html
@@ -227,6 +297,21 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
     assert "['claude','codex','opencode','pi','agy']" in html
+    assert "通道修改已暂存，生成保存预览后再写入" in html
+    assert "这是当前通道的模型清单，不是全局模型池" in html
+    assert "手动补充当前通道模型（extra_models" in html
+    assert "添加到补充模型库" in html
+    assert "当前通道补充模型库（extra_models）" in html
+    assert "不是待删除列表，也不是全局模型池" in html
+    assert "编辑补充模型库" in html
+    assert "从补充库移除" in html
+    assert "移除全部通道过期隐藏记录" in html
+    assert "过期隐藏记录（不在当前通道模型列表）" in html
+    assert "移除记录不会影响其他通道" in html
+    assert "移除隐藏记录" in html
+    assert "function providerEntries()" in html
+    assert "a.p.enabled?-1:1" in html
+    assert "renderProviderList();renderTestSelectors();" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
 
 
@@ -851,6 +936,258 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_registry_v2_apply_routes_visible_model_rows_without_fallback_lists(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = json.loads(json.dumps(_draft_payload()))
+    provider = payload["draft"]["providers"][0]
+    provider["fallback_models"] = []
+    provider["extra_models"] = []
+    provider["hidden_models"] = ["noisy-model"]
+    provider["models"] = [
+        {"id": "qwen3.6-plus", "visible": True},
+        {"id": "noisy-model", "visible": False},
+    ]
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert result["candidate"]["route_candidates"]["provider_route_count"] == 1
+    assert set(router["routes"]) == {"qwen3.6-plus"}
+    assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
+
+
+def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    apply_result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+    provider = snapshot["providers"][0]
+
+    assert apply_result["ok"] is True
+    assert snapshot["provider_default"] == "demo"
+    assert [item["id"] for item in snapshot["providers"]] == ["demo"]
+    assert provider["name"] == "Demo Gateway"
+    assert provider["openai_base_url"] == "https://demo.example/v1"
+    assert provider["anthropic_base_url"] == "https://demo.example/v1"
+    assert provider["has_api_key"] is True
+    assert provider["fallback_models"] == ["gpt-5.5", "qwen3.6-plus"]
+    assert [row["id"] for row in provider["models"]] == ["gpt-5.5", "qwen3.6-plus"]
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_preview_snapshot_merges_profile_only_channels_from_latest_bundle(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = json.loads(json.dumps(_draft_payload()))
+    payload["draft"]["providers"].append(
+        {
+            "original_id": "newapi-tencent",
+            "id": "newapi-tencent",
+            "name": "newapi-tencent",
+            "enabled": True,
+            "role": "fallback",
+            "priority": 100,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "/api/models/info?",
+            "openai_base_url": "https://apple.example",
+            "anthropic_base_url": "https://apple.example",
+            "api_key": "sk-tencent-secret",
+            "update_credentials": True,
+            "fallback_models": [],
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [],
+        }
+    )
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    apply_result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+    runtime_cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo Gateway",
+                "enabled": True,
+                "role": "primary",
+                "priority": 1000,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["claude", "codex", "opencode"],
+                "models_endpoint": "manual",
+                "openai_base_url": "https://demo.example/v1",
+                "anthropic_base_url": "https://demo.example/v1",
+                "api_key": "sk-super-secret-value",
+                "fallback_models": ["gpt-5.5", "qwen3.6-plus"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        runtime_cfg,
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    ids = [item["id"] for item in snapshot["providers"]]
+    tencent = next(item for item in snapshot["providers"] if item["id"] == "newapi-tencent")
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+    assert apply_result["ok"] is True
+    assert apply_result["runtime_ready"] is True
+    assert "demo" in ids
+    assert "newapi-tencent" in ids
+    assert tencent["has_api_key"] is True
+    assert tencent["models_endpoint"] == "/api/models/info?"
+    assert "sk-tencent-secret" not in encoded
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_republish_reuses_preview_secret_refs(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    snapshot["providers"][0]["api_key"] = ""
+    snapshot["providers"][0]["update_credentials"] = False
+    republish_payload = {
+        "draft": {
+            key: snapshot[key]
+            for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        republish_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    leaves = [router["routes"]["gpt-5.5"]["primary"], router["routes"]["qwen3.6-plus"]["primary"]]
+    encoded = json.dumps(second, ensure_ascii=False, sort_keys=True)
+
+    assert first["runtime_ready"] is True
+    assert second["ok"] is True
+    assert second["status"] == "verified"
+    assert second["runtime_ready"] is True
+    assert second["credential_backend"]["skipped"] is True
+    assert {leaf["secret_ref"] for leaf in leaves} == {"pending-webui:demo:api_key"}
+    assert all(leaf["api_key"] == "sk-super-secret-value" for leaf in leaves)
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_provider_model_fetch_resolves_preview_secret_ref(monkeypatch, tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    apply_result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    provider_payload = dict(snapshot["providers"][0])
+    provider_payload["api_key"] = ""
+    seen = {}
+
+    def fake_probe(provider, *, force_refresh=False):
+        seen["api_key"] = provider.get("api_key")
+        seen["secret_ref"] = provider.get("secret_ref")
+        return {"models": ["gpt-5.5"], "raw_models": ["gpt-5.5"], "base_source": "remote", "working_url": provider.get("openai_base_url")}
+
+    monkeypatch.setattr(mms_config_web, "probe_provider_models", fake_probe)
+
+    result = mms_config_web.test_provider_models(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        {"provider": provider_payload, "force_refresh": True},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert apply_result["ok"] is True
+    assert result["ok"] is True
+    assert result["models"] == ["gpt-5.5"]
+    assert seen["secret_ref"] == "pending-webui:demo:api_key"
+    assert seen["api_key"] == "sk-super-secret-value"
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_surfaces_runtime_not_ready_without_keys(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    provider = payload["draft"]["providers"][0]
+    provider["api_key"] = ""
+    provider["update_credentials"] = False
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    secret_path = config_root / "secrets" / "webui-secrets.json"
+
+    assert result["ok"] is True
+    assert result["status"] == "verified_not_runtime_ready"
+    assert result["runtime_ready"] is False
+    assert "missing plaintext secrets" in result["runtime_ready_reason"]
+    assert result["runtime_blockers"]["missing_api_key_count"] > 0
+    assert result["runtime_blockers"]["provider_route_count"] == result["publish"]["provider_route_count"]
+    assert result["credential_backend"]["skipped"] is True
+    assert result["credential_backend"]["count"] == 0
+    assert result["next_action"]["label"].startswith("填写 API Key")
+    assert result["verify"]["verified"] is True
+    assert not secret_path.exists()
+    assert "sk-super-secret-value" not in encoded
+
+
 def test_config_web_registry_v2_apply_updates_in_memory_snapshot(tmp_path):
     config_root = tmp_path / "mms-next"
     app = mms_config_web.ConfigWebApp(
@@ -941,3 +1278,5 @@ def test_setup_web_requests_are_guard_exempt():
     assert mms_core._is_setup_web_request(["setup"])
     assert mms_core._is_setup_web_request(["config", "web"])
     assert mms_core._is_config_help_request(["web"])
+    assert not mms_core._config_subcommand_mutates_legacy_config(["web"])
+    assert not mms_core._config_subcommand_mutates_legacy_config(["web", "--print-summary"])
