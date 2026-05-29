@@ -225,6 +225,63 @@ def overlay_project_scoped_claude_resume_state(
     return payload
 
 
+def link_claude_library_entries(session_home, entries=None):
+    import mms_launchers as _launchers
+
+    entries = _launchers._CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST if entries is None else entries
+    real_library = _launchers._real_user_path("Library")
+    if not os.path.isdir(real_library):
+        return
+
+    session_library = os.path.join(session_home, "Library")
+    if os.path.islink(session_library):
+        try:
+            os.unlink(session_library)
+        except OSError:
+            return
+    os.makedirs(session_library, exist_ok=True)
+
+    for entry in entries:
+        normalized = str(entry or "").strip()
+        if not normalized:
+            continue
+        src = os.path.join(real_library, normalized)
+        dst = os.path.join(session_library, normalized)
+        if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+            continue
+        os.symlink(src, dst)
+
+
+def ensure_account_library_entries(account_home, entries=None):
+    import mms_launchers as _launchers
+
+    entries = _launchers._CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST if entries is None else entries
+    account_library = os.path.join(account_home, "Library")
+    os.makedirs(account_library, exist_ok=True)
+    for entry in entries:
+        normalized = str(entry or "").strip()
+        if not normalized:
+            continue
+        os.makedirs(os.path.join(account_library, normalized), exist_ok=True)
+    return account_library
+
+
+def link_account_library_entries(session_home, account_home, entries=None):
+    import mms_launchers as _launchers
+
+    entries = _launchers._CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST if entries is None else entries
+    account_library = _launchers._ensure_account_library_entries(account_home, entries=entries)
+    session_library = os.path.join(session_home, "Library")
+    if os.path.islink(session_library):
+        if os.path.realpath(session_library) == os.path.realpath(account_library):
+            return
+        os.unlink(session_library)
+    elif os.path.exists(session_library) and not os.path.isdir(session_library):
+        os.unlink(session_library)
+    if not os.path.exists(session_library) and not os.path.islink(session_library):
+        os.symlink(account_library, session_library)
+
+
 def link_claude_persistent_entry(session_claude_dir, entry, target):
     import mms_launchers as _launchers
 

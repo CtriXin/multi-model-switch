@@ -6409,38 +6409,17 @@ def _link_real_local_bin(session_home):
 
 
 def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
-    real_library = _real_user_path("Library")
-    if not os.path.isdir(real_library):
-        return
+    """Compatibility wrapper for Claude session Library allowlist links."""
+    from mms_claude_session import link_claude_library_entries
 
-    session_library = os.path.join(session_home, "Library")
-    if os.path.islink(session_library):
-        try:
-            os.unlink(session_library)
-        except OSError:
-            return
-    os.makedirs(session_library, exist_ok=True)
-
-    for entry in entries:
-        normalized = str(entry or "").strip()
-        if not normalized:
-            continue
-        src = os.path.join(real_library, normalized)
-        dst = os.path.join(session_library, normalized)
-        if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
-            continue
-        os.symlink(src, dst)
+    return link_claude_library_entries(session_home, entries=entries)
 
 
 def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
-    account_library = os.path.join(account_home, "Library")
-    os.makedirs(account_library, exist_ok=True)
-    for entry in entries:
-        normalized = str(entry or "").strip()
-        if not normalized:
-            continue
-        os.makedirs(os.path.join(account_library, normalized), exist_ok=True)
-    return account_library
+    """Compatibility wrapper for account Library allowlist preparation."""
+    from mms_claude_session import ensure_account_library_entries
+
+    return ensure_account_library_entries(account_home, entries=entries)
 
 
 def _macos_security_bin():
@@ -6538,16 +6517,10 @@ def _install_agy_security_wrapper(session_home, account_home, env):
 
 
 def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
-    account_library = _ensure_account_library_entries(account_home, entries=entries)
-    session_library = os.path.join(session_home, "Library")
-    if os.path.islink(session_library):
-        if os.path.realpath(session_library) == os.path.realpath(account_library):
-            return
-        os.unlink(session_library)
-    elif os.path.exists(session_library) and not os.path.isdir(session_library):
-        os.unlink(session_library)
-    if not os.path.exists(session_library) and not os.path.islink(session_library):
-        os.symlink(account_library, session_library)
+    """Compatibility wrapper for account Library links into session homes."""
+    from mms_claude_session import link_account_library_entries
+
+    return link_account_library_entries(session_home, account_home, entries=entries)
 
 
 def _filter_real_home_wrapper_path(path_value, *, session_home=None):

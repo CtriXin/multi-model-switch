@@ -125,6 +125,13 @@ wrapper. Session-managed MCP allowlists, agent-pack MCP merging, disabled MCP
 filtering, and existing allowlisted MCP preservation must stay
 behavior-preserving during module extraction.
 
+2026-05-29 implementation note: Claude session/account `Library` allowlist
+helpers may live outside `mms_launchers.py`, but `_link_claude_library_entries`,
+`_ensure_account_library_entries`, and `_link_account_library_entries` remain
+the compatibility wrappers. Keychains-only exposure, broad `Library` symlink
+replacement, and account-local Library linking must stay behavior-preserving
+during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去
