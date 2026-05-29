@@ -279,14 +279,9 @@ _opencode_permission_bypass_value = opencode_permission_bypass_value
 _opencode_apply_agent_bypass_permissions = opencode_apply_agent_bypass_permissions
 
 
-def _mask_secret(value, *, keep=2):
-    """Compatibility wrapper for secret masking."""
-    return _mask_secret_impl(value, keep=keep)
-
-
 def _mask_proxy_url(proxy_url):
     """Compatibility wrapper for proxy URL masking."""
-    return _mask_proxy_url_impl(proxy_url, mask_secret_fn=_mask_secret)
+    return _mask_proxy_url_impl(proxy_url, mask_secret_fn=_mask_secret_impl)
 
 
 def _runtime_network_summary(runtime):
@@ -397,45 +392,35 @@ def _print_launch_step_done(label, started_at, detail=None, *, style="dim"):
     )
 
 
-def _launch_timing_threshold_sec():
-    from mms_launch_display import launch_timing_threshold_sec
-
-    return launch_timing_threshold_sec(environ=os.environ)
-
-
-def _launch_timing_enabled():
-    from mms_launch_display import launch_timing_enabled
-
-    return launch_timing_enabled(environ=os.environ)
-
-
 def _timed_launch_step(timings, label):
     from mms_launch_display import timed_launch_step
 
     return timed_launch_step(timings, label, perf_counter_fn=perf_counter)
 
 
-def _print_launch_timing_breakdown(timings, *, total_elapsed):
-    from mms_launch_display import print_launch_timing_breakdown
-
-    return print_launch_timing_breakdown(
-        timings,
-        total_elapsed=total_elapsed,
-        console=console,
-        launch_timing_enabled_fn=_launch_timing_enabled,
-        launch_timing_threshold_sec_fn=_launch_timing_threshold_sec,
+def _prepare_claude_env_with_status(runtime, **kwargs):
+    from mms_launch_display import (
+        launch_timing_enabled,
+        launch_timing_threshold_sec,
+        prepare_claude_env_with_status,
+        print_launch_timing_breakdown,
     )
 
-
-def _prepare_claude_env_with_status(runtime, **kwargs):
-    from mms_launch_display import prepare_claude_env_with_status
+    def _print_timing_breakdown(timings, *, total_elapsed):
+        return print_launch_timing_breakdown(
+            timings,
+            total_elapsed=total_elapsed,
+            console=console,
+            launch_timing_enabled_fn=lambda: launch_timing_enabled(environ=os.environ),
+            launch_timing_threshold_sec_fn=lambda: launch_timing_threshold_sec(environ=os.environ),
+        )
 
     return prepare_claude_env_with_status(
         runtime,
         claude_gateway_env_fn=_claude_gateway_env,
         launch_status_fn=_launch_status,
         print_launch_step_done_fn=_print_launch_step_done,
-        print_launch_timing_breakdown_fn=_print_launch_timing_breakdown,
+        print_launch_timing_breakdown_fn=_print_timing_breakdown,
         perf_counter_fn=perf_counter,
         **kwargs,
     )
@@ -663,22 +648,16 @@ def _set_session_home_hint(env, session_home):
     return set_session_home_hint(env, session_home)
 
 
-def _set_codex_home_hint(env, session_home):
-    from mms_launcher_export import set_codex_home_hint
-
-    return set_codex_home_hint(env, session_home)
-
-
 def _set_codex_soft_home(env, session_home):
     """Keep real HOME for tools; isolate Codex config/auth in CODEX_HOME."""
-    from mms_launcher_export import set_codex_soft_home
+    from mms_launcher_export import set_codex_home_hint, set_codex_soft_home
 
     return set_codex_soft_home(
         env,
         session_home,
         real_user_path=_real_user_path,
         set_session_home_hint=_set_session_home_hint,
-        set_codex_home_hint=_set_codex_home_hint,
+        set_codex_home_hint=set_codex_home_hint,
     )
 
 
