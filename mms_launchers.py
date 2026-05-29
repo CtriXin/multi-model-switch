@@ -156,8 +156,11 @@ from mms_runtime_network import (
     get_claude_network_guard_preview as _get_claude_network_guard_preview_impl,
     mask_proxy_url as _mask_proxy_url_impl,
     mask_secret as _mask_secret_impl,
+    provider_id_set_from_env as _provider_id_set_from_env_impl,
     proxy_dns_mode as _proxy_dns_mode_impl,
     run_proxy_probe as _run_proxy_probe_impl,
+    runtime_declares_sensitive_claude as _runtime_declares_sensitive_claude_impl,
+    runtime_is_sensitive_claude_provider as _runtime_is_sensitive_claude_provider_impl,
     runtime_network_summary as _runtime_network_summary_impl,
     split_no_proxy_values as _split_no_proxy_values_impl,
 )
@@ -318,23 +321,13 @@ def _apply_runtime_locale_profile(env, runtime=None):
     )
 
 def _provider_id_set_from_env(env_name):
-    raw = str(os.environ.get(env_name) or "").strip()
-    return {
-        item.strip().lower()
-        for item in raw.split(",")
-        if item.strip()
-    }
+    """Compatibility wrapper for provider id env-set parsing."""
+    return _provider_id_set_from_env_impl(env_name, environ=os.environ)
 
 
 def _runtime_declares_sensitive_claude(runtime):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    if bool(runtime.get("skip_anthropic_probe")):
-        return True
-    return str(runtime.get("claude_provider_sensitivity") or "").strip().lower() in {
-        "sensitive",
-        "private",
-        "isolated",
-    }
+    """Compatibility wrapper for runtime-declared sensitive Claude provider markers."""
+    return _runtime_declares_sensitive_claude_impl(runtime)
 
 
 def _coerce_context_window(value):
@@ -384,9 +377,12 @@ def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
 
 
 def _runtime_is_sensitive_claude_provider(runtime):
-    provider_id = str((runtime or {}).get("id", "")).strip().lower()
-    sensitive_ids = _provider_id_set_from_env("MMS_CLAUDE_SENSITIVE_PROVIDER_IDS")
-    return (provider_id and provider_id in sensitive_ids) or _runtime_declares_sensitive_claude(runtime)
+    """Compatibility wrapper for sensitive Claude provider detection."""
+    return _runtime_is_sensitive_claude_provider_impl(
+        runtime,
+        provider_id_set_from_env_fn=_provider_id_set_from_env,
+        runtime_declares_sensitive_claude_fn=_runtime_declares_sensitive_claude,
+    )
 
 
 

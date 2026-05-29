@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -139,6 +140,37 @@ def split_no_proxy_values(no_proxy):
     if not raw:
         return []
     return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+
+def provider_id_set_from_env(env_name, *, environ=os.environ):
+    raw = str(environ.get(env_name) or "").strip()
+    return {
+        item.strip().lower()
+        for item in raw.split(",")
+        if item.strip()
+    }
+
+
+def runtime_declares_sensitive_claude(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if bool(runtime.get("skip_anthropic_probe")):
+        return True
+    return str(runtime.get("claude_provider_sensitivity") or "").strip().lower() in {
+        "sensitive",
+        "private",
+        "isolated",
+    }
+
+
+def runtime_is_sensitive_claude_provider(
+    runtime,
+    *,
+    provider_id_set_from_env_fn=provider_id_set_from_env,
+    runtime_declares_sensitive_claude_fn=runtime_declares_sensitive_claude,
+):
+    provider_id = str((runtime or {}).get("id", "")).strip().lower()
+    sensitive_ids = provider_id_set_from_env_fn("MMS_CLAUDE_SENSITIVE_PROVIDER_IDS")
+    return (provider_id and provider_id in sensitive_ids) or runtime_declares_sensitive_claude_fn(runtime)
 
 
 def claude_no_proxy_conflicts(no_proxy, *, no_proxy_tokens=CLAUDE_NO_PROXY_TOKENS):
