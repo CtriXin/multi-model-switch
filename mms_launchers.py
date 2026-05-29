@@ -125,10 +125,8 @@ from mms_runtime_context import (
     ONE_M_CONTEXT_SUFFIX as _ONE_M_CONTEXT_SUFFIX,
     ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS as _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS,
     ONE_M_SUFFIX_CONTEXT_WINDOWS as _ONE_M_SUFFIX_CONTEXT_WINDOWS,
-    coerce_context_window as _coerce_context_window_impl,
     load_model_context_overrides as _load_model_context_overrides_impl,
     lookup_context_window as _lookup_context_window_impl,
-    provider_advertises_plain_mimo_1m as _provider_advertises_plain_mimo_1m_impl,
 )
 from mms_runtime_home import (
     build_home_context as _build_home_context_impl,
@@ -330,16 +328,6 @@ def _provider_id_set_from_env(env_name):
 def _runtime_declares_sensitive_claude(runtime):
     """Compatibility wrapper for runtime-declared sensitive Claude provider markers."""
     return _runtime_declares_sensitive_claude_impl(runtime)
-
-
-def _coerce_context_window(value):
-    """Compatibility wrapper for context-window coercion."""
-    return _coerce_context_window_impl(value)
-
-
-def _provider_advertises_plain_mimo_1m(provider_id):
-    """Compatibility wrapper for MiMo plain 1M provider detection."""
-    return _provider_advertises_plain_mimo_1m_impl(provider_id)
 
 
 def _load_model_context_overrides():
@@ -701,12 +689,6 @@ def _set_opencode_soft_home(env, session_home):
         real_user_path=_real_user_path,
         set_session_home_hint=_set_session_home_hint,
     )
-
-
-def _model_name_from_info(model_info):
-    from mms_launcher_export import model_name_from_info
-
-    return model_name_from_info(model_info)
 
 
 def _selected_model_name(*candidates, model_info=None):
