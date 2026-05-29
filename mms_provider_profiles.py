@@ -317,6 +317,7 @@ def profile_thinking_capabilities(
     provider_id: str = "",
     base_url: str = "",
     profile_id: str = "",
+    protocol: str = "",
 ) -> dict[str, Any]:
     profile_id, profile = resolve_provider_profile(
         runtime=runtime,
@@ -324,6 +325,7 @@ def profile_thinking_capabilities(
         base_url=base_url,
         model_name=model_name,
         profile_id=profile_id,
+        protocol=protocol,
     )
     if not profile:
         return {"profile": "", "thinking_supported": False, "effort_supported": False}
