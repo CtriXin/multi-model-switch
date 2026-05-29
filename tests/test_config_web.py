@@ -1,14 +1,23 @@
 import json
 
+import pytest
+
 import mms_config_web
 import mms_core
+
+
+@pytest.fixture(autouse=True)
+def _isolate_mms_root_env(monkeypatch):
+    # These tests pass explicit config_path values; ambient MMS session env should not reclassify temp roots.
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "MMS_COMMAND_NAME", "MMS_PREVIEW_MODE"):
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     cfg = {
         "providers": [
             {
-                "id": "direct-qwen",
+                "id": "webui-test-direct-qwen",
                 "name": "Qwen Direct",
                 "enabled": True,
                 "api_key": "sk-super-secret-value",
@@ -18,9 +27,20 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
                 "fallback_models": ["qwen3.6-plus"],
             }
         ],
+        "accounts": [
+            {
+                "id": "claude-main",
+                "name": "Claude Main",
+                "cli": "claude",
+                "home_dir": "/Users/example/.config/mms/accounts/claude-main",
+                "proxy": "http://proxy.example",
+                "timezone": "Asia/Singapore",
+            }
+        ],
+        "account": {"defaults": {"claude": "claude-main"}},
         "vision_sidecar": {
             "enabled": True,
-            "provider_id": "direct-qwen",
+            "provider_id": "webui-test-direct-qwen",
             "model": "qwen3.6-plus",
             "api_key": "sk-vision-secret",
         },
@@ -37,13 +57,23 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
 
     assert snapshot["mode"] == "interactive_audited_save"
     assert snapshot["schema"] == "mms.setup_web.snapshot.v2"
-    assert snapshot["providers"][0]["id"] == "direct-qwen"
+    assert snapshot["providers"][0]["id"] == "webui-test-direct-qwen"
     assert snapshot["providers"][0]["has_api_key"] is True
     assert snapshot["providers"][0]["model_count"] == 1
     assert snapshot["providers"][0]["api_key"] == ""
+    assert snapshot["providers"][0]["usage"]["launches"] == 0
+    assert snapshot["accounts"][0]["id"] == "claude-main"
+    assert snapshot["accounts"][0]["is_default"] is True
+    assert snapshot["accounts"][0]["home_dir_configured"] is True
+    assert snapshot["accounts"][0]["proxy_configured"] is True
+    assert snapshot["accounts"][0]["webui_write_policy"] == "read_only_human_gate"
+    assert "http://proxy.example" not in encoded
+    assert "/Users/example/.config/mms/accounts/claude-main" not in encoded
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
+    assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置"}
+    assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
     assert "vision_sidecar" in snapshot["snippets"]
     assert [step["id"] for step in snapshot["setup_flow"]] == [
         "channel",
@@ -55,6 +85,45 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     ]
     assert {item["id"] for item in snapshot["test_contracts"]} >= {"models_endpoint", "model_ping", "simple_chat"}
     assert snapshot["save_contract"]["requires_confirm_save"] is True
+
+
+def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
+    cfg = {
+        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["gpt-5.5"]}],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "proxy": "http://proxy.example"}],
+        "account": {"defaults": {"codex": "codex-main"}},
+    }
+    report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "coverage"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    accounts = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "accounts"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    registry = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "registry_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    encoded = json.dumps(accounts, ensure_ascii=False)
+
+    assert report["ok"] is True
+    assert report["write_policy"] == "read_only"
+    assert any(item["webui"] == "read_only_human_gate" for item in report["coverage"])
+    assert accounts["write_policy"] == "read_only_human_gate"
+    assert accounts["accounts"][0]["id"] == "codex-main"
+    assert accounts["accounts"][0]["is_default"] is True
+    assert "http://proxy.example" not in encoded
+    assert registry["ok"] is True
+    assert registry["write_policy"] == "read_only"
+    assert "can initialize SQLite" in registry["note"]
+    assert not (tmp_path / "mms-next" / "registry").exists()
 
 
 def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
@@ -363,6 +432,15 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
+    assert "['settings','能力整合','accounts / reports / parity']" in html
+    assert 'data-section="settings"' in html
+    assert "Settings / Channel 能力" in html
+    assert "accountTable" in html
+    assert "settingsCoverage" in html
+    assert "maintenanceActions" in html
+    assert "/api/settings/report" in html
+    assert "human-gated" in html
+    assert "function renderSettings()" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
     assert "pending key" in html
     assert "已输入新 key，保存前会保留（不回显）" in html
