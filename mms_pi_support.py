@@ -279,9 +279,15 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
         "gemini-3-flash-agent(medium)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3.1-flash-lite": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3.1-pro-low": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
+        "mimo-v2.5[1m]": "2026-05-30 live Pi smoke timed out after 90s on this relay; direct Claude route still passed",
+        "mimo-v2.5-pro[1m]": "2026-05-30 live Pi smoke timed out after 90s on this relay; direct Claude route still passed",
     },
     "openrouter": {
+        "claude-opus-4-6": "2026-05-30 live Pi smoke returned invalid model ID on this relay",
         "anthropic/claude-opus-4.7": "2026-05-28 live Pi smoke returned key-limit 403 on this relay",
+    },
+    "us-cpa-local-codex": {
+        "gpt-5.3-codex-spark": "2026-05-30 live Pi smoke returned OpenAI 400 while direct Codex route passed",
     },
     "us-cpa-local-antigravity": {
         "gemini-3-pro-high": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
