@@ -79,6 +79,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
     mapping = snapshot["tui_webui_mapping"]
     assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
+    assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
     assert {item["tui_action_id"] for item in mapping} >= {
         "provider_mgmt",
         "account_mgmt",
@@ -171,6 +172,7 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert "can initialize SQLite" in registry["note"]
     assert mapping["ok"] is True
     assert mapping["summary"]["counts"]["human_gate"] > 0
+    assert mapping["summary"]["counts"]["missing"] == 0
     assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
     assert guard["write_policy"] == "manual_cli_human_gate"
     assert "mmf guard status" in guard["commands"]
