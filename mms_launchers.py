@@ -193,6 +193,7 @@ from mms_session_features import (
     runtime_vision_sidecar as _runtime_vision_sidecar_impl,
 )
 from mms_session_guard import (
+    bounded_env_float as _bounded_env_float_impl,
     read_session_guard_marker as _read_session_guard_marker_impl,
     reserve_session_home as _reserve_session_home_impl,
     session_guard_lock_path as _session_guard_lock_path_impl,
@@ -839,13 +840,8 @@ def _session_home_is_active(session_home):
 
 
 def _bounded_env_float(name, default):
-    raw = str(os.environ.get(name) or "").strip()
-    if not raw:
-        return float(default)
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return float(default)
+    """Compatibility wrapper for bounded float env parsing."""
+    return _bounded_env_float_impl(name, default, environ=os.environ)
 
 
 def _session_cleanup_launch_max_entries():

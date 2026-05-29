@@ -138,6 +138,16 @@ def session_home_is_active(
     return pid_alive_fn(pid)
 
 
+def bounded_env_float(name, default, *, environ=os.environ):
+    raw = str(environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return float(default)
+
+
 def reserve_session_home(
     sessions_dir,
     *,
