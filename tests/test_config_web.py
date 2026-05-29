@@ -1255,7 +1255,7 @@ def test_config_web_registry_v2_apply_scoped_provider_manual_add_preserves_provi
     assert second["candidate"]["route_candidates"]["provider_route_count"] == 6
 
 
-def test_config_web_registry_v2_apply_refreshed_provider_removes_stale_routes(tmp_path):
+def test_config_web_registry_v2_apply_refreshed_provider_preserves_stale_routes_until_explicit_cleanup(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"
 
@@ -1298,23 +1298,35 @@ def test_config_web_registry_v2_apply_refreshed_provider_removes_stale_routes(tm
         config_path=str(config_path),
     )
 
-    second_payload = json.loads(json.dumps(first_payload))
-    second_payload["draft"]["route_scope_provider_ids"] = ["tokyo"]
-    second_payload["draft"]["route_refresh_provider_ids"] = ["tokyo"]
-    second_payload["draft"]["providers"] = [provider(["claude-opus-4-6-thinking"])]
-    second = mms_config_web.apply_registry_v2_preview_plan(
+    no_cleanup_payload = json.loads(json.dumps(first_payload))
+    no_cleanup_payload["draft"]["route_scope_provider_ids"] = ["tokyo"]
+    no_cleanup_payload["draft"]["providers"] = [provider(["claude-opus-4-6-thinking"])]
+    no_cleanup = mms_config_web.apply_registry_v2_preview_plan(
         {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
-        second_payload,
+        no_cleanup_payload,
         config_path=str(config_path),
     )
     router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
 
     assert first["ok"] is True
-    assert second["ok"] is True
+    assert no_cleanup["ok"] is True
+    assert set(router["routes"]) == {"claude-opus-4.7", "claude-opus-4-6-thinking"}
+    assert no_cleanup["candidate"]["route_candidates"]["provider_route_count"] == 2
+
+    cleanup_payload = json.loads(json.dumps(no_cleanup_payload))
+    cleanup_payload["draft"]["route_refresh_provider_ids"] = ["tokyo"]
+    cleanup = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        cleanup_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert cleanup["ok"] is True
     assert set(router["routes"]) == {"claude-opus-4-6-thinking"}
     assert "claude-opus-4.7" not in router["routes"]
-    assert second["candidate"]["route_candidates"]["provider_route_count"] == 1
-    assert second["route_publish_guard"]["diff"]["removed_models_sample"] == ["claude-opus-4.7"]
+    assert cleanup["candidate"]["route_candidates"]["provider_route_count"] == 1
+    assert cleanup["route_publish_guard"]["diff"]["removed_models_sample"] == ["claude-opus-4.7"]
 
 
 def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):
