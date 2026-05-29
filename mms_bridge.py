@@ -4286,6 +4286,23 @@ def _responses_input_to_messages(instructions, input_items, model_name=""):
     if pending_tool_calls:
         messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
 
+    if requires_roundtrip:
+        last_reasoning_content = ""
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "")
+            reasoning_content = str(message.get("reasoning_content") or "").strip()
+            if role == "assistant":
+                if reasoning_content:
+                    last_reasoning_content = reasoning_content
+                    continue
+                if last_reasoning_content and isinstance(message.get("tool_calls"), list) and message["tool_calls"]:
+                    message["reasoning_content"] = last_reasoning_content
+                    continue
+            if role == "user":
+                last_reasoning_content = ""
+
     return messages
 
 
