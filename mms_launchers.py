@@ -2411,59 +2411,6 @@ def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *
     )
 
 
-def _agy_plugin_dir(account_home):
-    """Compatibility wrapper for the AGY session plugin path."""
-    from mms_agy_assets import agy_plugin_dir
-
-    return agy_plugin_dir(account_home)
-
-
-def _path_under(path, root):
-    """Compatibility wrapper for path containment checks."""
-    from mms_agy_assets import path_under
-
-    return path_under(path, root)
-
-
-def _ensure_agy_plugin_dir(account_home):
-    """Compatibility wrapper for AGY session plugin directory setup."""
-    from mms_agy_assets import ensure_agy_plugin_dir
-
-    return ensure_agy_plugin_dir(account_home)
-
-
-def _write_agy_plugin_json(plugin_dir):
-    """Compatibility wrapper for AGY plugin metadata writes."""
-    from mms_agy_assets import write_agy_plugin_json
-
-    return write_agy_plugin_json(plugin_dir)
-
-
-def _remove_file_if_exists(path):
-    """Compatibility wrapper for optional AGY asset cleanup."""
-    from mms_agy_assets import remove_file_if_exists
-
-    return remove_file_if_exists(path)
-
-
-def _write_agy_mcp_config(plugin_dir, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for AGY MCP config writes."""
-    from mms_agy_assets import write_agy_mcp_config
-
-    return write_agy_mcp_config(plugin_dir, disabled_session_surfaces=disabled_session_surfaces)
-
-
-def _write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfaces=None):
-    """Compatibility wrapper for AGY hook materialization."""
-    from mms_agy_assets import write_agy_hooks
-
-    return write_agy_hooks(
-        plugin_dir,
-        enable_caveman=enable_caveman,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
 def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
     """Compatibility wrapper for AGY session plugin overlays."""
     from mms_agy_assets import overlay_agy_session_assets

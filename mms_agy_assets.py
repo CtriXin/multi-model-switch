@@ -35,7 +35,7 @@ def ensure_agy_plugin_dir(account_home):
 
     if os.path.islink(plugin_root):
         target = os.path.realpath(plugin_root)
-        if _launchers()._path_under(target, sessions_dir):
+        if path_under(target, sessions_dir):
             os.unlink(plugin_root)
             os.symlink(stable_plugin_root, plugin_root)
         elif not os.path.exists(target):
@@ -43,7 +43,7 @@ def ensure_agy_plugin_dir(account_home):
     elif not os.path.exists(plugin_root):
         os.symlink(stable_plugin_root, plugin_root)
 
-    plugin_dir = os.path.join(plugin_root, "mms-session")
+    plugin_dir = agy_plugin_dir(account_home)
     os.makedirs(plugin_dir, exist_ok=True)
     return plugin_dir
 
@@ -77,11 +77,11 @@ def write_agy_mcp_config(plugin_dir, *, disabled_session_surfaces=None):
     if servers:
         _launchers().atomic_write_json(path, {"mcpServers": servers}, mode=0o600, indent=2)
     else:
-        _launchers()._remove_file_if_exists(path)
+        remove_file_if_exists(path)
 
 
 def write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfaces=None):
-    _launchers()._remove_file_if_exists(os.path.join(plugin_dir, "hooks.json"))
+    remove_file_if_exists(os.path.join(plugin_dir, "hooks.json"))
     hooks_data = _launchers()._merge_mms_session_hooks({})
     if enable_caveman:
         hooks_data = _launchers()._configure_claude_caveman_hooks(hooks_data, enable_caveman=True)
@@ -93,16 +93,16 @@ def write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfac
         os.makedirs(hooks_dir, exist_ok=True)
         _launchers().atomic_write_json(path, {"hooks": hooks_data}, mode=0o600, indent=2)
     else:
-        _launchers()._remove_file_if_exists(path)
+        remove_file_if_exists(path)
 
 
 def overlay_agy_session_assets(account_home, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
     if not account_home or not session_home:
         return
-    plugin_dir = _launchers()._ensure_agy_plugin_dir(account_home)
-    _launchers()._write_agy_plugin_json(plugin_dir)
-    _launchers()._write_agy_mcp_config(plugin_dir, disabled_session_surfaces=disabled_session_surfaces)
-    _launchers()._write_agy_hooks(
+    plugin_dir = ensure_agy_plugin_dir(account_home)
+    write_agy_plugin_json(plugin_dir)
+    write_agy_mcp_config(plugin_dir, disabled_session_surfaces=disabled_session_surfaces)
+    write_agy_hooks(
         plugin_dir,
         enable_caveman=enable_caveman,
         disabled_session_surfaces=disabled_session_surfaces,
