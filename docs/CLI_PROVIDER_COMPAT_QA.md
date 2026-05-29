@@ -150,6 +150,13 @@ extraction.
 wrapper. Exposing only real `.ssh`, `.gitconfig`, and `.gitignore_global` into
 isolated session homes must stay behavior-preserving during module extraction.
 
+2026-05-29 implementation note: account/OAuth runtime environment
+materialization may live outside `mms_launchers.py`, but `_account_env` remains
+the compatibility wrapper. Claude/Gemini/AGY/Codex account HOME isolation,
+session state copy-in, session assets, command wrappers, host-context/session
+packet env, network profile application, and account guard launch recording must
+stay behavior-preserving during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去
