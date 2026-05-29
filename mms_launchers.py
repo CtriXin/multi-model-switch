@@ -4809,40 +4809,17 @@ def _strip_claude_state_execution_surfaces(payload):
 
 
 def _sanitize_claude_project_state_entry(entry):
-    entry = entry if isinstance(entry, dict) else {}
-    cleaned = _copy_allowed_scalar_fields(
-        entry,
-        (
-            "hasTrustDialogAccepted",
-            "hasCompletedProjectOnboarding",
-            "hasClaudeMdExternalIncludesApproved",
-            "hasClaudeMdExternalIncludesWarningShown",
-            "projectOnboardingSeenCount",
-            "lastGracefulShutdown",
-        ),
-    )
-    for key in ("allowedTools", "mcpContextUris", "enabledMcpjsonServers", "disabledMcpjsonServers"):
-        value = entry.get(key)
-        if isinstance(value, list):
-            cleaned[key] = copy.deepcopy(value)
-    mcp_servers = entry.get("mcpServers")
-    if isinstance(mcp_servers, dict):
-        cleaned["mcpServers"] = copy.deepcopy(mcp_servers)
-    return cleaned
+    """Compatibility wrapper for Claude project state entry sanitization."""
+    from mms_claude_state import sanitize_claude_project_state_entry
+
+    return sanitize_claude_project_state_entry(entry)
 
 
 def _sanitize_claude_project_state_map(projects_data):
-    projects = {}
-    if not isinstance(projects_data, dict):
-        return projects
-    for project_path, entry in projects_data.items():
-        normalized_path = os.path.realpath(str(project_path or "").strip())
-        if not normalized_path:
-            continue
-        cleaned_entry = _sanitize_claude_project_state_entry(entry)
-        if cleaned_entry:
-            projects[normalized_path] = cleaned_entry
-    return projects
+    """Compatibility wrapper for Claude project state map sanitization."""
+    from mms_claude_state import sanitize_claude_project_state_map
+
+    return sanitize_claude_project_state_map(projects_data)
 
 
 def _load_real_claude_ui_state_seed():
@@ -4886,35 +4863,17 @@ def _load_real_claude_project_state(project_path):
 
 
 def _sanitize_oauth_claude_state_payload(data):
-    raw_data = data if isinstance(data, dict) else {}
-    payload = _strip_claude_restore_state(raw_data)
-    cleaned = _copy_allowed_scalar_fields(payload, _CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST)
-    cleaned.update(_copy_allowed_scalar_dict_fields(raw_data, _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST))
+    """Compatibility wrapper for OAuth Claude state sanitization."""
+    from mms_claude_state import sanitize_oauth_claude_state_payload
 
-    oauth_account = _copy_allowed_scalar_fields(
-        payload.get("oauthAccount"),
-        _CLAUDE_OAUTH_ACCOUNT_ALLOWLIST,
-    )
-    if oauth_account:
-        cleaned["oauthAccount"] = oauth_account
-
-    claude_ai_oauth = _copy_allowed_scalar_fields(
-        payload.get("claudeAiOauth"),
-        _CLAUDE_AI_OAUTH_ALLOWLIST,
-    )
-    if claude_ai_oauth:
-        cleaned["claudeAiOauth"] = claude_ai_oauth
-
-    projects = _sanitize_claude_project_state_map(raw_data.get("projects"))
-    if projects:
-        cleaned["projects"] = projects
-
-    return cleaned
+    return sanitize_oauth_claude_state_payload(data)
 
 
 def _sanitize_codex_claude_state_payload(data):
-    payload = _strip_claude_restore_state(data, strip_sensitive_auth=True)
-    return _copy_allowed_scalar_fields(payload, _CLAUDE_CODEX_STATE_TOP_LEVEL_ALLOWLIST)
+    """Compatibility wrapper for Codex-seeded Claude state sanitization."""
+    from mms_claude_state import sanitize_codex_claude_state_payload
+
+    return sanitize_codex_claude_state_payload(data)
 
 
 _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
@@ -4933,14 +4892,10 @@ _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
 
 
 def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
-    payload = dict(data) if isinstance(data, dict) else {}
-    payload.pop("projects", None)
-    payload.pop("lastSessionId", None)
-    payload.pop("lastCost", None)
-    if strip_sensitive_auth:
-        for key in _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS:
-            payload.pop(key, None)
-    return payload
+    """Compatibility wrapper for Claude restore-state stripping."""
+    from mms_claude_state import strip_claude_restore_state
+
+    return strip_claude_restore_state(data, strip_sensitive_auth=strip_sensitive_auth)
 
 
 def _load_project_scoped_claude_resume_session_id(
@@ -5102,97 +5057,24 @@ def _copy_claude_state_json(src, dst, *, mode="restore"):
 
 
 def _parse_iso8601_utc(value):
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    normalized = raw.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    """Compatibility wrapper for OAuth token timestamp parsing."""
+    from mms_claude_state import parse_iso8601_utc
+
+    return parse_iso8601_utc(value)
 
 
 def _merge_oauth_token_state(existing_payload, incoming_payload):
-    existing_payload = existing_payload if isinstance(existing_payload, dict) else {}
-    incoming_payload = incoming_payload if isinstance(incoming_payload, dict) else {}
-    existing_expiry = _parse_iso8601_utc(existing_payload.get("expiresAt"))
-    incoming_expiry = _parse_iso8601_utc(incoming_payload.get("expiresAt"))
-    if existing_expiry and incoming_expiry:
-        return copy.deepcopy(incoming_payload if incoming_expiry >= existing_expiry else existing_payload)
-    if incoming_expiry:
-        return copy.deepcopy(incoming_payload)
-    if existing_expiry:
-        return copy.deepcopy(existing_payload)
-    incoming_has_tokens = any(
-        str(incoming_payload.get(key) or "").strip()
-        for key in ("accessToken", "refreshToken", "tokenType", "token_type")
-    )
-    if incoming_has_tokens:
-        return copy.deepcopy(incoming_payload)
-    return copy.deepcopy(existing_payload or incoming_payload)
+    """Compatibility wrapper for OAuth token state merging."""
+    from mms_claude_state import merge_oauth_token_state
+
+    return merge_oauth_token_state(existing_payload, incoming_payload)
 
 
 def _merge_oauth_claude_state_payload(existing_data, incoming_data):
-    existing = _sanitize_oauth_claude_state_payload(existing_data)
-    incoming = _sanitize_oauth_claude_state_payload(incoming_data)
-    merged = copy.deepcopy(existing)
+    """Compatibility wrapper for OAuth Claude state merging."""
+    from mms_claude_state import merge_oauth_claude_state_payload
 
-    for key in _CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST:
-        incoming_value = incoming.get(key)
-        existing_value = existing.get(key)
-        if key == "firstStartTime":
-            chosen = existing_value or incoming_value
-            if isinstance(chosen, (str, int, float, bool)):
-                merged[key] = copy.deepcopy(chosen)
-            continue
-        if key == "numStartups":
-            numeric_values = [value for value in (existing_value, incoming_value) if isinstance(value, (int, float))]
-            if numeric_values:
-                merged[key] = max(numeric_values)
-            continue
-        if key in {"bypassPermissionsModeAccepted", "alwaysThinkingEnabled", "hasCompletedOnboarding"}:
-            if existing_value or incoming_value:
-                merged[key] = bool(existing_value or incoming_value)
-            elif key in merged:
-                merged[key] = bool(merged.get(key))
-            continue
-        if isinstance(incoming_value, (str, int, float, bool)):
-            merged[key] = copy.deepcopy(incoming_value)
-
-    for key in _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST:
-        merged_dict = _merge_scalar_dict_entries(
-            existing.get(key),
-            incoming.get(key),
-            prefer_max_numeric=(key == "tipsHistory"),
-        )
-        if merged_dict:
-            merged[key] = merged_dict
-
-    merged_account = copy.deepcopy(existing.get("oauthAccount") or {})
-    if isinstance(incoming.get("oauthAccount"), dict):
-        merged_account.update(copy.deepcopy(incoming["oauthAccount"]))
-    if merged_account:
-        merged["oauthAccount"] = merged_account
-
-    merged_token = _merge_oauth_token_state(existing.get("claudeAiOauth"), incoming.get("claudeAiOauth"))
-    if merged_token:
-        merged["claudeAiOauth"] = merged_token
-
-    merged_projects = copy.deepcopy(existing.get("projects") or {})
-    for project_path, entry in (incoming.get("projects") or {}).items():
-        current_entry = merged_projects.get(project_path)
-        next_entry = dict(current_entry) if isinstance(current_entry, dict) else {}
-        if isinstance(entry, dict):
-            next_entry.update(copy.deepcopy(entry))
-        if next_entry:
-            merged_projects[project_path] = next_entry
-    if merged_projects:
-        merged["projects"] = merged_projects
-
-    return merged
+    return merge_oauth_claude_state_payload(existing_data, incoming_data)
 
 
 def _masked_exposure_env_value(key, value):

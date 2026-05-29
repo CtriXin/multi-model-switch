@@ -94,6 +94,15 @@ Account-scoped UI state allowlists, startup counters, theme/tips merge behavior,
 MCP execution-surface stripping, and project-scoped resume isolation must not
 change during module extraction.
 
+2026-05-29 implementation note: Claude project/OAuth state sanitizers may live
+outside `mms_launchers.py`, but `_sanitize_claude_project_state_entry`,
+`_sanitize_claude_project_state_map`, `_sanitize_oauth_claude_state_payload`,
+`_sanitize_codex_claude_state_payload`, `_strip_claude_restore_state`,
+`_merge_oauth_token_state`, and `_merge_oauth_claude_state_payload` remain the
+compatibility wrappers. Restore-state noise stripping, sensitive gateway auth
+scrubbing, OAuth token freshness selection, and project trust allowlists must
+stay behavior-preserving during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去
