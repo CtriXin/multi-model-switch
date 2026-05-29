@@ -226,6 +226,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "downloadPlanJson" in html
     assert "copyApplyCommand" in html
     assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
+    assert "Advanced / Recovery：plan JSON 与 CLI fallback" in html
+    assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
     assert "已发布，但 runtime 未就绪" in html
@@ -234,7 +236,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "currentApplyCommand()" in html
     assert "/api/registry-v2/apply" in html
     assert "写入预览DB" in html
-    assert "Preview root 下 legacy 确认保存会被阻止" in html
+    assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
     assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
@@ -243,6 +245,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "保存时更新 credentials.sh（需要填写 API Key；会 backup + audit）" not in html
     assert "function renderSaveControls()" in html
     assert "saveBtn').disabled=preview" in html
+    assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
     assert "pending key" in html

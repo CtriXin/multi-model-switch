@@ -3509,25 +3509,31 @@ _HTML_PAGE = r"""<!doctype html>
     <!-- 保存 / 审计 -->
     <section class="panel" data-section="save">
       <h2>保存 / 审计</h2>
-      <p>保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；preview root 走 DB candidate + latest-approved publish。API Key 不会出现在 diff 或响应里。</p>
+      <p id="saveModeLead">保存前先生成 diff。preview root 走 DB candidate + latest-approved publish；stable legacy 使用 audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p>
       <div class="grid">
         <div class="card span5">
+          <p class="muted" id="saveModeHint"></p>
           <div class="btns">
             <button id="previewPlan">生成保存预览</button>
             <button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button>
-            <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
-            <button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button>
-            <button id="saveBtn" class="danger">确认保存</button>
+            <button id="saveBtn" class="danger legacy-save-action">确认保存</button>
           </div>
-          <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；有 API Key 更新时请优先用本页“写入预览 DB + 发布”，下载 JSON 不含明文 key。</p>
+          <details class="oc-advanced" id="advancedPlanTools" style="margin-top:14px">
+            <summary>Advanced / Recovery：plan JSON 与 CLI fallback</summary>
+            <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；下载 JSON 不含明文 key。CLI apply 是无 WebUI 时的 fallback，不是日常主流程。</p>
+            <div class="btns">
+              <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
+              <button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button>
+            </div>
+          </details>
           <div class="check" style="margin-top:12px">
             <input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span>
           </div>
-          <label style="margin-top:12px">输入确认文字：保存配置 / 写入预览DB</label>
+          <label id="confirmPhraseLabel" style="margin-top:12px">输入确认文字</label>
           <input id="confirmPhrase" placeholder="保存配置 或 写入预览DB">
           <label>保存原因 / audit reason</label>
           <input id="saveReason" value="setup-web-ui:interactive-save">
-          <p class="muted">Preview root 下 legacy 确认保存会被阻止；请用“写入预览 DB + 发布”。Preview DB 按钮只写当前 MMS_CONFIG_ROOT 的 DB candidate + generated bundle；stable root 会被阻止。</p>
+          <p class="muted" id="saveCompatibilityNote">stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
         </div>
         <div class="card span7">
           <div class="result" id="saveResult">尚未生成预览</div>
@@ -3574,7 +3580,7 @@ function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll(
 function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
 function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'Preview root 已禁用 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?'':'Stable root 不能写 preview DB，请用 mmf preview root'}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
+function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;const modeName=preview?'MMF preview / DB truth':'MMS stable / legacy compatibility';if($('saveModeHint')){$('saveModeHint').innerHTML=preview?'当前是 <strong>mmf + ~/.config/mms-next</strong>：日常只需要“生成保存预览” → “写入预览 DB + 发布”。':'当前是 <strong>mms stable</strong>：使用 legacy audited save，仍会 backup + audit。'}if($('saveModeLead')){$('saveModeLead').textContent=preview?'保存前先生成 diff。写入只落到当前 preview root 的 DB candidate，并发布 latest-approved bundle；API Key 不会出现在 diff 或响应里。':'保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；API Key 不会出现在 diff 或响应里。'}if($('confirmPhraseLabel')){$('confirmPhraseLabel').textContent=preview?'输入确认文字：写入预览DB':'输入确认文字：保存配置'}if($('confirmPhrase')){$('confirmPhrase').placeholder=preview?'写入预览DB':'保存配置'}if($('saveCompatibilityNote')){$('saveCompatibilityNote').textContent=preview?'旧版“确认保存”在 mmf 中已隐藏；下载 JSON / CLI apply 只在 Advanced / Recovery 里作为 fallback。':'stable legacy 保存写入 config.toml / credentials.sh / model-policy，并保留 backup + audit；preview DB 发布请用 mmf。'}document.querySelectorAll('.legacy-save-action').forEach(el=>el.classList.toggle('hide',preview));if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'MMF preview 已隐藏 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').classList.toggle('hide',!preview);$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?modeName:'Stable root 不能写 preview DB，请用 mmf preview root'}if($('advancedPlanTools')){$('advancedPlanTools').open=false}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
 function renderSourceStatus(){
   const box=$('sourceStatus');if(!box)return;
   const status=state.model_source_status||{};
