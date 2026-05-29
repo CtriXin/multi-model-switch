@@ -45,6 +45,16 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
             "api_key": "sk-vision-secret",
         },
         "rescue": {"fallback_model": "deepseek-v4-flash", "hot_fallback_enabled": False},
+        "load_balance": {
+            "default": "daily",
+            "profiles": {
+                "daily": {
+                    "heavy": {"model": "gpt-5.5", "provider_id": "webui-test-direct-qwen"},
+                    "medium": "qwen3.6-plus",
+                    "light": "deepseek-v4-flash",
+                }
+            },
+        },
     }
 
     snapshot = mms_config_web.build_config_snapshot(
@@ -75,7 +85,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
-    assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置"}
+    assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置", "主屏入口", "负载"}
     assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
     mapping = snapshot["tui_webui_mapping"]
     assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
@@ -90,11 +100,26 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "routes_export",
         "about",
     }
-    assert {item["id"] for item in mapping} >= {"provider.credentials", "account.login", "registry.publish_approved", "guard.accept"}
+    assert {item["id"] for item in mapping} >= {
+        "connect.add_gateway",
+        "connect.add_official",
+        "channel.provider_browse",
+        "channel.family_autosort",
+        "load_balance.profile_select",
+        "load_balance.delete_recent",
+        "provider.credentials",
+        "account.login",
+        "registry.publish_approved",
+        "guard.accept",
+    }
     assert next(item for item in mapping if item["id"] == "guard.accept")["status"] == "human_gate"
     assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "connect.add_official")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "load_balance.profile_select")["status"] == "report"
     assert snapshot["ui"]["language"] == "zh"
+    assert snapshot["load_balance"]["default_profile"] == "daily"
+    assert snapshot["load_balance"]["profiles"][0]["slots"]["heavy"]["provider_id"] == "webui-test-direct-qwen"
     assert "vision_sidecar" in snapshot["snippets"]
     assert [step["id"] for step in snapshot["setup_flow"]] == [
         "channel",
@@ -113,6 +138,15 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
         "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["gpt-5.5"]}],
         "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "proxy": "http://proxy.example"}],
         "account": {"defaults": {"codex": "codex-main"}},
+        "load_balance": {
+            "default": "fast",
+            "profiles": {
+                "fast": {
+                    "heavy": {"model": "gpt-5.5", "provider_id": "demo"},
+                    "light": "qwen3.6-flash",
+                }
+            },
+        },
     }
     report = mms_config_web.build_settings_report(
         cfg,
@@ -156,6 +190,30 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
         config_path=str(tmp_path / "mms-next" / "config.toml"),
         command_name="mmf",
     )
+    load_balance = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "load_balance_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    channel_status = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_channel_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    official_gate = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "connect_official_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    autosort_gate = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "family_autosort_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
     encoded = json.dumps(accounts, ensure_ascii=False)
 
     assert report["ok"] is True
@@ -178,6 +236,12 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert "mmf guard status" in guard["commands"]
     assert guard_accept["status"] == "human_gate"
     assert language["status"] == "native"
+    assert load_balance["write_policy"] == "read_only"
+    assert load_balance["load_balance"]["default_profile"] == "fast"
+    assert channel_status["status"] == "native"
+    assert channel_status["provider_default"] == "demo"
+    assert official_gate["status"] == "human_gate"
+    assert autosort_gate["write_policy"] == "speed_stats_write_human_gate"
     assert not (tmp_path / "mms-next" / "registry").exists()
 
 
@@ -530,6 +594,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "settingsGapSummary" in html
     assert "ui:state.ui" in html
     assert "settingsCoverage" in html
+    assert "主屏 O/P/L/S 入口覆盖" in html
+    assert "entryAudit" in html
+    assert "function renderEntryAudit" in html
+    assert "Load Balance profiles" in html
+    assert "loadBalanceTable" in html
+    assert "function renderLoadBalance" in html
+    assert "load_balance_status" in html
     assert "TUI ↔ WebUI 对照表" in html
     assert "tuiMappingTable" in html
     assert "mappingFilters" in html
