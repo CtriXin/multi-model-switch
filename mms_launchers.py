@@ -1,6 +1,5 @@
 """MMS 启动器：按 provider 或账号档案启动 CLI。"""
 
-import copy
 import inspect
 import json
 import os
@@ -2181,31 +2180,17 @@ def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
 
 
 def _load_ecc_claude_hooks():
-    ecc_root = _resolve_ecc_root()
-    if not ecc_root:
-        return {}
-    hooks_path = os.path.join(ecc_root, "hooks", "hooks.json")
-    try:
-        with open(hooks_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        hooks_data = payload.get("hooks")
-        return copy.deepcopy(hooks_data) if isinstance(hooks_data, dict) else {}
-    except Exception:
-        return {}
+    """Compatibility wrapper for ECC Claude hook loading."""
+    from mms_claude_settings import load_claude_agent_pack_hooks
+
+    return load_claude_agent_pack_hooks(_resolve_ecc_root())
 
 
 def _load_omc_claude_hooks():
-    omc_root = _resolve_omc_root()
-    if not omc_root:
-        return {}
-    hooks_path = os.path.join(omc_root, "hooks", "hooks.json")
-    try:
-        with open(hooks_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        hooks_data = payload.get("hooks")
-        return copy.deepcopy(hooks_data) if isinstance(hooks_data, dict) else {}
-    except Exception:
-        return {}
+    """Compatibility wrapper for OMC Claude hook loading."""
+    from mms_claude_settings import load_claude_agent_pack_hooks
+
+    return load_claude_agent_pack_hooks(_resolve_omc_root())
 
 
 def _configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):

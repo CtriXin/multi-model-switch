@@ -949,6 +949,20 @@ def configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
     return hooks_data
 
 
+def load_claude_agent_pack_hooks(agent_pack_root):
+    agent_pack_root = str(agent_pack_root or "").strip()
+    if not agent_pack_root:
+        return {}
+    hooks_path = os.path.join(agent_pack_root, "hooks", "hooks.json")
+    try:
+        with open(hooks_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        hooks_data = payload.get("hooks")
+        return copy.deepcopy(hooks_data) if isinstance(hooks_data, dict) else {}
+    except Exception:
+        return {}
+
+
 def configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
     import mms_launchers as _launchers
 
