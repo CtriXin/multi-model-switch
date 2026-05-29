@@ -717,17 +717,6 @@ def _default_provider():
     )
 
 
-def _normalize_supported_clis(value, protocols=None):
-    from mms_command_tools import normalize_supported_clis
-
-    return normalize_supported_clis(
-        value,
-        protocols=protocols,
-        cli_names=CLI_NAMES,
-        legacy_provider_cli_aliases=LEGACY_PROVIDER_CLI_ALIASES,
-    )
-
-
 def _default_account_home(account_id):
     from mms_command_tools import default_account_home
 
@@ -1012,12 +1001,6 @@ def _normalize_provider_id_input(provider_id):
     return normalize_provider_id_input(provider_id, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
-def _sanitize_provider_id(provider_id):
-    from mms_command_tools import sanitize_provider_id
-
-    return sanitize_provider_id(provider_id, default_provider_id=DEFAULT_PROVIDER_ID)
-
-
 def _normalize_model_id_list(values):
     from mms_command_tools import normalize_model_id_list
 
@@ -1058,13 +1041,6 @@ def _provider_env_name(provider_id, field):
     from mms_command_tools import provider_env_name
 
     return provider_env_name(provider_id, field, default_provider_id=DEFAULT_PROVIDER_ID)
-
-
-def _provider_env_value(provider_id, field):
-    """读取 provider 环境变量。"""
-    from mms_command_tools import provider_env_value
-
-    return provider_env_value(provider_id, field, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _normalize_provider(provider):
@@ -1227,22 +1203,6 @@ def _model_capability_tags(model_name):
         vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
         vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
     )
-
-
-def _model_supports_vision(model_name):
-    from mms_command_tools import model_supports_vision
-
-    return model_supports_vision(
-        model_name,
-        vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
-        vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
-    )
-
-
-def _model_cli_modes(model_name):
-    from mms_command_tools import model_cli_modes
-
-    return model_cli_modes(model_name, infer_model_family=_infer_model_family)
 
 
 def _model_cli_summary(model_name):
