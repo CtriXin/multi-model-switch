@@ -65,6 +65,9 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert snapshot["disabled_defaults"]["mcp"] == ["pilot"]
     assert isinstance(snapshot["rows"], list)
     assert isinstance(snapshot["global_roots"], list)
+    assert {view["id"] for view in snapshot["cli_views"]} == {"claude", "codex", "opencode", "agy"}
+    assert all(isinstance(view["controls"], list) for view in snapshot["cli_views"])
+    assert all(isinstance(view["global_sources"], list) for view in snapshot["cli_views"])
 
 
 def test_session_asset_rows_have_user_facing_fields(monkeypatch, tmp_path):
@@ -93,3 +96,20 @@ def test_session_asset_rows_have_user_facing_fields(monkeypatch, tmp_path):
     assert sample["group_label"] in {"MMS 动态注入", "全局继承", "其它检测项"}
     assert "web" in sample["title"]
     assert "联网" in sample["summary"] or "浏览" in sample["summary"]
+
+
+def test_session_asset_cli_views_mirror_launch_confirm(monkeypatch, tmp_path):
+    _patch_core(monkeypatch, tmp_path)
+    snapshot = mms_session_assets.build_session_assets_snapshot({})
+
+    claude = next(view for view in snapshot["cli_views"] if view["id"] == "claude")
+
+    assert claude["label"] == "Claude"
+    assert claude["row_count"] > 0
+    assert claude["allow_execution_surfaces"] is True
+    assert {"mms_dynamic", "global", "other", "skills", "mcp", "hooks"} <= set(claude["counts"])
+    assert {"skills", "mcp", "hooks"} <= set(claude["scope_counts"])
+    assert any(control["label"] == "绕过审批" for control in claude["controls"])
+    assert any(control["label"] == "MCP/技能/钩子注入" for control in claude["controls"])
+    assert any(source["label"] == "Claude 全局技能" for source in claude["global_sources"])
+    assert any("只读展示" in constraint for constraint in claude["constraints"])

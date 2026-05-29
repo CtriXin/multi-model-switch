@@ -789,6 +789,91 @@ _HTML_PAGE = r"""<!doctype html>
       display: grid;
       gap: 14px;
     }
+    .asset-cli-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+      margin: 0 0 16px;
+      min-width: 0;
+    }
+    .asset-cli-card {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      background:
+        linear-gradient(180deg, oklch(100% 0 0), oklch(97.5% 0.01 220));
+      min-width: 0;
+    }
+    .asset-cli-card.is-active {
+      border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+      box-shadow:
+        0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent),
+        0 12px 30px oklch(31% 0.045 222 / 0.07);
+    }
+    .asset-cli-card h3 {
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .asset-cli-title {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      letter-spacing: -0.015em;
+    }
+    .asset-cli-metrics,
+    .asset-cli-controls,
+    .asset-cli-sources {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      min-width: 0;
+    }
+    .asset-cli-section {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .asset-cli-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+    }
+    .asset-cli-source {
+      width: 100%;
+      border-top: 1px dashed var(--border);
+      padding-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .asset-cli-source strong {
+      color: var(--fg);
+      font-weight: 650;
+    }
+    .asset-cli-sample,
+    .asset-cli-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .asset-cli-note {
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: var(--fg-soft);
+    }
+    .asset-cli-action {
+      justify-content: flex-start;
+      margin-top: 2px;
+    }
+    .asset-cli-action button {
+      padding: 7px 12px;
+      font-size: 12px;
+    }
     .asset-toolbar {
       border: 1.5px solid var(--border);
       border-radius: var(--radius-lg);
@@ -1018,6 +1103,7 @@ _HTML_PAGE = r"""<!doctype html>
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
       .oc-summary { grid-template-columns: 1fr 1fr; }
       .asset-hero { grid-template-columns: 1fr; }
+      .asset-cli-grid { grid-template-columns: 1fr 1fr; }
       .panel { padding: 20px; }
     }
     @media (max-width: 560px) {
@@ -1025,6 +1111,7 @@ _HTML_PAGE = r"""<!doctype html>
       .shell { padding: 12px; }
       .panel { padding: 16px; border-radius: var(--radius); }
       .asset-list { grid-template-columns: 1fr; }
+      .asset-cli-grid { grid-template-columns: 1fr; }
       .asset-card-head { grid-template-columns: 1fr; }
       .asset-action { align-items: flex-start; flex-direction: column; }
       .asset-toolbar-row { align-items: stretch; flex-direction: column; }
@@ -1212,6 +1299,7 @@ _HTML_PAGE = r"""<!doctype html>
       <h2>会话能力中心</h2>
       <p>这里解释“启动一个 CLI session 时会带上哪些能力”。默认先看 MMS 动态注入；全局继承只读展示，技术路径和开关 key 都放进高级信息里。</p>
       <div class="asset-hero" id="assetSummary"></div>
+      <div class="asset-cli-grid" id="assetCliOverview"></div>
       <div class="asset-manager">
         <div class="asset-toolbar">
           <div class="asset-toolbar-row">
@@ -1424,6 +1512,11 @@ function assetTomlString(value){return String(value||'').replaceAll('\\','\\\\')
 function assetArrayToml(values){return `[${[...new Set((values||[]).map(x=>String(x||'').trim()).filter(Boolean))].sort().map(v=>`"${assetTomlString(v)}"`).join(', ')}]`}
 function renderAssetPreferenceSnippet(){const assets=state.session_assets||{};const defaults=assets.launch_defaults||{};const draft=ensureAssetDisabledDraft();const snippet=[`[launch.defaults]`,`caveman_mode = "${assetTomlString(defaults.caveman_mode||'enable')}"`,`nsr_mode = "${assetTomlString(defaults.nsr_mode||'enable')}"`,`agent_pack = "${assetTomlString(defaults.agent_pack||'none')}"`,`bypass = ${defaults.bypass===false?'false':'true'}`,'',`[session_surfaces.disabled]`,`skills = ${assetArrayToml(draft.skills)}`,`mcp = ${assetArrayToml(draft.mcp)}`,`hooks = ${assetArrayToml(draft.hooks)}`].join('\n');$('assetPreferenceSnippet').textContent=snippet;return snippet}
 function bindAssetPreferenceButtons(){const copy=$('copyAssetPrefs');const reset=$('resetAssetPrefs');if(copy)copy.onclick=async()=>{const snippet=renderAssetPreferenceSnippet();try{await navigator.clipboard.writeText(snippet);toast('偏好片段已复制')}catch(_err){toast('无法访问剪贴板，片段已显示在页面')}};if(reset)reset.onclick=()=>{assetDisabledDraft=cloneAssetDisabledDefaults();renderSessionAssets();toast('已恢复为当前 preferences.toml 状态')}}
+function assetCliViews(){const assets=state.session_assets||{};return Array.isArray(assets.cli_views)?assets.cli_views:[]}
+function assetCliChip(label,value,cls=''){return `<span class="tag ${cls}">${escapeHtml(label)} ${escapeHtml(value)}</span>`}
+function renderAssetCliSources(view){const sources=Array.isArray(view.global_sources)?view.global_sources:[];const visible=sources.filter(src=>src&&((src.count||0)>0||src.exists)).slice(0,3);if(!visible.length)return '<p class="asset-cli-sample">没有检测到可展示的全局来源；本 CLI 主要看 MMS 动态注入。</p>';return visible.map(src=>{const items=Array.isArray(src.items)&&src.items.length?`<p class="asset-cli-sample">示例：${escapeHtml(src.items.slice(0,4).join(' / '))}${src.count>4?' ...':''}</p>`:'';return `<div class="asset-cli-source"><strong>${escapeHtml(src.label||src.surface_label||'全局来源')}</strong><span class="tag ${src.exists?'':'off'}">${src.count||0}</span><p class="mono">${escapeHtml(src.path||'-')}</p>${items}</div>`}).join('')}
+function renderAssetCliControls(view){const controls=Array.isArray(view.controls)?view.controls:[];if(!controls.length)return '<span class="tag off">TUI 确认页无额外控制项</span>';return controls.slice(0,7).map(item=>`<span class="tag" title="${escapeHtml(item.hint||'')}">${escapeHtml(item.label||item.id)}：${escapeHtml(item.state||'-')}</span>`).join('')}
+function renderAssetCliOverview(){const box=$('assetCliOverview');if(!box)return;const views=assetCliViews();if(!views.length){box.innerHTML='';return}box.innerHTML=views.map(view=>{const counts=view.counts||{};const selected=assetCli===view.id;const packs=(view.available_packs||[]).length?view.available_packs.map(x=>String(x).toUpperCase()).join(' / '):'无';const constraints=Array.isArray(view.constraints)?view.constraints:[];return `<article class="card asset-cli-card ${selected?'is-active':''}"><h3><span class="asset-cli-title">${escapeHtml(view.label||view.id)}</span><span class="tag ${view.allow_execution_surfaces?'':'off'}">${view.allow_execution_surfaces?'可注入':'只读/受限'}</span></h3><p class="muted">TUI 确认页同源预览：${escapeHtml(view.label||view.id)} 启动前会看到这些技能、MCP 和钩子。</p><div class="asset-cli-section"><span class="asset-cli-label">数量总览</span><div class="asset-cli-metrics">${assetCliChip('全部',view.row_count||0)}${assetCliChip('MMS 动态',counts.mms_dynamic||0)}${assetCliChip('全局继承',counts.global||0,'off')}${assetCliChip('其它',counts.other||0,'off')}${assetCliChip('技能',counts.skills||0)}${assetCliChip('MCP',counts.mcp||0)}${assetCliChip('钩子',counts.hooks||0)}${assetCliChip('默认关闭',view.disabled_by_default||0,'off')}</div></div><div class="asset-cli-section"><span class="asset-cli-label">TUI 确认页控制</span><div class="asset-cli-controls">${renderAssetCliControls(view)}</div><p class="asset-cli-sample">可选能力包：${escapeHtml(packs)}；Tab/C/N/T/E/X/D 等开关仍以启动确认页为准。</p></div><div class="asset-cli-section"><span class="asset-cli-label">全局来源（只读）</span><div class="asset-cli-sources">${renderAssetCliSources(view)}</div></div>${constraints.length?`<p class="asset-cli-note">${escapeHtml(constraints[0])}</p>`:''}<div class="asset-action asset-cli-action"><button class="${selected?'secondary':'ghost'}" data-asset-cli-focus="${escapeHtml(view.id)}">${selected?'正在查看这个 CLI':'只看这个 CLI'}</button></div></article>`}).join('');document.querySelectorAll('[data-asset-cli-focus]').forEach(btn=>btn.onclick=()=>{assetCli=btn.dataset.assetCliFocus;renderSessionAssets();toast(`已切换到 ${btn.textContent.includes('正在')?'当前':btn.dataset.assetCliFocus} 的能力清单`)})}
 function renderAssetFilters(){const assets=state.session_assets||{};const tabs=[['all','全部来源',assetRows().length],...(assets.tabs||[]).map(t=>[t.id,t.title,t.row_count])];$('assetTabs').innerHTML=tabs.map(([id,label,count])=>assetFilterButton(id,`${label} (${count||0})`,assetTab,'data-asset-tab')).join('');document.querySelectorAll('[data-asset-tab]').forEach(btn=>btn.onclick=()=>{assetTab=btn.dataset.assetTab;renderSessionAssets()});const cliRows=[['all','全部 CLI'],...(assets.clis||[]).map(c=>[c.id,`${c.label} (${c.row_count||0})`])];$('assetCliFilters').innerHTML=cliRows.map(([id,label])=>assetFilterButton(id,label,assetCli,'data-asset-cli')).join('');document.querySelectorAll('[data-asset-cli]').forEach(btn=>btn.onclick=()=>{assetCli=btn.dataset.assetCli;renderSessionAssets()});const kinds=[['all','全部类型'],['skills','技能'],['mcp','MCP 服务'],['hooks','自动钩子']];$('assetKindFilters').innerHTML=kinds.map(([id,label])=>assetFilterButton(id,label,assetKind,'data-asset-kind')).join('');document.querySelectorAll('[data-asset-kind]').forEach(btn=>btn.onclick=()=>{assetKind=btn.dataset.assetKind;renderSessionAssets()});const search=$('assetSearch');if(search){search.value=assetQuery;search.oninput=()=>{assetQuery=search.value.trim().toLowerCase();renderSessionAssets()}}}
 function baseFilteredAssetRows(){return assetRows().filter(row=>(assetTab==='all'||row.group===assetTab)&&(assetCli==='all'||row.cli===assetCli)&&(assetKind==='all'||row.kind===assetKind))}
 function mergeAssetRows(rows){if(assetCli!=='all')return rows;const groups=new Map();for(const row of rows){const key=[row.group,row.kind,row.disable_key||row.title,row.title].join('::');if(!groups.has(key)){groups.set(key,{...row,details:[],_cliLabels:[],_scopeLabels:[],_origins:[],_detailsSeen:new Set()})}const item=groups.get(key);item._cliLabels.push(row.cli_label||row.cli);item._scopeLabels.push(row.scope_label||row.scope);item._origins.push(row.origin_label||row.origin);for(const detail of (row.details||[])){const detailKey=`${detail.label}::${detail.display||detail.value}`;if(!item._detailsSeen.has(detailKey)){item._detailsSeen.add(detailKey);item.details.push(detail)}}}return [...groups.values()].map(row=>{const cliLabels=uniqueTexts(row._cliLabels);const scopeLabels=uniqueTexts(row._scopeLabels);const origins=uniqueTexts(row._origins);delete row._cliLabels;delete row._scopeLabels;delete row._origins;delete row._detailsSeen;row.cli_label=cliLabels.join(' / ');row.scope_label=scopeLabels.length>1?'多种启用条件':(scopeLabels[0]||row.scope_label);row.origin_label=origins.length>1?'多来源检测':(origins[0]||row.origin_label);row.merged_count=cliLabels.length;row.details=[{label:'适用 CLI',value:cliLabels.join(' / '),display:cliLabels.join(' / ')},...row.details];return row})}
@@ -1431,7 +1524,7 @@ function filteredAssetRows(){const query=assetQuery.trim().toLowerCase();return 
 function assetStatusText(row,disabled){if(disabled)return '默认关闭';if(row.scope==='always')return '默认带上';return '按开关启用'}
 function assetGroupTagClass(row){return row.group==='global'?'off':(row.group==='other'?'off':'')}
 function renderAssetCard(row,idx){const disabled=assetIsDefaultDisabled(row);const source=row.group_label||row.group||'未归类';const kind=row.kind_label||assetKindLabel(row.kind);const path=assetDetail(row,'路径')||assetDetail(row,'Path')||assetDetail(row,'URL')||assetDetail(row,'触发')||assetDetail(row,'Trigger');const status=assetStatusText(row,disabled);const globalClass=row.group==='global'?' is-global':'';const disabledClass=disabled?' is-disabled':'';const mergeTag=row.merged_count>1?`<span class="tag off">适用 ${row.merged_count} 个 CLI</span>`:'';return `<article class="card asset-card${globalClass}${disabledClass}" data-asset-row="${idx}"><div class="asset-card-head"><div><div class="asset-title">${escapeHtml(row.title||'未命名能力')}</div><div class="asset-subline">${escapeHtml(row.cli_label||row.cli||'CLI')} · ${escapeHtml(kind)} · ${escapeHtml(row.scope_label||row.scope||'默认')}</div></div><span class="tag ${assetGroupTagClass(row)}">${escapeHtml(source)}</span></div><p class="asset-desc">${escapeHtml(row.summary||'暂无说明。')}</p><div class="asset-meta"><span class="tag">${escapeHtml(row.origin_label||row.origin||'来源未知')}</span><span class="tag ${disabled?'off':''}">${escapeHtml(status)}</span>${mergeTag}${path?`<span class="tag off">有技术详情</span>`:''}</div><div class="asset-action"><span>${disabled?'已加入关闭草稿；启动确认页仍可临时打开。':'需要时可加入默认关闭草稿，当前不会写真实配置。'}</span><label class="asset-switch"><input type="checkbox" data-asset-disable="${idx}" ${disabled?'checked':''}>默认关闭</label></div><details class="asset-details"><summary>高级信息：路径、触发和 key</summary><div class="asset-detail-grid">${assetDetailsHtml(row)}</div></details></article>`}
-function renderSessionAssets(){if(!$('assetCards'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};const draft=ensureAssetDisabledDraft();const displayCount=filteredAssetRows().length;$('assetSummary').innerHTML=`<div class="card"><span class="asset-count">${summary.mms_dynamic||0}</span><h3>MMS 动态注入</h3><p class="muted">启动 session 时临时带上，不污染全局 CLI。当前筛选显示 ${displayCount} 张卡片；未选具体 CLI 时会合并同名能力，减少重复。</p><div class="asset-meta"><span class="tag">技能 ${summary.skills||0}</span><span class="tag">MCP 服务 ${summary.mcp||0}</span><span class="tag">自动钩子 ${summary.hooks||0}</span><span class="tag off">全局继承 ${summary.global||0}</span></div></div><div class="card"><span class="asset-count">${draft.skills.length+draft.mcp.length+draft.hooks.length}</span><h3>默认关闭草稿</h3><p class="muted">勾选卡片里的“默认关闭”只生成 preferences.toml 片段；WebUI 不会直接改真实配置。</p><div class="asset-meta"><span class="tag">技能 ${draft.skills.length}</span><span class="tag">MCP ${draft.mcp.length}</span><span class="tag">钩子 ${draft.hooks.length}</span></div></div>`;renderAssetFilters();const rows=filteredAssetRows();$('assetCards').innerHTML=rows.length?rows.map((row,idx)=>renderAssetCard(row,idx)).join(''):`<div class="asset-empty">没有匹配的能力。可以清空搜索，或切换来源 / CLI / 类型筛选。</div>`;document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});$('assetConfigContract').textContent=`持久偏好位置：${contract.persistent_path||'~/.config/mms/preferences.toml'}。${contract.webui_write_scope||'当前 WebUI 只生成片段，不直接写入。'} ${contract.launch_override||''}`;renderAssetPreferenceSnippet();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<div class="asset-root"><p><span class="tag ${root.exists?'':'off'}">${root.exists?'存在':'未找到'}</span> <strong>${escapeHtml(root.label)}</strong></p><p class="mono">${escapeHtml(root.path)}</p><p class="muted">${root.skill_count?`发现 ${root.skill_count} 个技能；`:''}${escapeHtml(root.note||'只读展示，不自动修改。')}</p></div>`).join('')||'<p class="muted">没有全局位置记录。</p>'}
+function renderSessionAssets(){if(!$('assetCards'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};const draft=ensureAssetDisabledDraft();const displayCount=filteredAssetRows().length;$('assetSummary').innerHTML=`<div class="card"><span class="asset-count">${summary.mms_dynamic||0}</span><h3>MMS 动态注入</h3><p class="muted">启动 session 时临时带上，不污染全局 CLI。当前筛选显示 ${displayCount} 张卡片；未选具体 CLI 时会合并同名能力，减少重复。</p><div class="asset-meta"><span class="tag">技能 ${summary.skills||0}</span><span class="tag">MCP 服务 ${summary.mcp||0}</span><span class="tag">自动钩子 ${summary.hooks||0}</span><span class="tag off">全局继承 ${summary.global||0}</span></div></div><div class="card"><span class="asset-count">${draft.skills.length+draft.mcp.length+draft.hooks.length}</span><h3>默认关闭草稿</h3><p class="muted">勾选卡片里的“默认关闭”只生成 preferences.toml 片段；WebUI 不会直接改真实配置；启动确认页仍可临时打开。</p><div class="asset-meta"><span class="tag">技能 ${draft.skills.length}</span><span class="tag">MCP ${draft.mcp.length}</span><span class="tag">钩子 ${draft.hooks.length}</span></div></div>`;renderAssetCliOverview();renderAssetFilters();const rows=filteredAssetRows();$('assetCards').innerHTML=rows.length?rows.map((row,idx)=>renderAssetCard(row,idx)).join(''):`<div class="asset-empty">没有匹配的能力。可以清空搜索，或切换来源 / CLI / 类型筛选。</div>`;document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});$('assetConfigContract').textContent=`持久偏好位置：${contract.persistent_path||'~/.config/mms/preferences.toml'}。${contract.webui_write_scope||'当前 WebUI 只生成片段，不直接写入。'} ${contract.launch_override||''}`;renderAssetPreferenceSnippet();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<div class="asset-root"><p><span class="tag ${root.exists?'':'off'}">${root.exists?'存在':'未找到'}</span> <strong>${escapeHtml(root.label)}</strong></p><p class="mono">${escapeHtml(root.path)}</p><p class="muted">${root.skill_count?`发现 ${root.skill_count} 个技能；`:''}${escapeHtml(root.note||'只读展示，不自动修改。')}</p></div>`).join('')||'<p class="muted">没有全局位置记录。</p>'}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}

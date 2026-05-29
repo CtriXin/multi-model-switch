@@ -8,7 +8,10 @@ versus MMS session-managed.
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import tomllib
 from typing import Any
 
 
@@ -430,6 +433,263 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
     )
 
 
+def _skill_dir_items(raw_path: str, *, home: str, limit: int = 8) -> tuple[int, list[str]]:
+    expanded = _expand_path(raw_path, home=home)
+    if not os.path.isdir(expanded):
+        return 0, []
+    names = []
+    try:
+        for name in sorted(os.listdir(expanded)):
+            if os.path.isfile(os.path.join(expanded, name, "SKILL.md")):
+                names.append(name)
+    except OSError:
+        return 0, []
+    return len(names), names[:limit]
+
+
+def _load_json_dict(path: str, *, home: str) -> dict[str, Any]:
+    expanded = _expand_path(path, home=home)
+    try:
+        with open(expanded, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _claude_json_mcp_names(home: str) -> list[str]:
+    payload = _load_json_dict("~/.claude.json", home=home)
+    servers = payload.get("mcpServers") if isinstance(payload.get("mcpServers"), dict) else {}
+    return sorted(str(name) for name in servers if _safe_text(name))
+
+
+def _codex_config_mcp_names(home: str) -> list[str]:
+    path = _expand_path("~/.codex/config.toml", home=home)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "rb") as f:
+            payload = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        payload = {}
+    names = []
+    servers = payload.get("mcp_servers") if isinstance(payload, dict) else {}
+    if isinstance(servers, dict):
+        names.extend(str(name) for name in servers if _safe_text(name))
+    if names:
+        return sorted(set(names))
+    try:
+        text = open(path, "r", encoding="utf-8").read(256_000)
+    except OSError:
+        return []
+    pattern = re.compile(r'^\[mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))(?:\.[^\]]+)?\]\s*$', re.MULTILINE)
+    return sorted({match.group(1) or match.group(2) for match in pattern.finditer(text) if match.group(1) or match.group(2)})
+
+
+def _codex_hook_names(home: str, limit: int = 8) -> tuple[int, list[str]]:
+    payload = _load_json_dict("~/.codex/hooks.json", home=home)
+    names: list[str] = []
+    hooks = payload.get("hooks") if isinstance(payload.get("hooks"), dict) else payload
+    if isinstance(hooks, dict):
+        for event_name, groups in hooks.items():
+            if not isinstance(groups, list):
+                continue
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                for hook in group.get("hooks") or []:
+                    if not isinstance(hook, dict):
+                        continue
+                    command = _safe_text(hook.get("command"))
+                    if not command:
+                        continue
+                    target = command.split()[-1] if command.split() else command
+                    names.append(f"{event_name}:{os.path.basename(target)}")
+    return len(names), names[:limit]
+
+
+def _append_global_source(
+    sources: list[dict[str, Any]],
+    *,
+    surface: str,
+    label: str,
+    path: str,
+    count: int,
+    items: list[str] | None = None,
+    note: str = "",
+    home: str,
+) -> None:
+    exists = os.path.exists(_expand_path(path, home=home))
+    sources.append(
+        {
+            "surface": surface,
+            "surface_label": _KIND_LABELS.get(surface, surface),
+            "label": label,
+            "path": path,
+            "exists": exists,
+            "count": max(0, int(count or 0)),
+            "items": list(items or []),
+            "note": note or "只读展示；WebUI 不自动修改全局配置。",
+        }
+    )
+
+
+def _global_sources_for_cli(cli: str, cli_rows: list[dict[str, Any]], *, home: str) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    preview_global = [row for row in cli_rows if row.get("group") == "global"]
+    for kind in SURFACE_KINDS:
+        items = sorted({str(row.get("title") or "") for row in preview_global if row.get("kind") == kind and row.get("title")})
+        if items:
+            _append_global_source(
+                sources,
+                surface=kind,
+                label="启动预览检测到的全局条目",
+                path="TUI launch preview",
+                count=len(items),
+                items=items[:8],
+                note="来自 TUI bypass/确认页同一 preview catalog。",
+                home=home,
+            )
+
+    if cli == "claude":
+        for raw_path, label in (("~/.claude/skills", "Claude 全局技能"), ("~/.agents/skills", "共享 agent 技能")):
+            count, items = _skill_dir_items(raw_path, home=home)
+            _append_global_source(sources, surface="skills", label=label, path=raw_path, count=count, items=items, home=home)
+        mcp_names = _claude_json_mcp_names(home)
+        _append_global_source(sources, surface="mcp", label="Claude 全局 MCP", path="~/.claude.json", count=len(mcp_names), items=mcp_names[:8], home=home)
+    elif cli == "codex":
+        for raw_path, label in (("~/.codex/skills", "Codex 全局技能"), ("~/.agents/skills", "共享 agent 技能")):
+            count, items = _skill_dir_items(raw_path, home=home)
+            _append_global_source(sources, surface="skills", label=label, path=raw_path, count=count, items=items, home=home)
+        claude_mcp_names = _claude_json_mcp_names(home)
+        _append_global_source(
+            sources,
+            surface="mcp",
+            label="Codex 继承的 Claude MCP",
+            path="~/.claude.json",
+            count=len(claude_mcp_names),
+            items=claude_mcp_names[:8],
+            note="MMS Codex session 会把 Claude 风格 MCP 转成 Codex mcp_servers。",
+            home=home,
+        )
+        codex_mcp_names = _codex_config_mcp_names(home)
+        _append_global_source(sources, surface="mcp", label="Codex 全局 MCP", path="~/.codex/config.toml", count=len(codex_mcp_names), items=codex_mcp_names[:8], home=home)
+        hook_count, hook_names = _codex_hook_names(home)
+        _append_global_source(sources, surface="hooks", label="Codex 全局 hooks", path="~/.codex/hooks.json", count=hook_count, items=hook_names, home=home)
+    elif cli == "opencode":
+        count, items = _skill_dir_items("~/.agents/skills", home=home)
+        _append_global_source(sources, surface="skills", label="共享 agent 技能", path="~/.agents/skills", count=count, items=items, home=home)
+        _append_global_source(sources, surface="mcp", label="OpenCode 配置目录", path="~/.config/opencode", count=0, items=[], note="OpenCode 全局配置只读展示；session-local opencode.json 由 launcher 生成。", home=home)
+    elif cli == "agy":
+        count, items = _skill_dir_items("~/.agents/skills", home=home)
+        _append_global_source(sources, surface="skills", label="共享 agent 技能", path="~/.agents/skills", count=count, items=items, home=home)
+        _append_global_source(sources, surface="mcp", label="Antigravity 全局/插件配置", path="~/.config", count=0, items=[], note="Antigravity 主要通过 session plugin 注入 MMS 能力；全局项只读展示。", home=home)
+    return sources
+
+
+def _catalog_scope_counts(catalog: dict[str, Any]) -> dict[str, dict[str, int]]:
+    result: dict[str, dict[str, int]] = {}
+    for kind in SURFACE_KINDS:
+        panel = catalog.get(kind) if isinstance(catalog.get(kind), dict) else {}
+        result[kind] = {}
+        for scope in PACK_SCOPES:
+            entries = panel.get(scope) if isinstance(panel, dict) else []
+            result[kind][scope] = len(entries) if isinstance(entries, list) else 0
+    return result
+
+
+def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any], catalog: dict[str, Any]) -> list[dict[str, str]]:
+    controls = [
+        {
+            "id": "bypass",
+            "label": "绕过审批",
+            "state": "默认开启" if defaults.get("bypass") is not False else "默认关闭",
+            "hint": "对应 TUI 确认页 Tab 切换。",
+        }
+    ]
+    if flags.get("caveman"):
+        controls.append(
+            {
+                "id": "caveman",
+                "label": "Caveman",
+                "state": "默认开启" if _safe_text(defaults.get("caveman_mode") or "enable") != "disable" else "默认关闭",
+                "hint": "对应 TUI 确认页 C 切换。",
+            }
+        )
+    if flags.get("nsr"):
+        controls.append(
+            {
+                "id": "nsr",
+                "label": "NSR",
+                "state": "默认开启" if _safe_text(defaults.get("nsr_mode") or "enable") != "disable" else "默认关闭",
+                "hint": "对应 TUI 确认页 N 切换。",
+            }
+        )
+    if cli == "claude" and (flags.get("ecc") or flags.get("omc")):
+        enabled_packs = " / ".join(name.upper() for name in ("ecc", "omc") if flags.get(name))
+        controls.append(
+            {
+                "id": "agent_pack",
+                "label": "能力包",
+                "state": _safe_text(defaults.get("agent_pack") or "none"),
+                "hint": f"对应 TUI 确认页 X 切换；可用：{enabled_packs or '无'}。",
+            }
+        )
+    if cli in {"claude", "codex"}:
+        controls.append(
+            {
+                "id": "thinking",
+                "label": "思考 / 强度",
+                "state": "随模型显示",
+                "hint": "对应 TUI 确认页 T / E；是否出现取决于当前模型能力。",
+            }
+        )
+    if cli == "claude":
+        controls.append(
+            {
+                "id": "claude_1m",
+                "label": "1M context",
+                "state": "随模型显示",
+                "hint": "只在支持的 Claude Opus/Sonnet 模型上出现。",
+            }
+        )
+    controls.append(
+        {
+            "id": "execution_surfaces",
+            "label": "MCP/技能/钩子注入",
+            "state": "会注入" if catalog.get("allow_execution_surfaces", True) else "不注入",
+            "hint": "与 TUI MCP / 技能 / 钩子面板的数据源一致。",
+        }
+    )
+    return controls
+
+
+def _cli_view(cli: str, cli_rows: list[dict[str, Any]], catalog: dict[str, Any], flags: dict[str, bool], defaults: dict[str, Any], *, home: str) -> dict[str, Any]:
+    by_group = {group: sum(1 for row in cli_rows if row.get("group") == group) for group in ("mms_dynamic", "global", "other")}
+    by_kind = {kind: sum(1 for row in cli_rows if row.get("kind") == kind) for kind in SURFACE_KINDS}
+    disabled = [row for row in cli_rows if not row.get("active_by_default")]
+    return {
+        "id": cli,
+        "label": _CLI_LABELS.get(cli, cli),
+        "row_count": len(cli_rows),
+        "allow_execution_surfaces": bool(catalog.get("allow_execution_surfaces", True)),
+        "available_packs": [name for name, enabled in flags.items() if enabled],
+        "counts": {
+            **by_group,
+            **by_kind,
+        },
+        "scope_counts": _catalog_scope_counts(catalog),
+        "controls": _cli_control_cards(cli, flags, defaults, catalog),
+        "global_sources": _global_sources_for_cli(cli, cli_rows, home=home),
+        "constraints": [
+            "TUI 启动确认页本次切换优先级最高，不写回真实配置。",
+            "全局 CLI 配置只读展示；WebUI 不自动修改 Claude/Codex/OpenCode/Antigravity 全局文件。",
+            "Claude OAuth / 受限启动路径不会注入托管 MCP、技能或钩子。" if not catalog.get("allow_execution_surfaces", True) else "当前启动预览允许注入托管 MCP、技能和钩子。",
+        ],
+        "disabled_by_default": len(disabled),
+    }
+
+
 def build_session_assets_snapshot(
     cfg: dict[str, Any] | None = None,
     *,
@@ -446,6 +706,7 @@ def build_session_assets_snapshot(
     cli_cards = []
     defaults = ((prefs.get("launch") or {}).get("defaults") or {}) if isinstance(prefs, dict) else {}
     disabled = ((prefs.get("session_surfaces") or {}).get("disabled") or {}) if isinstance(prefs, dict) else {}
+    cli_views = []
     for cli in CLI_ORDER:
         runtime = {
             "bypass": defaults.get("bypass", True),
@@ -454,6 +715,7 @@ def build_session_assets_snapshot(
         catalog, flags = _preview_for_cli(mms_core, cli, runtime)
         cli_rows = _flatten_catalog(cli, catalog, home=home)
         rows.extend(cli_rows)
+        cli_views.append(_cli_view(cli, cli_rows, catalog, flags, defaults, home=home))
         cli_cards.append(
             {
                 "id": cli,
@@ -499,6 +761,7 @@ def build_session_assets_snapshot(
             },
         ],
         "clis": cli_cards,
+        "cli_views": cli_views,
         "rows": rows,
         "global_roots": _global_roots(home),
         "launch_defaults": {
