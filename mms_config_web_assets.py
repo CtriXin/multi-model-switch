@@ -11,12 +11,12 @@ _HTML_PAGE = r"""<!doctype html>
   <title>MMS 配置中心</title>
   <style>
     :root {
-      --bg:      oklch(97% 0.004 250);
+      --bg:      oklch(96.5% 0.012 210);
       --surface: oklch(100% 0 0);
-      --fg:      oklch(16% 0.015 250);
-      --muted:   oklch(50% 0.015 250);
-      --border:  oklch(88% 0.008 250);
-      --accent:  oklch(54% 0.16 155);
+      --fg:      oklch(15% 0.02 230);
+      --muted:   oklch(46% 0.02 230);
+      --border:  oklch(86% 0.012 220);
+      --accent:  oklch(54% 0.14 157);
 
       --ok:      oklch(55% 0.14 145);
       --warn:    oklch(68% 0.11 80);
@@ -35,7 +35,7 @@ _HTML_PAGE = r"""<!doctype html>
       --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.05), 0 2px 4px -2px oklch(0% 0 0 / 0.04);
       --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.05), 0 4px 6px -4px oklch(0% 0 0 / 0.03);
 
-      --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-body: 'Aptos', 'Geist', 'IBM Plex Sans', 'Noto Sans SC', ui-sans-serif, sans-serif;
       --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
       --radius:    10px;
@@ -62,6 +62,10 @@ _HTML_PAGE = r"""<!doctype html>
       -webkit-font-smoothing: antialiased;
       min-height: 100vh;
       overflow-x: clip;
+      background:
+        radial-gradient(circle at 18% -8%, oklch(88% 0.055 164 / 0.46), transparent 31rem),
+        radial-gradient(circle at 92% 10%, oklch(82% 0.035 230 / 0.32), transparent 28rem),
+        linear-gradient(180deg, oklch(98% 0.01 210), var(--bg) 34rem);
     }
     img, svg { display: block; max-width: 100%; }
     a { color: inherit; text-decoration: none; }
@@ -78,7 +82,10 @@ _HTML_PAGE = r"""<!doctype html>
       gap: 20px;
       align-items: end;
       border-bottom: 1px solid var(--border);
-      background: var(--surface);
+      background:
+        linear-gradient(135deg, oklch(100% 0 0 / 0.92), oklch(98% 0.014 210 / 0.88)),
+        var(--surface);
+      box-shadow: 0 1px 0 oklch(100% 0 0 / 0.72) inset;
     }
     h1 {
       font-size: clamp(26px, 3.5vw, 42px);
@@ -165,11 +172,12 @@ _HTML_PAGE = r"""<!doctype html>
     .panel {
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      background: var(--surface);
+      background: oklch(100% 0 0 / 0.86);
       padding: 28px;
       box-shadow: var(--shadow-sm);
       transition: box-shadow .2s ease;
       min-width: 0;
+      backdrop-filter: saturate(1.05);
     }
     .panel:hover {
       box-shadow: var(--shadow);
@@ -199,13 +207,19 @@ _HTML_PAGE = r"""<!doctype html>
     .card {
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      background: var(--bg);
+      background: oklch(99% 0.006 220);
       padding: 18px;
       transition: border-color .15s ease, box-shadow .15s ease;
       min-width: 0;
+      box-shadow:
+        0 1px 0 oklch(100% 0 0 / 0.72) inset,
+        0 10px 28px oklch(25% 0.02 230 / 0.035);
     }
     .card:hover {
       border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
+      box-shadow:
+        0 1px 0 oklch(100% 0 0 / 0.74) inset,
+        0 16px 38px oklch(25% 0.03 230 / 0.055);
     }
 
     /* ===== Grid system ===== */
@@ -748,7 +762,20 @@ _HTML_PAGE = r"""<!doctype html>
       margin-bottom: 16px;
     }
     .asset-hero .card {
-      background: linear-gradient(135deg, var(--surface), var(--bg));
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(135deg, oklch(100% 0 0), oklch(96.5% 0.018 205));
+      border-color: oklch(83% 0.026 210);
+    }
+    .asset-hero .card::after {
+      content: "";
+      position: absolute;
+      inset: auto 18px 0;
+      height: 3px;
+      border-radius: 999px 999px 0 0;
+      background: linear-gradient(90deg, var(--accent), oklch(68% 0.12 204));
+      opacity: .72;
     }
     .asset-count {
       display: block;
@@ -766,10 +793,14 @@ _HTML_PAGE = r"""<!doctype html>
       border: 1.5px solid var(--border);
       border-radius: var(--radius-lg);
       padding: 14px;
-      background: var(--bg);
+      background:
+        linear-gradient(180deg, oklch(99% 0.006 210), oklch(96.5% 0.012 210));
       display: grid;
       gap: 12px;
       min-width: 0;
+      box-shadow:
+        0 1px 0 oklch(100% 0 0 / 0.7) inset,
+        0 10px 28px oklch(28% 0.02 230 / 0.035);
     }
     .asset-toolbar-row {
       display: flex;
@@ -782,11 +813,25 @@ _HTML_PAGE = r"""<!doctype html>
       font-size: 12px;
       color: var(--muted);
       min-width: 64px;
+      letter-spacing: 0.06em;
+    }
+    .asset-toolbar .filterbar {
+      margin: 0;
+    }
+    .asset-toolbar .filterbar button {
+      border: 1px solid transparent;
+      background: oklch(100% 0 0 / 0.7);
+      color: oklch(33% 0.02 230);
+      box-shadow: 0 1px 0 oklch(100% 0 0 / 0.7) inset;
+    }
+    .asset-toolbar .filterbar button:hover {
+      border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
     }
     .asset-search {
       max-width: 340px;
       min-width: 220px;
       flex: 1 1 260px;
+      background: oklch(100% 0 0 / 0.88);
     }
     .asset-list {
       display: grid;
@@ -800,14 +845,37 @@ _HTML_PAGE = r"""<!doctype html>
       flex-direction: column;
       gap: 12px;
       min-width: 0;
-      background: var(--surface);
+      padding: 16px;
+      background:
+        linear-gradient(180deg, oklch(100% 0 0), oklch(98% 0.006 220));
+      border-color: oklch(87% 0.014 220);
+      overflow: hidden;
+      box-shadow:
+        0 1px 0 oklch(100% 0 0 / 0.82) inset,
+        0 8px 22px oklch(25% 0.02 230 / 0.038);
+    }
+    .asset-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: linear-gradient(180deg, var(--accent), oklch(72% 0.09 178));
+      opacity: .75;
     }
     .asset-card.is-disabled {
       border-color: var(--warn);
-      background: color-mix(in oklch, var(--warn-soft) 34%, var(--surface));
+      background:
+        linear-gradient(180deg, oklch(100% 0 0), color-mix(in oklch, var(--warn-soft) 38%, var(--surface)));
+    }
+    .asset-card.is-disabled::before {
+      background: linear-gradient(180deg, var(--warn), oklch(76% 0.10 93));
     }
     .asset-card.is-global {
-      background: color-mix(in oklch, var(--fg-soft) 55%, var(--surface));
+      background:
+        linear-gradient(180deg, oklch(99% 0.003 230), color-mix(in oklch, var(--fg-soft) 58%, var(--surface)));
+    }
+    .asset-card.is-global::before {
+      background: linear-gradient(180deg, oklch(56% 0.025 235), oklch(72% 0.02 230));
     }
     .asset-card-head {
       display: grid;
@@ -817,9 +885,10 @@ _HTML_PAGE = r"""<!doctype html>
     }
     .asset-title {
       font-size: 16px;
-      font-weight: 700;
+      font-weight: 750;
       line-height: 1.25;
       overflow-wrap: anywhere;
+      letter-spacing: -0.015em;
     }
     .asset-subline {
       color: var(--muted);
@@ -877,6 +946,10 @@ _HTML_PAGE = r"""<!doctype html>
       font-size: 12.5px;
       font-weight: 600;
       user-select: none;
+      transition: color .18s cubic-bezier(.32,.72,0,1);
+    }
+    .asset-details summary:hover {
+      color: var(--fg);
     }
     .asset-detail-grid {
       display: grid;
@@ -910,8 +983,9 @@ _HTML_PAGE = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 12px;
-      background: var(--surface);
+      background: oklch(100% 0 0 / 0.72);
       min-width: 0;
+      box-shadow: 0 1px 0 oklch(100% 0 0 / 0.72) inset;
     }
 
     /* ===== Section entrance animation ===== */

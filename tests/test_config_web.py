@@ -356,6 +356,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "assetCards" in html
     assert "asset-search" in html
     assert "asset-list" in html
+    assert "Aptos" in html
+    assert ".asset-card::before" in html
     assert "overflow-wrap: anywhere" in html
     assert "默认关闭草稿" in html
     assert "copyAssetPrefs" in html
