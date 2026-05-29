@@ -1737,42 +1737,6 @@ def _pref_bool(value):
     return pref_bool(value)
 
 
-def _pref_enable_disable(value):
-    from mms_command_tools import pref_enable_disable
-
-    return pref_enable_disable(value)
-
-
-def _pref_reasoning_effort(value):
-    from mms_command_tools import pref_reasoning_effort
-
-    return pref_reasoning_effort(value)
-
-
-def _pref_agent_pack(value):
-    from mms_command_tools import pref_agent_pack
-
-    return pref_agent_pack(value)
-
-
-def _sanitize_surface_list(values):
-    from mms_command_tools import sanitize_surface_list
-
-    return sanitize_surface_list(values)
-
-
-def _sanitize_disabled_session_surfaces(payload):
-    from mms_command_tools import sanitize_disabled_session_surfaces
-
-    return sanitize_disabled_session_surfaces(payload)
-
-
-def _sanitize_launch_preferences(payload):
-    from mms_command_tools import sanitize_launch_preferences
-
-    return sanitize_launch_preferences(payload)
-
-
 _PREFERENCE_ASSET_ROOT_KEYS = {
     "agent_browser": "agent_browser",
     "agent-browser": "agent_browser",
@@ -1790,12 +1754,6 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
     "weber": "weber",
     "xmem": "xmem",
 }
-
-
-def _sanitize_asset_roots(payload):
-    from mms_command_tools import sanitize_asset_roots
-
-    return sanitize_asset_roots(payload, asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS)
 
 
 def _sanitize_user_preferences(raw):
@@ -1831,12 +1789,6 @@ def _merge_disabled_session_surfaces(*payloads):
     from mms_command_tools import merge_disabled_session_surfaces
 
     return merge_disabled_session_surfaces(*payloads)
-
-
-def _preference_runtime_overlay(prefs, cli_name):
-    from mms_command_tools import preference_runtime_overlay
-
-    return preference_runtime_overlay(prefs, cli_name)
 
 
 def _runtime_with_launch_preferences(cfg, runtime, cli_name):
