@@ -6929,6 +6929,15 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 
 
 def _materialize_codex_session_entry(entry, src, dst):
+    if os.path.isdir(src) and os.path.isdir(dst):
+        os.makedirs(dst, exist_ok=True)
+        for child in os.listdir(src):
+            child_src = os.path.join(src, child)
+            child_dst = os.path.join(dst, child)
+            if os.path.exists(child_dst) or os.path.islink(child_dst):
+                continue
+            os.symlink(child_src, child_dst)
+        return
     if os.path.exists(dst) or os.path.islink(dst):
         return
     if entry in _CODEX_COPY_INTO_SESSION_FILES and os.path.isfile(src):
