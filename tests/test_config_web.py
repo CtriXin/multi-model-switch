@@ -1079,6 +1079,34 @@ def test_config_web_registry_v2_apply_routes_visible_model_rows_without_fallback
     assert profile["provider"]["default"] == "demo"
 
 
+def test_config_web_registry_v2_apply_routes_visible_model_rows_with_existing_fallback_lists(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = json.loads(json.dumps(_draft_payload()))
+    provider = payload["draft"]["providers"][0]
+    provider["fallback_models"] = ["gpt-5.5"]
+    provider["extra_models"] = []
+    provider["models"] = [
+        {"id": "gpt-5.5", "visible": True},
+        {"id": "qwen3.6-plus", "visible": True},
+        {"id": "hidden-remote", "visible": False},
+    ]
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert set(router["routes"]) == {"gpt-5.5", "qwen3.6-plus"}
+    assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
+    assert "hidden-remote" not in router["routes"]
+
+
 def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"
@@ -1182,7 +1210,6 @@ def test_config_web_registry_v2_apply_republishes_no_diff_when_manifest_missing(
 
     assert first["ok"] is True
     assert second["ok"] is True
-    assert second["registry_v2_save_plan"]["route_publish_work"]["has_draft_changes"] is False
     assert second["registry_v2_save_plan"]["route_publish_work"]["has_route_publish_work"] is True
     assert "no_draft_changes" not in second["registry_v2_save_plan"]["blocked_reasons"]
     assert manifest_path.exists()

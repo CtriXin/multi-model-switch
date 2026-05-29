@@ -1347,12 +1347,9 @@ def _copy_existing_provider(
     provider["extra_models"] = _normalize_model_list(provider_payload.get("extra_models"))
     provider["hidden_models"] = _normalize_model_list(provider_payload.get("hidden_models"))
     if preserve_model_rows:
-        if not provider["fallback_models"] and not provider["extra_models"]:
-            route_rows = _route_model_rows_from_payload(provider_payload)
-            if route_rows:
-                provider["models"] = route_rows
-            else:
-                provider.pop("models", None)
+        route_rows = _route_model_rows_from_payload(provider_payload)
+        if route_rows:
+            provider["models"] = route_rows
         else:
             provider.pop("models", None)
     return provider

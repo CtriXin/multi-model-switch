@@ -742,7 +742,8 @@ def registry_v2_save_plan(
     current_route_count = int(guard_current.get("route_count") or 0)
     guard_has_current = bool(guard_current.get("available"))
     route_delta_count = int(guard_diff.get("removed_count") or 0) + int(guard_diff.get("added_count") or 0)
-    has_route_publish_work = candidate_route_count > 0 and (route_delta_count > 0 or not guard_has_current)
+    provider_route_delta_count = int(guard_diff.get("removed_provider_route_count") or 0) + int(guard_diff.get("added_provider_route_count") or 0)
+    has_route_publish_work = candidate_route_count > 0 and (route_delta_count > 0 or provider_route_delta_count > 0 or not guard_has_current)
     has_changes = has_draft_changes or has_route_publish_work
     guard_blocked = bool(guard) and guard.get("ok") is False
     backup_dir = root / "backups" / "db"
@@ -776,6 +777,7 @@ def registry_v2_save_plan(
             "current_route_count": current_route_count,
             "current_bundle_available": guard_has_current,
             "route_delta_count": route_delta_count,
+            "provider_route_delta_count": provider_route_delta_count,
         },
         "would_write": {
             "db_candidate_revision": can_write_preview,
@@ -1857,6 +1859,12 @@ def _route_models_from_candidate_payload(candidate_payload: Mapping[str, Any]) -
     return models
 
 
+def _provider_route_identity(model: Any, provider_id: Any) -> str:
+    model_text = str(model or "").strip()
+    provider_text = str(provider_id or "").strip()
+    return f"{provider_text}:{model_text}" if model_text and provider_text else ""
+
+
 def _latest_approved_route_guard_summary(root: Path) -> dict[str, Any]:
     try:
         bundle = mms_registry.load_latest_approved_bundle(config_dir=root, include_secret=True)
@@ -1868,18 +1876,28 @@ def _latest_approved_route_guard_summary(root: Path) -> dict[str, Any]:
             "route_count": 0,
             "provider_route_count": 0,
             "models": [],
+            "provider_routes": [],
         }
     manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), Mapping) else {}
     payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), Mapping) else {}
     router = payloads.get("router") if isinstance(payloads.get("router"), Mapping) else {}
     routes = router.get("routes") if isinstance(router.get("routes"), Mapping) else {}
     provider_route_count = 0
-    for entry in routes.values():
+    provider_routes: set[str] = set()
+    for model, entry in routes.items():
         if not isinstance(entry, Mapping):
             continue
         if isinstance(entry.get("primary"), Mapping):
             provider_route_count += 1
+            route_id = _provider_route_identity(model, entry["primary"].get("provider_id"))
+            if route_id:
+                provider_routes.add(route_id)
         provider_route_count += sum(1 for item in (entry.get("fallbacks") or []) if isinstance(item, Mapping))
+        for item in entry.get("fallbacks") or []:
+            if isinstance(item, Mapping):
+                route_id = _provider_route_identity(model, item.get("provider_id"))
+                if route_id:
+                    provider_routes.add(route_id)
     return {
         "available": True,
         "reason": "",
@@ -1888,16 +1906,26 @@ def _latest_approved_route_guard_summary(root: Path) -> dict[str, Any]:
         "route_count": len(routes),
         "provider_route_count": provider_route_count,
         "models": sorted(str(model) for model in routes.keys()),
+        "provider_routes": sorted(provider_routes),
     }
 
 
 def _candidate_route_guard_summary(candidate_payload: Mapping[str, Any]) -> dict[str, Any]:
     route_entries = [item for item in (candidate_payload.get("route_entries") or []) if isinstance(item, Mapping)]
     models = sorted(_route_models_from_candidate_payload(candidate_payload))
+    provider_routes = sorted(
+        route_id
+        for route_id in (
+            _provider_route_identity(item.get("model"), item.get("provider_id"))
+            for item in route_entries
+        )
+        if route_id
+    )
     return {
         "route_count": len(models),
         "provider_route_count": len(route_entries),
         "models": models,
+        "provider_routes": provider_routes,
     }
 
 
@@ -1930,6 +1958,8 @@ def _registry_v2_route_publish_guard_from_candidate(
     candidate = _candidate_route_guard_summary(candidate_payload)
     removed_models = sorted(set(current.get("models") or []) - set(candidate.get("models") or []))
     added_models = sorted(set(candidate.get("models") or []) - set(current.get("models") or []))
+    removed_provider_routes = sorted(set(current.get("provider_routes") or []) - set(candidate.get("provider_routes") or []))
+    added_provider_routes = sorted(set(candidate.get("provider_routes") or []) - set(current.get("provider_routes") or []))
     result: dict[str, Any] = {
         "schema": "mms.registry_v2.route_publish_guard.v1",
         "ok": True,
@@ -1937,13 +1967,17 @@ def _registry_v2_route_publish_guard_from_candidate(
         "message": "",
         "config_root": str(root),
         "expected_bundle_revision": str(expected_bundle_revision or "").strip(),
-        "current": {key: value for key, value in current.items() if key != "models"},
-        "candidate": {key: value for key, value in candidate.items() if key != "models"},
+        "current": {key: value for key, value in current.items() if key not in {"models", "provider_routes"}},
+        "candidate": {key: value for key, value in candidate.items() if key not in {"models", "provider_routes"}},
         "diff": {
             "removed_count": len(removed_models),
             "added_count": len(added_models),
+            "removed_provider_route_count": len(removed_provider_routes),
+            "added_provider_route_count": len(added_provider_routes),
             "removed_models_sample": removed_models[:20],
             "added_models_sample": added_models[:20],
+            "removed_provider_routes_sample": removed_provider_routes[:20],
+            "added_provider_routes_sample": added_provider_routes[:20],
         },
         "policy": {
             "min_baseline_route_count": ROUTE_SHRINK_GUARD_MIN_BASELINE,
