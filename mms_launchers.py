@@ -1,6 +1,5 @@
 """MMS 启动器：按 provider 或账号档案启动 CLI。"""
 
-import inspect
 import json
 import os
 import re
@@ -253,28 +252,10 @@ def _ensure_bridge_helpers():
 
 
 def _gateway_claude_bridge_context(*args, **kwargs):
-    target = gateway_claude_bridge
-    if target is None:
-        raise RuntimeError("gateway_claude_bridge 未初始化")
-    signature_target = getattr(target, "__wrapped__", target)
-    try:
-        signature = inspect.signature(signature_target)
-    except (TypeError, ValueError):
-        signature = None
-    if signature is None:
-        return target(*args, **kwargs)
-    allowed = set(signature.parameters.keys())
-    filtered = dict(kwargs)
-    dropped = [key for key in list(filtered.keys()) if key not in allowed]
-    for key in dropped:
-        filtered.pop(key, None)
-    if dropped:
-        console.print(
-            "[yellow]检测到旧版 bridge 签名，已自动降级忽略参数: "
-            + ", ".join(sorted(dropped))
-            + "[/yellow]"
-        )
-    return target(*args, **filtered)
+    """Compatibility wrapper for gateway Claude bridge signature downgrade."""
+    from mms_launcher_bridge import gateway_claude_bridge_context
+
+    return gateway_claude_bridge_context(gateway_claude_bridge, *args, console=console, **kwargs)
 
 
 def _ensure_speed_stats():
