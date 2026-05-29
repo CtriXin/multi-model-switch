@@ -89,6 +89,40 @@ def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
     assert provider["models"][0]["source"] == "approved"
 
 
+def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
+    monkeypatch.setattr(
+        mms_config_web._load_mms_core(),
+        "_load_probe_file_cache",
+        lambda *_args, **_kwargs: {"raw_models": ["gpt-preview", "hidden-remote"], "base_source": "remote"},
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "preview-provider",
+                "name": "Preview Provider",
+                "enabled": True,
+                "api_key": "sk-super-secret-value",
+                "openai_base_url": "https://preview.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "manual",
+                "fallback_models": ["gpt-preview"],
+                "_mms_bundle_runtime": True,
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    rows = snapshot["providers"][0]["models"]
+
+    assert [row["id"] for row in rows] == ["gpt-preview"]
+    assert rows[0]["source"] == "approved"
+
+
 def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
@@ -968,11 +1002,13 @@ def test_config_web_registry_v2_apply_routes_visible_model_rows_without_fallback
         config_path=str(config_path),
     )
     router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    profile = json.loads((config_root / "generated" / "provider-profiles.generated.json").read_text(encoding="utf-8"))
 
     assert result["ok"] is True
     assert result["candidate"]["route_candidates"]["provider_route_count"] == 1
     assert set(router["routes"]) == {"qwen3.6-plus"}
     assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
+    assert profile["profiles"]["demo"]["hidden_models"] == ["noisy-model"]
 
 
 def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):

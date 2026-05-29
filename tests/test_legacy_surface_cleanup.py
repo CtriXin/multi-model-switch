@@ -1179,6 +1179,46 @@ fallback_models = ["stale-model"]
     assert [item["id"] for item in cfg["providers"]] == ["preview-provider"]
 
 
+def test_bundle_runtime_provider_options_ignore_probe_cache(monkeypatch) -> None:
+    import mms_core
+
+    provider = {
+        "id": "preview-provider",
+        "enabled": True,
+        "api_key": "sk-preview-secret",
+        "protocols": ["anthropic_messages"],
+        "supported_clis": ["claude"],
+        "anthropic_base_url": "https://preview.example/v1",
+        "models_endpoint": "manual",
+        "fallback_models": ["visible-model"],
+        "_mms_bundle_runtime": True,
+    }
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args, **_kwargs: [(provider, ["visible-model", "hidden-remote-model"])],
+    )
+    monkeypatch.setattr(mms_core, "_account_options_for_model", lambda *_args, **_kwargs: [])
+
+    visible = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "visible-model"},
+    )
+    hidden = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "hidden-remote-model"},
+    )
+
+    assert [item["id"] for item in visible] == ["preview-provider"]
+    assert hidden == []
+
+
 def test_mmf_valid_bundle_without_config_reaches_launcher_selection(monkeypatch, tmp_path) -> None:
     import mms_core
 

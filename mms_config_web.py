@@ -447,7 +447,7 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
                 "secret_ref": secret_ref,
                 "fallback_models": sorted(provider_models.get(provider_id, set()), key=str.lower),
                 "extra_models": [],
-                "hidden_models": [],
+                "hidden_models": _normalize_model_list(profile.get("hidden_models")),
             }
         )
     role_rank = {"primary": 0, "auto": 1, "fallback": 2}
@@ -630,18 +630,20 @@ def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | Non
 def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dict[str, Any]) -> list[dict[str, Any]]:
     model_sources: dict[str, str] = {}
     provider_id = _safe_text(provider.get("id"))
+    bundle_runtime = bool(provider.get("_mms_bundle_runtime"))
     cached_raw: list[str] = []
     cached_source = "fallback"
-    try:
-        mms_core = _load_mms_core()
-        cached = mms_core._load_probe_file_cache(provider_id, allow_stale=True)  # noqa: SLF001 - UI snapshot only
-        if cached:
-            cached_raw = _normalize_model_list(cached.get("raw_models") or cached.get("models") or [])
-            cached_source = _safe_text(cached.get("base_source") or "remote") or "remote"
-    except Exception:
-        cached_raw = []
+    if not bundle_runtime:
+        try:
+            mms_core = _load_mms_core()
+            cached = mms_core._load_probe_file_cache(provider_id, allow_stale=True)  # noqa: SLF001 - UI snapshot only
+            if cached:
+                cached_raw = _normalize_model_list(cached.get("raw_models") or cached.get("models") or [])
+                cached_source = _safe_text(cached.get("base_source") or "remote") or "remote"
+        except Exception:
+            cached_raw = []
     for model in cached_raw or _normalize_model_list(provider.get("fallback_models")):
-        model_sources.setdefault(model, cached_source if cached_raw else "fallback")
+        model_sources.setdefault(model, "approved" if bundle_runtime else (cached_source if cached_raw else "fallback"))
     for model in _normalize_model_list(provider.get("extra_models")):
         model_sources.setdefault(model, "extra")
     policy_models = policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}

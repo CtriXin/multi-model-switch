@@ -1717,6 +1717,7 @@ def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str,
             "models_endpoint": str(provider.get("models_endpoint") or ""),
             "protocols": _as_string_list(provider.get("protocols")),
             "supported_clis": _as_string_list(provider.get("supported_clis")),
+            "hidden_models": _as_string_list(provider.get("hidden_models")),
             "enabled": provider.get("enabled", True) is not False,
         }
     payload = {

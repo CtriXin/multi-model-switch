@@ -7933,7 +7933,10 @@ def _provider_models_for_cli(cli_name, models):
 
 
 def _provider_effective_models(provider, cached_models, cfg=None):
-    if cached_models is None:
+    if provider.get("_mms_bundle_runtime"):
+        base_models = list(provider.get("fallback_models") or [])
+        base_source = "approved"
+    elif cached_models is None:
         if provider.get("models_endpoint") == "manual":
             base_models = list(provider.get("fallback_models") or [])
             base_source = "manual"
@@ -12886,7 +12889,7 @@ def _load_preview_runtime_config_from_latest_bundle():
                     "models_endpoint": str(profile.get("models_endpoint") or "manual"),
                     "fallback_models": [],
                     "extra_models": [],
-                    "hidden_models": [],
+                    "hidden_models": _normalize_model_id_list(profile.get("hidden_models")),
                     "default_anthropic_base_url": anthropic_url,
                     "default_openai_base_url": openai_url,
                     "anthropic_base_url": anthropic_url,
