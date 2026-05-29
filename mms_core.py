@@ -297,12 +297,6 @@ class WizardCancel(Exception):
     pass
 
 
-def _parse_semver_tag(tag):
-    from mms_command_tools import parse_semver_tag
-
-    return parse_semver_tag(tag)
-
-
 def _load_json_file(path, default):
     from mms_command_tools import load_json_file
 
@@ -333,21 +327,15 @@ def _save_update_check_cache(payload):
     _save_json_file(UPDATE_CHECK_PATH, payload)
 
 
-def _normalize_semver_tags(raw_tags):
-    from mms_command_tools import normalize_semver_tags
-
-    return normalize_semver_tags(raw_tags)
-
-
 def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
-    from mms_command_tools import fetch_latest_semver_tags
+    from mms_command_tools import fetch_latest_semver_tags, normalize_semver_tags
 
     return fetch_latest_semver_tags(
         limit=limit,
         request_cls=Request,
         urlopen_func=urlopen,
         json_load=json.load,
-        normalize_semver_tags=_normalize_semver_tags,
+        normalize_semver_tags=normalize_semver_tags,
     )
 
 
@@ -355,35 +343,6 @@ def _extract_semver_text(value):
     from mms_command_tools import extract_semver_text
 
     return extract_semver_text(value)
-
-
-def _compare_semver_text(current, latest):
-    from mms_command_tools import compare_semver_text
-
-    return compare_semver_text(current, latest)
-
-
-def _detect_cli_version(command_name):
-    from mms_command_tools import detect_cli_version
-
-    return detect_cli_version(
-        command_name,
-        which=shutil.which,
-        subprocess_run=subprocess.run,
-        extract_semver_text=_extract_semver_text,
-        localize=_L,
-    )
-
-
-def _fetch_npm_package_latest_version(package_name):
-    from mms_command_tools import fetch_npm_package_latest_version
-
-    return fetch_npm_package_latest_version(
-        package_name,
-        which=shutil.which,
-        subprocess_run=subprocess.run,
-        extract_semver_text=_extract_semver_text,
-    )
 
 
 def _installed_update_semver(version_meta):
@@ -399,7 +358,7 @@ def _semver_tag_gap(installed_version, known_tags, latest_tag=""):
 
 
 def _update_notice():
-    from mms_command_tools import update_notice
+    from mms_command_tools import parse_semver_tag, update_notice
 
     return update_notice(
         stdin=sys.stdin,
@@ -407,7 +366,7 @@ def _update_notice():
         load_version_meta=_load_version_meta,
         installed_update_semver=_installed_update_semver,
         load_update_check_cache=_load_update_check_cache,
-        parse_semver_tag=_parse_semver_tag,
+        parse_semver_tag=parse_semver_tag,
         semver_tag_gap=_semver_tag_gap,
         save_update_check_cache=_save_update_check_cache,
         now=time.time,
@@ -541,59 +500,65 @@ def _release_version_info():
     return release_version_info(load_version_meta=_load_version_meta, git_output=_git_output)
 
 
-def _refresh_update_cache_for_about(force_update=False):
-    from mms_command_tools import refresh_update_cache_for_about
-
-    return refresh_update_cache_for_about(
-        force_update=force_update,
-        load_update_check_cache=_load_update_check_cache,
-        fetch_latest_semver_tags=_fetch_latest_semver_tags,
-        save_update_check_cache=_save_update_check_cache,
-        now=time.time,
-    )
-
-
-def _cli_version_status(force_update=False):
-    from mms_command_tools import cli_version_status
-
-    return cli_version_status(
-        force_update=force_update,
-        load_update_check_cache=_load_update_check_cache,
-        save_update_check_cache=_save_update_check_cache,
-        cli_version_packages=CLI_VERSION_PACKAGES,
-        detect_cli_version=_detect_cli_version,
-        fetch_npm_package_latest_version=_fetch_npm_package_latest_version,
-        compare_semver_text=_compare_semver_text,
-        localize=_L,
-        now=time.time,
-    )
-
-
-def _mms_update_status(version_info, cache):
-    from mms_command_tools import mms_update_status
-
-    return mms_update_status(version_info, cache, localize=_L)
-
-
 def _about_status_snapshot(force_update=False):
-    from mms_command_tools import about_status_snapshot
+    from mms_command_tools import (
+        about_status_snapshot,
+        cli_version_status,
+        compare_semver_text,
+        detect_cli_version,
+        fetch_npm_package_latest_version,
+        mms_update_status,
+        refresh_update_cache_for_about,
+    )
+
+    def refresh_cache(*, force_update=False):
+        return refresh_update_cache_for_about(
+            force_update=force_update,
+            load_update_check_cache=_load_update_check_cache,
+            fetch_latest_semver_tags=_fetch_latest_semver_tags,
+            save_update_check_cache=_save_update_check_cache,
+            now=time.time,
+        )
+
+    def detect_cli(command_name):
+        return detect_cli_version(
+            command_name,
+            which=shutil.which,
+            subprocess_run=subprocess.run,
+            extract_semver_text=_extract_semver_text,
+            localize=_L,
+        )
+
+    def fetch_latest_package(package_name):
+        return fetch_npm_package_latest_version(
+            package_name,
+            which=shutil.which,
+            subprocess_run=subprocess.run,
+            extract_semver_text=_extract_semver_text,
+        )
+
+    def cli_status(*, force_update=False):
+        return cli_version_status(
+            force_update=force_update,
+            load_update_check_cache=_load_update_check_cache,
+            save_update_check_cache=_save_update_check_cache,
+            cli_version_packages=CLI_VERSION_PACKAGES,
+            detect_cli_version=detect_cli,
+            fetch_npm_package_latest_version=fetch_latest_package,
+            compare_semver_text=compare_semver_text,
+            localize=_L,
+            now=time.time,
+        )
+
+    def mms_status(version_info, cache):
+        return mms_update_status(version_info, cache, localize=_L)
 
     return about_status_snapshot(
         force_update=force_update,
         release_version_info=_release_version_info,
-        refresh_update_cache_for_about=_refresh_update_cache_for_about,
-        cli_version_status=_cli_version_status,
-        mms_update_status=_mms_update_status,
-    )
-
-
-def _mms_upgrade_shell_command(*, include_clis=False):
-    from mms_command_tools import mms_upgrade_shell_command
-
-    return mms_upgrade_shell_command(
-        include_clis=include_clis,
-        preferred_language=_load_version_meta().get("preferred_language", ""),
-        normalize_language=normalize_language,
+        refresh_update_cache_for_about=refresh_cache,
+        cli_version_status=cli_status,
+        mms_update_status=mms_status,
     )
 
 
@@ -604,14 +569,21 @@ def _cli_upgrade_shell_command(cli_name):
 
 
 def _run_about_upgrade(*, target="mms", include_clis=False):
-    from mms_command_tools import run_about_upgrade
+    from mms_command_tools import mms_upgrade_shell_command, run_about_upgrade
+
+    def mms_upgrade_command(*, include_clis=False):
+        return mms_upgrade_shell_command(
+            include_clis=include_clis,
+            preferred_language=_load_version_meta().get("preferred_language", ""),
+            normalize_language=normalize_language,
+        )
 
     return run_about_upgrade(
         target=target,
         include_clis=include_clis,
         ensure_rich=_ensure_rich,
         cli_upgrade_shell_command=_cli_upgrade_shell_command,
-        mms_upgrade_shell_command=_mms_upgrade_shell_command,
+        mms_upgrade_shell_command=mms_upgrade_command,
         confirm_ask=Confirm.ask,
         subprocess_run=subprocess.run,
         console=console,
@@ -3739,16 +3711,6 @@ def _ensure_models_cache_available(models_cache):
     from mms_command_tools import ensure_models_cache_available
 
     return ensure_models_cache_available(models_cache, console=console)
-
-
-def _model_matches_cli_family(cli_name, model_name):
-    from mms_command_tools import model_matches_cli_family
-
-    return model_matches_cli_family(
-        cli_name,
-        model_name,
-        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
-    )
 
 
 def _model_matches_account_cli(cli_name, model_name):
