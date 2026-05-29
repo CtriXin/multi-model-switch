@@ -5,6 +5,7 @@ import os
 import tempfile
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 try:
     import fcntl
@@ -17,6 +18,11 @@ _GATEWAY_SESSION_MARKERS = (
     os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
     os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
 )
+
+
+def utc_now_z(*, now_fn=None):
+    now = (now_fn or datetime.now)(timezone.utc)
+    return now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def resolve_real_user_home(env=None):

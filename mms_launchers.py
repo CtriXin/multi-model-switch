@@ -6,7 +6,7 @@ import re
 import shutil
 import sys
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -213,6 +213,7 @@ from mms_state_io import (
     atomic_write_text,
     load_json_dict_unlocked as _load_json_dict_unlocked_impl,
     locked_state_file,
+    utc_now_z as _utc_now_z_impl,
 )
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
@@ -304,7 +305,8 @@ def _runtime_network_summary(runtime):
 
 
 def _guard_utc_now():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    """Compatibility wrapper for UTC guard timestamps."""
+    return _utc_now_z_impl()
 
 
 def _runtime_locale_env(runtime=None):
