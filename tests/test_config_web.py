@@ -25,6 +25,11 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
                 "protocols": ["anthropic_messages"],
                 "supported_clis": ["claude", "opencode"],
                 "fallback_models": ["qwen3.6-plus"],
+                "claude_1m_mode": "enable",
+                "proxy": "http://provider-proxy.example",
+                "no_proxy": "provider.internal",
+                "timezone": "Asia/Tokyo",
+                "note": "primary qwen route",
             }
         ],
         "accounts": [
@@ -34,7 +39,9 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
                 "cli": "claude",
                 "home_dir": "/Users/example/.config/mms/accounts/claude-main",
                 "proxy": "http://proxy.example",
+                "no_proxy": "localhost",
                 "timezone": "Asia/Singapore",
+                "note": "human owned claude account",
             }
         ],
         "account": {"defaults": {"claude": "claude-main"}},
@@ -71,16 +78,26 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["providers"][0]["has_api_key"] is True
     assert snapshot["providers"][0]["model_count"] == 1
     assert snapshot["providers"][0]["api_key"] == ""
+    assert snapshot["providers"][0]["claude_1m_mode"] == "enable"
+    assert snapshot["providers"][0]["proxy_configured"] is True
+    assert snapshot["providers"][0]["no_proxy_configured"] is True
+    assert snapshot["providers"][0]["timezone"] == "Asia/Tokyo"
+    assert snapshot["providers"][0]["note"] == "primary qwen route"
     assert snapshot["providers"][0]["usage"]["launches"] == 0
     assert snapshot["accounts"][0]["id"] == "claude-main"
     assert snapshot["accounts"][0]["is_default"] is True
     assert snapshot["accounts"][0]["home_dir_configured"] is True
     assert snapshot["accounts"][0]["proxy_configured"] is True
+    assert snapshot["accounts"][0]["no_proxy_configured"] is True
+    assert snapshot["accounts"][0]["note"] == "human owned claude account"
     assert snapshot["accounts"][0]["is_claude_human_only"] is True
     assert snapshot["accounts"][0]["webui_write_policy"] == "claude_human_only_locked"
     assert snapshot["account_defaults"] == {"claude": "claude-main"}
     assert snapshot["account_write_policy"]["claude"] == "human_only_locked"
     assert "http://proxy.example" not in encoded
+    assert "http://provider-proxy.example" not in encoded
+    assert "provider.internal" not in encoded
+    assert "localhost" not in encoded
     assert "/Users/example/.config/mms/accounts/claude-main" not in encoded
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
@@ -90,10 +107,10 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     mapping = snapshot["tui_webui_mapping"]
     assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
     assert snapshot["tui_webui_mapping_summary"]["counts"] == {
-        "native": 19,
+        "native": 21,
         "report": 16,
         "draft_review": 3,
-        "human_gate": 19,
+        "human_gate": 22,
         "missing": 0,
     }
     assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
@@ -121,7 +138,13 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "load_balance.profile_select",
         "load_balance.delete_recent",
         "provider.credentials",
+        "provider.model_patch_reset",
+        "provider.advanced_metadata",
+        "provider.network_policy",
         "account.login",
+        "account.rename",
+        "account.edit_metadata",
+        "account.network_policy",
         "registry.publish_approved",
         "guard.accept",
     }
@@ -130,6 +153,12 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "connect.add_official")["status"] == "human_gate"
     assert next(item for item in mapping if item["id"] == "load_balance.profile_select")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "provider.model_patch_reset")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "provider.advanced_metadata")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "provider.network_policy")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "account.rename")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "account.edit_metadata")["status"] == "draft_review"
+    assert next(item for item in mapping if item["id"] == "account.network_policy")["status"] == "human_gate"
     verify_approved = next(item for item in mapping if item["id"] == "registry.verify_approved")
     assert verify_approved["status"] == "report"
     assert verify_approved["api_action"] == "verify_approved"
@@ -271,6 +300,9 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert "Claude OAuth 独立入口已下线" in " ".join(official_gate["manual_steps"])
     assert autosort_gate["write_policy"] == "speed_stats_write_human_gate"
     assert "WebUI 已提供手工 family priority 草稿" in autosort_gate["safe_alternative"]
+    assert any(item["id"] == "provider.network_policy" for item in mapping["mapping"])
+    assert any(item["id"] == "account.rename" for item in mapping["mapping"])
+    assert any(item["id"] == "account.network_policy" for item in mapping["mapping"])
     assert not (tmp_path / "mms-next" / "registry").exists()
 
 
@@ -290,6 +322,9 @@ def test_config_web_human_gate_reports_are_actionable(tmp_path):
     assert gate_actions
     assert "about_upgrade_gate" in gate_actions
     assert "refresh_due_sources_gate" in gate_actions
+    assert "provider_network_gate" in gate_actions
+    assert "account_rename_gate" in gate_actions
+    assert "account_network_gate" in gate_actions
     assert "verify_approved_gate" not in gate_actions
     for action in gate_actions:
         report = mms_config_web.build_settings_report(
@@ -322,6 +357,50 @@ def test_config_web_human_gate_reports_are_actionable(tmp_path):
     assert "mmf registry scheduled-refresh --dry-run --no-network" in scheduled["commands"]
     assert "mmf registry publish-approved" in publish["commands"]
     assert any("model-registry.latest-approved.json" in item for item in publish["writes"])
+
+
+def test_config_web_usage_reports_include_tui_detail_rows(monkeypatch, tmp_path):
+    def fake_usage_rows(runtime_kind, runtime_id):
+        return [
+            {
+                "cli": "codex",
+                "runtime_kind": runtime_kind,
+                "id": runtime_id,
+                "name": f"{runtime_kind}:{runtime_id}",
+                "launches": 7,
+                "last_model": "qwen3.6-plus",
+                "last_used_at": "2026-05-30T10:00:00+08:00",
+                "models": {"qwen3.6-plus": 5, "gpt-5.5": 2},
+            }
+        ]
+
+    monkeypatch.setattr(mms_core, "_usage_rows_for_runtime", fake_usage_rows)
+    cfg = {
+        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["qwen3.6-plus"]}],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex"}],
+        "account": {"defaults": {"codex": "codex-main"}},
+    }
+
+    provider_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_usage_summary"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    account_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "accounts"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    provider_rows = provider_report["providers"][0]["usage_rows"]
+    account_rows = account_report["accounts"][0]["usage_rows"]
+    assert provider_rows[0]["runtime_kind"] == "provider"
+    assert provider_rows[0]["launches"] == 7
+    assert provider_rows[0]["top_models"][0] == {"model": "qwen3.6-plus", "launches": 5}
+    assert account_rows[0]["runtime_kind"] == "account"
+    assert account_rows[0]["id"] == "codex-main"
 
 
 def test_config_web_verify_approved_report_is_read_only(monkeypatch, tmp_path):
@@ -713,7 +792,14 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "family_priority_overrides" in html
     assert "function familyPriorityInputs" in html
     assert "providerFamilyPriority" in html
+    assert "pClaude1m" in html
+    assert "pTimezone" in html
+    assert "pNote" in html
+    assert "network policy" in html
     assert "data-account-family" in html
+    assert "data-account-claude-1m" in html
+    assert "data-account-timezone" in html
+    assert "data-account-note" in html
     assert "TUI ↔ WebUI 对照表" in html
     assert "tuiMappingTable" in html
     assert "mappingFilters" in html
@@ -765,6 +851,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "这是当前通道的模型清单，不是全局模型池" in html
     assert "手动补充当前通道模型（extra_models" in html
     assert "添加到补充模型库" in html
+    assert "restoreModelPatch" in html
+    assert "恢复默认模型补丁" in html
+    assert "已恢复默认模型补丁" in html
     assert "当前通道补充模型库（extra_models）" in html
     assert "不是待删除列表，也不是全局模型池" in html
     assert "编辑补充模型库" in html
@@ -923,6 +1012,10 @@ def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(t
     codex_b["name"] = "Codex B Edited"
     codex_b["enabled"] = False
     codex_b["priority"] = 120
+    codex_b["family_priority_overrides"] = {"GPT": 125}
+    codex_b["claude_1m_mode"] = "disable"
+    codex_b["timezone"] = "Asia/Tokyo"
+    codex_b["note"] = "non-claude metadata ok"
     draft["account_defaults"]["codex"] = "codex-b"
 
     plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
@@ -934,6 +1027,10 @@ def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(t
     assert after_codex_b["name"] == "Codex B Edited"
     assert after_codex_b["enabled"] is False
     assert after_codex_b["priority"] == 120
+    assert after_codex_b["family_priority_overrides"] == {"GPT": 125}
+    assert after_codex_b["claude_1m_mode"] == "disable"
+    assert after_codex_b["timezone"] == "Asia/Tokyo"
+    assert after_codex_b["note"] == "non-claude metadata ok"
     assert any(item["kind"] == "account_default" and item["meta"]["cli"] == "codex" for item in review["items"])
     assert any(item["kind"] == "account_metadata" and item["meta"]["account_id"] == "codex-b" for item in review["items"])
     assert any(risk["id"] == "account_default_changed" for risk in review["risks"])

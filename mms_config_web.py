@@ -752,6 +752,48 @@ def _usage_summary(runtime_kind: str, runtime_id: str) -> dict[str, Any]:
         return {"launches": 0, "last_used_at": ""}
 
 
+def _runtime_usage_rows(runtime_kind: str, runtime_id: str) -> list[dict[str, Any]]:
+    """Mirror the TUI local usage table without exposing unrelated usage.json data."""
+    runtime_id = _safe_text(runtime_id)
+    if not runtime_id:
+        return []
+
+    def count_value(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    try:
+        mms_core = _load_mms_core()
+        rows = mms_core._usage_rows_for_runtime(runtime_kind, runtime_id)  # noqa: SLF001 - read-only UI report
+    except Exception:
+        return []
+    result: list[dict[str, Any]] = []
+    for item in rows if isinstance(rows, list) else []:
+        if not isinstance(item, dict):
+            continue
+        models = item.get("models") if isinstance(item.get("models"), dict) else {}
+        top_models = [
+            {"model": _safe_text(model), "launches": count_value(count)}
+            for model, count in sorted(models.items(), key=lambda pair: count_value(pair[1]), reverse=True)[:8]
+            if _safe_text(model)
+        ]
+        result.append(
+            {
+                "cli": _safe_text(item.get("cli")),
+                "runtime_kind": _safe_text(item.get("runtime_kind") or runtime_kind),
+                "id": _safe_text(item.get("id") or runtime_id),
+                "name": _safe_text(item.get("name")),
+                "launches": count_value(item.get("launches")),
+                "last_model": _safe_text(item.get("last_model")),
+                "last_used_at": _safe_text(item.get("last_used_at")),
+                "top_models": top_models,
+            }
+        )
+    return result
+
+
 def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any] | None = None) -> dict[str, Any]:
     provider = provider if isinstance(provider, dict) else {}
     provider_id = _safe_text(provider.get("id"))
@@ -790,6 +832,11 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "role": _safe_text(provider.get("role") or "auto"),
         "priority": provider.get("priority", 100),
         "family_priority_overrides": _normalize_family_priority_overrides(provider.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(provider.get("claude_1m_mode") or "auto") or "auto",
+        "proxy_configured": bool(_safe_text(provider.get("proxy"))),
+        "no_proxy_configured": bool(_safe_text(provider.get("no_proxy"))),
+        "timezone": _safe_text(provider.get("timezone")),
+        "note": _safe_text(provider.get("note")),
         "models_endpoint": _safe_text(provider.get("models_endpoint") or "/models"),
         "protocols": [str(item) for item in protocols if item],
         "supported_clis": [str(item) for item in supported_clis if item],
@@ -812,6 +859,7 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "model_count": len(dict.fromkeys(row["id"] for row in model_rows)),
         "models": model_rows,
         "usage": _usage_summary("provider", provider_id),
+        "usage_rows": _runtime_usage_rows("provider", provider_id),
     }
 
 
@@ -848,16 +896,20 @@ def _account_summary(account: dict[str, Any], *, defaults: dict[str, Any] | None
         "enabled": account.get("enabled", True) is not False,
         "priority": _normalize_priority(account.get("priority", 100)),
         "family_priority_overrides": _normalize_family_priority_overrides(account.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(account.get("claude_1m_mode") or "auto") or "auto",
         "auth_mode": auth_mode,
         "is_default": is_default,
         "default_label": cli_name.upper() if is_default else "备选",
         "home_dir_configured": bool(_safe_text(account.get("home_dir"))),
         "proxy_configured": bool(_safe_text(account.get("proxy"))),
+        "no_proxy_configured": bool(_safe_text(account.get("no_proxy"))),
         "timezone": _safe_text(account.get("timezone")),
+        "note": _safe_text(account.get("note")),
         "status": "configured",
         "is_claude_human_only": is_claude,
         "webui_write_policy": "claude_human_only_locked" if is_claude else "draft_review_confirmed_save",
         "usage": _usage_summary("account", account_id),
+        "usage_rows": _runtime_usage_rows("account", account_id),
     }
 
 
@@ -906,6 +958,8 @@ def _account_review_fields(account: dict[str, Any] | None) -> dict[str, Any]:
         "enabled": account.get("enabled", True) is not False,
         "priority": _normalize_priority(account.get("priority", 100)),
         "family_priority_overrides": _normalize_family_priority_overrides(account.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(account.get("claude_1m_mode") or "auto") or "auto",
+        "timezone": _safe_text(account.get("timezone")),
         "note": _safe_text(account.get("note")),
     }
 
@@ -931,6 +985,19 @@ def _copy_existing_account(existing: dict[str, Any], account_payload: dict[str, 
             account["family_priority_overrides"] = overrides
         else:
             account.pop("family_priority_overrides", None)
+    if "claude_1m_mode" in account_payload:
+        mode = _safe_text(account_payload.get("claude_1m_mode") or "auto")
+        normalized = mode if mode in {"auto", "enable", "disable"} else "auto"
+        if normalized != "auto" or "claude_1m_mode" in account:
+            account["claude_1m_mode"] = normalized
+        else:
+            account.pop("claude_1m_mode", None)
+    if "timezone" in account_payload:
+        timezone_name = _safe_text(account_payload.get("timezone"))
+        if timezone_name:
+            account["timezone"] = timezone_name
+        else:
+            account.pop("timezone", None)
     if "note" in account_payload:
         note = _safe_text(account_payload.get("note"))
         if note:
@@ -1041,7 +1108,7 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
     return [
         {
             "area": "通道",
-            "capability": "provider add/edit/default/role/priority/base URL/key/protocol/CLI",
+            "capability": "provider add/edit/default/role/priority/base URL/key/protocol/CLI/timezone/note/Claude 1M",
             "webui": "native",
             "tui": "can_degrade_after_save_flow_verified",
         },
@@ -1054,12 +1121,12 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
         {
             "area": "通道",
             "capability": "本地 usage / last-used / health overlay",
-            "webui": "read_only_summary",
-            "tui": "keep_until_webui_report_actions_land",
+            "webui": "read_only_detail_report",
+            "tui": "can_degrade_after_report_smoke",
         },
         {
             "area": "账号",
-            "capability": "OAuth/account status/default/login/edit/remove",
+            "capability": "OAuth/account status/default/login/edit/remove/metadata/timezone/note",
             "webui": "draft_review_human_gate",
             "tui": "keep_emergency_only_for_login_remove_and_claude_human_gate",
         },
@@ -1528,7 +1595,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             status="report",
             write_policy="read_only_report",
             verification="/api/settings/report?action=provider_usage_summary",
-            manual_check="完整 Rich usage table 尚未迁移；先提供 summary。",
+            manual_check="WebUI report 返回 TUI 同等 CLI/启动次数/最近模型/最近使用明细。",
         ),
         row(
             "provider.models",
@@ -1542,6 +1609,19 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             write_policy="draft_review_confirmed_save",
             verification="/api/provider/models + /api/plan",
             manual_check="检查模型拉取、隐藏/补充、capability toggle、stale cleanup。",
+        ),
+        row(
+            "provider.model_patch_reset",
+            tui_area="Channel / Provider",
+            tui_action_id="provider:2/model:6",
+            tui_label="恢复默认模型补丁",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="模型配置 tab restore model patch button",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/plan extra_models/hidden_models diff",
+            manual_check="一键清空当前通道 extra_models + hidden_models，然后保存预览。",
         ),
         row(
             "provider.default",
@@ -1583,6 +1663,33 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             manual_check="API Key 只显示 pending，不回显明文。",
         ),
         row(
+            "provider.advanced_metadata",
+            tui_area="Channel / Provider",
+            tui_action_id="provider.edit metadata",
+            tui_label="编辑 Claude 1M / timezone / note",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="provider advanced metadata fields",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/plan provider_metadata review_summary",
+            manual_check="TUI provider.edit 的非 secret 元数据进入 WebUI 草稿和保存预览。",
+        ),
+        row(
+            "provider.network_policy",
+            tui_area="Channel / Provider",
+            tui_action_id="provider.edit proxy/no_proxy",
+            tui_label="编辑 proxy / no_proxy",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="provider network policy human gate report",
+            api_action="provider_network_gate",
+            status="human_gate",
+            write_policy="network_policy_human_gate",
+            verification="/api/settings/report?action=provider_network_gate",
+            manual_check="proxy/no_proxy 可能包含凭据或影响 Claude network policy；WebUI 不回显明文，只给 gate。",
+        ),
+        row(
             "provider.remove",
             tui_area="Channel / Provider",
             tui_action_id="provider:6",
@@ -1607,7 +1714,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             status="report",
             write_policy="read_only_report",
             verification="/api/settings/report?action=accounts",
-            manual_check="完整 Rich usage table 尚未迁移；先提供 summary。",
+            manual_check="WebUI accounts report 返回 TUI 同等 CLI/启动次数/最近模型/最近使用明细。",
         ),
         row(
             "account.login",
@@ -1638,18 +1745,46 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             manual_check="Claude default radio disabled；非 Claude 进入保存预览。",
         ),
         row(
-            "account.rename_edit",
+            "account.rename",
             tui_area="Channel / Account",
-            tui_action_id="account:4/5",
-            tui_label="重命名 / 编辑通道",
+            tui_action_id="account:4",
+            tui_label="重命名",
             webui_section="能力整合",
             webui_section_id="settings",
-            webui_control="non-Claude name/enabled/priority draft fields",
+            webui_control="account rename human gate report",
+            api_action="account_rename_gate",
+            status="human_gate",
+            write_policy="account_home_human_gate",
+            verification="/api/settings/report?action=account_rename_gate",
+            manual_check="账号重命名会改 home_dir/usage/defaults 并可能移动目录；WebUI 不自动执行。",
+        ),
+        row(
+            "account.edit_metadata",
+            tui_area="Channel / Account",
+            tui_action_id="account:5",
+            tui_label="编辑通道",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="non-Claude name/enabled/priority/family/timezone/Claude 1M/note draft fields",
             api_action="accounts",
             status="draft_review",
             write_policy="draft_review_human_gate",
             verification="/api/plan blocks protected fields",
-            manual_check="home_dir/proxy/no_proxy/Claude metadata 不进入 WebUI write。",
+            manual_check="非 Claude metadata 进入 WebUI 保存预览；home_dir/proxy/no_proxy/Claude metadata 仍锁定。",
+        ),
+        row(
+            "account.network_policy",
+            tui_area="Channel / Account",
+            tui_action_id="account.edit proxy/no_proxy",
+            tui_label="编辑账号 proxy / no_proxy",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="account network policy human gate report",
+            api_action="account_network_gate",
+            status="human_gate",
+            write_policy="account_network_human_gate",
+            verification="/api/settings/report?action=account_network_gate",
+            manual_check="账号 proxy/no_proxy/home_dir 可能涉及 OAuth/Claude protected state；WebUI 不回显明文。",
         ),
         row(
             "account.remove",
@@ -2003,8 +2138,8 @@ def build_config_snapshot(
         "account_write_policy": {
             "status": "draft_review_confirmed_save",
             "claude": "human_only_locked",
-            "allowed_fields": ["name", "enabled", "priority", "default_non_claude"],
-            "blocked_fields": ["login", "remove", "home_dir", "proxy", "no_proxy", "claude_default", "claude_metadata"],
+            "allowed_fields": ["name", "enabled", "priority", "family_priority_overrides", "timezone", "note", "claude_1m_mode", "default_non_claude"],
+            "blocked_fields": ["login", "remove", "rename/home_dir", "proxy", "no_proxy", "claude_default", "claude_metadata"],
         },
         "settings_actions": _settings_action_cards(),
         "webui_capability_coverage": _webui_capability_coverage(),
@@ -2321,6 +2456,7 @@ def _copy_existing_provider(
     provider_payload: dict[str, Any],
     *,
     preserve_model_rows: bool = False,
+    force_model_rows: bool = False,
     clear_fallback_models: bool = False,
 ) -> dict[str, Any]:
     provider = dict(existing or {})
@@ -2337,6 +2473,27 @@ def _copy_existing_provider(
             provider["family_priority_overrides"] = overrides
         else:
             provider.pop("family_priority_overrides", None)
+    if "claude_1m_mode" in provider_payload:
+        mode = _safe_text(provider_payload.get("claude_1m_mode") or "auto")
+        normalized = mode if mode in {"auto", "enable", "disable"} else "auto"
+        if normalized != "auto" or "claude_1m_mode" in provider:
+            provider["claude_1m_mode"] = normalized
+        else:
+            provider.pop("claude_1m_mode", None)
+    if "timezone" in provider_payload:
+        timezone_name = _safe_text(provider_payload.get("timezone"))
+        if timezone_name:
+            provider["timezone"] = timezone_name
+        else:
+            provider.pop("timezone", None)
+    if "note" in provider_payload:
+        note = _safe_text(provider_payload.get("note"))
+        if note:
+            provider["note"] = note
+        elif "note" in provider:
+            provider["note"] = ""
+        else:
+            provider.pop("note", None)
     provider["protocols"] = _normalize_choice_list(provider_payload.get("protocols"), _ALLOWED_PROTOCOLS, _ALLOWED_PROTOCOLS)
     provider["supported_clis"] = _normalize_choice_list(provider_payload.get("supported_clis"), _ALLOWED_CLIS, ("claude", "codex", "opencode"))
     endpoint = _safe_text(provider_payload.get("models_endpoint") or provider.get("models_endpoint") or "/models")
@@ -2382,9 +2539,12 @@ def _copy_existing_provider(
     provider["hidden_models"] = _normalize_model_list(provider_payload.get("hidden_models"))
     if preserve_model_rows:
         route_rows = _route_model_rows_from_payload(provider_payload)
-        if route_rows:
+        configured_model_ids = set(provider["fallback_models"]) | set(provider["extra_models"])
+        has_route_only_rows = any(row["id"] not in configured_model_ids for row in route_rows)
+        existing_has_models = isinstance(provider.get("models"), list)
+        if route_rows and (force_model_rows or has_route_only_rows or existing_has_models):
             provider["models"] = route_rows
-        else:
+        elif force_model_rows or existing_has_models:
             provider.pop("models", None)
     return provider
 
@@ -2566,7 +2726,7 @@ def _build_review_summary(
         add_item(
             "account_metadata",
             f"账号元数据变化：{account_id}",
-            f"name/enabled/priority/note 将更新；CLI: `{cli_name or '-'}`。",
+            f"name/enabled/priority/family/timezone/claude_1m/note 将更新；CLI: `{cli_name or '-'}`。",
             level=level,
             meta={"account_id": account_id, "cli": cli_name},
         )
@@ -2588,18 +2748,24 @@ def _build_review_summary(
             "enabled": before.get("enabled", True) is not False,
             "role": _safe_text(before.get("role") or "auto"),
             "priority": _normalize_priority(before.get("priority", 100)),
+            "claude_1m_mode": _safe_text(before.get("claude_1m_mode") or "auto") or "auto",
+            "timezone": _safe_text(before.get("timezone")),
+            "note": _safe_text(before.get("note")),
         }
         after_meta = {
             "name": _safe_text(after.get("name") or provider_id),
             "enabled": after.get("enabled", True) is not False,
             "role": _safe_text(after.get("role") or "auto"),
             "priority": _normalize_priority(after.get("priority", 100)),
+            "claude_1m_mode": _safe_text(after.get("claude_1m_mode") or "auto") or "auto",
+            "timezone": _safe_text(after.get("timezone")),
+            "note": _safe_text(after.get("note")),
         }
         if provider_id in before_ids and _mapping_digest(before_meta) != _mapping_digest(after_meta):
             add_item(
                 "provider_metadata",
                 f"通道元数据变化：{provider_id}",
-                f"name/enabled/role/priority 将更新；priority `{before_meta['priority']}` -> `{after_meta['priority']}`。",
+                f"name/enabled/role/priority/claude_1m/timezone/note 将更新；priority `{before_meta['priority']}` -> `{after_meta['priority']}`。",
                 provider_id=provider_id,
                 level="warn",
                 meta={"before": before_meta, "after": after_meta},
@@ -2870,7 +3036,9 @@ def build_config_plan(
     providers_payload = draft.get("providers") if isinstance(draft.get("providers"), list) else []
     existing_by_id = {str(item.get("id") or ""): item for item in current_cfg.get("providers", []) if isinstance(item, dict)}
     preserve_model_rows = _is_preview_config_root(config_path, command_name=command_name)
+    route_scope_provider_ids = _route_scope_provider_ids_from_payload(payload or {})
     route_refresh_provider_ids = _route_refresh_provider_ids_from_payload(payload or {})
+    touched_route_provider_ids = set(route_scope_provider_ids) | set(route_refresh_provider_ids)
     refreshed_provider_ids = set(route_refresh_provider_ids)
     next_providers: list[dict[str, Any]] = []
     credential_updates: list[dict[str, str]] = []
@@ -2886,6 +3054,7 @@ def build_config_plan(
             existing_by_id.get(original_id),
             provider_payload,
             preserve_model_rows=preserve_model_rows,
+            force_model_rows=original_id in touched_route_provider_ids or provider_id in touched_route_provider_ids,
             clear_fallback_models=preserve_model_rows and (original_id in refreshed_provider_ids or provider_id in refreshed_provider_ids),
         )
         next_providers.append(provider)
@@ -3067,8 +3236,9 @@ def build_config_plan(
     after_config_text = _toml_text(_sanitize_for_output(next_cfg))
     before_policy_text = _pretty_json(_sanitize_for_output(policy_before))
     after_policy_text = _pretty_json(_sanitize_for_output(policy_after))
+    config_changed = _mapping_digest(current_cfg) != _mapping_digest(next_cfg)
     diffs = {
-        "config_toml": _diff_text(before_config_text, after_config_text, before_name="config.toml(before)", after_name="config.toml(after)"),
+        "config_toml": _diff_text(before_config_text, after_config_text, before_name="config.toml(before)", after_name="config.toml(after)") if config_changed else "",
         "model_policy_json": _diff_text(before_policy_text, after_policy_text, before_name="model-policy.json(before)", after_name="model-policy.json(after)"),
         "credentials": "\n".join(
             f"credential update: provider {item['provider_id']} (secret hidden; stable credentials.sh / preview secret backend)"
@@ -3090,7 +3260,7 @@ def build_config_plan(
         "errors": errors,
         "warnings": warnings,
         "expected_bundle_revision": _expected_bundle_revision_from_payload(payload or {}),
-        "route_scope_provider_ids": _route_scope_provider_ids_from_payload(payload or {}),
+        "route_scope_provider_ids": route_scope_provider_ids,
         "route_refresh_provider_ids": route_refresh_provider_ids,
         "paths": {
             "config": config_path,
@@ -3109,7 +3279,7 @@ def build_config_plan(
             config_payload=next_cfg,
             policy_payload=policy_after,
             expected_bundle_revision=_expected_bundle_revision_from_payload(payload or {}),
-            route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload or {}),
+            route_scope_provider_ids=route_scope_provider_ids,
             route_refresh_provider_ids=route_refresh_provider_ids,
         ),
         "summary": summary,
@@ -4007,6 +4177,42 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "writes": ["~/.config/mms/config.toml accounts/account.defaults", "~/.config/mms/accounts/<account-id>/**"],
             "safe_alternative": "先在 WebUI 将非 Claude account disabled/default 草稿调整并 review。",
         },
+        "account_rename_gate": {
+            "title": "Rename account / move account home",
+            "risk_level": "high",
+            "commands": [f"{command} config account.list", f"{command} config account.rename <old-account-id> <new-account-id>"],
+            "manual_steps": [
+                "先确认 old/new account id、默认账号引用和账号 home_dir。",
+                "该动作可能移动 account home 目录并重写 usage/defaults；必须人工确认备份和目标目录不存在。",
+                "完成后回 WebUI accounts report，核对 id/default/usage 是否一致。",
+            ],
+            "writes": ["~/.config/mms/config.toml accounts/account.defaults", "~/.config/mms/accounts/<old-id>/** -> <new-id>/**", "~/.config/mms/usage.json account usage keys"],
+            "safe_alternative": "WebUI 已支持非 Claude account 显示名、enabled、priority、family、timezone、note 的 draft/save review。",
+        },
+        "account_network_gate": {
+            "title": "Edit account proxy / no_proxy / home_dir",
+            "risk_level": "high",
+            "commands": [f"{command} config account.list", f"{command} config account.edit <account-id>"],
+            "manual_steps": [
+                "不要在 WebUI 中回显或复制 proxy/no_proxy 明文；这些字段可能包含凭据或影响 OAuth/Claude 网络边界。",
+                "Claude account config 是 human-only；任何 Claude proxy/home_dir/no_proxy 变化都必须停止并人工确认。",
+                "非 Claude 账号如需改 proxy/no_proxy，请在终端人工运行 account.edit 并随后回 WebUI 做只读核对。",
+            ],
+            "writes": ["~/.config/mms/config.toml accounts[*].proxy/no_proxy/home_dir/timezone", "~/.config/mms/accounts/** account state can be affected by launch/login"],
+            "safe_alternative": "WebUI 只显示 proxy/no_proxy 是否已配置；非敏感 timezone/note 可在账号表中走保存预览。",
+        },
+        "provider_network_gate": {
+            "title": "Edit provider proxy / no_proxy",
+            "risk_level": "high",
+            "commands": [f"{command} config provider.edit <provider-id>"],
+            "manual_steps": [
+                "proxy/no_proxy 可能包含凭据，也可能改变 Claude/provider 的网络隔离策略；WebUI 不回显明文。",
+                "修改前先确认目标 provider、expected proxy、no_proxy 不会命中 Claude/OpenAI 域名造成直连泄漏。",
+                "人工执行 provider.edit 后回到 WebUI 生成保存预览或 provider_usage_summary 核对非敏感字段。",
+            ],
+            "writes": ["~/.config/mms/config.toml providers[*].proxy/no_proxy", "provider network policy for future launches"],
+            "safe_alternative": "WebUI 支持 provider URL/key/protocol/CLI/timezone/note/Claude 1M 的 draft/save review；只把 proxy/no_proxy 留给 human gate。",
+        },
         "refresh_due_sources_gate": {
             "title": "刷新到期 registry sources",
             "risk_level": "medium",
@@ -4218,7 +4424,7 @@ def build_settings_report(
             "accounts": snapshot.get("accounts") or [],
             "account_defaults": snapshot.get("account_defaults") or {},
             "account_write_policy": snapshot.get("account_write_policy") or {},
-            "note": "WebUI 支持非 Claude account 的 name/enabled/priority/default 草稿预览；login/remove/home_dir/proxy 与 Claude account 仍 human-gated。",
+            "note": "WebUI 支持非 Claude account 的 name/enabled/priority/family/timezone/Claude 1M/note/default 草稿预览；login/remove/rename/home_dir/proxy 与 Claude account 仍 human-gated。",
         }
     if action in {"model_source_status", "source"}:
         return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "report": snapshot.get("model_source_status") or {}}
@@ -4303,6 +4509,7 @@ def build_settings_report(
                     "enabled": item.get("enabled"),
                     "role": item.get("role"),
                     "priority": item.get("priority"),
+                    "usage_rows": item.get("usage_rows") or [],
                 }
                 for item in (snapshot.get("providers") or [])
                 if isinstance(item, dict)
@@ -4398,12 +4605,15 @@ def build_settings_report(
     gate_actions = {
         "guard_accept_gate": ("manual_cli_human_gate", "Snapshot Guard accept 会更新 guard baseline；WebUI 不自动执行。"),
         "provider_remove_gate": ("planned_human_confirm", "删除 provider 需要 typed confirm + diff review；本 slice 只标出缺口。"),
+        "provider_network_gate": ("network_policy_human_gate", "proxy/no_proxy 可能包含凭据并影响网络隔离；WebUI 不回显或自动写入。"),
         "connect_official_gate": ("manual_login_only", "添加官方通道会创建/刷新 OAuth account state；WebUI 不自动执行登录。"),
         "migrate_config_gate": ("manual_cli_human_gate", "配置迁移会读写真实配置树；必须人工确认迁移源、目标和备份。"),
         "family_autosort_gate": ("speed_stats_write_human_gate", "按 speed stats 自动排序会批量改 provider priority/family overrides；当前保持 human gate。"),
         "load_balance_recent_delete_gate": ("local_artifact_human_gate", "删除负载最近项会写 lb_history.json；WebUI 当前不自动执行。"),
         "account_login_gate": ("manual_login_only", "OAuth login 会写外部账号状态；WebUI 当前不触发。"),
         "account_remove_gate": ("manual_remove_only", "删除 account 可能删除账号目录/登录状态；WebUI 当前不触发。"),
+        "account_rename_gate": ("account_home_human_gate", "账号重命名可能移动 home_dir 并改 usage/defaults；WebUI 当前不自动执行。"),
+        "account_network_gate": ("account_network_human_gate", "账号 proxy/no_proxy/home_dir 可能涉及 OAuth/Claude protected state；WebUI 不回显或自动写入。"),
         "refresh_due_sources_gate": ("network_write_human_gate", "刷新 registry source 可能触发 network/write；当前保持 human gate。"),
         "scheduled_refresh_gate": ("network_human_gate", "scheduled refresh 需要单独确认执行模式；当前保持 human gate。"),
         "refresh_sources_gate": ("network_write_human_gate", "刷新全部 sources 是 network/write 动作；当前保持 human gate。"),
@@ -5603,6 +5813,7 @@ _HTML_PAGE = r"""<!doctype html>
                 <div class="btns">
                   <button id="addManualModels" class="secondary">添加到补充模型库</button>
                   <button id="clearHidden" class="ghost">取消当前通道全部隐藏</button>
+                  <button id="restoreModelPatch" class="ghost">恢复默认模型补丁</button>
                   <button id="clearAllStaleHidden" class="ghost">移除全部通道未匹配隐藏规则</button>
                 </div>
               </div>
@@ -5915,17 +6126,17 @@ function familyPriorityInputs(values={},name='familyPriority'){return `<div clas
 function readFamilyPriorityInputs(name='familyPriority'){const result={};document.querySelectorAll(`[data-family-priority="${name}"]`).forEach(input=>{const family=input.dataset.family;const raw=String(input.value||'').trim();if(family&&raw){result[family]=Math.max(1,Number(raw)||100)}});return result}
 function formatFamilyOverrides(values={}){return Object.entries(values||{}).map(([k,v])=>`${k}=${v}`).join(', ')}
 function parseFamilyOverrides(text){const allowed=new Set(modelFamilies());const result={};String(text||'').split(/[\n,]/).map(x=>x.trim()).filter(Boolean).forEach(part=>{const [rawFamily,rawValue]=part.split(/[=:]/);const family=modelFamilies().find(f=>f.toLowerCase()===String(rawFamily||'').trim().toLowerCase());const value=Math.max(1,Number(String(rawValue||'').trim())||0);if(family&&allowed.has(family)&&value>0)result[family]=value});return result}
-function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span12"><label>family_priority_overrides</label><p class="muted">对应 TUI 模型页 +/- 对单个 family 写入的权重覆盖；留空表示继承全局 priority。</p>${familyPriorityInputs(p.family_priority_overrides||{},'providerFamilyPriority')}</div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div><div class="span12 delete-zone"><label>删除通道 typed confirm</label><input id="pDeleteConfirm" placeholder="输入 ${escapeHtml(p.id)} 后从草稿移除"><p class="muted">只从 WebUI 草稿移除；真正写入仍需要保存预览和确认。</p><div class="btns"><button id="deleteProvider" class="danger">从草稿移除通道</button></div></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
-function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);const keyEl=$('pKey');keyEl.oninput=()=>{keyEl.dataset.touched='1';syncProvider()};$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};const del=$('deleteProvider');if(del)del.onclick=deleteCurrentProviderDraft;document.querySelectorAll('input[name="pProtocols"],input[name="pClis"],[data-family-priority="providerFamilyPriority"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
+function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span12"><label>family_priority_overrides</label><p class="muted">对应 TUI 模型页 +/- 对单个 family 写入的权重覆盖；留空表示继承全局 priority。</p>${familyPriorityInputs(p.family_priority_overrides||{},'providerFamilyPriority')}</div><div class="span4"><label>Claude 1M 策略</label><select id="pClaude1m">${['auto','enable','disable'].map(v=>`<option value="${v}" ${(p.claude_1m_mode||'auto')===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>timezone</label><input id="pTimezone" value="${escapeHtml(p.timezone||'')}" placeholder="Asia/Singapore"></div><div class="span4"><label>network policy</label><p class="muted">proxy ${p.proxy_configured?'configured':'none'} · no_proxy ${p.no_proxy_configured?'configured':'none'} · 明文走 Human Gate</p></div><div class="span12"><label>备注 note</label><input id="pNote" value="${escapeHtml(p.note||'')}" placeholder="用途、限制或路由说明"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div><div class="span12 delete-zone"><label>删除通道 typed confirm</label><input id="pDeleteConfirm" placeholder="输入 ${escapeHtml(p.id)} 后从草稿移除"><p class="muted">只从 WebUI 草稿移除；真正写入仍需要保存预览和确认。</p><div class="btns"><button id="deleteProvider" class="danger">从草稿移除通道</button></div></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
+function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pClaude1m','pTimezone','pNote','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>{const el=$(id);el.oninput=syncProvider;el.onchange=syncProvider});const keyEl=$('pKey');keyEl.oninput=()=>{keyEl.dataset.touched='1';syncProvider()};$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};const del=$('deleteProvider');if(del)del.onclick=deleteCurrentProviderDraft;document.querySelectorAll('input[name="pProtocols"],input[name="pClis"],[data-family-priority="providerFamilyPriority"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
 function deleteCurrentProviderDraft(){const p=current();if(!p)return;const typed=($('pDeleteConfirm')?.value||'').trim();if(typed!==p.id){toast('输入当前 provider ID 后才能从草稿移除');return}if((state.providers||[]).length<=1){toast('至少保留一个 provider；删除最后一个通道请走 CLI/manual gate');return}const removed=p.id;state.providers.splice(activeProvider,1);touchedProviders.add(removed);if(state.provider_default===removed)state.provider_default=(state.providers[0]||{}).id||'';activeProvider=Math.max(0,Math.min(activeProvider,state.providers.length-1));lastPlan=null;renderAll();setSection('save');toast(`${removed} 已从 WebUI 草稿移除，生成保存预览后再写入`)}
-function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);const keyEl=$('pKey');const updateEl=$('pUpdateCreds');p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.family_priority_overrides=readFamilyPriorityInputs('providerFamilyPriority');p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');const keyText=keyEl?keyEl.value.trim():'';const keyTouched=keyEl?.dataset?.touched==='1';if(keyText){p.api_key=keyText;p.pending_api_key=true;p.has_api_key=true;if(updateEl)updateEl.checked=true}else if(keyTouched){p.api_key='';p.pending_api_key=false}p.update_credentials=!!(updateEl&&updateEl.checked);if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
+function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);const keyEl=$('pKey');const updateEl=$('pUpdateCreds');p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.family_priority_overrides=readFamilyPriorityInputs('providerFamilyPriority');p.claude_1m_mode=$('pClaude1m').value;p.timezone=$('pTimezone').value.trim();p.note=$('pNote').value.trim();p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');const keyText=keyEl?keyEl.value.trim():'';const keyTouched=keyEl?.dataset?.touched==='1';if(keyText){p.api_key=keyText;p.pending_api_key=true;p.has_api_key=true;if(updateEl)updateEl.checked=true}else if(keyTouched){p.api_key='';p.pending_api_key=false}p.update_credentials=!!(updateEl&&updateEl.checked);if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
 function derivedAliases(base,p){const ids=(base||[]).map(x=>String(x||''));const tails=ids.map(id=>id.toLowerCase().split('/').pop());const aliases=[];if(tails.some(id=>id.startsWith('claude-sonnet-4-')||id.startsWith('claude-sonnet-4.')))aliases.push('claude-sonnet-4-6');if(tails.some(id=>id.startsWith('claude-opus-4-')||id.startsWith('claude-opus-4.')))aliases.push('claude-opus-4-6');const ident=String([p?.id,p?.name,p?.label,p?.provider_profile].filter(Boolean).join(' ')).toLowerCase();const anthropic=String(p?.anthropic_base_url||p?.default_anthropic_base_url||'').toLowerCase();if((anthropic.includes('xiaomimimo.com')||ident.includes('mimo')||ident.includes('xiaomi'))&&!ident.includes('openrouter')){['mimo-v2.5-pro','mimo-v2.5'].forEach(id=>{if(ids.includes(id)&&!ids.includes(`${id}[1m]`))aliases.push(`${id}[1m]`)})}return aliases}
 function providerModels(p){p=p||{};const map=new Map();const hiddenLower=new Set((p.hidden_models||[]).map(x=>String(x||'').toLowerCase()));const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,visible:r.visible!==false&&!hiddenLower.has(String(r.id).toLowerCase()),capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})})}const baseIds=[...map.keys()];derivedAliases(baseIds.filter(id=>!hiddenLower.has(String(id).toLowerCase())),p).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'derived_alias',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{[...map.keys()].forEach(key=>{if(String(key).toLowerCase()===String(id).toLowerCase())map.get(key).visible=false})});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
 function defaultCaps(id){const l=String(id||'').toLowerCase();return {text:true,vision:['mimo-v2.5','mimo-v2-omni','k2.6','k2.6-code-preview','kimi-k2.5','qwen3.6-plus','qwen3.6-flash','qwen3.5-plus'].includes(l)||l.startsWith('claude-')||l.startsWith('gemini-'),tool_use:/^(claude|gpt|o|qwen|kimi|glm|minimax|gemini)/.test(l),reasoning:/gpt-5|qwen3|kimi-k2|glm-5|deepseek|claude/.test(l),long_context:/1m|long|qwen3|kimi-k2|gpt-5|claude/.test(l),cache_sensitive:/^(qwen|kimi|k2\.|glm|deepseek|minimax|mimo)/.test(l)}}
 function providerCurrentIds(p){return new Set(providerModels(p).map(r=>r.id))}
 function staleHiddenModels(p){const ids=providerCurrentIds(p);return [...new Set([...(p.stale_hidden_models||[]),...(p.hidden_models||[]).filter(id=>!ids.has(id))])]}
 function cleanupStaleHidden(p){const stale=staleHiddenModels(p);const doomed=new Set(stale);p.hidden_models=(p.hidden_models||[]).filter(x=>!doomed.has(x));p.stale_hidden_models=[];return stale.length}
-function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{total+=cleanupStaleHidden(p)});renderProviders();toast(total?`已移除 ${total} 条未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}
+function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{const count=cleanupStaleHidden(p);if(count)touchProvider(p.id);total+=count});renderProviders();toast(total?`已移除 ${total} 条未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}
 function staleRouteModels(p){const approved=(p.approved_route_models&&p.approved_route_models.length?p.approved_route_models:(p.fallback_models||[]));const remote=new Set((p.models||[]).filter(r=>r&&r.id).map(r=>String(r.id)));const extras=new Set((p.extra_models||[]).map(x=>String(x)));return [...new Set(approved.filter(id=>id&&!remote.has(String(id))&&!extras.has(String(id))))]}
 function renderStaleRouteBox(p){const box=$('staleRouteBox');if(!box)return;const stale=staleRouteModels(p);if(!stale.length){box.innerHTML='<strong>缺失旧 route</strong><p class="muted">当前没有“本地已批准但本次拉取未返回”的旧 route。</p>';return}const armed=staleCleanupProviders.has(p.id);box.innerHTML=`<strong>缺失旧 route（默认保留）</strong><p class="muted">这些模型在本地已批准 routes 里，但不在当前拉取到的模型列表里。默认不会删除；如果勾选“拉取后自动标记”，本页后续拉取会自动标记清理。避免上游 /models 抖动或 New API 临时关闭导致下游模型被清空。</p><div class="chips">${stale.slice(0,24).map(m=>`<span class="chip">${escapeHtml(m)}</span>`).join('')}${stale.length>24?`<span class="chip">+${stale.length-24}</span>`:''}</div><div class="btns"><button id="armStaleRouteCleanup" class="ghost">${armed?'已标记：保存时清理这些旧 route':'显式标记保存时清理这些旧 route'}</button></div>`;$('armStaleRouteCleanup').onclick=()=>{staleCleanupProviders.add(p.id);touchProvider(p.id);renderStaleRouteBox(p);toast(`已标记 ${p.id}：下次写入预览 DB 会清理 ${stale.length} 条缺失旧 route`)}}
 function visibleModelsForProvider(providerId,{visionFirst=false,includeHidden=false,enabledOnly=false}={}){let rows=[];(state.providers||[]).forEach(p=>{if(providerId&&p.id!==providerId)return;if(enabledOnly&&p.enabled===false)return;providerModels(p).forEach(r=>{if(!includeHidden&&r.visible===false)return;rows.push({...r,provider_id:p.id,provider_name:p.name||p.id,capabilities:{...(r.capabilities||defaultCaps(r.id))}})})});const seen=new Set();rows=rows.filter(r=>{const key=(providerId?'':r.provider_id+'::')+r.id;if(seen.has(key))return false;seen.add(key);return true});rows.sort((a,b)=>{const av=!!(a.capabilities||{}).vision,bv=!!(b.capabilities||{}).vision;if(visionFirst&&av!==bv)return av?-1:1;return (a.provider_id+' '+a.id).localeCompare(b.provider_id+' '+b.id)});return rows}
@@ -5933,9 +6144,9 @@ function providerOptions(selected,{blankLabel='请选择通道',auto=false,enabl
 function modelOptionValue(providerId,row){return providerId?row.id:`${row.provider_id}::${row.id}`}
 function decodeModelSelection(value,currentProvider){const text=String(value||'');if(!text)return{provider_id:currentProvider||'',model:''};const marker='::';if(text.includes(marker)){const [provider_id,...rest]=text.split(marker);return{provider_id,model:rest.join(marker)}}return{provider_id:currentProvider||'',model:text}}
 function modelOptions(providerId,selected,{visionFirst=false,auto=false,defaultModels=[],enabledOnly=false,selectedProvider=''}={}){const rows=visibleModelsForProvider(providerId,{visionFirst,enabledOnly});let opts=[];if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动路线${defaultModels.length?'：'+escapeHtml(defaultModels.join(' / ')):''}</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>请选择模型</option>`);let matched=false;opts.push(...rows.map(r=>{const value=modelOptionValue(providerId,r);const label=providerId?r.id:`${r.provider_id} / ${r.id}`;const tag=(r.capabilities||{}).vision?' [vision]':'';const isSelected=providerId?r.id===selected:((selectedProvider&&r.provider_id===selectedProvider&&r.id===selected)||(!selectedProvider&&r.id===selected));if(isSelected)matched=true;return `<option value="${escapeHtml(value)}" ${isSelected?'selected':''}>${escapeHtml(label)}${tag}</option>`}));if(selected&&!matched)opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
-function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">当前没有“暂时匹配不到模型行”的隐藏规则。</p>';return}box.innerHTML=`<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">这些只是当前通道 hidden_models 里的隐藏规则，暂时没有匹配到当前模型行；不等于远端不存在，也不等于 route 待删除。移除后如果模型仍在远端或 approved routes 里，会重新显示出来。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">移除记录</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">移除当前通道未匹配隐藏规则</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已移除 ${count} 条当前通道未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}}
-function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));const extras=p.extra_models||[];$('modelChips').innerHTML=`<strong>当前通道补充模型库（extra_models）</strong><p class="muted">这些模型是手动补充到当前 provider 的可用模型，会参与当前通道路由；不是待删除列表，也不是全局模型池。</p><div class="chips">${extras.length?extras.map(m=>`<span class="chip">${escapeHtml(m)}${editingExtraModels?` <button data-rm-extra="${escapeHtml(m)}">从补充库移除</button>`:''}</span>`).join(''):'<span class="muted">当前通道暂无手动补充模型。</span>'}</div><div class="btns"><button id="toggleExtraEdit" class="ghost">${editingExtraModels?'完成编辑':'编辑补充模型库'}</button></div><div id="staleRouteBox"></div>`;$('toggleExtraEdit').onclick=()=>{editingExtraModels=!editingExtraModels;renderModelTable()};document.querySelectorAll('[data-rm-extra]').forEach(b=>b.onclick=()=>{p.extra_models=extras.filter(x=>x!==b.dataset.rmExtra);toast(`已从当前通道补充模型库移除 ${b.dataset.rmExtra}`);renderModelTable()});renderStaleRouteBox(p);renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
-function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,source:'hidden',visible:!(p.hidden_models||[]).includes(model),favorite:false,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
+function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">当前没有“暂时匹配不到模型行”的隐藏规则。</p>';return}box.innerHTML=`<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">这些只是当前通道 hidden_models 里的隐藏规则，暂时没有匹配到当前模型行；不等于远端不存在，也不等于 route 待删除。移除后如果模型仍在远端或 approved routes 里，会重新显示出来。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">移除记录</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">移除当前通道未匹配隐藏规则</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);touchProvider(p.id);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);if(count)touchProvider(p.id);renderModelTable();toast(count?`已移除 ${count} 条当前通道未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}}
+function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));const extras=p.extra_models||[];$('modelChips').innerHTML=`<strong>当前通道补充模型库（extra_models）</strong><p class="muted">这些模型是手动补充到当前 provider 的可用模型，会参与当前通道路由；不是待删除列表，也不是全局模型池。</p><div class="chips">${extras.length?extras.map(m=>`<span class="chip">${escapeHtml(m)}${editingExtraModels?` <button data-rm-extra="${escapeHtml(m)}">从补充库移除</button>`:''}</span>`).join(''):'<span class="muted">当前通道暂无手动补充模型。</span>'}</div><div class="btns"><button id="toggleExtraEdit" class="ghost">${editingExtraModels?'完成编辑':'编辑补充模型库'}</button></div><div id="staleRouteBox"></div>`;$('toggleExtraEdit').onclick=()=>{editingExtraModels=!editingExtraModels;renderModelTable()};document.querySelectorAll('[data-rm-extra]').forEach(b=>b.onclick=()=>{p.extra_models=extras.filter(x=>x!==b.dataset.rmExtra);touchProvider(p.id);toast(`已从当前通道补充模型库移除 ${b.dataset.rmExtra}`);renderModelTable()});renderStaleRouteBox(p);renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
+function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,source:'hidden',visible:!(p.hidden_models||[]).includes(model),favorite:false,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);touchProvider(p.id);renderTestSelectors();renderFallback();renderRuntime()}
 function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [disabled]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
 function syncFallback(){state.rescue=state.rescue||{};state.rescue.fallback_model=$('rescueModel').value.trim();state.rescue.fallback_cli=$('rescueCli').value;state.rescue.hot_fallback_enabled=$('rescueHot').checked;state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.enabled=$('visionEnabled').checked;state.vision_sidecar.provider_id=$('visionProvider').value.trim();state.vision_sidecar.model=$('visionModel').value.trim();state.vision_sidecar.candidates=[...document.querySelectorAll('[data-vision-candidate]')].map(row=>({provider_id:row.querySelector('[data-vc-provider]').value.trim(),model:row.querySelector('[data-vc-model]').value.trim()})).filter(x=>x.provider_id&&x.model)}
 function bindVisionCandidateRow(row){const provider=row.querySelector('[data-vc-provider]');const model=row.querySelector('[data-vc-model]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{visionFirst:true});syncFallback()};model.onchange=syncFallback;row.querySelector('[data-vc-remove]').onclick=()=>{row.remove();syncFallback()}}
@@ -5961,7 +6172,7 @@ function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)r
 function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的 agent</td></tr>';table.innerHTML=`<thead><tr><th>启用</th><th>Agent</th><th>Preset</th><th>Priority</th><th>Provider</th><th>Model</th><th>Default</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(tr=>{const agent=tr.dataset.ocAgent;const row=visible.find(r=>r.agent===agent);const entry=rosterEntry(agent,row);tr.querySelector('[data-oc-enabled]').onchange=(e)=>{setRosterEnabled(agent,row,e.target.checked);renderOpencodeSummary()};tr.querySelector('[data-oc-preset]').onchange=(e)=>{persistRosterEntry(agent,row,{preset:e.target.value});renderOpencodeAgents()};tr.querySelector('[data-oc-priority]').oninput=(e)=>{persistRosterEntry(agent,row,{priority:Number(e.target.value)});renderOpencodeSummary()};tr.querySelector('[data-oc-provider]').onchange=(e)=>{const sel=e.target;const modelSel=tr.querySelector('[data-oc-model]');modelSel.innerHTML=modelOptions(sel.value,modelSel.value,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:sel.value});setOpencodeOverride(agent,sel.value,tr.querySelector('[data-oc-model]').value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-model]').onchange=(e)=>{setOpencodeOverride(agent,tr.querySelector('[data-oc-provider]').value,e.target.value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-reset]').onclick=()=>{const roster=opencodeRoster();delete roster[agent];const overrides=opencodeOverrides();delete overrides[agent];syncRuntime();renderOpencodeAgents();toast(`${agent} 已恢复默认`)}})}
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function accountLocked(a){return !!a.is_claude_human_only}
-function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');const familyEl=tr.querySelector('[data-account-family]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100);if(familyEl)acc.family_priority_overrides=parseFamilyOverrides(familyEl.value)});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
+function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');const familyEl=tr.querySelector('[data-account-family]');const claude1mEl=tr.querySelector('[data-account-claude-1m]');const timezoneEl=tr.querySelector('[data-account-timezone]');const noteEl=tr.querySelector('[data-account-note]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100);if(familyEl)acc.family_priority_overrides=parseFamilyOverrides(familyEl.value);if(claude1mEl)acc.claude_1m_mode=claude1mEl.value;if(timezoneEl)acc.timezone=timezoneEl.value.trim();if(noteEl)acc.note=noteEl.value.trim()});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
 function mappingStatusLabel(status){return {native:'Native',report:'Report',draft_review:'Draft review',human_gate:'Human gate',missing:'Missing'}[status]||status||'-'}
 function mappingStatusClass(status){return 'status-'+String(status||'missing').replace(/[^a-z0-9_ -]/gi,'').replace(/\s+/g,'_')}
 function mappingActionButton(row){const parts=[];if(row.webui_section_id){parts.push(`<button class="ghost mapping-action" data-section-jump="${escapeHtml(row.webui_section_id)}">打开</button>`)}if(row.api_action){const label=row.status==='human_gate'?'Gate':(row.status==='missing'?'Gap':'Report');parts.push(`<button class="ghost mapping-action" data-settings-action="${escapeHtml(row.api_action)}">${label}</button>`)}return parts.join(' ')}
@@ -5994,7 +6205,7 @@ function fillLoadBalanceForm(row){$('lbProfileName').value=row.name||'';$('lbHea
 function bindLoadBalanceControls(){const upsert=$('lbUpsert');if(!upsert)return;upsert.onclick=()=>{const {lb,name,heavy,medium,light}=syncLoadBalanceControls();if(!name||!heavy){toast('load_balance profile 需要 name 和 heavy model');return}const next=lbProfilePayload(name,name,heavy,medium,light);const idx=(lb.profiles||[]).findIndex(row=>row.name===name);if(idx>=0)lb.profiles[idx]={...(lb.profiles[idx]||{}),...next};else lb.profiles.push(next);if(!lb.default_profile)lb.default_profile=name;lb.profiles.forEach(row=>row.is_default=row.name===lb.default_profile);touchedLoadBalance=true;renderLoadBalance();setSection('save');toast('load_balance profile 已暂存，生成保存预览后再写入')};$('lbSetDefault').onclick=()=>{const {lb,name}=syncLoadBalanceControls();if(!name||!(lb.profiles||[]).some(row=>row.name===name)){toast('先选择或输入已有 profile name');return}lb.default_profile=name;lb.profiles.forEach(row=>row.is_default=row.name===name);touchedLoadBalance=true;renderLoadBalance();setSection('save');toast('load_balance.default 已暂存')};$('lbRemove').onclick=()=>{const {lb,name}=syncLoadBalanceControls();if(!name){toast('输入要删除的 profile name');return}const before=(lb.profiles||[]).length;lb.profiles=(lb.profiles||[]).filter(row=>row.name!==name);if(before===lb.profiles.length){toast('没有找到该 load_balance profile');return}if(lb.default_profile===name)lb.default_profile=(lb.profiles[0]||{}).name||'';lb.profiles.forEach(row=>row.is_default=row.name===lb.default_profile);touchedLoadBalance=true;renderLoadBalance();setSection('save');toast('load_balance profile 删除已暂存，生成保存预览后再写入')}}
 function renderLoadBalance(){const table=$('loadBalanceTable');if(!table)return;const lb=lbDraft();const rows=lb.profiles||[];bindLoadBalanceControls();if(!rows.length){table.innerHTML='<thead><tr><th>Status</th><th>说明</th></tr></thead><tbody><tr><td><span class="tag off">none</span></td><td class="empty-row">当前没有配置 load_balance profiles；可在上方新增持久化 profile，TUI L 仍可做 launch-time custom selection。</td></tr></tbody>';return}table.innerHTML=`<thead><tr><th>Default</th><th>Profile</th><th>Heavy</th><th>Medium</th><th>Light</th><th>Policy</th><th></th></tr></thead><tbody>${rows.map(row=>`<tr><td>${row.is_default||row.name===lb.default_profile?'<span class="tag">default</span>':'-'}</td><td class="mono">${escapeHtml(row.name||row.label||'-')}</td><td>${escapeHtml(lbSlotText((row.slots||{}).heavy))}</td><td>${escapeHtml(lbSlotText((row.slots||{}).medium))}</td><td>${escapeHtml(lbSlotText((row.slots||{}).light))}</td><td><span class="tag">draft_review</span> <span class="tag off">${escapeHtml(lb.history_write_policy||'local_artifact_human_gate')}</span></td><td><button class="ghost mapping-action" data-lb-edit="${escapeHtml(row.name||'')}">编辑</button></td></tr>`).join('')}</tbody>`;document.querySelectorAll('[data-lb-edit]').forEach(btn=>btn.onclick=()=>{const row=(lb.profiles||[]).find(item=>item.name===btn.dataset.lbEdit);if(row)fillLoadBalanceForm(row)})}
 function renderSettingsCommand(accounts,coverage,mapping){const board=$('settingsCommand');if(!board)return;const policy=state.account_write_policy||{};const summary=state.tui_webui_mapping_summary||{};const counts=summary.counts||{};const editable=accounts.filter(a=>!accountLocked(a)).length;const locked=accounts.filter(a=>accountLocked(a)).length;const nativeCount=counts.native??mapping.filter(r=>r.status==='native').length;const reportCount=(counts.report??mapping.filter(r=>r.status==='report').length)+(counts.draft_review??mapping.filter(r=>r.status==='draft_review').length);const gateCount=(counts.human_gate??mapping.filter(r=>r.status==='human_gate').length)+(counts.missing??mapping.filter(r=>r.status==='missing').length);const empty=accounts.length?'':`<div class="settings-empty-note"><strong>当前配置没有 OAuth account。</strong> 这也是你刚才看不出变化的原因：account draft/default 编辑器只会在存在 account 时出现；本页现在先把能力边界、TUI 降级路径和 human gate 明确展示出来。</div>`;board.innerHTML=`<div class="settings-command-head"><div><div class="settings-kicker">MMX / WEBUI TAKEOVER MAP</div><h3>Settings moved out of TUI</h3><p>这块现在是 settings/channel 迁移指挥台：${mapping.length} 条 TUI action 已逐项映射；能在 WebUI 里安全操作的直接显形，涉及真实账号、Claude config、Snapshot Guard accept、network/write 的动作保留 human gate。</p></div><div class="settings-stamp">${escapeHtml(policy.claude||'human_only_locked')}</div></div><div class="settings-metrics"><div class="settings-metric"><span>accounts loaded</span><strong>${accounts.length}</strong><em>${editable} editable / ${locked} Claude locked</em></div><div class="settings-metric"><span>native webui</span><strong>${nativeCount}</strong><em>direct WebUI controls</em></div><div class="settings-metric"><span>report / draft</span><strong>${reportCount}</strong><em>clickable JSON or save preview</em></div><div class="settings-metric"><span>gates / gaps</span><strong>${gateCount}</strong><em>visible, not hidden in TUI</em></div></div><div class="settings-route"><div class="settings-route-card ready"><b>01 / native controls</b><small>provider 编辑、模型管理、fallback/runtime/save 已经走 WebUI draft + diff。</small></div><div class="settings-route-card report"><b>02 / clickable reports</b><small>registry、about、usage、guard、rescue rows 都能点出 bounded JSON report。</small></div><div class="settings-route-card locked"><b>03 / human gates</b><small>Claude account、OAuth login/remove、Snapshot accept、network/write 操作不自动执行。</small></div><div class="settings-route-card"><b>04 / audit table</b><small>TUI ↔ WebUI 对照表是逐项 check list，不再让迁移范围藏在代码里。</small></div></div>${empty}`}
-function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderSettingsCommand(accounts,coverage,mapping);renderUiSettings(mapping);renderEntryAudit(mapping);renderLoadBalance();const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td><input data-account-family value="${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{}))}" ${locked?'disabled':''} placeholder="GPT=120, Qwen=90" style="min-width:160px"></td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${escapeHtml(a.timezone||'-')}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="14" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>Family</th><th>auth</th><th>home</th><th>proxy</th><th>timezone</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority],[data-account-family]').forEach(el=>{el.oninput=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')}});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);const actionLabels=new Map([['tui_mapping','TUI Mapping'],['coverage','覆盖矩阵']]);mapping.forEach(row=>{if(row.api_action&&!actionLabels.has(row.api_action))actionLabels.set(row.api_action,row.tui_label||row.api_action)});$('maintenanceActions').innerHTML=[...actionLabels.entries()].map(([id,label])=>`<button class="ghost" data-settings-action="${escapeHtml(id)}">${escapeHtml(label)}</button>`).join('');bindSettingsActionButtons()}
+function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderSettingsCommand(accounts,coverage,mapping);renderUiSettings(mapping);renderEntryAudit(mapping);renderLoadBalance();const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td><input data-account-family value="${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{}))}" ${locked?'disabled':''} placeholder="GPT=120, Qwen=90" style="min-width:160px"></td><td>${locked?escapeHtml(a.claude_1m_mode||'auto'):`<select data-account-claude-1m><option value="auto" ${(a.claude_1m_mode||'auto')==='auto'?'selected':''}>auto</option><option value="enable" ${a.claude_1m_mode==='enable'?'selected':''}>enable</option><option value="disable" ${a.claude_1m_mode==='disable'?'selected':''}>disable</option></select>`}</td><td>${locked?escapeHtml(a.timezone||'-'):`<input data-account-timezone value="${escapeHtml(a.timezone||'')}" placeholder="Asia/Singapore" style="min-width:140px">`}</td><td>${locked?escapeHtml(a.note||''):`<input data-account-note value="${escapeHtml(a.note||'')}" placeholder="note" style="min-width:130px">`}</td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${a.no_proxy_configured?'yes':'no'}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="17" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>Family</th><th>Claude 1M</th><th>timezone</th><th>note</th><th>auth</th><th>home</th><th>proxy</th><th>no_proxy</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority],[data-account-family],[data-account-claude-1m],[data-account-timezone],[data-account-note]').forEach(el=>{const handler=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')};el.oninput=handler;el.onchange=handler});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);const actionLabels=new Map([['tui_mapping','TUI Mapping'],['coverage','覆盖矩阵']]);mapping.forEach(row=>{if(row.api_action&&!actionLabels.has(row.api_action))actionLabels.set(row.api_action,row.tui_label||row.api_action)});$('maintenanceActions').innerHTML=[...actionLabels.entries()].map(([id,label])=>`<button class="ghost" data-settings-action="${escapeHtml(id)}">${escapeHtml(label)}</button>`).join('');bindSettingsActionButtons()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
@@ -6004,9 +6215,13 @@ function currentBundleRevision(){return state?.consumer_bundle_status?.component
 function draft(){syncProvider();syncFallback();syncRuntime();syncAccounts();syncUiSettings();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,accounts:state.accounts,account_defaults:state.account_defaults,rescue:state.rescue,...(touchedLoadBalance?{load_balance:state.load_balance}:{}),vision_sidecar:state.vision_sidecar,ui:state.ui,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderSettings();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];loadAcceptanceState(state.tui_webui_mapping||[]);renderNav();renderAll();}
-$('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,family_priority_overrides:{},models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
+$('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,family_priority_overrides:{},claude_1m_mode:'auto',timezone:'Asia/Singapore',note:'',models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
-$('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
+$('modelSearch').oninput=renderModelTable
+$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';if(vals.length)touchProvider(p.id);renderModelTable();toast(`已添加 ${vals.length} 个模型`)}
+$('clearHidden').onclick=()=>{const p=current();const count=(p.hidden_models||[]).length;p.hidden_models=[];p.stale_hidden_models=[];if(count)touchProvider(p.id);renderModelTable();toast(count?`已取消隐藏 ${count} 个模型`:'当前通道没有隐藏模型')}
+$('restoreModelPatch').onclick=()=>{const p=current();const extra=(p.extra_models||[]).length;const hidden=(p.hidden_models||[]).length;p.extra_models=[];p.hidden_models=[];p.stale_hidden_models=[];touchProvider(p.id);renderModelTable();toast(extra||hidden?`已恢复默认模型补丁：清空 ${extra} 个补充 / ${hidden} 个隐藏`:'当前已是默认模型补丁')}
+$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
 $('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();if(!p.approved_route_models||!p.approved_route_models.length){p.approved_route_models=(p.models||[]).filter(r=>r&&r.id&&r.source!=='derived_alias').map(r=>r.id)}p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);if($('autoStaleCleanupOnFetch')?.checked&&staleRouteModels(p).length){staleCleanupProviders.add(p.id)}renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(staleCleanupProviders.has(p.id)?`拉取到 ${data.models.length} 个模型；已自动标记缺失旧 route 清理`:`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models；缺失旧 route 默认保留`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}}
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
