@@ -8277,158 +8277,17 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
 
 
 def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
-    """
-    自动探测并缓存 ANTHROPIC_BASE_URL（Claude Code SDK 所需格式）。
+    """Compatibility wrapper for Claude Anthropic endpoint resolution."""
+    from mms_claude_endpoint import resolve_anthropic_base_url
 
-    Claude Code TypeScript SDK 固定使用路径 /v1/messages，因此：
-      ANTHROPIC_BASE_URL = https://xxx       → SDK 请求 https://xxx/v1/messages  ✓
-      ANTHROPIC_BASE_URL = https://xxx/v1    → SDK 请求 https://xxx/v1/v1/messages ✗
-
-    探测顺序（优先去掉 /v1）：
-      候选1: base_without_v1  （通常正确）
-      候选2: base_with_v1     （少数兼容两种路径的 gateway）
-
-    如果 provider 没显式给出 anthropic_base_url，但同时声明支持
-    anthropic_messages + openai_chat_completions，则会额外尝试把
-    openai_base_url 去掉尾部 /v1 后当成 shared-root candidate，探测
-    /v1/messages 是否可用；这样 newapi/shared-root provider 可以优先
-    走 cache 更友好的 Anthropic Messages，而不是直接退到 OpenAI bridge。
-
-    Returns: (base_url: str | None, method: str)
-      method: 'cached' | 'file_cached' | 'normalized' | 'config_bypass'
-              | 'sensitive_bypass' | 'bypass_for_bailian' | 'probed'
-              | 'openai_fallback_probed' | 'openai_fallback_failed'
-              | 'no_config' | 'failed'
-    """
-    configured, probe_source = _anthropic_probe_target(runtime)
-    api_key = runtime.get("api_key", "")
-    provider_id = runtime.get("id", "default")
-
-    if not configured or not api_key:
-        return None, "no_config"
-
-    # 预处理 URL
-    url = configured.rstrip("/")
-    normalized_url = url[:-3] if url.endswith("/v1") else url
-    cache_key = _anthropic_cache_key(provider_id, configured)
-
-    # ---- 内存缓存（TTL 1h）----
-    cached = _ANTHROPIC_URL_CACHE.get(cache_key)
-    if cached:
-        age = (datetime.now() - cached["ts"]).total_seconds()
-        if age < 3600:
-            return cached["url"], "cached"
-
-    # ---- 文件缓存（跨进程，TTL 24h）----
-    file_cached = _load_anthropic_url_file_cache().get(cache_key)
-    if isinstance(file_cached, dict):
-        cached_url = str(file_cached.get("url", "")).strip()
-        cached_ts = str(file_cached.get("ts", "")).strip()
-        if cached_url and cached_ts:
-            try:
-                age = (datetime.now() - datetime.fromisoformat(cached_ts)).total_seconds()
-            except ValueError:
-                age = 999999
-            if age < 24 * 3600:
-                _ANTHROPIC_URL_CACHE[cache_key] = {"url": cached_url, "ts": datetime.now()}
-                return cached_url, "file_cached"
-
-    # ---- 快速兼容：Claude SDK 自己会拼 /v1/messages，配置尾部 /v1 时直接裁掉 ----
-    if probe_source == "configured" and url.endswith("/v1"):
-        _remember_anthropic_url(provider_id, url, normalized_url)
-        return normalized_url, "normalized"
-
-    if provider_id and runtime.get("skip_anthropic_probe"):
-        if probe_source != "configured":
-            return None, "openai_fallback_failed"
-        console.print("[dim]已跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
-        _remember_anthropic_url(provider_id, url, url)
-        return url, "config_bypass"
-
-    if _runtime_is_sensitive_claude_provider(runtime):
-        if probe_source != "configured":
-            return None, "openai_fallback_failed"
-        console.print("[dim]敏感 Claude provider：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
-        _remember_anthropic_url(provider_id, url, url)
-        return url, "sensitive_bypass"
-
-    # 对 bailian-codingplan，直接使用配置的 URL，不做探测（百炼 Anthropic 端点行为特殊）
-    if provider_id == "bailian-codingplan":
-        if probe_source != "configured":
-            return None, "openai_fallback_failed"
-        console.print(f"[dim]百炼 CodingPlan：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
-        _remember_anthropic_url(provider_id, url, url)
-        return url, "bypass_for_bailian"
-
-    # ---- 使用公共工具探测（复用 mms_core.detect_working_base_url）----
-    # Claude Code SDK 固定追加 /v1/messages，所以探测路径是 /v1/messages
-    probe_nonce = os.urandom(8).hex()
-    body = json.dumps({
-        "model": probe_model,
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "hi"}],
-        "metadata": {
-            "user_id": json.dumps({
-                "device_id": f"device-{probe_nonce}",
-                "session_id": f"session-{probe_nonce}",
-            }, ensure_ascii=False),
-        },
-    }).encode()
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
-    candidate = detect_working_base_url(url, "/v1/messages", headers, body=body, timeout=5, runtime=runtime)
-
-    if candidate is not None:
-        _remember_anthropic_url(provider_id, configured, candidate)
-        if candidate != url:
-            console.print(f"[dim]✓ Anthropic 端点自动修正: {url} → {candidate}[/dim]")
-        if probe_source == "openai_fallback":
-            return candidate, "openai_fallback_probed"
-        return candidate, "probed"
-
-    if probe_source == "openai_fallback":
-        return None, "openai_fallback_failed"
-    return None, "failed"
+    return resolve_anthropic_base_url(runtime, probe_model=probe_model)
 
 
 def _pick_gateway_model(runtime, base_url):
-    """Fetch /models from gateway and return the best model ID for Claude slots.
+    """Compatibility wrapper for Claude gateway model selection."""
+    from mms_claude_endpoint import pick_gateway_model
 
-    Priority: opus-4 > opus > sonnet-4 > sonnet > first available > None
-    """
-    try:
-        import httpx as _httpx  # noqa: F401
-    except ImportError:
-        return None
-    api_key = runtime.get("api_key", "")
-    if not base_url or not api_key:
-        return None
-    url_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
-    try:
-        r = _runtime_httpx_request(
-            "GET",
-            f"{url_v1}/models",
-            runtime=runtime,
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=8,
-            follow_redirects=True,
-        )
-        if r.status_code != 200:
-            return None
-        models = [m.get("id", "") for m in r.json().get("data", [])]
-    except Exception:
-        return None
-    if not models:
-        return None
-    for keyword in ("opus-4", "opus", "sonnet-4", "sonnet", "claude"):
-        for m in models:
-            if keyword in m.lower():
-                return m
-    # 没有匹配到任何 Claude 模型 → 返回 None，不把 gpt-* 等非 Claude 模型填入 slot
-    return None
+    return pick_gateway_model(runtime, base_url)
 
 
 def _cleanup_stale_sessions(sessions_dir, stale_callback=None, *, max_entries=None, max_seconds=None):

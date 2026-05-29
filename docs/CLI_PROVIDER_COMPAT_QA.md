@@ -1,6 +1,6 @@
 # CLI / Provider Compatibility Notes
 
-> 更新时间：2026-05-10
+> 更新时间：2026-05-29
 > 范围：`claude` / `codex` / `qwen` / `kimi` 与公开仓库内可见的通用兼容性规则。
 
 > 2026-04-16 stopgap：`MMS` 当前保留 `Claude CLI` 启动能力，但默认隐藏 `Claude family model` 的展示与候选选择；这是 surface 收口，不是 runtime 下线。
@@ -63,6 +63,12 @@ Qwen / Kimi 现在是 provider model family，不再是独立 CLI launcher。删
 - sticky-session key source
 - `Responses` vs `Chat Completions` fallback
 - same-vendor native/direct fallback
+
+2026-05-29 implementation note: Claude Anthropic endpoint resolution may live
+outside `mms_launchers.py`, but the public compatibility contract is unchanged:
+`mms_launchers._resolve_anthropic_base_url` remains the compatibility wrapper,
+keeps the same cache key / `/v1/messages` probe / OpenAI fallback outcomes, and
+must stay monkeypatch-compatible for launcher regression tests.
 
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
