@@ -488,12 +488,6 @@ def _read_account_guard_state():
         return _load_json_dict_unlocked(path)
 
 
-def _write_account_guard_state(payload):
-    path = _account_guard_state_path()
-    with locked_state_file(path):
-        atomic_write_json(path, payload, mode=0o600)
-
-
 def _claude_account_guard_entry(state, account_id):
     """Compatibility wrapper for account guard state entries."""
     return _claude_account_guard_entry_impl(state, account_id)
