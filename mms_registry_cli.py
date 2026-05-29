@@ -716,6 +716,7 @@ def registry_v2_save_plan(
     command_name: str = "mms config save-plan",
     plan_summary: dict[str, Any] | None = None,
     credential_updates: list[dict[str, Any]] | None = None,
+    route_publish_guard: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Describe the DB-truth save path without writing anything."""
     root = Path(config_dir).expanduser() if config_dir is not None else _config_root_from_config_path(config_path)
@@ -728,17 +729,31 @@ def registry_v2_save_plan(
     db_path = mms_registry.default_registry_db_path(config_dir=root)
     summary = plan_summary if isinstance(plan_summary, dict) else {}
     credentials = credential_updates if isinstance(credential_updates, list) else []
+    guard = route_publish_guard if isinstance(route_publish_guard, Mapping) else {}
+    guard_current = guard.get("current") if isinstance(guard.get("current"), Mapping) else {}
+    guard_candidate = guard.get("candidate") if isinstance(guard.get("candidate"), Mapping) else {}
+    guard_diff = guard.get("diff") if isinstance(guard.get("diff"), Mapping) else {}
     mode = str(root_status.get("mode") or "")
-    has_changes = any(
+    has_draft_changes = any(
         bool(summary.get(key))
         for key in ("will_write_config", "will_write_policy", "will_write_credentials")
     )
+    candidate_route_count = int(guard_candidate.get("route_count") or 0)
+    current_route_count = int(guard_current.get("route_count") or 0)
+    guard_has_current = bool(guard_current.get("available"))
+    route_delta_count = int(guard_diff.get("removed_count") or 0) + int(guard_diff.get("added_count") or 0)
+    has_route_publish_work = candidate_route_count > 0 and (route_delta_count > 0 or not guard_has_current)
+    has_changes = has_draft_changes or has_route_publish_work
+    guard_blocked = bool(guard) and guard.get("ok") is False
     backup_dir = root / "backups" / "db"
     blocked_reasons: list[str] = []
     if mode != "preview":
         blocked_reasons.append("stable_root_human_only")
     if not has_changes:
         blocked_reasons.append("no_draft_changes")
+    if guard_blocked:
+        blocked_reasons.append(str(guard.get("reason") or "route_publish_guard_blocked"))
+    can_write_preview = bool(has_changes and mode == "preview" and not guard_blocked)
     plan_json_name = "webui-plan.json"
     cli_apply_command = f"./mmf config apply-plan --plan-json <{plan_json_name}> --apply --confirm-preview-apply --json"
     return {
@@ -751,12 +766,21 @@ def registry_v2_save_plan(
             "path": str(db_path),
             "exists": db_path.exists(),
             "backup_dir": str(backup_dir),
-            "would_backup_existing_db": bool(db_path.exists() and has_changes and mode == "preview"),
+            "would_backup_existing_db": bool(db_path.exists() and can_write_preview),
+        },
+        "route_publish_guard": dict(guard) if guard else {},
+        "route_publish_work": {
+            "has_draft_changes": bool(has_draft_changes),
+            "has_route_publish_work": bool(has_route_publish_work),
+            "candidate_route_count": candidate_route_count,
+            "current_route_count": current_route_count,
+            "current_bundle_available": guard_has_current,
+            "route_delta_count": route_delta_count,
         },
         "would_write": {
-            "db_candidate_revision": bool(has_changes and mode == "preview"),
-            "secret_backend": bool(credentials and mode == "preview"),
-            "generated_latest_approved_bundle": bool(has_changes and mode == "preview"),
+            "db_candidate_revision": can_write_preview,
+            "secret_backend": bool(credentials and mode == "preview" and not guard_blocked),
+            "generated_latest_approved_bundle": can_write_preview,
             "legacy_compat_files": {
                 "config_toml": bool(summary.get("will_write_config")),
                 "model_policy_json": bool(summary.get("will_write_policy")),

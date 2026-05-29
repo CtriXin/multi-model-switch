@@ -1683,15 +1683,36 @@ def _build_registry_v2_save_plan(
     config_path: str,
     plan_summary: dict[str, Any],
     credential_updates: list[dict[str, str]],
+    config_payload: dict[str, Any] | None = None,
+    policy_payload: dict[str, Any] | None = None,
+    expected_bundle_revision: str = "",
 ) -> dict[str, Any]:
     """Describe the future DB-truth save path without writing anything."""
-    from mms_registry_cli import registry_v2_save_plan
+    from mms_registry_cli import registry_v2_route_publish_guard, registry_v2_save_plan
+
+    route_publish_guard: dict[str, Any] = {}
+    try:
+        config_root = _config_root_for_snapshot(config_path)
+        route_publish_guard = registry_v2_route_publish_guard(
+            config_dir=config_root or None,
+            config_payload=config_payload if isinstance(config_payload, dict) else {},
+            policy_payload=policy_payload if isinstance(policy_payload, dict) else {},
+            credential_updates=credential_updates,
+            expected_bundle_revision=expected_bundle_revision,
+        )
+    except Exception as exc:
+        route_publish_guard = {
+            "ok": False,
+            "reason": "route_publish_guard_error",
+            "message": f"{type(exc).__name__}: {exc}",
+        }
 
     return registry_v2_save_plan(
         config_path=config_path,
         command_name="mms-config-web",
         plan_summary=plan_summary,
         credential_updates=credential_updates,
+        route_publish_guard=route_publish_guard,
     )
 
 
@@ -1915,6 +1936,9 @@ def build_config_plan(
             config_path=config_path,
             plan_summary=summary,
             credential_updates=credential_updates,
+            config_payload=next_cfg,
+            policy_payload=policy_after,
+            expected_bundle_revision=_expected_bundle_revision_from_payload(payload or {}),
         ),
         "summary": summary,
     }
@@ -2306,6 +2330,7 @@ def apply_registry_v2_preview_plan(
             "status": "blocked",
             "errors": blocked_reasons,
             "registry_v2_save_plan": v2_plan,
+            "route_publish_guard": _sanitize_for_output(v2_plan.get("route_publish_guard") if isinstance(v2_plan.get("route_publish_guard"), dict) else {}),
         }
 
     config_root = _config_root_for_snapshot(config_path)

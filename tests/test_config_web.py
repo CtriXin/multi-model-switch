@@ -1154,6 +1154,90 @@ def test_config_web_registry_v2_apply_blocks_stale_bundle_revision(tmp_path):
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_registry_v2_apply_republishes_no_diff_when_manifest_missing(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    app = mms_config_web.ConfigWebApp(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    first = app.registry_v2_apply(payload)
+    snapshot = app.snapshot()
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    manifest_path.unlink()
+    republish_payload = {
+        "draft": {
+            key: snapshot[key]
+            for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+
+    second = app.registry_v2_apply(republish_payload)
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert second["registry_v2_save_plan"]["route_publish_work"]["has_draft_changes"] is False
+    assert second["registry_v2_save_plan"]["route_publish_work"]["has_route_publish_work"] is True
+    assert "no_draft_changes" not in second["registry_v2_save_plan"]["blocked_reasons"]
+    assert manifest_path.exists()
+
+
+def test_config_web_registry_v2_apply_publishes_route_delta_without_config_diff(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    draft = {
+        key: snapshot[key]
+        for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")
+    }
+    provider = draft["providers"][0]
+    provider["fallback_models"] = [*provider["fallback_models"], "new-webui-model"]
+    provider["models"] = [*provider["models"], {"id": "new-webui-model", "visible": True}]
+    current_cfg = mms_config_web.build_config_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        {"draft": draft},
+        config_path=str(config_path),
+        command_name="mmf",
+    )["config"]
+    route_delta_payload = {
+        "draft": draft,
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        current_cfg,
+        route_delta_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert second["registry_v2_save_plan"]["route_publish_work"]["has_draft_changes"] is False
+    assert second["registry_v2_save_plan"]["route_publish_work"]["has_route_publish_work"] is True
+    assert "no_draft_changes" not in second["registry_v2_save_plan"]["blocked_reasons"]
+    assert "new-webui-model" in router["routes"]
+
+
 def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"
