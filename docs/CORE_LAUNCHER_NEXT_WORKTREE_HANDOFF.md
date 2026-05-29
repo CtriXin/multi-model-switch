@@ -123,3 +123,59 @@ cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/.worktrees/core-launch
 python3 /Users/xin/auto-skills/shared-skills/handover/scripts/continuity.py status --root . --layout agent-local
 sed -n '1,220p' .agent.local/continuity/pickup.md
 ```
+
+---
+
+## 2026-05-30 Human Gate Readiness Snapshot
+
+Status: pre-human-gate candidate after latest `main` sync.
+
+### Current Branch State
+
+- Worktree: `/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/.worktrees/core-launcher-slimming-next`
+- Branch: `refactor/core-launcher-slimming-next`
+- Current HEAD: `0692a28 refactor(pi): group runner scripts`
+- Latest synced `main` / `origin/main`: `f546903 fix(pi): fail-close live smoke regressions`
+- Evidence: `main` and `origin/main` are ancestors of this branch after the 2026-05-30 sync.
+- Worktree state at this snapshot: clean.
+
+### What Changed Since The Original Handoff
+
+- Synced `main` into the slimming branch twice and resolved Core/Launcher conflicts without re-inlining the extracted TUI/Core wrappers.
+- Preserved `mms_core._handle_tui_launcher_selection` and `mms_launchers.get_export_env` as compatibility wrappers around focused modules.
+- Carried forward latest Pi runner support, including provider compatibility, model availability filtering, selected-model export propagation, and smoke-matrix coverage.
+- Grouped Pi-only script assets under `scripts/pi/`:
+  - `scripts/pi/cli-wrapper.sh`
+  - `scripts/pi/retry-extension.mjs`
+  - `scripts/pi/smoke_matrix.py`
+
+### Verified Gates
+
+- `rtk python3.13 -m py_compile mms_core.py mms_launchers.py mms_command_tools.py mms_launcher_export.py mms_runtime_validation.py mms_tui_launcher_flow.py mms_tui_launcher_entry.py mms_confirm_preview.py mms_pi_support.py`
+- `rtk python3.13 -m pytest tests/test_pi_launcher.py tests/test_smoke_pi_matrix.py -q` -> `32 passed`
+- isolated temp HOME/XDG full suite: `rtk python3.13 -m pytest -q` -> `1430 passed, 4 skipped`
+- `git diff --check` -> pass
+
+### Human Gate Smoke Scope
+
+Manual gate can stay shallow. The user preference is “can open, no crash”; no real conversation is required.
+
+Suggested launch-only checks:
+
+- `mmg claude`
+- `mmg codex`
+- `mmg opencode`
+- Optional if Pi is installed/desired: `mmg pi`
+
+Stop before any real config mutation gate:
+
+- Do not run live `guard accept`.
+- Do not write real `~/.config/mms/**` automatically.
+- Claude config remains `human-only`.
+- Do not run installer, registry publish, or real proxy/egress smoke unless the human explicitly asks.
+
+### Remaining Merge Notes
+
+- This is close to a human-gate merge point: latest `main` is included, full isolated pytest is green, and the worktree is clean.
+- Larger root-module folder migration is intentionally deferred. Moving flat `mms_*.py` modules into packages would reduce visual clutter but has higher import/install/test blast radius than is appropriate immediately before merge.
+- The next safe cleanup after merge should be a dedicated package-layout migration plan with compatibility/import audit, not an opportunistic pre-gate move.
