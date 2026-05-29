@@ -136,7 +136,7 @@ def _sanitize_for_output(value: Any) -> Any:
         for key, child in value.items():
             key_text = str(key or "")
             key_lower = key_text.lower()
-            if key_lower.endswith(("_count", "_counts")):
+            if key_lower.startswith("has_") or key_lower.endswith(("_count", "_counts")):
                 result[key_text] = child
             elif key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key")):
                 result[key_text] = _redact(child)

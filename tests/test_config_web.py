@@ -61,6 +61,7 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
             "api_key": "sk-super-secret-value",
+            "has_api_key": True,
             "missing_api_key_count": 32,
             "runtime_blockers": {"missing_api_key_count": 32, "missing_base_url_count": 0},
             "secret_count": 2,
@@ -70,6 +71,7 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
     payload = json.loads(body)
 
     assert payload["api_key"] != "sk-super-secret-value"
+    assert payload["has_api_key"] is True
     assert payload["missing_api_key_count"] == 32
     assert payload["runtime_blockers"]["missing_api_key_count"] == 32
     assert payload["runtime_blockers"]["missing_base_url_count"] == 0
