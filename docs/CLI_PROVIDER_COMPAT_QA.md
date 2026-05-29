@@ -76,6 +76,13 @@ outside `mms_launchers.py`, but `mms_launchers._apply_claude_model_overrides`,
 compatibility wrappers. Claude `[1m]` suffix rules, MiMo selector stripping, and
 sensitive-provider 1M defaults must not change during module extraction.
 
+2026-05-29 implementation note: Claude session settings materialization may live
+outside `mms_launchers.py`, but `mms_launchers._build_claude_session_settings`,
+`_write_claude_session_settings`, and `_seed_oauth_claude_session_settings`
+remain the compatibility wrappers. Session settings inheritance, hook/MCP
+allowlists, session-local writes, and OAuth execution-surface stripping must
+stay monkeypatch-compatible and behavior-preserving during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去
