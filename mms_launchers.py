@@ -3645,135 +3645,45 @@ def _default_session_mcp_servers():
 
 
 def _resolve_hive_root(module_path=None):
-    candidates = []
-    explicit = str(os.environ.get("MMS_HIVE_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    install_home = str(os.environ.get("HIVE_HOME") or "").strip()
-    if install_home:
-        candidates.append(os.path.abspath(os.path.expanduser(install_home)))
+    """Compatibility wrapper for Hive MCP root discovery."""
+    from mms_session_mcp import resolve_hive_root
 
-    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
-    local_candidates = [
-        os.path.join(os.path.dirname(module_dir), "hive"),
-        _real_user_path("auto-skills", "CtriXin-repo", "hive"),
-        _real_user_path("auto-skills", "hive"),
-        _real_user_path("hive"),
-    ]
-    installed_candidates = [
-        _real_user_path(".hive-orchestrator"),
-        _real_user_path(".local", "share", "hive"),
-    ]
-    if _is_installed_mms_layout(module_path=module_path):
-        candidates.extend(installed_candidates)
-        candidates.extend(local_candidates)
-    else:
-        candidates.extend(local_candidates)
-        candidates.extend(installed_candidates)
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "bin", "mcp-server.sh")):
-            return candidate
-    return ""
+    return resolve_hive_root(module_path=module_path)
 
 
 def _default_hive_session_mcp_server():
-    hive_root = _resolve_hive_root()
-    if hive_root:
-        hive_command = os.path.join(hive_root, "bin", "mcp-server.sh")
-        return {
-            "args": [],
-            "command": hive_command,
-            "env": {"HOME": _real_user_home()},
-            "type": "stdio",
-        }
-    return None
+    """Compatibility wrapper for default Hive session MCP server discovery."""
+    from mms_session_mcp import default_hive_session_mcp_server
+
+    return default_hive_session_mcp_server()
 
 
 def _resolve_pilot_root(module_path=None):
-    candidates = []
-    explicit = str(os.environ.get("MMS_PILOT_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    """Compatibility wrapper for Pilot MCP root discovery."""
+    from mms_session_mcp import resolve_pilot_root
 
-    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
-    auto_skills_root = os.path.dirname(os.path.dirname(module_dir))
-    local_candidates = [
-        os.path.join(auto_skills_root, "shared-skills", "pilot"),
-        _real_user_path("auto-skills", "shared-skills", "pilot"),
-        os.path.join(os.path.dirname(module_dir), "pilot"),
-    ]
-    installed_candidates = [
-        _real_user_path(".local", "share", "pilot"),
-    ]
-    if _is_installed_mms_layout(module_path=module_path):
-        candidates.extend(installed_candidates)
-        candidates.extend(local_candidates)
-    else:
-        candidates.extend(local_candidates)
-        candidates.extend(installed_candidates)
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "scripts", "pilot_mcp_server.py")):
-            return candidate
-    return ""
+    return resolve_pilot_root(module_path=module_path)
 
 
 def _default_pilot_session_mcp_server():
-    pilot_root = _resolve_pilot_root()
-    if pilot_root:
-        return {
-            "command": "python3",
-            "args": [os.path.join(pilot_root, "scripts", "pilot_mcp_server.py")],
-            "env": {"HOME": _real_user_home()},
-            "type": "stdio",
-        }
-    return None
+    """Compatibility wrapper for default Pilot session MCP server discovery."""
+    from mms_session_mcp import default_pilot_session_mcp_server
+
+    return default_pilot_session_mcp_server()
 
 
 def _replace_plugin_root_tokens(value, plugin_root):
-    if isinstance(value, str):
-        return value.replace("${CLAUDE_PLUGIN_ROOT}", plugin_root).replace("$CLAUDE_PLUGIN_ROOT", plugin_root)
-    if isinstance(value, list):
-        return [_replace_plugin_root_tokens(item, plugin_root) for item in value]
-    if isinstance(value, dict):
-        return {
-            key: _replace_plugin_root_tokens(child, plugin_root)
-            for key, child in value.items()
-        }
-    return value
+    """Compatibility wrapper for plugin MCP root token replacement."""
+    from mms_session_mcp import replace_plugin_root_tokens
+
+    return replace_plugin_root_tokens(value, plugin_root)
 
 
 def _load_plugin_mcp_servers(plugin_root):
-    plugin_root = str(plugin_root or "").strip()
-    if not plugin_root:
-        return {}
-    mcp_path = os.path.join(plugin_root, ".mcp.json")
-    if not os.path.isfile(mcp_path):
-        return {}
-    try:
-        with open(mcp_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception:
-        return {}
-    servers = payload.get("mcpServers") if isinstance(payload, dict) else {}
-    if not isinstance(servers, dict):
-        return {}
-    normalized = {}
-    for name, spec in servers.items():
-        key = str(name or "").strip()
-        if not key or not isinstance(spec, dict):
-            continue
-        normalized[key] = _replace_plugin_root_tokens(copy.deepcopy(spec), plugin_root)
-    return normalized
+    """Compatibility wrapper for plugin MCP server loading."""
+    from mms_session_mcp import load_plugin_mcp_servers
+
+    return load_plugin_mcp_servers(plugin_root)
 
 
 def _agent_pack_mcp_servers(agent_pack):
