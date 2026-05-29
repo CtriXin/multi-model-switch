@@ -905,6 +905,24 @@ def _assistant_reasoning_content_from_blocks(content):
     return "\n\n".join(parts).strip()
 
 
+def _assistant_message_reasoning_content(message):
+    if not isinstance(message, dict):
+        return ""
+    direct = str(message.get("reasoning_content") or "").strip()
+    if direct:
+        return direct
+    return _assistant_reasoning_content_from_blocks(message.get("content"))
+
+
+def _anthropic_response_reasoning_content(payload):
+    if not isinstance(payload, dict):
+        return ""
+    direct = str(payload.get("reasoning_content") or "").strip()
+    if direct:
+        return direct
+    return _assistant_reasoning_content_from_blocks(payload.get("content"))
+
+
 def _assistant_has_thinking_block(content):
     for block in _normalize_message_content(content):
         if block.get("type") != "thinking":
@@ -1059,6 +1077,46 @@ def _preserve_domestic_reasoning_roundtrip(payload, model_name):
             if not _assistant_has_thinking_block(content):
                 message["content"] = [{"type": "thinking", "thinking": last_reasoning_content}] + content
             message["reasoning_content"] = last_reasoning_content
+
+
+def _restore_session_domestic_reasoning_roundtrip(payload, model_name, session_reasoning_content):
+    """Rehydrate the latest assistant tool-use group from session-level reasoning."""
+    if not _domestic_model_requires_reasoning_content_roundtrip(model_name):
+        return False
+    reasoning_content = str(session_reasoning_content or "").strip()
+    if not reasoning_content:
+        return False
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return False
+
+    tail_index = len(messages) - 1
+    while tail_index >= 0 and str(messages[tail_index].get("role", "")).strip() != "assistant":
+        tail_index -= 1
+    if tail_index < 0 or tail_index == len(messages) - 1:
+        return False
+
+    group_start = tail_index
+    while group_start >= 0 and str(messages[group_start].get("role", "")).strip() == "assistant":
+        group_start -= 1
+    assistant_group = [
+        message
+        for message in messages[group_start + 1 : tail_index + 1]
+        if isinstance(message, dict) and str(message.get("role", "")).strip() == "assistant"
+    ]
+    if not assistant_group:
+        return False
+    if not any(_assistant_message_has_tool_use(message) for message in assistant_group):
+        return False
+    if any(_assistant_message_reasoning_content(message) for message in assistant_group):
+        return False
+
+    first_message = assistant_group[0]
+    content = _normalize_message_content(first_message.get("content"))
+    if not _assistant_has_thinking_block(content):
+        first_message["content"] = [{"type": "thinking", "thinking": reasoning_content}] + content
+    first_message["reasoning_content"] = reasoning_content
+    return True
 
 
 def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=True, reasoning_effort="high"):
@@ -2697,6 +2755,78 @@ def _iter_sse_lines(response):
             yield current_event or "message", payload
 
 
+class _AnthropicReasoningStreamTracker:
+    """Collect thinking deltas from Anthropic SSE streams for next-turn carry-forward."""
+
+    def __init__(self):
+        self._thinking_by_index = {}
+
+    def feed_event(self, event_type, payload):
+        if not isinstance(payload, dict):
+            return
+        if event_type == "content_block_start":
+            try:
+                index = int(payload.get("index"))
+            except (TypeError, ValueError):
+                return
+            block = payload.get("content_block") if isinstance(payload.get("content_block"), dict) else {}
+            if block.get("type") != "thinking":
+                return
+            parts = self._thinking_by_index.setdefault(index, [])
+            initial = str(block.get("thinking") or "")
+            if initial:
+                parts.append(initial)
+            return
+        if event_type != "content_block_delta":
+            return
+        try:
+            index = int(payload.get("index"))
+        except (TypeError, ValueError):
+            return
+        delta = payload.get("delta") if isinstance(payload.get("delta"), dict) else {}
+        if delta.get("type") != "thinking_delta":
+            return
+        text = str(delta.get("thinking") or "")
+        if not text:
+            return
+        self._thinking_by_index.setdefault(index, []).append(text)
+
+    def reasoning_content(self):
+        parts = []
+        for index in sorted(self._thinking_by_index):
+            text = "".join(self._thinking_by_index[index]).strip()
+            if text:
+                parts.append(text)
+        return "\n\n".join(parts).strip()
+
+
+def _feed_anthropic_reasoning_sse_line(raw_line, tracker, state):
+    if tracker is None or state is None:
+        return
+    line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
+    stripped = line.strip()
+    if not stripped:
+        data_lines = state.get("data_lines", [])
+        if data_lines:
+            payload_text = "\n".join(data_lines)
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError:
+                payload = None
+            if payload is not None:
+                tracker.feed_event(state.get("event") or "message", payload)
+        state["event"] = None
+        state["data_lines"] = []
+        return
+    if stripped.startswith(":"):
+        return
+    if stripped.startswith("event:"):
+        state["event"] = stripped[6:].strip() or "message"
+        return
+    if stripped.startswith("data:"):
+        state.setdefault("data_lines", []).append(stripped[5:].lstrip())
+
+
 def _bridge_request_to_codex(account, model_name, request_payload, stream_response):
     _ensure_httpx()
     if httpx is None:
@@ -3433,6 +3563,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     route_payload["model"] = resolved_model.replace(_ONE_M_CONTEXT_SUFFIX, "")
                     resolved_model = str(route_payload["model"] or "")
 
+                _restore_session_domestic_reasoning_roundtrip(
+                    route_payload,
+                    resolved_model,
+                    getattr(self.server, "_last_reasoning_content", ""),
+                )
+
                 profile_id = apply_profile_body_patches(
                     route_payload,
                     protocol="anthropic_messages",
@@ -3506,6 +3642,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 
                 try:
                     if stream:
+                        reasoning_tracker = _AnthropicReasoningStreamTracker()
+                        reasoning_sse_state = {"event": None, "data_lines": []}
                         with httpx.stream(
                             "POST",
                             target_url,
@@ -3576,6 +3714,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             for raw_line in response.iter_lines():
                                 if first_byte_ms is None:
                                     first_byte_ms = _now_ms()
+                                _feed_anthropic_reasoning_sse_line(raw_line, reasoning_tracker, reasoning_sse_state)
+                                current_reasoning = reasoning_tracker.reasoning_content()
+                                if current_reasoning:
+                                    # Tool-result continuations can race ahead of message_stop.
+                                    # Publish reasoning as soon as it is visible in the stream.
+                                    self.server._last_reasoning_content = current_reasoning
                                 stripped = raw_line.strip()
                                 if stripped.startswith("data:"):
                                     data_str = stripped[5:].strip()
@@ -3594,6 +3738,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 self.wfile.write(raw_line.encode("utf-8") + b"\n")
                                 if raw_line == "":
                                     self.wfile.flush()
+                            _feed_anthropic_reasoning_sse_line("", reasoning_tracker, reasoning_sse_state)
+                            self.server._last_reasoning_content = reasoning_tracker.reasoning_content()
                             self.close_connection = True
                         if should_record_speed and response.status_code < 400:
                             _record_bridge_speed(
@@ -3686,6 +3832,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 status_paths=getattr(self.server, "route_status_paths", None),
                             )
                             continue
+                    if response.status_code == 200:
+                        try:
+                            response_payload = json.loads(body_out.decode("utf-8"))
+                        except Exception:
+                            response_payload = None
+                        self.server._last_reasoning_content = _anthropic_response_reasoning_content(response_payload)
                     if body_out:
                         try:
                             output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
@@ -5784,6 +5936,7 @@ def gateway_claude_bridge(
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier
+    server._last_reasoning_content = ""
     # ── Session 统计 ──
     server.session_input_tokens = 0
     server.session_output_tokens = 0

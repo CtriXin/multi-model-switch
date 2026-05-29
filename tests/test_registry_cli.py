@@ -1134,6 +1134,48 @@ def test_mmf_config_apply_plan_writes_preview_bundle_without_legacy_files(tmp_pa
     assert secret_value not in combined
 
 
+def test_registry_v2_webui_secret_backend_preserves_existing_entries(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    secret_dir = config_dir / "secrets"
+    secret_dir.mkdir(parents=True)
+    secret_path = secret_dir / "webui-secrets.json"
+    secret_path.write_text(
+        json.dumps(
+            {
+                "schema": mms_registry_cli.REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA,
+                "secrets": [
+                    {
+                        "provider_id": "newapi-tencent",
+                        "field": "api_key",
+                        "source": "webui-credential-update",
+                        "secret_ref": "pending-webui:newapi_tencent:api_key",
+                        "fingerprint": "old-fingerprint",
+                        "value": "sk-existing-tencent",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_registry_cli.write_registry_v2_webui_secret_backend(
+        config_dir=config_dir,
+        credential_updates=[{"provider_id": "newapi-personal-tokyo", "api_key": "sk-new-tokyo"}],
+        command_name="mmf config",
+    )
+    payload = json.loads(secret_path.read_text(encoding="utf-8"))
+    by_provider = {item["provider_id"]: item for item in payload["secrets"]}
+
+    assert result["skipped"] is False
+    assert result["secret_count"] == 2
+    assert result["updated_secret_count"] == 1
+    assert result["preserved_secret_count"] == 1
+    assert by_provider["newapi-tencent"]["value"] == "sk-existing-tencent"
+    assert by_provider["newapi-personal-tokyo"]["value"] == "sk-new-tokyo"
+    assert result["backup_path"]
+
+
 def test_mmf_config_apply_plan_blocks_apply_without_confirmation(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     plan_path = tmp_path / "plan.json"

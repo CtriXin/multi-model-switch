@@ -84,9 +84,77 @@ def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
     provider = snapshot["providers"][0]
 
     assert provider["fallback_models"] == []
+    assert provider["approved_route_models"] == ["gpt-preview"]
     assert provider["extra_models"] == []
     assert provider["models"][0]["id"] == "gpt-preview"
     assert provider["models"][0]["source"] == "approved"
+
+
+def test_config_web_bundle_runtime_exposes_derived_aliases_for_hiding():
+    cfg = {
+        "providers": [
+            {
+                "id": "newapi-personal-tokyo",
+                "name": "Tokyo",
+                "enabled": True,
+                "api_key": "sk-super-secret-value",
+                "anthropic_base_url": "https://tokyo.example/v1",
+                "protocols": ["anthropic_messages"],
+                "supported_clis": ["claude"],
+                "models_endpoint": "manual",
+                "fallback_models": ["anthropic/claude-opus-4.6"],
+                "hidden_models": ["claude-opus-4-6"],
+                "_mms_bundle_runtime": True,
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    provider = snapshot["providers"][0]
+    rows = {row["id"]: row for row in provider["models"]}
+
+    assert "claude-opus-4-6" in rows
+    assert rows["claude-opus-4-6"]["source"] == "derived_alias"
+    assert rows["claude-opus-4-6"]["visible"] is False
+    assert provider["stale_hidden_models"] == []
+
+
+def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
+    monkeypatch.setattr(
+        mms_config_web._load_mms_core(),
+        "_load_probe_file_cache",
+        lambda *_args, **_kwargs: {"raw_models": ["gpt-preview", "hidden-remote"], "base_source": "remote"},
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "preview-provider",
+                "name": "Preview Provider",
+                "enabled": True,
+                "api_key": "sk-super-secret-value",
+                "openai_base_url": "https://preview.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "manual",
+                "fallback_models": ["gpt-preview"],
+                "_mms_bundle_runtime": True,
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    rows = snapshot["providers"][0]["models"]
+
+    assert [row["id"] for row in rows] == ["gpt-preview"]
+    assert rows[0]["source"] == "approved"
 
 
 def test_config_web_json_response_keeps_non_secret_counts_visible():
@@ -110,6 +178,22 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
     assert payload["secret_count"] == 2
     assert payload["secrets"] != [{"value": "sk-super-secret-value"}]
     assert "sk-super-secret-value" not in body.decode("utf-8")
+
+
+def test_config_web_secret_ref_without_value_is_not_key_set():
+    summary = mms_config_web._provider_summary(
+        {
+            "id": "secret-ref-only-provider",
+            "enabled": True,
+            "secret_ref": "pending-webui:secret_ref_only_provider:api_key",
+            "openai_base_url": "https://provider.example/v1",
+            "protocols": ["openai_chat_completions"],
+            "fallback_models": ["demo-model"],
+        },
+        policy_payload={},
+    )
+
+    assert summary["has_api_key"] is False
 
 
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
@@ -305,10 +389,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "不是待删除列表，也不是全局模型池" in html
     assert "编辑补充模型库" in html
     assert "从补充库移除" in html
-    assert "移除全部通道过期隐藏记录" in html
-    assert "过期隐藏记录（不在当前通道模型列表）" in html
-    assert "移除记录不会影响其他通道" in html
-    assert "移除隐藏记录" in html
+    assert "移除全部通道未匹配隐藏规则" in html
+    assert "未匹配隐藏规则（hidden_models）" in html
+    assert "不等于远端不存在" in html
+    assert "拉取后自动标记缺失旧 route 为待清理" in html
+    assert "移除当前通道未匹配隐藏规则" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
@@ -537,6 +622,40 @@ def _draft_payload():
                     "mobius-reviewer-gpt55": {"model": "gpt-5.5"},
                 },
             },
+        }
+    }
+
+
+def _large_route_draft_payload(count=12):
+    models = [f"model-{index:02d}" for index in range(count)]
+    return {
+        "draft": {
+            "provider_default": "bulk",
+            "providers": [
+                {
+                    "original_id": "bulk",
+                    "id": "bulk",
+                    "name": "Bulk Gateway",
+                    "enabled": True,
+                    "role": "primary",
+                    "priority": 200,
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude", "codex", "opencode"],
+                    "models_endpoint": "manual",
+                    "openai_base_url": "https://bulk.example/v1",
+                    "anthropic_base_url": "https://bulk.example/v1",
+                    "api_key": "sk-bulk-secret-value",
+                    "update_credentials": True,
+                    "fallback_models": models,
+                    "extra_models": [],
+                    "hidden_models": [],
+                    "models": [{"id": model, "visible": True} for model in models],
+                }
+            ],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": models[0]},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
         }
     }
 
@@ -957,11 +1076,422 @@ def test_config_web_registry_v2_apply_routes_visible_model_rows_without_fallback
         config_path=str(config_path),
     )
     router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    profile = json.loads((config_root / "generated" / "provider-profiles.generated.json").read_text(encoding="utf-8"))
 
     assert result["ok"] is True
     assert result["candidate"]["route_candidates"]["provider_route_count"] == 1
     assert set(router["routes"]) == {"qwen3.6-plus"}
     assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
+    assert profile["profiles"]["demo"]["hidden_models"] == ["noisy-model"]
+    assert profile["provider"]["default"] == "demo"
+
+
+def test_config_web_registry_v2_apply_routes_visible_model_rows_with_existing_fallback_lists(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = json.loads(json.dumps(_draft_payload()))
+    provider = payload["draft"]["providers"][0]
+    provider["fallback_models"] = ["gpt-5.5"]
+    provider["extra_models"] = []
+    provider["models"] = [
+        {"id": "gpt-5.5", "visible": True},
+        {"id": "qwen3.6-plus", "visible": True},
+        {"id": "hidden-remote", "visible": False},
+    ]
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert set(router["routes"]) == {"gpt-5.5", "qwen3.6-plus"}
+    assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
+    assert "hidden-remote" not in router["routes"]
+
+
+def test_config_web_registry_v2_apply_scoped_provider_routes_preserve_other_channels(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+
+    def provider(provider_id, priority, models):
+        return {
+            "original_id": provider_id,
+            "id": provider_id,
+            "name": provider_id,
+            "enabled": True,
+            "role": "primary",
+            "priority": priority,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "manual",
+            "openai_base_url": f"https://{provider_id}.example/v1",
+            "anthropic_base_url": f"https://{provider_id}.example/v1",
+            "api_key": f"sk-{provider_id}-secret",
+            "update_credentials": True,
+            "fallback_models": models,
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [{"id": model, "visible": True} for model in models],
+        }
+
+    first_payload = {
+        "draft": {
+            "provider_default": "tokyo",
+            "providers": [
+                provider("tokyo", 200, ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2.5[1m]"]),
+                provider("tencent", 100, ["mimo-v2.5", "mimo-v2.5-pro"]),
+            ],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "mimo-v2.5"},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        first_payload,
+        config_path=str(config_path),
+    )
+
+    second_payload = json.loads(json.dumps(first_payload))
+    second_payload["draft"]["route_scope_provider_ids"] = ["tencent"]
+    second_payload["draft"]["providers"][0]["models"] = [{"id": "mimo-v2.5[1m]", "visible": True}]
+    second_payload["draft"]["providers"][0]["fallback_models"] = ["mimo-v2.5[1m]"]
+    second_payload["draft"]["providers"][1]["models"] = [
+        {"id": "mimo-v2.5", "visible": True},
+        {"id": "mimo-v2.5-pro", "visible": True},
+        {"id": "mimo-v2.5[1m]", "visible": True},
+    ]
+    second_payload["draft"]["providers"][1]["fallback_models"] = ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2.5[1m]"]
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        second_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    def providers_for(model):
+        route = router["routes"][model]
+        leaves = [route["primary"], *(route.get("fallbacks") or [])]
+        return {leaf["provider_id"] for leaf in leaves}
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert providers_for("mimo-v2.5") == {"tokyo", "tencent"}
+    assert providers_for("mimo-v2.5-pro") == {"tokyo", "tencent"}
+    assert providers_for("mimo-v2.5[1m]") == {"tokyo", "tencent"}
+    assert router["routes"]["mimo-v2.5"]["primary"]["provider_id"] == "tokyo"
+    assert second["candidate"]["route_candidates"]["provider_route_count"] == 6
+
+
+def test_config_web_registry_v2_apply_scoped_provider_manual_add_preserves_provider_routes(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+
+    def provider(provider_id, priority, models):
+        return {
+            "original_id": provider_id,
+            "id": provider_id,
+            "name": provider_id,
+            "enabled": True,
+            "role": "primary",
+            "priority": priority,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "manual",
+            "openai_base_url": f"https://{provider_id}.example/v1",
+            "anthropic_base_url": f"https://{provider_id}.example/v1",
+            "api_key": f"sk-{provider_id}-secret",
+            "update_credentials": True,
+            "fallback_models": models,
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [{"id": model, "visible": True} for model in models],
+        }
+
+    first_payload = {
+        "draft": {
+            "provider_default": "tokyo",
+            "providers": [
+                provider("tokyo", 200, ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2.5[1m]"]),
+                provider("tencent", 100, ["mimo-v2.5", "mimo-v2.5-pro"]),
+            ],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "mimo-v2.5"},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        first_payload,
+        config_path=str(config_path),
+    )
+
+    second_payload = json.loads(json.dumps(first_payload))
+    second_payload["draft"]["route_scope_provider_ids"] = ["tencent"]
+    second_payload["draft"]["providers"][1]["fallback_models"] = []
+    second_payload["draft"]["providers"][1]["models"] = []
+    second_payload["draft"]["providers"][1]["extra_models"] = ["mimo-v2.5[1m]"]
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        second_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    def providers_for(model):
+        route = router["routes"][model]
+        leaves = [route["primary"], *(route.get("fallbacks") or [])]
+        return {leaf["provider_id"] for leaf in leaves}
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert providers_for("mimo-v2.5") == {"tokyo", "tencent"}
+    assert providers_for("mimo-v2.5-pro") == {"tokyo", "tencent"}
+    assert providers_for("mimo-v2.5[1m]") == {"tokyo", "tencent"}
+    assert second["candidate"]["route_candidates"]["provider_route_count"] == 6
+
+
+def test_config_web_registry_v2_apply_refreshed_provider_preserves_stale_routes_until_explicit_cleanup(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+
+    def provider(models):
+        return {
+            "original_id": "tokyo",
+            "id": "tokyo",
+            "name": "Tokyo",
+            "enabled": True,
+            "role": "primary",
+            "priority": 200,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "/models",
+            "openai_base_url": "https://tokyo.example/v1",
+            "anthropic_base_url": "https://tokyo.example/v1",
+            "api_key": "sk-tokyo-secret",
+            "update_credentials": True,
+            "fallback_models": ["claude-opus-4.7", "claude-opus-4-6-thinking"],
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [{"id": model, "source": "remote", "visible": True} for model in models],
+        }
+
+    first_payload = {
+        "draft": {
+            "provider_default": "tokyo",
+            "providers": [provider(["claude-opus-4.7", "claude-opus-4-6-thinking"])],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "claude-opus-4-6-thinking"},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        first_payload,
+        config_path=str(config_path),
+    )
+
+    no_cleanup_payload = json.loads(json.dumps(first_payload))
+    no_cleanup_payload["draft"]["route_scope_provider_ids"] = ["tokyo"]
+    no_cleanup_payload["draft"]["providers"] = [provider(["claude-opus-4-6-thinking"])]
+    no_cleanup = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        no_cleanup_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert first["ok"] is True
+    assert no_cleanup["ok"] is True
+    assert set(router["routes"]) == {"claude-opus-4.7", "claude-opus-4-6-thinking"}
+    assert no_cleanup["candidate"]["route_candidates"]["provider_route_count"] == 2
+
+    cleanup_payload = json.loads(json.dumps(no_cleanup_payload))
+    cleanup_payload["draft"]["route_refresh_provider_ids"] = ["tokyo"]
+    cleanup = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        cleanup_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert cleanup["ok"] is True
+    assert set(router["routes"]) == {"claude-opus-4-6-thinking"}
+    assert "claude-opus-4.7" not in router["routes"]
+    assert cleanup["candidate"]["route_candidates"]["provider_route_count"] == 1
+    assert cleanup["route_publish_guard"]["diff"]["removed_models_sample"] == ["claude-opus-4.7"]
+
+
+def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    large_payload = _large_route_draft_payload(12)
+    large_payload["confirm_v2_preview"] = True
+    large_payload["confirm_phrase"] = "写入预览DB"
+
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "bulk", "name": "Old"}], "provider": {"default": "bulk"}},
+        large_payload,
+        config_path=str(config_path),
+    )
+    router_path = config_root / "generated" / "model-routes.json"
+    before_router = json.loads(router_path.read_text(encoding="utf-8"))
+
+    small_payload = _draft_payload()
+    small_payload["confirm_v2_preview"] = True
+    small_payload["confirm_phrase"] = "写入预览DB"
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "bulk", "name": "Old"}], "provider": {"default": "bulk"}},
+        small_payload,
+        config_path=str(config_path),
+    )
+    after_router = json.loads(router_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(second, ensure_ascii=False, sort_keys=True)
+
+    assert first["ok"] is True
+    assert len(before_router["routes"]) == 12
+    assert second["ok"] is False
+    assert second["status"] == "blocked"
+    assert second["route_publish_guard"]["reason"] == "route_shrink_guard"
+    assert second["route_publish_guard"]["current"]["route_count"] == 12
+    assert second["route_publish_guard"]["candidate"]["route_count"] == 2
+    assert len(after_router["routes"]) == 12
+    assert after_router["routes"] == before_router["routes"]
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_blocks_stale_bundle_revision(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    before_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stale_payload = _draft_payload()
+    stale_payload["draft"]["expected_bundle_revision"] = "bundle_stale_revision"
+    stale_payload["confirm_v2_preview"] = True
+    stale_payload["confirm_phrase"] = "写入预览DB"
+
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        stale_payload,
+        config_path=str(config_path),
+    )
+    after_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(second, ensure_ascii=False, sort_keys=True)
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["status"] == "blocked"
+    assert second["route_publish_guard"]["reason"] == "stale_preview_bundle_revision"
+    assert second["route_publish_guard"]["expected_bundle_revision"] == "bundle_stale_revision"
+    assert second["route_publish_guard"]["current"]["bundle_revision"] == before_manifest["bundle_revision"]
+    assert after_manifest["bundle_revision"] == before_manifest["bundle_revision"]
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_republishes_no_diff_when_manifest_missing(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    app = mms_config_web.ConfigWebApp(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    first = app.registry_v2_apply(payload)
+    snapshot = app.snapshot()
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    manifest_path.unlink()
+    republish_payload = {
+        "draft": {
+            key: snapshot[key]
+            for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+
+    second = app.registry_v2_apply(republish_payload)
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert second["registry_v2_save_plan"]["route_publish_work"]["has_route_publish_work"] is True
+    assert "no_draft_changes" not in second["registry_v2_save_plan"]["blocked_reasons"]
+    assert manifest_path.exists()
+
+
+def test_config_web_registry_v2_apply_publishes_route_delta_without_config_diff(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    draft = {
+        key: snapshot[key]
+        for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")
+    }
+    provider = draft["providers"][0]
+    provider["fallback_models"] = [*provider["fallback_models"], "new-webui-model"]
+    provider["models"] = [*provider["models"], {"id": "new-webui-model", "visible": True}]
+    current_cfg = mms_config_web.build_config_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        {"draft": draft},
+        config_path=str(config_path),
+        command_name="mmf",
+    )["config"]
+    route_delta_payload = {
+        "draft": draft,
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        current_cfg,
+        route_delta_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert second["registry_v2_save_plan"]["route_publish_work"]["has_draft_changes"] is False
+    assert second["registry_v2_save_plan"]["route_publish_work"]["has_route_publish_work"] is True
+    assert "no_draft_changes" not in second["registry_v2_save_plan"]["blocked_reasons"]
+    assert "new-webui-model" in router["routes"]
 
 
 def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):

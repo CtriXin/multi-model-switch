@@ -25,7 +25,9 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v3.4.0`
+Current stable release: `v3.3.1`
+
+Feature branch: `main` (tracks the newest iteration before the next stable cut)
 
 Key changes in this generation:
 
@@ -56,20 +58,33 @@ MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It
 
 ## Install Or Upgrade
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
-```
-
-Stable install pinned to `v3.4.0`:
+Recommended stable install (tracks the newest published stable release):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --latest-release
 ```
 
-Default behavior:
+New feature install (tracks `main` before the next stable cut):
 
-- installs the latest semver tag
-- creates an isolated MMS runtime under `~/.mms`
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --main
+```
+
+Current stable exact pin (`v3.3.1`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.1/install.sh | bash -s --
+```
+
+Channel behavior:
+
+- `--latest-release` follows the newest human-stabilized GitHub Release
+- `--main` follows the newest feature iteration on the default branch
+- no flag still installs the latest semver tag, which may be newer than the curated stable release line
+
+Default behavior after ref/channel selection:
+
+- installs the requested ref into an isolated MMS runtime under `~/.mms`
 - links `mms`, preview-root `mmf`, and `mmslogs` into `~/.local/bin`
 - creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
 - if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
@@ -101,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.1/install.sh | bash -s --
 ```
 
 Verify the install:
