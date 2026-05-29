@@ -86,6 +86,14 @@ discovery/merging, Claude settings reads, session-local repair writes, and
 OAuth execution-surface stripping must stay monkeypatch-compatible and
 behavior-preserving during module extraction.
 
+2026-05-29 implementation note: Claude UI state seed / gateway merge helpers
+may live outside `mms_launchers.py`, but `_sanitize_claude_ui_state_seed_payload`,
+`_merge_claude_ui_state_seed`, `_merge_claude_gateway_ui_state_payload`, and
+`_strip_claude_state_execution_surfaces` remain the compatibility wrappers.
+Account-scoped UI state allowlists, startup counters, theme/tips merge behavior,
+MCP execution-surface stripping, and project-scoped resume isolation must not
+change during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去
