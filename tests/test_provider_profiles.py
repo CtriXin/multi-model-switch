@@ -74,6 +74,38 @@ def test_mimo_openai_profile_uses_official_token_parameter(monkeypatch, tmp_path
     assert "max_tokens" not in payload
 
 
+def test_mimo_relay_profile_resolution_prefers_protocol_specific_profile(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    anthropic_profile, _ = profiles.resolve_provider_profile(
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+        model_name="mimo-v2.5[1m]",
+        protocol="anthropic_messages",
+    )
+    openai_profile, _ = profiles.resolve_provider_profile(
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+        model_name="mimo-v2.5[1m]",
+        protocol="openai_chat",
+    )
+
+    assert anthropic_profile == "mimo"
+    assert openai_profile == "mimo-openai"
+    assert profiles.profile_context_window(
+        "mimo-v2.5[1m]",
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+        protocol="anthropic_messages",
+    ) == 1_000_000
+    assert profiles.profile_model_alias(
+        "mimo-v2.5[1m]",
+        protocol="anthropic_messages",
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+    ) == "mimo-v2.5"
+
+
 def test_qwen_chat_template_profile_is_explicit_overlay_only(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
     payload = {"model": "qwen3.5-coder", "messages": []}

@@ -108,6 +108,57 @@ def _normalize_model(model_name: Any) -> str:
     return model
 
 
+_PROTOCOL_KEYED_PROFILE_SECTIONS = (
+    "api_formats",
+    "auth_headers",
+    "body_patches",
+    "parameter_aliases",
+    "model_aliases",
+    "effort",
+    "budget",
+)
+
+
+def _protocol_family(protocol: Any) -> str:
+    normalized = _lower(protocol)
+    if not normalized:
+        return ""
+    if "anthropic" in normalized:
+        return "anthropic"
+    if "openai" in normalized or normalized == "responses":
+        return "openai"
+    return normalized
+
+
+def _profile_protocol_rank(profile: dict[str, Any], *, protocol: str, model_name: str) -> tuple[int, int, int, int]:
+    requested = _lower(protocol)
+    if not requested or not isinstance(profile, dict):
+        return (0, 0, 0, 0)
+    requested_family = _protocol_family(requested)
+    exact_hits = 0
+    family_hits = 0
+    seen_families: set[str] = set()
+
+    for section_name in _PROTOCOL_KEYED_PROFILE_SECTIONS:
+        section = _effective_section(profile, section_name, model_name)
+        if not isinstance(section, dict):
+            continue
+        keys = {_lower(key) for key in section.keys() if _lower(key)}
+        families = {_protocol_family(key) for key in keys if _protocol_family(key)}
+        seen_families.update(families)
+        if requested in keys:
+            exact_hits += 1
+            continue
+        if requested_family and requested_family in families:
+            family_hits += 1
+
+    supported = 1 if (exact_hits or family_hits) else 0
+    exact_match = 1 if exact_hits else 0
+    family_only = 1 if requested_family and seen_families and seen_families == {requested_family} else 0
+    section_hits = exact_hits + family_hits
+    return (supported, exact_match, family_only, section_hits)
+
+
 def _profile_match_score(profile_id: str, profile: dict[str, Any], *, provider_id: str, base_url: str, model_name: str) -> int:
     match = profile.get("match") if isinstance(profile.get("match"), dict) else {}
     if match.get("profile_only"):
@@ -141,11 +192,14 @@ def resolve_provider_profile(
     base_url: str = "",
     model_name: str = "",
     profile_id: str = "",
+    protocol: str = "",
 ) -> tuple[str, dict[str, Any]]:
     """Resolve the best declarative profile for a runtime/model.
 
-    Explicit runtime/profile beats auto-detection. Return (id, profile); both are
-    empty when nothing matches.
+    Explicit runtime/profile beats auto-detection. When multiple profiles tie on
+    generic relay/model hints, prefer the one whose declarative sections match
+    the requested protocol. Return (id, profile); both are empty when nothing
+    matches.
     """
     runtime = runtime or {}
     profiles = load_provider_profiles().get("profiles") or {}
@@ -163,15 +217,19 @@ def resolve_provider_profile(
     model = _clean(model_name or runtime.get("model"))
     best_id = ""
     best_profile: dict[str, Any] = {}
-    best_score = 0
+    best_rank = (0, 0, 0, 0, 0)
     for candidate_id, profile in profiles.items():
         if not isinstance(profile, dict):
             continue
         score = _profile_match_score(candidate_id, profile, provider_id=provider, base_url=base, model_name=model)
-        if score > best_score:
+        if score <= 0:
+            continue
+        protocol_rank = _profile_protocol_rank(profile, protocol=protocol, model_name=model)
+        rank = (score,) + protocol_rank
+        if rank > best_rank:
             best_id = str(candidate_id)
             best_profile = profile
-            best_score = score
+            best_rank = rank
     if not best_id:
         hinted_id = _relay_model_profile_hint(provider_id=provider, base_url=base, model_name=model)
         hinted_profile = profiles.get(hinted_id)
@@ -211,6 +269,7 @@ def profile_thinking_capabilities(
     provider_id: str = "",
     base_url: str = "",
     profile_id: str = "",
+    protocol: str = "",
 ) -> dict[str, Any]:
     profile_id, profile = resolve_provider_profile(
         runtime=runtime,
@@ -218,6 +277,7 @@ def profile_thinking_capabilities(
         base_url=base_url,
         model_name=model_name,
         profile_id=profile_id,
+        protocol=protocol,
     )
     if not profile:
         return {"profile": "", "thinking_supported": False, "effort_supported": False}
@@ -391,6 +451,7 @@ def apply_profile_body_patches(
         base_url=base_url,
         model_name=model_name or payload.get("model", ""),
         profile_id=profile_id,
+        protocol=protocol,
     )
     if not profile:
         return ""
@@ -463,6 +524,7 @@ def apply_profile_auth_headers(
         base_url=base_url,
         model_name=model_name,
         profile_id=profile_id,
+        protocol=protocol,
     )
     if not profile or not api_key:
         return profile_id
@@ -485,6 +547,7 @@ def profile_context_window(
     provider_id: str = "",
     base_url: str = "",
     profile_id: str = "",
+    protocol: str = "",
 ) -> int | None:
     profile_id, profile = resolve_provider_profile(
         runtime=runtime,
@@ -492,6 +555,7 @@ def profile_context_window(
         base_url=base_url,
         model_name=model_name,
         profile_id=profile_id,
+        protocol=protocol,
     )
     if not profile_id:
         return None
@@ -526,6 +590,7 @@ def profile_model_alias(
         base_url=base_url,
         model_name=model_name,
         profile_id=profile_id,
+        protocol=protocol,
     )
     if not profile_id:
         return ""

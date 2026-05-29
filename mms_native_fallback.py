@@ -86,13 +86,14 @@ def _protocols(provider):
     return {_clean(item) for item in (raw or []) if _clean(item)}
 
 
-def _profile_for(runtime, model_name):
+def _profile_for(runtime, model_name, *, protocol=""):
     return resolve_provider_profile(
         runtime=runtime if isinstance(runtime, dict) else {},
         provider_id=_clean((runtime or {}).get("id") or (runtime or {}).get("provider_id")),
         base_url=_base_url(runtime),
         model_name=model_name,
         profile_id=_clean((runtime or {}).get("profile") or (runtime or {}).get("provider_profile")),
+        protocol=protocol,
     )
 
 
@@ -237,7 +238,7 @@ def resolve_native_fallback_routes(runtime, model_name, *, cfg=None, max_routes=
     if runtime.get("auth_mode") not in {None, "", "api_key"}:
         return []
 
-    current_profile_id, current_profile = _profile_for(runtime, model_name)
+    current_profile_id, current_profile = _profile_for(runtime, model_name, protocol="anthropic_messages")
     if not current_profile_id or not current_profile:
         return []
 
@@ -273,7 +274,7 @@ def resolve_native_fallback_routes(runtime, model_name, *, cfg=None, max_routes=
         gateway_url = _fallback_gateway_url(provider)
         if not gateway_url or not provider.get("api_key"):
             continue
-        provider_profile_id, provider_profile = _profile_for(provider, model_name)
+        provider_profile_id, provider_profile = _profile_for(provider, model_name, protocol="anthropic_messages")
         if provider_profile_id != current_profile_id:
             continue
         if not _provider_looks_native_direct(provider, provider_profile):
@@ -326,7 +327,7 @@ def resolve_codex_responses_fallback_routes(runtime, model_name, *, cfg=None, ma
     if runtime.get("auth_mode") not in {None, "", "api_key"}:
         return []
 
-    current_profile_id, current_profile = _profile_for(runtime, model_name)
+    current_profile_id, current_profile = _profile_for(runtime, model_name, protocol="openai_chat")
     if not current_profile_id or not current_profile:
         return []
 
@@ -364,7 +365,7 @@ def resolve_codex_responses_fallback_routes(runtime, model_name, *, cfg=None, ma
         gateway_url = _fallback_openai_url(provider)
         if not gateway_url or not provider.get("api_key"):
             continue
-        provider_profile_id, _provider_profile = _profile_for(provider, model_name)
+        provider_profile_id, _provider_profile = _profile_for(provider, model_name, protocol="openai_chat")
         if provider_profile_id != current_profile_id:
             continue
         route_urls = {
