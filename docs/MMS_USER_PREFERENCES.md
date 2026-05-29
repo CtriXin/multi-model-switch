@@ -173,3 +173,19 @@ Common roots:
 Passive assets are available naturally in MMS-launched sessions. NSR is also enabled by default for MMS-managed Claude/Codex sessions, but its default hooks are limited to tool/compact/closeout events and can be disabled per launch or via `nsr_mode = "disable"`. Heavier agent packs such as `ECC` and `OMC` remain opt-in.
 
 This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giving each MMS session the selected skills, hooks, and MCP surfaces.
+
+## WebUI Inventory
+
+`mms config web` exposes a read-only **Session Skills / MCP / Hooks** panel. It
+uses the same launch preview catalog as the TUI confirmation screen, then groups
+items by:
+
+- `MMS dynamic`: session-local skills, MCP, hooks, and OpenCode plugins injected
+  by MMS;
+- `Global / inherited`: user-owned Claude/Codex/OpenCode config or plugins that
+  MMS can see but should not silently edit;
+- `Other detected`: launch-preview items that need conservative path review.
+
+The panel is for discovery and snippet generation only. Persistent defaults
+still belong in `preferences.toml`, and real `~/.config/mms/**` writes remain
+under the human gate.

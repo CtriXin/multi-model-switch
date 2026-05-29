@@ -52,9 +52,12 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "validation",
         "fallbacks",
         "runtime",
+        "session_assets",
     ]
     assert {item["id"] for item in snapshot["test_contracts"]} >= {"models_endpoint", "model_ping", "simple_chat"}
     assert snapshot["save_contract"]["requires_confirm_save"] is True
+    assert snapshot["session_assets"]["schema"] == "mms.session_assets.snapshot.v1"
+    assert "preference_snippet" in snapshot["session_assets"]
 
 
 def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
@@ -346,6 +349,12 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
+    assert 'data-section="sessionAssets"' in html
+    assert "Session Skills / MCP / Hooks" in html
+    assert "function renderSessionAssets()" in html
+    assert "assetPreferenceSnippet" in html
+    assert "Global / inherited" in html
+    assert "MMS dynamic" in html
     assert "已发布，但 runtime 未就绪" in html
     assert "mmf 会读到这次保存后的最新 bundle" in html
     assert "missing key/base URL" in html
