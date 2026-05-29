@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 from contextlib import contextmanager
 from time import perf_counter
@@ -105,6 +106,21 @@ def prepare_claude_env_with_status(
     print_launch_step_done_fn("Claude 会话环境准备", step_start, detail)
     print_launch_timing_breakdown_fn(timings, total_elapsed=total_elapsed)
     return env
+
+
+def print_mms_resume_hint(cli_name, session_id, *, resume_command_name_fn, console, quote_fn=shlex.quote):
+    cli_name = str(cli_name or "").strip().lower()
+    session_id = str(session_id or "").strip()
+    if (
+        cli_name not in {"codex", "claude"}
+        or not session_id
+        or session_id == "None"
+        or session_id.startswith("pid-")
+    ):
+        return
+    resume_ref = f"{cli_name}:{session_id}"
+    command = f"{resume_command_name_fn()} resume {quote_fn(resume_ref)}"
+    console.print(f"[dim][MMS] resume:[/dim] [green]{command}[/green]")
 
 
 def show_launch_info(cli, runtime, auth_mode):

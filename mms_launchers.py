@@ -4,7 +4,6 @@ import inspect
 import json
 import os
 import re
-import shlex
 import shutil
 import sys
 import subprocess
@@ -3311,18 +3310,15 @@ def _mms_resume_command_name():
 
 
 def _print_mms_resume_hint(cli_name, session_id):
-    cli_name = str(cli_name or "").strip().lower()
-    session_id = str(session_id or "").strip()
-    if (
-        cli_name not in {"codex", "claude"}
-        or not session_id
-        or session_id == "None"
-        or session_id.startswith("pid-")
-    ):
-        return
-    resume_ref = f"{cli_name}:{session_id}"
-    command = f"{_mms_resume_command_name()} resume {shlex.quote(resume_ref)}"
-    console.print(f"[dim][MMS] resume:[/dim] [green]{command}[/green]")
+    """Compatibility wrapper for MMS resume hint display."""
+    from mms_launch_display import print_mms_resume_hint
+
+    return print_mms_resume_hint(
+        cli_name,
+        session_id,
+        resume_command_name_fn=_mms_resume_command_name,
+        console=console,
+    )
 
 
 def _codex_index_records(codex_dir):
