@@ -4934,24 +4934,10 @@ def _sanitize_account_claude_settings_payload(settings_data):
 
 
 def _default_session_mcp_servers():
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    servers = {}
-    candidates = [
-        ("brainkeeper", os.path.join(repo_root, "brainkeeper", "dist", "server.js")),
-        ("brainkeeper", _real_user_path(".local", "share", "brainkeeper", "dist", "server.js")),
-        ("mindkeeper", os.path.join(repo_root, "mindkeeper", "dist", "server.js")),
-        ("mindkeeper", _real_user_path(".local", "share", "mindkeeper", "dist", "server.js")),
-    ]
-    for key, server_path in candidates:
-        if os.path.isfile(server_path):
-            servers[key] = {
-                "args": [server_path],
-                "command": "node",
-                "type": "stdio",
-            }
-            break
+    """Compatibility wrapper for default session MCP discovery."""
+    from mms_claude_settings import default_session_mcp_servers
 
-    return servers
+    return default_session_mcp_servers()
 
 
 def _resolve_hive_root(module_path=None):
@@ -5087,74 +5073,51 @@ def _load_plugin_mcp_servers(plugin_root):
 
 
 def _agent_pack_mcp_servers(agent_pack):
-    pack = _normalize_agent_pack(agent_pack, default="none")
-    if pack == "ecc":
-        return _load_plugin_mcp_servers(_resolve_ecc_root())
-    if pack == "omc":
-        return _load_plugin_mcp_servers(_resolve_omc_root())
-    return {}
+    """Compatibility wrapper for agent-pack MCP discovery."""
+    from mms_claude_settings import agent_pack_mcp_servers
+
+    return agent_pack_mcp_servers(agent_pack)
 
 
 def _merge_agent_pack_mcp_servers(mcp_servers, *, agent_pack="none", disabled_session_surfaces=None):
-    merged = copy.deepcopy(mcp_servers) if isinstance(mcp_servers, dict) else {}
-    for name, spec in _agent_pack_mcp_servers(agent_pack).items():
-        if _session_surface_disabled(disabled_session_surfaces, "mcp", name):
-            continue
-        merged.setdefault(name, copy.deepcopy(spec))
-    return _filter_mcp_servers_by_disabled(merged, disabled_session_surfaces)
+    """Compatibility wrapper for agent-pack MCP merging."""
+    from mms_claude_settings import merge_agent_pack_mcp_servers
+
+    return merge_agent_pack_mcp_servers(
+        mcp_servers,
+        agent_pack=agent_pack,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
 
 def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_surfaces=None):
-    settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
-    mcp_servers = settings_data.get("mcpServers")
-    merged = copy.deepcopy(mcp_servers) if isinstance(mcp_servers, dict) else {}
+    """Compatibility wrapper for session-only Claude MCP injection."""
+    from mms_claude_settings import ensure_session_only_claude_mcp_servers
 
-    hive_spec = _default_hive_session_mcp_server()
-    if hive_spec and not (isinstance(merged.get("hive"), dict) and str(merged.get("hive", {}).get("command") or "").strip()):
-        merged["hive"] = copy.deepcopy(hive_spec)
-    pilot_spec = _default_pilot_session_mcp_server()
-    if pilot_spec and not (isinstance(merged.get("pilot"), dict) and str(merged.get("pilot", {}).get("command") or "").strip()):
-        merged["pilot"] = copy.deepcopy(pilot_spec)
-    merged = _normalize_session_mcp_servers(merged, disabled_session_surfaces=disabled_session_surfaces)
-
-    if merged:
-        settings_data["mcpServers"] = merged
-    else:
-        settings_data.pop("mcpServers", None)
-    return settings_data
+    return ensure_session_only_claude_mcp_servers(
+        settings_data,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
 
 def _session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
-    if allow_execution_surfaces:
-        return _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST
-    return ()
+    """Compatibility wrapper for session-managed MCP allowlist."""
+    from mms_claude_settings import session_managed_mcp_server_allowlist
+
+    return session_managed_mcp_server_allowlist(
+        allow_execution_surfaces=allow_execution_surfaces
+    )
 
 
 def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True, disabled_session_surfaces=None):
-    settings_data = settings_data if isinstance(settings_data, dict) else {}
-    inherited = {}
-    allowlist = _session_managed_mcp_server_allowlist(
-        allow_execution_surfaces=allow_execution_surfaces
-    )
-    mcp_servers = settings_data.get("mcpServers")
-    if isinstance(mcp_servers, dict):
-        for name in allowlist:
-            spec = mcp_servers.get(name)
-            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
-                inherited[name] = copy.deepcopy(spec)
+    """Compatibility wrapper for session-managed Claude MCP collection."""
+    from mms_claude_settings import session_managed_mcp_servers
 
-    fallback = _default_session_mcp_servers()
-    for name in allowlist:
-        if name not in inherited and isinstance(fallback.get(name), dict):
-            inherited[name] = copy.deepcopy(fallback[name])
-    if allow_execution_surfaces:
-        hive_spec = _default_hive_session_mcp_server()
-        if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
-            inherited.setdefault("hive", copy.deepcopy(hive_spec))
-        pilot_spec = _default_pilot_session_mcp_server()
-        if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
-            inherited.setdefault("pilot", copy.deepcopy(pilot_spec))
-    return _normalize_session_mcp_servers(inherited, disabled_session_surfaces=disabled_session_surfaces)
+    return session_managed_mcp_servers(
+        settings_data,
+        allow_execution_surfaces=allow_execution_surfaces,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
 
 def _inject_managed_mcp_servers_into_claude_state(

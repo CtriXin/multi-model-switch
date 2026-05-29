@@ -337,6 +337,116 @@ def configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
     return _launchers._merge_claude_hooks(hooks_data, omc_hooks)
 
 
+def default_session_mcp_servers():
+    import mms_launchers as _launchers
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(_launchers.__file__)))
+    servers = {}
+    candidates = [
+        ("brainkeeper", os.path.join(repo_root, "brainkeeper", "dist", "server.js")),
+        ("brainkeeper", _launchers._real_user_path(".local", "share", "brainkeeper", "dist", "server.js")),
+        ("mindkeeper", os.path.join(repo_root, "mindkeeper", "dist", "server.js")),
+        ("mindkeeper", _launchers._real_user_path(".local", "share", "mindkeeper", "dist", "server.js")),
+    ]
+    for key, server_path in candidates:
+        if os.path.isfile(server_path):
+            servers[key] = {
+                "args": [server_path],
+                "command": "node",
+                "type": "stdio",
+            }
+            break
+
+    return servers
+
+
+def agent_pack_mcp_servers(agent_pack):
+    import mms_launchers as _launchers
+
+    pack = _launchers._normalize_agent_pack(agent_pack, default="none")
+    if pack == "ecc":
+        return _launchers._load_plugin_mcp_servers(_launchers._resolve_ecc_root())
+    if pack == "omc":
+        return _launchers._load_plugin_mcp_servers(_launchers._resolve_omc_root())
+    return {}
+
+
+def merge_agent_pack_mcp_servers(mcp_servers, *, agent_pack="none", disabled_session_surfaces=None):
+    import mms_launchers as _launchers
+
+    merged = copy.deepcopy(mcp_servers) if isinstance(mcp_servers, dict) else {}
+    for name, spec in _launchers._agent_pack_mcp_servers(agent_pack).items():
+        if _launchers._session_surface_disabled(disabled_session_surfaces, "mcp", name):
+            continue
+        merged.setdefault(name, copy.deepcopy(spec))
+    return _launchers._filter_mcp_servers_by_disabled(merged, disabled_session_surfaces)
+
+
+def ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_surfaces=None):
+    import mms_launchers as _launchers
+
+    settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
+    mcp_servers = settings_data.get("mcpServers")
+    merged = copy.deepcopy(mcp_servers) if isinstance(mcp_servers, dict) else {}
+
+    hive_spec = _launchers._default_hive_session_mcp_server()
+    if hive_spec and not (isinstance(merged.get("hive"), dict) and str(merged.get("hive", {}).get("command") or "").strip()):
+        merged["hive"] = copy.deepcopy(hive_spec)
+    pilot_spec = _launchers._default_pilot_session_mcp_server()
+    if pilot_spec and not (isinstance(merged.get("pilot"), dict) and str(merged.get("pilot", {}).get("command") or "").strip()):
+        merged["pilot"] = copy.deepcopy(pilot_spec)
+    merged = _launchers._normalize_session_mcp_servers(
+        merged,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+
+    if merged:
+        settings_data["mcpServers"] = merged
+    else:
+        settings_data.pop("mcpServers", None)
+    return settings_data
+
+
+def session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
+    import mms_launchers as _launchers
+
+    if allow_execution_surfaces:
+        return _launchers._CLAUDE_SESSION_MCP_SERVER_ALLOWLIST
+    return ()
+
+
+def session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True, disabled_session_surfaces=None):
+    import mms_launchers as _launchers
+
+    settings_data = settings_data if isinstance(settings_data, dict) else {}
+    inherited = {}
+    allowlist = _launchers._session_managed_mcp_server_allowlist(
+        allow_execution_surfaces=allow_execution_surfaces
+    )
+    mcp_servers = settings_data.get("mcpServers")
+    if isinstance(mcp_servers, dict):
+        for name in allowlist:
+            spec = mcp_servers.get(name)
+            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+                inherited[name] = copy.deepcopy(spec)
+
+    fallback = _launchers._default_session_mcp_servers()
+    for name in allowlist:
+        if name not in inherited and isinstance(fallback.get(name), dict):
+            inherited[name] = copy.deepcopy(fallback[name])
+    if allow_execution_surfaces:
+        hive_spec = _launchers._default_hive_session_mcp_server()
+        if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
+            inherited.setdefault("hive", copy.deepcopy(hive_spec))
+        pilot_spec = _launchers._default_pilot_session_mcp_server()
+        if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
+            inherited.setdefault("pilot", copy.deepcopy(pilot_spec))
+    return _launchers._normalize_session_mcp_servers(
+        inherited,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+
+
 def build_claude_session_settings(
     base_settings=None,
     *,
