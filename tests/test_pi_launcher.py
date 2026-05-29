@@ -25,7 +25,9 @@ def test_runtime_resolver_uses_repo_pi_wrapper(monkeypatch, tmp_path):
 
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
-    wrapper = scripts_dir / "pi-cli-wrapper.sh"
+    pi_dir = scripts_dir / "pi"
+    pi_dir.mkdir()
+    wrapper = pi_dir / "cli-wrapper.sh"
     wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     wrapper.chmod(0o755)
     monkeypatch.setattr(mms_runtime, "__file__", str(tmp_path / "mms_runtime.py"))
@@ -106,7 +108,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
         )
     )
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
-    assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
+    assert settings_payload["extensions"][0].endswith("scripts/pi/retry-extension.mjs")
 
 
 def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):
@@ -227,7 +229,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert provider["models"][1]["compat"] == {"forceAdaptiveThinking": True}
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
-    assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
+    assert settings_payload["extensions"][0].endswith("scripts/pi/retry-extension.mjs")
 
 
 def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monkeypatch, tmp_path):
@@ -269,7 +271,7 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
     assert provider["models"][1]["id"] == "gpt-5.5"
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
-    assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
+    assert settings_payload["extensions"][0].endswith("scripts/pi/retry-extension.mjs")
 
 
 def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatch, tmp_path):

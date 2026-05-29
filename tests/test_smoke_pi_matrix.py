@@ -5,7 +5,7 @@ from pathlib import Path
 
 def _load_smoke_pi_matrix():
     root = Path(__file__).resolve().parents[1]
-    script_path = root / "scripts" / "smoke_pi_matrix.py"
+    script_path = root / "scripts" / "pi" / "smoke_matrix.py"
     spec = importlib.util.spec_from_file_location("smoke_pi_matrix_test", script_path)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None

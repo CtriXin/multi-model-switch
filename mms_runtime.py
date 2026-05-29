@@ -19,7 +19,8 @@ def _repo_cli_wrapper(command_name):
     wrapper_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "scripts",
-        "pi-cli-wrapper.sh",
+        "pi",
+        "cli-wrapper.sh",
     )
     if os.path.isfile(wrapper_path) and os.access(wrapper_path, os.X_OK):
         return wrapper_path
