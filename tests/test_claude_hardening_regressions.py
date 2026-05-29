@@ -6,8 +6,10 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import types
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -83,6 +85,7 @@ def test_build_claude_session_settings_injects_only_allowlisted_mcp_servers(monk
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
         "_resolve_real_home_command_path",
@@ -145,6 +148,7 @@ def test_build_claude_session_settings_drops_deprecated_mindkeeper_mcp(monkeypat
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
 
@@ -157,6 +161,27 @@ def test_build_claude_session_settings_drops_deprecated_mindkeeper_mcp(monkeypat
     )
 
     assert "mcpServers" not in result
+
+
+def test_build_claude_session_settings_includes_installed_plugin_http_mcp(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    result = mms_launchers._build_claude_session_settings({})
+
+    assert result["mcpServers"] == {
+        "figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}
+    }
 
 
 def test_default_session_mcp_servers_prefer_brainkeeper_over_legacy(monkeypatch, tmp_path):
@@ -195,6 +220,7 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_brainkeeper_
         "_resolve_real_home_command_path",
         lambda name, env=None: {"node": str(fake_node), "python3": str(fake_python)}.get(name, ""),
     )
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
         "_default_session_mcp_servers",
@@ -242,6 +268,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
 
@@ -278,7 +305,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
     assert mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK not in commands
 
 
-def test_build_claude_session_settings_adds_codegraph_auto_index_hook(monkeypatch):
+def test_build_claude_session_settings_keeps_codegraph_auto_index_opt_in(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
@@ -290,16 +317,14 @@ def test_build_claude_session_settings_adds_codegraph_auto_index_hook(monkeypatc
     result = mms_launchers._build_claude_session_settings({})
     hooks = [
         hook
-        for group in result["hooks"]["SessionStart"]
+        for group in result["hooks"].get("SessionStart", [])
         for hook in group["hooks"]
         if hook.get("type") == "command"
     ]
 
-    codegraph_hook = next(
-        hook for hook in hooks if hook["command"] == mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK
-    )
-    assert codegraph_hook["timeout"] == 20
-    assert codegraph_hook["statusMessage"] == "Syncing CodeGraph"
+    assert mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK not in [
+        hook["command"] for hook in hooks
+    ]
 
 
 def test_resolve_hive_root_prefers_installed_hive_home_for_installed_mms(monkeypatch, tmp_path):
@@ -497,6 +522,51 @@ def test_append_codex_mcp_servers_drops_missing_bare_codegraph(monkeypatch, tmp_
     assert rendered == 'base_url = "https://example.test"\n'
 
 
+def test_append_codex_mcp_servers_includes_installed_plugin_http_server(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.figma]" in rendered
+    assert 'url = "https://mcp.figma.com/mcp"' in rendered
+
+
+def test_append_codex_mcp_servers_skips_http_plugin_when_real_codex_plugin_enabled(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    codex_dir = real_home / ".codex"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "config.toml").write_text(
+        '[plugins."figma@openai-curated"]\n'
+        'enabled = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.figma]" not in rendered
+
+
 def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallback(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -509,6 +579,7 @@ def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallba
         "_resolve_real_home_command_path",
         lambda name, env=None: str(fake_python) if name == "python3" else "",
     )
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
         "_default_hive_session_mcp_server",
@@ -547,6 +618,7 @@ def test_inject_managed_mcp_servers_drops_unresolvable_existing_codegraph(monkey
         lambda: {"mcpServers": {"codegraph": {"command": "codegraph", "args": ["serve", "--mcp"]}}},
     )
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_installed_claude_plugin_mcp_servers", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda name, env=None: "")
@@ -554,6 +626,46 @@ def test_inject_managed_mcp_servers_drops_unresolvable_existing_codegraph(monkey
     result = mms_launchers._inject_managed_mcp_servers_into_claude_state({})
 
     assert "mcpServers" not in result
+
+
+def test_installed_claude_plugin_mcp_servers_reads_plugin_manifest(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    install_root = real_home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "figma" / "2.2.12"
+    (install_root / ".cursor-plugin").mkdir(parents=True, exist_ok=True)
+    (install_root / ".cursor-plugin" / "plugin.json").write_text(
+        json.dumps({"mcpServers": "./.mcp.json"}),
+        encoding="utf-8",
+    )
+    (install_root / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}}}),
+        encoding="utf-8",
+    )
+    installed = real_home / ".claude" / "plugins" / "installed_plugins.json"
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    installed.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "plugins": {
+                    "figma@claude-plugins-official": [
+                        {
+                            "scope": "user",
+                            "installPath": str(install_root),
+                            "version": "2.2.12",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    assert mms_launchers._installed_claude_plugin_mcp_servers() == {
+        "figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}
+    }
 
 
 def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claude(monkeypatch):
@@ -664,7 +776,7 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     ]
     disabled_user_prompt = [
         item["command"]
-        for group in disabled["hooks"]["UserPromptSubmit"]
+        for group in disabled["hooks"].get("UserPromptSubmit", [])
         for item in group["hooks"]
     ]
     disabled_stop = [
@@ -673,8 +785,8 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in disabled_session_start
-    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK in disabled_session_start
-    assert disabled_user_prompt == [mms_launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK]
+    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK not in disabled_session_start
+    assert disabled_user_prompt == []
     assert disabled_stop == [
         mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
         mms_launchers._XMEM_SESSION_END_HOOK,
@@ -691,7 +803,7 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     ]
     user_prompt_commands = [
         item["command"]
-        for group in enabled["hooks"]["UserPromptSubmit"]
+        for group in enabled["hooks"].get("UserPromptSubmit", [])
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in session_start_commands
@@ -700,7 +812,7 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert "CAVEMAN_HOOK_COMPACT=1" in caveman_activate_commands[0]
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_activate_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_activate_commands[0]
-    assert f'node "{caveman_root / "hooks" / "caveman-mode-tracker.js"}"' in user_prompt_commands
+    assert user_prompt_commands == []
 
 
 def test_filter_claude_session_hooks_drops_stale_managed_stop_hook(tmp_path):
@@ -752,6 +864,28 @@ def test_resolve_caveman_root_prefers_bundled_vendor_before_legacy_home(monkeypa
     )
 
     assert mms_launchers._resolve_caveman_root() == str(bundled_root)
+
+
+def test_resolve_nsr_root_prefers_current_shared_skill_before_deprecated_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    current_root = real_home / "auto-skills" / "shared-skills" / "nsr"
+    deprecated_root = real_home / "auto-skills" / "shared-skills" / "looop.deprecated"
+    for root in (current_root, deprecated_root):
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "codex_hook.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        (scripts_dir / "claude_hook.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_NSR_ROOT", raising=False)
+    monkeypatch.delenv("NSR_ROOT", raising=False)
+    monkeypatch.delenv("NSR_HOME", raising=False)
+    monkeypatch.setattr(mms_launchers, "_asset_root_preference", lambda name: "")
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "__file__", str(tmp_path / "mms-install" / "mms_launchers.py"))
+
+    assert mms_launchers._resolve_nsr_root() == str(current_root)
 
 
 def test_resolve_agent_pack_roots_prefer_mms_installed_packs(monkeypatch, tmp_path):
@@ -875,7 +1009,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in disabled_commands
-    assert mms_launchers._XMEM_SESSION_START_HOOK in disabled_commands
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in disabled_commands
     assert "PreToolUse" not in disabled["hooks"]
 
     enabled = mms_launchers._build_codex_session_hooks(
@@ -893,7 +1027,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert len(caveman_commands) == 1
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
-    assert mms_launchers._XMEM_SESSION_START_HOOK in enabled_commands
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in enabled_commands
     assert "PreToolUse" not in enabled["hooks"]
 
 
@@ -944,7 +1078,6 @@ def test_build_codex_session_hooks_replaces_inherited_compact_caveman_with_sessi
             'CLAUDE_CONFIG_DIR="$HOME/.codex" '
             f'node "{caveman_root / "hooks" / "caveman-activate.js"}"'
         ),
-        mms_launchers._XMEM_SESSION_START_HOOK,
     ]
     assert compact_command not in session_commands
     assert stale_echo_command not in session_commands
@@ -1035,6 +1168,16 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
         for group in enabled_hooks["Stop"]
         for item in group["hooks"]
     ]
+    assert mms_launchers._NSR_CLAUDE_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("SessionStart", [])
+        for item in group.get("hooks", [])
+    ]
+    assert mms_launchers._NSR_CLAUDE_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("UserPromptSubmit", [])
+        for item in group.get("hooks", [])
+    ]
     assert not any("/tmp/nsr-claude-hook.sh" == command or "looop" in command for command in enabled_commands)
 
 
@@ -1081,6 +1224,16 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
         for group in enabled_hooks["Stop"]
         for item in group["hooks"]
     ]
+    assert mms_launchers._NSR_CODEX_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("SessionStart", [])
+        for item in group.get("hooks", [])
+    ]
+    assert mms_launchers._NSR_CODEX_HOOK not in [
+        item["command"]
+        for group in enabled_hooks.get("UserPromptSubmit", [])
+        for item in group.get("hooks", [])
+    ]
     assert not any("/tmp/nsr-codex-hook.sh" == command or "bugloop" in command for command in enabled_commands)
 
 
@@ -1119,6 +1272,33 @@ def test_builtin_nsr_hook_injects_active_context(monkeypatch, tmp_path):
     assert "Finish release" in payload["hookSpecificOutput"]["additionalContext"]
     assert "Run tests" in payload["hookSpecificOutput"]["additionalContext"]
     assert (session_dir / "events.jsonl").read_text(encoding="utf-8").strip()
+
+    first_stop = subprocess.run(
+        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
+        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    assert first_stop.returncode == 0
+    assert json.loads(first_stop.stdout)["decision"] == "block"
+
+    repeated_stop = subprocess.run(
+        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
+        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    assert repeated_stop.returncode == 0
+    assert json.loads(repeated_stop.stdout)["continue"] is True
+    state = json.loads((session_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["loop"]["status"] == "blocked"
+    assert "infinite hook loop" in state["quality"]["blocker"]
 
 
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
@@ -2162,6 +2342,24 @@ def test_overlay_toon_session_entries_merges_existing_session_skills(monkeypatch
     assert (parent_dir / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# toon\n"
 
 
+def test_materialize_codex_session_entry_merges_existing_generated_skill_dir(tmp_path):
+    import mms_launchers
+
+    real_skills = tmp_path / "real" / "skills"
+    generated_skills = tmp_path / "gateway" / "skills"
+    (real_skills / "keep-skill").mkdir(parents=True)
+    (generated_skills / ".system").mkdir(parents=True)
+
+    mms_launchers._materialize_codex_session_entry(
+        "skills",
+        str(real_skills),
+        str(generated_skills),
+    )
+
+    assert (generated_skills / ".system").is_dir()
+    assert os.path.islink(generated_skills / "keep-skill")
+
+
 def test_codex_gateway_env_materializes_session_toon_skill_and_wrapper(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -2275,7 +2473,7 @@ def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(mo
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in disabled_commands
-    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK in disabled_commands
+    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK not in disabled_commands
     assert "CLAUDE_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_HOOK_PROFILE" not in disabled["env"]
@@ -3524,7 +3722,7 @@ def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort(
     assert "reasoning_content" not in payload["messages"][0]
 
 
-def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_deepseek():
+def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_roundtrip_family():
     import mms_bridge
 
     payload = {
@@ -3534,7 +3732,7 @@ def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_no
 
     mms_bridge._apply_domestic_reasoning_controls(
         payload,
-        "kimi-for-coding",
+        "glm-5.1",
         thinking_enabled=True,
         reasoning_effort="high",
     )
@@ -3560,6 +3758,210 @@ def test_preserve_domestic_reasoning_roundtrip_supports_mimo():
     mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "mimo-v2.5-pro")
 
     assert payload["messages"][0]["reasoning_content"] == "mimo step"
+
+
+def test_preserve_domestic_reasoning_roundtrip_rehydrates_missing_thinking_block_from_reasoning_content():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "reasoning_content": "hidden step",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_mimo", "name": "Read", "input": {"file": "x"}},
+                ],
+            }
+        ]
+    }
+
+    mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "mimo-v2.5-pro")
+
+    assert payload["messages"][0]["content"][0] == {"type": "thinking", "thinking": "hidden step"}
+    assert payload["messages"][0]["reasoning_content"] == "hidden step"
+
+
+def test_preserve_domestic_reasoning_roundtrip_propagates_split_kimi_tool_use_messages():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "carry this forward"}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I will call tools now."}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_b", "name": "Read", "input": {"file": "x"}}],
+            },
+        ]
+    }
+
+    mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "kimi-k2.6")
+
+    assert payload["messages"][0]["reasoning_content"] == "carry this forward"
+    assert "reasoning_content" not in payload["messages"][1]
+    assert payload["messages"][2]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][2]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][2]["content"][1]["type"] == "tool_use"
+    assert payload["messages"][3]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][3]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert payload["messages"][3]["content"][1]["type"] == "tool_use"
+
+
+def test_canonicalize_domestic_anthropic_history_coalesces_split_kimi_tool_roundtrip():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "/work read requirements only"},
+            {"role": "assistant", "content": [{"type": "thinking", "thinking": "carry this forward"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_b", "name": "Read", "input": {"file": "x"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "ok a", "is_error": False}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_b", "content": "ok b", "is_error": False}]},
+        ]
+    }
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "kimi-k2.6")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user"]
+    assert payload["messages"][0]["content"] == "/work read requirements only"
+    assert [block["type"] for block in payload["messages"][1]["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+        "tool_use",
+    ]
+    assert payload["messages"][1]["reasoning_content"] == "carry this forward"
+    assert [block["type"] for block in payload["messages"][2]["content"]] == [
+        "tool_result",
+        "tool_result",
+    ]
+
+
+def test_canonicalize_domestic_anthropic_history_coalesces_split_mimo_tool_history():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": [{"type": "thinking", "thinking": "mimo carry"}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_b", "name": "Bash", "input": {"command": "ls"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "ok a", "is_error": False}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_b", "content": "ok b", "is_error": False}]},
+        ],
+    }
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "mimo-v2.5")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user"]
+    assert [block["type"] for block in payload["messages"][1]["content"]] == [
+        "thinking",
+        "tool_use",
+        "tool_use",
+    ]
+    assert payload["messages"][1]["reasoning_content"] == "mimo carry"
+    assert [block["type"] for block in payload["messages"][2]["content"]] == [
+        "tool_result",
+        "tool_result",
+    ]
+
+
+def test_restore_session_domestic_reasoning_roundtrip_rehydrates_latest_kimi_tool_group():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "/work previous round"},
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "older reasoning"}],
+            },
+            {"role": "assistant", "content": [{"type": "text", "text": "older reply"}]},
+            {"role": "user", "content": "/work current round"},
+            {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "ok", "is_error": False}],
+            },
+        ]
+    }
+
+    restored = mms_bridge._restore_session_domestic_reasoning_roundtrip(
+        payload,
+        "kimi-k2.6",
+        "carry this forward",
+    )
+
+    assert restored is True
+    assert payload["messages"][4]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][4]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert "reasoning_content" not in payload["messages"][5]
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "kimi-k2.6")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user", "assistant", "user"]
+    assert [block["type"] for block in payload["messages"][3]["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+    ]
+    assert payload["messages"][3]["reasoning_content"] == "carry this forward"
+
+
+def test_restore_session_domestic_reasoning_roundtrip_rehydrates_compact_resume_tool_group():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "/work previous round"},
+            {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_a", "name": "Write", "input": {"file": "x"}}],
+            },
+            {
+                "role": "user",
+                "content": "This session is being continued from a previous conversation that ran out of context.",
+            },
+        ]
+    }
+
+    restored = mms_bridge._restore_session_domestic_reasoning_roundtrip(
+        payload,
+        "kimi-k2.6",
+        "carry this forward",
+    )
+
+    assert restored is True
+    assert payload["messages"][1]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][1]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert "reasoning_content" not in payload["messages"][2]
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "kimi-k2.6")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user"]
+    assert [block["type"] for block in payload["messages"][1]["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+    ]
+    assert payload["messages"][1]["reasoning_content"] == "carry this forward"
 
 
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
@@ -5089,6 +5491,274 @@ def test_gateway_bridge_preserves_qwen_anthropic_cache_control(monkeypatch):
     assert captured["url"] == "https://relay.example.com/v1/messages"
     assert captured["json"]["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert captured["json"]["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_gateway_bridge_stream_restores_kimi_reasoning_for_tool_continuation(monkeypatch):
+    import mms_bridge
+
+    requests = []
+
+    def build_sse_lines(message):
+        body = mms_bridge._json_resp_to_sse(json.dumps(message).encode("utf-8")).decode("utf-8")
+        return body.splitlines()
+
+    first_message = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "kimi-k2.6",
+        "content": [
+            {"type": "thinking", "thinking": "carry this forward"},
+            {"type": "text", "text": "I will call tools now."},
+            {"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}},
+        ],
+        "stop_reason": "tool_use",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    second_message = {
+        "id": "msg_2",
+        "type": "message",
+        "role": "assistant",
+        "model": "kimi-k2.6",
+        "content": [{"type": "text", "text": "done"}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+    responses = [
+        FakeResponse(build_sse_lines(first_message)),
+        FakeResponse(build_sse_lines(second_message)),
+    ]
+
+    def fake_stream(method, url, **kwargs):
+        requests.append({"url": url, "json": json.loads(json.dumps(kwargs.get("json") or {}))})
+        return responses.pop(0)
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+        route_status_paths=[],
+        advertised_models=["kimi-k2.6"],
+        heavy_model="kimi-k2.6",
+        medium_model=None,
+        light_model=None,
+        slot_configs={},
+        openai_url=None,
+        speed_scope=None,
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        native_fallback_routes=[],
+        vision_sidecar={},
+        _last_reasoning_content="",
+    )
+
+    def make_handler(raw_body):
+        handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+        handler.path = "/v1/messages?beta=true"
+        handler.headers = {
+            "content-length": str(len(raw_body)),
+            "x-api-key": "bridge-token",
+        }
+        handler.rfile = io.BytesIO(raw_body)
+        handler.wfile = io.BytesIO()
+        handler.server = server
+        handler.send_response = lambda *_args, **_kwargs: None
+        handler.send_header = lambda *_args, **_kwargs: None
+        handler.end_headers = lambda: None
+        return handler
+
+    first_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    make_handler(first_body).do_POST()
+
+    assert server._last_reasoning_content == "carry this forward"
+
+    second_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "phase: INTAKE", "is_error": False}]},
+            ],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    make_handler(second_body).do_POST()
+
+    forwarded = requests[1]["json"]["messages"]
+    assert [message["role"] for message in forwarded] == ["user", "assistant", "user"]
+    assistant_message = forwarded[1]
+    assert assistant_message["reasoning_content"] == "carry this forward"
+    assert [block["type"] for block in assistant_message["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+    ]
+
+
+def test_gateway_bridge_stream_publishes_kimi_reasoning_before_first_stream_finishes(monkeypatch):
+    import mms_bridge
+
+    requests = []
+    ready = threading.Event()
+    release = threading.Event()
+
+    first_stream_lines = [
+        'event: content_block_start',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"carry this forward"}}',
+        "",
+    ]
+
+    class BlockingFirstResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def iter_lines(self):
+            for line in first_stream_lines:
+                yield line
+            ready.set()
+            release.wait(timeout=5)
+            yield 'event: message_stop'
+            yield 'data: {"type":"message_stop"}'
+            yield ""
+
+    class FinalResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        @staticmethod
+        def iter_lines():
+            return iter(
+                [
+                    'event: message_stop',
+                    'data: {"type":"message_stop"}',
+                    "",
+                ]
+            )
+
+    responses = [BlockingFirstResponse(), FinalResponse()]
+
+    def fake_stream(method, url, **kwargs):
+        requests.append({"url": url, "json": json.loads(json.dumps(kwargs.get("json") or {}))})
+        return responses.pop(0)
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+        route_status_paths=[],
+        advertised_models=["kimi-k2.6"],
+        heavy_model="kimi-k2.6",
+        medium_model=None,
+        light_model=None,
+        slot_configs={},
+        openai_url=None,
+        speed_scope=None,
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        native_fallback_routes=[],
+        vision_sidecar={},
+        _last_reasoning_content="",
+    )
+
+    def make_handler(raw_body):
+        handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+        handler.path = "/v1/messages?beta=true"
+        handler.headers = {
+            "content-length": str(len(raw_body)),
+            "x-api-key": "bridge-token",
+        }
+        handler.rfile = io.BytesIO(raw_body)
+        handler.wfile = io.BytesIO()
+        handler.server = server
+        handler.send_response = lambda *_args, **_kwargs: None
+        handler.send_header = lambda *_args, **_kwargs: None
+        handler.end_headers = lambda: None
+        return handler
+
+    first_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    first_handler = make_handler(first_body)
+    first_thread = threading.Thread(target=first_handler.do_POST)
+    first_thread.start()
+
+    assert ready.wait(timeout=5)
+    assert server._last_reasoning_content == "carry this forward"
+
+    second_body = json.dumps(
+        {
+            "model": "kimi-k2.6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {"command": "pwd"}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "phase: INTAKE", "is_error": False}]},
+            ],
+            "stream": True,
+        }
+    ).encode("utf-8")
+    make_handler(second_body).do_POST()
+
+    forwarded = requests[1]["json"]["messages"]
+    assert [message["role"] for message in forwarded] == ["user", "assistant", "user"]
+    assert forwarded[1]["reasoning_content"] == "carry this forward"
+
+    release.set()
+    first_thread.join(timeout=5)
+    assert not first_thread.is_alive()
 
 
 def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkeypatch):

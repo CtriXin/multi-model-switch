@@ -26,28 +26,66 @@ fi
 COLS=$(tput cols 2>/dev/null || echo 100)
 model_short=$(echo "$model" | sed 's/ (.*//')
 
-pick_route_status_file() {
+mms_config_root() {
+    if [ -n "$MMS_CONFIG_ROOT" ]; then
+        echo "$MMS_CONFIG_ROOT"
+        return
+    fi
+    if [ -n "$MMS_CONFIG_DIR" ]; then
+        echo "$MMS_CONFIG_DIR"
+        return
+    fi
+    if [ -n "$XDG_CONFIG_HOME" ]; then
+        if [[ "$XDG_CONFIG_HOME" == *"/.config/mms/claude-gateway/"* ]]; then
+            echo "${XDG_CONFIG_HOME%%/.config/mms/claude-gateway/*}/.config/mms"
+            return
+        fi
+        if [[ "$XDG_CONFIG_HOME" == *"/.config/mms/codex-gateway/"* ]]; then
+            echo "${XDG_CONFIG_HOME%%/.config/mms/codex-gateway/*}/.config/mms"
+            return
+        fi
+        echo "$XDG_CONFIG_HOME/mms"
+        return
+    fi
     local user_home="$HOME"
-    local is_gateway_session=0
     if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]]; then
         user_home="${HOME%%/.config/mms/claude-gateway/*}"
+    fi
+    echo "$user_home/.config/mms"
+}
+
+pick_route_status_file() {
+    local config_root
+    config_root="$(mms_config_root)"
+    local is_gateway_session=0
+    if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]]; then
         is_gateway_session=1
     fi
 
-    local primary_user="$user_home/.config/mms/route_status.json"
+    local primary_user="$config_root/route_status.json"
     local primary_home="$HOME/.config/mms/route_status.json"
-    local gateway_sessions="$user_home/.config/mms/claude-gateway/s"
+    local gateway_sessions="$config_root/claude-gateway/s"
+    local explicit_config_root=0
+    if [ -n "$MMS_CONFIG_ROOT" ] || [ -n "$MMS_CONFIG_DIR" ]; then
+        explicit_config_root=1
+    fi
     local now
     now=$(date +%s)
 
     if [ "$is_gateway_session" -eq 1 ]; then
+        if [ "$explicit_config_root" -eq 1 ] && [ -f "$primary_user" ]; then
+            local mt age
+            mt=$(stat -f %m "$primary_user" 2>/dev/null || echo 0)
+            age=$(( now - mt ))
+            [ "$age" -lt 600 ] && { echo "$primary_user"; return; }
+        fi
         if [ -f "$primary_home" ]; then
             local mt age
             mt=$(stat -f %m "$primary_home" 2>/dev/null || echo 0)
             age=$(( now - mt ))
             [ "$age" -lt 600 ] && { echo "$primary_home"; return; }
         fi
-        if [ -f "$primary_user" ]; then
+        if [ "$explicit_config_root" -ne 1 ] && [ -f "$primary_user" ]; then
             local mt age
             mt=$(stat -f %m "$primary_user" 2>/dev/null || echo 0)
             age=$(( now - mt ))
@@ -118,10 +156,7 @@ fi
 
 # ── health indicator ──
 health_icon=""
-_HEALTH_CACHE="$HOME/.config/mms/health-cache.json"
-if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]]; then
-    _HEALTH_CACHE="${HOME%%/.config/mms/claude-gateway/*}/.config/mms/health-cache.json"
-fi
+_HEALTH_CACHE="$(mms_config_root)/health-cache.json"
 if [ -f "$_HEALTH_CACHE" ]; then
     h_age=$(( $(date +%s) - $(stat -f %m "$_HEALTH_CACHE" 2>/dev/null || echo 0) ))
     if [ "$h_age" -lt 120 ]; then

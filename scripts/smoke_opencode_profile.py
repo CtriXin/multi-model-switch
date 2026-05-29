@@ -119,10 +119,9 @@ def _record_trace_event(repo_root: Path, trace_id: str, status: str, data: dict[
 
 
 def _resolve_profile(profile: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    cfg = mms_core.load_config()
+    cfg = mms_core.load_runtime_config()
     if cfg is None:
         raise RuntimeError("未找到 MMS config")
-    cfg = mms_core.apply_local_overrides(cfg)
     provider = mms_core.ensure_provider_credentials(cfg)
     default_models = mms_core._probe_models(provider, emit_output=False).get("models")
     model_info, runtime = mms_core._resolve_opencode_profile_runtime(cfg, provider, default_models, profile)
@@ -235,7 +234,9 @@ def _combined_check_text(check: dict[str, Any]) -> str:
 def _classify_error(check: dict[str, Any], route: dict[str, Any]) -> str:
     evidence = check.get("cache_transport_evidence") if isinstance(check.get("cache_transport_evidence"), dict) else {}
     text = _combined_check_text(check)
-    if "reasoning_content" in text and "must be passed back" in text:
+    if "must be passed back" in text and (
+        "reasoning_content" in text or "content[].thinking" in text
+    ):
         return "reasoning_content_roundtrip_required"
     if not _protocol_correct(route, evidence):
         return "cache_sensitive_wrong_protocol"

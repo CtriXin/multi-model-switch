@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
+import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import mms_registry
@@ -24,6 +29,34 @@ def test_refresh_sources_imports_reference_snapshot_to_db(tmp_path: Path) -> Non
     assert status["source_freshness"]["due_count"] == 0
     assert status["counts"]["model_identity"] >= 30
     assert status["counts"]["model_fact"] == summary["fact_count"]
+
+
+def test_preview_config_root_uses_registry_subdir_for_db(monkeypatch, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_registry.default_registry_db_path() == preview_root / "registry" / "model-registry.sqlite"
+    assert mms_registry.default_registry_db_path(config_dir=preview_root) == preview_root / "registry" / "model-registry.sqlite"
+
+
+def test_config_dir_explicit_root_uses_registry_subdir_for_db(monkeypatch, tmp_path: Path) -> None:
+    selected_root = tmp_path / "selected-root"
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
+
+    assert mms_registry.default_registry_db_path() == selected_root / "registry" / "model-registry.sqlite"
+    assert mms_registry.default_registry_db_path(config_dir=selected_root) == selected_root / "registry" / "model-registry.sqlite"
+
+
+def test_legacy_config_dir_keeps_root_level_registry_db(monkeypatch, tmp_path: Path) -> None:
+    legacy_root = tmp_path / "mms"
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+
+    assert mms_registry.default_registry_db_path(config_dir=legacy_root) == legacy_root / "model-registry.sqlite"
 
 
 def test_source_freshness_and_if_due_refresh_use_check_timestamp(tmp_path: Path) -> None:
@@ -330,6 +363,2719 @@ def test_registry_command_refresh_sources_and_status(capsys, tmp_path: Path) -> 
     assert "model_identity=" in out
 
 
+def test_registry_backup_and_restore_roundtrip(capsys, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    db_path = config_dir / "model-registry.sqlite"
+
+    mms_registry_cli.refresh_source_snapshots(db_path=db_path, paths=[REFERENCE_JSON])
+    backup = mms_registry_cli.backup_registry_db(
+        config_dir=config_dir,
+        db_path=db_path,
+        reason="test-roundtrip",
+    )
+    dry_run = mms_registry_cli.restore_registry_db(
+        backup["backup_path"],
+        config_dir=config_dir,
+        db_path=db_path,
+    )
+    for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        if path.exists():
+            path.unlink()
+    restored = mms_registry_cli.restore_registry_db(
+        backup["backup_path"],
+        config_dir=config_dir,
+        db_path=db_path,
+        apply=True,
+        reason="test-restore",
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+    backup_rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "backup-db", "--config-dir", str(config_dir), "--reason", "cli-test"],
+        command_name="mms registry",
+    )
+    restore_dry_run_rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "restore-db", backup["backup_path"], "--config-dir", str(config_dir)],
+        command_name="mms registry",
+    )
+    out = capsys.readouterr().out
+
+    assert backup["skipped"] is False
+    assert Path(backup["backup_path"]).exists()
+    assert Path(backup["manifest_path"]).exists()
+    assert backup["integrity_check"] == "ok"
+    assert dry_run["skipped"] is True
+    assert dry_run["skip_reason"] == "dry_run_apply_required"
+    assert restored["skipped"] is False
+    assert restored["restored_integrity_check"] == "ok"
+    assert status["counts"]["source_snapshot"] == 1
+    assert status["counts"]["source_check"] == 1
+    assert backup_rc == 0
+    assert restore_dry_run_rc == 0
+    assert "MMS Registry DB Backup" in out
+    assert "MMS Registry DB Restore" in out
+    assert "skip_reason=dry_run_apply_required" in out
+
+
+def test_legacy_import_report_detects_credential_conflicts_without_plaintext(capsys, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [api]
+        base_url = "https://config-default.example/v1"
+        api_key = "sk-config-default-secret"
+
+        [[providers]]
+        id = "default"
+        name = "Default"
+        default_openai_base_url = "https://provider-default.example/v1"
+        protocols = ["openai_chat_completions"]
+
+        [[providers]]
+        id = "kimi-direct"
+        name = "Kimi Direct"
+        default_openai_base_url = "https://config-kimi.example/v1"
+        default_anthropic_base_url = "https://config-kimi.example/anthropic"
+        protocols = ["anthropic_messages", "openai_chat_completions"]
+        models_endpoint = "/models"
+        priority = 10
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        """
+        export MMS_PROVIDER_KIMI_DIRECT_OPENAI_BASE_URL='https://creds-kimi.example/v1'
+        export MMS_PROVIDER_KIMI_DIRECT_API_KEY='sk-creds-kimi-secret'
+        export MMS_API_BASE_URL='https://creds-default.example/v1'
+        export MMS_API_KEY='sk-creds-default-secret'
+        """,
+        encoding="utf-8",
+    )
+
+    summary = mms_registry_cli.legacy_import_report(config_dir=config_dir)
+    rc = mms_registry_cli.handle_registry_command(
+        ["legacy-report", "--config-dir", str(config_dir)],
+        command_name="mms registry",
+    )
+    json_rc = mms_registry_cli.handle_registry_command(
+        ["legacy-report", "--config-dir", str(config_dir), "--json"],
+        command_name="mms registry",
+    )
+    out = capsys.readouterr().out
+    encoded = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+    assert rc == 0
+    assert json_rc == 0
+    assert summary["read_only"] is True
+    assert summary["plaintext_secret_in_db"] is False
+    assert summary["provider_count"] == 2
+    assert summary["conflict_count"] >= 2
+    assert any(item["provider_id"] == "kimi-direct" and item["field"] == "openai_base_url" for item in summary["conflicts"])
+    assert any(item["provider_id"] == "default" and item["field"] == "base_url" for item in summary["conflicts"])
+    assert any(item["provider_id"] == "kimi-direct" and item["field"] == "api_key" for item in summary["secret_refs"])
+    assert "MMS Legacy Import Report" in out
+    assert "conflict=provider=kimi-direct field=openai_base_url" in out
+    assert "secret_ref=provider=kimi-direct field=api_key" in out
+    assert "sk-config-default-secret" not in encoded
+    assert "sk-creds-default-secret" not in encoded
+    assert "sk-creds-kimi-secret" not in encoded
+    assert "sk-config-default-secret" not in out
+    assert "sk-creds-default-secret" not in out
+    assert "sk-creds-kimi-secret" not in out
+
+
+def test_mmf_registry_legacy_report_does_not_bootstrap_config_migration(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [api]
+        base_url = "https://config-default.example/v1"
+        api_key = "sk-config-default-secret"
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        """
+        export MMS_API_BASE_URL='https://creds-default.example/v1'
+        export MMS_API_KEY='sk-creds-default-secret'
+        """,
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "registry", "legacy-report", "--config-dir", str(config_dir), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.LEGACY_IMPORT_REPORT_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["conflict_count"] >= 1
+    assert "sk-config-default-secret" not in combined
+    assert "sk-creds-default-secret" not in combined
+    assert not (config_dir / "backups").exists()
+    assert not (config_dir / "config-audit.jsonl").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_mmf_config_root_does_not_bootstrap_config_migration(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+    (config_dir / "credentials.sh").write_text(
+        "export MMS_API_BASE_URL='https://creds-default.example/v1'\nexport MMS_API_KEY='sk-creds-default-secret'\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "root", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["command"] == "mmf"
+    assert payload["mode"] == "preview"
+    assert payload["config_root"] == str(config_dir)
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "backups").exists()
+    assert not (config_dir / "config-audit.jsonl").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_mmf_preview_help_is_short_and_read_only(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "--help"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    combined = result.stdout + result.stderr
+
+    assert "MMF preview commands" in result.stdout
+    assert "mmf preview check [--json]" in result.stdout
+    assert "mmf preview bundle [--json]" in result.stdout
+    assert "mmf preview doctor [--json]" in result.stdout
+    assert "mmf config doctor [--json]" in result.stdout
+    assert "mmf preview prepare --from ~/.config/mms --include-secrets --json" in result.stdout
+    assert "AI Coding CLI" not in result.stdout
+    assert "sk-config-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_mmf_preview_check_is_single_read_only_strict_check(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "check", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.PREVIEW_CHECK_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["result"] == "NOT_READY"
+    assert payload["ready"] is False
+    assert payload["status"] == "needs_init"
+    assert payload["next_action"]["command"] == "./mmf preview init --json"
+    assert "sk-config-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+    non_strict = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "check", "--json", "--no-strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    non_strict_payload = json.loads(non_strict.stdout)
+    assert non_strict.returncode == 0
+    assert non_strict_payload["schema"] == mms_registry_cli.PREVIEW_CHECK_SCHEMA
+    assert non_strict_payload["status"] == "needs_init"
+
+
+def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+    (config_dir / "credentials.sh").write_text(
+        "export MMS_API_BASE_URL='https://creds-default.example/v1'\nexport MMS_API_KEY='sk-creds-default-secret'\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "source", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == "mms.model_source_status.v1"
+    assert payload["read_only"] is True
+    assert payload["result"] == "NOT_READY"
+    assert payload["ready"] is False
+    assert payload["status"] == "needs_init"
+    assert payload["next_action"]["command"] == "./mmf preview init --json"
+    assert payload["root"]["command"] == "mmf"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["legacy_import"]["conflict_count"] >= 1
+    assert payload["registry_db"]["status"] == "missing"
+    assert payload["registry_db"]["path"] == str(config_dir / "registry" / "model-registry.sqlite")
+    assert payload["legacy_import"]["candidates"]["status"] == "not_imported"
+    assert payload["legacy_import"]["candidates"]["provider_route_count"] == 0
+    assert payload["generated_bundle"]["status"] == "missing"
+    assert "sk-config-default-secret" not in combined
+    assert "sk-creds-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_mmf_config_doctor_is_read_only_and_reports_next_action(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "doctor", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == "mms.preview_doctor.v1"
+    assert payload["read_only"] is True
+    assert payload["status"] == "needs_init"
+    assert payload["ready"] is False
+    assert payload["next_actions"][0]["command"] == "./mmf preview init --json"
+    assert "sk-config-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_registry_v2_save_plan_reports_preview_backup_sequence_without_secrets(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"not-a-real-db")
+
+    plan = mms_registry_cli.registry_v2_save_plan(
+        config_dir=config_dir,
+        command_name="mmf config save-plan",
+        plan_summary={
+            "will_write_config": True,
+            "will_write_policy": True,
+            "will_write_credentials": True,
+        },
+        credential_updates=[{"provider_id": "demo", "api_key": "sk-preview-secret"}],
+    )
+    encoded = json.dumps(plan, ensure_ascii=False, sort_keys=True)
+
+    assert plan["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
+    assert plan["read_only"] is True
+    assert plan["execution_state"] == "plan_only"
+    assert plan["actual_save_enabled"] is False
+    assert plan["root"]["command"] == "mmf"
+    assert plan["root"]["mode"] == "preview"
+    assert plan["db"]["path"] == str(db_path)
+    assert plan["db"]["would_backup_existing_db"] is True
+    assert plan["would_write"]["db_candidate_revision"] is True
+    assert plan["would_write"]["secret_backend"] is True
+    assert plan["would_write"]["generated_latest_approved_bundle"] is True
+    assert plan["would_write"]["legacy_compat_files"]["credentials_sh"] is True
+    assert plan["blocked_reasons"] == []
+    assert "rollback" in " ".join(plan["ordered_steps"])
+    assert plan["plan_json"]["name"] == "webui-plan.json"
+    assert plan["plan_json"]["redacted"] is True
+    assert plan["plan_json"]["secrets_included"] is False
+    assert plan["apply_plan"]["webui_endpoint"] == "/api/registry-v2/apply"
+    assert plan["apply_plan"]["confirm_phrase"] == "写入预览DB"
+    assert "--confirm-preview-apply" in plan["apply_plan"]["cli_apply_command"]
+    assert "Downloaded WebUI plan JSON is redacted" in plan["apply_plan"]["credential_note"]
+    assert "WebUI and mms config apply-plan are wired" in plan["next_implementation_step"]
+    assert "wire WebUI" not in plan["next_implementation_step"]
+    assert "sk-preview-secret" not in encoded
+
+
+def test_mmf_config_save_plan_is_read_only_and_reports_no_draft_changes(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "save-plan", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["root"]["command"] == "mmf"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["actual_save_enabled"] is False
+    assert payload["would_write"]["db_candidate_revision"] is False
+    assert payload["would_write"]["secret_backend"] is False
+    assert payload["would_write"]["generated_latest_approved_bundle"] is False
+    assert "no_draft_changes" in payload["blocked_reasons"]
+    assert "stable_root_human_only" not in payload["blocked_reasons"]
+    assert payload["db"]["path"] == str(config_dir / "registry" / "model-registry.sqlite")
+    assert "sk-config-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path) -> None:
+    real_home = tmp_path / "home"
+    stable_root = real_home / ".config" / "mms"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(real_home),
+            "MMS_REAL_HOME": str(real_home),
+            "PYTHONPATH": str(ROOT),
+        }
+    )
+    env.pop("MMS_CONFIG_ROOT", None)
+    env.pop("MMS_CONFIG_DIR", None)
+    env.pop("MMS_PREVIEW_MODE", None)
+    env.pop("MMS_COMMAND_NAME", None)
+    env.pop("XDG_CONFIG_HOME", None)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "save-plan", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["root"]["command"] == "mms"
+    assert payload["root"]["mode"] == "stable"
+    assert payload["root"]["config_root"] == str(stable_root)
+    assert payload["actual_save_enabled"] is False
+    assert payload["would_write"]["db_candidate_revision"] is False
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "no_draft_changes" in payload["blocked_reasons"]
+    assert not stable_root.exists()
+
+
+def _registry_v2_candidate_config() -> dict:
+    return {
+        "provider": {"default": "primary-local"},
+        "providers": [
+            {
+                "id": "primary-local",
+                "name": "Primary Local",
+                "enabled": True,
+                "role": "primary",
+                "priority": 100,
+                "default_openai_base_url": "https://primary.example/v1",
+                "api_key": "sk-primary-local-secret",
+                "models_endpoint": "/models",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex", "opencode"],
+                "fallback_models": ["shared-model"],
+                "extra_models": ["manual-model"],
+            },
+            {
+                "id": "disabled-local",
+                "enabled": False,
+                "default_openai_base_url": "https://disabled.example/v1",
+                "fallback_models": ["disabled-model"],
+            },
+        ],
+    }
+
+
+def test_registry_v2_save_candidate_writes_preview_db_without_secrets(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    policy = {
+        "version": 1,
+        "models": {
+            "shared-model": {"visible": True, "favorite": True},
+            "manual-model": {"visible": False},
+        },
+    }
+
+    dry_run = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        credential_updates=[{"provider_id": "primary-local", "api_key": "sk-redacted"}],
+    )
+    assert dry_run["skipped"] is True
+    assert dry_run["candidate"]["route_entry_count"] == 2
+    assert not (config_dir / "registry").exists()
+
+    summary = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        credential_updates=[{"provider_id": "primary-local", "api_key": "sk-redacted"}],
+        apply=True,
+        command_name="mmf registry",
+    )
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    db_text = db_path.read_bytes()
+
+    assert summary["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_CANDIDATE_SCHEMA
+    assert summary["skipped"] is False
+    assert summary["backup"]["reason"] == "new_db"
+    assert summary["route_candidates"]["provider_route_count"] == 2
+    assert summary["route_candidates"]["route_group_count"] == 2
+    assert summary["policy_candidate"]["model_count"] == 2
+    assert summary["profile_candidate"]["provider_count"] == 2
+    assert summary["writes"]["generated_latest_approved_bundle"] is False
+    assert summary["writes"]["secret_backend"] is False
+    assert b"sk-primary-local-secret" not in db_text
+    assert not (config_dir / "generated" / "model-registry.latest-approved.json").exists()
+
+    db = sqlite3.connect(db_path)
+    try:
+        route_revision = summary["route_candidates"]["revision_id"]
+        assert db.execute("SELECT count(*) FROM provider_route WHERE route_revision_id = ?", (route_revision,)).fetchone()[0] == 2
+        refs = {row[0] for row in db.execute("SELECT secret_ref FROM provider_route WHERE route_revision_id = ?", (route_revision,))}
+        assert refs == {"pending-webui:primary_local:api_key"}
+        sources = {
+            json.loads(row[0])["source"]
+            for row in db.execute("SELECT metadata_json FROM registry_revision WHERE revision_id IN (?, ?, ?)", (
+                summary["route_candidates"]["revision_id"],
+                summary["policy_candidate"]["revision_id"],
+                summary["profile_candidate"]["revision_id"],
+            ))
+        }
+        assert sources == {"registry-v2-save-candidate"}
+        candidate_ids = {
+            json.loads(row[0])["candidate_id"]
+            for row in db.execute("SELECT metadata_json FROM registry_revision WHERE revision_id IN (?, ?, ?)", (
+                summary["route_candidates"]["revision_id"],
+                summary["policy_candidate"]["revision_id"],
+                summary["profile_candidate"]["revision_id"],
+            ))
+        }
+        assert candidate_ids == {summary["candidate_id"]}
+    finally:
+        db.close()
+
+
+def test_registry_v2_save_candidate_refuses_stable_root_without_allow_stable(tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+
+    try:
+        mms_registry_cli.apply_registry_v2_save_candidate(
+            config_dir=stable_root,
+            config_payload=_registry_v2_candidate_config(),
+            apply=True,
+            command_name="mms registry",
+        )
+    except mms_registry.RegistryValidationError as exc:
+        assert "refusing to write registry v2 save candidate into stable config root" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("stable config root candidate write should require --allow-stable")
+    assert not stable_root.exists()
+
+
+def test_registry_v2_save_candidate_rolls_back_preview_db_on_failure(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    first = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        apply=True,
+        command_name="mmf registry",
+    )
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    first_route_revision = first["route_candidates"]["revision_id"]
+
+    original = mms_registry_cli._insert_registry_v2_candidate_revisions
+
+    def write_then_fail(db, payload, *, actor):
+        original(db, payload, actor=actor)
+        raise RuntimeError("injected candidate failure")
+
+    monkeypatch.setattr(mms_registry_cli, "_insert_registry_v2_candidate_revisions", write_then_fail)
+    broken_cfg = _registry_v2_candidate_config()
+    broken_cfg["providers"][0]["extra_models"] = ["manual-model", "should-rollback"]
+
+    try:
+        mms_registry_cli.apply_registry_v2_save_candidate(
+            config_dir=config_dir,
+            config_payload=broken_cfg,
+            apply=True,
+            command_name="mmf registry",
+        )
+    except RuntimeError as exc:
+        assert "injected candidate failure" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("injected failure should be raised")
+
+    backups = list((config_dir / "backups" / "db").glob("model-registry.*.sqlite"))
+    assert backups
+    db = sqlite3.connect(db_path)
+    try:
+        route_revisions = {
+            row[0]
+            for row in db.execute("SELECT revision_id, metadata_json FROM registry_revision WHERE revision_class = 'route'")
+            if json.loads(row[1]).get("source") == "registry-v2-save-candidate"
+        }
+        assert route_revisions == {first_route_revision}
+        assert db.execute("SELECT count(*) FROM provider_route").fetchone()[0] == first["route_candidates"]["provider_route_count"]
+        assert not db.execute("SELECT 1 FROM route_group WHERE logical_model = 'should-rollback'").fetchone()
+    finally:
+        db.close()
+
+
+def test_mmf_registry_v2_save_candidate_cli_accepts_webui_plan_json(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema": "mms.setup_web.plan.v1",
+                "config": _registry_v2_candidate_config(),
+                "model_policy": {"version": 1, "models": {"shared-model": {"visible": True}}},
+                "credential_updates": [{"provider_id": "primary-local", "api_key": "***"}],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "registry",
+            "v2-save-candidate",
+            "--config-dir",
+            str(config_dir),
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_CANDIDATE_SCHEMA
+    assert payload["route_candidates"]["provider_route_count"] == 2
+    assert payload["policy_candidate"]["model_count"] == 1
+    assert "sk-primary-local-secret" not in combined
+    assert (config_dir / "registry" / "model-registry.sqlite").exists()
+
+
+def test_mmf_config_apply_plan_writes_preview_bundle_without_legacy_files(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    secret_value = "sk-preview-apply-secret"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema": "mms.setup_web.plan.v1",
+                "config": _registry_v2_candidate_config(),
+                "model_policy": {"version": 1, "models": {"shared-model": {"visible": True}}},
+                "credential_updates": [{"provider_id": "primary-local", "api_key": secret_value}],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "config",
+            "apply-plan",
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--confirm-preview-apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_APPLY_PLAN_SCHEMA
+    assert payload["ok"] is True
+    assert payload["status"] == "applied"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["candidate_result"]["route_candidates"]["provider_route_count"] == 2
+    assert payload["secret_backend"]["secret_count"] == 1
+    assert payload["publish"]["preview_source"] == "registry-v2-save-candidate"
+    assert payload["verify"]["verified"] is True
+    assert payload["writes"]["legacy_files"] is False
+    assert router["routes"]["shared-model"]["primary"]["api_key"] == secret_value
+    assert not (config_dir / "config.toml").exists()
+    assert not (config_dir / "credentials.sh").exists()
+    assert not (config_dir / "model-policy.json").exists()
+    assert secret_value not in combined
+
+
+def test_registry_v2_webui_secret_backend_preserves_existing_entries(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    secret_dir = config_dir / "secrets"
+    secret_dir.mkdir(parents=True)
+    secret_path = secret_dir / "webui-secrets.json"
+    secret_path.write_text(
+        json.dumps(
+            {
+                "schema": mms_registry_cli.REGISTRY_V2_WEBUI_SECRET_BACKEND_SCHEMA,
+                "secrets": [
+                    {
+                        "provider_id": "newapi-tencent",
+                        "field": "api_key",
+                        "source": "webui-credential-update",
+                        "secret_ref": "pending-webui:newapi_tencent:api_key",
+                        "fingerprint": "old-fingerprint",
+                        "value": "sk-existing-tencent",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_registry_cli.write_registry_v2_webui_secret_backend(
+        config_dir=config_dir,
+        credential_updates=[{"provider_id": "newapi-personal-tokyo", "api_key": "sk-new-tokyo"}],
+        command_name="mmf config",
+    )
+    payload = json.loads(secret_path.read_text(encoding="utf-8"))
+    by_provider = {item["provider_id"]: item for item in payload["secrets"]}
+
+    assert result["skipped"] is False
+    assert result["secret_count"] == 2
+    assert result["updated_secret_count"] == 1
+    assert result["preserved_secret_count"] == 1
+    assert by_provider["newapi-tencent"]["value"] == "sk-existing-tencent"
+    assert by_provider["newapi-personal-tokyo"]["value"] == "sk-new-tokyo"
+    assert result["backup_path"]
+
+
+def test_mmf_config_apply_plan_blocks_apply_without_confirmation(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"config": _registry_v2_candidate_config()}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "config",
+            "apply-plan",
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_APPLY_PLAN_SCHEMA
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert "confirm_preview_apply_required" in payload["blocked_reasons"]
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "generated").exists()
+
+
+def test_registry_v2_apply_plan_stops_stable_even_with_allow_stable(capsys, tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"config": _registry_v2_candidate_config()}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    rc = mms_registry_cli.handle_registry_command(
+        [
+            "apply-plan",
+            "--config-dir",
+            str(stable_root),
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--confirm-preview-apply",
+            "--allow-stable",
+            "--json",
+        ],
+        command_name="mms registry",
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 2
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_APPLY_PLAN_SCHEMA
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["stable_apply_policy"]["allow_stable_requested"] is True
+    assert payload["stable_apply_policy"]["apply_enabled"] is False
+    assert payload["stable_apply_policy"]["human_gate_required"] is True
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "stable_apply_not_implemented" in payload["blocked_reasons"]
+    assert payload["writes"]["db_candidate_revision"] is False
+    assert payload["writes"]["secret_backend"] is False
+    assert payload["writes"]["generated_latest_approved_bundle"] is False
+    assert not stable_root.exists()
+
+
+def test_registry_v2_apply_plan_rolls_back_on_verify_failure(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    plan_path = tmp_path / "plan.json"
+    secret_value = "sk-rollback-apply-secret"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "config": _registry_v2_candidate_config(),
+                "model_policy": {"version": 1, "models": {"shared-model": {"visible": True}}},
+                "credential_updates": [{"provider_id": "primary-local", "api_key": secret_value}],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_registry_cli, "verify_approved_bundle", lambda **_kwargs: {"verified": False, "errors": ["forced verify failure"]})
+
+    result = mms_registry_cli.apply_registry_v2_plan(
+        config_dir=config_dir,
+        plan_json=str(plan_path),
+        apply=True,
+        confirm_preview_apply=True,
+        command_name="mmf config",
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["rollback"]["db"]["removed_new_db"] is True
+    assert result["rollback"]["secret_backend"]["removed_new_file"] is True
+    assert "model-registry.latest-approved.json" in result["rollback"]["generated"]["removed"]
+    assert not (config_dir / "registry" / "model-registry.sqlite").exists()
+    assert not (config_dir / "secrets" / "webui-secrets.json").exists()
+    assert not (config_dir / "generated" / "model-registry.latest-approved.json").exists()
+    assert secret_value not in encoded
+
+
+def test_publish_preview_bundle_prefers_latest_registry_v2_save_candidate(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    policy = {
+        "version": 1,
+        "models": {
+            "shared-model": {"visible": True, "favorite": True},
+            "manual-model": {"visible": False},
+        },
+    }
+    candidate = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        credential_updates=[{"provider_id": "primary-local", "api_key": "***"}],
+        apply=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    verify_summary = mms_registry_cli.verify_approved_bundle(config_dir=config_dir)
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    policy_payload = json.loads((config_dir / "generated" / "model-policy.effective.json").read_text(encoding="utf-8"))
+    profile_payload = json.loads((config_dir / "generated" / "provider-profiles.generated.json").read_text(encoding="utf-8"))
+    generated_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            config_dir / "generated" / "model-routes.json",
+            config_dir / "generated" / "model-policy.effective.json",
+            config_dir / "generated" / "provider-profiles.generated.json",
+            config_dir / "generated" / "model-registry.latest-approved.json",
+        )
+    )
+
+    assert publish_summary["schema"] == "mms.preview_bundle_publish.v1"
+    assert publish_summary["source"] == "registry-preview-v2-save-candidate"
+    assert publish_summary["preview_source"] == "registry-v2-save-candidate"
+    assert publish_summary["route_revision"] == candidate["route_candidates"]["revision_id"]
+    assert publish_summary["policy_revision"] == candidate["policy_candidate"]["revision_id"]
+    assert publish_summary["profile_revision"] == candidate["profile_candidate"]["revision_id"]
+    assert publish_summary["provider_route_count"] == 2
+    assert publish_summary["runtime_ready"] is False
+    assert verify_summary["verified"] is True
+    assert status["generated_bundle"]["verified"] is True
+    assert router["source"] == "registry-preview-v2-save-candidate"
+    assert router["routes"]["shared-model"]["primary"]["secret_ref"] == "pending-webui:primary_local:api_key"
+    assert router["routes"]["shared-model"]["primary"]["api_key"] == ""
+    assert policy_payload["source"] == "registry-preview-v2-save-candidate"
+    assert policy_payload["models"]["manual-model"]["visible"] is False
+    assert profile_payload["source"] == "registry-preview-v2-save-candidate"
+    assert profile_payload["profiles"]["primary-local"]["models_endpoint"] == "/models"
+    assert "sk-primary-local-secret" not in generated_text
+
+
+def test_publish_preview_bundle_does_not_mix_foreign_registry_v2_policy_revision(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    policy = {
+        "version": 1,
+        "models": {
+            "shared-model": {"visible": True, "favorite": True},
+            "manual-model": {"visible": False},
+        },
+    }
+    candidate = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        apply=True,
+        command_name="mmf registry",
+    )
+    foreign_policy = {
+        "version": 1,
+        "models": {"manual-model": {"visible": True, "source": "foreign-candidate"}},
+    }
+    foreign_digest = mms_registry.sha256_hex(json.dumps(foreign_policy, ensure_ascii=False, sort_keys=True))
+    db = mms_registry.open_registry(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        mms_registry.create_revision(
+            db,
+            "registry_v2_policy_foreign_candidate",
+            "policy",
+            status="candidate",
+            revision_hash=foreign_digest,
+            created_at="2999-01-01T00:00:00Z",
+            metadata={
+                "source": "registry-v2-save-candidate",
+                "candidate_id": "foreign-candidate",
+                "payload": foreign_policy,
+                "model_count": 1,
+            },
+        )
+    finally:
+        db.close()
+
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    policy_payload = json.loads((config_dir / "generated" / "model-policy.effective.json").read_text(encoding="utf-8"))
+
+    assert publish_summary["candidate_id"] == candidate["candidate_id"]
+    assert publish_summary["policy_revision"] == candidate["policy_candidate"]["revision_id"]
+    assert policy_payload["models"]["manual-model"]["visible"] is False
+    assert policy_payload["models"]["manual-model"].get("source") != "foreign-candidate"
+
+
+def test_mmf_preview_init_creates_preview_layout_without_stable_fallback(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    real_home = tmp_path / "home"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(real_home),
+            "MMS_REAL_HOME": str(real_home),
+            "MMS_CONFIG_ROOT": str(config_dir),
+            "PYTHONPATH": str(ROOT),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "init", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_ROOT_INIT_SCHEMA
+    assert payload["root"]["command"] == "mmf"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["root"]["config_root"] == str(config_dir)
+    assert payload["db_initialized"] is True
+    assert payload["db_path"] == str(config_dir / "registry" / "model-registry.sqlite")
+    assert (config_dir / "root-manifest.json").exists()
+    assert (config_dir / "registry" / "model-registry.sqlite").exists()
+    for rel in mms_registry_cli.CONFIG_ROOT_LAYOUT_DIRS:
+        assert (config_dir / rel).is_dir()
+    assert not (real_home / ".config" / "mms").exists()
+    assert "api_key" not in combined.lower()
+    assert "token" not in combined.lower()
+
+
+def test_init_config_root_refuses_stable_root_without_allow_stable(capsys, tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+
+    try:
+        mms_registry_cli.init_config_root(config_dir=stable_root, command_name="mms registry")
+    except mms_registry.RegistryValidationError as exc:
+        assert "refusing to initialize stable config root" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("stable config root init should require --allow-stable")
+
+    assert not stable_root.exists()
+    rc = mms_registry_cli.handle_registry_command(
+        ["init-root", "--config-dir", str(stable_root), "--json"],
+        command_name="mms registry",
+    )
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+
+    assert rc == 2
+    assert payload["ok"] is False
+    assert "refusing to initialize stable config root" in payload["error"]
+    assert not stable_root.exists()
+
+
+def test_mmf_registry_legacy_import_dry_run_is_read_only(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "local"
+        name = "Local"
+        default_openai_base_url = "https://config-local.example/v1"
+        api_key = "sk-config-local-secret"
+        protocols = ["openai_chat_completions"]
+        fallback_models = ["gpt-5.5"]
+        extra_models = ["qwen3.7-max"]
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        "export MMS_PROVIDER_LOCAL_API_KEY='sk-creds-local-secret'\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "registry", "legacy-import", "--config-dir", str(config_dir), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.LEGACY_IMPORT_SCHEMA
+    assert payload["skipped"] is True
+    assert payload["skip_reason"] == "dry_run_apply_required"
+    assert payload["model_count"] == 2
+    assert "sk-config-local-secret" not in combined
+    assert "sk-creds-local-secret" not in combined
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "imports").exists()
+
+
+def test_mmf_registry_legacy_import_can_read_source_root_and_write_preview_target(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "source-local"
+        name = "Source Local"
+        default_openai_base_url = "https://source-local.example/v1"
+        api_key = "sk-source-local-secret"
+        protocols = ["openai_chat_completions"]
+        fallback_models = ["source-model"]
+        """,
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "registry",
+            "legacy-import",
+            "--config-dir",
+            str(target_dir),
+            "--source-config-dir",
+            str(source_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["config_root"] == str(target_dir)
+    assert payload["source_config_root"] == str(source_dir)
+    assert payload["read_only_report"]["config_root"] == str(source_dir)
+    assert payload["model_count"] == 1
+    assert payload["route_candidates"]["provider_route_count"] == 1
+    assert (target_dir / "registry" / "model-registry.sqlite").exists()
+    assert not (source_dir / "registry").exists()
+    assert not (source_dir / "imports").exists()
+    assert "sk-source-local-secret" not in combined
+
+
+def test_mmf_preview_import_legacy_wrapper_targets_preview_root(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    real_home = tmp_path / "home"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "wrapped-source"
+        default_openai_base_url = "https://wrapped-source.example/v1"
+        api_key = "sk-wrapped-source-secret"
+        fallback_models = ["wrapped-model"]
+        """,
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(real_home),
+            "MMS_REAL_HOME": str(real_home),
+            "MMS_CONFIG_ROOT": str(target_dir),
+            "PYTHONPATH": str(ROOT),
+        }
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "import-legacy",
+            "--from",
+            str(source_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["config_root"] == str(target_dir)
+    assert payload["source_config_root"] == str(source_dir)
+    assert payload["route_candidates"]["provider_route_count"] == 1
+    assert (target_dir / "registry" / "model-registry.sqlite").exists()
+    assert not (source_dir / "registry").exists()
+    assert not (real_home / ".config" / "mms-next").exists()
+    assert "sk-wrapped-source-secret" not in combined
+
+
+def test_registry_legacy_import_refuses_stable_root_without_allow_stable(tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+    stable_root.mkdir()
+    (stable_root / "config.toml").write_text("[api]\nbase_url = 'https://stable.example/v1'\n", encoding="utf-8")
+
+    try:
+        mms_registry_cli.import_legacy_config(config_dir=stable_root, apply=True, command_name="mms registry")
+    except mms_registry.RegistryValidationError as exc:
+        assert "refusing to import into stable config root" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("stable legacy import should require --allow-stable")
+
+    assert not (stable_root / "registry").exists()
+    assert not (stable_root / "imports").exists()
+
+
+def test_mmf_registry_legacy_import_apply_writes_preview_db_without_plaintext(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "local"
+        name = "Local"
+        default_openai_base_url = "https://config-local.example/v1"
+        default_anthropic_base_url = "https://config-local.example/anthropic"
+        api_key = "sk-config-local-secret"
+        protocols = ["anthropic_messages", "openai_chat_completions"]
+        fallback_models = ["gpt-5.5"]
+        extra_models = ["qwen3.7-max"]
+        hidden_models = ["retired-model"]
+        priority = 42
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        """
+        export MMS_PROVIDER_LOCAL_OPENAI_BASE_URL='https://creds-local.example/v1'
+        export MMS_PROVIDER_LOCAL_API_KEY='sk-creds-local-secret'
+        """,
+        encoding="utf-8",
+    )
+    mms_registry.write_json_atomic(
+        config_dir / "model-policy.json",
+        {"version": 1, "models": {"gpt-5.5": {"favorite": True}}},
+    )
+    mms_registry.write_json_atomic(
+        config_dir / "model-routes.lineup.json",
+        {"version": 1, "routes": {"lineup-only-model": {"context_window": 123}}},
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "registry", "legacy-import", "--config-dir", str(config_dir), "--apply", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    import_path = Path(payload["import_path"])
+
+    assert payload["schema"] == mms_registry_cli.LEGACY_IMPORT_SCHEMA
+    assert payload["skipped"] is False
+    assert payload["model_count"] == 4
+    assert payload["plaintext_secret_in_db"] is False
+    assert payload["source_snapshot"]["model_count"] == 4
+    assert payload["route_candidates"]["provider_route_count"] == 2
+    assert db_path.exists()
+    assert import_path.exists()
+    import_text = import_path.read_text(encoding="utf-8")
+    assert "sk-config-local-secret" not in combined
+    assert "sk-creds-local-secret" not in combined
+    assert "sk-config-local-secret" not in import_text
+    assert "sk-creds-local-secret" not in import_text
+
+    db = sqlite3.connect(db_path)
+    try:
+        assert db.execute("SELECT count(*) FROM source_snapshot WHERE source_kind = ?", (mms_registry_cli.LEGACY_IMPORT_SOURCE_KIND,)).fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM model_identity").fetchone()[0] == 4
+        assert db.execute("SELECT count(*) FROM provider_route").fetchone()[0] == 2
+        secret_ref = db.execute("SELECT secret_ref FROM provider_route LIMIT 1").fetchone()[0]
+        assert secret_ref.startswith("legacy-")
+        assert "sk-" not in secret_ref
+    finally:
+        db.close()
+
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    status_text = json.dumps(status, ensure_ascii=False, sort_keys=True)
+    candidates = status["legacy_import"]["candidates"]
+
+    assert status["registry_db"]["counts"]["provider_route"] == 2
+    assert candidates["status"] == "imported"
+    assert candidates["source_snapshot_count"] == 1
+    assert candidates["route_revision_count"] == 1
+    assert candidates["route_group_count"] == 2
+    assert candidates["provider_route_count"] == 2
+    assert candidates["latest_snapshot"]["model_count"] == 4
+    assert "sk-config-local-secret" not in status_text
+    assert "sk-creds-local-secret" not in status_text
+
+
+def test_publish_preview_bundle_from_legacy_candidates_verifies_manifest(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "primary-local"
+        default_openai_base_url = "https://primary.example/v1"
+        api_key = "sk-primary-local-secret"
+        fallback_models = ["shared-model"]
+        priority = 100
+        role = "primary"
+
+        [[providers]]
+        id = "fallback-local"
+        default_openai_base_url = "https://fallback.example/v1"
+        api_key = "sk-fallback-local-secret"
+        fallback_models = ["shared-model"]
+        priority = 10
+        role = "fallback"
+        """,
+        encoding="utf-8",
+    )
+    import_summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    verified = mms_registry_cli.verify_approved_bundle(config_dir=config_dir)
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    manifest_path = config_dir / "generated" / "model-registry.latest-approved.json"
+    router_path = config_dir / "generated" / "model-routes.json"
+    lineup_path = config_dir / "generated" / "model-routes.lineup.json"
+    router = json.loads(router_path.read_text(encoding="utf-8"))
+    lineup = json.loads(lineup_path.read_text(encoding="utf-8"))
+    generated_text = "\n".join(path.read_text(encoding="utf-8") for path in (manifest_path, router_path, lineup_path))
+
+    assert publish_summary["schema"] == "mms.preview_bundle_publish.v1"
+    assert publish_summary["route_revision"] == import_summary["route_candidates"]["route_revision_id"]
+    assert publish_summary["route_count"] == 1
+    assert publish_summary["provider_route_count"] == 2
+    assert publish_summary["runtime_ready"] is False
+    assert verified["verified"] is True
+    assert status["generated_bundle"]["verified"] is True
+    assert status["generated_bundle"]["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
+    assert status["generated_bundle"]["router_missing_api_key_count"] == 2
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 0
+    assert status["generated_bundle"]["router_secret_ref_count"] == 2
+    assert router["runtime_ready"] is False
+    assert router["routes"]["shared-model"]["primary"]["provider_id"] == "primary-local"
+    assert router["routes"]["shared-model"]["primary"]["api_key"] == ""
+    assert router["routes"]["shared-model"]["primary"]["secret_ref"].startswith("legacy-config:")
+    assert router["routes"]["shared-model"]["fallbacks"][0]["provider_id"] == "fallback-local"
+    assert lineup["routes"]["shared-model"]["primary"] == {"provider_id": "primary-local", "model_id": "shared-model"}
+    assert "api_key" not in json.dumps(lineup, ensure_ascii=False)
+    assert "sk-primary-local-secret" not in generated_text
+    assert "sk-fallback-local-secret" not in generated_text
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        status = db.execute(
+            "SELECT status FROM registry_revision WHERE revision_id = ?",
+            (publish_summary["route_revision"],),
+        ).fetchone()[0]
+        assert status == "approved"
+    finally:
+        db.close()
+
+
+def test_preview_include_secrets_enables_runtime_ready_publish_without_db_plaintext(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "secret-primary"
+        default_openai_base_url = "https://secret-primary.example/v1"
+        api_key = "sk-secret-primary-value"
+        fallback_models = ["secret-model"]
+        priority = 100
+        role = "primary"
+
+        [[providers]]
+        id = "secret-fallback"
+        default_openai_base_url = "https://secret-fallback.example/v1"
+        api_key = "sk-secret-fallback-value"
+        fallback_models = ["secret-model"]
+        priority = 10
+        role = "fallback"
+        """,
+        encoding="utf-8",
+    )
+    import_summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+    import_text = json.dumps(import_summary, ensure_ascii=False, sort_keys=True)
+    secret_backend = import_summary["secret_backend"]
+    secret_path = Path(secret_backend["path"])
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+
+    assert secret_backend["secret_count"] == 2
+    assert secret_path.exists()
+    assert oct(secret_path.stat().st_mode & 0o777) == "0o600"
+    assert "sk-secret-primary-value" not in import_text
+    assert "sk-secret-fallback-value" not in import_text
+    assert publish_summary["runtime_ready"] is True
+    assert publish_summary["missing_api_key_count"] == 0
+    assert publish_summary["missing_base_url_count"] == 0
+    assert router["runtime_ready"] is True
+    assert router["routes"]["secret-model"]["primary"]["api_key"] == "sk-secret-primary-value"
+    assert router["routes"]["secret-model"]["fallbacks"][0]["api_key"] == "sk-secret-fallback-value"
+    assert status["generated_bundle"]["runtime_ready"] is True
+    assert status["generated_bundle"]["router_missing_api_key_count"] == 0
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 0
+    assert status["generated_bundle"]["router_secret_ref_count"] == 2
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        leaked = db.execute(
+            "SELECT count(*) FROM provider_route WHERE secret_ref LIKE 'sk-%'"
+        ).fetchone()[0]
+        assert leaked == 0
+    finally:
+        db.close()
+
+
+def test_preview_include_secrets_without_route_url_is_not_runtime_ready(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "missing-url"
+        api_key = "sk-missing-url-value"
+        fallback_models = ["secret-model"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert publish_summary["runtime_ready"] is False
+    assert publish_summary["missing_api_key_count"] == 0
+    assert publish_summary["missing_base_url_count"] == 1
+    assert "missing route base URLs" in publish_summary["runtime_ready_reason"]
+    assert router["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
+    assert status["generated_bundle"]["router_missing_api_key_count"] == 0
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 1
+    doctor = mms_registry_cli.preview_doctor(config_dir=config_dir, command_name="mmf config doctor")
+    assert doctor["counts"]["missing_api_keys"] == 0
+    assert doctor["counts"]["missing_base_urls"] == 1
+    assert doctor["next_actions"][0]["command"] == "./mmf preview prepare --from ~/.config/mms --json"
+
+
+def test_preview_doctor_missing_url_and_key_suggests_prepare_include_secrets(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "missing-url-and-key"
+        api_key = "sk-missing-url-and-key"
+        fallback_models = ["model-needing-url-and-key"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        command_name="mmf registry",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+
+    doctor = mms_registry_cli.preview_doctor(config_dir=config_dir, command_name="mmf config doctor")
+
+    assert doctor["counts"]["missing_api_keys"] == 1
+    assert doctor["counts"]["missing_base_urls"] == 1
+    assert doctor["next_actions"][0]["command"] == "./mmf preview prepare --from ~/.config/mms --include-secrets --json"
+
+
+def test_legacy_import_backfills_route_urls_from_legacy_route_artifact(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "artifact-url"
+        api_key = "sk-config-secret-value"
+        fallback_models = ["artifact-model"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    mms_registry.write_json_atomic(
+        config_dir / "model-routes.json",
+        {
+            "version": 1,
+            "routes": {
+                "artifact-model": {
+                    "primary": {
+                        "provider_id": "artifact-url",
+                        "model_id": "artifact-model",
+                        "openai_base_url": "https://artifact.example/v1",
+                        "api_key": "sk-route-artifact-secret",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+
+    import_summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    combined = json.dumps(import_summary, ensure_ascii=False, sort_keys=True) + json.dumps(router, ensure_ascii=False, sort_keys=True)
+
+    assert publish_summary["runtime_ready"] is True
+    assert publish_summary["missing_api_key_count"] == 0
+    assert publish_summary["missing_base_url_count"] == 0
+    assert router["routes"]["artifact-model"]["primary"]["openai_base_url"] == "https://artifact.example/v1"
+    assert router["routes"]["artifact-model"]["primary"]["api_key"] == "sk-config-secret-value"
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 0
+    assert status["generated_bundle"]["runtime_ready"] is True
+    assert "sk-route-artifact-secret" not in combined
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        route = db.execute(
+            "SELECT openai_base_url FROM provider_route WHERE provider_id = 'artifact-url'"
+        ).fetchone()
+        leaked = db.execute(
+            "SELECT count(*) FROM provider_route WHERE secret_ref LIKE 'sk-%'"
+        ).fetchone()[0]
+        assert route[0] == "https://artifact.example/v1"
+        assert leaked == 0
+    finally:
+        db.close()
+
+
+def test_legacy_import_skips_disabled_providers_for_route_candidates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "enabled-route"
+        enabled = true
+        default_openai_base_url = "https://enabled.example/v1"
+        api_key = "sk-enabled-secret"
+        fallback_models = ["enabled-model"]
+
+        [[providers]]
+        id = "disabled-route"
+        enabled = false
+        default_openai_base_url = "https://disabled.example/v1"
+        api_key = "sk-disabled-secret"
+        fallback_models = ["disabled-model"]
+        """,
+        encoding="utf-8",
+    )
+
+    summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert summary["provider_count"] == 2
+    assert summary["route_candidates"]["provider_route_count"] == 1
+    assert publish_summary["runtime_ready"] is True
+    assert "enabled-model" in router["routes"]
+    assert "disabled-model" not in router["routes"]
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        providers = {
+            row[0]
+            for row in db.execute("SELECT provider_id FROM provider_route").fetchall()
+        }
+        assert providers == {"enabled-route"}
+    finally:
+        db.close()
+
+
+def test_model_source_status_downgrades_stale_runtime_ready_when_route_url_missing(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    generated = config_dir / "generated"
+    generated.mkdir(parents=True)
+    router = generated / "model-routes.json"
+    lineup = generated / "model-routes.lineup.json"
+    profile = generated / "provider-profiles.generated.json"
+    policy = generated / "model-policy.effective.json"
+    capabilities = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(
+        router,
+        {
+            "version": 1,
+            "runtime_ready": True,
+            "routes": {
+                "missing-url-model": {
+                    "primary": {
+                        "provider_id": "missing-url",
+                        "model_id": "missing-url-model",
+                        "api_key": "sk-present",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        lineup,
+        {
+            "version": 1,
+            "routes": {
+                "missing-url-model": {
+                    "primary": {"provider_id": "missing-url", "model_id": "missing-url-model"},
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(profile, {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_missing_url_test",
+        capability_revision="cap_missing_url_test",
+        route_revision="route_missing_url_test",
+        policy_revision="policy_missing_url_test",
+        profile_revision="profile_missing_url_test",
+        files={
+            "router": {"path": router, "canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+            "lineup": {"path": lineup, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+        },
+    )
+
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+
+    assert status["generated_bundle"]["verified"] is True
+    assert status["generated_bundle"]["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 1
+
+
+def test_mmf_preview_publish_wrapper_fails_closed_without_candidates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "publish", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["ok"] is False
+    assert "preview route candidate" in payload["error"]
+    assert not (config_dir / "generated" / "model-registry.latest-approved.json").exists()
+
+
+def test_mmf_preview_import_then_publish_wrapper_verifies_bundle(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "wrapped-publish"
+        default_openai_base_url = "https://wrapped-publish.example/v1"
+        api_key = "sk-wrapped-publish-secret"
+        fallback_models = ["wrapped-publish-model"]
+        """,
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "import-legacy",
+            "--from",
+            str(source_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    publish = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "publish", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    verify = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "verify", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    status_result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "status", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(publish.stdout)
+    verify_payload = json.loads(verify.stdout)
+    status_payload = json.loads(status_result.stdout)
+    router = json.loads((target_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    verified = mms_registry_cli.verify_approved_bundle(config_dir=target_dir)
+    combined = publish.stdout + publish.stderr + json.dumps(router, ensure_ascii=False)
+
+    assert payload["schema"] == "mms.preview_bundle_publish.v1"
+    assert payload["route_count"] == 1
+    assert payload["runtime_ready"] is False
+    assert verify_payload["verified"] is True
+    assert status_payload["generated_bundle"]["verified"] is True
+    assert status_payload["generated_bundle"]["runtime_ready"] is False
+    assert verified["verified"] is True
+    assert router["routes"]["wrapped-publish-model"]["primary"]["provider_id"] == "wrapped-publish"
+    assert "sk-wrapped-publish-secret" not in combined
+
+
+def _write_preview_doctor_provider(config_dir: Path, *, provider_id: str = "doctor-local", api_key: str = "sk-doctor-secret") -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        f"""
+        [[providers]]
+        id = "{provider_id}"
+        default_openai_base_url = "https://{provider_id}.example/v1"
+        api_key = "{api_key}"
+        fallback_models = ["doctor-model"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+
+
+def test_preview_doctor_reports_needs_init_without_writing(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["schema"] == "mms.preview_doctor.v1"
+    assert summary["status"] == "needs_init"
+    assert summary["read_only"] is True
+    assert summary["next_actions"][0]["command"] == "./mmf preview init --json"
+    assert not config_dir.exists()
+
+
+def test_preview_doctor_reports_wrong_root_for_stable_config(monkeypatch, tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+
+    summary = mms_registry_cli.preview_doctor(config_dir=stable_root, command_name="mms registry")
+
+    assert summary["status"] == "wrong_root"
+    assert summary["checks"][0] == {"id": "preview_root", "ok": False, "detail": "stable"}
+    assert summary["next_actions"][0]["command"] == "./mmf config root --json"
+    assert not stable_root.exists()
+
+
+def test_preview_doctor_reports_needs_import_after_init(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    mms_registry_cli.init_config_root(config_dir=config_dir, command_name="mmf preview")
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["status"] == "needs_import"
+    assert summary["counts"]["candidate_provider_routes"] == 0
+    assert summary["next_actions"][0]["command"].startswith("./mmf preview import-legacy")
+
+
+def test_preview_doctor_reports_needs_publish_after_import(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir)
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["status"] == "needs_publish"
+    assert summary["counts"]["candidate_provider_routes"] == 1
+    assert summary["bundle"]["verified"] is False
+    assert summary["next_actions"][0]["command"] == "./mmf preview publish --json && ./mmf preview verify --json"
+
+
+def test_preview_doctor_reports_verified_not_runtime_ready_without_secret_backend(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir)
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["status"] == "verified_not_runtime_ready"
+    assert summary["bundle"]["verified"] is True
+    assert summary["bundle"]["runtime_ready"] is False
+    assert summary["counts"]["missing_api_keys"] == 1
+    assert summary["counts"]["missing_base_urls"] == 0
+    assert summary["secrets"]["status"] == "missing"
+    assert summary["next_actions"][0]["command"].startswith("./mmf preview import-legacy")
+
+
+def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-doctor-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["status"] == "ready"
+    assert payload["ready"] is True
+    assert payload["result"] == "READY"
+    assert payload["bundle"]["verified"] is True
+    assert payload["bundle"]["runtime_ready"] is True
+    assert payload["secrets"]["secret_count"] == 1
+    assert payload["next_actions"][0]["command"].startswith("scripts/mms_health_watchdog.py")
+    assert f"--config-dir {config_dir}" in payload["next_actions"][0]["command"]
+    assert "$MMS_CONFIG_ROOT" not in payload["next_actions"][0]["command"]
+    assert "sk-doctor-ready-secret" not in combined
+
+
+def test_mmf_preview_check_reports_ready_with_strict_success(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-check-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "check", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.PREVIEW_CHECK_SCHEMA
+    assert payload["result"] == "READY"
+    assert payload["ready"] is True
+    assert payload["status"] == "ready"
+    assert "Preview root is ready" in payload["headline"]
+    assert payload["bundle"]["verified"] is True
+    assert payload["bundle"]["runtime_ready"] is True
+    assert payload["next_action"]["command"].startswith("scripts/mms_health_watchdog.py")
+    assert "sk-check-ready-secret" not in combined
+
+
+def test_mmf_preview_bundle_reports_verified_consumer_entrypoint(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-bundle-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "bundle", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONSUMER_BUNDLE_STATUS_SCHEMA
+    assert payload["result"] == "READY"
+    assert payload["verified"] is True
+    assert payload["status"] == "ok"
+    assert payload["consumer_entrypoint"] == str(config_dir / "generated" / "model-registry.latest-approved.json")
+    assert payload["component_revisions"]["route"]
+    assert payload["files"]["router"]["path"] == str(config_dir / "generated" / "model-routes.json")
+    assert payload["files"]["router"]["sensitivity"] == "secret"
+    assert payload["next_action"]["label"] == "Consume verified bundle"
+    assert "do not query SQLite directly" in payload["consumer_rules"]
+    assert "sk-bundle-ready-secret" not in combined
+
+
+def test_mmf_config_bundle_fails_closed_when_manifest_missing(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    strict = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "bundle", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(strict.stdout)
+
+    assert strict.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONSUMER_BUNDLE_STATUS_SCHEMA
+    assert payload["verified"] is False
+    assert payload["status"] == "missing"
+    assert payload["next_action"]["command"] == "./mmf preview publish --json && ./mmf preview verify --json"
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+    non_strict = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "bundle", "--json", "--no-strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    non_strict_payload = json.loads(non_strict.stdout)
+    assert non_strict.returncode == 0
+    assert non_strict_payload["status"] == "missing"
+
+
+def test_config_v2_promotion_plan_stops_at_human_gate_for_ready_preview(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    stable_dir.mkdir()
+    (stable_dir / "config.toml").write_text("[api]\n", encoding="utf-8")
+    _write_preview_doctor_provider(config_dir, api_key="sk-promote-plan-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+
+    summary = mms_registry_cli.config_v2_promotion_plan(
+        preview_config_dir=config_dir,
+        stable_config_dir=stable_dir,
+        command_name="mmf promote",
+    )
+    combined = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+    assert summary["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert summary["read_only"] is True
+    assert summary["apply_enabled"] is False
+    assert summary["status"] == "human_gate"
+    assert summary["result"] == "READY_FOR_HUMAN_PROMOTION_REVIEW"
+    assert summary["ready_for_human_review"] is True
+    assert "stable_root_human_only" in summary["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in summary["blocked_reasons"]
+    assert summary["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert summary["promotion_safety"]["requires_backup"] is True
+    assert summary["promotion_safety"]["forbids_silent_preview_to_stable_fallback"] is True
+    assert summary["would_write"]["stable_config_root"] is False
+    assert summary["would_write"]["claude_config"] is False
+    assert summary["preview"]["bundle"]["verified"] is True
+    assert summary["stable"]["files"]["config_toml"]["exists"] is True
+    assert summary["stable_backup_plan"]["read_only"] is True
+    assert summary["stable_backup_plan"]["would_create_backup"] is False
+    assert summary["stable_backup_plan"]["requires_backup_before_apply"] is True
+    protected_names = {item["name"] for item in summary["stable_backup_plan"]["protected_items"]}
+    assert {"config_toml", "credentials_sh", "registry_db", "secret_backend"}.issubset(protected_names)
+    assert summary["bundle_comparison"]["read_only"] is True
+    assert summary["bundle_comparison"]["preview"]["verified"] is True
+    assert summary["bundle_comparison"]["preview"]["manifest_sha256"]
+    assert summary["bundle_comparison"]["stable"]["verified"] is False
+    assert summary["bundle_comparison"]["comparison_status"] == "stable_bundle_missing"
+    assert summary["next_action"]["label"].startswith("Human gate")
+    assert any("--dry-run --print-json" in item for item in summary["preflight_commands"])
+    assert any("./mms config bundle --json" in item for item in summary["post_promotion_verify_commands"])
+    assert "sk-promote-plan-secret" not in combined
+    assert not (stable_dir / "registry").exists()
+    assert not (stable_dir / "backups").exists()
+
+
+def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-promote-wrapper-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "promote", "--stable-config-dir", str(stable_dir), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["ready_for_human_review"] is True
+    assert payload["status"] == "human_gate"
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert payload["would_write"]["stable_secret_backend"] is False
+    assert payload["promotion_safety"]["apply_enabled"] is False
+    assert payload["stable_backup_plan"]["would_create_backup"] is False
+    assert payload["bundle_comparison"]["preview"]["verified"] is True
+    assert "human must approve any stable" in payload["human_gates"][0]
+    assert "sk-promote-wrapper-secret" not in combined
+    assert not stable_dir.exists()
+
+
+def test_mms_migrate_config_v2_is_read_only_and_human_gated(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-migrate-wrapper-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "migrate",
+            "config-v2",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["apply_enabled"] is False
+    assert payload["status"] == "human_gate"
+    assert payload["ready_for_human_review"] is True
+    assert payload["preview"]["root"]["config_root"] == str(config_dir)
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in payload["blocked_reasons"]
+    assert payload["would_write"]["stable_config_root"] is False
+    assert payload["would_write"]["stable_generated_bundle"] is False
+    assert payload["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert payload["stable_backup_plan"]["would_create_backup"] is False
+    assert payload["bundle_comparison"]["read_only"] is True
+    assert "sk-migrate-wrapper-secret" not in combined
+    assert not stable_dir.exists()
+
+
+def test_mms_migrate_config_v2_missing_preview_does_not_create_roots(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "migrate",
+            "config-v2",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["status"] == "not_ready"
+    assert payload["ready_for_human_review"] is False
+    assert payload["apply_enabled"] is False
+    assert payload["preview"]["root"]["config_root"] == str(config_dir)
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert "preview_not_runtime_ready" in payload["blocked_reasons"]
+    assert payload["would_write"]["stable_config_root"] is False
+    assert not config_dir.exists()
+    assert not stable_dir.exists()
+
+
+def test_mms_config_release_readiness_reaches_human_gate_for_ready_preview(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-release-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "config",
+            "release-readiness",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    requirements = {item["id"]: item for item in payload["requirements"]}
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["release_complete"] is False
+    assert payload["result"] == "READY_FOR_4_0_HUMAN_GATE"
+    assert payload["status"] == "human_gate"
+    assert payload["ready_for_human_gate"] is True
+    assert payload["human_gate_required"] is True
+    assert payload["completion_blocker"] == "stable_promotion_human_gate"
+    assert payload["config_root"] == str(config_dir)
+    assert payload["stable_config_root"] == str(stable_dir)
+    assert payload["blocked_requirements"] == []
+    assert all(item["ok"] is True for item in requirements.values())
+    assert requirements["promotion_human_gate"]["ok"] is True
+    assert requirements["stable_no_write_plan"]["ok"] is True
+    assert requirements["no_silent_stable_fallback"]["ok"] is True
+    assert payload["promotion_plan"]["apply_enabled"] is False
+    assert "stable_root_human_only" in payload["promotion_plan"]["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in payload["promotion_plan"]["blocked_reasons"]
+    assert payload["next_action"]["command"] == "./mmf promote --json"
+    assert "sk-release-ready-secret" not in combined
+    assert not stable_dir.exists()
+
+    registry_result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "registry",
+            "release-readiness",
+            "--preview-config-dir",
+            str(config_dir),
+            "--stable-config-dir",
+            str(stable_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    registry_payload = json.loads(registry_result.stdout)
+    assert registry_payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert registry_payload["ready_for_human_gate"] is True
+    assert registry_payload["release_complete"] is False
+    assert "sk-release-ready-secret" not in (registry_result.stdout + registry_result.stderr)
+    assert not stable_dir.exists()
+
+
+def test_mms_config_release_readiness_missing_preview_is_read_only(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "config",
+            "release-readiness",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert payload["status"] == "not_ready"
+    assert payload["ready_for_human_gate"] is False
+    assert payload["release_complete"] is False
+    assert "preview_runtime_ready" in payload["blocked_requirements"]
+    assert "consumer_bundle_verified" in payload["blocked_requirements"]
+    assert payload["promotion_plan"]["apply_enabled"] is False
+    assert not config_dir.exists()
+    assert not stable_dir.exists()
+
+
+def test_mms_config_promote_plan_strict_exit_fails_when_preview_not_ready(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "promote-plan", "--strict-exit", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["ready_for_human_review"] is False
+    assert "preview_not_runtime_ready" in payload["blocked_reasons"]
+    assert payload["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert payload["bundle_comparison"]["preview"]["verified"] is False
+    assert payload["would_write"]["stable_config_root"] is False
+    assert not (config_dir / "registry").exists()
+
+
+def test_mmf_preview_doctor_strict_exit_distinguishes_ready_state(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-doctor-strict-secret")
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    not_ready = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--strict-exit", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    not_ready_payload = json.loads(not_ready.stdout)
+    assert not_ready.returncode == 2
+    assert not_ready_payload["result"] == "VERIFIED_NOT_RUNTIME_READY"
+    assert not_ready_payload["ready"] is False
+
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    ready = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert ready.returncode == 0
+    assert "result=READY" in ready.stdout
+    assert "ready=True" in ready.stdout
+    assert "sk-doctor-strict-secret" not in (ready.stdout + ready.stderr)
+
+
+def test_mmf_config_doctor_strict_exit_matches_preview_doctor(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-config-doctor-strict-secret")
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    not_ready = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "doctor", "--strict-exit", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    not_ready_payload = json.loads(not_ready.stdout)
+    assert not_ready.returncode == 2
+    assert not_ready_payload["status"] == "verified_not_runtime_ready"
+    assert not_ready_payload["ready"] is False
+
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    ready = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "doctor", "--strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert ready.returncode == 0
+    assert "result=READY" in ready.stdout
+    assert "ready=True" in ready.stdout
+    combined = not_ready.stdout + not_ready.stderr + ready.stdout + ready.stderr
+    assert "sk-config-doctor-strict-secret" not in combined
+
+
+def test_mms_config_doctor_strict_exit_matches_preview_doctor(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-mms-config-doctor-strict-secret")
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mms preview")
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    not_ready = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "doctor", "--strict-exit", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    not_ready_payload = json.loads(not_ready.stdout)
+    assert not_ready.returncode == 2
+    assert not_ready_payload["status"] == "verified_not_runtime_ready"
+    assert not_ready_payload["ready"] is False
+
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mms preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    ready = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "doctor", "--strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert ready.returncode == 0
+    assert "result=READY" in ready.stdout
+    assert "ready=True" in ready.stdout
+    combined = not_ready.stdout + not_ready.stderr + ready.stdout + ready.stderr
+    assert "sk-mms-config-doctor-strict-secret" not in combined
+
+
+def test_mmf_preview_prepare_wrapper_runs_full_preview_flow_without_secrets(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-local", api_key="sk-prepare-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == "mms.preview_prepare.v1"
+    assert payload["ok"] is True
+    assert payload["ready"] is False
+    assert payload["result"] == "VERIFIED_NOT_RUNTIME_READY"
+    assert payload["config_root"] == str(target_dir)
+    assert payload["source_config_root"] == str(source_dir)
+    assert payload["include_secrets"] is False
+    assert payload["stages"]["import"]["provider_route_count"] == 1
+    assert payload["stages"]["publish"]["runtime_ready"] is False
+    assert payload["stages"]["verify"]["verified"] is True
+    assert payload["doctor"]["status"] == "verified_not_runtime_ready"
+    assert (target_dir / "generated" / "model-registry.latest-approved.json").exists()
+    assert not (source_dir / "registry").exists()
+    assert "sk-prepare-secret" not in combined
+
+
+def test_mmf_preview_prepare_include_secrets_reports_ready_without_stdout_leak(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-secret", api_key="sk-prepare-ready-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--include-secrets",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    secret_path = target_dir / "secrets" / "legacy-secrets.json"
+
+    assert payload["ok"] is True
+    assert payload["ready"] is True
+    assert payload["result"] == "READY"
+    assert payload["include_secrets"] is True
+    assert payload["stages"]["import"]["secret_backend_count"] == 1
+    assert payload["stages"]["publish"]["runtime_ready"] is True
+    assert payload["stages"]["publish"]["missing_api_key_count"] == 0
+    assert payload["doctor"]["status"] == "ready"
+    assert secret_path.exists()
+    assert oct(secret_path.stat().st_mode & 0o777) == "0o600"
+    assert "sk-prepare-ready-secret" not in combined
+
+
+def test_mmf_preview_prepare_repeated_run_backs_up_existing_preview_db(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-backup", api_key="sk-prepare-backup-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+
+    first = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    second = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    first_payload = json.loads(first.stdout)
+    second_payload = json.loads(second.stdout)
+    backup_path = Path(second_payload["stages"]["backup"]["backup_path"])
+
+    assert first_payload["stages"]["backup"]["skipped"] is True
+    assert first_payload["stages"]["backup"]["reason"] == "new_db"
+    assert second_payload["stages"]["backup"]["skipped"] is False
+    assert backup_path.exists()
+    assert backup_path.parent == target_dir / "backups" / "db"
+    assert not (source_dir / "backups").exists()
+    assert "sk-prepare-backup-secret" not in (second.stdout + second.stderr)
+
+
+def test_mmf_preview_prepare_strict_exit_requires_runtime_ready(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-strict", api_key="sk-prepare-strict-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["ok"] is True
+    assert payload["ready"] is False
+    assert payload["result"] == "VERIFIED_NOT_RUNTIME_READY"
+    assert "sk-prepare-strict-secret" not in (result.stdout + result.stderr)
+
+
 def _write_config_artifacts(config_dir: Path) -> None:
     generated_route = {
         "version": 1,
@@ -385,6 +3131,49 @@ def test_publish_approved_bundle_verifies_and_resolves_model(tmp_path: Path) -> 
     assert caps["context_window_tokens"] == 1048576
     assert caps["supports_thinking"] is True
     assert caps["thinking_control"]["control_type"] == "thinkingLevel"
+
+
+def test_publish_approved_bundle_refuses_preview_root_legacy_artifacts(capsys, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+    db_path = tmp_path / "model-registry.sqlite"
+    _write_config_artifacts(preview_root)
+    mms_registry_cli.refresh_source_snapshots(db_path=db_path, paths=[REFERENCE_JSON])
+
+    try:
+        mms_registry_cli.publish_approved_bundle(config_dir=preview_root, db_path=db_path)
+    except mms_registry.RegistryValidationError as exc:
+        direct_error = str(exc)
+    else:  # pragma: no cover - assertion clarity
+        direct_error = ""
+
+    rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "publish-approved", "--config-dir", str(preview_root)],
+        command_name="mmf registry",
+    )
+    out = capsys.readouterr().out
+
+    assert "publish-approved from legacy root artifacts is disabled" in direct_error
+    assert "publish-preview" in direct_error
+    assert rc == 2
+    assert "publish-preview" in out
+    assert not (preview_root / "generated" / "model-registry.latest-approved.json").exists()
+
+
+def test_publish_approved_preview_gate_runs_before_refresh_sources(capsys, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+    db_path = tmp_path / "model-registry.sqlite"
+    _write_config_artifacts(preview_root)
+
+    rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "publish-approved", "--config-dir", str(preview_root), "--refresh-sources"],
+        command_name="mmf registry",
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 2
+    assert "publish-preview" in out
+    assert not db_path.exists()
+    assert not (preview_root / "generated" / "model-registry.latest-approved.json").exists()
 
 
 def test_registry_command_publish_verify_and_resolve(capsys, tmp_path: Path) -> None:

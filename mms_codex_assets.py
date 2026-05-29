@@ -51,19 +51,16 @@ def overlay_codex_shared_resume(home_dir, session_home):
 
 
 def materialize_codex_session_entry(entry, src, dst):
+    if os.path.isdir(src) and os.path.isdir(dst):
+        os.makedirs(dst, exist_ok=True)
+        for child in os.listdir(src):
+            child_src = os.path.join(src, child)
+            child_dst = os.path.join(dst, child)
+            if os.path.exists(child_dst) or os.path.islink(child_dst):
+                continue
+            os.symlink(child_src, child_dst)
+        return
     if os.path.exists(dst) or os.path.islink(dst):
-        if entry == "skills" and os.path.isdir(src) and os.path.isdir(os.path.realpath(dst)):
-            merged_dir = os.path.realpath(dst)
-            try:
-                if os.path.samefile(src, merged_dir):
-                    return
-            except Exception:
-                pass
-            for item in os.listdir(src):
-                link = os.path.join(merged_dir, item)
-                if os.path.exists(link) or os.path.islink(link):
-                    continue
-                os.symlink(os.path.join(src, item), link)
         return
     if entry in _launchers()._CODEX_COPY_INTO_SESSION_FILES and os.path.isfile(src):
         os.makedirs(os.path.dirname(dst), exist_ok=True)

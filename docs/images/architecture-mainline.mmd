@@ -12,8 +12,8 @@ flowchart LR
     R5["Export & Diagnose\nWrite route exports, usage, speed stats, and diagnostics so operators can inspect what MMS will actually do next."]
   end
   subgraph Artifacts[Artifacts / Operator Surfaces]
-    A1["Config Tree\n`~/.config/mms/` holds `config.toml`, `override.toml`, `accounts/`, `env/`, and usage/session state."]
-    A2["Routing Artifacts\n`model-routes.json`, route keyword files, gateway slots, and speed stats expose the current runtime picture."]
+    A1["Config Tree\n`~/.config/mms/` holds legacy config, accounts, env, usage, and session state; humans use TUI / `mms config` / WebUI."]
+    A2["Registry Bundle\n`generated/model-registry.latest-approved.json` verifies generated Router / Lineup / Profile / Policy / Capabilities; root route files are compatibility exports."]
     A3["Operator Surfaces\n`mms routes`, `doctor`, `test`, `warm`, and the TUI let the operator steer or debug the system."]
   end
   E1 --> R1

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -10,6 +11,38 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
+
+
+def _write_latest_approved_router_manifest(config_root: Path, *, router_payload: dict, sha_override: str = "") -> None:
+    import mms_registry
+
+    generated = config_root / "generated"
+    router_path = generated / "model-routes.json"
+    lineup_path = generated / "model-routes.lineup.json"
+    profile_path = generated / "provider-profiles.generated.json"
+    policy_path = generated / "model-policy.effective.json"
+    capabilities_path = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(router_path, router_payload)
+    router_hash = hashlib.sha256(router_path.read_bytes()).hexdigest()
+    mms_registry.write_json_atomic(lineup_path, {"version": 1, "routes": {}})
+    mms_registry.write_json_atomic(profile_path, {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(policy_path, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities_path, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_review_test",
+        capability_revision="cap_review_test",
+        route_revision="route_review_test",
+        policy_revision="policy_review_test",
+        profile_revision="profile_review_test",
+        files={
+            "router": {"path": router_path, "canonical_path": "generated/model-routes.json", "sha256": sha_override or router_hash, "sensitivity": "secret"},
+            "lineup": {"path": lineup_path, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile_path, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy_path, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities_path, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+        },
+    )
 
 
 def test_review_launch_help_is_real_subcommand(capsys):
@@ -441,6 +474,121 @@ def test_review_launch_uses_default_provider_cache_and_canonical_model_case(monk
     assert candidates[0]["model_name"] == "MiniMax-M2.7"
 
 
+def test_review_launch_uses_verified_latest_approved_router_with_explicit_root(tmp_path):
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_review_launch_candidates
+
+    config_root = tmp_path / "mms-next"
+    _write_latest_approved_router_manifest(
+        config_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "review-model": {
+                    "primary": {
+                        "provider_id": "verified-review-provider",
+                        "anthropic_base_url": "https://verified.example",
+                        "api_key": "sk-test-verified",
+                        "model_id": "Review-Model",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+
+    candidates, error = _resolve_review_launch_candidates(
+        "review-model",
+        {"MMS_CONFIG_ROOT": str(config_root)},
+    )
+
+    assert error == ""
+    assert len(candidates) == 1
+    assert candidates[0]["provider"]["id"] == "verified-review-provider"
+    assert candidates[0]["provider"]["route_source"] == "mms:latest-approved:bundle_review_test"
+    assert candidates[0]["protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
+    assert candidates[0]["model_name"] == "Review-Model"
+
+
+def test_review_launch_latest_approved_router_fails_closed_on_invalid_manifest(monkeypatch, tmp_path):
+    import mms_core
+    from mms_review_launch import _resolve_review_launch_candidates
+
+    config_root = tmp_path / "mms-next"
+    _write_latest_approved_router_manifest(
+        config_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "review-model": {
+                    "primary": {
+                        "provider_id": "untrusted-review-provider",
+                        "anthropic_base_url": "https://untrusted.example",
+                        "api_key": "sk-test-untrusted",
+                        "model_id": "review-model",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+        sha_override="0" * 64,
+    )
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "legacy"}, "providers": []})
+
+    candidates, error = _resolve_review_launch_candidates(
+        "review-model",
+        {"MMS_CONFIG_ROOT": str(config_root)},
+    )
+
+    assert candidates == []
+    assert "latest-approved bundle invalid" in error
+
+
+def test_review_launch_latest_approved_router_fails_closed_on_missing_manifest(monkeypatch, tmp_path):
+    import mms_core
+    from mms_review_launch import _resolve_review_launch_candidates
+
+    config_root = tmp_path / "mms-next"
+    legacy_provider = {
+        "id": "legacy-review-provider",
+        "enabled": True,
+        "role": "auto",
+        "priority": 120,
+        "protocols": ["anthropic_messages"],
+        "anthropic_base_url": "https://legacy.example",
+        "api_key": "legacy-key",
+    }
+    cfg = {"provider": {"default": "legacy-review-provider"}, "providers": [legacy_provider]}
+
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda loaded: loaded)
+    monkeypatch.setattr(mms_core, "_default_config", lambda: {})
+    monkeypatch.setattr(
+        mms_core,
+        "resolve_provider_context",
+        lambda _loaded, _provider_id: legacy_provider,
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_load_probe_file_cache",
+        lambda _provider_id, allow_stale=False: {"raw_models": ["review-model"]},
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda _loaded, default, default_models: [(default, default_models)],
+    )
+    monkeypatch.setattr(mms_core, "_provider_effective_models", lambda _provider, cached, _cfg=None: list(cached or []))
+
+    candidates, error = _resolve_review_launch_candidates(
+        "review-model",
+        {"MMS_CONFIG_ROOT": str(config_root)},
+    )
+
+    assert candidates == []
+    assert "latest-approved bundle missing" in error
+    assert str(config_root / "generated" / "model-registry.latest-approved.json") in error
+
+
 def test_review_launch_gpt_auto_uses_openai_chat_on_dual_provider(monkeypatch):
     import mms_core
     from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
@@ -558,6 +706,7 @@ def test_review_launch_transport_evidence_uses_model_call_usage(tmp_path, monkey
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["transport_evidence"][0]["usage"] == usage
+    assert payload["transport_evidence"][0]["route_source"] == "mms:legacy-provider-config"
     assert payload["dispatch_attempts"][0]["usage"] == usage
     assert payload["cache_transport_evidence"] == payload["transport_evidence"]
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()

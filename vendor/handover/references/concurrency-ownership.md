@@ -13,7 +13,7 @@ Use legacy `current.md` ownership only when a repo explicitly chooses
 At shift boundary:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root .
+<offduty-skill-dir>/offduty --root .
 ```
 
 Default writes:
@@ -34,9 +34,9 @@ If side session:
 For repos that explicitly use `.ai/plan/current.md`:
 
 ```bash
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py status --root .
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py claim --root . --task-id <id> --owner <agent> --cli <cli> --model <model> --next-action "<next>"
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py audit --root .
+python3 <handover-root>/scripts/handover_current.py status --root .
+python3 <handover-root>/scripts/handover_current.py claim --root . --task-id <id> --owner <agent> --cli <cli> --model <model> --next-action "<next>"
+python3 <handover-root>/scripts/handover_current.py audit --root .
 ```
 
 If audit returns `CONFLICT_OR_INCOMPLETE`, do not write more current state until

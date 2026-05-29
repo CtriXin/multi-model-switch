@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。旧的内置 `chat` / `discuss` 客户端已�
 
 ## 当前版本
 
-当前 tagged version：`v3.2.6`
+当前 tagged version：`v3.4.0`
 
 这一代的重点：
 
@@ -46,13 +46,13 @@ MMS 的主线是 launcher-first。旧的内置 `chat` / `discuss` 客户端已�
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`xmem` 和 Web automation bundle（`weber` 路由器 + `web-access` 登录态 Chrome + `agent-browser` headless）；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
 - Caveman 默认改为 `lite`，保留完整句子但去掉 filler；需要更强压缩时仍可用 `/caveman full`
-- silent hook policy：Caveman / Map / RTK 避免 noisy hook stdout；Claude/Codex hook 只输出合法 compact JSON
-- session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；Codex Caveman 尽量保留已信任 hook 顺序
+- quiet hook policy：MMS-managed Claude/Codex session 默认不再挂 SessionStart/UserPrompt probe；保留的 hook 只用于 guard、closeout 或显式启用的 pack
+- session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；同时补载已安装 Claude plugin 的 URL-based MCP（如 Figma）；对 Codex，如果 real `~/.codex/config.toml` 里已启用同名 app-backed plugin，则不再额外注入重复的 URL MCP，避免制造第二条坏掉的 OAuth 路径；Codex Caveman 尽量保留已信任 hook 顺序
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
 - 可选 xmem installer pack：`--install-xmem` 安装通用 xmem CLI/skill，`--xmem-ref` 可固定来源版本，`--dry-run` 可预览安装/setup 计划且不写文件
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
 
-MMS 会内建通用版 `xmem` skill 和静默 session-start/session-end hook。hook 只有在用户配置了 `xmem` CLI/source 时才注册/同步当前项目；如果本机没有 `xmem` CLI 就 fail-open 静默跳过。durable summaries 留在用户自己的 xmem sources 里，不写进 MMS 本身。公开版 xmem onboarding 保持低侵入：可选安装器会创建 `~/.xmem`、注册 HOME 下浅层 git roots，但不会写 repo-local `.xmem`，直到用户或 agent 在具体项目里运行 `xmem setup`。
+MMS 会内建通用版 `xmem` skill 和静默 session closeout hook；默认不再挂 `xmem` SessionStart sync 或 UserPrompt gateway probe。agent 需要 recall 时显式调用 `xmem` skill/CLI 即可。closeout hook 只有在用户配置了 `xmem` CLI/source 时才运行；如果本机没有 `xmem` CLI 就 fail-open 静默跳过。durable summaries 留在用户自己的 xmem sources 里，不写进 MMS 本身。公开版 xmem onboarding 保持低侵入：可选安装器会创建 `~/.xmem`、注册 HOME 下浅层 git roots，但不会写 repo-local `.xmem`，直到用户或 agent 在具体项目里运行 `xmem setup`。
 
 ## 安装 / 升级
 
@@ -60,15 +60,21 @@ MMS 会内建通用版 `xmem` skill 和静默 session-start/session-end hook。h
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
 
+稳定版安装（固定到 `v3.4.0`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
+```
+
 默认行为：
 
 - 安装最新 semver tag
 - 在 `~/.mms` 创建隔离 MMS runtime
-- 把 `mms`、`mmslogs` 链接到 `~/.local/bin`
+- 把 `mms`、preview-root `mmf`、`mmslogs` 链接到 `~/.local/bin`
 - 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
 - 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
 - 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex` / `opencode` / `agy`
-- legacy `ccs` / `mmc` shim 已下线；新安装暴露 `mms` / `mmslogs`，不再暴露 `ccs` / `mmc`
+- legacy `ccs` / `mmc` shim 已下线；新安装暴露 `mms` / `mmf` / `mmslogs`，不再暴露 `ccs` / `mmc`
 - 安装可选包或缺失 CLI 前会询问
 - 不会静默改写真实 provider/account 配置
 
@@ -83,7 +89,7 @@ Shell 支持：
 - Bash/Zsh：`--write-shell-rc` 会把 `~/.local/bin` 写入当前 shell rc。
 - Fish：`--write-shell-rc` 会写入 `~/.config/fish/conf.d/mms.fish`。
 - Ghostty/iTerm/Terminal：安装后重开 tab，或执行 `exec $SHELL -l`。
-- 如果不写 shell rc，马上可执行 `~/.local/bin/mms`；PATH 加载后可直接输入 `mms`。
+- 如果不写 shell rc，马上可执行 `~/.local/bin/mms` 或 `~/.local/bin/mmf`；PATH 加载后可直接输入 `mms` / `mmf`。
 
 安装时指定 UI 语言：
 
@@ -95,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.6/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -111,6 +117,49 @@ mms test --provider <id> --cli codex
 probe cache 时，MMS 会先显示已配置的 `fallback_models` / `extra_models`，
 同时后台刷新 `/models`；同一个 key 仍缺 family 时，优先对比 provider
 config/credentials，并跑 `mms models` 或 `mms doctor full`。
+
+## Config V2 Preview Root
+
+Config v2 先通过 preview root 提供，确认稳定后再进入 stable 默认路径。
+日常稳定使用继续走 `mms`，隔离预览走 `mmf`：
+
+```text
+mms -> ~/.config/mms
+mmf -> ~/.config/mms-next
+```
+
+推荐 preview 流程：
+
+```bash
+mmf config root --json
+mmf preview doctor --json
+mmf preview prepare --from ~/.config/mms --json
+mmf preview prepare --from ~/.config/mms --include-secrets --json
+mmf config check --json
+mmf config bundle --json
+mmf config web
+```
+
+preview 模式下，人需要看的入口仍然是 TUI / `mms config` / WebUI。这些入口写
+DB candidate、preview secret backend，并发布校验后的
+`generated/model-registry.latest-approved.json` bundle；不会再让
+`config.toml`、`credentials.sh`、route、policy、profile、lineup 文件互相竞争
+truth source。
+
+stable promotion 仍然停在 human gate，当前只读：
+
+```bash
+mmf promote --json
+mms migrate config-v2 --json
+mms config release-readiness --json
+```
+
+即使传 `--apply`，`mms migrate config-v2` 目前也只会报告
+`apply_enabled=false`，并停在 `stable_root_human_only` /
+`promotion_apply_not_implemented`；preview root 不会 silent fallback 到 stable
+credentials、OAuth state 或 Claude config。release readiness audit 可以返回
+`READY_FOR_4_0_HUMAN_GATE`，但在人工 stable promotion 和 post-promotion smoke
+完成前仍会报告 `release_complete=false`。
 
 ## 快速使用
 
@@ -216,7 +265,10 @@ MMS 的默认策略是：在当前选择的 runtime 内 fail closed。
 - context window metadata
 - 便于后续核验的官方 reference URL
 
-用户自己的 overlay 可以作为只读 profile 输入放在 MMS config 目录。MMS 不应该因为一次 probe 就自动改写真实 `config.toml`。
+本地修改优先走 Registry v2：TUI / `mms config` / WebUI 先创建 DB candidate，再发布并校验
+`generated/model-registry.latest-approved.json` bundle。只要该 manifest 存在，它引用的 generated Profile 就是 runtime boundary。
+
+legacy 用户 overlay 仍可作为手动 import/export 兼容输入放在 MMS config 目录。MMS 不应该因为一次 probe 就自动改写真实 `config.toml`。
 
 ## 用户偏好
 
@@ -239,12 +291,12 @@ MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 | `xmem` | `~/.mms/vendor` 内建 | 通用跨项目 memory / truth-index skill；只有配置了 `xmem` CLI/source 才真正 active |
 | Web automation bundle | `~/.mms/vendor` 内建 | `weber` 负责路由，`web-access` 连接登录态 Chrome，`agent-browser` 负责轻量 headless |
 | `Caveman` | `~/.mms/vendor` 内建 | 低 token 沟通模式；只有偏好或启动确认页启用后才 active |
-| `NSR` | 内建 hooks，默认开启 | active goal continuation hooks；不写全局 hooks/config |
+| `NSR` | 内建 hooks，默认开启 | active goal continuation hooks；默认不挂 startup/prompt hook |
 | `ECC` | MMS-managed 可选包 | Claude engineering workflow / rules / quality hooks |
 | `OMC` | MMS-managed 可选包 | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | 已安装时检测 | 规划和开源贡献入口 |
 
-启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。Passive skills（`token-saver`、`TOON`、`xmem`、`web-access`、`weber`、`agent-browser`）在 MMS-launched session 中自然可用。`NSR` 对 MMS-managed Claude/Codex session 默认开启，但仍是 session-local，可在启动确认页关闭，或用 `nsr_mode = "disable"` 关闭。更重的 active behavior packs（`ECC`、`OMC`）仍需要显式选择。OpenCode 会拿到 session-local Caveman / token-saver / TOON / xmem / web-access / weber skills；如果本机有 `rtk`，也会通过 session-local plugin 目录注入静默 RTK plugin。
+启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。Passive skills（`token-saver`、`TOON`、`xmem`、`web-access`、`weber`、`agent-browser`）在 MMS-launched session 中自然可用。`NSR` 对 MMS-managed Claude/Codex session 默认开启，但默认 hook 面只覆盖 tool/compact/closeout 事件，可在启动确认页关闭，或用 `nsr_mode = "disable"` 关闭。更重的 active behavior packs（`ECC`、`OMC`）仍需要显式选择。OpenCode 会拿到 session-local Caveman / token-saver / TOON / xmem / web-access / weber skills；如果本机有 `rtk`，也会通过 session-local plugin 目录注入静默 RTK plugin。
 
 ## 可选安装包
 
@@ -268,7 +320,7 @@ bash install.sh --install-ops-env-safe
 
 `--install-map` 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；它让 Claude 在进入 repo 时更快理解目录和文件结构。这是全局 Claude hook，可用 `--map-ref` 固定版本。
 
-`--install-codegraph` 会通过 npm 安装 CodeGraph CLI/MCP；它提供 symbol search、callers/callees 和代码上下文检索。MMS session 会内建静默的 CodeGraph auto-register hook：git repo 没有 `.codegraph/` 时执行 `codegraph init <repo>` + `codegraph index <repo>`；已有 `.codegraph/` 时执行 `codegraph sync <repo>`。可用 `--codegraph-package` 覆盖 npm 包规格。需要立刻初始化全部 repo 时，也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
+`--install-codegraph` 会通过 npm 安装 CodeGraph CLI/MCP；它提供 symbol search、callers/callees 和代码上下文检索。MMS 默认不再给 CodeGraph 挂 SessionStart auto-register hook，需要某个 repo 时显式运行索引。可用 `--codegraph-package` 覆盖 npm 包规格。需要立刻初始化全部 repo 时，也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
 
 `--install-read-once` 会安装 Claude Read 省 token hooks；同一个 session 内重复读取未变化文件时给提示，文件变化后优先给 diff。它自动生效，不需要用户记命令。
 

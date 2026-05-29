@@ -43,6 +43,8 @@ def build_home_context(
     *,
     real_user_home_fn,
     real_user_path_fn,
+    selected_mms_config_root_fn=None,
+    config_root_is_explicit_fn=None,
     runtime_locale_env_fn,
     runtime_net_mode_fn,
     runtime_dns_mode_fn,
@@ -64,7 +66,11 @@ def build_home_context(
     account_home = normalize_path(runtime.get("home_dir") or "")
     xdg_config_home = normalize_path(env.get("XDG_CONFIG_HOME") or "")
     gemini_cli_home = normalize_path(env.get("GEMINI_CLI_HOME") or "")
-    config_root = os.path.join(real_home, ".config", "mms") if real_home else real_user_path_fn(".config", "mms")
+    if selected_mms_config_root_fn is not None:
+        config_root = normalize_path(selected_mms_config_root_fn(env))
+    else:
+        config_root = os.path.join(real_home, ".config", "mms") if real_home else real_user_path_fn(".config", "mms")
+    config_root_explicit = bool(config_root_is_explicit_fn(env)) if config_root_is_explicit_fn is not None else False
     expected_session_home = auth_mode == "oauth" and (
         cli_name == "claude"
         or (cli_name in {"codex", "agy"} and effective_home and effective_home != real_home)
@@ -82,6 +88,7 @@ def build_home_context(
         "gemini_cli_home": gemini_cli_home,
         "xdg_config_home": xdg_config_home,
         "config_root": config_root,
+        "config_root_explicit": config_root_explicit,
         "net_mode": runtime_net_mode_fn(runtime),
         "dns_mode": runtime_dns_mode_fn(runtime),
         "locale": locale_value,
@@ -114,7 +121,12 @@ def validate_home_context_or_exit(context, *, console, path_is_within_fn=path_is
         _block("无法解析真实 HOME")
 
     if auth_mode != "oauth":
-        if effective_home and real_home and not path_is_within_fn(config_root, real_home):
+        if (
+            effective_home
+            and real_home
+            and not context.get("config_root_explicit")
+            and not path_is_within_fn(config_root, real_home)
+        ):
             _block(f"config_root 异常：{config_root}")
         return context
 

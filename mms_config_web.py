@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Local interactive WebUI for MMS setup, model policy, and audited config saves."""
 
 from __future__ import annotations
@@ -24,6 +25,14 @@ _ALLOWED_CLIS = ("claude", "codex", "opencode", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
 _OPENCODE_REQUIRED_BUILDER_AGENTS = {"mobius-builder-pro", "builder_primary"}
+_REGISTRY_V2_GENERATED_FILES = (
+    "model-routes.json",
+    "model-routes.lineup.json",
+    "provider-profiles.generated.json",
+    "model-policy.effective.json",
+    "model-capabilities.approved.json",
+    "model-registry.latest-approved.json",
+)
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
@@ -126,7 +135,10 @@ def _sanitize_for_output(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, child in value.items():
             key_text = str(key or "")
-            if key_text.lower() in _SECRET_KEYS or any(token in key_text.lower() for token in ("token", "secret", "api_key")):
+            key_lower = key_text.lower()
+            if key_lower.startswith("has_") or key_lower.endswith(("_count", "_counts")):
+                result[key_text] = child
+            elif key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key")):
                 result[key_text] = _redact(child)
             else:
                 result[key_text] = _sanitize_for_output(child)
@@ -156,6 +168,389 @@ def _policy_path_for_config(config_path: str = "") -> str:
         return str(getattr(mms_router, "MODEL_POLICY_PATH", ""))
     except Exception:
         return ""
+
+
+def _config_root_for_snapshot(config_path: str = "") -> str:
+    config_path = os.path.abspath(os.path.expanduser(str(config_path or ""))) if config_path else ""
+    if config_path:
+        return os.path.dirname(config_path)
+    try:
+        from mms_state_io import resolve_mms_config_dir
+
+        return resolve_mms_config_dir()
+    except Exception:
+        return ""
+
+
+def _model_source_status_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import model_source_status
+
+        return model_source_status(
+            config_dir=config_root or None,
+            command_name=f"{command_name} config source",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.model_source_status.v1",
+            "read_only": True,
+            "status": "error",
+            "error": str(exc),
+            "config_root": config_root,
+        }
+
+
+def _consumer_bundle_status_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import consumer_bundle_status
+
+        return consumer_bundle_status(
+            config_dir=config_root or None,
+            command_name=f"{command_name} config bundle",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.consumer_bundle_status.v1",
+            "read_only": True,
+            "status": "error",
+            "verified": False,
+            "error": str(exc),
+            "config_root": config_root,
+        }
+
+
+def _is_preview_config_root(config_path: str = "", *, command_name: str = "mms") -> bool:
+    config_root = _config_root_for_snapshot(config_path)
+    if not config_root:
+        return False
+    try:
+        from mms_state_io import mms_config_root_status
+
+        return mms_config_root_status(command=command_name, config_dir=config_root).get("mode") == "preview"
+    except Exception:
+        return False
+
+
+def _is_placeholder_provider_config(cfg: dict[str, Any]) -> bool:
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    if not providers:
+        return True
+    if len(providers) != 1 or not isinstance(providers[0], dict):
+        return False
+    provider = providers[0]
+    provider_id = _safe_text(provider.get("id"))
+    name = _safe_text(provider.get("name"))
+    if provider_id not in {"default", "local", ""}:
+        return False
+    if name and name not in {"Default Gateway", "Default", "Local"}:
+        return False
+    configured_models = (
+        _normalize_model_list(provider.get("fallback_models"))
+        or _normalize_model_list(provider.get("extra_models"))
+        or _normalize_model_list(provider.get("models"))
+    )
+    configured_urls = _safe_text(
+        provider.get("openai_base_url")
+        or provider.get("anthropic_base_url")
+        or provider.get("default_openai_base_url")
+        or provider.get("default_anthropic_base_url")
+        or provider.get("base_url")
+    )
+    configured_key = _safe_text(provider.get("api_key") or provider.get("openai_api_key") or provider.get("anthropic_api_key"))
+    return not configured_models and not configured_urls and not configured_key
+
+
+def _read_json_from_verified_file(verified_files: dict[str, Any], key: str) -> dict[str, Any]:
+    row = verified_files.get(key) if isinstance(verified_files.get(key), dict) else {}
+    path = _safe_text(row.get("path"))
+    if not path:
+        return {}
+    return _load_json_file(path)
+
+
+def _preview_secret_refs_by_provider(config_root: str = "") -> dict[str, str]:
+    root = os.path.abspath(os.path.expanduser(config_root)) if config_root else ""
+    if not root:
+        return {}
+    ranked: dict[str, tuple[int, str]] = {}
+    paths = [
+        (os.path.join(root, "secrets", "legacy-secrets.json"), 10),
+        (os.path.join(root, "secrets", "webui-secrets.json"), 20),
+    ]
+    field_rank = {"api_key": 3, "openai_api_key": 2, "anthropic_api_key": 1}
+    for path, source_score in paths:
+        payload = _load_json_file(path)
+        entries = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            provider_id = _safe_text(entry.get("provider_id"))
+            secret_ref = _safe_text(entry.get("secret_ref"))
+            if not provider_id or not secret_ref:
+                continue
+            score = source_score + field_rank.get(_safe_text(entry.get("field")), 0)
+            current = ranked.get(provider_id)
+            if current is None or score > current[0]:
+                ranked[provider_id] = (score, secret_ref)
+    return {provider_id: secret_ref for provider_id, (_score, secret_ref) in ranked.items()}
+
+
+def _preview_secret_values_by_ref(config_root: str = "") -> dict[str, str]:
+    root = os.path.abspath(os.path.expanduser(config_root)) if config_root else ""
+    if not root:
+        return {}
+    values: dict[str, str] = {}
+    for filename in ("legacy-secrets.json", "webui-secrets.json"):
+        payload = _load_json_file(os.path.join(root, "secrets", filename))
+        entries = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            secret_ref = _safe_text(entry.get("secret_ref"))
+            value = _safe_text(entry.get("value"))
+            if secret_ref and value:
+                values[secret_ref] = value
+    return values
+
+
+def _preview_cached_provider_url(provider_id: str) -> str:
+    provider_id = _safe_text(provider_id)
+    if not provider_id:
+        return ""
+    try:
+        mms_core = _load_mms_core()
+        cached = mms_core._load_probe_file_cache(provider_id, allow_stale=True)  # noqa: SLF001 - UI recovery only
+    except Exception:
+        cached = {}
+    if not isinstance(cached, dict):
+        return ""
+    return _safe_text(cached.get("working_url")).rstrip("/")
+
+
+def _resolve_preview_provider_secret(
+    provider: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    provider = dict(provider or {})
+    if not _is_preview_config_root(config_path, command_name=command_name):
+        return provider
+    config_root = _config_root_for_snapshot(config_path)
+    provider_id = _safe_text(provider.get("id") or provider.get("provider_id"))
+    secret_ref = _safe_text(provider.get("secret_ref"))
+    if provider_id and not secret_ref:
+        secret_ref = _preview_secret_refs_by_provider(config_root).get(provider_id, "")
+        if secret_ref:
+            provider["secret_ref"] = secret_ref
+    if secret_ref and not _safe_text(provider.get("api_key") or provider.get("openai_api_key") or provider.get("anthropic_api_key")):
+        value = _preview_secret_values_by_ref(config_root).get(secret_ref, "")
+        if value:
+            provider["api_key"] = value
+    return provider
+
+
+def _attach_preview_secret_refs(
+    cfg: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
+    if not _is_preview_config_root(config_path, command_name=command_name):
+        return cfg
+    refs = _preview_secret_refs_by_provider(_config_root_for_snapshot(config_path))
+    if not refs:
+        return cfg
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    changed = False
+    next_providers = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            next_providers.append(provider)
+            continue
+        row = dict(provider)
+        provider_id = _safe_text(row.get("id") or row.get("provider_id"))
+        if provider_id and not _safe_text(row.get("secret_ref")) and refs.get(provider_id):
+            row["secret_ref"] = refs[provider_id]
+            changed = True
+        next_providers.append(row)
+    if changed:
+        cfg["providers"] = next_providers
+    return cfg
+
+
+def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *, config_root: str = "") -> dict[str, Any]:
+    profiles_payload = _read_json_from_verified_file(verified_files, "profile")
+    router_payload = _read_json_from_verified_file(verified_files, "router")
+    profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), dict) else {}
+    routes = router_payload.get("routes") if isinstance(router_payload.get("routes"), dict) else {}
+    secret_refs = _preview_secret_refs_by_provider(config_root)
+    secret_values = _preview_secret_values_by_ref(config_root)
+    provider_models: dict[str, set[str]] = {}
+    provider_routes: dict[str, dict[str, Any]] = {}
+    for route_model, route in routes.items():
+        if not isinstance(route, dict):
+            continue
+        leaves = []
+        primary = route.get("primary")
+        if isinstance(primary, dict):
+            leaves.append(primary)
+        leaves.extend(item for item in (route.get("fallbacks") or []) if isinstance(item, dict))
+        for leaf in leaves:
+            provider_id = _safe_text(leaf.get("provider_id"))
+            if not provider_id:
+                continue
+            model_id = _safe_text(leaf.get("model") or leaf.get("model_id") or route_model)
+            if model_id:
+                provider_models.setdefault(provider_id, set()).add(model_id)
+            info = provider_routes.setdefault(provider_id, {"openai_base_url": "", "anthropic_base_url": "", "has_api_key": False})
+            if not info["openai_base_url"]:
+                info["openai_base_url"] = _safe_text(leaf.get("openai_base_url"))
+            if not info["anthropic_base_url"]:
+                info["anthropic_base_url"] = _safe_text(leaf.get("anthropic_base_url"))
+            if _safe_text(leaf.get("api_key")):
+                info["has_api_key"] = True
+            if not info.get("secret_ref"):
+                info["secret_ref"] = _safe_text(leaf.get("secret_ref"))
+
+    provider_ids = set(profiles.keys()) | set(provider_models.keys())
+    providers: list[dict[str, Any]] = []
+    for provider_id in sorted(provider_ids):
+        profile = profiles.get(provider_id) if isinstance(profiles.get(provider_id), dict) else {}
+        route_info = provider_routes.get(provider_id, {})
+        cached_url = _preview_cached_provider_url(provider_id)
+        openai_base_url = _safe_text(route_info.get("openai_base_url"))
+        anthropic_base_url = _safe_text(route_info.get("anthropic_base_url"))
+        secret_ref = _safe_text(route_info.get("secret_ref") or secret_refs.get(provider_id))
+        protocols = _normalize_model_list(profile.get("protocols"))
+        if cached_url:
+            if not openai_base_url and "openai_chat_completions" in protocols:
+                openai_base_url = cached_url
+            if not anthropic_base_url and "anthropic_messages" in protocols:
+                anthropic_base_url = cached_url
+        providers.append(
+            {
+                "id": provider_id,
+                "name": _safe_text(profile.get("name") or provider_id),
+                "enabled": profile.get("enabled", True) is not False,
+                "role": _safe_text(profile.get("role") or "auto"),
+                "priority": int(profile.get("priority") or 0),
+                "models_endpoint": _safe_text(profile.get("models_endpoint") or "manual"),
+                "protocols": protocols,
+                "supported_clis": _normalize_model_list(profile.get("supported_clis")),
+                "openai_base_url": openai_base_url,
+                "anthropic_base_url": anthropic_base_url,
+                "has_api_key": bool(route_info.get("has_api_key") or (secret_ref and secret_values.get(secret_ref))),
+                "secret_ref": secret_ref,
+                "fallback_models": sorted(provider_models.get(provider_id, set()), key=str.lower),
+                "extra_models": [],
+                "hidden_models": _normalize_model_list(profile.get("hidden_models")),
+            }
+        )
+    role_rank = {"primary": 0, "auto": 1, "fallback": 2}
+    providers.sort(key=lambda item: (role_rank.get(str(item.get("role") or "auto"), 1), -int(item.get("priority") or 0), str(item.get("id") or "")))
+    provider_cfg = profiles_payload.get("provider") if isinstance(profiles_payload.get("provider"), dict) else {}
+    explicit_default = _safe_text(provider_cfg.get("default") or profiles_payload.get("default_provider"))
+    provider_ids = {_safe_text(item.get("id")) for item in providers}
+    provider_default = explicit_default if explicit_default in provider_ids else (providers[0]["id"] if providers else "")
+    return {"providers": providers, "provider": {"default": provider_default}}
+
+
+def _hydrate_preview_config_from_latest_bundle(
+    cfg: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    """Preview roots may have no legacy config.toml; hydrate the editor from the verified bundle."""
+    cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
+    if not _is_preview_config_root(config_path, command_name=command_name):
+        return cfg
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import verify_approved_bundle
+
+        verified = verify_approved_bundle(config_dir=config_root or None)
+    except Exception:
+        return cfg
+    if not verified.get("verified"):
+        return cfg
+    hydrated = _preview_bundle_config_from_verified_files(
+        verified.get("verified_files") if isinstance(verified.get("verified_files"), dict) else {},
+        config_root=config_root,
+    )
+    if not hydrated.get("providers"):
+        return cfg
+    if not _is_placeholder_provider_config(cfg):
+        result = _attach_preview_secret_refs(cfg, config_path=config_path, command_name=command_name)
+        existing_ids = {
+            _safe_text(item.get("id"))
+            for item in (result.get("providers") if isinstance(result.get("providers"), list) else [])
+            if isinstance(item, dict)
+        }
+        missing = [
+            dict(item)
+            for item in hydrated.get("providers", [])
+            if isinstance(item, dict) and _safe_text(item.get("id")) and _safe_text(item.get("id")) not in existing_ids
+        ]
+        if missing:
+            result["providers"] = list(result.get("providers") or []) + missing
+            result["_preview_bundle_profile_merged"] = True
+        return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
+    result = copy.deepcopy(cfg)
+    result["providers"] = hydrated["providers"]
+    result["provider"] = hydrated["provider"]
+    result["_preview_bundle_hydrated"] = True
+    return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
+
+
+def _config_v2_promotion_plan_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import config_v2_promotion_plan
+
+        return config_v2_promotion_plan(
+            preview_config_dir=config_root or None,
+            command_name=f"{command_name} config promote-plan",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.config_v2_promotion_plan.v1",
+            "read_only": True,
+            "apply_enabled": False,
+            "status": "error",
+            "ready_for_human_review": False,
+            "error": str(exc),
+            "config_root": config_root,
+        }
+
+
+def _config_v2_release_readiness_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import config_v2_release_readiness
+
+        return config_v2_release_readiness(
+            preview_config_dir=config_root or None,
+            command_name=f"{command_name} config release-readiness",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.config_v2_release_readiness.v1",
+            "read_only": True,
+            "release_complete": False,
+            "status": "error",
+            "result": "NOT_READY",
+            "ready_for_human_gate": False,
+            "human_gate_required": True,
+            "completion_blocker": "release_readiness_error",
+            "blocked_requirements": ["release_readiness_error"],
+            "error": str(exc),
+            "config_root": config_root,
+        }
 
 
 def _load_json_file(path: str) -> dict[str, Any]:
@@ -236,29 +631,55 @@ def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | Non
     return caps
 
 
+def _provider_derived_model_aliases(base_models: list[str], provider: dict[str, Any]) -> list[str]:
+    try:
+        mms_core = _load_mms_core()
+        return list(mms_core._derived_model_aliases(base_models, provider))  # noqa: SLF001 - mirror runtime model patching
+    except Exception:
+        return []
+
+
 def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dict[str, Any]) -> list[dict[str, Any]]:
     model_sources: dict[str, str] = {}
     provider_id = _safe_text(provider.get("id"))
+    bundle_runtime = bool(provider.get("_mms_bundle_runtime"))
     cached_raw: list[str] = []
     cached_source = "fallback"
-    try:
-        mms_core = _load_mms_core()
-        cached = mms_core._load_probe_file_cache(provider_id, allow_stale=True)  # noqa: SLF001 - UI snapshot only
-        if cached:
-            cached_raw = _normalize_model_list(cached.get("raw_models") or cached.get("models") or [])
-            cached_source = _safe_text(cached.get("base_source") or "remote") or "remote"
-    except Exception:
-        cached_raw = []
-    for model in cached_raw or _normalize_model_list(provider.get("fallback_models")):
-        model_sources.setdefault(model, cached_source if cached_raw else "fallback")
+    if not bundle_runtime:
+        try:
+            mms_core = _load_mms_core()
+            cached = mms_core._load_probe_file_cache(provider_id, allow_stale=True)  # noqa: SLF001 - UI snapshot only
+            if cached:
+                cached_raw = _normalize_model_list(cached.get("raw_models") or cached.get("models") or [])
+                cached_source = _safe_text(cached.get("base_source") or "remote") or "remote"
+        except Exception:
+            cached_raw = []
+    row_models: list[str] = []
+    row_sources: dict[str, str] = {}
+    for item in (provider.get("models") if isinstance(provider.get("models"), list) else []):
+        model_id = _safe_text(item.get("id") or item.get("model")) if isinstance(item, dict) else _safe_text(item)
+        if not model_id:
+            continue
+        row_models.append(model_id)
+        if isinstance(item, dict):
+            row_sources.setdefault(model_id, _safe_text(item.get("source") or "manual") or "manual")
+    fallback_models = _normalize_model_list(provider.get("fallback_models"))
+    base_models = cached_raw or fallback_models or row_models
+    for model in base_models:
+        source = "approved" if bundle_runtime else (cached_source if cached_raw else ("fallback" if fallback_models else row_sources.get(model, "manual")))
+        model_sources.setdefault(model, source)
     for model in _normalize_model_list(provider.get("extra_models")):
         model_sources.setdefault(model, "extra")
-    policy_models = policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}
     hidden = set(_normalize_model_list(provider.get("hidden_models")))
+    hidden_lower = {model.lower() for model in hidden}
+    alias_base_models = [model for model in base_models if model.lower() not in hidden_lower]
+    for model in _provider_derived_model_aliases(alias_base_models, provider):
+        model_sources.setdefault(model, "derived_alias")
+    policy_models = policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}
     rows: list[dict[str, Any]] = []
     for model_id in sorted(model_sources.keys(), key=lambda item: item.lower()):
         entry = policy_models.get(model_id) if isinstance(policy_models.get(model_id), dict) else {}
-        visible = model_id not in hidden
+        visible = model_id.lower() not in hidden_lower
         if isinstance(entry, dict) and isinstance(entry.get("visible"), bool):
             visible = bool(entry.get("visible")) and visible
         rows.append(
@@ -282,6 +703,7 @@ def _provider_stale_hidden_models(provider: dict[str, Any], model_rows: list[dic
 def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any] | None = None) -> dict[str, Any]:
     provider = provider if isinstance(provider, dict) else {}
     provider_id = _safe_text(provider.get("id"))
+    bundle_runtime = bool(provider.get("_mms_bundle_runtime"))
     protocols = provider.get("protocols") if isinstance(provider.get("protocols"), list) else []
     supported_clis = provider.get("supported_clis") if isinstance(provider.get("supported_clis"), list) else []
     models = []
@@ -301,6 +723,13 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
     api_key = _safe_text(provider.get("api_key") or provider.get("openai_api_key"))
     policy_payload = policy_payload if isinstance(policy_payload, dict) else {}
     model_rows = _provider_effective_model_rows(provider, policy_payload)
+    if bundle_runtime:
+        for row in model_rows:
+            if row.get("source") in {"fallback", "manual"}:
+                row["source"] = "approved"
+    approved_route_models = _normalize_model_list(provider.get("fallback_models"))
+    fallback_models = [] if bundle_runtime else approved_route_models
+    extra_models = _normalize_model_list(provider.get("extra_models"))
     return {
         "id": provider_id,
         "original_id": provider_id,
@@ -320,13 +749,14 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "openai_base_url_source": "config" if config_openai_base else ("credentials" if credential_openai_base else ""),
         "anthropic_base_url_source": "config" if config_anthropic_base else ("credentials" if credential_anthropic_base else ""),
         "api_key": "",
-        "has_api_key": bool(api_key or creds.get("has_api_key")),
+        "has_api_key": bool(api_key or creds.get("has_api_key") or provider.get("has_api_key")),
         "update_credentials": False,
-        "fallback_models": _normalize_model_list(provider.get("fallback_models")),
-        "extra_models": _normalize_model_list(provider.get("extra_models")),
+        "fallback_models": fallback_models,
+        "approved_route_models": approved_route_models,
+        "extra_models": extra_models,
         "hidden_models": _normalize_model_list(provider.get("hidden_models")),
         "stale_hidden_models": _provider_stale_hidden_models(provider, model_rows),
-        "model_count": len(dict.fromkeys(models or [row["id"] for row in model_rows])),
+        "model_count": len(dict.fromkeys(row["id"] for row in model_rows)),
         "models": model_rows,
     }
 
@@ -520,6 +950,7 @@ def build_config_snapshot(
 ) -> dict[str, Any]:
     """Return a redacted, UI-friendly config snapshot; never mutates config."""
     cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
+    cfg = _hydrate_preview_config_from_latest_bundle(cfg, config_path=config_path, command_name=command_name)
     providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
     policy_path = _policy_path_for_config(config_path)
     policy_payload = _load_json_file(policy_path)
@@ -579,6 +1010,10 @@ def build_config_snapshot(
             "model_count": len((policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}) or {}),
             "project_count": len((policy_payload.get("projects") if isinstance(policy_payload.get("projects"), dict) else {}) or {}),
         },
+        "model_source_status": _model_source_status_for_snapshot(config_path, command_name=command_name),
+        "consumer_bundle_status": _consumer_bundle_status_for_snapshot(config_path, command_name=command_name),
+        "config_v2_promotion_plan": _config_v2_promotion_plan_for_snapshot(config_path, command_name=command_name),
+        "config_v2_release_readiness": _config_v2_release_readiness_for_snapshot(config_path, command_name=command_name),
         "references": build_reference_cards(),
         "recommendations": recommendations,
         "snippets": build_config_snippets(),
@@ -586,8 +1021,18 @@ def build_config_snapshot(
             "requires_diff_preview": True,
             "requires_confirm_save": True,
             "confirm_phrase": "保存配置",
+            "preview_confirm_phrase": "写入预览DB",
             "writes": ["config.toml", "credentials.sh(仅当输入新 key 并勾选更新凭据)", "model-policy.json"],
-            "safety": "保存走 lock + backup + audit；已存在的写入目标会额外生成 *.bak；页面不会回显真实 API Key。",
+            "stable_legacy_writes": ["config.toml", "credentials.sh(仅当输入新 key 并勾选更新凭据)", "model-policy.json"],
+            "preview_v2_writes": [
+                "registry/model-registry.sqlite(candidate revisions)",
+                "secrets/webui-secrets.json(仅当输入新 key)",
+                "generated/model-registry.latest-approved.json",
+                "generated/model-routes.json",
+                "generated/model-policy.effective.json",
+                "generated/provider-profiles.generated.json",
+            ],
+            "safety": "stable legacy 保存走 lock + backup + audit；preview root 使用 DB candidate + generated bundle 发布并校验；页面不会回显真实 API Key。",
         },
     }
 
@@ -684,7 +1129,7 @@ def build_setup_flow() -> list[dict[str, Any]]:
         {
             "id": "model_inventory",
             "title": "2. 模型列表",
-            "summary": "查看拉取结果，隐藏噪音模型，像 NewAPI 一样手动补充模型。",
+            "summary": "查看当前通道拉取结果，隐藏噪音模型，像 NewAPI 一样手动补充当前通道模型。",
             "fields": ["visible", "favorite", "hidden_models", "manual_models", "model_aliases"],
             "actions": ["hide_selected", "add_manual_model", "copy_selected"],
         },
@@ -840,7 +1285,30 @@ def _extract_draft(payload: dict[str, Any]) -> dict[str, Any]:
     return draft if isinstance(draft, dict) else {}
 
 
-def _copy_existing_provider(existing: dict[str, Any] | None, provider_payload: dict[str, Any]) -> dict[str, Any]:
+def _route_model_rows_from_payload(provider_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in provider_payload.get("models") if isinstance(provider_payload.get("models"), list) else []:
+        if isinstance(item, dict):
+            model_id = _safe_text(item.get("id") or item.get("model"))
+            visible = item.get("visible") is not False
+        else:
+            model_id = _safe_text(item)
+            visible = True
+        if not model_id or model_id in seen or not visible:
+            continue
+        seen.add(model_id)
+        rows.append({"id": model_id, "visible": True})
+    return rows
+
+
+def _copy_existing_provider(
+    existing: dict[str, Any] | None,
+    provider_payload: dict[str, Any],
+    *,
+    preserve_model_rows: bool = False,
+    clear_fallback_models: bool = False,
+) -> dict[str, Any]:
     provider = dict(existing or {})
     provider_id = _slug(provider_payload.get("id") or provider_payload.get("original_id") or provider.get("id"), "provider")
     provider["id"] = provider_id
@@ -889,9 +1357,15 @@ def _copy_existing_provider(existing: dict[str, Any] | None, provider_payload: d
         provider["default_anthropic_base_url"] = ""
     else:
         provider.pop("default_anthropic_base_url", None)
-    provider["fallback_models"] = _normalize_model_list(provider_payload.get("fallback_models"))
+    provider["fallback_models"] = [] if clear_fallback_models else _normalize_model_list(provider_payload.get("fallback_models"))
     provider["extra_models"] = _normalize_model_list(provider_payload.get("extra_models"))
     provider["hidden_models"] = _normalize_model_list(provider_payload.get("hidden_models"))
+    if preserve_model_rows:
+        route_rows = _route_model_rows_from_payload(provider_payload)
+        if route_rows:
+            provider["models"] = route_rows
+        else:
+            provider.pop("models", None)
     return provider
 
 
@@ -1083,7 +1557,7 @@ def _build_review_summary(
         if removed:
             preview = ", ".join(removed[:8])
             suffix = f" 等 {len(removed)} 个" if len(removed) > 8 else ""
-            add_item("hidden_removed", f"清理 hidden_models：{provider_id}", f"将移除 `{preview}`{suffix}", provider_id=provider_id, meta={"models": removed})
+            add_item("hidden_removed", f"移除隐藏记录：{provider_id}", f"将移除 `{preview}`{suffix}", provider_id=provider_id, meta={"models": removed})
         if added:
             preview = ", ".join(added[:8])
             suffix = f" 等 {len(added)} 个" if len(added) > 8 else ""
@@ -1173,8 +1647,18 @@ def _build_review_summary(
 
     if credential_updates:
         provider_ids = ", ".join(item["provider_id"] for item in credential_updates)
-        add_item("credentials", "凭据写入", f"将更新 credentials.sh：{provider_ids}", level="warn")
-        add_risk("credential_update", "凭据写入", "只有输入了新 API Key 且勾选更新凭据的通道会写 credentials.sh。", level="warn")
+        add_item(
+            "credentials",
+            "凭据写入",
+            f"stable legacy 写 credentials.sh；preview 写 secret backend：{provider_ids}",
+            level="warn",
+        )
+        add_risk(
+            "credential_update",
+            "凭据写入",
+            "只有输入了新 API Key 且勾选更新凭据的通道才会写入；stable legacy 目标是 credentials.sh，preview 目标是 secret backend。",
+            level="warn",
+        )
 
     policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
     policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
@@ -1205,6 +1689,48 @@ def _build_review_summary(
     }
 
 
+def _build_registry_v2_save_plan(
+    *,
+    config_path: str,
+    plan_summary: dict[str, Any],
+    credential_updates: list[dict[str, str]],
+    config_payload: dict[str, Any] | None = None,
+    policy_payload: dict[str, Any] | None = None,
+    expected_bundle_revision: str = "",
+    route_scope_provider_ids: list[str] | None = None,
+    route_refresh_provider_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Describe the future DB-truth save path without writing anything."""
+    from mms_registry_cli import registry_v2_route_publish_guard, registry_v2_save_plan
+
+    route_publish_guard: dict[str, Any] = {}
+    try:
+        config_root = _config_root_for_snapshot(config_path)
+        route_publish_guard = registry_v2_route_publish_guard(
+            config_dir=config_root or None,
+            config_payload=config_payload if isinstance(config_payload, dict) else {},
+            policy_payload=policy_payload if isinstance(policy_payload, dict) else {},
+            credential_updates=credential_updates,
+            expected_bundle_revision=expected_bundle_revision,
+            route_scope_provider_ids=route_scope_provider_ids,
+            route_refresh_provider_ids=route_refresh_provider_ids,
+        )
+    except Exception as exc:
+        route_publish_guard = {
+            "ok": False,
+            "reason": "route_publish_guard_error",
+            "message": f"{type(exc).__name__}: {exc}",
+        }
+
+    return registry_v2_save_plan(
+        config_path=config_path,
+        command_name="mms-config-web",
+        plan_summary=plan_summary,
+        credential_updates=credential_updates,
+        route_publish_guard=route_publish_guard,
+    )
+
+
 def build_config_plan(
     current_cfg: dict[str, Any] | None,
     payload: dict[str, Any] | None,
@@ -1212,11 +1738,16 @@ def build_config_plan(
     config_path: str = "",
     preferences_path: str = "",
     include_secrets: bool = False,
+    command_name: str = "mms",
 ) -> dict[str, Any]:
     current_cfg = copy.deepcopy(current_cfg) if isinstance(current_cfg, dict) else {}
+    current_cfg = _hydrate_preview_config_from_latest_bundle(current_cfg, config_path=config_path, command_name=command_name)
     draft = _extract_draft(payload or {})
     providers_payload = draft.get("providers") if isinstance(draft.get("providers"), list) else []
     existing_by_id = {str(item.get("id") or ""): item for item in current_cfg.get("providers", []) if isinstance(item, dict)}
+    preserve_model_rows = _is_preview_config_root(config_path, command_name=command_name)
+    route_refresh_provider_ids = _route_refresh_provider_ids_from_payload(payload or {})
+    refreshed_provider_ids = set(route_refresh_provider_ids)
     next_providers: list[dict[str, Any]] = []
     credential_updates: list[dict[str, str]] = []
     errors: list[str] = []
@@ -1226,7 +1757,13 @@ def build_config_plan(
         if not isinstance(provider_payload, dict):
             continue
         original_id = _safe_text(provider_payload.get("original_id") or provider_payload.get("id"))
-        provider = _copy_existing_provider(existing_by_id.get(original_id), provider_payload)
+        provider_id = _safe_text(provider_payload.get("id") or original_id)
+        provider = _copy_existing_provider(
+            existing_by_id.get(original_id),
+            provider_payload,
+            preserve_model_rows=preserve_model_rows,
+            clear_fallback_models=preserve_model_rows and (original_id in refreshed_provider_ids or provider_id in refreshed_provider_ids),
+        )
         next_providers.append(provider)
         if _truthy(provider_payload.get("update_credentials"), False):
             api_key = _safe_text(provider_payload.get("api_key"))
@@ -1384,14 +1921,28 @@ def build_config_plan(
     diffs = {
         "config_toml": _diff_text(before_config_text, after_config_text, before_name="config.toml(before)", after_name="config.toml(after)"),
         "model_policy_json": _diff_text(before_policy_text, after_policy_text, before_name="model-policy.json(before)", after_name="model-policy.json(after)"),
-        "credentials": "\n".join(f"credentials.sh: update provider {item['provider_id']} (secret hidden)" for item in credential_updates),
+        "credentials": "\n".join(
+            f"credential update: provider {item['provider_id']} (secret hidden; stable credentials.sh / preview secret backend)"
+            for item in credential_updates
+        ),
     }
     review_summary = _build_review_summary(current_cfg, next_cfg, policy_before, policy_after, credential_updates)
+    summary = {
+        "providers": len(next_cfg.get("providers") or []),
+        "credential_updates": len(credential_updates),
+        "policy_models": len((policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}) or {}),
+        "will_write_config": bool(diffs["config_toml"]),
+        "will_write_policy": bool(diffs["model_policy_json"]),
+        "will_write_credentials": bool(credential_updates),
+    }
     return {
         "schema": "mms.setup_web.plan.v1",
         "ok": not errors,
         "errors": errors,
         "warnings": warnings,
+        "expected_bundle_revision": _expected_bundle_revision_from_payload(payload or {}),
+        "route_scope_provider_ids": _route_scope_provider_ids_from_payload(payload or {}),
+        "route_refresh_provider_ids": route_refresh_provider_ids,
         "paths": {
             "config": config_path,
             "preferences": preferences_path,
@@ -1402,15 +1953,65 @@ def build_config_plan(
         "credential_updates": credential_updates,
         "diffs": diffs,
         "review_summary": review_summary,
-        "summary": {
-            "providers": len(next_cfg.get("providers") or []),
-            "credential_updates": len(credential_updates),
-            "policy_models": len((policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}) or {}),
-            "will_write_config": bool(diffs["config_toml"]),
-            "will_write_policy": bool(diffs["model_policy_json"]),
-            "will_write_credentials": bool(credential_updates),
-        },
+        "registry_v2_save_plan": _build_registry_v2_save_plan(
+            config_path=config_path,
+            plan_summary=summary,
+            credential_updates=credential_updates,
+            config_payload=next_cfg,
+            policy_payload=policy_after,
+            expected_bundle_revision=_expected_bundle_revision_from_payload(payload or {}),
+            route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload or {}),
+            route_refresh_provider_ids=route_refresh_provider_ids,
+        ),
+        "summary": summary,
     }
+
+
+def _expected_bundle_revision_from_payload(payload: dict[str, Any] | None) -> str:
+    payload = payload if isinstance(payload, dict) else {}
+    draft = _extract_draft(payload)
+    for source in (payload, draft):
+        for key in ("expected_bundle_revision", "bundle_revision", "source_bundle_revision"):
+            value = _safe_text(source.get(key))
+            if value:
+                return value
+    return ""
+
+
+def _route_scope_provider_ids_from_payload(payload: dict[str, Any] | None) -> list[str]:
+    payload = payload if isinstance(payload, dict) else {}
+    draft = _extract_draft(payload)
+    for source in (payload, draft):
+        values = source.get("route_scope_provider_ids") or source.get("touched_provider_ids")
+        if isinstance(values, list):
+            result = []
+            seen = set()
+            for item in values:
+                provider_id = _safe_text(item)
+                if provider_id and provider_id not in seen:
+                    seen.add(provider_id)
+                    result.append(provider_id)
+            if result:
+                return result
+    return []
+
+
+def _route_refresh_provider_ids_from_payload(payload: dict[str, Any] | None) -> list[str]:
+    payload = payload if isinstance(payload, dict) else {}
+    draft = _extract_draft(payload)
+    for source in (payload, draft):
+        values = source.get("route_refresh_provider_ids") or source.get("refreshed_provider_ids")
+        if isinstance(values, list):
+            result = []
+            seen = set()
+            for item in values:
+                provider_id = _safe_text(item)
+                if provider_id and provider_id not in seen:
+                    seen.add(provider_id)
+                    result.append(provider_id)
+            if result:
+                return result
+    return []
 
 
 def _latest_audit_rows(config_path: str, limit: int = 8) -> list[dict[str, Any]]:
@@ -1450,6 +2051,167 @@ def _copy_backup_file(target_path: str, *, config_path: str, label: str) -> str:
 def _bak_path_for_backup(backup_path: str) -> str:
     bak_path = f"{backup_path}.bak" if backup_path else ""
     return bak_path if bak_path and os.path.exists(bak_path) else ""
+
+
+def _registry_v2_snapshot_generated_bundle(config_root: str) -> dict[str, Any]:
+    generated_dir = os.path.join(config_root, "generated")
+    summary: dict[str, Any] = {
+        "schema": "mms.setup_web.registry_v2_generated_snapshot.v1",
+        "generated_dir": generated_dir,
+        "file_names": list(_REGISTRY_V2_GENERATED_FILES),
+    }
+    if not os.path.isdir(generated_dir):
+        summary.update({"skipped": True, "reason": "missing_generated_dir", "files": []})
+        return summary
+    existing = [name for name in _REGISTRY_V2_GENERATED_FILES if os.path.isfile(os.path.join(generated_dir, name))]
+    if not existing:
+        summary.update({"skipped": True, "reason": "no_existing_bundle_files", "files": []})
+        return summary
+    slug = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = os.path.join(config_root, "backups", "generated", f"webui-apply-{slug}")
+    os.makedirs(backup_dir, exist_ok=True)
+    for name in existing:
+        target = os.path.join(backup_dir, name)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(os.path.join(generated_dir, name), target)
+        try:
+            os.chmod(target, 0o600)
+        except OSError:
+            pass
+    manifest_path = os.path.join(backup_dir, "manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "schema": "mms.setup_web.registry_v2_generated_snapshot_manifest.v1",
+                "created_at": _now_iso(),
+                "generated_dir": generated_dir,
+                "files": existing,
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+    try:
+        os.chmod(manifest_path, 0o600)
+    except OSError:
+        pass
+    summary.update({"skipped": False, "backup_dir": backup_dir, "manifest_path": manifest_path, "files": existing})
+    return summary
+
+
+def _registry_v2_restore_generated_bundle(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        return {"attempted": False, "reason": "missing_snapshot"}
+    generated_dir = str(snapshot.get("generated_dir") or "")
+    if not generated_dir:
+        return {"attempted": False, "reason": "missing_generated_dir"}
+    file_names = [str(name) for name in (snapshot.get("file_names") or _REGISTRY_V2_GENERATED_FILES)]
+    removed: list[str] = []
+    restored: list[str] = []
+    backup_dir = str(snapshot.get("backup_dir") or "")
+    if not os.path.isdir(generated_dir) and not backup_dir:
+        return {
+            "attempted": True,
+            "snapshot_skipped": bool(snapshot.get("skipped")),
+            "removed": removed,
+            "restored": restored,
+            "backup_dir": backup_dir,
+        }
+    os.makedirs(generated_dir, exist_ok=True)
+    for name in file_names:
+        target = os.path.join(generated_dir, name)
+        if os.path.exists(target):
+            os.remove(target)
+            removed.append(name)
+    for name in [str(item) for item in (snapshot.get("files") or [])]:
+        source = os.path.join(backup_dir, name)
+        target = os.path.join(generated_dir, name)
+        if backup_dir and os.path.isfile(source):
+            shutil.copy2(source, target)
+            try:
+                os.chmod(target, 0o600)
+            except OSError:
+                pass
+            restored.append(name)
+    try:
+        if not os.listdir(generated_dir):
+            os.rmdir(generated_dir)
+    except OSError:
+        pass
+    return {
+        "attempted": True,
+        "snapshot_skipped": bool(snapshot.get("skipped")),
+        "removed": removed,
+        "restored": restored,
+        "backup_dir": backup_dir,
+    }
+
+
+def _registry_v2_restore_webui_credential_backend(secret_backend: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(secret_backend, dict) or bool(secret_backend.get("skipped")):
+        return {"attempted": False, "reason": "not_written"}
+    path = str(secret_backend.get("path") or "")
+    if not path:
+        return {"attempted": False, "reason": "missing_path"}
+    backup_path = str(secret_backend.get("backup_path") or "")
+    if backup_path and os.path.isfile(backup_path):
+        shutil.copy2(backup_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return {"attempted": True, "restored": True, "removed_new_file": False, "backup_path": backup_path}
+    if os.path.exists(path):
+        os.remove(path)
+        return {"attempted": True, "restored": False, "removed_new_file": True, "path": path}
+    return {"attempted": True, "restored": False, "removed_new_file": False, "path": path}
+
+
+def _registry_v2_restore_db_candidate(candidate: dict[str, Any] | None, *, config_root: str) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return {"attempted": False, "reason": "missing_candidate"}
+    backup = candidate.get("backup") if isinstance(candidate.get("backup"), dict) else {}
+    backup_path = str(backup.get("backup_path") or "")
+    db_path = str(candidate.get("db_path") or backup.get("source_db_path") or "")
+    if backup_path:
+        from mms_registry_cli import restore_registry_db
+
+        restore = restore_registry_db(
+            backup_path,
+            config_dir=config_root,
+            db_path=db_path or None,
+            apply=True,
+            reason="webui-registry-v2-preview-apply-rollback",
+        )
+        return {"attempted": True, "restored": True, "removed_new_db": False, "restore": restore}
+    if backup.get("reason") == "new_db" and db_path:
+        removed: list[str] = []
+        for suffix in ("", "-wal", "-shm"):
+            target = f"{db_path}{suffix}"
+            if os.path.exists(target):
+                os.remove(target)
+                removed.append(target)
+        return {"attempted": True, "restored": False, "removed_new_db": bool(removed), "removed": removed}
+    return {"attempted": False, "reason": "no_candidate_backup", "db_path": db_path}
+
+
+def _rollback_registry_v2_preview_apply(
+    *,
+    config_root: str,
+    candidate: dict[str, Any] | None,
+    secret_backend: dict[str, Any] | None,
+    generated_snapshot: dict[str, Any] | None,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "attempted": True,
+        "reason": reason,
+        "generated": _registry_v2_restore_generated_bundle(generated_snapshot),
+        "credential_backend": _registry_v2_restore_webui_credential_backend(secret_backend),
+        "db": _registry_v2_restore_db_candidate(candidate, config_root=config_root),
+    }
 
 
 def _append_audit(*, config_path: str, target_path: str, backup_path: str, reason: str, before_sha1: str, after_sha1: str, function: str) -> None:
@@ -1536,6 +2298,21 @@ def apply_config_plan(
         return {"ok": False, "errors": ["保存前必须勾选确认保存。"], "status": "blocked"}
     if _safe_text(payload.get("confirm_phrase")) != "保存配置":
         return {"ok": False, "errors": ["确认文字必须输入：保存配置"], "status": "blocked"}
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_state_io import mms_config_root_status
+
+        root_status = mms_config_root_status(command="mms-config-web", config_dir=config_root or None)
+    except Exception:
+        root_status = {}
+    if root_status.get("mode") == "preview":
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.save_result.v1",
+            "status": "blocked",
+            "errors": ["preview root 已禁用 legacy /api/save；请使用“写入预览 DB + 发布”。"],
+            "root": root_status,
+        }
     plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, include_secrets=True)
     if not plan.get("ok"):
         return {
@@ -1582,11 +2359,191 @@ def apply_config_plan(
     }
 
 
-def _provider_from_payload(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def apply_registry_v2_preview_plan(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    if not _truthy(payload.get("confirm_v2_preview"), False):
+        return {"ok": False, "errors": ["写入预览 DB 前必须勾选确认。"], "status": "blocked"}
+    if _safe_text(payload.get("confirm_phrase")) != "写入预览DB":
+        return {"ok": False, "errors": ["确认文字必须输入：写入预览DB"], "status": "blocked"}
+    plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, include_secrets=True, command_name="mmf")
+    if not plan.get("ok"):
+        return {
+            "ok": False,
+            "errors": plan.get("errors") or [],
+            "warnings": plan.get("warnings") or [],
+            "status": "blocked",
+            "plan": _sanitize_for_output(plan),
+        }
+    v2_plan = plan.get("registry_v2_save_plan") if isinstance(plan.get("registry_v2_save_plan"), dict) else {}
+    blocked_reasons = [str(item) for item in (v2_plan.get("blocked_reasons") or []) if str(item or "").strip()]
+    if blocked_reasons:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "blocked",
+            "errors": blocked_reasons,
+            "registry_v2_save_plan": v2_plan,
+            "route_publish_guard": _sanitize_for_output(v2_plan.get("route_publish_guard") if isinstance(v2_plan.get("route_publish_guard"), dict) else {}),
+        }
+
+    config_root = _config_root_for_snapshot(config_path)
+    route_publish_guard: dict[str, Any] = {}
+    try:
+        from mms_registry_cli import registry_v2_route_publish_guard
+
+        route_publish_guard = registry_v2_route_publish_guard(
+            config_dir=config_root or None,
+            config_payload=plan.get("config") if isinstance(plan.get("config"), dict) else {},
+            policy_payload=plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {},
+            credential_updates=[item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)],
+            expected_bundle_revision=_expected_bundle_revision_from_payload(payload),
+            route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload),
+            route_refresh_provider_ids=_route_refresh_provider_ids_from_payload(payload),
+        )
+    except Exception as exc:
+        route_publish_guard = {
+            "ok": False,
+            "reason": "route_publish_guard_error",
+            "message": f"{type(exc).__name__}: {exc}",
+        }
+    if not route_publish_guard.get("ok"):
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "blocked",
+            "errors": [str(route_publish_guard.get("message") or route_publish_guard.get("reason") or "route publish guard blocked")],
+            "registry_v2_save_plan": v2_plan,
+            "route_publish_guard": _sanitize_for_output(route_publish_guard),
+        }
+    candidate: dict[str, Any] | None = None
+    secret_backend: dict[str, Any] | None = None
+    generated_snapshot: dict[str, Any] | None = None
+    try:
+        from mms_registry_cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle, write_registry_v2_webui_secret_backend
+
+        credential_updates = [item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)]
+        generated_snapshot = _registry_v2_snapshot_generated_bundle(config_root)
+        candidate = apply_registry_v2_save_candidate(
+            config_dir=config_root or None,
+            config_payload=plan.get("config") if isinstance(plan.get("config"), dict) else {},
+            policy_payload=plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {},
+            credential_updates=credential_updates,
+            apply=True,
+            command_name="mms-config-web",
+            expected_bundle_revision=_expected_bundle_revision_from_payload(payload),
+            route_scope_provider_ids=_route_scope_provider_ids_from_payload(payload),
+            route_refresh_provider_ids=_route_refresh_provider_ids_from_payload(payload),
+        )
+        secret_backend = write_registry_v2_webui_secret_backend(
+            config_dir=config_root or None,
+            credential_updates=credential_updates,
+            command_name="mms-config-web",
+        )
+        publish = publish_preview_bundle(config_dir=config_root or None)
+        verify = verify_approved_bundle(config_dir=config_root or None)
+    except Exception as exc:
+        rollback = _rollback_registry_v2_preview_apply(
+            config_root=config_root,
+            candidate=candidate,
+            secret_backend=secret_backend,
+            generated_snapshot=generated_snapshot,
+            reason=f"{type(exc).__name__}: {exc}",
+        )
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "registry_v2_save_plan": v2_plan,
+            "rollback": rollback,
+        }
+
+    verified = bool(verify.get("verified"))
+    runtime_ready = publish.get("runtime_ready") is True
+    missing_api_keys = int(publish.get("missing_api_key_count") or 0)
+    missing_base_urls = int(publish.get("missing_base_url_count") or 0)
+    provider_route_count = int(publish.get("provider_route_count") or 0)
+    route_count = int(publish.get("route_count") or 0)
+    runtime_next_action = {}
+    if verified and not runtime_ready:
+        if missing_api_keys:
+            runtime_next_action = {
+                "label": "填写 API Key 并勾选更新凭据后重新写入预览 DB + 发布",
+                "command": "在 WebUI 通道里输入 API Key，勾选更新凭据，再点写入预览 DB + 发布",
+            }
+        elif missing_base_urls:
+            runtime_next_action = {
+                "label": "补齐 OpenAI/Anthropic base URL 后重新写入预览 DB + 发布",
+                "command": "在 WebUI 通道里补齐 base URL，再点写入预览 DB + 发布",
+            }
+        elif provider_route_count <= 0:
+            runtime_next_action = {
+                "label": "给通道添加至少一个可见模型后重新写入预览 DB + 发布",
+                "command": "在 WebUI 通道里添加 fallback/extra/可见模型，再点写入预览 DB + 发布",
+            }
+    credential_backend = {
+        "schema": secret_backend.get("schema"),
+        "skipped": bool(secret_backend.get("skipped")),
+        "path": secret_backend.get("path"),
+        "count": secret_backend.get("updated_secret_count", secret_backend.get("secret_count", 0)),
+        "secret_count": secret_backend.get("secret_count", 0),
+        "preserved_count": secret_backend.get("preserved_secret_count", 0),
+        "backup_path": secret_backend.get("backup_path", ""),
+        "plaintext_store": bool(secret_backend.get("plaintext_secret_store")),
+    }
+    rollback: dict[str, Any] = {}
+    if not verified:
+        rollback = _rollback_registry_v2_preview_apply(
+            config_root=config_root,
+            candidate=candidate,
+            secret_backend=secret_backend,
+            generated_snapshot=generated_snapshot,
+            reason="verify_failed",
+        )
+    return {
+        "ok": verified,
+        "schema": "mms.setup_web.registry_v2_apply_result.v1",
+        "status": "verified" if verified and runtime_ready else "verified_not_runtime_ready" if verified else "failed_verify",
+        "runtime_ready": runtime_ready,
+        "runtime_ready_reason": publish.get("runtime_ready_reason") or "",
+        "runtime_blockers": {
+            "missing_api_key_count": missing_api_keys,
+            "missing_base_url_count": missing_base_urls,
+            "provider_route_count": provider_route_count,
+            "route_count": route_count,
+        },
+        "next_action": runtime_next_action,
+        "summary": plan.get("summary") or {},
+        "warnings": plan.get("warnings") or [],
+        "paths": plan.get("paths") or {},
+        "registry_v2_save_plan": v2_plan,
+        "route_publish_guard": _sanitize_for_output(route_publish_guard),
+        "candidate": _sanitize_for_output(candidate),
+        "credential_backend": credential_backend,
+        "publish": _sanitize_for_output(publish),
+        "verify": _sanitize_for_output(verify),
+        "rollback": rollback,
+    }
+
+
+def _provider_from_payload(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     provider_payload = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
     provider_id = _safe_text(payload.get("provider_id") or provider_payload.get("id"))
     provider = dict(provider_payload)
+    cfg = _hydrate_preview_config_from_latest_bundle(cfg, config_path=config_path, command_name=command_name)
     cfg_provider_ids = {
         _safe_text(item.get("id"))
         for item in (cfg.get("providers", []) if isinstance(cfg, dict) else [])
@@ -1615,7 +2572,7 @@ def _provider_from_payload(cfg: dict[str, Any], payload: dict[str, Any]) -> dict
         provider["anthropic_base_url"] = _safe_text(provider.get("anthropic_base_url")).rstrip("/")
     if provider.get("base_url") and not provider.get("openai_base_url"):
         provider["openai_base_url"] = _safe_text(provider.get("base_url")).rstrip("/")
-    return provider
+    return _resolve_preview_provider_secret(provider, config_path=config_path, command_name=command_name)
 
 
 def probe_provider_models(provider: dict[str, Any], *, force_refresh: bool = False) -> dict[str, Any]:
@@ -1623,8 +2580,14 @@ def probe_provider_models(provider: dict[str, Any], *, force_refresh: bool = Fal
     return mms_core._probe_models(provider, emit_output=False, force_refresh=force_refresh)  # noqa: SLF001
 
 
-def test_provider_models(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    provider = _provider_from_payload(cfg, payload)
+def test_provider_models(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    provider = _provider_from_payload(cfg, payload, config_path=config_path, command_name=command_name)
     started = time.time()
     try:
         probe = probe_provider_models(provider, force_refresh=_truthy(payload.get("force_refresh"), True))
@@ -1668,8 +2631,15 @@ def _join_anthropic_messages_url(base_url: str) -> str:
     return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
 
 
-def run_model_smoke(cfg: dict[str, Any], payload: dict[str, Any], *, chat: bool = False) -> dict[str, Any]:
-    provider = _provider_from_payload(cfg, payload)
+def run_model_smoke(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    chat: bool = False,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    provider = _provider_from_payload(cfg, payload, config_path=config_path, command_name=command_name)
     model = _safe_text(payload.get("model") or payload.get("model_id"))
     if not model:
         return {"ok": False, "error": "请选择要测试的模型。"}
@@ -1766,75 +2736,1067 @@ _HTML_PAGE = r"""<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MMS 配置中心</title>
   <style>
-    :root{
-      --ink:#16211d; --muted:#65746f; --paper:#f7f1e6; --panel:#fffaf0; --panel2:#fefdf8;
-      --line:#d9cdb8; --accent:#0f7b5f; --accent2:#db7c26; --danger:#b42318; --ok:#16803d;
-      --shadow:0 24px 70px rgba(55,45,28,.14); --mono:"SFMono-Regular","Cascadia Code",monospace;
-      --sans:"Avenir Next","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
-      --serif:"Songti SC","STSong","Noto Serif CJK SC",serif;
+    :root {
+      --bg:      oklch(97% 0.004 250);
+      --surface: oklch(100% 0 0);
+      --fg:      oklch(16% 0.015 250);
+      --muted:   oklch(50% 0.015 250);
+      --border:  oklch(88% 0.008 250);
+      --accent:  oklch(54% 0.16 155);
+
+      --ok:      oklch(55% 0.14 145);
+      --warn:    oklch(68% 0.11 80);
+      --danger:  oklch(55% 0.18 25);
+
+      --accent-soft:  color-mix(in oklch, var(--accent) 10%, transparent);
+      --accent-hover: color-mix(in oklch, var(--accent) 80%, black);
+      --fg-soft:      color-mix(in oklch, var(--fg) 5%, transparent);
+      --fg-ghost:     color-mix(in oklch, var(--fg) 8%, transparent);
+      --ok-soft:      color-mix(in oklch, var(--ok) 12%, transparent);
+      --warn-soft:    color-mix(in oklch, var(--warn) 12%, transparent);
+      --danger-soft:  color-mix(in oklch, var(--danger) 12%, transparent);
+
+      --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.04);
+      --shadow:    0 1px 3px oklch(0% 0 0 / 0.06), 0 1px 2px oklch(0% 0 0 / 0.04);
+      --shadow-md: 0 4px 6px -1px oklch(0% 0 0 / 0.05), 0 2px 4px -2px oklch(0% 0 0 / 0.04);
+      --shadow-lg: 0 10px 15px -3px oklch(0% 0 0 / 0.05), 0 4px 6px -4px oklch(0% 0 0 / 0.03);
+
+      --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+      --radius:    10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+
+      --gap-xs: 6px;
+      --gap-sm: 10px;
+      --gap-md: 16px;
+      --gap-lg: 24px;
+      --gap-xl: 32px;
     }
-    *{box-sizing:border-box} body{margin:0;color:var(--ink);font-family:var(--sans);background:radial-gradient(circle at 10% -5%,#d7eadb 0,transparent 34rem),radial-gradient(circle at 92% 10%,#ffe1b8 0,transparent 30rem),linear-gradient(135deg,#fbf5e8,#eef4ef 58%,#f6efe2);}
-    header{padding:34px clamp(18px,4vw,56px) 18px;display:grid;grid-template-columns:1.4fr .6fr;gap:20px;align-items:end}
-    h1{margin:0;font-family:var(--serif);font-size:clamp(34px,6vw,70px);line-height:.95;letter-spacing:-.05em}.lead{max-width:760px;color:#46564f;font-size:17px;line-height:1.7}.statusbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill{border:1px solid var(--line);border-radius:999px;padding:7px 11px;background:rgba(255,250,240,.7);font-size:12px;color:#55645f}.pill.ok{color:var(--ok);border-color:#94d3a2}.pill.warn{color:#9a5b00;border-color:#ecc37d}
-    .shell{display:grid;grid-template-columns:280px 1fr;gap:18px;padding:0 clamp(18px,4vw,56px) 48px}.side{position:sticky;top:12px;align-self:start;border:1px solid var(--line);background:rgba(255,250,240,.78);backdrop-filter:blur(16px);border-radius:26px;padding:14px;box-shadow:var(--shadow)}.navbtn{width:100%;border:0;background:transparent;text-align:left;border-radius:18px;padding:13px 14px;margin:3px 0;cursor:pointer;color:#44554e;font-weight:700}.navbtn.active{background:#163d32;color:#fff}.navbtn small{display:block;font-weight:500;opacity:.75;margin-top:4px}.content{display:grid;gap:18px}.panel{border:1px solid var(--line);border-radius:28px;background:rgba(255,250,240,.88);padding:22px;box-shadow:var(--shadow)}.panel h2{margin:0 0 10px;font-size:25px}.panel p{color:var(--muted);line-height:1.65}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{border:1px solid var(--line);border-radius:20px;background:var(--panel2);padding:16px}.span4{grid-column:span 4}.span5{grid-column:span 5}.span6{grid-column:span 6}.span7{grid-column:span 7}.span8{grid-column:span 8}.span12{grid-column:span 12}.provider-editor{position:sticky;top:14px;align-self:start;max-height:calc(100vh - 28px);overflow:auto;scrollbar-gutter:stable}
-    label{display:block;font-size:12px;font-weight:800;color:#566760;margin:0 0 6px}input,select,textarea{width:100%;border:1px solid #cfc2ae;background:#fffef8;border-radius:14px;padding:11px 12px;font:inherit;color:var(--ink)}textarea{min-height:92px;resize:vertical;font-family:var(--mono);font-size:13px}.checks{display:flex;gap:8px;flex-wrap:wrap}.check{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:8px 10px;background:#fffef8}.check input{width:auto}.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}button,.button{border:0;border-radius:999px;padding:10px 15px;background:#173d33;color:#fff;font-weight:800;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}button.secondary{background:#f0e4d0;color:#22342e}button.ghost{background:transparent;color:#173d33;border:1px solid var(--line)}button.danger{background:var(--danger)}button:disabled{opacity:.5;cursor:not-allowed}.provider-list{display:grid;gap:8px}.provider-item{border:1px solid var(--line);border-radius:18px;padding:12px;background:#fffef8;cursor:pointer}.provider-item.active{outline:3px solid rgba(15,123,95,.18);border-color:var(--accent)}.provider-item strong{display:block}.muted{color:var(--muted)}.mono{font-family:var(--mono);font-size:12px}.tag{display:inline-block;border-radius:999px;background:#e9f3ed;color:#0f674f;padding:4px 8px;font-size:12px;margin:2px}.tag.off{background:#f3e2dc;color:#9f2d20}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:20px;background:#fffef8}table{width:100%;border-collapse:collapse;min-width:860px}th,td{border-bottom:1px solid #eadfce;padding:10px;text-align:left;font-size:13px}th{position:sticky;top:0;background:#f8efdf;z-index:1}td input[type="checkbox"]{width:auto}.chips{display:flex;flex-wrap:wrap;gap:7px}.chip{border:1px solid #d8c8b1;border-radius:999px;padding:6px 9px;background:#fffdf5;font-size:12px}.chip button{padding:0 4px;background:transparent;color:#8a2d22}.result{white-space:pre-wrap;background:#13231d;color:#e8f8ed;border-radius:18px;padding:14px;max-height:420px;overflow:auto;font-family:var(--mono);font-size:12px}.diff{white-space:pre;overflow:auto;background:#111d19;color:#e8f8ed;border-radius:18px;padding:16px;max-height:520px;font-family:var(--mono);font-size:12px}.toast{position:fixed;right:18px;bottom:18px;background:#163d32;color:#fff;border-radius:18px;padding:14px 16px;box-shadow:var(--shadow);max-width:520px;display:none}.toast.show{display:block}.danger-text{color:var(--danger);font-weight:800}.ok-text{color:var(--ok);font-weight:800}.hide{display:none!important}
-    .oc-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}.oc-metric{border:1px solid var(--line);border-radius:18px;background:#fffef8;padding:12px}.oc-metric strong{display:block;font-size:22px;color:#173d33}.oc-advanced{border:1px dashed #c9b898;border-radius:20px;padding:14px;background:rgba(255,253,248,.7)}.oc-advanced summary{cursor:pointer;font-weight:900;color:#173d33}.filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0}.filterbar button{background:#f0e4d0;color:#22342e}.filterbar button.active{background:#173d33;color:#fff}.empty-row{padding:18px;color:var(--muted);text-align:center}.default-route{max-width:300px;white-space:normal}.oc-order-note{border-left:4px solid #173d33;background:#f7efe0;border-radius:14px;padding:10px 12px;margin:12px 0;color:#46564f}.oc-enabled{width:auto}
-    @media(max-width:980px){header{grid-template-columns:1fr}.statusbar{justify-content:flex-start}.shell{grid-template-columns:1fr}.side,.provider-editor{position:relative;top:auto;max-height:none;overflow:visible}.span4,.span5,.span6,.span7,.span8,.span12{grid-column:span 12}.oc-summary{grid-template-columns:1fr}}
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.55;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+    img, svg { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; }
+    p { text-wrap: pretty; margin: 0; }
+    h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+    pre { margin: 0; }
+
+    /* ===== Header ===== */
+    header {
+      padding: 24px clamp(18px, 4vw, 56px) 16px;
+      display: grid;
+      grid-template-columns: 1.5fr .5fr;
+      gap: 20px;
+      align-items: end;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    h1 {
+      font-size: clamp(26px, 3.5vw, 42px);
+      line-height: 1.15;
+      letter-spacing: -0.025em;
+      font-weight: 700;
+      color: var(--fg);
+    }
+    .lead {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+      max-width: 560px;
+      margin-top: 6px;
+    }
+    .statusbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    /* ===== Shell layout ===== */
+    .shell {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 28px;
+      padding: 24px clamp(18px, 4vw, 56px) 48px;
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+    .side {
+      position: sticky;
+      top: 20px;
+      align-self: start;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 10px;
+      box-shadow: var(--shadow-sm);
+    }
+    .content {
+      display: grid;
+      gap: 24px;
+    }
+
+    /* ===== Sidebar nav ===== */
+    .navbtn {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin: 3px 0;
+      cursor: pointer;
+      color: var(--fg);
+      font-size: 14px;
+      font-weight: 500;
+      transition: all .15s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .navbtn:hover {
+      background: var(--fg-soft);
+    }
+    .navbtn.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+    .navbtn small {
+      display: block;
+      font-size: 11.5px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+    .navbtn.active small { color: rgba(255,255,255,0.82); }
+
+    /* ===== Panels ===== */
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      padding: 28px;
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow .2s ease;
+    }
+    .panel:hover {
+      box-shadow: var(--shadow);
+    }
+    .panel h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel > p:first-of-type {
+      color: var(--muted);
+      font-size: 13.5px;
+      line-height: 1.6;
+      margin-bottom: 22px;
+    }
+    .panel h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--fg);
+    }
+
+    /* ===== Cards ===== */
+    .card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      padding: 18px;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .card:hover {
+      border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
+    }
+
+    /* ===== Grid system ===== */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+    }
+    .span4 { grid-column: span 4; }
+    .span5 { grid-column: span 5; }
+    .span6 { grid-column: span 6; }
+    .span7 { grid-column: span 7; }
+    .span8 { grid-column: span 8; }
+    .span12 { grid-column: span 12; }
+
+    /* ===== Forms ===== */
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      margin: 0 0 6px;
+      letter-spacing: 0.01em;
+    }
+    input, select, textarea {
+      width: 100%;
+      border: 1.5px solid var(--border);
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 14px;
+      color: var(--fg);
+      transition: border-color .15s ease, box-shadow .15s ease, outline .15s ease;
+    }
+    input:hover, select:hover, textarea:hover {
+      border-color: color-mix(in oklch, var(--fg) 25%, var(--border));
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    textarea {
+      min-height: 88px;
+      resize: vertical;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    select { cursor: pointer; }
+    input[type="password"] { font-family: var(--font-mono); }
+
+    /* ===== Checkbox groups ===== */
+    .checks {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      padding: 7px 13px;
+      background: var(--surface);
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease;
+      user-select: none;
+    }
+    .check:hover {
+      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+      background: var(--accent-soft);
+    }
+    .check input {
+      width: auto;
+      cursor: pointer;
+      accent-color: var(--accent);
+      margin: 0;
+    }
+
+    /* ===== Buttons ===== */
+    button, .button {
+      border: 0;
+      border-radius: 999px;
+      padding: 9px 17px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
+      box-shadow: var(--shadow-sm);
+    }
+    button:hover, .button:hover {
+      background: var(--accent-hover);
+      box-shadow: var(--shadow);
+    }
+    button:active, .button:active { transform: translateY(1px); }
+    button.secondary, .button.secondary {
+      background: var(--fg-ghost);
+      color: var(--fg);
+      box-shadow: none;
+    }
+    button.secondary:hover, .button.secondary:hover {
+      background: var(--fg-soft);
+    }
+    button.ghost, .button.ghost {
+      background: transparent;
+      color: var(--fg);
+      border: 1.5px solid var(--border);
+      box-shadow: none;
+    }
+    button.ghost:hover, .button.ghost:hover {
+      border-color: var(--fg);
+      background: var(--fg-soft);
+    }
+    button.danger, .button.danger { background: var(--danger); }
+    button.danger:hover, .button.danger:hover {
+      background: color-mix(in oklch, var(--danger) 82%, black);
+    }
+    button:disabled, .button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: center;
+    }
+
+    /* ===== Provider list ===== */
+    .provider-list { display: grid; gap: 6px; }
+    .provider-item {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all .15s ease;
+    }
+    .provider-item:hover {
+      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+      box-shadow: var(--shadow-sm);
+    }
+    .provider-item.active {
+      outline: none;
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .provider-item strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    /* ===== Channel layout: sidebar + main ===== */
+    .channel-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .channel-sidebar {
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 120px);
+      overflow: auto;
+      scrollbar-gutter: stable;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .channel-sidebar .btns {
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+    .channel-main {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      min-width: 0;
+    }
+    .channel-main .provider-editor {
+      position: static;
+      max-height: none;
+      overflow: visible;
+      align-self: stretch;
+    }
+
+    /* ===== Provider tabs ===== */
+    .provider-tabs {
+      display: flex;
+      gap: 2px;
+      border-bottom: 1.5px solid var(--border);
+      margin-bottom: 4px;
+      padding: 0 2px;
+    }
+    .tab-btn {
+      background: transparent;
+      border: 0;
+      border-bottom: 2.5px solid transparent;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all .15s ease;
+      border-radius: var(--radius) var(--radius) 0 0;
+      box-shadow: none;
+      margin-bottom: -1.5px;
+    }
+    .tab-btn:hover {
+      color: var(--fg);
+      background: var(--fg-soft);
+    }
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .tab-panel {
+      display: none;
+      animation: fadeIn .2s ease both;
+    }
+    .tab-panel.active {
+      display: block;
+    }
+
+    .model-section {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .model-section h3 {
+      font-size: 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .model-section > p {
+      color: var(--muted);
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+
+    /* ===== Pills ===== */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 11px;
+      background: var(--surface);
+      font-size: 12px;
+      color: var(--muted);
+      box-shadow: var(--shadow-sm);
+    }
+    .pill.ok {
+      color: var(--ok);
+      border-color: var(--ok-soft);
+      background: var(--ok-soft);
+    }
+    .pill.warn {
+      color: var(--warn);
+      border-color: var(--warn-soft);
+      background: var(--warn-soft);
+    }
+
+    /* ===== Tags ===== */
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 600;
+      margin: 2px;
+      letter-spacing: 0.01em;
+    }
+    .tag.off {
+      background: var(--fg-soft);
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    /* ===== Tables ===== */
+    .table-wrap {
+      overflow: auto;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 860px;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 1;
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    td input[type="checkbox"] {
+      width: auto;
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
+    tbody tr {
+      transition: background .1s ease;
+    }
+    tbody tr:hover {
+      background: var(--fg-soft);
+    }
+
+    /* ===== Chips ===== */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 11px;
+      background: var(--surface);
+      font-size: 12px;
+      transition: border-color .15s ease;
+    }
+    .chip:hover {
+      border-color: color-mix(in oklch, var(--accent) 25%, var(--border));
+    }
+    .chip button {
+      padding: 0 4px;
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      cursor: pointer;
+      font-size: 15px;
+      line-height: 1;
+      border-radius: 4px;
+      box-shadow: none;
+    }
+    .chip button:hover { color: var(--danger); }
+
+    /* ===== Result / Diff blocks ===== */
+    .result, .diff {
+      white-space: pre-wrap;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      max-height: 420px;
+      overflow: auto;
+      color: var(--fg);
+      box-shadow: inset var(--shadow-sm);
+    }
+    .diff { max-height: 320px; }
+
+    /* ===== OpenCode metrics ===== */
+    .oc-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .oc-metric {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 16px;
+      text-align: center;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .oc-metric:hover {
+      border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
+      box-shadow: var(--shadow-sm);
+    }
+    .oc-metric strong {
+      display: block;
+      font-size: 22px;
+      color: var(--fg);
+      margin: 6px 0;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .oc-metric .muted { font-size: 11px; }
+    .oc-metric .mono {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .oc-advanced {
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      background: var(--bg);
+      transition: border-color .15s ease;
+    }
+    .oc-advanced:hover {
+      border-color: color-mix(in oklch, var(--accent) 25%, var(--border));
+    }
+    .oc-advanced summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--fg);
+      font-size: 14px;
+      user-select: none;
+    }
+    .oc-advanced summary::marker { color: var(--muted); }
+
+    .oc-order-note {
+      border-left: 3px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 12px 16px;
+      margin: 14px 0;
+      color: var(--fg);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .oc-enabled {
+      width: auto;
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
+
+    /* ===== Filter bar ===== */
+    .filterbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 14px 0;
+    }
+    .filterbar button {
+      background: var(--fg-ghost);
+      color: var(--fg);
+      box-shadow: none;
+      font-size: 13px;
+      padding: 7px 13px;
+    }
+    .filterbar button.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* ===== Empty / default helpers ===== */
+    .empty-row {
+      padding: 22px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 14px;
+    }
+    .default-route {
+      max-width: 300px;
+      white-space: normal;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ===== Toast ===== */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      padding: 14px 22px;
+      background: var(--fg);
+      color: var(--surface);
+      border-radius: var(--radius-lg);
+      opacity: 0;
+      transform: translateY(16px) scale(0.96);
+      transition: opacity .35s cubic-bezier(.4,0,.2,1), transform .35s cubic-bezier(.4,0,.2,1);
+      pointer-events: none;
+      z-index: 100;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: var(--shadow-lg);
+      max-width: 400px;
+      word-break: break-word;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    /* ===== Utilities ===== */
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .mono {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .hide { display: none !important; }
+
+    /* ===== Section entrance animation ===== */
+    [data-section] {
+      animation: fadeIn .25s ease both;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 980px) {
+      header { grid-template-columns: 1fr; }
+      .statusbar { justify-content: flex-start; }
+      .shell { grid-template-columns: 1fr; padding: 16px; }
+      .side, .provider-editor {
+        position: relative;
+        top: auto;
+        max-height: none;
+        overflow: visible;
+      }
+      .channel-layout { grid-template-columns: 1fr; }
+      .channel-sidebar {
+        position: relative;
+        top: auto;
+        max-height: none;
+        overflow: visible;
+      }
+      .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
+      .oc-summary { grid-template-columns: 1fr 1fr; }
+      .panel { padding: 20px; }
+    }
   </style>
 </head>
 <body>
 <header>
-  <div><h1>MMS 配置中心</h1><p class="lead">不是展示页：这里可以配置通道、拉取模型、隐藏/补充模型、标记能力、测试模型、设置 fallback，并在预览 diff 后直接走 backup + audit 保存。</p></div>
+  <div>
+    <h1>MMS 配置中心</h1>
+    <p class="lead">不是展示页：这里可以配置通道、拉取模型、隐藏/补充模型、标记能力、测试模型、设置 fallback。保存前先预览；stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
+  </div>
   <div class="statusbar" id="statusbar"><span class="pill warn">加载中</span></div>
 </header>
 <div class="shell">
   <aside class="side" id="nav"></aside>
   <main class="content">
-    <section class="panel" data-section="channel"><h2>通道配置</h2><p>先建通道：内部 ID、显示名、OpenAI/Anthropic URL、API Key、协议和模型列表接口。Key 只会通过 POST 发送，不会回显。</p><div class="grid"><div class="card span4"><div class="provider-list" id="providerList"></div><div class="btns"><button id="addProvider" class="secondary">+ 添加通道</button><button id="duplicateProvider" class="ghost">复制当前</button></div></div><div class="card span8 provider-editor" id="providerForm"></div></div></section>
-    <section class="panel" data-section="models"><h2>模型列表</h2><p>可拉取远端列表，也可像 NewAPI 一样手动补充；取消“显示”会写入 provider.hidden_models。拉取只更新缓存/当前表格，不会自动写入 fallback_models；需要固定保留的模型请用“手动补充模型”。</p><div class="grid"><div class="card span12"><div class="btns"><button id="fetchModels">拉取当前通道模型</button><button id="testList" class="secondary">测试 /models</button><input id="modelSearch" placeholder="搜索模型" style="max-width:260px"></div><label style="margin-top:14px">手动补充模型（逗号或换行分隔）</label><textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea><div class="btns"><button id="addManualModels" class="secondary">添加到列表</button><button id="clearHidden" class="ghost">取消当前通道全部隐藏</button><button id="clearAllStaleHidden" class="ghost">一键清理全部通道过期隐藏项</button></div><div id="modelChips" class="chips" style="margin-top:10px"></div></div><div class="card span12" id="staleHiddenBox"></div><div class="span12 table-wrap"><table id="modelTable"></table></div></div></section>
-    <section class="panel" data-section="test"><h2>模型测试</h2><p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p><div class="grid"><div class="card span5"><label>测试通道</label><select id="testProvider"></select><label>测试模型</label><select id="testModel"></select><label>协议</label><select id="testProtocol"><option value="auto">auto</option><option value="anthropic_messages">anthropic_messages</option><option value="openai_chat_completions">openai_chat_completions</option></select><label>Prompt</label><textarea id="testPrompt">只回复 pong</textarea><div class="btns"><button id="testModelBtn">Ping 模型</button><button id="chatTestBtn" class="secondary">Simple chat</button></div></div><div class="card span7"><div class="result" id="testResult">暂无测试结果</div></div></div></section>
-    <section class="panel" data-section="fallback"><h2>Fallback 设置</h2><p>这里会写入 config.toml 的 [rescue] 和 [vision_sidecar]，用于失败交接和 text-only 模型的图片 sidecar。</p><div class="grid"><div class="card span6"><h3>Rescue fallback</h3><label>fallback_model</label><input id="rescueModel" placeholder="deepseek-v4-flash"><label>fallback_cli</label><select id="rescueCli"><option value="">不指定</option><option>codex</option><option>claude</option><option>opencode</option><option>agy</option></select><div class="check" style="margin-top:10px"><input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span></div></div><div class="card span6"><h3>Vision sidecar</h3><div class="check"><input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span></div><label>provider_id</label><select id="visionProvider"></select><label>model</label><select id="visionModel"></select><p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为“当前配置值”。</p><label>候选列表</label><div id="visionCandidates" class="grid"></div><div class="btns"><button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button></div></div></div></section>
-    <section class="panel" data-section="runtime"><h2>运行默认值</h2><p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p><div class="grid"><div class="card span5"><label>preferred CLI</label><select id="preferredCli"><option>opencode</option><option>codex</option><option>claude</option><option>agy</option></select><label>coding preset model（可选）</label><input id="codingModel" placeholder="gpt-5.5"></div><div class="card span7"><label>OpenCode default profile</label><select id="opencodeProfile"><option>agent</option><option>omo</option><option>raw</option></select><p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p></div><div class="card span12"><h3>OpenCode Agent Roster</h3><p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p><div class="oc-summary" id="opencodeOverrideSummary"></div><div class="oc-order-note">Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。</div><details class="oc-advanced" id="opencodeAdvanced"><summary>Advanced: OpenCode per-agent roster</summary><div class="filterbar" id="opencodeAgentFilters"></div><div class="table-wrap"><table id="opencodeAgents"></table></div></details></div></div></section>
-    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。真正写入时会使用 MMS audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="saveBtn" class="danger">确认保存</button></div><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意写入配置</span></div><label style="margin-top:12px">输入确认文字：保存配置</label><input id="confirmPhrase" placeholder="保存配置"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
-    <section class="panel" data-section="refs"><h2>本地参考</h2><p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p><div class="grid" id="refsGrid"></div></section>
+    <section class="panel" data-section="source">
+      <h2>真源状态</h2>
+      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态。</p>
+      <div class="grid" id="sourceStatus"></div>
+    </section>
+
+
+    <!-- 通道配置 -->
+    <section class="panel" data-section="channel">
+      <h2>通道配置</h2>
+      <p>先建通道：内部 ID、显示名、OpenAI/Anthropic URL、API Key、协议和模型列表接口。Key 只会通过 POST 发送，不会回显。</p>
+      <div class="channel-layout">
+        <div class="channel-sidebar">
+          <div class="provider-list" id="providerList"></div>
+          <div class="btns">
+            <button id="addProvider" class="secondary">+ 添加通道</button>
+            <button id="duplicateProvider" class="ghost">复制当前</button>
+          </div>
+        </div>
+        <div class="channel-main">
+          <div class="provider-tabs">
+            <button class="tab-btn active" data-tab="config" onclick="switchProviderTab('config')">通道配置</button>
+            <button class="tab-btn" data-tab="models" onclick="switchProviderTab('models')">模型配置</button>
+          </div>
+          <div class="tab-panel active" data-tab-panel="config">
+            <div class="card provider-editor" id="providerForm"></div>
+          </div>
+          <div class="tab-panel" data-tab-panel="models">
+            <div class="model-section">
+              <p class="muted">这是当前通道的模型清单，不是全局模型池。手动补充会写入当前通道的 extra_models；取消勾选「显示」会写入当前通道的 hidden_models。</p>
+              <div class="card">
+                <div class="btns">
+                  <button id="fetchModels">拉取当前通道模型</button>
+                  <button id="testList" class="secondary">测试 /models</button>
+                  <label class="check"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>拉取后自动标记缺失旧 route 为待清理（本页临时）</span></label>
+                  <input id="modelSearch" placeholder="搜索模型" style="max-width:260px">
+                </div>
+                <label style="margin-top:14px">手动补充当前通道模型（extra_models，逗号或换行分隔）</label>
+                <textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea>
+                <div class="btns">
+                  <button id="addManualModels" class="secondary">添加到补充模型库</button>
+                  <button id="clearHidden" class="ghost">取消当前通道全部隐藏</button>
+                  <button id="clearAllStaleHidden" class="ghost">移除全部通道未匹配隐藏规则</button>
+                </div>
+              </div>
+              <div id="modelChips" class="card"></div>
+              <div class="card" id="staleHiddenBox"></div>
+              <div class="table-wrap"><table id="modelTable"></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 模型测试 -->
+    <section class="panel" data-section="test">
+      <h2>模型测试</h2>
+      <p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p>
+      <div class="grid">
+        <div class="card span5">
+          <label>测试通道</label><select id="testProvider"></select>
+          <label>测试模型</label><select id="testModel"></select>
+          <label>协议</label>
+          <select id="testProtocol">
+            <option value="auto">auto</option>
+            <option value="anthropic_messages">anthropic_messages</option>
+            <option value="openai_chat_completions">openai_chat_completions</option>
+          </select>
+          <label>Prompt</label>
+          <textarea id="testPrompt">只回复 pong</textarea>
+          <div class="btns">
+            <button id="testModelBtn">Ping 模型</button>
+            <button id="chatTestBtn" class="secondary">Simple chat</button>
+          </div>
+        </div>
+        <div class="card span7">
+          <div class="result" id="testResult">暂无测试结果</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fallback -->
+    <section class="panel" data-section="fallback">
+      <h2>Fallback 设置</h2>
+      <p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。</p>
+      <div class="grid">
+        <div class="card span6">
+          <h3>Rescue fallback</h3>
+          <label>fallback_model</label>
+          <input id="rescueModel" placeholder="deepseek-v4-flash">
+          <label>fallback_cli</label>
+          <select id="rescueCli">
+            <option value="">不指定</option>
+            <option>codex</option>
+            <option>claude</option>
+            <option>opencode</option>
+            <option>agy</option>
+          </select>
+          <div class="check" style="margin-top:10px">
+            <input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span>
+          </div>
+        </div>
+        <div class="card span6">
+          <h3>Vision sidecar</h3>
+          <div class="check">
+            <input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span>
+          </div>
+          <label>provider_id</label>
+          <select id="visionProvider"></select>
+          <label>model</label>
+          <select id="visionModel"></select>
+          <p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为「当前配置值」。</p>
+          <label>候选列表</label>
+          <div id="visionCandidates" class="grid"></div>
+          <div class="btns">
+            <button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 运行默认值 -->
+    <section class="panel" data-section="runtime">
+      <h2>运行默认值</h2>
+      <p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p>
+      <div class="grid">
+        <div class="card span5">
+          <label>preferred CLI</label>
+          <select id="preferredCli">
+            <option>opencode</option>
+            <option>codex</option>
+            <option>claude</option>
+            <option>agy</option>
+          </select>
+          <label>coding preset model（可选）</label>
+          <input id="codingModel" placeholder="gpt-5.5">
+        </div>
+        <div class="card span7">
+          <label>OpenCode default profile</label>
+          <select id="opencodeProfile">
+            <option>agent</option>
+            <option>omo</option>
+            <option>raw</option>
+          </select>
+          <p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p>
+        </div>
+        <div class="card span12">
+          <h3>OpenCode Agent Roster</h3>
+          <p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p>
+          <div class="oc-summary" id="opencodeOverrideSummary"></div>
+          <div class="oc-order-note">
+            Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。
+          </div>
+          <details class="oc-advanced" id="opencodeAdvanced">
+            <summary>Advanced: OpenCode per-agent roster</summary>
+            <div class="filterbar" id="opencodeAgentFilters"></div>
+            <div class="table-wrap"><table id="opencodeAgents"></table></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 保存 / 审计 -->
+    <section class="panel" data-section="save">
+      <h2>保存 / 审计</h2>
+      <p id="saveModeLead">保存前先生成 diff。preview root 走 DB candidate + latest-approved publish；stable legacy 使用 audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p>
+      <div class="grid">
+        <div class="card span5">
+          <p class="muted" id="saveModeHint"></p>
+          <div class="btns">
+            <button id="previewPlan">生成保存预览</button>
+            <button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button>
+            <button id="saveBtn" class="danger legacy-save-action">确认保存</button>
+          </div>
+          <details class="oc-advanced" id="advancedPlanTools" style="margin-top:14px">
+            <summary>Advanced / Recovery：plan JSON 与 CLI fallback</summary>
+            <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；下载 JSON 不含明文 key。CLI apply 是无 WebUI 时的 fallback，不是日常主流程。</p>
+            <div class="btns">
+              <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
+              <button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button>
+            </div>
+          </details>
+          <div class="check" style="margin-top:12px">
+            <input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span>
+          </div>
+          <label id="confirmPhraseLabel" style="margin-top:12px">输入确认文字</label>
+          <input id="confirmPhrase" placeholder="保存配置 或 写入预览DB">
+          <label>保存原因 / audit reason</label>
+          <input id="saveReason" value="setup-web-ui:interactive-save">
+          <p class="muted" id="saveCompatibilityNote">stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
+        </div>
+        <div class="card span7">
+          <div class="result" id="saveResult">尚未生成预览</div>
+        </div>
+        <div class="card span12">
+          <h3>保存摘要</h3>
+          <div id="reviewSummary">
+            <p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p>
+          </div>
+        </div>
+        <div class="span12">
+          <h3 style="margin-bottom:8px">Raw diff / 审计详情</h3>
+          <div class="diff" id="diffBox">点击“生成保存预览”</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 本地参考 -->
+    <section class="panel" data-section="refs">
+      <h2>本地参考</h2>
+      <p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p>
+      <div class="grid" id="refsGrid"></div>
+    </section>
   </main>
 </div>
 <div class="toast" id="toast"></div>
 <script>
 const sections=[
-  ['channel','通道配置','URL / Key / 协议'],['models','模型列表','拉取 / 隐藏 / 补充'],['test','模型测试','ping / chat smoke'],['fallback','Fallback','rescue / vision'],['runtime','运行默认值','preferred CLI / OpenCode'],['save','保存审计','diff / backup / audit'],['refs','本地参考','配置契约 / docs']
+  ['source','真源状态','DB / legacy / bundle'],
+  ['channel','通道配置','URL / Key / 协议 / 模型'],
+  ['test','模型测试','ping / chat smoke'],
+  ['fallback','Fallback','rescue / vision'],
+  ['runtime','运行默认值','preferred CLI / OpenCode'],
+  ['save','保存审计','diff / backup / audit'],
+  ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false;
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set(); let staleCleanupProviders=new Set();
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
 function current(){return state.providers[activeProvider]}
+function touchProvider(id){if(id)touchedProviders.add(id)}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
-function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('channel') }
-function renderStatus(){const providers=state.providers||[];$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
+function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
+function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
+function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;const modeName=preview?'MMF preview / DB truth':'MMS stable / legacy compatibility';if($('saveModeHint')){$('saveModeHint').innerHTML=preview?'当前是 <strong>mmf + ~/.config/mms-next</strong>：日常只需要“生成保存预览” → “写入预览 DB + 发布”。':'当前是 <strong>mms stable</strong>：使用 legacy audited save，仍会 backup + audit。'}if($('saveModeLead')){$('saveModeLead').textContent=preview?'保存前先生成 diff。写入只落到当前 preview root 的 DB candidate，并发布 latest-approved bundle；API Key 不会出现在 diff 或响应里。':'保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；API Key 不会出现在 diff 或响应里。'}if($('confirmPhraseLabel')){$('confirmPhraseLabel').textContent=preview?'输入确认文字：写入预览DB':'输入确认文字：保存配置'}if($('confirmPhrase')){$('confirmPhrase').placeholder=preview?'写入预览DB':'保存配置'}if($('saveCompatibilityNote')){$('saveCompatibilityNote').textContent=preview?'旧版“确认保存”在 mmf 中已隐藏；下载 JSON / CLI apply 只在 Advanced / Recovery 里作为 fallback。':'stable legacy 保存写入 config.toml / credentials.sh / model-policy，并保留 backup + audit；preview DB 发布请用 mmf。'}document.querySelectorAll('.legacy-save-action').forEach(el=>el.classList.toggle('hide',preview));if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'MMF preview 已隐藏 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').classList.toggle('hide',!preview);$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?modeName:'Stable root 不能写 preview DB，请用 mmf preview root'}if($('advancedPlanTools')){$('advancedPlanTools').open=false}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
+function renderSourceStatus(){
+  const box=$('sourceStatus');if(!box)return;
+  const status=state.model_source_status||{};
+  const consumer=state.consumer_bundle_status||{};
+  const promotion=state.config_v2_promotion_plan||{};
+  const readiness=state.config_v2_release_readiness||{};
+  const root=status.root||consumer.root||{};
+  const db=status.registry_db||{};
+  const legacy=status.legacy_import||{};
+  const candidates=legacy.candidates||db.legacy_import_candidates||{};
+  const bundle=status.generated_bundle||{};
+  const revisions=consumer.component_revisions||{};
+  const rules=consumer.consumer_rules||[];
+  const consumerFiles=consumer.files||{};
+  const counts=db.counts||{};
+  const safety=promotion.promotion_safety||{};
+  const backup=promotion.stable_backup_plan||{};
+  const compare=promotion.bundle_comparison||{};
+  const comparePreview=compare.preview||{};
+  const compareStable=compare.stable||{};
+  const readinessNext=readiness.next_action||{};
+  const readinessBlocked=Array.isArray(readiness.blocked_requirements)?readiness.blocked_requirements:[];
+  const readinessReqs=Array.isArray(readiness.requirements)?readiness.requirements:[];
+  const readinessOk=readiness.ready_for_human_gate?'ok':'warn';
+  const okBundle=bundle.verified?'ok':'warn';
+  const okConsumer=consumer.verified?'ok':'warn';
+  const okPromotion=promotion.ready_for_human_review?'ok':'warn';
+  const ready=bundle.runtime_ready===true?'ready':bundle.runtime_ready===false?'not ready':'unknown';
+  const bundleCommand=(root.command||state.command||'mms')==='mmf'?'mmf config bundle --json':'mms config bundle --json';
+  box.innerHTML=`<div class="card span6"><h3>Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${escapeHtml(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">sources ${counts.source_snapshot||0}</span><span class="tag">facts ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy Import</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">providers ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">conflicts ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">candidates ${escapeHtml(candidates.status||'not_imported')}</span><span class="tag">candidate routes ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>Latest Approved Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${escapeHtml(bundle.status||'missing')}</span><span class="tag">verified ${bundle.verified?'yes':'no'}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">missing keys ${bundle.router_missing_api_key_count||0}</span><span class="tag">files ${bundle.file_count||0}</span></div><div class="card span12"><h3>Consumer Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${escapeHtml(consumer.status||'missing')}</span><span class="tag">verified ${consumer.verified?'yes':'no'}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">files ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>Promotion Plan / Human Gate</h3><p class="muted">stable backup + bundle comparison 是只读审查；apply 仍停在 human gate。</p><span class="tag ${okPromotion==='ok'?'':'off'}">${escapeHtml(promotion.status||'not_ready')}</span><span class="tag">review ${promotion.ready_for_human_review?'ready':'not ready'}</span><span class="tag">apply ${promotion.apply_enabled?'enabled':'disabled'}</span><span class="tag">stable ${escapeHtml(safety.stable_write_policy||'human_only')}</span><span class="tag">backup ${backup.requires_backup_before_apply?'required':'unknown'}</span><span class="tag">would backup ${backup.would_create_backup?'yes':'no'}</span><span class="tag">bundle comparison ${escapeHtml(compare.comparison_status||'-')}</span><p class="muted">preview ${escapeHtml(comparePreview.bundle_revision||comparePreview.status||'-')} → stable ${escapeHtml(compareStable.bundle_revision||compareStable.status||'-')}</p></div><div class="card span12"><h3>4.0 Release Readiness</h3><p class="muted">只读 audit：证明自动检查已到 stable promotion human gate；release_complete 仍为 false。</p><span class="tag ${readinessOk==='ok'?'':'off'}">${escapeHtml(readiness.result||'NOT_READY')}</span><span class="tag">status ${escapeHtml(readiness.status||'not_ready')}</span><span class="tag">release complete ${readiness.release_complete?'yes':'no'}</span><span class="tag">human gate ${readiness.ready_for_human_gate?'ready':'not ready'}</span><span class="tag">blocked ${readinessBlocked.length}</span><span class="tag">requirements ${readinessReqs.filter(r=>r&&r.ok).length}/${readinessReqs.length}</span><span class="tag">blocker ${escapeHtml(readiness.completion_blocker||'-')}</span><p class="muted">blocked requirements: ${escapeHtml(readinessBlocked.length?readinessBlocked.join(', '):'-')}</p><p class="muted">next: <span class="mono">${escapeHtml(readinessNext.command||readinessNext.label||'-')}</span></p></div><div class="card span12"><h3>Raw Status</h3><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer,config_v2_promotion_plan:promotion,config_v2_release_readiness:readiness},null,2))}</div></div>`
+}
 function providerEntries(){return (state.providers||[]).map((p,i)=>({p,i})).sort((a,b)=>{if(!!a.p.enabled!==!!b.p.enabled)return a.p.enabled?-1:1;return a.i-b.i})}
-function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>`<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">enabled</span>':'<span class="tag off">disabled</span>'}${p.has_api_key?'<span class="tag">key set</span>':'<span class="tag off">no key</span>'}<span class="tag">${p.models?.length||0} models</span></div>`).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
+function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>{const keyTag=p.api_key?'<span class="tag">pending key</span>':(p.has_api_key?'<span class="tag">key set</span>':'<span class="tag off">no key</span>');return `<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">enabled</span>':'<span class="tag off">disabled</span>'}${keyTag}<span class="tag">${p.models?.length||0} models</span></div>`}).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
 function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}
 function checks(name,values,allowed){values=values||[];return `<div class="checks">${allowed.map(v=>`<label class="check"><input type="checkbox" name="${name}" value="${v}" ${values.includes(v)?'checked':''}><span>${v}</span></label>`).join('')}</div>`}
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
-function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} $('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...'}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox"><span>保存时更新 credentials.sh（需要填写 API Key；会 backup + audit）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div>`; bindProviderForm();}
-function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);$('pKey').oninput=syncProvider;$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider)}
-function syncProvider(){const p=current(); if(!p)return; const old=p.id;p.id=$('pId').value.trim()||p.id;p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');p.api_key=$('pKey').value;p.update_credentials=$('pUpdateCreds').checked;if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
-function providerModels(p){p=p||{};const map=new Map();const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})})}(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{if(map.has(id))map.get(id).visible=false});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
+function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
+function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);const keyEl=$('pKey');keyEl.oninput=()=>{keyEl.dataset.touched='1';syncProvider()};$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
+function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);const keyEl=$('pKey');const updateEl=$('pUpdateCreds');p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');const keyText=keyEl?keyEl.value.trim():'';const keyTouched=keyEl?.dataset?.touched==='1';if(keyText){p.api_key=keyText;p.pending_api_key=true;p.has_api_key=true;if(updateEl)updateEl.checked=true}else if(keyTouched){p.api_key='';p.pending_api_key=false}p.update_credentials=!!(updateEl&&updateEl.checked);if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
+function derivedAliases(base,p){const ids=(base||[]).map(x=>String(x||''));const tails=ids.map(id=>id.toLowerCase().split('/').pop());const aliases=[];if(tails.some(id=>id.startsWith('claude-sonnet-4-')||id.startsWith('claude-sonnet-4.')))aliases.push('claude-sonnet-4-6');if(tails.some(id=>id.startsWith('claude-opus-4-')||id.startsWith('claude-opus-4.')))aliases.push('claude-opus-4-6');const ident=String([p?.id,p?.name,p?.label,p?.provider_profile].filter(Boolean).join(' ')).toLowerCase();const anthropic=String(p?.anthropic_base_url||p?.default_anthropic_base_url||'').toLowerCase();if((anthropic.includes('xiaomimimo.com')||ident.includes('mimo')||ident.includes('xiaomi'))&&!ident.includes('openrouter')){['mimo-v2.5-pro','mimo-v2.5'].forEach(id=>{if(ids.includes(id)&&!ids.includes(`${id}[1m]`))aliases.push(`${id}[1m]`)})}return aliases}
+function providerModels(p){p=p||{};const map=new Map();const hiddenLower=new Set((p.hidden_models||[]).map(x=>String(x||'').toLowerCase()));const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,visible:r.visible!==false&&!hiddenLower.has(String(r.id).toLowerCase()),capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})})}const baseIds=[...map.keys()];derivedAliases(baseIds.filter(id=>!hiddenLower.has(String(id).toLowerCase())),p).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'derived_alias',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{[...map.keys()].forEach(key=>{if(String(key).toLowerCase()===String(id).toLowerCase())map.get(key).visible=false})});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
 function defaultCaps(id){const l=String(id||'').toLowerCase();return {text:true,vision:['mimo-v2.5','mimo-v2-omni','k2.6','k2.6-code-preview','kimi-k2.5','qwen3.6-plus','qwen3.6-flash','qwen3.5-plus'].includes(l)||l.startsWith('claude-')||l.startsWith('gemini-'),tool_use:/^(claude|gpt|o|qwen|kimi|glm|minimax|gemini)/.test(l),reasoning:/gpt-5|qwen3|kimi-k2|glm-5|deepseek|claude/.test(l),long_context:/1m|long|qwen3|kimi-k2|gpt-5|claude/.test(l),cache_sensitive:/^(qwen|kimi|k2\.|glm|deepseek|minimax|mimo)/.test(l)}}
 function providerCurrentIds(p){return new Set(providerModels(p).map(r=>r.id))}
 function staleHiddenModels(p){const ids=providerCurrentIds(p);return [...new Set([...(p.stale_hidden_models||[]),...(p.hidden_models||[]).filter(id=>!ids.has(id))])]}
 function cleanupStaleHidden(p){const stale=staleHiddenModels(p);const doomed=new Set(stale);p.hidden_models=(p.hidden_models||[]).filter(x=>!doomed.has(x));p.stale_hidden_models=[];return stale.length}
-function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{total+=cleanupStaleHidden(p)});renderProviders();toast(total?`已清理 ${total} 个过期 hidden_models`:'没有需要清理的过期隐藏项')}
+function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{total+=cleanupStaleHidden(p)});renderProviders();toast(total?`已移除 ${total} 条未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}
+function staleRouteModels(p){const approved=(p.approved_route_models&&p.approved_route_models.length?p.approved_route_models:(p.fallback_models||[]));const remote=new Set((p.models||[]).filter(r=>r&&r.id).map(r=>String(r.id)));const extras=new Set((p.extra_models||[]).map(x=>String(x)));return [...new Set(approved.filter(id=>id&&!remote.has(String(id))&&!extras.has(String(id))))]}
+function renderStaleRouteBox(p){const box=$('staleRouteBox');if(!box)return;const stale=staleRouteModels(p);if(!stale.length){box.innerHTML='<strong>缺失旧 route</strong><p class="muted">当前没有“本地已批准但本次拉取未返回”的旧 route。</p>';return}const armed=staleCleanupProviders.has(p.id);box.innerHTML=`<strong>缺失旧 route（默认保留）</strong><p class="muted">这些模型在本地已批准 routes 里，但不在当前拉取到的模型列表里。默认不会删除；如果勾选“拉取后自动标记”，本页后续拉取会自动标记清理。避免上游 /models 抖动或 New API 临时关闭导致下游模型被清空。</p><div class="chips">${stale.slice(0,24).map(m=>`<span class="chip">${escapeHtml(m)}</span>`).join('')}${stale.length>24?`<span class="chip">+${stale.length-24}</span>`:''}</div><div class="btns"><button id="armStaleRouteCleanup" class="ghost">${armed?'已标记：保存时清理这些旧 route':'显式标记保存时清理这些旧 route'}</button></div>`;$('armStaleRouteCleanup').onclick=()=>{staleCleanupProviders.add(p.id);touchProvider(p.id);renderStaleRouteBox(p);toast(`已标记 ${p.id}：下次写入预览 DB 会清理 ${stale.length} 条缺失旧 route`)}}
 function visibleModelsForProvider(providerId,{visionFirst=false,includeHidden=false,enabledOnly=false}={}){let rows=[];(state.providers||[]).forEach(p=>{if(providerId&&p.id!==providerId)return;if(enabledOnly&&p.enabled===false)return;providerModels(p).forEach(r=>{if(!includeHidden&&r.visible===false)return;rows.push({...r,provider_id:p.id,provider_name:p.name||p.id,capabilities:{...(r.capabilities||defaultCaps(r.id))}})})});const seen=new Set();rows=rows.filter(r=>{const key=(providerId?'':r.provider_id+'::')+r.id;if(seen.has(key))return false;seen.add(key);return true});rows.sort((a,b)=>{const av=!!(a.capabilities||{}).vision,bv=!!(b.capabilities||{}).vision;if(visionFirst&&av!==bv)return av?-1:1;return (a.provider_id+' '+a.id).localeCompare(b.provider_id+' '+b.id)});return rows}
 function providerOptions(selected,{blankLabel='请选择通道',auto=false,enabledOnly=false}={}){const opts=[];const providers=providerEntries().filter(({p})=>!enabledOnly||p.enabled||p.id===selected);if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动选择 provider</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>${escapeHtml(blankLabel)}</option>`);opts.push(...providers.map(({p})=>{const disabled=p.enabled?'':' [disabled 当前配置值]';return `<option value="${escapeHtml(p.id)}" ${p.id===selected?'selected':''}>${escapeHtml(p.name||p.id)} / ${escapeHtml(p.id)}${disabled}</option>`}));if(selected&&!state.providers.some(p=>p.id===selected))opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
 function modelOptionValue(providerId,row){return providerId?row.id:`${row.provider_id}::${row.id}`}
 function decodeModelSelection(value,currentProvider){const text=String(value||'');if(!text)return{provider_id:currentProvider||'',model:''};const marker='::';if(text.includes(marker)){const [provider_id,...rest]=text.split(marker);return{provider_id,model:rest.join(marker)}}return{provider_id:currentProvider||'',model:text}}
 function modelOptions(providerId,selected,{visionFirst=false,auto=false,defaultModels=[],enabledOnly=false,selectedProvider=''}={}){const rows=visibleModelsForProvider(providerId,{visionFirst,enabledOnly});let opts=[];if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动路线${defaultModels.length?'：'+escapeHtml(defaultModels.join(' / ')):''}</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>请选择模型</option>`);let matched=false;opts.push(...rows.map(r=>{const value=modelOptionValue(providerId,r);const label=providerId?r.id:`${r.provider_id} / ${r.id}`;const tag=(r.capabilities||{}).vision?' [vision]':'';const isSelected=providerId?r.id===selected:((selectedProvider&&r.provider_id===selectedProvider&&r.id===selected)||(!selectedProvider&&r.id===selected));if(isSelected)matched=true;return `<option value="${escapeHtml(value)}" ${isSelected?'selected':''}>${escapeHtml(label)}${tag}</option>`}));if(selected&&!matched)opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
-function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>过期隐藏项</strong><p class="muted">当前没有“已不在通道模型列表里”的 hidden_models。</p>';return}box.innerHTML=`<strong>过期隐藏项（不在当前通道模型列表）</strong><p class="muted">这些多半是之前手动隐藏过、后来通道不再返回的模型。默认保留配置但不放进主表；确认无用后可清理。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">清理</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">清理当前通道过期隐藏项</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已清理 ${count} 个当前通道过期 hidden_models`:'没有需要清理的过期隐藏项')}}
-function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));$('modelChips').innerHTML=(p.extra_models||[]).map(m=>`<span class="chip">${escapeHtml(m)} <button data-rm="${escapeHtml(m)}">×</button></span>`).join('');document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{p.extra_models=(p.extra_models||[]).filter(x=>x!==b.dataset.rm);renderModelTable()});renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
-function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
+function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">当前没有“暂时匹配不到模型行”的隐藏规则。</p>';return}box.innerHTML=`<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">这些只是当前通道 hidden_models 里的隐藏规则，暂时没有匹配到当前模型行；不等于远端不存在，也不等于 route 待删除。移除后如果模型仍在远端或 approved routes 里，会重新显示出来。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">移除记录</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">移除当前通道未匹配隐藏规则</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已移除 ${count} 条当前通道未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}}
+function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));const extras=p.extra_models||[];$('modelChips').innerHTML=`<strong>当前通道补充模型库（extra_models）</strong><p class="muted">这些模型是手动补充到当前 provider 的可用模型，会参与当前通道路由；不是待删除列表，也不是全局模型池。</p><div class="chips">${extras.length?extras.map(m=>`<span class="chip">${escapeHtml(m)}${editingExtraModels?` <button data-rm-extra="${escapeHtml(m)}">从补充库移除</button>`:''}</span>`).join(''):'<span class="muted">当前通道暂无手动补充模型。</span>'}</div><div class="btns"><button id="toggleExtraEdit" class="ghost">${editingExtraModels?'完成编辑':'编辑补充模型库'}</button></div><div id="staleRouteBox"></div>`;$('toggleExtraEdit').onclick=()=>{editingExtraModels=!editingExtraModels;renderModelTable()};document.querySelectorAll('[data-rm-extra]').forEach(b=>b.onclick=()=>{p.extra_models=extras.filter(x=>x!==b.dataset.rmExtra);toast(`已从当前通道补充模型库移除 ${b.dataset.rmExtra}`);renderModelTable()});renderStaleRouteBox(p);renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
+function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,source:'hidden',visible:!(p.hidden_models||[]).includes(model),favorite:false,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
 function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [disabled]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
 function syncFallback(){state.rescue=state.rescue||{};state.rescue.fallback_model=$('rescueModel').value.trim();state.rescue.fallback_cli=$('rescueCli').value;state.rescue.hot_fallback_enabled=$('rescueHot').checked;state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.enabled=$('visionEnabled').checked;state.vision_sidecar.provider_id=$('visionProvider').value.trim();state.vision_sidecar.model=$('visionModel').value.trim();state.vision_sidecar.candidates=[...document.querySelectorAll('[data-vision-candidate]')].map(row=>({provider_id:row.querySelector('[data-vc-provider]').value.trim(),model:row.querySelector('[data-vc-model]').value.trim()})).filter(x=>x.provider_id&&x.model)}
 function bindVisionCandidateRow(row){const provider=row.querySelector('[data-vc-provider]');const model=row.querySelector('[data-vc-model]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{visionFirst:true});syncFallback()};model.onchange=syncFallback;row.querySelector('[data-vc-remove]').onclick=()=>{row.remove();syncFallback()}}
@@ -1857,24 +3819,31 @@ function syncRuntime(){state.runtime=state.runtime||{};state.opencode=state.open
 function renderOpencodeSummary(){const box=$('opencodeOverrideSummary');if(!box)return;const rows=opencodeAllRows();const enabled=rows.filter(row=>rosterEntry(row.agent,row).enabled!==false).length;const count=opencodeOverrideEntries().length;const custom=rows.filter(row=>rosterEntry(row.agent,row).custom).length;const profile=state.opencode.default_profile||'agent';box.innerHTML=`<div class="oc-metric"><span class="muted">Profile</span><strong>${escapeHtml(profile)}</strong><span class="mono">Lite Pro Roster</span></div><div class="oc-metric"><span class="muted">Enabled agents</span><strong>${enabled}/${rows.length}</strong><span class="mono">进入 session-local opencode.json</span></div><div class="oc-metric"><span class="muted">Agent overrides</span><strong>${count}/${rows.length}</strong><span class="mono">Auto 不写 agent_models</span></div><div class="oc-metric"><span class="muted">Custom agents</span><strong>${custom}</strong><span class="mono">按 preset 继承 prompt/permission</span></div>`}
 function opencodeFilterMatches(row,overridden){const entry=rosterEntry(row.agent,row);if(opencodeOnlyOverridden&&!overridden&&entry.enabled!==false&&!entry.custom)return false;if(opencodeAgentFilter==='all')return true;if(opencodeAgentFilter==='enabled')return entry.enabled!==false;if(opencodeAgentFilter==='custom')return !!entry.custom;if(opencodeAgentFilter==='execute')return ['builder','executor','fixer','spec'].includes(entry.preset)||String(row.category||'').startsWith('执行');if(opencodeAgentFilter==='explore')return entry.preset==='explore'||row.category==='探索';if(opencodeAgentFilter==='bughunt')return entry.preset==='bughunt'||row.category==='找茬';if(opencodeAgentFilter==='vision')return entry.preset==='vision'||row.category==='Vision';if(opencodeAgentFilter==='review')return entry.preset==='reviewer'||row.category==='审查';return true}
 function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)return;const filters=[['all','全部'],['enabled','已启用'],['custom','自定义'],['execute','执行/协调'],['explore','探索'],['bughunt','找茬'],['vision','Vision'],['review','审查']];wrap.innerHTML=`${filters.map(([id,label])=>`<button class="ghost ${opencodeAgentFilter===id?'active':''}" data-oc-filter="${id}">${label}</button>`).join('')}<label class="check"><input id="ocOnlyOverridden" type="checkbox" ${opencodeOnlyOverridden?'checked':''}><span>只看改动项</span></label><button class="ghost" data-oc-add="vision">+ Add Vision Agent</button><button class="ghost" data-oc-add="executor">+ Add Executor Agent</button><button class="ghost" data-oc-add="explore">+ Add Explore Agent</button><button class="ghost" id="ocClearAll">全部自动</button>`;document.querySelectorAll('[data-oc-filter]').forEach(btn=>btn.onclick=()=>{opencodeAgentFilter=btn.dataset.ocFilter;renderOpencodeAgents()});document.querySelectorAll('[data-oc-add]').forEach(btn=>btn.onclick=()=>addCustomAgent(btn.dataset.ocAdd));$('ocOnlyOverridden').onchange=()=>{opencodeOnlyOverridden=$('ocOnlyOverridden').checked;renderOpencodeAgents()};$('ocClearAll').onclick=()=>{state.opencode.agent_models={};state.opencode.agent_roster={};syncRuntime();renderOpencodeAgents();toast('OpenCode roster 已恢复默认自动路线')}}
-function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button>${entry.custom?'<button class="ghost" data-oc-remove>移除</button>':''}</td></tr>`}).join(''):`<tr><td colspan="8" class="empty-row">当前过滤条件下没有 agent；关闭“只看改动项”或切换分类。</td></tr>`;table.innerHTML=`<thead><tr><th>启用</th><th>agent</th><th>preset</th><th>priority</th><th>provider</th><th>model</th><th>默认路线</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(rowEl=>{const agent=rowEl.dataset.ocAgent;const row=rows.find(x=>x.agent===agent)||{};const provider=rowEl.querySelector('[data-oc-provider]');const model=rowEl.querySelector('[data-oc-model]');const enabled=rowEl.querySelector('[data-oc-enabled]');const preset=rowEl.querySelector('[data-oc-preset]');const priority=rowEl.querySelector('[data-oc-priority]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{auto:true,defaultModels:row.default_models||[],visionFirst:(rosterEntry(agent,row).preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider.value});setOpencodeOverride(agent,provider.value.trim(),'');persistRosterEntry(agent,row,{provider_id:provider.value.trim(),model:''});syncRuntime();renderOpencodeSummary()};model.onchange=()=>{const picked=decodeModelSelection(model.value.trim(),provider.value.trim());if(picked.provider_id&&provider.value!==picked.provider_id){provider.value=picked.provider_id}setOpencodeOverride(agent,picked.provider_id,picked.model);persistRosterEntry(agent,row,{provider_id:picked.provider_id,model:picked.model});syncRuntime();renderOpencodeSummary()};enabled.onchange=()=>{setRosterEnabled(agent,row,enabled.checked);syncRuntime();renderOpencodeAgents()};preset.onchange=()=>{persistRosterEntry(agent,row,{preset:preset.value});syncRuntime();renderOpencodeAgents()};priority.onchange=()=>{persistRosterEntry(agent,row,{priority:Number(priority.value||999)});syncRuntime();renderOpencodeAgents()};rowEl.querySelector('[data-oc-reset]').onclick=()=>{setOpencodeOverride(agent,'','');delete opencodeRoster()[agent];syncRuntime();renderOpencodeAgents()};const remove=rowEl.querySelector('[data-oc-remove]');if(remove)remove.onclick=()=>{setOpencodeOverride(agent,'','');delete opencodeRoster()[agent];syncRuntime();renderOpencodeAgents()}})}
+function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的 agent</td></tr>';table.innerHTML=`<thead><tr><th>启用</th><th>Agent</th><th>Preset</th><th>Priority</th><th>Provider</th><th>Model</th><th>Default</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(tr=>{const agent=tr.dataset.ocAgent;const row=visible.find(r=>r.agent===agent);const entry=rosterEntry(agent,row);tr.querySelector('[data-oc-enabled]').onchange=(e)=>{setRosterEnabled(agent,row,e.target.checked);renderOpencodeSummary()};tr.querySelector('[data-oc-preset]').onchange=(e)=>{persistRosterEntry(agent,row,{preset:e.target.value});renderOpencodeAgents()};tr.querySelector('[data-oc-priority]').oninput=(e)=>{persistRosterEntry(agent,row,{priority:Number(e.target.value)});renderOpencodeSummary()};tr.querySelector('[data-oc-provider]').onchange=(e)=>{const sel=e.target;const modelSel=tr.querySelector('[data-oc-model]');modelSel.innerHTML=modelOptions(sel.value,modelSel.value,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:sel.value});setOpencodeOverride(agent,sel.value,tr.querySelector('[data-oc-model]').value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-model]').onchange=(e)=>{setOpencodeOverride(agent,tr.querySelector('[data-oc-provider]').value,e.target.value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-reset]').onclick=()=>{const roster=opencodeRoster();delete roster[agent];const overrides=opencodeOverrides();delete overrides[agent];syncRuntime();renderOpencodeAgents();toast(`${agent} 已恢复默认`)}})}
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
-function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">清理 hidden ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}`}
-function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode}))}
-function renderAll(){renderStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
+function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
+function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
+function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
+function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
+function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
+function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
-$('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
+$('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
 $('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
-$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.models){const p=current();p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models`)}else{$('testResult').textContent=JSON.stringify(data,null,2)}};
+$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();if(!p.approved_route_models||!p.approved_route_models.length){p.approved_route_models=(p.models||[]).filter(r=>r&&r.id&&r.source!=='derived_alias').map(r=>r.id)}p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);if($('autoStaleCleanupOnFetch')?.checked&&staleRouteModels(p).length){staleCleanupProviders.add(p.id)}renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(staleCleanupProviders.has(p.id)?`拉取到 ${data.models.length} 个模型；已自动标记缺失旧 route 清理`:`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models；缺失旧 route 默认保留`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}}
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
-$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
-$('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
-load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:#b42318">'+escapeHtml(err.stack||err.message)+'</pre>'})
+$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderSaveControls();renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,registry_v2_save_plan:data.registry_v2_save_plan,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
+function currentApplyCommand(){return lastPlan?.registry_v2_save_plan?.apply_plan?.cli_apply_command||'./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json'}
+$('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载 redacted plan JSON')}
+$('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
+$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}
+$('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}
+load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:var(--danger);font-family:var(--font-mono)">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
 </body>
 </html>"""
@@ -1898,23 +3867,31 @@ class ConfigWebApp:
 
     def plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            return build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+            return build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             result = apply_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
             if result.get("ok"):
-                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
+                self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
+            return result
+
+    def registry_v2_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            result = apply_registry_v2_preview_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+            if result.get("ok"):
+                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
                 self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
             return result
 
     def provider_test(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            return test_provider_models(self.cfg, payload)
+            return test_provider_models(self.cfg, payload, config_path=self.config_path, command_name=self.command_name)
 
     def model_test(self, payload: dict[str, Any], *, chat: bool = False) -> dict[str, Any]:
         with self.lock:
-            return run_model_smoke(self.cfg, payload, chat=chat)
+            return run_model_smoke(self.cfg, payload, chat=chat, config_path=self.config_path, command_name=self.command_name)
 
 
 class _SetupWebHandler(BaseHTTPRequestHandler):
@@ -1983,6 +3960,10 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/save":
                 result = app.save(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/registry-v2/apply":
+                result = app.registry_v2_apply(payload)
                 self._send(*_json_response(result, status=200 if result.get("ok") else 400))
                 return
             self._send(404, b"not found\n", "text/plain; charset=utf-8")

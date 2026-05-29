@@ -91,11 +91,12 @@ def load_model_context_overrides(path, cache):
     try:
         mtime = os.path.getmtime(path)
     except OSError:
+        cache["path"] = path
         cache["mtime"] = None
         cache["data"] = empty_context_overrides()
         return cache["data"]
 
-    if cache["mtime"] == mtime:
+    if cache.get("path") == path and cache["mtime"] == mtime:
         return cache["data"]
 
     models = {}
@@ -132,6 +133,7 @@ def load_model_context_overrides(path, cache):
                     if window:
                         provider_overrides[str(key).strip()] = window
 
+    cache["path"] = path
     cache["mtime"] = mtime
     cache["data"] = {
         "models": models,

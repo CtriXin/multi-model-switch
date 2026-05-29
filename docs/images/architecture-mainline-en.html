@@ -22,7 +22,7 @@
   <div class="card-copy"><code>install.sh</code> bootstraps MMS itself and optional packs like RTK, MindKeeper context, Map, read-once, and ops-env-safe.</div>
   <div class="meta"><span class="chip green">bootstrap</span></div>
 </article>
-<article class="card">
+                  <article class="card">
   <div class="card-title">TUI & CLI</div>
   <div class="card-copy"><code>mms</code>, <code>mms claude</code>, <code>mms codex</code>, and related commands expose one local launcher surface.</div>
   <div class="meta"><span class="chip">human operator</span></div>
@@ -65,15 +65,15 @@
               <section class="section artifacts">
                 <h2 class="section-title">Artifacts / Operator Surfaces <span class="section-note">persistent config, exported routes, and operator tools</span></h2>
                 <div class="cards artifacts-grid">
-                  <article class="card">
+<article class="card">
   <div class="card-title">Config Tree</div>
-  <div class="card-copy"><code>~/.config/mms/</code> holds <code>config.toml</code>, <code>override.toml</code>, <code>accounts/</code>, <code>env/</code>, and usage/session state.</div>
-  <div class="meta"><span class="chip green">persistent truth</span></div>
+  <div class="card-copy"><code>~/.config/mms/</code> holds legacy config, accounts, env, usage, and session state; humans use TUI / <code>mms config</code> / WebUI.</div>
+  <div class="meta"><span class="chip green">human config / state</span></div>
 </article>
 <article class="card">
-  <div class="card-title">Routing Artifacts</div>
-  <div class="card-copy"><code>model-routes.json</code>, route keyword files, gateway slots, and speed stats expose the current runtime picture.</div>
-  <div class="meta"><span class="chip violet">route export</span></div>
+  <div class="card-title">Registry Bundle</div>
+  <div class="card-copy"><code>generated/model-registry.latest-approved.json</code> verifies generated Router / Lineup / Profile / Policy / Capabilities; root route files are compatibility exports.</div>
+  <div class="meta"><span class="chip violet">latest-approved</span></div>
 </article>
 <article class="card">
   <div class="card-title">Operator Surfaces</div>

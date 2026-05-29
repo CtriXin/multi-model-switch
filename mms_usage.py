@@ -4,7 +4,7 @@
   - Claude OAuth 账号 → Anthropic /api/oauth/usage (5h/7d 利用率)
   - Codex  OAuth 账号 → JWT 解码出 plan 类型 + 有效期（OpenAI 无公开利用率 API）
   - API Key 厂商     → Kimi codingplan key 校验 / GLM·CN|EN key 校验 / Minimax·CN|EN key 校验
-  - 本地 MMS 启动统计 → ~/.config/mms/usage.json
+  - 本地 MMS 启动统计 → selected MMS config root / usage.json
 
 API key 环境变量（在 shell 里 export 后运行 mms usage）:
   MMS_KIMI_KEY      Kimi — coding plan key (sk-kimi-*), endpoint: api.kimi.com/coding/v1
@@ -23,6 +23,8 @@ import json
 import os
 import subprocess
 from datetime import datetime, timezone
+
+from mms_state_io import resolve_mms_config_dir
 
 try:
     import httpx as _httpx
@@ -53,13 +55,20 @@ class _LazyConsole:
 
 console = _LazyConsole()
 
-_CONFIG_DIRS = [
+_DEFAULT_CONFIG_DIRS = [
     os.path.expanduser("~/.config/mms"),
 ]
+_CONFIG_DIRS = list(_DEFAULT_CONFIG_DIRS)
+
+
+def _usage_config_dirs() -> list[str]:
+    if _CONFIG_DIRS != _DEFAULT_CONFIG_DIRS:
+        return list(_CONFIG_DIRS)
+    return [resolve_mms_config_dir()]
 
 
 def _active_usage_path() -> str | None:
-    for d in _CONFIG_DIRS:
+    for d in _usage_config_dirs():
         p = os.path.join(d, "usage.json")
         if os.path.exists(p):
             return p

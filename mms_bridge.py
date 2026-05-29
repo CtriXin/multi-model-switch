@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover
     import tomli as tomllib
 
 from mms_speed_stats import record_model_speed
-from mms_state_io import atomic_write_json, locked_state_file, resolve_mms_config_dir
+from mms_state_io import atomic_write_json, locked_state_file, mms_config_root_mode, resolve_mms_config_dir
 from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
 from mms_i18n import get_language as _get_mms_language, normalize_language as _normalize_mms_language
 
@@ -436,7 +436,8 @@ _DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
 _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
-_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo")
+_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES = ("kimi", "k2.", "mimo")
+_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo", "kimi", "k2.")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES = {
     "gpt-5.3-codex",
@@ -843,6 +844,11 @@ def _domestic_model_requires_reasoning_content_roundtrip(model_name):
     return normalized.startswith(_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES)
 
 
+def _domestic_model_requires_anthropic_history_coalescing(model_name):
+    normalized = _normalize_model_name(model_name)
+    return normalized.startswith(_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES)
+
+
 def _model_supports_anthropic_cache_control(model_name):
     normalized = _normalize_model_name(model_name)
     return normalized.startswith(_ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES)
@@ -899,6 +905,34 @@ def _assistant_reasoning_content_from_blocks(content):
     return "\n\n".join(parts).strip()
 
 
+def _assistant_message_reasoning_content(message):
+    if not isinstance(message, dict):
+        return ""
+    direct = str(message.get("reasoning_content") or "").strip()
+    if direct:
+        return direct
+    return _assistant_reasoning_content_from_blocks(message.get("content"))
+
+
+def _anthropic_response_reasoning_content(payload):
+    if not isinstance(payload, dict):
+        return ""
+    direct = str(payload.get("reasoning_content") or "").strip()
+    if direct:
+        return direct
+    return _assistant_reasoning_content_from_blocks(payload.get("content"))
+
+
+def _assistant_has_thinking_block(content):
+    for block in _normalize_message_content(content):
+        if block.get("type") != "thinking":
+            continue
+        text = block.get("thinking")
+        if isinstance(text, str) and text.strip():
+            return True
+    return False
+
+
 def _assistant_messages_with_reasoning_slots(payload):
     messages = []
     for message in payload.get("messages", []):
@@ -908,6 +942,107 @@ def _assistant_messages_with_reasoning_slots(payload):
             continue
         messages.append(message)
     return messages
+
+
+def _assistant_message_has_tool_use(message):
+    if not isinstance(message, dict):
+        return False
+    if isinstance(message.get("tool_calls"), list) and any(isinstance(item, dict) for item in message["tool_calls"]):
+        return True
+    for block in _normalize_message_content(message.get("content")):
+        if block.get("type") == "tool_use":
+            return True
+    return False
+
+
+def _message_has_only_tool_result_blocks(message):
+    if not isinstance(message, dict):
+        return False
+    if str(message.get("role", "")).strip() != "user":
+        return False
+    content = _normalize_message_content(message.get("content"))
+    return bool(content) and all(block.get("type") == "tool_result" for block in content)
+
+
+def _assistant_content_with_reasoning_fallback(message):
+    if not isinstance(message, dict):
+        return []
+    content = _normalize_message_content(message.get("content"))
+    reasoning_content = str(message.get("reasoning_content") or "").strip()
+    if reasoning_content and not _assistant_has_thinking_block(content):
+        return [{"type": "thinking", "thinking": reasoning_content}] + content
+    return content
+
+
+def _merge_assistant_messages(left, right):
+    merged = copy.deepcopy(left) if isinstance(left, dict) else {}
+    left_content = _assistant_content_with_reasoning_fallback(left)
+    right_content = _assistant_content_with_reasoning_fallback(right)
+    merged_content = left_content + right_content
+    merged["role"] = "assistant"
+    merged["content"] = merged_content
+
+    merged_tool_calls = []
+    for tool_calls in ((left or {}).get("tool_calls"), (right or {}).get("tool_calls")):
+        if isinstance(tool_calls, list):
+            merged_tool_calls.extend(item for item in tool_calls if isinstance(item, dict))
+    if merged_tool_calls:
+        merged["tool_calls"] = merged_tool_calls
+    else:
+        merged.pop("tool_calls", None)
+
+    reasoning_content = _assistant_reasoning_content_from_blocks(merged_content)
+    if reasoning_content:
+        merged["reasoning_content"] = reasoning_content
+    else:
+        merged.pop("reasoning_content", None)
+    return merged
+
+
+def _merge_user_tool_result_messages(left, right):
+    merged = copy.deepcopy(left) if isinstance(left, dict) else {}
+    merged["role"] = "user"
+    merged["content"] = _normalize_message_content((left or {}).get("content")) + _normalize_message_content((right or {}).get("content"))
+    return merged
+
+
+def _coalesce_domestic_anthropic_history(payload, model_name):
+    if not _domestic_model_requires_anthropic_history_coalescing(model_name):
+        return
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+
+    coalesced = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role", "")).strip()
+        if not coalesced:
+            coalesced.append(copy.deepcopy(message))
+            continue
+
+        previous = coalesced[-1]
+        previous_role = str(previous.get("role", "")).strip()
+        if role == "assistant" and previous_role == "assistant":
+            coalesced[-1] = _merge_assistant_messages(previous, message)
+            continue
+        if (
+            role == "user"
+            and previous_role == "user"
+            and _message_has_only_tool_result_blocks(previous)
+            and _message_has_only_tool_result_blocks(message)
+        ):
+            coalesced[-1] = _merge_user_tool_result_messages(previous, message)
+            continue
+        coalesced.append(copy.deepcopy(message))
+
+    payload["messages"] = coalesced
+
+
+def _canonicalize_domestic_anthropic_history(payload, model_name):
+    _coalesce_domestic_anthropic_history(payload, model_name)
+    _preserve_domestic_reasoning_roundtrip(payload, model_name)
 
 
 def _apply_domestic_thinking_toggle(payload, model_name, *, thinking_enabled):
@@ -923,13 +1058,65 @@ def _preserve_domestic_reasoning_roundtrip(payload, model_name):
     if not _domestic_model_requires_reasoning_content_roundtrip(model_name):
         return
     assistant_messages = _assistant_messages_with_reasoning_slots(payload)
+    last_reasoning_content = ""
     for message in assistant_messages:
+        content = _normalize_message_content(message.get("content"))
+        reasoning_content = str(message.get("reasoning_content") or "").strip()
+        if reasoning_content and not _assistant_has_thinking_block(content):
+            message["content"] = [{"type": "thinking", "thinking": reasoning_content}] + content
+            content = message["content"]
         reasoning_content = _assistant_reasoning_content_from_blocks(message.get("content"))
         if reasoning_content:
             # Some OpenAI-compatible relays (notably DeepSeek thinking/tool-use paths)
             # require assistant reasoning_content to be echoed back on continuation
             # even when the client talks to us in Anthropic thinking blocks.
             message["reasoning_content"] = reasoning_content
+            last_reasoning_content = reasoning_content
+            continue
+        if last_reasoning_content and _assistant_message_has_tool_use(message):
+            if not _assistant_has_thinking_block(content):
+                message["content"] = [{"type": "thinking", "thinking": last_reasoning_content}] + content
+            message["reasoning_content"] = last_reasoning_content
+
+
+def _restore_session_domestic_reasoning_roundtrip(payload, model_name, session_reasoning_content):
+    """Rehydrate the latest assistant tool-use group from session-level reasoning."""
+    if not _domestic_model_requires_reasoning_content_roundtrip(model_name):
+        return False
+    reasoning_content = str(session_reasoning_content or "").strip()
+    if not reasoning_content:
+        return False
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return False
+
+    tail_index = len(messages) - 1
+    while tail_index >= 0 and str(messages[tail_index].get("role", "")).strip() != "assistant":
+        tail_index -= 1
+    if tail_index < 0 or tail_index == len(messages) - 1:
+        return False
+
+    group_start = tail_index
+    while group_start >= 0 and str(messages[group_start].get("role", "")).strip() == "assistant":
+        group_start -= 1
+    assistant_group = [
+        message
+        for message in messages[group_start + 1 : tail_index + 1]
+        if isinstance(message, dict) and str(message.get("role", "")).strip() == "assistant"
+    ]
+    if not assistant_group:
+        return False
+    if not any(_assistant_message_has_tool_use(message) for message in assistant_group):
+        return False
+    if any(_assistant_message_reasoning_content(message) for message in assistant_group):
+        return False
+
+    first_message = assistant_group[0]
+    content = _normalize_message_content(first_message.get("content"))
+    if not _assistant_has_thinking_block(content):
+        first_message["content"] = [{"type": "thinking", "thinking": reasoning_content}] + content
+    first_message["reasoning_content"] = reasoning_content
+    return True
 
 
 def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=True, reasoning_effort="high"):
@@ -964,7 +1151,7 @@ def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=
         next_config = dict(output_config) if isinstance(output_config, dict) else {}
         next_config["effort"] = _normalize_domestic_reasoning_effort(reasoning_effort, default="high")
         payload["output_config"] = next_config
-    _preserve_domestic_reasoning_roundtrip(payload, model_name)
+    _canonicalize_domestic_anthropic_history(payload, model_name)
 
 
 def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses_payload, error_text):
@@ -1371,11 +1558,21 @@ def _rescue_config_root(server):
     try:
         return resolve_mms_config_dir()
     except Exception:
-        return os.path.expanduser("~/.config/mms")
+        return ""
+
+
+def _rescue_requires_latest_approved_bundle(config_root):
+    try:
+        return mms_config_root_mode(config_root) == "preview"
+    except Exception:
+        return False
 
 
 def _read_rescue_fallback_config(config_root):
-    path = os.path.join(str(config_root or "").strip(), "config.toml")
+    root = str(config_root or "").strip()
+    if not root:
+        return {"model": "", "cli": ""}
+    path = os.path.join(root, "config.toml")
     try:
         with open(path, "rb") as handle:
             cfg = tomllib.load(handle)
@@ -1497,6 +1694,27 @@ def _rescue_route_protocol(route, model_id, *, anthropic_url="", openai_url=""):
     return "openai_chat_completions"
 
 
+def _rescue_routes_from_router_payload(payload, fallback_model, seen):
+    model_routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
+    entry = model_routes.get(fallback_model)
+    if not isinstance(entry, dict):
+        return []
+    routes = []
+    leaves = [entry.get("primary")]
+    if isinstance(entry.get("fallbacks"), list):
+        leaves.extend(entry.get("fallbacks") or [])
+    for leaf in leaves:
+        normalized = _rescue_route_from_export(leaf, fallback_model)
+        if not normalized:
+            continue
+        key = (normalized.get("provider_id"), normalized.get("gateway_url"), normalized.get("model"))
+        if key in seen:
+            continue
+        seen.add(key)
+        routes.append(normalized)
+    return routes
+
+
 def _load_rescue_hot_fallback_routes(server, fallback_model):
     explicit_routes = getattr(server, "rescue_hot_fallback_routes", None)
     if isinstance(explicit_routes, list) and explicit_routes:
@@ -1508,6 +1726,20 @@ def _load_rescue_hot_fallback_routes(server, fallback_model):
         return routes
 
     config_root = _rescue_config_root(server)
+    manifest_path = os.path.join(config_root, "generated", "model-registry.latest-approved.json")
+    if os.path.exists(manifest_path):
+        try:
+            import mms_registry
+
+            payload = mms_registry.try_load_latest_approved_payload("router", config_dir=config_root, include_secret=True)
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and payload:
+            return _rescue_routes_from_router_payload(payload, fallback_model, set())
+        return []
+    if _rescue_requires_latest_approved_bundle(config_root):
+        return []
+
     candidates = [
         os.path.join(config_root, "generated", "model-routes.json"),
         os.path.join(config_root, "model-routes.json"),
@@ -1519,22 +1751,7 @@ def _load_rescue_hot_fallback_routes(server, fallback_model):
             payload = json.loads(open(path, "r", encoding="utf-8").read())
         except (OSError, json.JSONDecodeError, TypeError):
             continue
-        model_routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
-        entry = model_routes.get(fallback_model)
-        if not isinstance(entry, dict):
-            continue
-        leaves = [entry.get("primary")]
-        if isinstance(entry.get("fallbacks"), list):
-            leaves.extend(entry.get("fallbacks") or [])
-        for leaf in leaves:
-            normalized = _rescue_route_from_export(leaf, fallback_model)
-            if not normalized:
-                continue
-            key = (normalized.get("provider_id"), normalized.get("gateway_url"), normalized.get("model"))
-            if key in seen:
-                continue
-            seen.add(key)
-            routes.append(normalized)
+        routes.extend(_rescue_routes_from_router_payload(payload, fallback_model, seen))
         if routes:
             return routes
     return routes
@@ -2538,6 +2755,78 @@ def _iter_sse_lines(response):
             yield current_event or "message", payload
 
 
+class _AnthropicReasoningStreamTracker:
+    """Collect thinking deltas from Anthropic SSE streams for next-turn carry-forward."""
+
+    def __init__(self):
+        self._thinking_by_index = {}
+
+    def feed_event(self, event_type, payload):
+        if not isinstance(payload, dict):
+            return
+        if event_type == "content_block_start":
+            try:
+                index = int(payload.get("index"))
+            except (TypeError, ValueError):
+                return
+            block = payload.get("content_block") if isinstance(payload.get("content_block"), dict) else {}
+            if block.get("type") != "thinking":
+                return
+            parts = self._thinking_by_index.setdefault(index, [])
+            initial = str(block.get("thinking") or "")
+            if initial:
+                parts.append(initial)
+            return
+        if event_type != "content_block_delta":
+            return
+        try:
+            index = int(payload.get("index"))
+        except (TypeError, ValueError):
+            return
+        delta = payload.get("delta") if isinstance(payload.get("delta"), dict) else {}
+        if delta.get("type") != "thinking_delta":
+            return
+        text = str(delta.get("thinking") or "")
+        if not text:
+            return
+        self._thinking_by_index.setdefault(index, []).append(text)
+
+    def reasoning_content(self):
+        parts = []
+        for index in sorted(self._thinking_by_index):
+            text = "".join(self._thinking_by_index[index]).strip()
+            if text:
+                parts.append(text)
+        return "\n\n".join(parts).strip()
+
+
+def _feed_anthropic_reasoning_sse_line(raw_line, tracker, state):
+    if tracker is None or state is None:
+        return
+    line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
+    stripped = line.strip()
+    if not stripped:
+        data_lines = state.get("data_lines", [])
+        if data_lines:
+            payload_text = "\n".join(data_lines)
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError:
+                payload = None
+            if payload is not None:
+                tracker.feed_event(state.get("event") or "message", payload)
+        state["event"] = None
+        state["data_lines"] = []
+        return
+    if stripped.startswith(":"):
+        return
+    if stripped.startswith("event:"):
+        state["event"] = stripped[6:].strip() or "message"
+        return
+    if stripped.startswith("data:"):
+        state.setdefault("data_lines", []).append(stripped[5:].lstrip())
+
+
 def _bridge_request_to_codex(account, model_name, request_payload, stream_response):
     _ensure_httpx()
     if httpx is None:
@@ -3274,6 +3563,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     route_payload["model"] = resolved_model.replace(_ONE_M_CONTEXT_SUFFIX, "")
                     resolved_model = str(route_payload["model"] or "")
 
+                _restore_session_domestic_reasoning_roundtrip(
+                    route_payload,
+                    resolved_model,
+                    getattr(self.server, "_last_reasoning_content", ""),
+                )
+
                 profile_id = apply_profile_body_patches(
                     route_payload,
                     protocol="anthropic_messages",
@@ -3284,8 +3579,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
                     reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
                 )
-                if _domestic_model_requires_reasoning_content_roundtrip(resolved_model):
-                    _preserve_domestic_reasoning_roundtrip(route_payload, resolved_model)
+                if profile_id:
+                    _canonicalize_domestic_anthropic_history(route_payload, resolved_model)
                 if not profile_id and _is_domestic_model(resolved_model):
                     _apply_domestic_reasoning_controls(
                         route_payload,
@@ -3347,6 +3642,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 
                 try:
                     if stream:
+                        reasoning_tracker = _AnthropicReasoningStreamTracker()
+                        reasoning_sse_state = {"event": None, "data_lines": []}
                         with httpx.stream(
                             "POST",
                             target_url,
@@ -3417,6 +3714,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             for raw_line in response.iter_lines():
                                 if first_byte_ms is None:
                                     first_byte_ms = _now_ms()
+                                _feed_anthropic_reasoning_sse_line(raw_line, reasoning_tracker, reasoning_sse_state)
+                                current_reasoning = reasoning_tracker.reasoning_content()
+                                if current_reasoning:
+                                    # Tool-result continuations can race ahead of message_stop.
+                                    # Publish reasoning as soon as it is visible in the stream.
+                                    self.server._last_reasoning_content = current_reasoning
                                 stripped = raw_line.strip()
                                 if stripped.startswith("data:"):
                                     data_str = stripped[5:].strip()
@@ -3435,6 +3738,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 self.wfile.write(raw_line.encode("utf-8") + b"\n")
                                 if raw_line == "":
                                     self.wfile.flush()
+                            _feed_anthropic_reasoning_sse_line("", reasoning_tracker, reasoning_sse_state)
+                            self.server._last_reasoning_content = reasoning_tracker.reasoning_content()
                             self.close_connection = True
                         if should_record_speed and response.status_code < 400:
                             _record_bridge_speed(
@@ -3527,6 +3832,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 status_paths=getattr(self.server, "route_status_paths", None),
                             )
                             continue
+                    if response.status_code == 200:
+                        try:
+                            response_payload = json.loads(body_out.decode("utf-8"))
+                        except Exception:
+                            response_payload = None
+                        self.server._last_reasoning_content = _anthropic_response_reasoning_content(response_payload)
                     if body_out:
                         try:
                             output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
@@ -5063,8 +5374,8 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             thinking_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
         )
-        if _domestic_model_requires_reasoning_content_roundtrip(model_name):
-            _preserve_domestic_reasoning_roundtrip(anthropic_payload, model_name)
+        if profile_id:
+            _canonicalize_domestic_anthropic_history(anthropic_payload, model_name)
         if not profile_id and _is_domestic_model(model_name):
             _apply_domestic_reasoning_controls(
                 anthropic_payload,
@@ -5625,6 +5936,7 @@ def gateway_claude_bridge(
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier
+    server._last_reasoning_content = ""
     # ── Session 统计 ──
     server.session_input_tokens = 0
     server.session_output_tokens = 0

@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import mms_registry
+from mms_capability_resolver import CapabilityBundleError
 from mms_capability_resolver import resolve_model_capabilities
 
 
@@ -31,6 +34,14 @@ def _write_bundle(
         },
     )
     mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(
+        capabilities,
+        capabilities_payload
+        or {
+            "schema": "mms.model_capabilities.approved.v1",
+            "models": [],
+        },
+    )
     files = {
         "router": {
             "path": router,
@@ -59,15 +70,13 @@ def _write_bundle(
             "sensitivity": "non-secret",
             "legacy_alias_compat": True,
         },
-    }
-    if capabilities_payload is not None:
-        mms_registry.write_json_atomic(capabilities, capabilities_payload)
-        files["capabilities"] = {
+        "capabilities": {
             "path": capabilities,
             "canonical_path": "generated/model-capabilities.approved.json",
             "sensitivity": "non-secret",
             "legacy_alias_compat": False,
-        }
+        },
+    }
 
     manifest_path = generated / "model-registry.latest-approved.json"
     mms_registry.export_latest_approved_bundle_manifest(
@@ -125,8 +134,79 @@ def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatc
             "approved-model",
             provider_id="approved-provider",
         )
+        is None
+    )
+
+
+def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypatch, tmp_path: Path) -> None:
+    config_root = tmp_path / "xdg" / "mms"
+    config_root.mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_root.parent))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    legacy_profile = {
+        "schema_version": 1,
+        "profiles": {
+            "legacy-test": {
+                "match": {"provider_id_contains": ["legacy-provider"]},
+                "context_windows": {"legacy-model": 111_000},
+            }
+        },
+    }
+    mms_registry.write_json_atomic(config_root / "provider-profiles.json", legacy_profile)
+
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    assert (
+        mms_provider_profiles.profile_context_window(
+            "legacy-model",
+            provider_id="legacy-provider",
+        )
         == 111_000
     )
+
+
+def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: Path) -> None:
+    root_a = tmp_path / "root-a" / "mms"
+    root_b = tmp_path / "root-b" / "mms"
+    root_a.mkdir(parents=True)
+    root_b.mkdir(parents=True)
+    mms_registry.write_json_atomic(
+        root_a / "provider-profiles.json",
+        {
+            "schema_version": 1,
+            "profiles": {
+                "root-a-profile": {
+                    "match": {"provider_id_contains": ["cache-provider"]},
+                    "context_windows": {"cache-model": 111_000},
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        root_b / "provider-profiles.json",
+        {
+            "schema_version": 1,
+            "profiles": {
+                "root-b-profile": {
+                    "match": {"provider_id_contains": ["cache-provider"]},
+                    "context_windows": {"cache-model": 222_000},
+                }
+            },
+        },
+    )
+
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root_a.parent))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 111_000
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root_b.parent))
+    assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 222_000
 
 
 def test_capability_resolver_uses_verified_latest_approved_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -158,10 +238,9 @@ def test_capability_resolver_uses_verified_latest_approved_by_default(monkeypatc
 
     generated_caps = tmp_path / "generated" / "model-capabilities.approved.json"
     generated_caps.write_text(json.dumps({"models": []}), encoding="utf-8")
-    fallback = resolve_model_capabilities("approved-model")
 
-    assert fallback["context_window_tokens"] == 8_192
-    assert fallback["sources"]["context_window_tokens"] == "conservative_fallback"
+    with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
+        resolve_model_capabilities("approved-model")
 
 
 def test_runtime_context_helpers_accept_only_approved_context_facts(monkeypatch, tmp_path: Path) -> None:

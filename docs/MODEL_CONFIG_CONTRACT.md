@@ -1,20 +1,39 @@
 # MMS Model Config Contract
 
 This document is the baseline contract for projects that consume MMS model
-configuration. New consumers should read these files instead of creating a
-project-local model registry.
+configuration. New v2 consumers should start from the verified
+latest-approved manifest instead of creating a project-local model registry or
+reading legacy root files as primary truth.
 
-## Baseline Files
+Canonical consumer entrypoint:
+
+```text
+<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json
+```
+
+Hive / Pilot / Ant / Moebius / Mobius and future downstream consumers MUST use
+that manifest, or a resolver that verifies it, as their first read. They MUST
+NOT read `model-routes.json`, `model-policy.json`, or `provider-profiles.json`
+from the config root as primary truth. They MUST NOT query SQLite tables
+directly.
+
+## Generated Bundle Surfaces
 
 | File | Owner | Sensitivity | Purpose |
 |---|---|---|---|
-| `model-routes.json` | MMS export | Secret | Provider route data: `primary`, `fallbacks`, URL, API key, provider id, wire `model_id`. |
-| `model-routes.lineup.json` | MMS export + metadata merge | Non-secret | Model metadata: context window, references, display/capability metadata, pricing/tier fields. |
-| `provider-profiles.json` | MMS source config | Non-secret | Provider protocol differences: auth headers, body patches, protocol preference, wire aliases, context references. |
-| `model-policy.json` | Human / Agent Soul / Moebius overlay, with MMS CLI support | Non-secret | User policy: hide/show, favorite, allow/deny per project, downgrade, project priority. |
+| `generated/model-routes.json` | MMS generated export | Secret | Provider route data: `primary`, `fallbacks`, URL, API key, provider id, wire `model_id`. |
+| `generated/model-routes.lineup.json` | MMS generated export + metadata merge | Non-secret | Model metadata: context window, references, display/capability metadata, pricing/tier fields. |
+| `generated/provider-profiles.generated.json` | MMS generated export | Non-secret | Effective provider protocol differences: auth headers, body patches, protocol preference, wire aliases, context references. |
+| `generated/model-policy.effective.json` | MMS generated export | Non-secret | Effective user/project policy: hide/show, favorite, allow/deny per project, downgrade, project priority. |
 
-`model-routes.json` is the only file that should contain API keys. Do not copy
-it into public artifacts or docs.
+`generated/model-routes.json` is the only generated bundle file that should
+contain API keys. Do not copy it into public artifacts or docs.
+
+Legacy root files such as `model-routes.json`, `model-routes.lineup.json`,
+`provider-profiles.json`, and `model-policy.json` may still exist for
+compatibility, backup, import/export, or human source-overlay migration. They
+are not the v2 consumer entrypoint and must not be treated as independent
+truth.
 
 ## Reference Evidence
 
@@ -27,7 +46,7 @@ capability calibration snapshot lives at:
 These files are evidence inputs for registry import/refresh. They are not live
 runtime truth and should not be consumed directly by downstream projects.
 Runtime consumers should keep reading the approved Router / Lineup / Profile /
-Policy surfaces documented below.
+Policy / Capabilities surfaces documented below.
 
 ## Latest-Approved Bundle
 
@@ -35,7 +54,7 @@ Local Registry v2 introduces a single consumer-facing latest-approved bundle.
 New consumers should treat this manifest as the canonical entrypoint:
 
 ```text
-~/.config/mms/generated/model-registry.latest-approved.json
+<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json
 ```
 
 The bundle pins every generated export to one approved revision set:
@@ -83,11 +102,24 @@ Bundle rules:
 
 - The manifest is the v2 canonical consumer contract; legacy root files remain
   compatibility aliases/copies, not independent truth.
+- Tooling can inspect the same boundary with `mms config bundle --json` or
+  `mmf config bundle --json`; these commands are read-only and fail closed when
+  the manifest is missing or hash-mismatched unless explicitly run in
+  diagnostic non-strict mode.
 - Generated v2 exports MUST carry the same `model_registry_revision` or
   `bundle_revision` when their strict legacy shape allows it. If a legacy root
   file must stay shape-compatible, the manifest hash is the revision tie.
 - Consumers must verify per-file hashes and must not combine route, lineup,
-  profile, or policy files from different bundles.
+  profile, policy, or capability files from different bundles.
+- Consumers must fail closed when any required component revision id is missing;
+  `bundle_revision`, `route_revision`, `policy_revision`, `profile_revision`,
+  and `capability_revision` are part of the contract, not optional metadata.
+- Consumers must fail closed if a required manifest key points outside its exact
+  generated canonical path or uses the wrong sensitivity. Router is `secret`;
+  Lineup, Profile, Policy, and Capabilities are `non-secret`.
+- Consumers must rescan non-secret manifest files for secret-looking fields or
+  plaintext key patterns after hash verification; matching hashes do not make a
+  leaked non-secret payload acceptable.
 - Publishing uses atomic temp-file + rename: write canonical payloads first,
   refresh legacy aliases, then rename the manifest last.
 - `provider-profiles.generated.json` and `model-policy.effective.json` are
@@ -107,17 +139,21 @@ Bundle rules:
 See `docs/REGISTRY_ARCHITECTURE.md` for the full source/candidate/approved/
 runtime/health layer contract, `privacy_boundary` gates, deletion/tombstone
 rules, and reference-snapshot ingestion boundaries.
+See `docs/DOWNSTREAM_CONSUMER_BUNDLE_RUNBOOK.md` for the cutover checklist and
+portable manifest/hash verifier that downstream projects can adopt before they
+switch from legacy root files to the latest-approved bundle.
 
 ## Responsibilities
 
 | Question | Answer |
 |---|---|
-| How do I call a model? | Read `model-routes.json`; use `primary` first, then `fallbacks` in order for transient provider failures. |
-| What is the model context window? | Read `model-routes.lineup.json`; field: `routes[model].primary.max_context_tokens`. |
-| Why does a provider need a special body/header/model alias? | Read `provider-profiles.json`. |
-| Should this model be visible or preferred in a specific project? | Read `model-policy.json`. |
-| Where should a display name live? | Prefer `model-policy.json`; use Lineup only for generated metadata or shared display metadata. |
-| Where should a wire alias live? | Prefer `provider-profiles.json`; MMS export materializes it as `model_id` in Router and Lineup. |
+| What do I read first? | Read `<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json`, verify per-file hashes, then load only the generated files it references. |
+| How do I call a model? | Use the manifest-referenced generated Router; use `primary` first, then `fallbacks` in order for transient provider failures. |
+| What is the model context window? | Use the manifest-referenced generated Lineup/Capabilities; field: `routes[model].primary.max_context_tokens` when present. |
+| Why does a provider need a special body/header/model alias? | Use the manifest-referenced generated Profile. |
+| Should this model be visible or preferred in a specific project? | Use the manifest-referenced generated effective Policy. |
+| Where should a display name live? | DB/policy source owns human intent; generated Policy/Lineup expose the effective consumer view. |
+| Where should a wire alias live? | DB/profile source owns the rule; generated Router/Lineup materialize it as `model_id`. |
 
 ## File Shapes
 
@@ -229,7 +265,9 @@ Unknown `allowed_models` and `favorite_models` still warn because they imply a
 model the current Router/Lineup cannot actually provide.
 
 Current official execution surface for MMS consumers (`mms`, `hive`, `pilot`,
-`ant`, `moebius`/`mobius`) is maintained in `model-policy.json`:
+`ant`, `moebius`/`mobius`) is exposed through the manifest-referenced effective
+Policy. During migration, legacy `model-policy.json` remains a compatibility or
+source-overlay surface, not the downstream source of truth:
 
 | Family | Models |
 |---|---|
@@ -255,12 +293,12 @@ surfaces can stay project-owned until explicitly migrated.
 
 | Consumer | Required behavior |
 |---|---|
-| Hive | Resolve provider URL/key from Router; context/display/policy from Lineup/Policy; provider quirks from Profile; emit `cache_transport_evidence.v1` in `WorkerResult`. |
-| Pilot | Resolve model routes from Router; planning pool metadata from Lineup/Policy; persist each call's `cache_transport_evidence.v1` in run artifacts. |
-| Ant | Resolve execution models through Router; provider quirks from Profile; packet `fallback_chain` remains task-level fallback; include `cache_transport_evidence.v1` in worker results. |
-| Moebius | Prefer Lineup/Policy for planning and audit; do not read API keys unless dispatching through Ant/Hive; gates must consume downstream `cache_transport_evidence.v1`. |
-| Agent Soul local | Router for text-model URL/key; Lineup for context/reference; Policy for visibility; Jimeng stays Agent Soul-owned. |
-| Agent Soul online | Sync server-private copies of Router/Lineup/Profile/Policy during deploy; never fold Jimeng keys into MMS files. |
+| Hive | Verify latest-approved manifest; resolve provider URL/key from manifest-referenced Router; context/display/policy from Lineup/Policy; provider quirks from Profile; emit `cache_transport_evidence.v1` in `WorkerResult`. |
+| Pilot | Verify latest-approved manifest; resolve model routes from manifest-referenced Router; planning pool metadata from Lineup/Policy; persist each call's `cache_transport_evidence.v1` in run artifacts. |
+| Ant | Verify latest-approved manifest; resolve execution models through manifest-referenced Router; provider quirks from Profile; packet `fallback_chain` remains task-level fallback; include `cache_transport_evidence.v1` in worker results. |
+| Moebius / Mobius | Verify latest-approved manifest; prefer manifest-referenced Lineup/Policy for planning and audit; do not read API keys unless dispatching through Ant/Hive; gates must consume downstream `cache_transport_evidence.v1`. |
+| Agent Soul local | Verify latest-approved manifest; Router for text-model URL/key; Lineup for context/reference; Policy for visibility; Jimeng stays Agent Soul-owned. |
+| Agent Soul online | Sync server-private generated bundle files during deploy; never fold Jimeng keys into MMS files. |
 
 Consumers that adopt Local Registry v2 must resolve through the latest-approved
 bundle manifest or a future `mms registry resolve` API. They must not read the
@@ -282,7 +320,7 @@ This is a runtime output contract, not another route table.
   "protocol": "anthropic_messages",
   "request_url": "http://127.0.0.1:4001/v1/messages",
   "request_path": "/v1/messages",
-  "route_source": "mms:model-routes.json",
+  "route_source": "mms:latest-approved:<bundle_revision>",
   "provider_profile": "deepseek",
   "fallback_used": false,
   "fallback_reason": "",
@@ -325,13 +363,19 @@ validate the minimal contract above.
 
 ## Consistency Checks
 
-Run:
+For v2 consumers, first verify the published manifest:
+
+```bash
+mms registry verify
+```
+
+Legacy alias consistency can still be checked during migration with:
 
 ```bash
 mms routes check
 ```
 
-The check verifies:
+The checks verify:
 
 | Check | Reason |
 |---|---|
@@ -346,6 +390,13 @@ log records the actor, changed files, route count, hashes, and issue count.
 
 ## Current Migration Status
 
-The MMS exporter writes Router, Lineup, a Policy stub, snapshots, and audit
-events. Downstream projects should migrate toward this contract and stop
-maintaining independent context tables.
+MMS has a preview latest-approved publish/verify loop and selected read-side
+adoption for generated Router, Lineup, Policy, Profile, and capability facts.
+Stable `mms` defaults still preserve legacy behavior while `mmf` uses the
+preview config root.
+
+Downstream projects should migrate toward the manifest/resolver contract and
+stop maintaining independent context tables or reading root legacy files as
+primary truth. Legacy route/policy/profile files remain compatibility,
+backup, import/export, or source-overlay surfaces until each consumer is cut
+over.

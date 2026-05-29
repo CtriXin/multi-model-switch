@@ -85,6 +85,30 @@ This is now a hard MMS contract:
 - Do not treat an old per-PID session config as the durable source of truth for hook trust. The durable source is the stable gateway `.codex/config.toml`, refreshed from real-home trust with sibling sessions as fallback.
 - Codex upgrades can change hook hash normalization. MMS must refresh stable gateway hook trust from the current Codex `app-server` `hooks/list` `currentHash` before launch.
 - Real `~/.codex/config.toml` may only be auto-refreshed for MMS-managed hook trust hashes, so app-server children that use real `CODEX_HOME` do not reintroduce the prompt. Do not auto-trust arbitrary project/user hooks.
+- A user approval in one isolated MMS/Codex session must be durable. If the same MMS-managed hook prompts again in a later isolated session, treat it as a launcher trust write-back regression, not as expected Codex behavior.
+
+## Recurrence Playbook
+
+When a user reports `Hooks need review` again, do not start by asking them to approve it again. First prove which trust identity is active.
+
+1. Check active Codex processes:
+   - CLI command must include `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`.
+   - CLI env must use `CODEX_HOME=/Users/xin/.config/mms/codex-gateway/.codex`.
+   - `MMS_SESSION_HOME` may be per-PID under `~/.config/mms/codex-gateway/s/<pid>`.
+2. Check app-server children:
+   - Some Codex app-server/node_repl children may use `CODEX_HOME=/Users/xin/.codex`.
+   - That is why MMS also refreshes only MMS-managed hook trust in real `~/.codex/config.toml`.
+3. Run Codex `app-server` `hooks/list` against both homes:
+   - gateway `~/.config/mms/codex-gateway/.codex`
+   - real `~/.codex`
+   - Healthy result is `0` hooks with `trustStatus` `untrusted` or `modified`.
+4. If hashes drift after a Codex upgrade:
+   - refresh from current `hooks/list` `currentHash`, not from old copied `trusted_hash`.
+   - gateway refresh may cover all generated target hooks.
+   - real-home refresh must remain scoped to MMS-managed hook commands only.
+5. If one isolated session approval is not reused:
+   - inspect `_sync_codex_hook_trust_back`, `_write_codex_hook_trust_cache`, `_append_codex_session_hook_trust_states`, and `_refresh_codex_current_hook_trust_cache`.
+   - the fix must persist trust to stable gateway `.codex/config.toml` before the next launch.
 
 Regression coverage:
 
@@ -118,7 +142,7 @@ Result:
 - `npm run build --if-present` passed.
 - `git diff --check` passed.
 - Local projection confirmed inherited `codegraph` became an absolute NVM binary path when available.
-- Local projection confirmed Codex `SessionStart` order keeps Map/Caveman stable and no longer inherits Looop/bugloop hooks by default. CodeGraph auto-register remains a Claude session hook: uninitialized git repos run init/index, initialized repos sync.
+- Local projection confirmed Codex `SessionStart` order keeps Map/Caveman stable and no longer inherits Looop/bugloop hooks by default. Later hook-noise hardening made CodeGraph auto-register opt-in instead of a default Claude session hook.
 
 ## Regression Tests Added
 

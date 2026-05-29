@@ -92,17 +92,27 @@ def append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_s
     config_text = _launchers._strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces)
 
     real_json = _launchers._real_user_path(".claude.json")
-    if not os.path.exists(real_json):
-        return config_text
-
     try:
-        with open(real_json, "r", encoding="utf-8") as f:
-            loaded = _json.load(f)
+        if os.path.exists(real_json):
+            with open(real_json, "r", encoding="utf-8") as f:
+                loaded = _json.load(f)
+        else:
+            loaded = {}
         servers = loaded.get("mcpServers", {}) if isinstance(loaded, dict) else {}
     except Exception:
-        return config_text
+        servers = {}
 
     servers = copy.deepcopy(servers) if isinstance(servers, dict) else {}
+    enabled_codex_plugins = _launchers._enabled_real_codex_plugin_names()
+    for name, spec in _launchers._installed_claude_plugin_mcp_servers().items():
+        if (
+            isinstance(spec, dict)
+            and isinstance(spec.get("url"), str)
+            and spec.get("url").strip()
+            and str(name or "").strip().lower() in enabled_codex_plugins
+        ):
+            continue
+        servers.setdefault(name, copy.deepcopy(spec))
     hive_spec = _launchers._default_hive_session_mcp_server()
     if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
         servers.setdefault("hive", hive_spec)

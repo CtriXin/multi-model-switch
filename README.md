@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v3.2.6`
+Current tagged version: `v3.4.0`
 
 Key changes in this generation:
 
@@ -46,13 +46,13 @@ Key changes in this generation:
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
 - bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `xmem`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
 - Caveman now defaults to `lite`, keeping full sentences while still removing filler; `/caveman full` remains available for stronger compression
-- silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
-- session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones; Codex Caveman preserves trusted hook order where possible
+- quiet hook policy: MMS-managed Claude/Codex sessions avoid default SessionStart/UserPrompt probes; remaining hooks are guard, closeout, or explicitly enabled pack hooks
+- session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones, and also surfaces URL-based MCP servers from installed Claude plugins (for example Figma); for Codex, app-backed integrations already enabled in real `~/.codex/config.toml` win over duplicate inherited URL MCP entries so MMS does not create a second broken OAuth path; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
 - optional xmem installer pack: `--install-xmem` installs the generic xmem CLI/skill, `--xmem-ref` can pin the source ref, and `--dry-run` previews the install/setup plan without writing files
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
-MMS also bundles the generic `xmem` skill plus silent session-start/session-end hooks. Newer sessions add a silent `xmem gateway` prompt probe in dry-run telemetry mode so MMS can learn when compact memory would have helped without changing agent context yet. These hooks only register/sync/probe when an `xmem` CLI is configured; if the CLI is absent they fail open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
+MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It no longer adds default `xmem` SessionStart sync or UserPrompt gateway probes; agents can call the `xmem` skill/CLI explicitly when a task needs recall. The closeout hook only runs when an `xmem` CLI is configured; if the CLI is absent it fails open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
 
 ## Install Or Upgrade
 
@@ -60,15 +60,21 @@ MMS also bundles the generic `xmem` skill plus silent session-start/session-end 
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
 
+Stable install pinned to `v3.4.0`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
+```
+
 Default behavior:
 
 - installs the latest semver tag
 - creates an isolated MMS runtime under `~/.mms`
-- links `mms` and `mmslogs` into `~/.local/bin`
+- links `mms`, preview-root `mmf`, and `mmslogs` into `~/.local/bin`
 - creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
 - if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
 - discovers installed `claude` / `codex` / `opencode` / `agy` across PATH, Homebrew, and NVM versions
-- retires the legacy `ccs` and `mmc` shims; new installs expose `mms` / `mmslogs`, not `ccs` / `mmc`
+- retires the legacy `ccs` and `mmc` shims; new installs expose `mms` / `mmf` / `mmslogs`, not `ccs` / `mmc`
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
 
@@ -83,7 +89,7 @@ Shell support:
 - Bash/Zsh: `--write-shell-rc` writes `~/.local/bin` into the active shell rc.
 - Fish: `--write-shell-rc` writes `~/.config/fish/conf.d/mms.fish`.
 - Ghostty/iTerm/Terminal: reopen the tab after install, or run `exec $SHELL -l`.
-- If you do not write shell rc, run `~/.local/bin/mms` immediately; direct `mms` works after PATH is loaded.
+- If you do not write shell rc, run `~/.local/bin/mms` or `~/.local/bin/mmf` immediately; direct `mms` / `mmf` works after PATH is loaded.
 
 Set the UI language during install:
 
@@ -95,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.6/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -112,6 +118,50 @@ fresh machine, MMS shows configured `fallback_models` / `extra_models`
 immediately while refreshing `/models` in the background; if a family is still
 missing on the same key, compare provider config/credentials and run
 `mms models` or `mms doctor full`.
+
+## Config V2 Preview Root
+
+Config v2 is available as a preview path before it becomes the stable default.
+Use `mms` for the current stable root and `mmf` for the isolated preview root:
+
+```text
+mms -> ~/.config/mms
+mmf -> ~/.config/mms-next
+```
+
+Recommended preview flow:
+
+```bash
+mmf config root --json
+mmf preview doctor --json
+mmf preview prepare --from ~/.config/mms --json
+mmf preview prepare --from ~/.config/mms --include-secrets --json
+mmf config check --json
+mmf config bundle --json
+mmf config web
+```
+
+In preview mode, the human-facing entrypoints are TUI / `mms config` / WebUI.
+Those surfaces write DB candidates, the preview secret backend, and a verified
+`generated/model-registry.latest-approved.json` bundle; they do not make
+`config.toml`, `credentials.sh`, route, policy, profile, or lineup files compete
+as separate truth sources.
+
+Stable promotion is still human-gated and read-only:
+
+```bash
+mmf promote --json
+mms migrate config-v2 --json
+mms config release-readiness --json
+```
+
+Even with `--apply`, `mms migrate config-v2` currently reports
+`apply_enabled=false` and stops at `stable_root_human_only` /
+`promotion_apply_not_implemented`. There is no silent fallback from the preview
+root into stable credentials, OAuth state, or Claude config. The release
+readiness audit can return `READY_FOR_4_0_HUMAN_GATE`, but it still reports
+`release_complete=false` until the human-gated stable promotion and post-promotion
+smoke are done.
 
 ## Quick Start
 
@@ -218,7 +268,14 @@ Provider-specific behavior belongs in data, not in one-off launcher branches.
 - context window metadata
 - reference URLs for future verification
 
-User overlays can live in the MMS config directory as read-only profile inputs. MMS should not mutate your real `config.toml` just because a model was probed.
+Registry v2 is the preferred path for local changes: TUI / `mms config` / WebUI
+creates DB candidates, then publishes a verified
+`generated/model-registry.latest-approved.json` bundle. When that manifest is
+present, the generated Profile it references is the runtime boundary.
+
+Legacy user overlays can still live in the MMS config directory as manual
+import/export compatibility inputs. MMS should not mutate your real
+`config.toml` just because a model was probed.
 
 ## User Preferences
 
@@ -241,12 +298,12 @@ MMS can expose capabilities per session without writing global hooks/config.
 | `xmem` | bundled in `~/.mms/vendor` | generic cross-project memory / truth-index skill; only active when an `xmem` CLI/source is configured |
 | Web automation bundle | bundled in `~/.mms/vendor` | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
 | `Caveman` | bundled in `~/.mms/vendor` | compact communication mode; only active when enabled by preference or launch confirmation |
-| `NSR` | built-in hooks, default on | session-local continuation hooks for active NSR goals; no global hooks/config writes |
+| `NSR` | built-in hooks, default on | session-local continuation hooks for active NSR goals; no default startup or prompt hook |
 | `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
 | `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is enabled by default for MMS-managed Claude/Codex sessions, but remains session-local and can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is enabled by default for MMS-managed Claude/Codex sessions, but its default hook surface is limited to tool/compact/closeout events and can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists.
 
 ## Optional Installer Packs
 
@@ -270,7 +327,7 @@ Add `--dry-run` to preview the install plan without writing files, for example `
 
 `--install-map` installs the project-structure Map and enables the Claude SessionStart auto-index hook. It helps Claude orient in a repo faster by refreshing a lightweight directory/file map. This is a global Claude hook; use `--map-ref` to pin the version.
 
-`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS sessions include a quiet CodeGraph auto-register hook: in a git repo without `.codegraph/`, it runs `codegraph init <repo>` then `codegraph index <repo>`; when `.codegraph/` already exists, it runs `codegraph sync <repo>`. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
+`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS no longer adds a default SessionStart auto-register hook for CodeGraph; run indexing explicitly when a repo needs it. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
 
 `--install-read-once` installs Claude Read token-saving hooks. Within one session it warns on repeated reads of unchanged files and prefers diffs after edits. It works automatically; users do not need to remember a command.
 

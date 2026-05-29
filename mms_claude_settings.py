@@ -831,12 +831,6 @@ def merge_mms_session_hooks(existing_hooks, template_hooks=None):
     )
     hooks_data = _launchers._append_command_hook(
         hooks_data,
-        "SessionStart",
-        _launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK,
-        matcher="",
-    )
-    hooks_data = _launchers._append_command_hook(
-        hooks_data,
         "Stop",
         _launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
         matcher="",
@@ -848,35 +842,6 @@ def merge_mms_session_hooks(existing_hooks, template_hooks=None):
         matcher="",
         timeout=10,
         status_message="Closing xmem",
-    )
-    hooks_data = _launchers._append_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK,
-        matcher="",
-    )
-    hooks_data = _launchers._append_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _launchers._XMEM_GATEWAY_HOOK,
-        matcher="",
-        timeout=10,
-    )
-    hooks_data = _launchers._append_command_hook(
-        hooks_data,
-        "SessionStart",
-        _launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK,
-        matcher="",
-        timeout=20,
-        status_message="Syncing CodeGraph",
-    )
-    hooks_data = _launchers._append_command_hook(
-        hooks_data,
-        "SessionStart",
-        _launchers._XMEM_SESSION_START_HOOK,
-        matcher="",
-        timeout=10,
-        status_message="Syncing xmem",
     )
     hooks_data = _launchers._append_command_hook(
         hooks_data,
@@ -903,8 +868,6 @@ def configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     if not enable_nsr or not _launchers._nsr_available_for_cli("claude"):
         return hooks_data
     for event_name, matcher in (
-        ("SessionStart", "startup|resume|clear|compact"),
-        ("UserPromptSubmit", ""),
         ("PermissionRequest", "*"),
         ("PreToolUse", "*"),
         ("PostToolUse", "*"),
@@ -938,13 +901,6 @@ def configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
         _launchers._caveman_claude_activate_command(caveman_root),
         timeout=5,
         status_message="Loading caveman mode...",
-    )
-    hooks_data = _launchers._append_shell_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _launchers._caveman_claude_tracker_command(caveman_root),
-        timeout=5,
-        status_message="Tracking caveman mode...",
     )
     return hooks_data
 
@@ -1077,7 +1033,7 @@ def session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True,
     if isinstance(mcp_servers, dict):
         for name in allowlist:
             spec = mcp_servers.get(name)
-            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+            if _launchers._mcp_server_spec_has_entrypoint(spec):
                 inherited[name] = copy.deepcopy(spec)
 
     fallback = _launchers._default_session_mcp_servers()
@@ -1085,6 +1041,8 @@ def session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True,
         if name not in inherited and isinstance(fallback.get(name), dict):
             inherited[name] = copy.deepcopy(fallback[name])
     if allow_execution_surfaces:
+        for name, spec in _launchers._installed_claude_plugin_mcp_servers().items():
+            inherited.setdefault(name, copy.deepcopy(spec))
         hive_spec = _launchers._default_hive_session_mcp_server()
         if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
             inherited.setdefault("hive", copy.deepcopy(hive_spec))
@@ -1124,12 +1082,14 @@ def inject_managed_mcp_servers_into_claude_state(
     allowlist = _launchers._session_managed_mcp_server_allowlist(
         allow_execution_surfaces=allow_execution_surfaces
     )
+    managed_names = set(allowlist)
+    managed_names.update(merged.keys())
     if isinstance(existing, dict):
-        for name in allowlist:
+        for name in managed_names:
             if _launchers._session_surface_disabled(disabled_session_surfaces, "mcp", name):
                 continue
             spec = existing.get(name)
-            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+            if _launchers._mcp_server_spec_has_entrypoint(spec):
                 merged[name] = copy.deepcopy(spec)
     merged = _launchers._normalize_session_mcp_servers(
         merged,

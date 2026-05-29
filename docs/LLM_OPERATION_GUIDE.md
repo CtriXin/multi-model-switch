@@ -44,8 +44,8 @@ Use overlays when the request is about preferences, visibility, local provider q
 | Thinking / effort / Caveman / bypass / agent pack defaults | `preferences.toml` | generate snippet; do not edit code |
 | Disable selected session skills/MCP/hooks | `[session_surfaces.disabled]` in `preferences.toml` | generate snippet; ask human to apply |
 | Override session asset roots | `[assets.roots]` in `preferences.toml` | generate snippet; no secret paths in public docs |
-| Provider-specific request schema differences | `config/provider-profiles.json` for built-in behavior; `~/.config/mms/provider-profiles.json` for human local overlay | built-in changes need tests/docs; real overlay is human-gated |
-| Model visibility / favorite / project policy | `model-policy.json` | preserve human policy; do not overwrite blindly |
+| Provider-specific request schema differences | Registry v2 Profile through TUI / `mms config` / WebUI; `config/provider-profiles.json` only for built-in seed behavior; legacy `provider-profiles.json` overlays are import/export compatibility | built-in changes need tests/docs; local behavior should become a DB candidate or manual snippet; real overlay writes are human-gated |
+| Model visibility / favorite / project policy | Registry v2 Policy through TUI / `mms config` / WebUI; legacy `model-policy.json` is compatibility/import-export only | preserve human policy; do not overwrite blindly; downstream consumers read the latest-approved bundle |
 | Team/power-user full runtime override | `override.toml` | human-gated; explain risk and backup path |
 
 `preferences.toml` intentionally ignores credentials, provider routes, account identity, proxy, OAuth, real `HOME`, real `XDG_*`, and Claude config fields.
@@ -119,7 +119,8 @@ Do not do these as a convenience fix:
 For vendor-specific behavior, prefer data over launcher branches:
 
 - Add request body/header/model differences to `config/provider-profiles.json` when it is a built-in public behavior.
-- Use `~/.config/mms/provider-profiles.json` or `~/.config/mms/model-profiles.json` only as human-managed local overlays.
+- Use TUI / `mms config` / WebUI to create Registry v2 Profile candidates for local behavior; after approval, publish the latest-approved bundle.
+- Use `~/.config/mms/provider-profiles.json` or `~/.config/mms/model-profiles.json` only as human-managed legacy overlay/import-export surfaces.
 - Update `docs/PROVIDER_PROFILES.md` and `docs/MODEL_CONFIG_CONTRACT.md` when the contract changes.
 - Run provider-profile tests and at least one relevant route/bridge smoke if the behavior affects real requests.
 

@@ -17,6 +17,7 @@ _STATE_FILE_PROCESS_LOCK = threading.RLock()
 _GATEWAY_SESSION_MARKERS = (
     os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
     os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+    os.path.join(".config", "mms", "accounts") + os.sep,
 )
 
 
@@ -90,13 +91,17 @@ def resolve_current_workdir(env=None, fallback=None):
 
 def resolve_mms_config_dir(env=None):
     env = env or os.environ
+    explicit_root = str(env.get("MMS_CONFIG_ROOT") or "").strip()
+    if explicit_root:
+        return _path_from_env_value(explicit_root)
+
     explicit = str(env.get("MMS_CONFIG_DIR") or "").strip()
     if explicit:
-        return os.path.abspath(os.path.expanduser(explicit))
+        return _path_from_env_value(explicit)
 
     xdg_config_home = str(env.get("XDG_CONFIG_HOME") or "").strip()
     if xdg_config_home:
-        normalized_xdg = os.path.abspath(os.path.expanduser(xdg_config_home))
+        normalized_xdg = _path_from_env_value(xdg_config_home)
         for marker in _GATEWAY_SESSION_MARKERS:
             idx = normalized_xdg.find(marker)
             if idx == -1:
@@ -107,6 +112,51 @@ def resolve_mms_config_dir(env=None):
         return os.path.join(normalized_xdg, "mms")
 
     return os.path.join(resolve_real_user_home(env), ".config", "mms")
+
+
+def mms_config_root_source(env=None):
+    env = env or os.environ
+    if str(env.get("MMS_CONFIG_ROOT") or "").strip():
+        return "MMS_CONFIG_ROOT"
+    if str(env.get("MMS_CONFIG_DIR") or "").strip():
+        return "MMS_CONFIG_DIR"
+    if str(env.get("XDG_CONFIG_HOME") or "").strip():
+        return "XDG_CONFIG_HOME"
+    return "real_home"
+
+
+def mms_config_root_is_explicit(env=None):
+    env = env or os.environ
+    return bool(str(env.get("MMS_CONFIG_ROOT") or env.get("MMS_CONFIG_DIR") or "").strip())
+
+
+def mms_config_root_mode(config_dir=None, env=None):
+    env = env or os.environ
+    marker = str(env.get("MMS_PREVIEW_MODE") or env.get("MMS_COMMAND_NAME") or "").strip().lower()
+    root = os.path.normpath(str(config_dir or resolve_mms_config_dir(env)))
+    if marker == "mmf" or os.path.basename(root) == "mms-next":
+        return "preview"
+    if mms_config_root_is_explicit(env):
+        return "preview"
+    return "stable"
+
+
+def mms_config_root_status(command=None, config_dir=None, env=None):
+    env = env or os.environ
+    root = os.path.normpath(str(config_dir or resolve_mms_config_dir(env)))
+    real_home = resolve_real_user_home(env)
+    return {
+        "command": str(command or env.get("MMS_COMMAND_NAME") or "mms"),
+        "mode": mms_config_root_mode(root, env),
+        "root_source": mms_config_root_source(env),
+        "config_root": root,
+        "config_path": os.path.join(root, "config.toml"),
+        "credentials_path": os.path.join(root, "credentials.sh"),
+        "usage_path": os.path.join(root, "usage.json"),
+        "stable_root": os.path.join(real_home, ".config", "mms"),
+        "preview_root": os.path.join(real_home, ".config", "mms-next"),
+        "explicit_root": mms_config_root_is_explicit(env),
+    }
 
 
 

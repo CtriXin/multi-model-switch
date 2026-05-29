@@ -45,6 +45,7 @@ def resolve_nsr_root(*, module_file, real_user_path_fn, asset_root_preference_fn
         candidates.append(expand_candidate(nsr_home))
     candidates.extend([
         os.path.join(_module_dir(module_file), "vendor", "non-stop-run"),
+        real_user_path_fn("auto-skills", "shared-skills", "nsr"),
         real_user_path_fn("auto-skills", "Non-Stop-Run"),
         real_user_path_fn("auto-skills", "shared-skills", "looop.deprecated"),
     ])

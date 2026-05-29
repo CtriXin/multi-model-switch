@@ -22,7 +22,7 @@
   <div class="card-copy"><code>install.sh</code> 负责安装 MMS 本体，也能顺手装 RTK、MindKeeper context、Map、read-once、ops-env-safe 等 optional packs。</div>
   <div class="meta"><span class="chip green">bootstrap</span></div>
 </article>
-<article class="card">
+                  <article class="card">
   <div class="card-title">TUI & CLI</div>
   <div class="card-copy"><code>mms</code>、<code>mms claude</code>、<code>mms codex</code> 等命令提供统一的本地 launcher surface。</div>
   <div class="meta"><span class="chip">human operator</span></div>
@@ -65,15 +65,15 @@
               <section class="section artifacts">
                 <h2 class="section-title">Artifacts / Operator Surfaces <span class="section-note">持久配置、导出路由与 operator 工具面</span></h2>
                 <div class="cards artifacts-grid">
-                  <article class="card">
+<article class="card">
   <div class="card-title">Config Tree</div>
-  <div class="card-copy"><code>~/.config/mms/</code> 保存 <code>config.toml</code>、<code>override.toml</code>、<code>accounts/</code>、<code>env/</code> 与 usage/session state。</div>
-  <div class="meta"><span class="chip green">persistent truth</span></div>
+  <div class="card-copy"><code>~/.config/mms/</code> 保存 legacy config、accounts、env、usage 与 session state；人只通过 TUI / <code>mms config</code> / WebUI 操作。</div>
+  <div class="meta"><span class="chip green">human config / state</span></div>
 </article>
 <article class="card">
-  <div class="card-title">Routing Artifacts</div>
-  <div class="card-copy"><code>model-routes.json</code>、route keyword 文件、gateway slots、speed stats 共同暴露当前 runtime picture。</div>
-  <div class="meta"><span class="chip violet">route export</span></div>
+  <div class="card-title">Registry Bundle</div>
+  <div class="card-copy"><code>generated/model-registry.latest-approved.json</code> 校验 generated Router / Lineup / Profile / Policy / Capabilities；root route 文件只是 compatibility exports。</div>
+  <div class="meta"><span class="chip violet">latest-approved</span></div>
 </article>
 <article class="card">
   <div class="card-title">Operator Surfaces</div>

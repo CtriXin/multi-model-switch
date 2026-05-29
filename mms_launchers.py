@@ -1,6 +1,7 @@
 """MMS 启动器：按 provider 或账号档案启动 CLI。"""
 
 import json
+import copy
 import os
 import re
 import shutil
@@ -211,6 +212,8 @@ from mms_state_io import (
     atomic_write_text,
     load_json_dict_unlocked as _load_json_dict_unlocked_impl,
     locked_state_file,
+    mms_config_root_mode,
+    resolve_mms_config_dir as _resolve_mms_config_dir,
     utc_now_z as _utc_now_z_impl,
 )
 from mms_state_io import resolve_current_workdir as _safe_getcwd
@@ -328,7 +331,7 @@ def _runtime_declares_sensitive_claude(runtime):
 def _load_model_context_overrides():
     """Compatibility wrapper for model context-window overrides."""
     return _load_model_context_overrides_impl(
-        _MODEL_CONTEXT_OVERRIDES_PATH,
+        _model_context_overrides_path(),
         _MODEL_CONTEXT_OVERRIDES_CACHE,
     )
 
@@ -539,12 +542,19 @@ def _record_account_guard_finalize(account_id, *, exit_code=None, stale_cleanup=
     )
 
 
-_MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context-overrides.json")
-_MODEL_CONTEXT_OVERRIDES_CACHE = {"mtime": None, "data": {"models": {}, "provider_overrides": {}}}
+_MODEL_CONTEXT_OVERRIDES_CACHE = {"path": None, "mtime": None, "data": {"models": {}, "provider_overrides": {}}}
 _CLAUDE_NETWORK_GUARD_CACHE: dict = {}
 _CLAUDE_NETWORK_GUARD_TTL_SEC = 20.0
 _SESSION_GUARD_MARKER_NAME = ".mms-session-guard.json"
 _SESSION_GUARD_LOCK_NAME = ".mms-session-guard.lock"
+
+
+def _model_context_overrides_path():
+    try:
+        config_root = _resolve_mms_config_dir()
+    except Exception:
+        config_root = _real_user_path(".config", "mms")
+    return os.path.join(config_root, "model-context-overrides.json")
 
 
 def _inject_real_home_hints(env, *, include_xdg=False):
@@ -565,13 +575,15 @@ def _truthy(value):
     return truthy(value)
 
 
-def _rescue_default_fallback_config():
+def _rescue_default_fallback_config(env=None):
     from mms_launcher_export import rescue_default_fallback_config
 
+    environ = env if isinstance(env, dict) else os.environ
     return rescue_default_fallback_config(
-        environ=os.environ,
+        environ=environ,
         load_config=load_config,
         truthy=_truthy,
+        mms_config_root_mode=mms_config_root_mode,
     )
 
 
@@ -583,6 +595,32 @@ def _rescue_bridge_kwargs():
     )
 
 
+def _merged_config_root_env(env):
+    merged_env = dict(os.environ)
+    if isinstance(env, dict):
+        merged_env.update({str(key): str(value) for key, value in env.items() if value is not None})
+        if "XDG_CONFIG_HOME" not in env and any(key in env for key in ("HOME", "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME")):
+            merged_env.pop("XDG_CONFIG_HOME", None)
+    return merged_env
+
+
+def _selected_mms_config_root(env):
+    merged_env = _merged_config_root_env(env)
+    try:
+        return _resolve_mms_config_dir(merged_env)
+    except Exception:
+        return _real_user_path(".config", "mms")
+
+
+def _config_root_is_explicit(env):
+    merged_env = _merged_config_root_env(env)
+    return bool(str(merged_env.get("MMS_CONFIG_ROOT") or merged_env.get("MMS_CONFIG_DIR") or "").strip())
+
+
+def _selected_config_path(*parts):
+    return os.path.join(_selected_mms_config_root({}), *parts)
+
+
 def _inject_rescue_launch_env(env):
     from mms_launcher_export import inject_rescue_launch_env
 
@@ -591,6 +629,7 @@ def _inject_rescue_launch_env(env):
         safe_getcwd=_safe_getcwd,
         real_user_path=_real_user_path,
         rescue_default_fallback_config=_rescue_default_fallback_config,
+        selected_mms_config_root=_selected_mms_config_root,
     )
 
 
@@ -826,6 +865,15 @@ def _path_is_within(path, root):
     return _path_is_within_impl(path, root)
 
 
+def _path_under(path, root):
+    try:
+        path_real = os.path.realpath(os.path.abspath(path))
+        root_real = os.path.realpath(os.path.abspath(root))
+        return os.path.commonpath([path_real, root_real]) == root_real
+    except Exception:
+        return False
+
+
 def _runtime_net_mode(runtime):
     """Compatibility wrapper for runtime network mode labels."""
     return _runtime_net_mode_impl(
@@ -851,6 +899,8 @@ def _build_home_context(env, runtime, cli_name):
         cli_name,
         real_user_home_fn=_real_user_home,
         real_user_path_fn=_real_user_path,
+        selected_mms_config_root_fn=_selected_mms_config_root,
+        config_root_is_explicit_fn=_config_root_is_explicit,
         runtime_locale_env_fn=_runtime_locale_env,
         runtime_net_mode_fn=_runtime_net_mode,
         runtime_dns_mode_fn=_runtime_dns_mode,
@@ -1057,8 +1107,9 @@ def _apply_runtime_ip_stack_profile(env, runtime):
     )
 
 
-HEALTH_CHECK_PATH = _real_user_path(".config", "mms", "health_check.json")
-ANTHROPIC_URL_CACHE_PATH = _real_user_path(".config", "mms", "cache", "anthropic_base_urls.json")
+RUNTIME_DIR = _selected_config_path("runtime")
+HEALTH_CHECK_PATH = _selected_config_path("health_check.json")
+ANTHROPIC_URL_CACHE_PATH = _selected_config_path("cache", "anthropic_base_urls.json")
 
 # Anthropic URL 探测结果缓存（内存，TTL 1h）
 # key: provider_id → {"url": str, "ts": datetime}
@@ -1317,6 +1368,8 @@ def _claude_gateway_home():
 
 
 def _claude_route_status_paths():
+    if str(os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR") or "").strip():
+        return [os.path.join(_resolve_mms_config_dir(), "route_status.json")]
     gateway_home = _claude_gateway_home()
     return [os.path.join(gateway_home, ".config", "mms", "route_status.json")]
 
@@ -1953,6 +2006,16 @@ def _normalize_session_mcp_server_spec(name, spec, *, env=None):
     return normalize_session_mcp_server_spec(name, spec, env=env)
 
 
+def _mcp_server_spec_has_entrypoint(spec):
+    if not isinstance(spec, dict):
+        return False
+    url = spec.get("url")
+    if isinstance(url, str) and url.strip():
+        return True
+    command = str(spec.get("command") or "").strip()
+    return bool(command)
+
+
 def _normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=None, env=None):
     """Compatibility wrapper for session MCP normalization."""
     from mms_claude_settings import normalize_session_mcp_servers
@@ -2417,6 +2480,119 @@ def _default_session_mcp_servers():
     from mms_claude_settings import default_session_mcp_servers
 
     return default_session_mcp_servers()
+
+
+def _installed_claude_plugin_paths():
+    plugins_root = _real_user_path(".claude", "plugins")
+    installed_path = os.path.join(plugins_root, "installed_plugins.json")
+    loaded = _load_json_dict_unlocked(installed_path)
+    plugins = loaded.get("plugins") if isinstance(loaded, dict) else {}
+    if not isinstance(plugins, dict):
+        return []
+
+    resolved_paths = []
+    seen = set()
+    for records in plugins.values():
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            install_path = os.path.abspath(
+                os.path.expanduser(str(record.get("installPath") or "").strip())
+            )
+            if not install_path or install_path in seen:
+                continue
+            if not os.path.isdir(install_path):
+                continue
+            if not _path_under(install_path, plugins_root):
+                continue
+            seen.add(install_path)
+            resolved_paths.append(install_path)
+    return resolved_paths
+
+
+def _installed_claude_plugin_mcp_manifest_paths(install_path):
+    install_root = os.path.abspath(os.path.expanduser(str(install_path or "").strip()))
+    if not install_root:
+        return []
+
+    candidates = []
+    metadata_paths = (
+        os.path.join(install_root, ".cursor-plugin", "plugin.json"),
+        os.path.join(install_root, ".claude-plugin", "plugin.json"),
+    )
+    for metadata_path in metadata_paths:
+        metadata = _load_json_dict_unlocked(metadata_path)
+        manifest_rel = metadata.get("mcpServers")
+        if not isinstance(manifest_rel, str) or not manifest_rel.strip():
+            continue
+        manifest_path = os.path.abspath(os.path.join(install_root, manifest_rel.strip()))
+        if _path_under(manifest_path, install_root):
+            candidates.append(manifest_path)
+
+    candidates.append(os.path.join(install_root, ".mcp.json"))
+
+    manifests = []
+    seen = set()
+    for candidate in candidates:
+        normalized = os.path.abspath(os.path.expanduser(str(candidate or "").strip()))
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        if os.path.isfile(normalized):
+            manifests.append(normalized)
+    return manifests
+
+
+def _installed_claude_plugin_mcp_servers():
+    servers = {}
+    for install_path in _installed_claude_plugin_paths():
+        for manifest_path in _installed_claude_plugin_mcp_manifest_paths(install_path):
+            payload = _load_json_dict_unlocked(manifest_path)
+            plugin_servers = payload.get("mcpServers") if isinstance(payload, dict) else {}
+            if not isinstance(plugin_servers, dict):
+                continue
+            for name, spec in plugin_servers.items():
+                key = str(name or "").strip()
+                if not key or key in servers or not _mcp_server_spec_has_entrypoint(spec):
+                    continue
+                servers[key] = copy.deepcopy(spec)
+    return servers
+
+
+def _enabled_real_codex_plugin_names():
+    import re
+
+    config_path = _real_user_path(".codex", "config.toml")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception:
+        return set()
+
+    header_pattern = re.compile(
+        r'^\[plugins\."((?:\\.|[^"\\])*)"\]\s*$',
+        flags=re.MULTILINE,
+    )
+    matches = list(header_pattern.finditer(text))
+    enabled = set()
+    for index, match in enumerate(matches):
+        plugin_id = _decode_toml_basic_key(match.group(1))
+        block_start = match.end()
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[block_start:block_end]
+        enabled_match = re.search(
+            r'^\s*enabled\s*=\s*(true|false)\s*$',
+            block,
+            flags=re.MULTILINE | re.IGNORECASE,
+        )
+        if not enabled_match or enabled_match.group(1).lower() != "true":
+            continue
+        plugin_name = str(plugin_id or "").split("@", 1)[0].strip().lower()
+        if plugin_name:
+            enabled.add(plugin_name)
+    return enabled
 
 
 def _resolve_hive_root(module_path=None):

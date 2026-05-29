@@ -155,8 +155,6 @@ def configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
     if not enable_nsr or not _launchers()._nsr_available_for_cli("codex"):
         return hooks_data
     for event_name, matcher in (
-        ("SessionStart", "startup|resume"),
-        ("UserPromptSubmit", ""),
         ("PermissionRequest", "*"),
         ("PreToolUse", "*"),
         ("PostToolUse", "*"),
@@ -181,26 +179,11 @@ def build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_n
     hooks_data = _launchers()._configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
     hooks_data = _launchers()._append_shell_command_hook(
         hooks_data,
-        "SessionStart",
-        _launchers()._XMEM_SESSION_START_HOOK,
-        matcher="startup|resume",
-        timeout=10,
-        status_message="Syncing xmem",
-    )
-    hooks_data = _launchers()._append_shell_command_hook(
-        hooks_data,
         "Stop",
         _launchers()._XMEM_SESSION_END_HOOK,
         matcher="",
         timeout=10,
         status_message="Closing xmem",
-    )
-    hooks_data = _launchers()._append_shell_command_hook(
-        hooks_data,
-        "UserPromptSubmit",
-        _launchers()._XMEM_GATEWAY_HOOK,
-        matcher="",
-        timeout=10,
     )
     hooks_data = _launchers()._filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _launchers()._filter_missing_managed_hook_commands(hooks_data)

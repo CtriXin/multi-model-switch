@@ -8,7 +8,7 @@ Status: L3 file-first rescue with thin bridge hook, TUI rescue viewer, safe fall
 - Hooks terminal bridge failures for blocking classes: 429/quota, 403/401 permission/auth, context overflow, model not found, timeout, 5xx, and unsupported capability/parameter.
 - Global fallback is file-first behavior: bridge failures write the rescue packet and `fallback-handover.md/json`, but do not switch the active request to the fallback model automatically.
 - Current-session hot fallback is paused pending redesign. `[rescue].hot_fallback_enabled = true` and `MMS_RESCUE_HOT_FALLBACK=1` are still parsed for compatibility, but the bridge keeps handoff-only behavior.
-- Fallback route resolution still reads `generated/model-routes.json` / `model-routes.json` so tests can verify cache-sensitive routes select Anthropic `/v1/messages` instead of `/v1/chat/completions`.
+- Fallback route resolution checks `<config_root>/generated/model-registry.latest-approved.json` first. When the manifest exists, only the verified Router payload is used and invalid manifests fail closed; when it is missing, legacy generated/root `model-routes.json` files remain compatibility fallbacks.
 - Blocking failures and cache-sensitive channel switches append redacted JSONL entries to `<resolved-mms-config>/logs/incidents.jsonl`.
 - When a fallback model is configured, the bridge may generate `summary.md` asynchronously in the rescue artifact directory; this is a recovery summary only, not a same-request hot fallback.
 - Keeps global OAuth fallback disabled.

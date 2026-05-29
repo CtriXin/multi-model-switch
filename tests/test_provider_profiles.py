@@ -74,6 +74,38 @@ def test_mimo_openai_profile_uses_official_token_parameter(monkeypatch, tmp_path
     assert "max_tokens" not in payload
 
 
+def test_mimo_relay_profile_resolution_prefers_protocol_specific_profile(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    anthropic_profile, _ = profiles.resolve_provider_profile(
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+        model_name="mimo-v2.5[1m]",
+        protocol="anthropic_messages",
+    )
+    openai_profile, _ = profiles.resolve_provider_profile(
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+        model_name="mimo-v2.5[1m]",
+        protocol="openai_chat",
+    )
+
+    assert anthropic_profile == "mimo"
+    assert openai_profile == "mimo-openai"
+    assert profiles.profile_context_window(
+        "mimo-v2.5[1m]",
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+        protocol="anthropic_messages",
+    ) == 1_000_000
+    assert profiles.profile_model_alias(
+        "mimo-v2.5[1m]",
+        protocol="anthropic_messages",
+        provider_id="xin",
+        base_url="https://apple.clawopen.online",
+    ) == "mimo-v2.5"
+
+
 def test_qwen_chat_template_profile_is_explicit_overlay_only(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
     payload = {"model": "qwen3.5-coder", "messages": []}
@@ -328,3 +360,85 @@ def test_gemini_profile_keeps_3_level_and_25_numeric_budget(monkeypatch, tmp_pat
     assert gemini25_payload["thinkingConfig"]["thinkingBudget"] == 2048
     assert isinstance(gemini25_payload["thinkingConfig"]["thinkingBudget"], int)
     assert "thinkingLevel" not in gemini25_payload["thinkingConfig"]
+
+
+def test_preview_root_missing_latest_bundle_ignores_legacy_profile_overlay(monkeypatch, tmp_path):
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    (preview_root / "provider-profiles.json").write_text(
+        """
+        {
+          "schema_version": 1,
+            "profiles": {
+              "preview-only-legacy-overlay": {
+                "match": {"provider_id_contains": ["preview-only-provider"]},
+              "context_windows": {"any": 12345}
+              }
+            }
+          }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+
+    assert mms_provider_profiles.resolve_provider_profile(provider_id="preview-only-provider")[0] == ""
+    assert mms_provider_profiles.profile_context_window("any-model", provider_id="preview-only-provider") is None
+
+
+def test_config_dir_root_missing_latest_bundle_ignores_legacy_profile_overlay(monkeypatch, tmp_path):
+    selected_root = tmp_path / "selected-root"
+    selected_root.mkdir()
+    (selected_root / "provider-profiles.json").write_text(
+        """
+        {
+          "schema_version": 1,
+            "profiles": {
+              "config-dir-legacy-overlay": {
+                "match": {"provider_id_contains": ["config-dir-provider"]},
+              "context_windows": {"any": 24680}
+              }
+            }
+          }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+
+    assert mms_provider_profiles.resolve_provider_profile(provider_id="config-dir-provider")[0] == ""
+    assert mms_provider_profiles.profile_context_window("any-model", provider_id="config-dir-provider") is None
+
+
+def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypatch, tmp_path):
+    stable_root = tmp_path / "xdg" / "mms"
+    stable_root.mkdir(parents=True)
+    (stable_root / "provider-profiles.json").write_text(
+        """
+        {
+          "schema_version": 1,
+            "profiles": {
+              "stable-legacy-overlay": {
+                "match": {"provider_id_contains": ["stable-overlay-provider"]},
+              "context_windows": {"any": 54321}
+              }
+            }
+          }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(stable_root.parent))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+
+    assert mms_provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == "stable-legacy-overlay"
+    assert mms_provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") == 54321

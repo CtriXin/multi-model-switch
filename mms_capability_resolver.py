@@ -3,8 +3,9 @@
 This module is intentionally runtime-adjacent, not runtime-owning. It does not
 query SQLite directly and it does not alter provider/model/account selection.
 By default it reads the verified latest-approved capability export when
-available. Missing or corrupt approved inputs fall back to provider profiles and
-then conservative defaults.
+available. Explicitly selected preview roots fail closed when that bundle is
+missing or corrupt; stable legacy roots can still fall back to provider profiles
+and then conservative defaults.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from mms_provider_profiles import load_provider_profiles, resolve_provider_profile
+
+
+class CapabilityBundleError(RuntimeError):
+    """Raised when selected-root capability facts cannot be safely verified."""
 
 
 CONSERVATIVE_CAPABILITY_FALLBACK: dict[str, Any] = {
@@ -89,12 +94,30 @@ def load_approved_facts(path: str | Path | None) -> dict[str, Any]:
 
 
 def load_default_approved_facts() -> dict[str, Any]:
-    """Read verified latest-approved capability facts, returning empty on fallback."""
+    """Read verified latest-approved capability facts.
+
+    Stable legacy roots keep conservative fallback compatibility. Explicit
+    preview roots must not silently continue when the selected latest-approved
+    bundle is missing or invalid.
+    """
     try:
         import mms_registry
     except Exception:
         return {}
-    return mms_registry.try_load_latest_approved_payload("capabilities")
+    try:
+        return mms_registry.load_latest_approved_bundle(include_secret=False).get("payloads", {}).get("capabilities") or {}
+    except Exception as exc:
+        try:
+            from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
+
+            config_root = resolve_mms_config_dir()
+            if mms_config_root_mode(config_root) == "preview":
+                raise CapabilityBundleError(f"latest-approved capabilities unavailable for selected config root: {exc}") from exc
+        except CapabilityBundleError:
+            raise
+        except Exception:
+            pass
+    return {}
 
 
 def resolve_model_capabilities(

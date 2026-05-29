@@ -23,19 +23,22 @@ remain available only for repos that explicitly opt into `--layout legacy-ai-pla
 
 ## Install
 
-### Global Slash Commands
+### Global Skill Aliases
 
 Preferred one-time/idempotent installer:
 
 ```bash
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/install_global_commands.py
+python3 <handover-root>/scripts/install_global_commands.py
 ```
+
+`<handover-root>` is this directory, for example the bundled
+`$MMS_HOME/vendor/handover` in public MMS installs.
 
 It installs symlinks for:
 
 - `handover` skill
 - `offduty` / `onduty` skill aliases, so Codex can use `$offduty` / `$onduty`
-- managed `/offduty` and `/onduty` command files for slash-command hosts
+- cleanup of old managed `/offduty` and `/onduty` command symlinks, so the same entry does not appear twice
 
 Targets:
 
@@ -45,24 +48,24 @@ Targets:
 - `~/.config/opencode`
 - `~/.opencode`
 
-The installer only replaces command files that contain its managed marker, then
-turns them into symlinks to this repo. If an unmanaged command or non-symlink
-skill already exists, it is skipped instead of replaced.
+The installer removes old managed command symlinks and keeps unmanaged command
+files untouched. If a non-symlink skill already exists, it is skipped instead of
+replaced.
 
 The `mobius` skill runs this installer as trigger preflight, so after any
-Mobius invocation `$offduty` / `$onduty` and slash commands should be available
-in fresh sessions.
+Mobius invocation `$offduty` / `$onduty` skill aliases should be available in
+fresh sessions.
 
 ### Claude
 
 ```bash
-ln -s /Users/xin/auto-skills/shared-skills/handover ~/.claude/skills/handover
+ln -s <handover-root> ~/.claude/skills/handover
 ```
 
 ### Codex
 
 ```bash
-ln -s /Users/xin/auto-skills/shared-skills/handover ~/.codex/skills/handover
+ln -s <handover-root> ~/.codex/skills/handover
 ```
 
 ## Main Rule
@@ -89,9 +92,9 @@ For legacy `.ai/plan/current.md` projects, `current.md` is not concurrency-safe:
 Use only for the legacy `.ai/plan/current.md` layout:
 
 ```bash
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py status --root .
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py claim --root . --task-id <id> --owner <agent> --cli <cli> --model <model> --next-action "<next>"
-python3 /Users/xin/auto-skills/shared-skills/handover/scripts/handover_current.py audit --root .
+python3 <handover-root>/scripts/handover_current.py status --root .
+python3 <handover-root>/scripts/handover_current.py claim --root . --task-id <id> --owner <agent> --cli <cli> --model <model> --next-action "<next>"
+python3 <handover-root>/scripts/handover_current.py audit --root .
 ```
 
 ## Offduty / Onduty
@@ -106,9 +109,13 @@ Default usage:
 /onduty
 $offduty
 $onduty
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty
-/Users/xin/auto-skills/shared-skills/handover/scripts/onduty
+<offduty-skill-dir>/offduty
+<onduty-skill-dir>/onduty
 ```
+
+The installed `offduty` / `onduty` alias directories include same-name wrapper
+scripts that resolve `../../scripts/*` relative to the alias target, so public
+installs do not depend on a developer checkout path.
 
 Agents should infer task id, type, summary, risk, validation, and next action
 from chat, docs, git status, and diff. Extra flags are overrides for scripts or

@@ -107,11 +107,20 @@ def extract_global_lang(argv, *, normalize_language):
     return cleaned, lang
 
 
-def current_command(*, primary_command):
+def current_command(*, primary_command, environ=None, argv0=None):
+    environ = {} if environ is None else environ
+    explicit = str(environ.get("MMS_COMMAND_NAME") or "").strip()
+    invoked = os.path.basename(str(argv0 if argv0 is not None else (sys.argv[0] if sys.argv else ""))).strip()
+    if explicit and (explicit == "mmf" or invoked == explicit):
+        return explicit
+    if invoked == "mmf":
+        return "mmf"
     return primary_command
 
 
-def display_title(title="MMS"):
+def display_title(title="MMS", *, current_command_fn=None):
+    if current_command_fn is not None and current_command_fn() == "mmf":
+        return "MMF"
     return title
 
 
@@ -1659,7 +1668,7 @@ def rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback
             ("Model", model or "-"),
             ("Hot fallback", localize("开启", "on") if hot_fallback_enabled else localize("关闭", "off")),
             (localize("保存位置", "saved at"), "[rescue].fallback_model"),
-            (localize("生效方式", "applies"), "bridge failure -> model-routes.json"),
+            (localize("生效方式", "applies"), "bridge failure -> latest-approved Router"),
             (localize("安全边界", "safety"), "no global OAuth"),
         ],
         (
@@ -1694,10 +1703,6 @@ def rescue_hot_fallback_toggle_report_payload(enabled, *, has_default=True, loca
 def rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", limit=80, default_config_dir=""):
     failed = str(failed_model or "").strip().lower()
     root = os.path.expanduser(str(config_dir or default_config_dir))
-    paths = [
-        os.path.join(root, "generated", "model-routes.json"),
-        os.path.join(root, "model-routes.json"),
-    ]
     candidates = []
     seen = set()
 
@@ -1706,11 +1711,7 @@ def rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", 
             return False
         return bool(str(route.get("openai_base_url") or "").strip() and str(route.get("api_key") or "").strip())
 
-    for path in paths:
-        try:
-            payload = json.loads(open(path, "r", encoding="utf-8").read())
-        except (OSError, json.JSONDecodeError, TypeError):
-            continue
+    def add_from_router_payload(payload):
         routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
         for model_name, entry in routes.items():
             name = str(model_name or "").strip()
@@ -1725,6 +1726,36 @@ def rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", 
                 continue
             seen.add(name.lower())
             candidates.append(name)
+
+    manifest_path = os.path.join(root, "generated", "model-registry.latest-approved.json")
+    if os.path.exists(manifest_path):
+        try:
+            import mms_registry
+
+            payload = mms_registry.try_load_latest_approved_payload("router", config_dir=root, include_secret=True)
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and payload:
+            add_from_router_payload(payload)
+        return candidates[: max(1, int(limit or 1))]
+    try:
+        from mms_state_io import mms_config_root_status
+
+        if mms_config_root_status(config_dir=root).get("mode") == "preview":
+            return []
+    except Exception:
+        pass
+
+    paths = [
+        os.path.join(root, "generated", "model-routes.json"),
+        os.path.join(root, "model-routes.json"),
+    ]
+    for path in paths:
+        try:
+            payload = json.loads(open(path, "r", encoding="utf-8").read())
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        add_from_router_payload(payload)
         if candidates:
             break
     return candidates[: max(1, int(limit or 1))]
@@ -4557,6 +4588,13 @@ def ensure_provider_credentials(
     setup_provider_credentials,
 ):
     provider = get_provider_definition(cfg, provider_id)
+    if provider.get("_mms_bundle_runtime") and provider.get("api_key") and (
+        provider.get("openai_base_url")
+        or provider.get("anthropic_base_url")
+        or provider.get("default_openai_base_url")
+        or provider.get("default_anthropic_base_url")
+    ):
+        return resolve_provider_context(cfg, provider["id"])
     credentials = load_provider_credentials(provider["id"])
     if (
         credentials["base_url"]
@@ -4650,9 +4688,10 @@ def derived_model_aliases(
     provider_supports_mimo_anthropic_selectors=provider_supports_mimo_anthropic_selectors,
 ):
     aliases = []
-    if any(model_id.startswith("claude-sonnet-4-") for model_id in base_models):
+    claude_tails = [str(model_id or "").strip().lower().rsplit("/", 1)[-1] for model_id in base_models]
+    if any(model_id.startswith("claude-sonnet-4-") or model_id.startswith("claude-sonnet-4.") for model_id in claude_tails):
         aliases.append("claude-sonnet-4-6")
-    if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
+    if any(model_id.startswith("claude-opus-4-") or model_id.startswith("claude-opus-4.") for model_id in claude_tails):
         aliases.append("claude-opus-4-6")
     if provider_supports_mimo_anthropic_selectors(provider):
         model_set = set(base_models)
@@ -4675,8 +4714,10 @@ def apply_provider_model_patch(
     result = dict(base_result)
     base_models = normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
     extra_models = normalize_model_id_list(provider.get("extra_models", []))
-    aliases = derived_model_aliases(base_models, provider)
     hidden_requested = set(normalize_model_id_list(provider.get("hidden_models", [])))
+    hidden_requested_lower = {model_id.lower() for model_id in hidden_requested}
+    alias_base_models = [model_id for model_id in base_models if model_id.lower() not in hidden_requested_lower]
+    aliases = derived_model_aliases(alias_base_models, provider)
     base_source = result.get("base_source") or ("fallback" if result.get("used_fallback") else "remote")
 
     effective_models = []
@@ -4711,9 +4752,9 @@ def apply_provider_model_patch(
         and not (model_id.startswith("claude-") and model_id not in claude_keep)
     ]
 
-    hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
+    hidden_applied = [model_id for model_id in effective_models if model_id.lower() in hidden_requested_lower]
     if hidden_requested:
-        effective_models = [model_id for model_id in effective_models if model_id not in hidden_requested]
+        effective_models = [model_id for model_id in effective_models if model_id.lower() not in hidden_requested_lower]
     visible_sources = {model_id: model_sources.get(model_id, base_source) for model_id in effective_models}
 
     result["raw_models"] = base_models
@@ -4756,7 +4797,10 @@ def provider_effective_models(
     schedule_probe_refresh,
     apply_provider_model_patch,
 ):
-    if cached_models is None:
+    if provider.get("_mms_bundle_runtime"):
+        base_models = list(provider.get("fallback_models") or [])
+        base_source = "approved"
+    elif cached_models is None:
         if provider.get("models_endpoint") == "manual":
             base_models = list(provider.get("fallback_models") or [])
             base_source = "manual"
@@ -5277,11 +5321,26 @@ def resolve_provider_context(
 ):
     provider = normalize_provider(get_provider_definition(cfg, provider_id))
     credentials = load_provider_credentials(provider["id"])
-    provider["base_url"] = credentials["base_url"]
-    provider["openai_base_url"] = credentials["openai_base_url"] or provider.get("default_openai_base_url", "")
-    provider["anthropic_base_url"] = credentials["anthropic_base_url"] or provider.get("default_anthropic_base_url", "")
-    provider["api_key"] = credentials["api_key"]
-    provider["openai_api_key"] = credentials.get("openai_api_key", "")
+    if provider.get("_mms_bundle_runtime"):
+        provider["base_url"] = credentials["base_url"] or provider.get("base_url", "")
+        provider["openai_base_url"] = (
+            credentials["openai_base_url"]
+            or provider.get("openai_base_url", "")
+            or provider.get("default_openai_base_url", "")
+        )
+        provider["anthropic_base_url"] = (
+            credentials["anthropic_base_url"]
+            or provider.get("anthropic_base_url", "")
+            or provider.get("default_anthropic_base_url", "")
+        )
+        provider["api_key"] = credentials["api_key"] or provider.get("api_key", "")
+        provider["openai_api_key"] = credentials.get("openai_api_key", "") or provider.get("openai_api_key", "")
+    else:
+        provider["base_url"] = credentials["base_url"]
+        provider["openai_base_url"] = credentials["openai_base_url"] or provider.get("default_openai_base_url", "")
+        provider["anthropic_base_url"] = credentials["anthropic_base_url"] or provider.get("default_anthropic_base_url", "")
+        provider["api_key"] = credentials["api_key"]
+        provider["openai_api_key"] = credentials.get("openai_api_key", "")
     provider["auth_mode"] = "api_key"
     provider["runtime_kind"] = "provider"
     return provider

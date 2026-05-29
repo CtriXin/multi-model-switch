@@ -78,7 +78,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | `thinking_mode` | `enable` / `disable` | Default Thinking toggle for supported `Claude` / `Codex` routes |
 | `reasoning_effort` | `low` / `medium` / `high` / `xhigh` | Default effort when the selected model profile supports it |
 | `caveman_mode` | `enable` / `disable` | Default session-local Caveman overlay |
-| `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `enable` |
+| `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `enable`, without startup/prompt hooks |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
 | `disabled_session_surfaces` | table with `skills` / `mcp` / `hooks` arrays | Per-launch disabled surface overlay |
@@ -170,6 +170,6 @@ Common roots:
 ~/.mms/agent-packs/oh-my-claudecode
 ```
 
-Passive assets are available naturally in MMS-launched sessions. NSR is also enabled by default for MMS-managed Claude/Codex sessions, but remains session-local and can be disabled per launch or via `nsr_mode = "disable"`. Heavier agent packs such as `ECC` and `OMC` remain opt-in.
+Passive assets are available naturally in MMS-launched sessions. NSR is also enabled by default for MMS-managed Claude/Codex sessions, but its default hooks are limited to tool/compact/closeout events and can be disabled per launch or via `nsr_mode = "disable"`. Heavier agent packs such as `ECC` and `OMC` remain opt-in.
 
 This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giving each MMS session the selected skills, hooks, and MCP surfaces.

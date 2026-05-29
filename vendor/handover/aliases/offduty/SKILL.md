@@ -19,29 +19,39 @@ Use this alias when the user types `$offduty`, `/offduty`, or asks to 下班交�
 3. Choose an actual work cwd for each root; usually the repo root or the touched subdirectory.
 4. Infer the concrete task line from current chat, repo docs, git branch, git status, git diff, and recent artifacts for each root.
 5. Preserve useful failed attempts, reversals, validation, risks, exact next action, session id, and model name.
-6. From each actual repo root, run:
+6. Resolve the helper from the installed skill alias, not from a
+   machine-specific absolute path:
+   - Preferred: use `<directory-containing-this-SKILL.md>/offduty`.
+   - If the skill directory is not visible, find an installed alias wrapper
+     under `${MMS_REAL_HOME:-}`, `${REAL_HOME:-}`, `${ORIGINAL_HOME:-}`, or
+     `$HOME`: `.agents/skills/offduty/offduty`,
+     `.claude/skills/offduty/offduty`, `.codex/skills/offduty/offduty`,
+     `.config/opencode/skills/offduty/offduty`, or
+     `.opencode/skills/offduty/offduty`.
+   - Never run a developer-machine path such as `/Users/xin/...`.
+7. From each actual repo root, run:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>"
+"<offduty-skill-dir>/offduty" --root "<actual-repo-root>" --cwd "<actual-work-cwd>"
 ```
 
    This writes `.agent.local/continuity/` plus a lightweight
    `.agent.local/continuity/lifeboat/*.md/json` capsule and best-effort `bkc`
    backup when the local session can be resolved. Do not call native resume here.
 
-7. If the current truth, next action, and visible model name are already clear, pass only concise overrides:
+8. If the current truth, next action, and visible model name are already clear, pass only concise overrides:
 
 ```bash
-/Users/xin/auto-skills/shared-skills/handover/scripts/offduty --root "<actual-repo-root>" --cwd "<actual-work-cwd>" --model "<model-name>" --summary "<current truth>" --next-action "<next>"
+"<offduty-skill-dir>/offduty" --root "<actual-repo-root>" --cwd "<actual-work-cwd>" --model "<model-name>" --summary "<current truth>" --next-action "<next>"
 ```
 
-8. Reply briefly with the written paths per root, plus cwd/session_id/session_hash/model, and tell the user to use `$onduty` or `/onduty` in the target repo fresh session.
+9. Reply briefly with the written paths per root, plus cwd/session_id/session_hash/model, and tell the user to use `$onduty` or `/onduty` in the target repo fresh session.
 
 ## Rules
 
 - Default output is `.agent.local/continuity/`; legacy `.ai/plan` requires `--layout legacy-ai-plan`.
 - For Codex, `$offduty` is the preferred explicit trigger.
-- For Claude/OpenCode, `/offduty` may be available through command symlinks.
+- For Claude/OpenCode, `/offduty` may route through the skill alias; legacy command symlinks are cleaned to avoid duplicate entries.
 - Root ownership follows actual touched repo/root, not the session launch folder.
 - Task ids must stay short; use a concrete task id, not a long summary.
 - Side sessions should not take the active pointer unless the helper decides the task owns main scope.

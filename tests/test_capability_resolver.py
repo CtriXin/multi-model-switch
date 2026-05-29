@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from mms_capability_resolver import CapabilityBundleError
 from mms_capability_resolver import resolve_model_capabilities
 
 
@@ -121,6 +124,7 @@ def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_ali
         "mimo-v2.5-pro",
         provider_id="mimo-direct",
         base_url="https://api.xiaomimimo.com/v1",
+        approved_facts={},
     )
 
     assert caps["context_window_tokens"] == 1_048_576
@@ -170,6 +174,7 @@ def test_gemini_25_profile_uses_numeric_thinking_budget(monkeypatch, tmp_path) -
         "gemini-2.5-pro",
         provider_id="gemini-direct",
         base_url="https://generativelanguage.googleapis.com",
+        approved_facts={},
     )
 
     assert caps["thinking_control"]["path"] == "thinkingConfig.thinkingBudget"
@@ -211,3 +216,20 @@ def test_cache_sensitive_dual_protocol_routes_keep_anthropic_first() -> None:
     assert caps["protocol_hints"]["cache_sensitive_transport"] is True
     assert caps["protocol_hints"]["openai_chat_completions_is_fallback"] is True
     assert caps["protocol_hints"]["preferred_protocol"] != "openai_chat_completions"
+
+
+def test_selected_root_missing_latest_approved_capabilities_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
+        resolve_model_capabilities("missing-approved-model")
+
+
+def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+
+    caps = resolve_model_capabilities("legacy-unknown-model")
+
+    assert caps["context_window_tokens"] == 8_192
+    assert caps["sources"]["context_window_tokens"] == "conservative_fallback"

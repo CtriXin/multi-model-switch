@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -8,6 +9,44 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_latest_approved_router_manifest(
+    config_root: Path,
+    *,
+    router_payload: dict,
+    profile_payload: dict | None = None,
+    sha_override: str = "",
+) -> None:
+    import mms_registry
+
+    generated = config_root / "generated"
+    router_path = generated / "model-routes.json"
+    lineup_path = generated / "model-routes.lineup.json"
+    profile_path = generated / "provider-profiles.generated.json"
+    policy_path = generated / "model-policy.effective.json"
+    capabilities_path = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(router_path, router_payload)
+    router_hash = hashlib.sha256(router_path.read_bytes()).hexdigest()
+    mms_registry.write_json_atomic(lineup_path, {"version": 1, "routes": {}})
+    mms_registry.write_json_atomic(profile_path, profile_payload or {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(policy_path, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities_path, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_rescue_test",
+        capability_revision="cap_rescue_test",
+        route_revision="route_rescue_test",
+        policy_revision="policy_rescue_test",
+        profile_revision="profile_rescue_test",
+        files={
+            "router": {"path": router_path, "canonical_path": "generated/model-routes.json", "sha256": sha_override or router_hash, "sensitivity": "secret"},
+            "lineup": {"path": lineup_path, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile_path, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy_path, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities_path, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+        },
+    )
 
 
 def test_tui_settings_action_descriptors_have_stable_labels() -> None:
@@ -40,6 +79,10 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
     assert "guard" in ids
     assert "recommend" not in ids
     assert "fake_upstream" not in ids
+    routes_export = next(item for item in items if item["id"] == "routes_export")
+    assert "Legacy" in routes_export["label"]
+    assert "model-routes.json" in routes_export["desc"]
+    assert "v2" in routes_export["desc"]
 
 
 def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
@@ -173,6 +216,128 @@ def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path:
     assert "deepseek-v4-flash" in all_candidates
     assert "failed-model" not in route_candidates
     assert "no-openai-route" not in route_candidates
+
+
+def test_rescue_route_candidates_read_verified_latest_approved_router(tmp_path: Path) -> None:
+    import mms_core
+
+    _write_latest_approved_router_manifest(
+        tmp_path,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "verified-fallback": {
+                    "primary": {
+                        "provider_id": "verified",
+                        "openai_base_url": "https://verified.example/v1",
+                        "api_key": "sk-test-verified",
+                        "model_id": "verified-fallback",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    (tmp_path / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "stale-root": {
+                        "primary": {
+                            "provider_id": "stale",
+                            "openai_base_url": "https://stale.example/v1",
+                            "api_key": "sk-test-stale",
+                            "model_id": "stale-root",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = mms_core._rescue_route_fallback_model_candidates(config_dir=tmp_path)
+
+    assert candidates == ["verified-fallback"]
+
+
+def test_rescue_route_candidates_fail_closed_on_invalid_latest_approved_manifest(tmp_path: Path) -> None:
+    import mms_core
+
+    _write_latest_approved_router_manifest(
+        tmp_path,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "untrusted-generated": {
+                    "primary": {
+                        "provider_id": "untrusted",
+                        "openai_base_url": "https://untrusted.example/v1",
+                        "api_key": "sk-test-untrusted",
+                        "model_id": "untrusted-generated",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+        sha_override="0" * 64,
+    )
+    (tmp_path / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "stale-root": {
+                        "primary": {
+                            "provider_id": "stale",
+                            "openai_base_url": "https://stale.example/v1",
+                            "api_key": "sk-test-stale",
+                            "model_id": "stale-root",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = mms_core._rescue_route_fallback_model_candidates(config_dir=tmp_path)
+
+    assert candidates == []
+
+
+def test_rescue_route_candidates_fail_closed_on_missing_preview_manifest(tmp_path: Path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    generated = preview_root / "generated"
+    generated.mkdir(parents=True)
+    (generated / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "stale-preview-route": {
+                        "primary": {
+                            "provider_id": "stale",
+                            "openai_base_url": "https://stale.example/v1",
+                            "api_key": "sk-test-stale",
+                            "model_id": "stale-preview-route",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = mms_core._rescue_route_fallback_model_candidates(config_dir=preview_root)
+
+    assert candidates == []
 
 
 def test_rescue_default_fallback_config_roundtrip() -> None:
@@ -390,6 +555,279 @@ def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
     assert "Registry Doctor / 状态" in action_labels
 
 
+def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    title, info_lines, actions = mms_core._model_source_status_tui_payload(
+        {
+            "result": "NOT_READY",
+            "status": "needs_init",
+            "ready": False,
+            "headline": "Preview root needs registry DB initialization.",
+            "next_action": {"label": "Initialize preview root", "command": "./mmf preview init --json"},
+            "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
+            "registry_db": {
+                "path": "/tmp/mms-next/registry/model-registry.sqlite",
+                "status": "missing",
+                "counts": {"source_snapshot": 0, "model_fact": 0, "provider_route": 0},
+            },
+            "legacy_import": {
+                "conflict_count": 2,
+                "candidates": {"status": "not_imported", "provider_route_count": 0},
+                "next_action": "review_conflicts_before_import",
+            },
+            "generated_bundle": {
+                "status": "missing",
+                "verified": False,
+                "runtime_ready_status": "unknown",
+                "router_missing_api_key_count": 0,
+            },
+        }
+    )
+    report_title, rows, note = mms_core._model_source_status_report_payload(
+        {
+            "result": "NOT_READY",
+            "status": "needs_init",
+            "ready": False,
+            "headline": "Preview root needs registry DB initialization.",
+            "next_action": {"label": "Initialize preview root", "command": "./mmf preview init --json"},
+            "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
+            "registry_db": {"path": "/tmp/mms-next/registry/model-registry.sqlite", "status": "missing", "counts": {}},
+            "legacy_import": {
+                "conflict_count": 2,
+                "candidates": {"status": "not_imported", "provider_route_count": 0},
+                "next_action": "review_conflicts_before_import",
+            },
+            "generated_bundle": {
+                "status": "missing",
+                "verified": False,
+                "runtime_ready_status": "unknown",
+                "router_missing_api_key_count": 0,
+            },
+        }
+    )
+
+    assert title == "模型真源 / Registry Truth"
+    assert info_lines[:8] == [
+        ("结果", "NOT_READY"),
+        ("状态", "needs_init"),
+        ("Ready", "no"),
+        ("一句话", "Preview root needs registry DB initialization."),
+        ("Root", "/tmp/mms-next"),
+        ("Mode", "preview"),
+        ("DB", "/tmp/mms-next/registry/model-registry.sqlite"),
+        ("DB 状态", "missing"),
+    ]
+    assert actions[0] == ("model_source_status", "查看 Model Source Status")
+    assert actions[1] == ("consumer_bundle_status", "查看 Consumer Bundle")
+    assert actions[2] == ("registry_v2_save_plan", "查看 v2 Save Plan")
+    assert actions[3] == ("config_v2_promotion_plan", "查看 Promote Plan")
+    assert actions[4] == ("config_v2_release_readiness", "查看 4.0 Readiness")
+    assert actions[5] == ("preview_doctor", "运行 Preview Doctor")
+    assert report_title == "Model Source Status"
+    assert ("Legacy 冲突", 2) in rows
+    assert ("Legacy 候选状态", "not_imported") in rows
+    assert ("Legacy 候选 routes", 0) in rows
+    assert ("Bundle runtime", "unknown") in rows
+    assert ("Router 缺失 key", 0) in rows
+    assert ("下一步", "Initialize preview root") in rows
+    assert ("建议命令", "./mmf preview init --json") in rows
+    assert "只读视图" in note
+
+    consumer_title, consumer_rows, consumer_note = mms_core._consumer_bundle_status_report_payload(
+        {
+            "result": "READY",
+            "status": "ok",
+            "verified": True,
+            "consumer_entrypoint": "/tmp/mms-next/generated/model-registry.latest-approved.json",
+            "root": {"config_root": "/tmp/mms-next"},
+            "component_revisions": {
+                "bundle": "bundle_abc",
+                "route": "route_abc",
+                "policy": "policy_abc",
+                "profile": "profile_abc",
+            },
+            "files": {
+                "router": {"path": "/tmp/mms-next/generated/model-routes.json", "sha256": "abc"},
+                "policy": {"path": "/tmp/mms-next/generated/model-policy.effective.json", "sha256": "def"},
+            },
+            "consumer_rules": ["read manifest first", "do not query SQLite directly"],
+            "next_action": {"label": "Consume verified bundle", "command": "/tmp/mms-next/generated/model-registry.latest-approved.json"},
+        }
+    )
+    assert consumer_title == "Consumer Bundle Status"
+    assert consumer_rows[:5] == [
+        ("结果", "READY"),
+        ("状态", "ok"),
+        ("Bundle 校验", "yes"),
+        ("入口", "/tmp/mms-next/generated/model-registry.latest-approved.json"),
+        ("Root", "/tmp/mms-next"),
+    ]
+    assert ("Bundle revision", "bundle_abc") in consumer_rows
+    assert ("Route revision", "route_abc") in consumer_rows
+    assert ("Policy revision", "policy_abc") in consumer_rows
+    assert ("Profile revision", "profile_abc") in consumer_rows
+    assert ("文件数", 2) in consumer_rows
+    assert ("消费规则", "read manifest first / do not query SQLite directly") in consumer_rows
+    assert ("下一步", "Consume verified bundle") in consumer_rows
+    assert ("建议命令", "/tmp/mms-next/generated/model-registry.latest-approved.json") in consumer_rows
+    assert "只读视图" in consumer_note
+    assert "不读取 SQLite" in consumer_note
+
+    plan_title, plan_rows, plan_note = mms_core._registry_v2_save_plan_report_payload(
+        {
+            "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
+            "execution_state": "plan_only",
+            "actual_save_enabled": False,
+            "db": {
+                "path": "/tmp/mms-next/registry/model-registry.sqlite",
+                "exists": True,
+                "backup_dir": "/tmp/mms-next/backups/db",
+                "would_backup_existing_db": True,
+            },
+            "would_write": {
+                "db_candidate_revision": True,
+                "secret_backend": False,
+                "generated_latest_approved_bundle": True,
+                "legacy_compat_files": {"config_toml": True, "model_policy_json": False, "credentials_sh": False},
+            },
+            "ordered_steps": ["backup preview registry DB", "verify manifest hashes"],
+            "blocked_reasons": [],
+            "plan_json": {"name": "webui-plan.json", "redacted": True, "secrets_included": False},
+            "apply_plan": {
+                "webui_button": "写入预览 DB + 发布",
+                "cli_apply_command": "./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json",
+            },
+            "next_implementation_step": "wire save later",
+        }
+    )
+
+    assert plan_title == "Registry v2 Save Plan"
+    assert ("执行状态", "plan_only") in plan_rows
+    assert ("实际保存启用", "no") in plan_rows
+    assert ("将备份 DB", "yes") in plan_rows
+    assert ("Secret backend", "no") in plan_rows
+    assert ("阻塞原因", "-") in plan_rows
+    assert ("Plan JSON", "webui-plan.json") in plan_rows
+    assert ("Plan JSON 密钥", "redacted") in plan_rows
+    assert ("WebUI 写入", "写入预览 DB + 发布") in plan_rows
+    assert ("CLI 写入命令", "./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json") in plan_rows
+    assert "只读计划" in plan_note
+
+    promotion_title, promotion_rows, promotion_note = mms_core._config_v2_promotion_plan_report_payload(
+        {
+            "result": "READY_FOR_HUMAN_PROMOTION_REVIEW",
+            "status": "human_gate",
+            "ready_for_human_review": True,
+            "preview": {
+                "root": {"config_root": "/tmp/mms-next"},
+                "check": {"result": "READY", "ready": True},
+                "bundle": {
+                    "verified": True,
+                    "entrypoint": "/tmp/mms-next/generated/model-registry.latest-approved.json",
+                },
+            },
+            "stable": {"root": {"config_root": "/tmp/mms"}},
+            "promotion_safety": {
+                "stable_write_policy": "human_only",
+                "apply_enabled": False,
+                "requires_backup": True,
+            },
+            "stable_backup_plan": {
+                "requires_backup_before_apply": True,
+                "would_create_backup": False,
+            },
+            "bundle_comparison": {
+                "comparison_status": "stable_bundle_missing",
+                "preview": {"bundle_revision": "bundle_preview"},
+                "stable": {"status": "missing"},
+            },
+            "blocked_reasons": ["stable_root_human_only", "promotion_apply_not_implemented"],
+            "next_action": {"label": "Human gate: review promotion plan", "command": "./mmf promote --json"},
+        }
+    )
+
+    assert promotion_title == "Config v2 Promote Plan"
+    assert ("结果", "READY_FOR_HUMAN_PROMOTION_REVIEW") in promotion_rows
+    assert ("状态", "human_gate") in promotion_rows
+    assert ("Ready for review", "yes") in promotion_rows
+    assert ("Preview root", "/tmp/mms-next") in promotion_rows
+    assert ("Stable root", "/tmp/mms") in promotion_rows
+    assert ("Bundle 校验", "yes") in promotion_rows
+    assert ("Stable 写策略", "human_only") in promotion_rows
+    assert ("Apply 启用", "no") in promotion_rows
+    assert ("必须备份", "yes") in promotion_rows
+    assert ("本命令创建备份", "no") in promotion_rows
+    assert ("Bundle 对比", "stable_bundle_missing") in promotion_rows
+    assert ("Preview bundle", "bundle_preview") in promotion_rows
+    assert ("Stable bundle", "missing") in promotion_rows
+    assert ("阻塞原因", "stable_root_human_only, promotion_apply_not_implemented") in promotion_rows
+    assert ("下一步", "Human gate: review promotion plan") in promotion_rows
+    assert "human gate" in promotion_note
+    assert "不写 stable root" in promotion_note
+
+    readiness_title, readiness_rows, readiness_note = mms_core._config_v2_release_readiness_report_payload(
+        {
+            "result": "READY_FOR_4_0_HUMAN_GATE",
+            "status": "human_gate",
+            "release_complete": False,
+            "ready_for_human_gate": True,
+            "human_gate_required": True,
+            "completion_blocker": "stable_promotion_human_gate",
+            "config_root": "/tmp/mms-next",
+            "stable_config_root": "/tmp/mms",
+            "requirements": [
+                {"id": "preview_root_selected", "ok": True},
+                {"id": "consumer_bundle_verified", "ok": True},
+            ],
+            "blocked_requirements": [],
+            "promotion_plan": {
+                "status": "human_gate",
+                "apply_enabled": False,
+                "blocked_reasons": ["stable_root_human_only", "promotion_apply_not_implemented"],
+            },
+            "next_action": {"label": "Human gate: review promotion plan", "command": "./mmf promote --json"},
+        }
+    )
+
+    assert readiness_title == "Config v2 Release Readiness"
+    assert ("结果", "READY_FOR_4_0_HUMAN_GATE") in readiness_rows
+    assert ("状态", "human_gate") in readiness_rows
+    assert ("Release complete", "no") in readiness_rows
+    assert ("Ready for human gate", "yes") in readiness_rows
+    assert ("Human gate required", "yes") in readiness_rows
+    assert ("完成阻塞", "stable_promotion_human_gate") in readiness_rows
+    assert ("Preview root", "/tmp/mms-next") in readiness_rows
+    assert ("Stable root", "/tmp/mms") in readiness_rows
+    assert ("Requirements", "2/2 ok") in readiness_rows
+    assert ("Blocked requirements", "-") in readiness_rows
+    assert ("Promotion apply", "no") in readiness_rows
+    assert ("下一步", "Human gate: review promotion plan") in readiness_rows
+    assert "只读审计" in readiness_note
+    assert "不改 Claude config" in readiness_note
+
+    doctor_title, doctor_rows, doctor_note = mms_core._preview_doctor_report_payload(
+        {
+            "result": "NOT_READY",
+            "status": "needs_publish",
+            "ready": False,
+            "config_root": "/tmp/mms-next",
+            "counts": {"candidate_provider_routes": 2, "missing_api_keys": 1, "preview_secret_count": 0},
+            "bundle": {"verified": False, "runtime_ready_status": "unknown"},
+            "next_actions": [{"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"}],
+        }
+    )
+
+    assert doctor_title == "Preview Doctor"
+    assert ("状态", "needs_publish") in doctor_rows
+    assert ("候选 routes", 2) in doctor_rows
+    assert ("Router 缺失 key", 1) in doctor_rows
+    assert ("下一步", "Publish and verify preview bundle") in doctor_rows
+    assert "只读检查" in doctor_note
+
+
 def test_registry_result_payloads_are_chinese_first_and_compact() -> None:
     import mms_core
     import mms_i18n
@@ -428,6 +866,18 @@ def test_registry_result_payloads_are_chinese_first_and_compact() -> None:
     assert ("缺少 reference", 1) in diff_rows
     assert "不改变当前 runtime defaults" in diff_note
     assert mms_core._compact_tui_report_value("x" * 120, max_len=20) == "x" * 19 + "…"
+
+
+def test_rescue_fallback_report_points_to_latest_approved_router() -> None:
+    import mms_core
+
+    _title, rows, _note = mms_core._rescue_default_fallback_report_payload(
+        "fallback-model",
+        hot_fallback_enabled=True,
+    )
+
+    assert ("生效方式", "bridge failure -> latest-approved Router") in rows
+    assert all("model-routes.json" not in str(value) for _label, value in rows)
 
 
 def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
@@ -587,6 +1037,366 @@ def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
     mms_core.main()
 
     assert calls == ["tui"]
+
+
+def test_mmf_missing_preview_config_does_not_run_legacy_setup(monkeypatch, tmp_path, capsys) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+    monkeypatch.setattr(sys, "argv", ["mmf"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: None)
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "setup_wizard", lambda *_args, **_kwargs: pytest.fail("legacy setup must not run for preview root"))
+    monkeypatch.setattr(mms_core, "save_config", lambda *_args, **_kwargs: pytest.fail("preview root must not get legacy config.toml"))
+
+    with pytest.raises(SystemExit) as exc:
+        mms_core.main()
+
+    assert exc.value.code == 2
+    assert not (preview_root / "config.toml").exists()
+    out = capsys.readouterr().out
+    assert "Preview root uses v2 DB truth" in out
+    assert "mmf preview prepare" in out
+
+
+def test_mmf_config_mutation_is_blocked_from_legacy_config_path(monkeypatch, tmp_path, capsys) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+    monkeypatch.setattr(sys, "argv", ["mmf", "config", "provider.default", "demo"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: None)
+    monkeypatch.setattr(mms_core, "save_config", lambda *_args, **_kwargs: pytest.fail("legacy config write must be blocked"))
+
+    with pytest.raises(SystemExit) as exc:
+        mms_core.main()
+
+    assert exc.value.code == 2
+    assert not (preview_root / "config.toml").exists()
+    out = capsys.readouterr().out
+    assert "legacy config.toml writes are disabled" in out
+    assert "config apply-plan" in out
+
+
+def test_mmf_preview_runtime_can_use_verified_bundle_without_legacy_config(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "gpt-preview": {
+                    "primary": {
+                        "provider_id": "preview-provider",
+                        "openai_base_url": "https://preview.example/v1",
+                        "api_key": "sk-preview-secret",
+                        "model_id": "gpt-preview",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+        profile_payload={
+            "schema_version": 1,
+            "profiles": {
+                "preview-provider": {
+                    "name": "Preview Provider",
+                    "role": "fallback",
+                    "priority": 123,
+                    "models_endpoint": "/api/models/info?",
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                    "enabled": True,
+                }
+            },
+        },
+    )
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+
+    cfg = mms_core._load_config_or_preview_bundle()
+    provider = mms_core.resolve_provider_context(cfg, "preview-provider")
+
+    assert cfg["_mms_config_source"] == "latest-approved-bundle"
+    assert cfg["provider"]["default"] == "preview-provider"
+    assert provider["openai_base_url"] == "https://preview.example/v1"
+    assert provider["api_key"] == "sk-preview-secret"
+    assert provider["name"] == "Preview Provider"
+    assert provider["role"] == "fallback"
+    assert provider["priority"] == 123
+    assert provider["models_endpoint"] == "/api/models/info?"
+    assert provider["supported_clis"] == ["codex"]
+    assert "gpt-preview" in provider["fallback_models"]
+    assert provider["extra_models"] == []
+    assert not (preview_root / "config.toml").exists()
+
+
+def test_mmf_preview_runtime_prefers_verified_bundle_over_legacy_config(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    (preview_root / "config.toml").write_text(
+        """
+[provider]
+default = "stale-provider"
+
+[[providers]]
+id = "stale-provider"
+name = "Stale Provider"
+enabled = true
+protocols = ["openai_chat_completions"]
+supported_clis = ["codex"]
+default_openai_base_url = "https://stale.example/v1"
+fallback_models = ["stale-model"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "gpt-preview": {
+                    "primary": {
+                        "provider_id": "preview-provider",
+                        "openai_base_url": "https://preview.example/v1",
+                        "api_key": "sk-preview-secret",
+                        "model_id": "gpt-preview",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+
+    cfg = mms_core._load_config_or_preview_bundle()
+
+    assert cfg["_mms_config_source"] == "latest-approved-bundle"
+    assert cfg["provider"]["default"] == "preview-provider"
+    assert [item["id"] for item in cfg["providers"]] == ["preview-provider"]
+
+
+def test_mmf_preview_runtime_uses_explicit_bundle_default(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "first-model": {
+                    "primary": {
+                        "provider_id": "first-provider",
+                        "openai_base_url": "https://first.example/v1",
+                        "api_key": "sk-first",
+                        "model_id": "first-model",
+                    },
+                    "fallbacks": [],
+                },
+                "default-model": {
+                    "primary": {
+                        "provider_id": "default-provider",
+                        "openai_base_url": "https://default.example/v1",
+                        "api_key": "sk-default",
+                        "model_id": "default-model",
+                    },
+                    "fallbacks": [],
+                },
+            },
+        },
+        profile_payload={
+            "schema_version": 1,
+            "provider": {"default": "default-provider"},
+            "profiles": {
+                "first-provider": {"name": "First Provider", "protocols": ["openai_chat_completions"]},
+                "default-provider": {"name": "Default Provider", "protocols": ["openai_chat_completions"]},
+            },
+        },
+    )
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+
+    cfg = mms_core._load_config_or_preview_bundle()
+
+    assert cfg["_mms_config_source"] == "latest-approved-bundle"
+    assert cfg["provider"]["default"] == "default-provider"
+
+
+def test_bundle_runtime_provider_options_ignore_probe_cache(monkeypatch) -> None:
+    import mms_core
+
+    provider = {
+        "id": "preview-provider",
+        "enabled": True,
+        "api_key": "sk-preview-secret",
+        "protocols": ["anthropic_messages"],
+        "supported_clis": ["claude"],
+        "anthropic_base_url": "https://preview.example/v1",
+        "models_endpoint": "manual",
+        "fallback_models": ["visible-model"],
+        "_mms_bundle_runtime": True,
+    }
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args, **_kwargs: [(provider, ["visible-model", "hidden-remote-model"])],
+    )
+    monkeypatch.setattr(mms_core, "_account_options_for_model", lambda *_args, **_kwargs: [])
+
+    visible = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "visible-model"},
+    )
+    hidden = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "hidden-remote-model"},
+    )
+
+    assert [item["id"] for item in visible] == ["preview-provider"]
+    assert hidden == []
+
+
+def test_bundle_runtime_provider_options_honor_hidden_derived_alias(monkeypatch) -> None:
+    import mms_core
+
+    provider = {
+        "id": "tokyo-provider",
+        "enabled": True,
+        "api_key": "sk-preview-secret",
+        "protocols": ["anthropic_messages"],
+        "supported_clis": ["claude"],
+        "anthropic_base_url": "https://tokyo.example/v1",
+        "models_endpoint": "manual",
+        "fallback_models": ["anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7"],
+        "hidden_models": ["claude-opus-4-6"],
+        "_mms_bundle_runtime": True,
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_account_options_for_model", lambda *_args, **_kwargs: [])
+
+    visible_raw = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "anthropic/claude-opus-4.6"},
+    )
+    hidden_alias = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "claude-opus-4-6"},
+    )
+
+    assert [item["id"] for item in visible_raw] == ["tokyo-provider"]
+    assert hidden_alias == []
+
+
+def test_bundle_runtime_hiding_raw_variants_suppresses_derived_alias() -> None:
+    import mms_core
+
+    provider = {
+        "id": "tokyo-provider",
+        "models_endpoint": "manual",
+        "fallback_models": ["anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7"],
+        "hidden_models": ["anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7"],
+    }
+
+    assert mms_core._provider_effective_models(provider, None, {}) == []
+
+
+def test_mmf_valid_bundle_without_config_reaches_launcher_selection(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "gpt-preview": {
+                    "primary": {
+                        "provider_id": "preview-provider",
+                        "openai_base_url": "https://preview.example/v1",
+                        "api_key": "sk-preview-secret",
+                        "model_id": "gpt-preview",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    calls: list[str] = []
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+    monkeypatch.setattr(sys, "argv", ["mmf"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: None)
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "setup_wizard", lambda *_args, **_kwargs: pytest.fail("legacy setup must not run when bundle is valid"))
+    monkeypatch.setattr(mms_core, "save_config", lambda *_args, **_kwargs: pytest.fail("bundle runtime must stay transient"))
+    monkeypatch.setattr(
+        mms_core,
+        "ensure_models_ready",
+        lambda _cfg, provider: (provider, ["gpt-preview"]),
+    )
+    monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["codex"])
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: True)
+
+    def fake_tui_handler(*_args, **_kwargs):
+        calls.append("tui")
+        return True
+
+    monkeypatch.setattr(mms_core, "_handle_tui_launcher_selection", fake_tui_handler)
+
+    mms_core.main()
+
+    assert calls == ["tui"]
+    assert not (preview_root / "config.toml").exists()
 
 
 def test_mms_numeric_target_no_longer_launches_builtin_scene(monkeypatch, capsys) -> None:

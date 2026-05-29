@@ -45,6 +45,89 @@ def test_resolve_native_fallback_routes_finds_same_vendor_direct():
     assert "invalid_text" in routes[0]["try_next_on"]
 
 
+def test_native_fallback_skips_legacy_config_for_preview_root(monkeypatch, tmp_path):
+    import mms_core
+    from mms_native_fallback import resolve_native_fallback_routes
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "mms-next"))
+    load_called = {"value": False}
+
+    def fake_load_config():
+        load_called["value"] = True
+        return {
+            "providers": [
+                {
+                    "id": "deepseek-direct",
+                    "enabled": True,
+                    "role": "fallback",
+                    "protocols": ["anthropic_messages"],
+                    "default_anthropic_base_url": "https://api.deepseek.com/anthropic",
+                    "api_key": "native-key",
+                    "extra_models": ["deepseek-v4-pro"],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(mms_core, "load_config", fake_load_config)
+    runtime = {
+        "id": "newapi-personal-tokyo",
+        "auth_mode": "api_key",
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "api_key": "relay-key",
+    }
+
+    routes = resolve_native_fallback_routes(runtime, "deepseek-v4-pro")
+
+    assert routes == []
+    assert load_called["value"] is False
+
+
+def test_resolve_native_fallback_routes_uses_anthropic_profile_for_mimo_relays(monkeypatch):
+    import mms_native_fallback
+
+    monkeypatch.setattr(
+        mms_native_fallback,
+        "_provider_context",
+        lambda _cfg, provider_def: dict(provider_def),
+    )
+
+    runtime = {
+        "id": "xin",
+        "auth_mode": "api_key",
+        "anthropic_base_url": "https://apple.clawopen.online",
+        "openai_base_url": "https://apple.clawopen.online",
+        "api_key": "relay-key",
+    }
+    cfg = {
+        "providers": [
+            {
+                "id": "xin",
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "default_anthropic_base_url": "https://apple.clawopen.online",
+                "default_openai_base_url": "https://apple.clawopen.online",
+                "api_key": "relay-key",
+                "extra_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            },
+            {
+                "id": "mimo-direct-anthropic",
+                "enabled": True,
+                "role": "fallback",
+                "protocols": ["anthropic_messages"],
+                "default_anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+                "api_key": "native-key",
+                "extra_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            },
+        ]
+    }
+
+    routes = mms_native_fallback.resolve_native_fallback_routes(runtime, "mimo-v2.5[1m]", cfg=cfg)
+
+    assert [route["provider_id"] for route in routes] == ["mimo-direct-anthropic"]
+    assert routes[0]["provider_profile"] == "mimo"
+    assert routes[0]["gateway_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1"
+
+
 def test_resolve_codex_responses_fallback_routes_finds_codex_provider(monkeypatch):
     import mms_native_fallback
 

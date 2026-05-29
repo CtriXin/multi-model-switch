@@ -35,7 +35,7 @@ from mms_core import (
     _provider_map,
     apply_local_overrides,
     detect_working_base_url,
-    load_config,
+    load_runtime_config as load_config,
     resolve_provider_context,
 )
 from mms_provider_profiles import ensure_default_user_agent

@@ -110,12 +110,18 @@ def set_codex_soft_home(
     return env
 
 
-def rescue_default_fallback_config(*, environ, load_config, truthy):
+def rescue_default_fallback_config(*, environ, load_config, truthy, mms_config_root_mode=None):
     env_model = str(environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
     env_cli = str(environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
     env_hot = environ.get("MMS_RESCUE_HOT_FALLBACK")
     if env_model:
         return {"model": env_model, "cli": env_cli, "hot_fallback_enabled": truthy(env_hot)}
+    if mms_config_root_mode is not None:
+        try:
+            if mms_config_root_mode(env=environ) == "preview":
+                return {"model": "", "cli": "", "hot_fallback_enabled": False}
+        except Exception:
+            pass
     try:
         cfg = load_config() or {}
     except Exception:
@@ -145,6 +151,7 @@ def inject_rescue_launch_env(
     safe_getcwd,
     real_user_path,
     rescue_default_fallback_config,
+    selected_mms_config_root=None,
 ):
     if not isinstance(env, dict):
         return env
@@ -155,8 +162,18 @@ def inject_rescue_launch_env(
     if project_root:
         env["MMS_PROJECT_ROOT"] = project_root
         env["MMS_CWD"] = project_root
-    env.setdefault("MMS_RESCUE_CONFIG_ROOT", real_user_path(".config", "mms"))
-    fallback = rescue_default_fallback_config()
+    if selected_mms_config_root is not None:
+        try:
+            config_root = selected_mms_config_root(env)
+        except Exception:
+            config_root = real_user_path(".config", "mms")
+    else:
+        config_root = real_user_path(".config", "mms")
+    env.setdefault("MMS_RESCUE_CONFIG_ROOT", config_root)
+    try:
+        fallback = rescue_default_fallback_config(env)
+    except TypeError:
+        fallback = rescue_default_fallback_config()
     if fallback.get("model"):
         env["MMS_RESCUE_FALLBACK_MODEL"] = str(fallback.get("model") or "")
         if fallback.get("cli"):

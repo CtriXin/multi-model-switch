@@ -1,6 +1,3 @@
-import ast
-from pathlib import Path
-
 from mms_tui import (
     _COLD_FAMILY_BUCKET_ID,
     _ECC_TOGGLE_KEY,
@@ -77,27 +74,26 @@ def test_confirm_profile_capabilities_apply_model_defaults(monkeypatch, tmp_path
     assert _confirm_effort_values(deepseek_caps, deepseek_caps["tokens"]) == ["high", "xhigh"]
 
 
-def test_core_confirm_tui_keeps_ecc_default_off():
-    tree = ast.parse(Path("mms_core.py").read_text(encoding="utf-8"))
+def test_launcher_flow_confirm_tui_keeps_ecc_default_off():
+    from mms_tui_launcher_flow import confirm_tui_options
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Name) or node.func.id != "_safe_tui_call":
-            continue
-        if not node.args or not isinstance(node.args[0], ast.Name) or node.args[0].id != "confirm_tui":
-            continue
+    runtime = {"agent_pack": "ecc"}
+    options = confirm_tui_options(
+        env_vars={},
+        once=False,
+        context_lines=[],
+        has_caveman=False,
+        has_nsr=False,
+        has_ecc=True,
+        has_omc=False,
+        runtime=runtime,
+        default_reasoning_effort="high",
+        preview_catalog=[],
+    )
 
-        keyword_values = {keyword.arg: keyword.value for keyword in node.keywords}
-        ecc_default = keyword_values.get("ecc_enabled_default")
-        assert isinstance(ecc_default, ast.Constant)
-        assert ecc_default.value is False
-        pack_default = keyword_values.get("agent_pack_default")
-        assert isinstance(pack_default, ast.Call)
-        assert "runtime" in keyword_values
-        return
-
-    raise AssertionError("confirm_tui launch call was not found")
+    assert options["ecc_enabled_default"] is False
+    assert options["agent_pack_default"] == "ecc"
+    assert options["runtime"] is runtime
 
 
 def test_confirm_tui_ecc_hotkey_is_fixed_x():
