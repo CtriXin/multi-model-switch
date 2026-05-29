@@ -13953,6 +13953,8 @@ def _config_subcommand_mutates_legacy_config(args_rest):
     key_path = str(args_rest[0] or "").strip()
     if not key_path or key_path in {"-h", "--help", "help"}:
         return False
+    if key_path in {"web", "webui", "setup.web", "setup-web"}:
+        return False
     if key_path in _PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS:
         return True
     if key_path in {"api.setup", "api.edit"}:

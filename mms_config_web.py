@@ -315,6 +315,20 @@ def _preview_secret_values_by_ref(config_root: str = "") -> dict[str, str]:
     return values
 
 
+def _preview_cached_provider_url(provider_id: str) -> str:
+    provider_id = _safe_text(provider_id)
+    if not provider_id:
+        return ""
+    try:
+        mms_core = _load_mms_core()
+        cached = mms_core._load_probe_file_cache(provider_id, allow_stale=True)  # noqa: SLF001 - UI recovery only
+    except Exception:
+        cached = {}
+    if not isinstance(cached, dict):
+        return ""
+    return _safe_text(cached.get("working_url")).rstrip("/")
+
+
 def _resolve_preview_provider_secret(
     provider: dict[str, Any],
     *,
@@ -406,6 +420,15 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
     for provider_id in sorted(provider_ids):
         profile = profiles.get(provider_id) if isinstance(profiles.get(provider_id), dict) else {}
         route_info = provider_routes.get(provider_id, {})
+        cached_url = _preview_cached_provider_url(provider_id)
+        openai_base_url = _safe_text(route_info.get("openai_base_url"))
+        anthropic_base_url = _safe_text(route_info.get("anthropic_base_url"))
+        protocols = _normalize_model_list(profile.get("protocols"))
+        if cached_url:
+            if not openai_base_url and "openai_chat_completions" in protocols:
+                openai_base_url = cached_url
+            if not anthropic_base_url and "anthropic_messages" in protocols:
+                anthropic_base_url = cached_url
         providers.append(
             {
                 "id": provider_id,
@@ -414,10 +437,10 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
                 "role": _safe_text(profile.get("role") or "auto"),
                 "priority": int(profile.get("priority") or 0),
                 "models_endpoint": _safe_text(profile.get("models_endpoint") or "manual"),
-                "protocols": _normalize_model_list(profile.get("protocols")),
+                "protocols": protocols,
                 "supported_clis": _normalize_model_list(profile.get("supported_clis")),
-                "openai_base_url": _safe_text(route_info.get("openai_base_url")),
-                "anthropic_base_url": _safe_text(route_info.get("anthropic_base_url")),
+                "openai_base_url": openai_base_url,
+                "anthropic_base_url": anthropic_base_url,
                 "has_api_key": bool(route_info.get("has_api_key") or secret_refs.get(provider_id)),
                 "secret_ref": _safe_text(route_info.get("secret_ref") or secret_refs.get(provider_id)),
                 "fallback_models": sorted(provider_models.get(provider_id, set()), key=str.lower),
@@ -440,8 +463,6 @@ def _hydrate_preview_config_from_latest_bundle(
     cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
     if not _is_preview_config_root(config_path, command_name=command_name):
         return cfg
-    if not _is_placeholder_provider_config(cfg):
-        return _attach_preview_secret_refs(cfg, config_path=config_path, command_name=command_name)
     config_root = _config_root_for_snapshot(config_path)
     try:
         from mms_registry_cli import verify_approved_bundle
@@ -457,6 +478,22 @@ def _hydrate_preview_config_from_latest_bundle(
     )
     if not hydrated.get("providers"):
         return cfg
+    if not _is_placeholder_provider_config(cfg):
+        result = _attach_preview_secret_refs(cfg, config_path=config_path, command_name=command_name)
+        existing_ids = {
+            _safe_text(item.get("id"))
+            for item in (result.get("providers") if isinstance(result.get("providers"), list) else [])
+            if isinstance(item, dict)
+        }
+        missing = [
+            dict(item)
+            for item in hydrated.get("providers", [])
+            if isinstance(item, dict) and _safe_text(item.get("id")) and _safe_text(item.get("id")) not in existing_ids
+        ]
+        if missing:
+            result["providers"] = list(result.get("providers") or []) + missing
+            result["_preview_bundle_profile_merged"] = True
+        return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
     result = copy.deepcopy(cfg)
     result["providers"] = hydrated["providers"]
     result["provider"] = hydrated["provider"]
@@ -1207,7 +1244,29 @@ def _extract_draft(payload: dict[str, Any]) -> dict[str, Any]:
     return draft if isinstance(draft, dict) else {}
 
 
-def _copy_existing_provider(existing: dict[str, Any] | None, provider_payload: dict[str, Any]) -> dict[str, Any]:
+def _route_model_rows_from_payload(provider_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in provider_payload.get("models") if isinstance(provider_payload.get("models"), list) else []:
+        if isinstance(item, dict):
+            model_id = _safe_text(item.get("id") or item.get("model"))
+            visible = item.get("visible") is not False
+        else:
+            model_id = _safe_text(item)
+            visible = True
+        if not model_id or model_id in seen or not visible:
+            continue
+        seen.add(model_id)
+        rows.append({"id": model_id, "visible": True})
+    return rows
+
+
+def _copy_existing_provider(
+    existing: dict[str, Any] | None,
+    provider_payload: dict[str, Any],
+    *,
+    preserve_model_rows: bool = False,
+) -> dict[str, Any]:
     provider = dict(existing or {})
     provider_id = _slug(provider_payload.get("id") or provider_payload.get("original_id") or provider.get("id"), "provider")
     provider["id"] = provider_id
@@ -1259,6 +1318,15 @@ def _copy_existing_provider(existing: dict[str, Any] | None, provider_payload: d
     provider["fallback_models"] = _normalize_model_list(provider_payload.get("fallback_models"))
     provider["extra_models"] = _normalize_model_list(provider_payload.get("extra_models"))
     provider["hidden_models"] = _normalize_model_list(provider_payload.get("hidden_models"))
+    if preserve_model_rows:
+        if not provider["fallback_models"] and not provider["extra_models"]:
+            route_rows = _route_model_rows_from_payload(provider_payload)
+            if route_rows:
+                provider["models"] = route_rows
+            else:
+                provider.pop("models", None)
+        else:
+            provider.pop("models", None)
     return provider
 
 
@@ -1613,6 +1681,7 @@ def build_config_plan(
     draft = _extract_draft(payload or {})
     providers_payload = draft.get("providers") if isinstance(draft.get("providers"), list) else []
     existing_by_id = {str(item.get("id") or ""): item for item in current_cfg.get("providers", []) if isinstance(item, dict)}
+    preserve_model_rows = _is_preview_config_root(config_path, command_name=command_name)
     next_providers: list[dict[str, Any]] = []
     credential_updates: list[dict[str, str]] = []
     errors: list[str] = []
@@ -1622,7 +1691,11 @@ def build_config_plan(
         if not isinstance(provider_payload, dict):
             continue
         original_id = _safe_text(provider_payload.get("original_id") or provider_payload.get("id"))
-        provider = _copy_existing_provider(existing_by_id.get(original_id), provider_payload)
+        provider = _copy_existing_provider(
+            existing_by_id.get(original_id),
+            provider_payload,
+            preserve_model_rows=preserve_model_rows,
+        )
         next_providers.append(provider)
         if _truthy(provider_payload.get("update_credentials"), False):
             api_key = _safe_text(provider_payload.get("api_key"))

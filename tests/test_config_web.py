@@ -885,6 +885,34 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_registry_v2_apply_routes_visible_model_rows_without_fallback_lists(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = json.loads(json.dumps(_draft_payload()))
+    provider = payload["draft"]["providers"][0]
+    provider["fallback_models"] = []
+    provider["extra_models"] = []
+    provider["hidden_models"] = ["noisy-model"]
+    provider["models"] = [
+        {"id": "qwen3.6-plus", "visible": True},
+        {"id": "noisy-model", "visible": False},
+    ]
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert result["candidate"]["route_candidates"]["provider_route_count"] == 1
+    assert set(router["routes"]) == {"qwen3.6-plus"}
+    assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
+
+
 def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"
@@ -914,6 +942,77 @@ def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_pa
     assert provider["has_api_key"] is True
     assert provider["fallback_models"] == ["gpt-5.5", "qwen3.6-plus"]
     assert [row["id"] for row in provider["models"]] == ["gpt-5.5", "qwen3.6-plus"]
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_preview_snapshot_merges_profile_only_channels_from_latest_bundle(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = json.loads(json.dumps(_draft_payload()))
+    payload["draft"]["providers"].append(
+        {
+            "original_id": "newapi-tencent",
+            "id": "newapi-tencent",
+            "name": "newapi-tencent",
+            "enabled": True,
+            "role": "fallback",
+            "priority": 100,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "/api/models/info?",
+            "openai_base_url": "https://apple.example",
+            "anthropic_base_url": "https://apple.example",
+            "api_key": "sk-tencent-secret",
+            "update_credentials": True,
+            "fallback_models": [],
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [],
+        }
+    )
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    apply_result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+    runtime_cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo Gateway",
+                "enabled": True,
+                "role": "primary",
+                "priority": 1000,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["claude", "codex", "opencode"],
+                "models_endpoint": "manual",
+                "openai_base_url": "https://demo.example/v1",
+                "anthropic_base_url": "https://demo.example/v1",
+                "api_key": "sk-super-secret-value",
+                "fallback_models": ["gpt-5.5", "qwen3.6-plus"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        runtime_cfg,
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    ids = [item["id"] for item in snapshot["providers"]]
+    tencent = next(item for item in snapshot["providers"] if item["id"] == "newapi-tencent")
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+    assert apply_result["ok"] is True
+    assert apply_result["runtime_ready"] is True
+    assert "demo" in ids
+    assert "newapi-tencent" in ids
+    assert tencent["has_api_key"] is True
+    assert tencent["models_endpoint"] == "/api/models/info?"
+    assert "sk-tencent-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
 
 
@@ -1128,3 +1227,5 @@ def test_setup_web_requests_are_guard_exempt():
     assert mms_core._is_setup_web_request(["setup"])
     assert mms_core._is_setup_web_request(["config", "web"])
     assert mms_core._is_config_help_request(["web"])
+    assert not mms_core._config_subcommand_mutates_legacy_config(["web"])
+    assert not mms_core._config_subcommand_mutates_legacy_config(["web", "--print-summary"])
