@@ -90,6 +90,12 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     mapping = snapshot["tui_webui_mapping"]
     assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
     assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
+    assert snapshot["tui_webui_mapping_summary"]["clickable_rows"] == len(mapping)
+    assert snapshot["tui_webui_mapping_summary"]["rows_with_open_target"] == len(mapping)
+    assert "每行都可在 WebUI 点击" in snapshot["tui_webui_mapping_summary"]["user_check_policy"]
+    assert all(item["clickable"] == "yes" for item in mapping)
+    assert all(item["click_targets"] for item in mapping)
+    assert all(item["acceptance_check"] for item in mapping)
     assert {item["tui_action_id"] for item in mapping} >= {
         "provider_mgmt",
         "account_mgmt",
@@ -232,6 +238,7 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert mapping["ok"] is True
     assert mapping["summary"]["counts"]["human_gate"] > 0
     assert mapping["summary"]["counts"]["missing"] == 0
+    assert mapping["summary"]["clickable_rows"] == mapping["summary"]["total"]
     assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
     assert guard["write_policy"] == "manual_cli_human_gate"
     assert "mmf guard status" in guard["commands"]
@@ -670,6 +677,14 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "TUI ↔ WebUI 对照表" in html
     assert "tuiMappingTable" in html
     assert "mappingFilters" in html
+    assert "acceptancePanel" in html
+    assert "逐项验收 checklist" in html
+    assert "mapCheckProgress" in html
+    assert "data-map-check" in html
+    assert "function renderAcceptancePanel" in html
+    assert "function copyAcceptanceReport" in html
+    assert "function acceptanceReportText" in html
+    assert "Click evidence" in html or "click evidence" in html
     assert "function renderTuiMapping" in html
     assert "data-map-filter" in html
     assert "data-section-jump" in html

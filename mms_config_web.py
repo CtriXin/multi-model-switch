@@ -1210,6 +1210,28 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
         webui_section_id: str = "",
         api_action: str = "",
     ) -> dict[str, str]:
+        click_targets = []
+        if webui_section_id:
+            click_targets.append("open_section")
+        if api_action:
+            click_targets.append("settings_report")
+        if status in {"native", "draft_review"}:
+            click_targets.append("save_preview")
+        if status == "human_gate":
+            click_targets.append("human_gate_card")
+        if status == "missing":
+            click_targets.append("missing_gap")
+        click_text = " + ".join(dict.fromkeys(click_targets))
+        if status == "human_gate":
+            acceptance_check = "点 Gate 查看风险/写入范围/命令；只复制命令，不在 WebUI 自动执行。"
+        elif status == "report":
+            acceptance_check = "点 Report 确认 API 返回 ok/read-only JSON。"
+        elif status == "draft_review":
+            acceptance_check = "编辑草稿后生成保存预览，确认 review summary 和 diff。"
+        elif status == "native":
+            acceptance_check = "点打开 WebUI 落点；如修改配置，继续生成保存预览确认。"
+        else:
+            acceptance_check = "必须补 WebUI 落点或显式 gate，不允许隐藏。"
         return {
             "id": row_id,
             "tui_area": tui_area,
@@ -1223,6 +1245,9 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             "write_policy": write_policy,
             "verification": verification,
             "manual_check": manual_check,
+            "clickable": "yes" if webui_section_id or api_action else "no",
+            "click_targets": click_text,
+            "acceptance_check": acceptance_check,
         }
 
     rows = [
@@ -1714,14 +1739,27 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
 def _tui_webui_mapping_summary(rows: list[dict[str, str]] | None = None) -> dict[str, Any]:
     rows = rows if isinstance(rows, list) else _tui_webui_mapping()
     counts = {"native": 0, "report": 0, "draft_review": 0, "human_gate": 0, "missing": 0}
+    clickable = 0
+    with_report = 0
+    with_open = 0
     for item in rows:
         status = _safe_text(item.get("status"))
         if status in counts:
             counts[status] += 1
+        if item.get("clickable") == "yes" or item.get("api_action") or item.get("webui_section_id"):
+            clickable += 1
+        if item.get("api_action"):
+            with_report += 1
+        if item.get("webui_section_id"):
+            with_open += 1
     return {
         "schema": "mms.setup_web.tui_mapping_summary.v1",
         "total": len(rows),
         "counts": counts,
+        "clickable_rows": clickable,
+        "rows_with_report_or_gate": with_report,
+        "rows_with_open_target": with_open,
+        "user_check_policy": "每行都可在 WebUI 点击：Open 跳到页面落点，Report/Gate 验证 API 或 Human Gate 卡，native/draft 行再用保存预览核对写入。",
         "source_files": [
             "mms_tui.py:_connect_actions",
             "mms_tui.py:select_submodel_tui",
@@ -4750,6 +4788,55 @@ _HTML_PAGE = r"""<!doctype html>
       letter-spacing: .04em;
       text-transform: uppercase;
     }
+    .acceptance-panel {
+      border: 1.5px solid color-mix(in oklch, var(--accent) 35%, var(--border));
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--accent) 9%, transparent), transparent 38%),
+        color-mix(in oklch, var(--surface) 92%, var(--accent-soft));
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .acceptance-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 10px;
+    }
+    .acceptance-head h4 {
+      font-size: 18px;
+      line-height: 1.05;
+      letter-spacing: -.03em;
+      text-transform: uppercase;
+    }
+    .acceptance-progress {
+      font-family: var(--font-mono);
+      font-size: 24px;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .mapping-check {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .mapping-check input {
+      width: auto;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .check-evidence {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+    }
     .status-native { background: var(--ok-soft); color: var(--ok); }
     .status-report { background: var(--warn-soft); color: color-mix(in oklch, var(--warn) 72%, black); }
     .status-draft_review { background: var(--accent-soft); color: var(--accent); }
@@ -5425,7 +5512,7 @@ _HTML_PAGE = r"""<!doctype html>
       }
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
       .oc-summary { grid-template-columns: 1fr 1fr; }
-      .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid { grid-template-columns: 1fr; }
+      .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid, .acceptance-head { grid-template-columns: 1fr; }
       .filterbar.compact { justify-content: flex-start; }
       .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
       .settings-stamp { white-space: normal; }
@@ -5661,10 +5748,11 @@ _HTML_PAGE = r"""<!doctype html>
           <div class="mapping-head">
             <div>
               <h3>TUI ↔ WebUI 对照表</h3>
-              <p class="muted">逐项对应 TUI settings/channel action：native 直接在 WebUI 操作，report 可点击取 JSON，human gate/missing 明确保留，不伪装完成。</p>
+              <p class="muted">逐项对应 TUI settings/channel action：每行都有 Open / Report / Gate / 保存预览证据，左侧 checkbox 给你逐项验收。</p>
             </div>
             <div id="mappingFilters" class="filterbar compact"></div>
           </div>
+          <div id="acceptancePanel" class="acceptance-panel"></div>
           <div class="table-wrap"><table id="tuiMappingTable"></table></div>
         </div>
         <div class="card span5">
@@ -5744,7 +5832,7 @@ const sections=[
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let touchedLoadBalance=false; let lastGateCommands=[];
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let touchedLoadBalance=false; let lastGateCommands=[]; let checkedMappingRows=new Set();
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -5848,7 +5936,15 @@ function mappingStatusLabel(status){return {native:'Native',report:'Report',draf
 function mappingStatusClass(status){return 'status-'+String(status||'missing').replace(/[^a-z0-9_ -]/gi,'').replace(/\s+/g,'_')}
 function mappingActionButton(row){const parts=[];if(row.webui_section_id){parts.push(`<button class="ghost mapping-action" data-section-jump="${escapeHtml(row.webui_section_id)}">打开</button>`)}if(row.api_action){const label=row.status==='human_gate'?'Gate':(row.status==='missing'?'Gap':'Report');parts.push(`<button class="ghost mapping-action" data-settings-action="${escapeHtml(row.api_action)}">${label}</button>`)}return parts.join(' ')}
 function renderMappingFilters(mapping){const box=$('mappingFilters');if(!box)return;const count=s=>mapping.filter(row=>s==='all'||row.status===s).length;const filters=[['all','全部'],['native','Native'],['report','Report'],['draft_review','Draft'],['human_gate','Gate'],['missing','Missing']];box.innerHTML=filters.map(([id,label])=>`<button class="${settingsMappingFilter===id?'active':''}" data-map-filter="${id}">${label} ${count(id)}</button>`).join('');document.querySelectorAll('[data-map-filter]').forEach(btn=>{btn.onclick=()=>{settingsMappingFilter=btn.dataset.mapFilter;renderSettings()}})}
-function renderTuiMapping(mapping){renderMappingFilters(mapping);const rows=(settingsMappingFilter==='all'?mapping:mapping.filter(row=>row.status===settingsMappingFilter));const body=rows.length?rows.map(row=>`<tr><td class="mono">${escapeHtml(row.tui_area)}<br><span class="muted">${escapeHtml(row.tui_action_id)}</span></td><td>${escapeHtml(row.tui_label)}</td><td>${escapeHtml(row.webui_section)}<br><span class="muted">${escapeHtml(row.webui_control)}</span></td><td><span class="tag ${mappingStatusClass(row.status)}">${mappingStatusLabel(row.status)}</span><br><span class="muted">${escapeHtml(row.write_policy)}</span></td><td class="default-route">${escapeHtml(row.verification||'-')}<br><span class="muted">${escapeHtml(row.manual_check||'')}</span></td><td>${mappingActionButton(row)}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-row">当前筛选没有条目</td></tr>';$('tuiMappingTable').innerHTML=`<thead><tr><th>TUI area/action</th><th>TUI label</th><th>WebUI 落点</th><th>Status</th><th>验证 / check</th><th>操作</th></tr></thead><tbody>${body}</tbody>`}
+function acceptanceStorageKey(){return `mms-webui-tui-acceptance:${state?.command||'mms'}:${state?.schema||'snapshot'}`}
+function loadAcceptanceState(mapping){try{const allowed=new Set((mapping||[]).map(row=>row.id));const raw=JSON.parse(localStorage.getItem(acceptanceStorageKey())||'[]');checkedMappingRows=new Set((Array.isArray(raw)?raw:[]).filter(id=>allowed.has(id)))}catch(_err){checkedMappingRows=new Set()}}
+function saveAcceptanceState(){try{localStorage.setItem(acceptanceStorageKey(),JSON.stringify([...checkedMappingRows].sort()))}catch(_err){}}
+function currentMappingRows(mapping){return settingsMappingFilter==='all'?mapping:mapping.filter(row=>row.status===settingsMappingFilter)}
+function acceptanceReportText(mapping){const rows=mapping||[];const unchecked=rows.filter(row=>!checkedMappingRows.has(row.id));const counts=(state.tui_webui_mapping_summary||{}).counts||{};return [`MMS WebUI Settings/Channel acceptance`,`command: ${state.command||'mms'}`,`total: ${rows.length}`,`checked: ${rows.length-unchecked.length}`,`unchecked: ${unchecked.length}`,`status: native ${counts.native||0} / report ${counts.report||0} / draft ${counts.draft_review||0} / gate ${counts.human_gate||0} / missing ${counts.missing||0}`,`clickable: ${(state.tui_webui_mapping_summary||{}).clickable_rows||0}/${rows.length}`,`unchecked rows: ${unchecked.map(row=>row.id).join(', ')||'-'}`].join('\\n')}
+async function copyAcceptanceReport(mapping){const text=acceptanceReportText(mapping);try{await navigator.clipboard.writeText(text);toast('已复制验收摘要')}catch(_err){$('settingsReport').textContent=text;toast('无法访问剪贴板，验收摘要已显示在 Report')}}
+function renderAcceptancePanel(mapping){const box=$('acceptancePanel');if(!box)return;const rows=mapping||[];const visible=currentMappingRows(rows);const checked=rows.filter(row=>checkedMappingRows.has(row.id)).length;const clickable=(state.tui_webui_mapping_summary||{}).clickable_rows??rows.filter(row=>row.clickable==='yes').length;const missing=(state.tui_webui_mapping_summary||{}).counts?.missing||0;box.innerHTML=`<div class="acceptance-head"><div><h4>逐项验收 checklist</h4><p class="muted">你可以按行点击 Open / Report / Gate / 保存预览验证，再勾选左侧 Checked；状态保存在本浏览器 localStorage，不写真实 MMS config。</p></div><div class="acceptance-progress" id="mapCheckProgress">${checked}/${rows.length}</div></div><div class="chips"><span class="chip">clickable ${clickable}/${rows.length}</span><span class="chip">visible ${visible.length}</span><span class="chip">missing ${missing}</span><span class="chip">${checked===rows.length?'all checked':'unchecked '+(rows.length-checked)}</span></div><div class="btns"><button class="ghost" id="markVisibleChecked">标记当前筛选已检查</button><button class="ghost" id="copyAcceptanceReport">复制验收摘要</button><button class="ghost" id="clearAcceptanceChecks">清空本地勾选</button></div>`;$('markVisibleChecked').onclick=()=>{visible.forEach(row=>checkedMappingRows.add(row.id));saveAcceptanceState();renderTuiMapping(rows);toast(`已标记 ${visible.length} 行为 checked`)};$('clearAcceptanceChecks').onclick=()=>{checkedMappingRows.clear();saveAcceptanceState();renderTuiMapping(rows);toast('已清空本地验收勾选')};$('copyAcceptanceReport').onclick=()=>copyAcceptanceReport(rows)}
+function bindMappingChecks(mapping){document.querySelectorAll('[data-map-check]').forEach(input=>{input.onchange=()=>{const id=input.dataset.mapCheck;if(input.checked)checkedMappingRows.add(id);else checkedMappingRows.delete(id);saveAcceptanceState();renderAcceptancePanel(mapping)}})}
+function renderTuiMapping(mapping){renderMappingFilters(mapping);renderAcceptancePanel(mapping);const rows=currentMappingRows(mapping);const body=rows.length?rows.map(row=>`<tr><td><label class="mapping-check"><input data-map-check="${escapeHtml(row.id)}" type="checkbox" ${checkedMappingRows.has(row.id)?'checked':''}>Checked</label></td><td class="mono">${escapeHtml(row.tui_area)}<br><span class="muted">${escapeHtml(row.tui_action_id)}</span></td><td>${escapeHtml(row.tui_label)}</td><td>${escapeHtml(row.webui_section)}<br><span class="muted">${escapeHtml(row.webui_control)}</span></td><td><span class="tag ${mappingStatusClass(row.status)}">${mappingStatusLabel(row.status)}</span><br><span class="muted">${escapeHtml(row.write_policy)}</span></td><td class="default-route">${escapeHtml(row.verification||'-')}<br><span class="check-evidence">${escapeHtml(row.click_targets||'-')}</span><br><span class="muted">${escapeHtml(row.acceptance_check||row.manual_check||'')}</span></td><td>${mappingActionButton(row)}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">当前筛选没有条目</td></tr>';$('tuiMappingTable').innerHTML=`<thead><tr><th>Check</th><th>TUI area/action</th><th>TUI label</th><th>WebUI 落点</th><th>Status</th><th>验证 / click evidence</th><th>操作</th></tr></thead><tbody>${body}</tbody>`;bindMappingChecks(mapping)}
 function gateArray(items){return Array.isArray(items)?items.filter(x=>String(x??'').trim()).map(x=>String(x)) : []}
 function gateList(items,empty='-'){const rows=gateArray(items);return rows.length?`<ol class="gate-list">${rows.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ol>`:`<p class="muted">${escapeHtml(empty)}</p>`}
 function gateCommands(commands){lastGateCommands=gateArray(commands);if(!lastGateCommands.length)return '<p class="muted">没有安全 one-shot CLI；按人工步骤处理。</p>';return lastGateCommands.map((cmd,i)=>`<div class="gate-command-row"><code>${escapeHtml(cmd)}</code><button class="ghost copy-gate-command" data-copy-gate-command="${i}">Copy</button></div>`).join('')}
@@ -5877,7 +5973,7 @@ function renderReviewSummary(plan){const review=plan?.review_summary||{};const c
 function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
 function draft(){syncProvider();syncFallback();syncRuntime();syncAccounts();syncUiSettings();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,accounts:state.accounts,account_defaults:state.account_defaults,rescue:state.rescue,...(touchedLoadBalance?{load_balance:state.load_balance}:{}),vision_sidecar:state.vision_sidecar,ui:state.ui,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderSettings();renderRefs()}
-async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
+async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];loadAcceptanceState(state.tui_webui_mapping||[]);renderNav();renderAll();}
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,family_priority_overrides:{},models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
 $('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
