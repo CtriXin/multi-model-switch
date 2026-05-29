@@ -206,7 +206,12 @@ from mms_session_guard import (
 from mms_session_assets import resolve_local_hooks_dir as _resolve_local_hooks_dir_impl
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
-from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
+from mms_state_io import (
+    atomic_write_json,
+    atomic_write_text,
+    load_json_dict_unlocked as _load_json_dict_unlocked_impl,
+    locked_state_file,
+)
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 _build_gateway_url = None
@@ -499,14 +504,8 @@ def _account_guard_state_path():
 
 
 def _load_json_dict_unlocked(path):
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    """Compatibility wrapper for best-effort JSON object reads."""
+    return _load_json_dict_unlocked_impl(path)
 
 
 def _read_account_guard_state():

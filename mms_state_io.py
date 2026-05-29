@@ -152,3 +152,14 @@ def atomic_write_json(path, payload, *, mode=None, indent=2):
         json.dumps(payload, ensure_ascii=False, indent=indent) + "\n",
         mode=mode,
     )
+
+
+def load_json_dict_unlocked(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
