@@ -79,6 +79,31 @@ class TuiSettingsActionDeps:
     set_language: Callable[..., Any]
 
 
+@dataclass(frozen=True)
+class TuiLaunchConfirmationDeps:
+    once: bool
+    check_cli_installed: Callable[..., Any]
+    check_and_offer_install_loader: Callable[..., Any]
+    select_and_apply_opencode_profile: Callable[..., Any]
+    runtime_with_launch_preferences: Callable[..., Any]
+    runtime_with_vision_sidecar: Callable[..., Any]
+    clean_model_info: Callable[..., Any]
+    get_export_env: Callable[..., Any]
+    network_guard_preview_loader: Callable[..., Any]
+    confirm_tui: Callable[..., Any]
+    confirm_context_lines: Callable[..., Any]
+    caveman_available_for_cli: Callable[..., Any]
+    nsr_available_for_cli: Callable[..., Any]
+    ecc_available_for_claude: Callable[..., Any]
+    omc_available_for_claude: Callable[..., Any]
+    model_info_looks_domestic: Callable[..., Any]
+    default_reasoning_effort_for_model_info: Callable[..., Any]
+    build_confirm_preview_catalog: Callable[..., Any]
+    network_guard_enforcer_loader: Callable[..., Any]
+    merge_disabled_session_surfaces: Callable[..., Any]
+    launch_with_tracking: Callable[..., Any]
+
+
 def safe_tui_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -2681,32 +2706,12 @@ def handle_tui_launch_confirmation(
     model_info,
     runtime,
     *,
-    once,
-    check_cli_installed,
-    check_and_offer_install_loader,
-    select_and_apply_opencode_profile,
-    runtime_with_launch_preferences,
-    runtime_with_vision_sidecar,
-    clean_model_info,
-    get_export_env,
-    network_guard_preview_loader,
-    confirm_tui,
-    confirm_context_lines,
-    caveman_available_for_cli,
-    nsr_available_for_cli,
-    ecc_available_for_claude,
-    omc_available_for_claude,
-    model_info_looks_domestic,
-    default_reasoning_effort_for_model_info,
-    build_confirm_preview_catalog,
-    network_guard_enforcer_loader,
-    merge_disabled_session_surfaces,
-    launch_with_tracking,
+    deps,
 ):
     install_result = ensure_cli_installed_for_launch(
         cli_name,
-        check_cli_installed=check_cli_installed,
-        check_and_offer_install_loader=check_and_offer_install_loader,
+        check_cli_installed=deps.check_cli_installed,
+        check_and_offer_install_loader=deps.check_and_offer_install_loader,
     )
     if install_result["status"] == "exit":
         return {"status": "exit"}
@@ -2714,7 +2719,7 @@ def handle_tui_launch_confirmation(
     opencode_profile_result = apply_opencode_profile_for_launch(
         runtime,
         cli_name,
-        select_and_apply_opencode_profile=select_and_apply_opencode_profile,
+        select_and_apply_opencode_profile=deps.select_and_apply_opencode_profile,
     )
     if opencode_profile_result.get("cancelled"):
         return {"status": "continue"}
@@ -2723,17 +2728,17 @@ def handle_tui_launch_confirmation(
         cfg,
         runtime,
         cli_name,
-        runtime_with_launch_preferences=runtime_with_launch_preferences,
-        runtime_with_vision_sidecar=runtime_with_vision_sidecar,
+        runtime_with_launch_preferences=deps.runtime_with_launch_preferences,
+        runtime_with_vision_sidecar=deps.runtime_with_vision_sidecar,
     )
 
     confirm_inputs = prepare_confirm_prompt_inputs(
         cli_name,
         model_info,
         runtime,
-        clean_model_info=clean_model_info,
-        get_export_env=get_export_env,
-        network_guard_preview_loader=network_guard_preview_loader,
+        clean_model_info=deps.clean_model_info,
+        get_export_env=deps.get_export_env,
+        network_guard_preview_loader=deps.network_guard_preview_loader,
     )
     clean = confirm_inputs["clean_model_info"]
     env_vars = confirm_inputs["env_vars"]
@@ -2744,16 +2749,16 @@ def handle_tui_launch_confirmation(
         clean,
         runtime,
         env_vars=env_vars,
-        once=once,
-        confirm_tui=confirm_tui,
-        confirm_context_lines=confirm_context_lines,
-        caveman_available_for_cli=caveman_available_for_cli,
-        nsr_available_for_cli=nsr_available_for_cli,
-        ecc_available_for_claude=ecc_available_for_claude,
-        omc_available_for_claude=omc_available_for_claude,
-        model_info_looks_domestic=model_info_looks_domestic,
-        default_reasoning_effort_for_model_info=default_reasoning_effort_for_model_info,
-        build_confirm_preview_catalog=build_confirm_preview_catalog,
+        once=deps.once,
+        confirm_tui=deps.confirm_tui,
+        confirm_context_lines=deps.confirm_context_lines,
+        caveman_available_for_cli=deps.caveman_available_for_cli,
+        nsr_available_for_cli=deps.nsr_available_for_cli,
+        ecc_available_for_claude=deps.ecc_available_for_claude,
+        omc_available_for_claude=deps.omc_available_for_claude,
+        model_info_looks_domestic=deps.model_info_looks_domestic,
+        default_reasoning_effort_for_model_info=deps.default_reasoning_effort_for_model_info,
+        build_confirm_preview_catalog=deps.build_confirm_preview_catalog,
     )
     if confirm_prompt["status"] == "interrupt":
         return {"status": "exit"}
@@ -2773,9 +2778,9 @@ def handle_tui_launch_confirmation(
         runtime,
         bypass=confirm_action["bypass"],
         runtime_preferences=confirm_action["runtime_preferences"],
-        once=once,
-        network_guard_enforcer_loader=network_guard_enforcer_loader,
-        merge_disabled_session_surfaces=merge_disabled_session_surfaces,
-        launch_with_tracking=launch_with_tracking,
+        once=deps.once,
+        network_guard_enforcer_loader=deps.network_guard_enforcer_loader,
+        merge_disabled_session_surfaces=deps.merge_disabled_session_surfaces,
+        launch_with_tracking=deps.launch_with_tracking,
     )
     return {"status": "exit"}

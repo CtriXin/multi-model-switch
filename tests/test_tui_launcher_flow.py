@@ -72,6 +72,7 @@ from mms_tui_launcher_flow import (
     show_rescue_no_packets_report,
     show_rescue_paths_action,
     TuiLaunchCandidateDeps,
+    TuiLaunchConfirmationDeps,
     TuiSettingsActionDeps,
 )
 
@@ -3872,7 +3873,7 @@ def _launch_confirmation_deps(**overrides):
         "launch_with_tracking": unused,
     }
     deps.update(overrides)
-    return deps
+    return TuiLaunchConfirmationDeps(**deps)
 
 
 def test_handle_tui_launch_confirmation_returns_continue_for_profile_cancel_and_back() -> None:
@@ -3883,7 +3884,7 @@ def test_handle_tui_launch_confirmation_returns_continue_for_profile_cancel_and_
         "opencode",
         {"model": "gpt-5.4"},
         runtime,
-        **_launch_confirmation_deps(
+        deps=_launch_confirmation_deps(
             select_and_apply_opencode_profile=lambda _runtime, *, use_tui: None,
         ),
     ) == {"status": "continue"}
@@ -3893,7 +3894,7 @@ def test_handle_tui_launch_confirmation_returns_continue_for_profile_cancel_and_
         "codex",
         {"model": "gpt-5.4"},
         runtime,
-        **_launch_confirmation_deps(
+        deps=_launch_confirmation_deps(
             confirm_tui=lambda *_args, **_kwargs: "b",
         ),
     ) == {"status": "continue"}
@@ -3911,7 +3912,7 @@ def test_handle_tui_launch_confirmation_launches_with_prepared_runtime() -> None
         "codex",
         model_info,
         runtime,
-        **_launch_confirmation_deps(
+        deps=_launch_confirmation_deps(
             once=True,
             runtime_with_launch_preferences=lambda cfg_arg, runtime_arg, cli: calls.append(("prefs", cfg_arg, runtime_arg, cli)) or preferred_runtime,
             clean_model_info=lambda model: calls.append(("clean", model)) or {"model": model["model"]},
