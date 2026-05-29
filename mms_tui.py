@@ -1390,7 +1390,8 @@ def select_submodel_tui(
                         if focus == "model":
                             _safe_addstr(stdscr, y, ll + 1, " " * max(1, left_w - 4), name_attr)
                         _safe_addstr(stdscr, y, ll - 1, "|", marker_attr)
-                        _safe_addstr(stdscr, y, ll + 1, model_name, name_attr, max_w=left_w - 4)
+                        visible_model = _marquee_text(model_name, left_w - 4, marquee_tick)
+                        _safe_addstr(stdscr, y, ll + 1, visible_model, name_attr, max_w=left_w - 4)
                     else:
                         _safe_addstr(stdscr, y, ll + 1, model_name, curses.color_pair(2), max_w=left_w - 4)
 

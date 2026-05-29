@@ -465,6 +465,31 @@ def test_watchdog_default_config_dir_honors_mms_config_dir(monkeypatch, tmp_path
     assert watchdog.resolve_require_bundle(args, config_dir) is True
 
 
+def test_watchdog_model_presence_skips_claude_routes(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    routes_payload = {
+        "routes": {
+            "anthropic/claude-opus-4.6": {
+                "primary": {
+                    "provider_id": "newapi-personal-tokyo",
+                    "model": "anthropic/claude-opus-4.6",
+                    "openai_base_url": "https://tokyo.example/v1",
+                    "api_key": "sk-test-secret",
+                },
+                "fallbacks": [],
+            }
+        }
+    }
+    providers = {"newapi-personal-tokyo": {"models_endpoint": "/models"}}
+    model_sets = {("newapi-personal-tokyo", "https://tokyo.example/v1/models"): {"not-the-claude-row"}}
+    policy_payload = {"projects": {"mms": {"allowed_models": ["anthropic/claude-opus-4.6"]}}}
+
+    results = watchdog.model_presence_checks(routes_payload, providers, model_sets, policy_payload)
+
+    assert results[0].status == "ok"
+    assert "skipped 1 Claude route entries" in results[0].detail
+
+
 def test_watchdog_dry_run_does_not_persist_report_log_or_state(tmp_path: Path, capsys) -> None:
     watchdog = _load_watchdog()
 

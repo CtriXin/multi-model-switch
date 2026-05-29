@@ -32,6 +32,9 @@ PREVIEW_CHECK_SCHEMA = "mms.preview_check.v1"
 CONSUMER_BUNDLE_STATUS_SCHEMA = "mms.consumer_bundle_status.v1"
 CONFIG_V2_PROMOTION_PLAN_SCHEMA = "mms.config_v2_promotion_plan.v1"
 CONFIG_V2_RELEASE_READINESS_SCHEMA = "mms.config_v2_release_readiness.v1"
+ROUTE_SHRINK_GUARD_MIN_BASELINE = 10
+ROUTE_SHRINK_GUARD_MIN_REMOVED = 5
+ROUTE_SHRINK_GUARD_MAX_REMAINING_RATIO = 0.75
 REGISTRY_V2_GENERATED_FILES = (
     "model-registry.latest-approved.json",
     "model-routes.json",
@@ -713,6 +716,7 @@ def registry_v2_save_plan(
     command_name: str = "mms config save-plan",
     plan_summary: dict[str, Any] | None = None,
     credential_updates: list[dict[str, Any]] | None = None,
+    route_publish_guard: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Describe the DB-truth save path without writing anything."""
     root = Path(config_dir).expanduser() if config_dir is not None else _config_root_from_config_path(config_path)
@@ -725,17 +729,32 @@ def registry_v2_save_plan(
     db_path = mms_registry.default_registry_db_path(config_dir=root)
     summary = plan_summary if isinstance(plan_summary, dict) else {}
     credentials = credential_updates if isinstance(credential_updates, list) else []
+    guard = route_publish_guard if isinstance(route_publish_guard, Mapping) else {}
+    guard_current = guard.get("current") if isinstance(guard.get("current"), Mapping) else {}
+    guard_candidate = guard.get("candidate") if isinstance(guard.get("candidate"), Mapping) else {}
+    guard_diff = guard.get("diff") if isinstance(guard.get("diff"), Mapping) else {}
     mode = str(root_status.get("mode") or "")
-    has_changes = any(
+    has_draft_changes = any(
         bool(summary.get(key))
         for key in ("will_write_config", "will_write_policy", "will_write_credentials")
     )
+    candidate_route_count = int(guard_candidate.get("route_count") or 0)
+    current_route_count = int(guard_current.get("route_count") or 0)
+    guard_has_current = bool(guard_current.get("available"))
+    route_delta_count = int(guard_diff.get("removed_count") or 0) + int(guard_diff.get("added_count") or 0)
+    provider_route_delta_count = int(guard_diff.get("removed_provider_route_count") or 0) + int(guard_diff.get("added_provider_route_count") or 0)
+    has_route_publish_work = candidate_route_count > 0 and (route_delta_count > 0 or provider_route_delta_count > 0 or not guard_has_current)
+    has_changes = has_draft_changes or has_route_publish_work
+    guard_blocked = bool(guard) and guard.get("ok") is False
     backup_dir = root / "backups" / "db"
     blocked_reasons: list[str] = []
     if mode != "preview":
         blocked_reasons.append("stable_root_human_only")
     if not has_changes:
         blocked_reasons.append("no_draft_changes")
+    if guard_blocked:
+        blocked_reasons.append(str(guard.get("reason") or "route_publish_guard_blocked"))
+    can_write_preview = bool(has_changes and mode == "preview" and not guard_blocked)
     plan_json_name = "webui-plan.json"
     cli_apply_command = f"./mmf config apply-plan --plan-json <{plan_json_name}> --apply --confirm-preview-apply --json"
     return {
@@ -748,12 +767,22 @@ def registry_v2_save_plan(
             "path": str(db_path),
             "exists": db_path.exists(),
             "backup_dir": str(backup_dir),
-            "would_backup_existing_db": bool(db_path.exists() and has_changes and mode == "preview"),
+            "would_backup_existing_db": bool(db_path.exists() and can_write_preview),
+        },
+        "route_publish_guard": dict(guard) if guard else {},
+        "route_publish_work": {
+            "has_draft_changes": bool(has_draft_changes),
+            "has_route_publish_work": bool(has_route_publish_work),
+            "candidate_route_count": candidate_route_count,
+            "current_route_count": current_route_count,
+            "current_bundle_available": guard_has_current,
+            "route_delta_count": route_delta_count,
+            "provider_route_delta_count": provider_route_delta_count,
         },
         "would_write": {
-            "db_candidate_revision": bool(has_changes and mode == "preview"),
-            "secret_backend": bool(credentials and mode == "preview"),
-            "generated_latest_approved_bundle": bool(has_changes and mode == "preview"),
+            "db_candidate_revision": can_write_preview,
+            "secret_backend": bool(credentials and mode == "preview" and not guard_blocked),
+            "generated_latest_approved_bundle": can_write_preview,
             "legacy_compat_files": {
                 "config_toml": bool(summary.get("will_write_config")),
                 "model_policy_json": bool(summary.get("will_write_policy")),
@@ -1660,7 +1689,7 @@ def _provider_secret_ref(report: dict[str, Any], provider_id: str) -> str:
     return ""
 
 
-def _provider_route_models(provider: Mapping[str, Any]) -> list[str]:
+def _provider_route_models(provider: Mapping[str, Any], *, ignore_fallback_models: bool = False) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
 
@@ -1671,7 +1700,8 @@ def _provider_route_models(provider: Mapping[str, Any]) -> list[str]:
         seen.add(text)
         result.append(text)
 
-    for key in ("fallback_models", "extra_models"):
+    source_keys = ("extra_models",) if ignore_fallback_models else ("fallback_models", "extra_models")
+    for key in source_keys:
         for model in _as_string_list(provider.get(key)):
             add(model)
     hidden = set(_as_string_list(provider.get("hidden_models")))
@@ -1751,8 +1781,10 @@ def _registry_v2_candidate_payload(
     *,
     policy_payload: Mapping[str, Any] | None = None,
     credential_updates: list[Mapping[str, Any]] | None = None,
+    route_refresh_provider_ids: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> dict[str, Any]:
     providers = [item for item in (config_payload.get("providers") or []) if isinstance(item, Mapping)]
+    refresh_scope = {str(item or "").strip() for item in (route_refresh_provider_ids or []) if str(item or "").strip()}
     credential_provider_ids = {
         str(item.get("provider_id") or item.get("id") or "").strip()
         for item in (credential_updates or [])
@@ -1768,10 +1800,12 @@ def _registry_v2_candidate_payload(
         if provider.get("enabled", True) is False:
             skipped.append({"provider_id": provider_id, "reason": "provider_disabled"})
             continue
-        models = _provider_route_models(provider)
+        models = _provider_route_models(provider, ignore_fallback_models=provider_id in refresh_scope)
         if not models:
             skipped.append({"provider_id": provider_id, "reason": "no_configured_models"})
             continue
+        if provider_id in refresh_scope:
+            skipped.append({"provider_id": provider_id, "reason": "provider_models_refreshed_ignore_fallback_models"})
         openai_base = str(
             provider.get("openai_base_url")
             or provider.get("default_openai_base_url")
@@ -1817,6 +1851,321 @@ def _registry_v2_candidate_payload(
     }
     mms_registry.validate_non_secret_payload(payload, context="registry_v2_save_candidate")
     return payload
+
+
+def _provider_route_identity(model: Any, provider_id: Any) -> str:
+    model_text = str(model or "").strip()
+    provider_text = str(provider_id or "").strip()
+    return f"{provider_text}:{model_text}" if model_text and provider_text else ""
+
+
+def _latest_approved_route_entries(root: Path) -> list[dict[str, Any]]:
+    try:
+        bundle = mms_registry.load_latest_approved_bundle(config_dir=root, include_secret=True)
+    except Exception:
+        return []
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), Mapping) else {}
+    router = payloads.get("router") if isinstance(payloads.get("router"), Mapping) else {}
+    routes = router.get("routes") if isinstance(router.get("routes"), Mapping) else {}
+    profile_payload = payloads.get("profile") if isinstance(payloads.get("profile"), Mapping) else {}
+    if not profile_payload and isinstance(payloads.get("profiles"), Mapping):
+        profile_payload = payloads.get("profiles")  # backward-compatible key used by early drafts
+    profiles = profile_payload.get("profiles") if isinstance(profile_payload.get("profiles"), Mapping) else {}
+    entries: list[dict[str, Any]] = []
+    for route_model, route in routes.items():
+        if not isinstance(route, Mapping):
+            continue
+        leaves: list[Mapping[str, Any]] = []
+        primary = route.get("primary")
+        if isinstance(primary, Mapping):
+            leaves.append(primary)
+        leaves.extend(item for item in (route.get("fallbacks") or []) if isinstance(item, Mapping))
+        for leaf in leaves:
+            provider_id = str(leaf.get("provider_id") or "").strip()
+            model = str(leaf.get("model") or leaf.get("model_id") or route_model or "").strip()
+            if not provider_id or not model:
+                continue
+            profile = profiles.get(provider_id) if isinstance(profiles.get(provider_id), Mapping) else {}
+            entries.append(
+                {
+                    "provider_id": provider_id,
+                    "model": model,
+                    "priority": int(profile.get("priority") or leaf.get("priority") or 0),
+                    "anthropic_base_url": str(leaf.get("anthropic_base_url") or "").strip().rstrip("/"),
+                    "openai_base_url": str(leaf.get("openai_base_url") or "").strip().rstrip("/"),
+                    "secret_ref": str(leaf.get("secret_ref") or "").strip(),
+                    "metadata": {
+                        "source": "registry-v2-preserved-latest-approved",
+                        "name": str(profile.get("name") or provider_id),
+                        "role": str(profile.get("role") or "auto"),
+                        "models_endpoint": str(profile.get("models_endpoint") or ""),
+                        "protocols": _as_string_list(profile.get("protocols")),
+                        "supported_clis": _as_string_list(profile.get("supported_clis")),
+                        "secret_source": "latest_approved_bundle",
+                    },
+                }
+            )
+    return entries
+
+
+def _route_scoped_candidate_payload(
+    *,
+    config_dir: str | Path | None = None,
+    candidate_payload: Mapping[str, Any],
+    route_scope_provider_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+    route_refresh_provider_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> dict[str, Any]:
+    scope = {str(item or "").strip() for item in (route_scope_provider_ids or []) if str(item or "").strip()}
+    refresh_scope = {str(item or "").strip() for item in (route_refresh_provider_ids or []) if str(item or "").strip()}
+    scope |= refresh_scope
+    payload = dict(candidate_payload)
+    route_entries = [dict(item) for item in (candidate_payload.get("route_entries") or []) if isinstance(item, Mapping)]
+    if not scope:
+        payload["route_entries"] = route_entries
+        return payload
+
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    profiles_payload = candidate_payload.get("profile") if isinstance(candidate_payload.get("profile"), Mapping) else {}
+    profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), Mapping) else {}
+    scoped_hidden: dict[str, set[str]] = {}
+    scoped_enabled: dict[str, bool] = {}
+    for provider_id in scope:
+        profile = profiles.get(provider_id) if isinstance(profiles.get(provider_id), Mapping) else {}
+        scoped_hidden[provider_id] = {str(item or "").strip() for item in _as_string_list(profile.get("hidden_models"))}
+        scoped_enabled[provider_id] = profile.get("enabled", True) is not False
+    scoped_entries = [entry for entry in route_entries if str(entry.get("provider_id") or "").strip() in scope]
+    scoped_route_ids = {
+        route_id
+        for route_id in (
+            _provider_route_identity(entry.get("model"), entry.get("provider_id"))
+            for entry in scoped_entries
+        )
+        if route_id
+    }
+    preserved_entries: list[dict[str, Any]] = []
+    for entry in _latest_approved_route_entries(root):
+        provider_id = str(entry.get("provider_id") or "").strip()
+        if provider_id in scope:
+            model = str(entry.get("model") or "").strip()
+            route_id = _provider_route_identity(model, provider_id)
+            if not scoped_enabled.get(provider_id, True):
+                continue
+            if model in scoped_hidden.get(provider_id, set()):
+                continue
+            if provider_id in refresh_scope and route_id not in scoped_route_ids:
+                continue
+        preserved_entries.append(entry)
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in scoped_entries + preserved_entries:
+        route_id = _provider_route_identity(entry.get("model"), entry.get("provider_id"))
+        if not route_id or route_id in seen:
+            continue
+        seen.add(route_id)
+        merged.append(entry)
+    payload["route_entries"] = merged
+    skipped = list(candidate_payload.get("skipped") or [])
+    skipped.append(
+        {
+            "reason": "route_scope_preserved_latest_approved",
+            "scoped_provider_ids": sorted(scope),
+            "refreshed_provider_ids": sorted(refresh_scope),
+            "scoped_route_count": len(scoped_entries),
+            "preserved_route_count": len(preserved_entries),
+        }
+    )
+    payload["skipped"] = skipped
+    return payload
+
+
+def _route_models_from_candidate_payload(candidate_payload: Mapping[str, Any]) -> set[str]:
+    models: set[str] = set()
+    for item in candidate_payload.get("route_entries") or []:
+        if not isinstance(item, Mapping):
+            continue
+        model = str(item.get("model") or "").strip()
+        if model:
+            models.add(model)
+    return models
+
+
+def _latest_approved_route_guard_summary(root: Path) -> dict[str, Any]:
+    try:
+        bundle = mms_registry.load_latest_approved_bundle(config_dir=root, include_secret=True)
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+            "bundle_revision": "",
+            "route_count": 0,
+            "provider_route_count": 0,
+            "models": [],
+            "provider_routes": [],
+        }
+    manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), Mapping) else {}
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), Mapping) else {}
+    router = payloads.get("router") if isinstance(payloads.get("router"), Mapping) else {}
+    routes = router.get("routes") if isinstance(router.get("routes"), Mapping) else {}
+    provider_route_count = 0
+    provider_routes: set[str] = set()
+    for model, entry in routes.items():
+        if not isinstance(entry, Mapping):
+            continue
+        if isinstance(entry.get("primary"), Mapping):
+            provider_route_count += 1
+            route_id = _provider_route_identity(model, entry["primary"].get("provider_id"))
+            if route_id:
+                provider_routes.add(route_id)
+        provider_route_count += sum(1 for item in (entry.get("fallbacks") or []) if isinstance(item, Mapping))
+        for item in entry.get("fallbacks") or []:
+            if isinstance(item, Mapping):
+                route_id = _provider_route_identity(model, item.get("provider_id"))
+                if route_id:
+                    provider_routes.add(route_id)
+    return {
+        "available": True,
+        "reason": "",
+        "bundle_revision": str(manifest.get("bundle_revision") or ""),
+        "route_revision": str(manifest.get("route_revision") or ""),
+        "route_count": len(routes),
+        "provider_route_count": provider_route_count,
+        "models": sorted(str(model) for model in routes.keys()),
+        "provider_routes": sorted(provider_routes),
+    }
+
+
+def _candidate_route_guard_summary(candidate_payload: Mapping[str, Any]) -> dict[str, Any]:
+    route_entries = [item for item in (candidate_payload.get("route_entries") or []) if isinstance(item, Mapping)]
+    models = sorted(_route_models_from_candidate_payload(candidate_payload))
+    provider_routes = sorted(
+        route_id
+        for route_id in (
+            _provider_route_identity(item.get("model"), item.get("provider_id"))
+            for item in route_entries
+        )
+        if route_id
+    )
+    return {
+        "route_count": len(models),
+        "provider_route_count": len(route_entries),
+        "models": models,
+        "provider_routes": provider_routes,
+    }
+
+
+def _route_publish_guard_message(reason: str, current: Mapping[str, Any], candidate: Mapping[str, Any]) -> str:
+    current_count = int(current.get("route_count") or 0)
+    candidate_count = int(candidate.get("route_count") or 0)
+    if reason == "stale_preview_bundle_revision":
+        return (
+            "stale_preview_bundle_revision: latest-approved bundle changed since this WebUI draft was loaded; "
+            "refresh the WebUI before publishing"
+        )
+    if reason == "route_shrink_guard":
+        return (
+            "route_shrink_guard: candidate would shrink latest-approved route groups "
+            f"from {current_count} to {candidate_count}; refresh WebUI or use an explicit recovery flow"
+        )
+    return reason or "route_publish_guard_blocked"
+
+
+def _registry_v2_route_publish_guard_from_candidate(
+    *,
+    config_dir: str | Path | None = None,
+    candidate_payload: Mapping[str, Any],
+    expected_bundle_revision: str = "",
+    allow_route_shrink: bool = False,
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    current = _latest_approved_route_guard_summary(root)
+    candidate = _candidate_route_guard_summary(candidate_payload)
+    removed_models = sorted(set(current.get("models") or []) - set(candidate.get("models") or []))
+    added_models = sorted(set(candidate.get("models") or []) - set(current.get("models") or []))
+    removed_provider_routes = sorted(set(current.get("provider_routes") or []) - set(candidate.get("provider_routes") or []))
+    added_provider_routes = sorted(set(candidate.get("provider_routes") or []) - set(current.get("provider_routes") or []))
+    result: dict[str, Any] = {
+        "schema": "mms.registry_v2.route_publish_guard.v1",
+        "ok": True,
+        "reason": "",
+        "message": "",
+        "config_root": str(root),
+        "expected_bundle_revision": str(expected_bundle_revision or "").strip(),
+        "current": {key: value for key, value in current.items() if key not in {"models", "provider_routes"}},
+        "candidate": {key: value for key, value in candidate.items() if key not in {"models", "provider_routes"}},
+        "diff": {
+            "removed_count": len(removed_models),
+            "added_count": len(added_models),
+            "removed_provider_route_count": len(removed_provider_routes),
+            "added_provider_route_count": len(added_provider_routes),
+            "removed_models_sample": removed_models[:20],
+            "added_models_sample": added_models[:20],
+            "removed_provider_routes_sample": removed_provider_routes[:20],
+            "added_provider_routes_sample": added_provider_routes[:20],
+        },
+        "policy": {
+            "min_baseline_route_count": ROUTE_SHRINK_GUARD_MIN_BASELINE,
+            "min_removed_route_count": ROUTE_SHRINK_GUARD_MIN_REMOVED,
+            "max_remaining_ratio": ROUTE_SHRINK_GUARD_MAX_REMAINING_RATIO,
+            "allow_route_shrink": bool(allow_route_shrink),
+        },
+    }
+    if not current.get("available"):
+        return result
+
+    current_revision = str(current.get("bundle_revision") or "")
+    expected_revision = str(expected_bundle_revision or "").strip()
+    if expected_revision and current_revision and expected_revision != current_revision:
+        result["ok"] = False
+        result["reason"] = "stale_preview_bundle_revision"
+        result["message"] = _route_publish_guard_message(result["reason"], current, candidate)
+        return result
+
+    current_count = int(current.get("route_count") or 0)
+    candidate_count = int(candidate.get("route_count") or 0)
+    removed_count = len(removed_models)
+    if (
+        not allow_route_shrink
+        and current_count >= ROUTE_SHRINK_GUARD_MIN_BASELINE
+        and removed_count >= ROUTE_SHRINK_GUARD_MIN_REMOVED
+        and candidate_count < current_count * ROUTE_SHRINK_GUARD_MAX_REMAINING_RATIO
+    ):
+        result["ok"] = False
+        result["reason"] = "route_shrink_guard"
+        result["message"] = _route_publish_guard_message(result["reason"], current, candidate)
+    return result
+
+
+def registry_v2_route_publish_guard(
+    *,
+    config_dir: str | Path | None = None,
+    config_payload: Mapping[str, Any] | None = None,
+    policy_payload: Mapping[str, Any] | None = None,
+    credential_updates: list[Mapping[str, Any]] | None = None,
+    expected_bundle_revision: str = "",
+    allow_route_shrink: bool = False,
+    route_scope_provider_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+    route_refresh_provider_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> dict[str, Any]:
+    candidate_payload = _registry_v2_candidate_payload(
+        config_payload if isinstance(config_payload, Mapping) else {},
+        policy_payload=policy_payload if isinstance(policy_payload, Mapping) else {},
+        credential_updates=credential_updates or [],
+        route_refresh_provider_ids=route_refresh_provider_ids,
+    )
+    candidate_payload = _route_scoped_candidate_payload(
+        config_dir=config_dir,
+        candidate_payload=candidate_payload,
+        route_scope_provider_ids=route_scope_provider_ids,
+        route_refresh_provider_ids=route_refresh_provider_ids,
+    )
+    return _registry_v2_route_publish_guard_from_candidate(
+        config_dir=config_dir,
+        candidate_payload=candidate_payload,
+        expected_bundle_revision=expected_bundle_revision,
+        allow_route_shrink=allow_route_shrink,
+    )
 
 
 def _insert_registry_v2_candidate_revisions(db: sqlite3.Connection, payload: dict[str, Any], *, actor: str) -> dict[str, Any]:
@@ -2598,6 +2947,10 @@ def apply_registry_v2_save_candidate(
     db_path: str | Path | None = None,
     apply: bool = False,
     allow_stable: bool = False,
+    expected_bundle_revision: str = "",
+    allow_route_shrink: bool = False,
+    route_scope_provider_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+    route_refresh_provider_ids: list[str] | tuple[str, ...] | set[str] | None = None,
     command_name: str = "mms registry",
 ) -> dict[str, Any]:
     """Write preview DB candidate revisions for the future v2 save path."""
@@ -2611,6 +2964,19 @@ def apply_registry_v2_save_candidate(
         config_payload,
         policy_payload=policy_payload if isinstance(policy_payload, Mapping) else {},
         credential_updates=credential_updates or [],
+        route_refresh_provider_ids=route_refresh_provider_ids,
+    )
+    candidate_payload = _route_scoped_candidate_payload(
+        config_dir=root,
+        candidate_payload=candidate_payload,
+        route_scope_provider_ids=route_scope_provider_ids,
+        route_refresh_provider_ids=route_refresh_provider_ids,
+    )
+    route_publish_guard = _registry_v2_route_publish_guard_from_candidate(
+        config_dir=root,
+        candidate_payload=candidate_payload,
+        expected_bundle_revision=expected_bundle_revision,
+        allow_route_shrink=allow_route_shrink,
     )
     target_db = Path(db_path).expanduser() if db_path is not None else mms_registry.default_registry_db_path(config_dir=root)
     route_entries = candidate_payload.get("route_entries") if isinstance(candidate_payload.get("route_entries"), list) else []
@@ -2629,6 +2995,7 @@ def apply_registry_v2_save_candidate(
             "profile_provider_count": len(profile.get("profiles") if isinstance(profile.get("profiles"), dict) else {}),
             "skipped": candidate_payload.get("skipped") or [],
         },
+        "route_publish_guard": route_publish_guard,
         "writes": {
             "target_preview_root": root_status.get("mode") == "preview",
             "db_candidate_revision": bool(apply),
@@ -2641,6 +3008,10 @@ def apply_registry_v2_save_candidate(
         summary["skipped"] = True
         summary["skip_reason"] = "dry_run_apply_required"
         return summary
+    if not route_publish_guard.get("ok"):
+        raise mms_registry.RegistryValidationError(
+            str(route_publish_guard.get("message") or route_publish_guard.get("reason") or "route publish guard blocked")
+        )
 
     db_existed_before = target_db.exists()
     init_summary = init_config_root(config_dir=root, create_db=True, allow_stable=allow_stable, command_name=command_name)
@@ -2701,20 +3072,26 @@ def _registry_v2_candidate_inputs_from_files(
     plan_json: str = "",
     config_json: str = "",
     policy_json: str = "",
-) -> tuple[dict[str, Any], dict[str, Any], list[Mapping[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any], list[Mapping[str, Any]], str, list[str], list[str]]:
     plan = _read_json_mapping(plan_json, label="plan-json") if str(plan_json or "").strip() else {}
     if plan:
         config_payload = plan.get("config") if isinstance(plan.get("config"), dict) else {}
         policy_payload = plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {}
         credentials = plan.get("credential_updates") if isinstance(plan.get("credential_updates"), list) else []
+        expected_bundle_revision = str(plan.get("expected_bundle_revision") or "").strip()
+        route_scope_provider_ids = _as_string_list(plan.get("route_scope_provider_ids"))
+        route_refresh_provider_ids = _as_string_list(plan.get("route_refresh_provider_ids"))
     else:
         config_payload = _read_json_mapping(config_json, label="config-json") if str(config_json or "").strip() else {}
         policy_payload = _read_json_mapping(policy_json, label="policy-json") if str(policy_json or "").strip() else {}
         credentials = []
+        expected_bundle_revision = ""
+        route_scope_provider_ids = []
+        route_refresh_provider_ids = []
     if not config_payload:
         raise mms_registry.RegistryValidationError("registry v2 save candidate requires --plan-json or --config-json")
     credential_updates = [item for item in credentials if isinstance(item, Mapping)]
-    return config_payload, policy_payload, credential_updates
+    return config_payload, policy_payload, credential_updates, expected_bundle_revision, route_scope_provider_ids, route_refresh_provider_ids
 
 
 def apply_registry_v2_plan(
@@ -2733,7 +3110,14 @@ def apply_registry_v2_plan(
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     root = root.expanduser()
     root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
-    config_payload, policy_payload, credential_updates = _registry_v2_candidate_inputs_from_files(
+    (
+        config_payload,
+        policy_payload,
+        credential_updates,
+        expected_bundle_revision,
+        route_scope_provider_ids,
+        route_refresh_provider_ids,
+    ) = _registry_v2_candidate_inputs_from_files(
         plan_json=plan_json,
         config_json=config_json,
         policy_json=policy_json,
@@ -2742,6 +3126,18 @@ def apply_registry_v2_plan(
         config_payload,
         policy_payload=policy_payload,
         credential_updates=credential_updates,
+        route_refresh_provider_ids=route_refresh_provider_ids,
+    )
+    candidate_payload = _route_scoped_candidate_payload(
+        config_dir=root,
+        candidate_payload=candidate_payload,
+        route_scope_provider_ids=route_scope_provider_ids,
+        route_refresh_provider_ids=route_refresh_provider_ids,
+    )
+    route_publish_guard = _registry_v2_route_publish_guard_from_candidate(
+        config_dir=root,
+        candidate_payload=candidate_payload,
+        expected_bundle_revision=expected_bundle_revision,
     )
     route_entries = candidate_payload.get("route_entries") if isinstance(candidate_payload.get("route_entries"), list) else []
     summary: dict[str, Any] = {
@@ -2758,6 +3154,7 @@ def apply_registry_v2_plan(
             "credential_update_count": len(credential_updates),
             "skipped": candidate_payload.get("skipped") or [],
         },
+        "route_publish_guard": route_publish_guard,
         "writes": {
             "db_candidate_revision": False,
             "secret_backend": False,
@@ -2779,6 +3176,9 @@ def apply_registry_v2_plan(
             summary["blocked_reasons"].append("stable_apply_not_implemented")
     if apply and not confirm_preview_apply:
         summary["blocked_reasons"].append("confirm_preview_apply_required")
+    if apply and not route_publish_guard.get("ok"):
+        summary["blocked_reasons"].append(str(route_publish_guard.get("reason") or "route_publish_guard_blocked"))
+        summary["error"] = str(route_publish_guard.get("message") or route_publish_guard.get("reason") or "")
     if not apply:
         summary["ok"] = True
         summary["next_action"] = "rerun with --apply --confirm-preview-apply after reviewing the plan"
@@ -2799,6 +3199,9 @@ def apply_registry_v2_plan(
             db_path=db_path,
             apply=True,
             allow_stable=allow_stable,
+            expected_bundle_revision=expected_bundle_revision,
+            route_scope_provider_ids=route_scope_provider_ids,
+            route_refresh_provider_ids=route_refresh_provider_ids,
             command_name=command_name,
         )
         secret_backend = write_registry_v2_webui_secret_backend(
@@ -4147,7 +4550,14 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         return 0
     if args.subcommand == "v2-save-candidate":
         try:
-            config_payload, policy_payload, credential_updates = _registry_v2_candidate_inputs_from_files(
+            (
+                config_payload,
+                policy_payload,
+                credential_updates,
+                expected_bundle_revision,
+                route_scope_provider_ids,
+                route_refresh_provider_ids,
+            ) = _registry_v2_candidate_inputs_from_files(
                 plan_json=args.plan_json or "",
                 config_json=args.config_json or "",
                 policy_json=args.policy_json or "",
@@ -4160,6 +4570,9 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
                 db_path=db_path,
                 apply=bool(args.apply),
                 allow_stable=bool(args.allow_stable),
+                expected_bundle_revision=expected_bundle_revision,
+                route_scope_provider_ids=route_scope_provider_ids,
+                route_refresh_provider_ids=route_refresh_provider_ids,
                 command_name=command_name,
             )
         except mms_registry.RegistryValidationError as exc:
@@ -4423,6 +4836,7 @@ __all__ = [
     "preview_prepare",
     "apply_registry_v2_plan",
     "apply_registry_v2_save_candidate",
+    "registry_v2_route_publish_guard",
     "registry_v2_save_plan",
     "scheduled_refresh",
     "backup_registry_db",
