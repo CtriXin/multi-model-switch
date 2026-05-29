@@ -32,6 +32,9 @@ PREVIEW_CHECK_SCHEMA = "mms.preview_check.v1"
 CONSUMER_BUNDLE_STATUS_SCHEMA = "mms.consumer_bundle_status.v1"
 CONFIG_V2_PROMOTION_PLAN_SCHEMA = "mms.config_v2_promotion_plan.v1"
 CONFIG_V2_RELEASE_READINESS_SCHEMA = "mms.config_v2_release_readiness.v1"
+ROUTE_SHRINK_GUARD_MIN_BASELINE = 10
+ROUTE_SHRINK_GUARD_MIN_REMOVED = 5
+ROUTE_SHRINK_GUARD_MAX_REMAINING_RATIO = 0.75
 REGISTRY_V2_GENERATED_FILES = (
     "model-registry.latest-approved.json",
     "model-routes.json",
@@ -1819,6 +1822,160 @@ def _registry_v2_candidate_payload(
     return payload
 
 
+def _route_models_from_candidate_payload(candidate_payload: Mapping[str, Any]) -> set[str]:
+    models: set[str] = set()
+    for item in candidate_payload.get("route_entries") or []:
+        if not isinstance(item, Mapping):
+            continue
+        model = str(item.get("model") or "").strip()
+        if model:
+            models.add(model)
+    return models
+
+
+def _latest_approved_route_guard_summary(root: Path) -> dict[str, Any]:
+    try:
+        bundle = mms_registry.load_latest_approved_bundle(config_dir=root, include_secret=True)
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+            "bundle_revision": "",
+            "route_count": 0,
+            "provider_route_count": 0,
+            "models": [],
+        }
+    manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), Mapping) else {}
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), Mapping) else {}
+    router = payloads.get("router") if isinstance(payloads.get("router"), Mapping) else {}
+    routes = router.get("routes") if isinstance(router.get("routes"), Mapping) else {}
+    provider_route_count = 0
+    for entry in routes.values():
+        if not isinstance(entry, Mapping):
+            continue
+        if isinstance(entry.get("primary"), Mapping):
+            provider_route_count += 1
+        provider_route_count += sum(1 for item in (entry.get("fallbacks") or []) if isinstance(item, Mapping))
+    return {
+        "available": True,
+        "reason": "",
+        "bundle_revision": str(manifest.get("bundle_revision") or ""),
+        "route_revision": str(manifest.get("route_revision") or ""),
+        "route_count": len(routes),
+        "provider_route_count": provider_route_count,
+        "models": sorted(str(model) for model in routes.keys()),
+    }
+
+
+def _candidate_route_guard_summary(candidate_payload: Mapping[str, Any]) -> dict[str, Any]:
+    route_entries = [item for item in (candidate_payload.get("route_entries") or []) if isinstance(item, Mapping)]
+    models = sorted(_route_models_from_candidate_payload(candidate_payload))
+    return {
+        "route_count": len(models),
+        "provider_route_count": len(route_entries),
+        "models": models,
+    }
+
+
+def _route_publish_guard_message(reason: str, current: Mapping[str, Any], candidate: Mapping[str, Any]) -> str:
+    current_count = int(current.get("route_count") or 0)
+    candidate_count = int(candidate.get("route_count") or 0)
+    if reason == "stale_preview_bundle_revision":
+        return (
+            "stale_preview_bundle_revision: latest-approved bundle changed since this WebUI draft was loaded; "
+            "refresh the WebUI before publishing"
+        )
+    if reason == "route_shrink_guard":
+        return (
+            "route_shrink_guard: candidate would shrink latest-approved route groups "
+            f"from {current_count} to {candidate_count}; refresh WebUI or use an explicit recovery flow"
+        )
+    return reason or "route_publish_guard_blocked"
+
+
+def _registry_v2_route_publish_guard_from_candidate(
+    *,
+    config_dir: str | Path | None = None,
+    candidate_payload: Mapping[str, Any],
+    expected_bundle_revision: str = "",
+    allow_route_shrink: bool = False,
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    current = _latest_approved_route_guard_summary(root)
+    candidate = _candidate_route_guard_summary(candidate_payload)
+    removed_models = sorted(set(current.get("models") or []) - set(candidate.get("models") or []))
+    added_models = sorted(set(candidate.get("models") or []) - set(current.get("models") or []))
+    result: dict[str, Any] = {
+        "schema": "mms.registry_v2.route_publish_guard.v1",
+        "ok": True,
+        "reason": "",
+        "message": "",
+        "config_root": str(root),
+        "expected_bundle_revision": str(expected_bundle_revision or "").strip(),
+        "current": {key: value for key, value in current.items() if key != "models"},
+        "candidate": {key: value for key, value in candidate.items() if key != "models"},
+        "diff": {
+            "removed_count": len(removed_models),
+            "added_count": len(added_models),
+            "removed_models_sample": removed_models[:20],
+            "added_models_sample": added_models[:20],
+        },
+        "policy": {
+            "min_baseline_route_count": ROUTE_SHRINK_GUARD_MIN_BASELINE,
+            "min_removed_route_count": ROUTE_SHRINK_GUARD_MIN_REMOVED,
+            "max_remaining_ratio": ROUTE_SHRINK_GUARD_MAX_REMAINING_RATIO,
+            "allow_route_shrink": bool(allow_route_shrink),
+        },
+    }
+    if not current.get("available"):
+        return result
+
+    current_revision = str(current.get("bundle_revision") or "")
+    expected_revision = str(expected_bundle_revision or "").strip()
+    if expected_revision and current_revision and expected_revision != current_revision:
+        result["ok"] = False
+        result["reason"] = "stale_preview_bundle_revision"
+        result["message"] = _route_publish_guard_message(result["reason"], current, candidate)
+        return result
+
+    current_count = int(current.get("route_count") or 0)
+    candidate_count = int(candidate.get("route_count") or 0)
+    removed_count = len(removed_models)
+    if (
+        not allow_route_shrink
+        and current_count >= ROUTE_SHRINK_GUARD_MIN_BASELINE
+        and removed_count >= ROUTE_SHRINK_GUARD_MIN_REMOVED
+        and candidate_count < current_count * ROUTE_SHRINK_GUARD_MAX_REMAINING_RATIO
+    ):
+        result["ok"] = False
+        result["reason"] = "route_shrink_guard"
+        result["message"] = _route_publish_guard_message(result["reason"], current, candidate)
+    return result
+
+
+def registry_v2_route_publish_guard(
+    *,
+    config_dir: str | Path | None = None,
+    config_payload: Mapping[str, Any] | None = None,
+    policy_payload: Mapping[str, Any] | None = None,
+    credential_updates: list[Mapping[str, Any]] | None = None,
+    expected_bundle_revision: str = "",
+    allow_route_shrink: bool = False,
+) -> dict[str, Any]:
+    candidate_payload = _registry_v2_candidate_payload(
+        config_payload if isinstance(config_payload, Mapping) else {},
+        policy_payload=policy_payload if isinstance(policy_payload, Mapping) else {},
+        credential_updates=credential_updates or [],
+    )
+    return _registry_v2_route_publish_guard_from_candidate(
+        config_dir=config_dir,
+        candidate_payload=candidate_payload,
+        expected_bundle_revision=expected_bundle_revision,
+        allow_route_shrink=allow_route_shrink,
+    )
+
+
 def _insert_registry_v2_candidate_revisions(db: sqlite3.Connection, payload: dict[str, Any], *, actor: str) -> dict[str, Any]:
     route_entries = [item for item in (payload.get("route_entries") or []) if isinstance(item, dict)]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
@@ -2598,6 +2755,8 @@ def apply_registry_v2_save_candidate(
     db_path: str | Path | None = None,
     apply: bool = False,
     allow_stable: bool = False,
+    expected_bundle_revision: str = "",
+    allow_route_shrink: bool = False,
     command_name: str = "mms registry",
 ) -> dict[str, Any]:
     """Write preview DB candidate revisions for the future v2 save path."""
@@ -2611,6 +2770,12 @@ def apply_registry_v2_save_candidate(
         config_payload,
         policy_payload=policy_payload if isinstance(policy_payload, Mapping) else {},
         credential_updates=credential_updates or [],
+    )
+    route_publish_guard = _registry_v2_route_publish_guard_from_candidate(
+        config_dir=root,
+        candidate_payload=candidate_payload,
+        expected_bundle_revision=expected_bundle_revision,
+        allow_route_shrink=allow_route_shrink,
     )
     target_db = Path(db_path).expanduser() if db_path is not None else mms_registry.default_registry_db_path(config_dir=root)
     route_entries = candidate_payload.get("route_entries") if isinstance(candidate_payload.get("route_entries"), list) else []
@@ -2629,6 +2794,7 @@ def apply_registry_v2_save_candidate(
             "profile_provider_count": len(profile.get("profiles") if isinstance(profile.get("profiles"), dict) else {}),
             "skipped": candidate_payload.get("skipped") or [],
         },
+        "route_publish_guard": route_publish_guard,
         "writes": {
             "target_preview_root": root_status.get("mode") == "preview",
             "db_candidate_revision": bool(apply),
@@ -2641,6 +2807,10 @@ def apply_registry_v2_save_candidate(
         summary["skipped"] = True
         summary["skip_reason"] = "dry_run_apply_required"
         return summary
+    if not route_publish_guard.get("ok"):
+        raise mms_registry.RegistryValidationError(
+            str(route_publish_guard.get("message") or route_publish_guard.get("reason") or "route publish guard blocked")
+        )
 
     db_existed_before = target_db.exists()
     init_summary = init_config_root(config_dir=root, create_db=True, allow_stable=allow_stable, command_name=command_name)
@@ -2701,20 +2871,22 @@ def _registry_v2_candidate_inputs_from_files(
     plan_json: str = "",
     config_json: str = "",
     policy_json: str = "",
-) -> tuple[dict[str, Any], dict[str, Any], list[Mapping[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any], list[Mapping[str, Any]], str]:
     plan = _read_json_mapping(plan_json, label="plan-json") if str(plan_json or "").strip() else {}
     if plan:
         config_payload = plan.get("config") if isinstance(plan.get("config"), dict) else {}
         policy_payload = plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {}
         credentials = plan.get("credential_updates") if isinstance(plan.get("credential_updates"), list) else []
+        expected_bundle_revision = str(plan.get("expected_bundle_revision") or "").strip()
     else:
         config_payload = _read_json_mapping(config_json, label="config-json") if str(config_json or "").strip() else {}
         policy_payload = _read_json_mapping(policy_json, label="policy-json") if str(policy_json or "").strip() else {}
         credentials = []
+        expected_bundle_revision = ""
     if not config_payload:
         raise mms_registry.RegistryValidationError("registry v2 save candidate requires --plan-json or --config-json")
     credential_updates = [item for item in credentials if isinstance(item, Mapping)]
-    return config_payload, policy_payload, credential_updates
+    return config_payload, policy_payload, credential_updates, expected_bundle_revision
 
 
 def apply_registry_v2_plan(
@@ -2733,7 +2905,7 @@ def apply_registry_v2_plan(
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     root = root.expanduser()
     root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
-    config_payload, policy_payload, credential_updates = _registry_v2_candidate_inputs_from_files(
+    config_payload, policy_payload, credential_updates, expected_bundle_revision = _registry_v2_candidate_inputs_from_files(
         plan_json=plan_json,
         config_json=config_json,
         policy_json=policy_json,
@@ -2742,6 +2914,11 @@ def apply_registry_v2_plan(
         config_payload,
         policy_payload=policy_payload,
         credential_updates=credential_updates,
+    )
+    route_publish_guard = _registry_v2_route_publish_guard_from_candidate(
+        config_dir=root,
+        candidate_payload=candidate_payload,
+        expected_bundle_revision=expected_bundle_revision,
     )
     route_entries = candidate_payload.get("route_entries") if isinstance(candidate_payload.get("route_entries"), list) else []
     summary: dict[str, Any] = {
@@ -2758,6 +2935,7 @@ def apply_registry_v2_plan(
             "credential_update_count": len(credential_updates),
             "skipped": candidate_payload.get("skipped") or [],
         },
+        "route_publish_guard": route_publish_guard,
         "writes": {
             "db_candidate_revision": False,
             "secret_backend": False,
@@ -2779,6 +2957,9 @@ def apply_registry_v2_plan(
             summary["blocked_reasons"].append("stable_apply_not_implemented")
     if apply and not confirm_preview_apply:
         summary["blocked_reasons"].append("confirm_preview_apply_required")
+    if apply and not route_publish_guard.get("ok"):
+        summary["blocked_reasons"].append(str(route_publish_guard.get("reason") or "route_publish_guard_blocked"))
+        summary["error"] = str(route_publish_guard.get("message") or route_publish_guard.get("reason") or "")
     if not apply:
         summary["ok"] = True
         summary["next_action"] = "rerun with --apply --confirm-preview-apply after reviewing the plan"
@@ -2799,6 +2980,7 @@ def apply_registry_v2_plan(
             db_path=db_path,
             apply=True,
             allow_stable=allow_stable,
+            expected_bundle_revision=expected_bundle_revision,
             command_name=command_name,
         )
         secret_backend = write_registry_v2_webui_secret_backend(
@@ -4147,7 +4329,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         return 0
     if args.subcommand == "v2-save-candidate":
         try:
-            config_payload, policy_payload, credential_updates = _registry_v2_candidate_inputs_from_files(
+            config_payload, policy_payload, credential_updates, expected_bundle_revision = _registry_v2_candidate_inputs_from_files(
                 plan_json=args.plan_json or "",
                 config_json=args.config_json or "",
                 policy_json=args.policy_json or "",
@@ -4160,6 +4342,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
                 db_path=db_path,
                 apply=bool(args.apply),
                 allow_stable=bool(args.allow_stable),
+                expected_bundle_revision=expected_bundle_revision,
                 command_name=command_name,
             )
         except mms_registry.RegistryValidationError as exc:
@@ -4423,6 +4606,7 @@ __all__ = [
     "preview_prepare",
     "apply_registry_v2_plan",
     "apply_registry_v2_save_candidate",
+    "registry_v2_route_publish_guard",
     "registry_v2_save_plan",
     "scheduled_refresh",
     "backup_registry_db",

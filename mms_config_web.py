@@ -1900,6 +1900,7 @@ def build_config_plan(
         "ok": not errors,
         "errors": errors,
         "warnings": warnings,
+        "expected_bundle_revision": _expected_bundle_revision_from_payload(payload or {}),
         "paths": {
             "config": config_path,
             "preferences": preferences_path,
@@ -1917,6 +1918,17 @@ def build_config_plan(
         ),
         "summary": summary,
     }
+
+
+def _expected_bundle_revision_from_payload(payload: dict[str, Any] | None) -> str:
+    payload = payload if isinstance(payload, dict) else {}
+    draft = _extract_draft(payload)
+    for source in (payload, draft):
+        for key in ("expected_bundle_revision", "bundle_revision", "source_bundle_revision"):
+            value = _safe_text(source.get(key))
+            if value:
+                return value
+    return ""
 
 
 def _latest_audit_rows(config_path: str, limit: int = 8) -> list[dict[str, Any]]:
@@ -2297,6 +2309,32 @@ def apply_registry_v2_preview_plan(
         }
 
     config_root = _config_root_for_snapshot(config_path)
+    route_publish_guard: dict[str, Any] = {}
+    try:
+        from mms_registry_cli import registry_v2_route_publish_guard
+
+        route_publish_guard = registry_v2_route_publish_guard(
+            config_dir=config_root or None,
+            config_payload=plan.get("config") if isinstance(plan.get("config"), dict) else {},
+            policy_payload=plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {},
+            credential_updates=[item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)],
+            expected_bundle_revision=_expected_bundle_revision_from_payload(payload),
+        )
+    except Exception as exc:
+        route_publish_guard = {
+            "ok": False,
+            "reason": "route_publish_guard_error",
+            "message": f"{type(exc).__name__}: {exc}",
+        }
+    if not route_publish_guard.get("ok"):
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "blocked",
+            "errors": [str(route_publish_guard.get("message") or route_publish_guard.get("reason") or "route publish guard blocked")],
+            "registry_v2_save_plan": v2_plan,
+            "route_publish_guard": _sanitize_for_output(route_publish_guard),
+        }
     candidate: dict[str, Any] | None = None
     secret_backend: dict[str, Any] | None = None
     generated_snapshot: dict[str, Any] | None = None
@@ -2312,6 +2350,7 @@ def apply_registry_v2_preview_plan(
             credential_updates=credential_updates,
             apply=True,
             command_name="mms-config-web",
+            expected_bundle_revision=_expected_bundle_revision_from_payload(payload),
         )
         secret_backend = write_registry_v2_webui_secret_backend(
             config_dir=config_root or None,
@@ -2396,6 +2435,7 @@ def apply_registry_v2_preview_plan(
         "warnings": plan.get("warnings") or [],
         "paths": plan.get("paths") or {},
         "registry_v2_save_plan": v2_plan,
+        "route_publish_guard": _sanitize_for_output(route_publish_guard),
         "candidate": _sanitize_for_output(candidate),
         "credential_backend": credential_backend,
         "publish": _sanitize_for_output(publish),
@@ -3694,7 +3734,8 @@ function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
 function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
 function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
-function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode}))}
+function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
+function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision()}))}
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}

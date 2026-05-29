@@ -619,6 +619,40 @@ def _draft_payload():
     }
 
 
+def _large_route_draft_payload(count=12):
+    models = [f"model-{index:02d}" for index in range(count)]
+    return {
+        "draft": {
+            "provider_default": "bulk",
+            "providers": [
+                {
+                    "original_id": "bulk",
+                    "id": "bulk",
+                    "name": "Bulk Gateway",
+                    "enabled": True,
+                    "role": "primary",
+                    "priority": 200,
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude", "codex", "opencode"],
+                    "models_endpoint": "manual",
+                    "openai_base_url": "https://bulk.example/v1",
+                    "anthropic_base_url": "https://bulk.example/v1",
+                    "api_key": "sk-bulk-secret-value",
+                    "update_credentials": True,
+                    "fallback_models": models,
+                    "extra_models": [],
+                    "hidden_models": [],
+                    "models": [{"id": model, "visible": True} for model in models],
+                }
+            ],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": models[0]},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        }
+    }
+
+
 def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
     cfg = {"provider": {"default": "demo"}, "providers": [{"id": "demo", "name": "Old"}]}
     payload = _draft_payload()
@@ -1043,6 +1077,81 @@ def test_config_web_registry_v2_apply_routes_visible_model_rows_without_fallback
     assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
     assert profile["profiles"]["demo"]["hidden_models"] == ["noisy-model"]
     assert profile["provider"]["default"] == "demo"
+
+
+def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    large_payload = _large_route_draft_payload(12)
+    large_payload["confirm_v2_preview"] = True
+    large_payload["confirm_phrase"] = "写入预览DB"
+
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "bulk", "name": "Old"}], "provider": {"default": "bulk"}},
+        large_payload,
+        config_path=str(config_path),
+    )
+    router_path = config_root / "generated" / "model-routes.json"
+    before_router = json.loads(router_path.read_text(encoding="utf-8"))
+
+    small_payload = _draft_payload()
+    small_payload["confirm_v2_preview"] = True
+    small_payload["confirm_phrase"] = "写入预览DB"
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "bulk", "name": "Old"}], "provider": {"default": "bulk"}},
+        small_payload,
+        config_path=str(config_path),
+    )
+    after_router = json.loads(router_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(second, ensure_ascii=False, sort_keys=True)
+
+    assert first["ok"] is True
+    assert len(before_router["routes"]) == 12
+    assert second["ok"] is False
+    assert second["status"] == "blocked"
+    assert second["route_publish_guard"]["reason"] == "route_shrink_guard"
+    assert second["route_publish_guard"]["current"]["route_count"] == 12
+    assert second["route_publish_guard"]["candidate"]["route_count"] == 2
+    assert len(after_router["routes"]) == 12
+    assert after_router["routes"] == before_router["routes"]
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_blocks_stale_bundle_revision(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    before_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stale_payload = _draft_payload()
+    stale_payload["draft"]["expected_bundle_revision"] = "bundle_stale_revision"
+    stale_payload["confirm_v2_preview"] = True
+    stale_payload["confirm_phrase"] = "写入预览DB"
+
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        stale_payload,
+        config_path=str(config_path),
+    )
+    after_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(second, ensure_ascii=False, sort_keys=True)
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["status"] == "blocked"
+    assert second["route_publish_guard"]["reason"] == "stale_preview_bundle_revision"
+    assert second["route_publish_guard"]["expected_bundle_revision"] == "bundle_stale_revision"
+    assert second["route_publish_guard"]["current"]["bundle_revision"] == before_manifest["bundle_revision"]
+    assert after_manifest["bundle_revision"] == before_manifest["bundle_revision"]
+    assert "sk-super-secret-value" not in encoded
 
 
 def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):
