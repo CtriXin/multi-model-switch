@@ -792,6 +792,133 @@ def handle_tui_profile_action(
     return {"status": "continue"}
 
 
+def load_provider_browse_tui_tools():
+    from mms_tui import select_provider_browse_tui, select_provider_models_tui
+
+    return {
+        "select_provider_browse_tui": select_provider_browse_tui,
+        "select_provider_models_tui": select_provider_models_tui,
+    }
+
+
+def handle_tui_launch_candidate_action(
+    cfg,
+    action_type,
+    cli_name,
+    action_data,
+    current_provider,
+    default_models,
+    *,
+    families_detail,
+    provider_options_by_cli,
+    last_by_cli,
+    select_submodel_tui,
+    account_id=None,
+    provider_id=None,
+    apply_priority_changes,
+    resolve_last_used_runtime,
+    resolve_best_provider,
+    choose_runtime_source,
+    trace_record,
+    trace_runtime_choice,
+    provider_browse_tui_loader,
+    provider_candidates,
+    default_provider_id,
+    provider_supports_cli_name,
+    provider_label,
+    resolve_provider_context,
+    probe_models,
+    filter_visible_models,
+    agy_connect_profile_id,
+    connect_action,
+    resolve_opencode_profile_runtime,
+    resolve_account_context,
+):
+    if action_type == "profile":
+        if cli_name not in {"opencode", "agy"}:
+            return {"status": "continue"}
+        return handle_tui_profile_action(
+            cfg,
+            cli_name,
+            action_data,
+            current_provider,
+            default_models,
+            agy_connect_profile_id=agy_connect_profile_id,
+            connect_action=connect_action,
+            resolve_opencode_profile_runtime=resolve_opencode_profile_runtime,
+            resolve_account_context=resolve_account_context,
+            trace_record=trace_record,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+    if action_type == "provider_browse":
+        provider_browse_tui = provider_browse_tui_loader()
+        return handle_tui_provider_browse_action(
+            cfg,
+            cli_name,
+            current_provider,
+            default_models,
+            select_provider_browse_tui=provider_browse_tui["select_provider_browse_tui"],
+            select_provider_models_tui=provider_browse_tui["select_provider_models_tui"],
+            provider_candidates=provider_candidates,
+            default_provider_id=default_provider_id,
+            provider_supports_cli_name=provider_supports_cli_name,
+            provider_label=provider_label,
+            resolve_provider_context=resolve_provider_context,
+            probe_models=probe_models,
+            filter_visible_models=filter_visible_models,
+            trace_record=trace_record,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+    if action_type == "last":
+        return handle_tui_last_action(
+            cfg,
+            cli_name,
+            action_data,
+            current_provider,
+            default_models,
+            account_id=account_id,
+            provider_id=provider_id,
+            trace_record=trace_record,
+            resolve_last_used_runtime=resolve_last_used_runtime,
+            resolve_best_provider=resolve_best_provider,
+            choose_runtime_source=choose_runtime_source,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+    if action_type == "submodel":
+        return handle_tui_submodel_action(
+            cfg,
+            cli_name,
+            action_data,
+            current_provider,
+            default_models,
+            apply_priority_changes=apply_priority_changes,
+            resolve_best_provider=resolve_best_provider,
+            trace_record=trace_record,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+    if action_type == "family":
+        return handle_tui_family_action(
+            cfg,
+            cli_name,
+            action_data,
+            families_detail,
+            provider_options_by_cli,
+            last_by_cli,
+            current_provider,
+            default_models,
+            select_submodel_tui=select_submodel_tui,
+            account_id=account_id,
+            provider_id=provider_id,
+            apply_priority_changes=apply_priority_changes,
+            resolve_last_used_runtime=resolve_last_used_runtime,
+            resolve_best_provider=resolve_best_provider,
+            choose_runtime_source=choose_runtime_source,
+            trace_record=trace_record,
+            trace_runtime_choice=trace_runtime_choice,
+        )
+    return {"status": "continue"}
+
+
 def refresh_tui_runtime_state_after_config_change(
     cfg,
     *,

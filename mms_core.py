@@ -4983,63 +4983,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 return True
             continue
 
-        # ── Profile / 官方账号 ──
-        if action_type == "profile" and cli in {"opencode", "agy"}:
-            profile_action = tui_flow.handle_tui_profile_action(
-                current_cfg,
-                cli,
-                action_data,
-                current_provider,
-                default_models,
-                agy_connect_profile_id=_AGY_CONNECT_PROFILE_ID,
-                connect_action=lambda cfg_arg, cli_arg: tui_flow.handle_tui_connect_action(
-                    cfg_arg,
-                    cli_arg,
-                    quick_connect_official=_quick_connect_official,
-                    run_connect_wizard=run_connect_wizard,
-                    refresh_runtime_state=_refresh_runtime_state_after_config_change,
-                ),
-                resolve_opencode_profile_runtime=_resolve_opencode_profile_runtime,
-                resolve_account_context=resolve_account_context,
-                trace_record=_trace_record,
-                trace_runtime_choice=_trace_runtime_choice,
-            )
-            _apply_launcher_state_result(profile_action)
-            launch_status = _apply_action_launch_result(profile_action)
-            if launch_status == "exit":
-                return True
-            if launch_status != "launch":
-                continue
-            # fall through to confirm
-
-        # ── Provider 浏览 ──
-        if action_type == "provider_browse":
-            from mms_tui import select_provider_browse_tui, select_provider_models_tui
-
-            browse_result = tui_flow.handle_tui_provider_browse_action(
-                current_cfg,
-                cli,
-                current_provider,
-                default_models,
-                select_provider_browse_tui=select_provider_browse_tui,
-                select_provider_models_tui=select_provider_models_tui,
-                provider_candidates=_provider_candidates,
-                default_provider_id=DEFAULT_PROVIDER_ID,
-                provider_supports_cli_name=_provider_supports_cli_name,
-                provider_label=_provider_label,
-                resolve_provider_context=resolve_provider_context,
-                probe_models=_probe_models,
-                filter_visible_models=_filter_visible_models,
-                trace_record=_trace_record,
-                trace_runtime_choice=_trace_runtime_choice,
-            )
-            launch_status = _apply_action_launch_result(browse_result)
-            if launch_status == "exit":
-                return True
-            if launch_status != "launch":
-                continue
-            # fall through to confirm
-
         # ── 设置 ──
         if action_type == "settings":
             from mms_tui import (
@@ -5114,79 +5057,50 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 return True
             continue
 
-        # ── 上次使用 ──
-        elif action_type == "last":
-
-            last_action = tui_flow.handle_tui_last_action(
-                current_cfg,
-                cli,
-                action_data,
-                current_provider,
-                default_models,
-                account_id=account_id,
-                provider_id=provider_id,
-                trace_record=_trace_record,
-                resolve_last_used_runtime=_resolve_last_used_runtime,
-                resolve_best_provider=_resolve_best_provider,
-                choose_runtime_source=_choose_runtime_source,
-                trace_runtime_choice=_trace_runtime_choice,
-            )
-            launch_status = _apply_action_launch_result(last_action)
-            if launch_status == "exit":
-                return True
-            if launch_status != "launch":
-                continue
-            # fall through to confirm
-
-        # ── 品类选择 → 子模型 ──
-        elif action_type == "submodel":
-            selected_action = tui_flow.handle_tui_submodel_action(
-                current_cfg,
-                cli,
-                action_data,
-                current_provider,
-                default_models,
-                apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
-                resolve_best_provider=_resolve_best_provider,
-                trace_record=_trace_record,
-                trace_runtime_choice=_trace_runtime_choice,
-            )
-            launch_status = _apply_action_launch_result(selected_action)
-            if launch_status == "exit":
-                return True
-            if launch_status != "launch":
-                continue
-            # fall through to confirm
-
-        elif action_type == "family":
-            family_action = tui_flow.handle_tui_family_action(
-                current_cfg,
-                cli,
-                action_data,
-                families_detail,
-                provider_options_by_cli,
-                last_by_cli,
-                current_provider,
-                default_models,
-                select_submodel_tui=select_submodel_tui,
-                account_id=account_id,
-                provider_id=provider_id,
-                apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
-                resolve_last_used_runtime=_resolve_last_used_runtime,
-                resolve_best_provider=_resolve_best_provider,
-                choose_runtime_source=_choose_runtime_source,
-                trace_record=_trace_record,
-                trace_runtime_choice=_trace_runtime_choice,
-            )
-            launch_status = _apply_action_launch_result(family_action)
-            if launch_status == "exit":
-                return True
-            if launch_status != "launch":
-                continue
-            # fall through to confirm
-        elif action_type == "profile" and cli not in {"opencode", "agy"}:
-            continue
-        elif action_type not in ("profile", "provider_browse", "last", "family"):
+        # ── 选择结果 → 启动候选 ──
+        launch_candidate = tui_flow.handle_tui_launch_candidate_action(
+            current_cfg,
+            action_type,
+            cli,
+            action_data,
+            current_provider,
+            default_models,
+            families_detail=families_detail,
+            provider_options_by_cli=provider_options_by_cli,
+            last_by_cli=last_by_cli,
+            select_submodel_tui=select_submodel_tui,
+            account_id=account_id,
+            provider_id=provider_id,
+            apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
+            resolve_last_used_runtime=_resolve_last_used_runtime,
+            resolve_best_provider=_resolve_best_provider,
+            choose_runtime_source=_choose_runtime_source,
+            trace_record=_trace_record,
+            trace_runtime_choice=_trace_runtime_choice,
+            provider_browse_tui_loader=tui_flow.load_provider_browse_tui_tools,
+            provider_candidates=_provider_candidates,
+            default_provider_id=DEFAULT_PROVIDER_ID,
+            provider_supports_cli_name=_provider_supports_cli_name,
+            provider_label=_provider_label,
+            resolve_provider_context=resolve_provider_context,
+            probe_models=_probe_models,
+            filter_visible_models=_filter_visible_models,
+            agy_connect_profile_id=_AGY_CONNECT_PROFILE_ID,
+            connect_action=lambda cfg_arg, cli_arg: tui_flow.handle_tui_connect_action(
+                cfg_arg,
+                cli_arg,
+                quick_connect_official=_quick_connect_official,
+                run_connect_wizard=run_connect_wizard,
+                refresh_runtime_state=_refresh_runtime_state_after_config_change,
+            ),
+            resolve_opencode_profile_runtime=_resolve_opencode_profile_runtime,
+            resolve_account_context=resolve_account_context,
+        )
+        _apply_launcher_state_result(launch_candidate)
+        launch_status = _apply_action_launch_result(launch_candidate)
+        if launch_status == "exit":
+            return True
+        if launch_status != "launch":
             continue
 
         # ── 公共：确认页 + 启动 ──

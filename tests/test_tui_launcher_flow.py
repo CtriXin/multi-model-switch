@@ -31,6 +31,7 @@ from mms_tui_launcher_flow import (
     handle_tui_guard_settings_action,
     handle_tui_last_action,
     handle_tui_last_used_action,
+    handle_tui_launch_candidate_action,
     handle_tui_launch_confirmation,
     handle_tui_language_settings_action,
     handle_tui_provider_browse_action,
@@ -1270,6 +1271,135 @@ def test_handle_tui_profile_action_launches_official_account() -> None:
     assert result == {"status": "launch", "model_info": {}, "runtime": runtime}
     assert trace_records == [(("official account",), {"cli": "agy", "account": "agy-main"})]
     assert trace_choices == [(("runtime resolve", runtime), {"launch_cli": "agy", "choice": "official account"})]
+
+
+def _launch_candidate_deps(**overrides):
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    deps = {
+        "families_detail": {},
+        "provider_options_by_cli": {},
+        "last_by_cli": {},
+        "select_submodel_tui": unused,
+        "apply_priority_changes": lambda *_args: False,
+        "resolve_last_used_runtime": unused,
+        "resolve_best_provider": lambda *_args, **_kwargs: (None, None),
+        "choose_runtime_source": unused,
+        "trace_record": lambda *_args, **_kwargs: None,
+        "trace_runtime_choice": lambda *_args, **_kwargs: None,
+        "provider_browse_tui_loader": unused,
+        "provider_candidates": unused,
+        "default_provider_id": "default",
+        "provider_supports_cli_name": lambda *_args: True,
+        "provider_label": lambda provider: provider.get("name") or provider.get("id"),
+        "resolve_provider_context": unused,
+        "probe_models": unused,
+        "filter_visible_models": lambda models: models,
+        "agy_connect_profile_id": "__connect__",
+        "connect_action": unused,
+        "resolve_opencode_profile_runtime": unused,
+        "resolve_account_context": unused,
+    }
+    deps.update(overrides)
+    return deps
+
+
+def test_handle_tui_launch_candidate_action_dispatches_profile_and_unknown() -> None:
+    connect_result = {
+        "cfg": {"updated": True},
+        "changed": True,
+        "current_provider": {"id": "provider"},
+        "default_models": ["gpt-5.4"],
+        "current_cli_names": ["agy"],
+        "families_dirty": True,
+    }
+
+    assert handle_tui_launch_candidate_action(
+        {"cfg": True},
+        "profile",
+        "agy",
+        "__connect__",
+        {},
+        [],
+        **_launch_candidate_deps(
+            connect_action=lambda cfg, cli: {**connect_result, "called_with": (cfg, cli)},
+        ),
+    ) == {"status": "continue", **connect_result, "called_with": ({"cfg": True}, "agy")}
+
+    assert handle_tui_launch_candidate_action(
+        {},
+        "profile",
+        "claude",
+        "ignored",
+        {},
+        [],
+        **_launch_candidate_deps(),
+    ) == {"status": "continue"}
+
+    assert handle_tui_launch_candidate_action(
+        {},
+        "unknown",
+        "claude",
+        None,
+        {},
+        [],
+        **_launch_candidate_deps(),
+    ) == {"status": "continue"}
+
+
+def test_handle_tui_launch_candidate_action_dispatches_provider_browse_and_family() -> None:
+    calls = []
+    provider = {"id": "p1", "name": "Provider One", "api_key": "k", "supported_clis": ["codex"]}
+    family_runtime = {"id": "family-provider"}
+
+    provider_result = handle_tui_launch_candidate_action(
+        {"cfg": True},
+        "provider_browse",
+        "codex",
+        None,
+        {"id": "current"},
+        ["gpt-5.4"],
+        **_launch_candidate_deps(
+            provider_browse_tui_loader=lambda: {
+                "select_provider_browse_tui": lambda providers: calls.append(("select_provider", providers)) or ("p1", "Provider One"),
+                "select_provider_models_tui": lambda name, models: calls.append(("select_model", name, models)) or {"model": "gpt-5.4"},
+            },
+            provider_candidates=lambda *_args: [(provider, False)],
+            provider_supports_cli_name=lambda provider_arg, cli: cli in provider_arg.get("supported_clis", []),
+            resolve_provider_context=lambda _cfg, provider_id: calls.append(("resolve", provider_id)) or provider,
+            probe_models=lambda provider_arg, *, emit_output: calls.append(("probe", provider_arg, emit_output)) or {"models": ["gpt-5.4"]},
+            trace_record=lambda *args, **kwargs: calls.append(("record", args, kwargs)),
+            trace_runtime_choice=lambda *args, **kwargs: calls.append(("choice", args, kwargs)),
+        ),
+    )
+
+    assert provider_result == {"status": "launch", "model_info": {"model": "gpt-5.4"}, "runtime": provider}
+
+    family_result = handle_tui_launch_candidate_action(
+        {"cfg": True},
+        "family",
+        "codex",
+        "GPT",
+        {"id": "current"},
+        ["gpt-5.4"],
+        **_launch_candidate_deps(
+            families_detail={"codex": {"GPT": [{"model": "gpt-5.4"}]}},
+            provider_options_by_cli={"codex": {}},
+            last_by_cli={},
+            select_submodel_tui=lambda *_args, **_kwargs: {"model": "gpt-5.4"},
+            resolve_best_provider=lambda *_args, **_kwargs: (family_runtime, None),
+            trace_record=lambda *args, **kwargs: calls.append(("family_record", args, kwargs)),
+            trace_runtime_choice=lambda *args, **kwargs: calls.append(("family_choice", args, kwargs)),
+        ),
+    )
+
+    assert family_result == {
+        "status": "launch",
+        "model_info": {"model": "gpt-5.4"},
+        "runtime": family_runtime,
+        "families_dirty": False,
+    }
 
 
 def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> None:
