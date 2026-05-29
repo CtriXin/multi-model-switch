@@ -71,6 +71,7 @@ from mms_tui_launcher_flow import (
     select_rescue_route_fallback_model,
     show_rescue_no_packets_report,
     show_rescue_paths_action,
+    TuiLaunchCandidateDeps,
 )
 
 
@@ -1278,9 +1279,6 @@ def _launch_candidate_deps(**overrides):
         raise AssertionError("unused")
 
     deps = {
-        "families_detail": {},
-        "provider_options_by_cli": {},
-        "last_by_cli": {},
         "select_submodel_tui": unused,
         "apply_priority_changes": lambda *_args: False,
         "resolve_last_used_runtime": unused,
@@ -1302,7 +1300,7 @@ def _launch_candidate_deps(**overrides):
         "resolve_account_context": unused,
     }
     deps.update(overrides)
-    return deps
+    return TuiLaunchCandidateDeps(**deps)
 
 
 def test_handle_tui_launch_candidate_action_dispatches_profile_and_unknown() -> None:
@@ -1322,7 +1320,10 @@ def test_handle_tui_launch_candidate_action_dispatches_profile_and_unknown() -> 
         "__connect__",
         {},
         [],
-        **_launch_candidate_deps(
+        families_detail={},
+        provider_options_by_cli={},
+        last_by_cli={},
+        deps=_launch_candidate_deps(
             connect_action=lambda cfg, cli: {**connect_result, "called_with": (cfg, cli)},
         ),
     ) == {"status": "continue", **connect_result, "called_with": ({"cfg": True}, "agy")}
@@ -1334,7 +1335,10 @@ def test_handle_tui_launch_candidate_action_dispatches_profile_and_unknown() -> 
         "ignored",
         {},
         [],
-        **_launch_candidate_deps(),
+        families_detail={},
+        provider_options_by_cli={},
+        last_by_cli={},
+        deps=_launch_candidate_deps(),
     ) == {"status": "continue"}
 
     assert handle_tui_launch_candidate_action(
@@ -1344,7 +1348,10 @@ def test_handle_tui_launch_candidate_action_dispatches_profile_and_unknown() -> 
         None,
         {},
         [],
-        **_launch_candidate_deps(),
+        families_detail={},
+        provider_options_by_cli={},
+        last_by_cli={},
+        deps=_launch_candidate_deps(),
     ) == {"status": "continue"}
 
 
@@ -1360,7 +1367,10 @@ def test_handle_tui_launch_candidate_action_dispatches_provider_browse_and_famil
         None,
         {"id": "current"},
         ["gpt-5.4"],
-        **_launch_candidate_deps(
+        families_detail={},
+        provider_options_by_cli={},
+        last_by_cli={},
+        deps=_launch_candidate_deps(
             provider_browse_tui_loader=lambda: {
                 "select_provider_browse_tui": lambda providers: calls.append(("select_provider", providers)) or ("p1", "Provider One"),
                 "select_provider_models_tui": lambda name, models: calls.append(("select_model", name, models)) or {"model": "gpt-5.4"},
@@ -1383,10 +1393,10 @@ def test_handle_tui_launch_candidate_action_dispatches_provider_browse_and_famil
         "GPT",
         {"id": "current"},
         ["gpt-5.4"],
-        **_launch_candidate_deps(
-            families_detail={"codex": {"GPT": [{"model": "gpt-5.4"}]}},
-            provider_options_by_cli={"codex": {}},
-            last_by_cli={},
+        families_detail={"codex": {"GPT": [{"model": "gpt-5.4"}]}},
+        provider_options_by_cli={"codex": {}},
+        last_by_cli={},
+        deps=_launch_candidate_deps(
             select_submodel_tui=lambda *_args, **_kwargs: {"model": "gpt-5.4"},
             resolve_best_provider=lambda *_args, **_kwargs: (family_runtime, None),
             trace_record=lambda *args, **kwargs: calls.append(("family_record", args, kwargs)),

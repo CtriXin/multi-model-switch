@@ -4893,6 +4893,36 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             export_model_routes_loader=tui_flow.load_export_model_routes,
         )
 
+    launch_candidate_deps = tui_flow.TuiLaunchCandidateDeps(
+        select_submodel_tui=select_submodel_tui,
+        account_id=account_id,
+        provider_id=provider_id,
+        apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
+        resolve_last_used_runtime=_resolve_last_used_runtime,
+        resolve_best_provider=_resolve_best_provider,
+        choose_runtime_source=_choose_runtime_source,
+        trace_record=_trace_record,
+        trace_runtime_choice=_trace_runtime_choice,
+        provider_browse_tui_loader=tui_flow.load_provider_browse_tui_tools,
+        provider_candidates=_provider_candidates,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        provider_supports_cli_name=_provider_supports_cli_name,
+        provider_label=_provider_label,
+        resolve_provider_context=resolve_provider_context,
+        probe_models=_probe_models,
+        filter_visible_models=_filter_visible_models,
+        agy_connect_profile_id=_AGY_CONNECT_PROFILE_ID,
+        connect_action=lambda cfg_arg, cli_arg: tui_flow.handle_tui_connect_action(
+            cfg_arg,
+            cli_arg,
+            quick_connect_official=_quick_connect_official,
+            run_connect_wizard=run_connect_wizard,
+            refresh_runtime_state=_refresh_runtime_state_after_config_change,
+        ),
+        resolve_opencode_profile_runtime=_resolve_opencode_profile_runtime,
+        resolve_account_context=resolve_account_context,
+    )
+
     cli = None
     model_info = None
     runtime_runtime = None
@@ -5066,33 +5096,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             families_detail=families_detail,
             provider_options_by_cli=provider_options_by_cli,
             last_by_cli=last_by_cli,
-            select_submodel_tui=select_submodel_tui,
-            account_id=account_id,
-            provider_id=provider_id,
-            apply_priority_changes=lambda _cfg, changes: _apply_tui_priority_changes(changes),
-            resolve_last_used_runtime=_resolve_last_used_runtime,
-            resolve_best_provider=_resolve_best_provider,
-            choose_runtime_source=_choose_runtime_source,
-            trace_record=_trace_record,
-            trace_runtime_choice=_trace_runtime_choice,
-            provider_browse_tui_loader=tui_flow.load_provider_browse_tui_tools,
-            provider_candidates=_provider_candidates,
-            default_provider_id=DEFAULT_PROVIDER_ID,
-            provider_supports_cli_name=_provider_supports_cli_name,
-            provider_label=_provider_label,
-            resolve_provider_context=resolve_provider_context,
-            probe_models=_probe_models,
-            filter_visible_models=_filter_visible_models,
-            agy_connect_profile_id=_AGY_CONNECT_PROFILE_ID,
-            connect_action=lambda cfg_arg, cli_arg: tui_flow.handle_tui_connect_action(
-                cfg_arg,
-                cli_arg,
-                quick_connect_official=_quick_connect_official,
-                run_connect_wizard=run_connect_wizard,
-                refresh_runtime_state=_refresh_runtime_state_after_config_change,
-            ),
-            resolve_opencode_profile_runtime=_resolve_opencode_profile_runtime,
-            resolve_account_context=resolve_account_context,
+            deps=launch_candidate_deps,
         )
         _apply_launcher_state_result(launch_candidate)
         launch_status = _apply_action_launch_result(launch_candidate)

@@ -2,6 +2,34 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any, Callable
+
+
+@dataclass(frozen=True)
+class TuiLaunchCandidateDeps:
+    select_submodel_tui: Callable[..., Any]
+    apply_priority_changes: Callable[..., Any]
+    resolve_last_used_runtime: Callable[..., Any]
+    resolve_best_provider: Callable[..., Any]
+    choose_runtime_source: Callable[..., Any]
+    trace_record: Callable[..., Any]
+    trace_runtime_choice: Callable[..., Any]
+    provider_browse_tui_loader: Callable[..., Any]
+    provider_candidates: Callable[..., Any]
+    default_provider_id: str
+    provider_supports_cli_name: Callable[..., Any]
+    provider_label: Callable[..., Any]
+    resolve_provider_context: Callable[..., Any]
+    probe_models: Callable[..., Any]
+    filter_visible_models: Callable[..., Any]
+    agy_connect_profile_id: str
+    connect_action: Callable[..., Any]
+    resolve_opencode_profile_runtime: Callable[..., Any]
+    resolve_account_context: Callable[..., Any]
+    account_id: str | None = None
+    provider_id: str | None = None
+
 
 def safe_tui_call(fn, *args, **kwargs):
     try:
@@ -841,27 +869,7 @@ def handle_tui_launch_candidate_action(
     families_detail,
     provider_options_by_cli,
     last_by_cli,
-    select_submodel_tui,
-    account_id=None,
-    provider_id=None,
-    apply_priority_changes,
-    resolve_last_used_runtime,
-    resolve_best_provider,
-    choose_runtime_source,
-    trace_record,
-    trace_runtime_choice,
-    provider_browse_tui_loader,
-    provider_candidates,
-    default_provider_id,
-    provider_supports_cli_name,
-    provider_label,
-    resolve_provider_context,
-    probe_models,
-    filter_visible_models,
-    agy_connect_profile_id,
-    connect_action,
-    resolve_opencode_profile_runtime,
-    resolve_account_context,
+    deps,
 ):
     if action_type == "profile":
         if cli_name not in {"opencode", "agy"}:
@@ -872,15 +880,15 @@ def handle_tui_launch_candidate_action(
             action_data,
             current_provider,
             default_models,
-            agy_connect_profile_id=agy_connect_profile_id,
-            connect_action=connect_action,
-            resolve_opencode_profile_runtime=resolve_opencode_profile_runtime,
-            resolve_account_context=resolve_account_context,
-            trace_record=trace_record,
-            trace_runtime_choice=trace_runtime_choice,
+            agy_connect_profile_id=deps.agy_connect_profile_id,
+            connect_action=deps.connect_action,
+            resolve_opencode_profile_runtime=deps.resolve_opencode_profile_runtime,
+            resolve_account_context=deps.resolve_account_context,
+            trace_record=deps.trace_record,
+            trace_runtime_choice=deps.trace_runtime_choice,
         )
     if action_type == "provider_browse":
-        provider_browse_tui = provider_browse_tui_loader()
+        provider_browse_tui = deps.provider_browse_tui_loader()
         return handle_tui_provider_browse_action(
             cfg,
             cli_name,
@@ -888,15 +896,15 @@ def handle_tui_launch_candidate_action(
             default_models,
             select_provider_browse_tui=provider_browse_tui["select_provider_browse_tui"],
             select_provider_models_tui=provider_browse_tui["select_provider_models_tui"],
-            provider_candidates=provider_candidates,
-            default_provider_id=default_provider_id,
-            provider_supports_cli_name=provider_supports_cli_name,
-            provider_label=provider_label,
-            resolve_provider_context=resolve_provider_context,
-            probe_models=probe_models,
-            filter_visible_models=filter_visible_models,
-            trace_record=trace_record,
-            trace_runtime_choice=trace_runtime_choice,
+            provider_candidates=deps.provider_candidates,
+            default_provider_id=deps.default_provider_id,
+            provider_supports_cli_name=deps.provider_supports_cli_name,
+            provider_label=deps.provider_label,
+            resolve_provider_context=deps.resolve_provider_context,
+            probe_models=deps.probe_models,
+            filter_visible_models=deps.filter_visible_models,
+            trace_record=deps.trace_record,
+            trace_runtime_choice=deps.trace_runtime_choice,
         )
     if action_type == "last":
         return handle_tui_last_action(
@@ -905,13 +913,13 @@ def handle_tui_launch_candidate_action(
             action_data,
             current_provider,
             default_models,
-            account_id=account_id,
-            provider_id=provider_id,
-            trace_record=trace_record,
-            resolve_last_used_runtime=resolve_last_used_runtime,
-            resolve_best_provider=resolve_best_provider,
-            choose_runtime_source=choose_runtime_source,
-            trace_runtime_choice=trace_runtime_choice,
+            account_id=deps.account_id,
+            provider_id=deps.provider_id,
+            trace_record=deps.trace_record,
+            resolve_last_used_runtime=deps.resolve_last_used_runtime,
+            resolve_best_provider=deps.resolve_best_provider,
+            choose_runtime_source=deps.choose_runtime_source,
+            trace_runtime_choice=deps.trace_runtime_choice,
         )
     if action_type == "submodel":
         return handle_tui_submodel_action(
@@ -920,10 +928,10 @@ def handle_tui_launch_candidate_action(
             action_data,
             current_provider,
             default_models,
-            apply_priority_changes=apply_priority_changes,
-            resolve_best_provider=resolve_best_provider,
-            trace_record=trace_record,
-            trace_runtime_choice=trace_runtime_choice,
+            apply_priority_changes=deps.apply_priority_changes,
+            resolve_best_provider=deps.resolve_best_provider,
+            trace_record=deps.trace_record,
+            trace_runtime_choice=deps.trace_runtime_choice,
         )
     if action_type == "family":
         return handle_tui_family_action(
@@ -935,15 +943,15 @@ def handle_tui_launch_candidate_action(
             last_by_cli,
             current_provider,
             default_models,
-            select_submodel_tui=select_submodel_tui,
-            account_id=account_id,
-            provider_id=provider_id,
-            apply_priority_changes=apply_priority_changes,
-            resolve_last_used_runtime=resolve_last_used_runtime,
-            resolve_best_provider=resolve_best_provider,
-            choose_runtime_source=choose_runtime_source,
-            trace_record=trace_record,
-            trace_runtime_choice=trace_runtime_choice,
+            select_submodel_tui=deps.select_submodel_tui,
+            account_id=deps.account_id,
+            provider_id=deps.provider_id,
+            apply_priority_changes=deps.apply_priority_changes,
+            resolve_last_used_runtime=deps.resolve_last_used_runtime,
+            resolve_best_provider=deps.resolve_best_provider,
+            choose_runtime_source=deps.choose_runtime_source,
+            trace_record=deps.trace_record,
+            trace_runtime_choice=deps.trace_runtime_choice,
         )
     return {"status": "continue"}
 
