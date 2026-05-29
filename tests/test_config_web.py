@@ -913,6 +913,52 @@ def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_pa
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_registry_v2_republish_reuses_preview_secret_refs(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    snapshot["providers"][0]["api_key"] = ""
+    snapshot["providers"][0]["update_credentials"] = False
+    republish_payload = {
+        "draft": {
+            key: snapshot[key]
+            for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        republish_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    leaves = [router["routes"]["gpt-5.5"]["primary"], router["routes"]["qwen3.6-plus"]["primary"]]
+    encoded = json.dumps(second, ensure_ascii=False, sort_keys=True)
+
+    assert first["runtime_ready"] is True
+    assert second["ok"] is True
+    assert second["status"] == "verified"
+    assert second["runtime_ready"] is True
+    assert second["credential_backend"]["skipped"] is True
+    assert {leaf["secret_ref"] for leaf in leaves} == {"pending-webui:demo:api_key"}
+    assert all(leaf["api_key"] == "sk-super-secret-value" for leaf in leaves)
+    assert "sk-super-secret-value" not in encoded
+
+
 def test_config_web_registry_v2_apply_surfaces_runtime_not_ready_without_keys(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"

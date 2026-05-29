@@ -270,11 +270,69 @@ def _read_json_from_verified_file(verified_files: dict[str, Any], key: str) -> d
     return _load_json_file(path)
 
 
-def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any]) -> dict[str, Any]:
+def _preview_secret_refs_by_provider(config_root: str = "") -> dict[str, str]:
+    root = os.path.abspath(os.path.expanduser(config_root)) if config_root else ""
+    if not root:
+        return {}
+    ranked: dict[str, tuple[int, str]] = {}
+    paths = [
+        (os.path.join(root, "secrets", "legacy-secrets.json"), 10),
+        (os.path.join(root, "secrets", "webui-secrets.json"), 20),
+    ]
+    field_rank = {"api_key": 3, "openai_api_key": 2, "anthropic_api_key": 1}
+    for path, source_score in paths:
+        payload = _load_json_file(path)
+        entries = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            provider_id = _safe_text(entry.get("provider_id"))
+            secret_ref = _safe_text(entry.get("secret_ref"))
+            if not provider_id or not secret_ref:
+                continue
+            score = source_score + field_rank.get(_safe_text(entry.get("field")), 0)
+            current = ranked.get(provider_id)
+            if current is None or score > current[0]:
+                ranked[provider_id] = (score, secret_ref)
+    return {provider_id: secret_ref for provider_id, (_score, secret_ref) in ranked.items()}
+
+
+def _attach_preview_secret_refs(
+    cfg: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
+    if not _is_preview_config_root(config_path, command_name=command_name):
+        return cfg
+    refs = _preview_secret_refs_by_provider(_config_root_for_snapshot(config_path))
+    if not refs:
+        return cfg
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    changed = False
+    next_providers = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            next_providers.append(provider)
+            continue
+        row = dict(provider)
+        provider_id = _safe_text(row.get("id") or row.get("provider_id"))
+        if provider_id and not _safe_text(row.get("secret_ref")) and refs.get(provider_id):
+            row["secret_ref"] = refs[provider_id]
+            changed = True
+        next_providers.append(row)
+    if changed:
+        cfg["providers"] = next_providers
+    return cfg
+
+
+def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *, config_root: str = "") -> dict[str, Any]:
     profiles_payload = _read_json_from_verified_file(verified_files, "profile")
     router_payload = _read_json_from_verified_file(verified_files, "router")
     profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), dict) else {}
     routes = router_payload.get("routes") if isinstance(router_payload.get("routes"), dict) else {}
+    secret_refs = _preview_secret_refs_by_provider(config_root)
     provider_models: dict[str, set[str]] = {}
     provider_routes: dict[str, dict[str, Any]] = {}
     for route_model, route in routes.items():
@@ -299,6 +357,8 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any]) -
                 info["anthropic_base_url"] = _safe_text(leaf.get("anthropic_base_url"))
             if _safe_text(leaf.get("api_key")):
                 info["has_api_key"] = True
+            if not info.get("secret_ref"):
+                info["secret_ref"] = _safe_text(leaf.get("secret_ref"))
 
     provider_ids = set(profiles.keys()) | set(provider_models.keys())
     providers: list[dict[str, Any]] = []
@@ -317,7 +377,8 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any]) -
                 "supported_clis": _normalize_model_list(profile.get("supported_clis")),
                 "openai_base_url": _safe_text(route_info.get("openai_base_url")),
                 "anthropic_base_url": _safe_text(route_info.get("anthropic_base_url")),
-                "has_api_key": bool(route_info.get("has_api_key")),
+                "has_api_key": bool(route_info.get("has_api_key") or secret_refs.get(provider_id)),
+                "secret_ref": _safe_text(route_info.get("secret_ref") or secret_refs.get(provider_id)),
                 "fallback_models": sorted(provider_models.get(provider_id, set()), key=str.lower),
                 "extra_models": [],
                 "hidden_models": [],
@@ -339,7 +400,7 @@ def _hydrate_preview_config_from_latest_bundle(
     if not _is_preview_config_root(config_path, command_name=command_name):
         return cfg
     if not _is_placeholder_provider_config(cfg):
-        return cfg
+        return _attach_preview_secret_refs(cfg, config_path=config_path, command_name=command_name)
     config_root = _config_root_for_snapshot(config_path)
     try:
         from mms_registry_cli import verify_approved_bundle
@@ -349,14 +410,17 @@ def _hydrate_preview_config_from_latest_bundle(
         return cfg
     if not verified.get("verified"):
         return cfg
-    hydrated = _preview_bundle_config_from_verified_files(verified.get("verified_files") if isinstance(verified.get("verified_files"), dict) else {})
+    hydrated = _preview_bundle_config_from_verified_files(
+        verified.get("verified_files") if isinstance(verified.get("verified_files"), dict) else {},
+        config_root=config_root,
+    )
     if not hydrated.get("providers"):
         return cfg
     result = copy.deepcopy(cfg)
     result["providers"] = hydrated["providers"]
     result["provider"] = hydrated["provider"]
     result["_preview_bundle_hydrated"] = True
-    return result
+    return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
 
 
 def _config_v2_promotion_plan_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
@@ -567,7 +631,7 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "openai_base_url_source": "config" if config_openai_base else ("credentials" if credential_openai_base else ""),
         "anthropic_base_url_source": "config" if config_anthropic_base else ("credentials" if credential_anthropic_base else ""),
         "api_key": "",
-        "has_api_key": bool(api_key or creds.get("has_api_key") or provider.get("has_api_key")),
+        "has_api_key": bool(api_key or creds.get("has_api_key") or provider.get("has_api_key") or provider.get("secret_ref")),
         "update_credentials": False,
         "fallback_models": _normalize_model_list(provider.get("fallback_models")),
         "extra_models": _normalize_model_list(provider.get("extra_models")),
