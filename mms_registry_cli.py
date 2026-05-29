@@ -1918,12 +1918,25 @@ def _route_scoped_candidate_payload(
 
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     root = root.expanduser()
+    profiles_payload = candidate_payload.get("profile") if isinstance(candidate_payload.get("profile"), Mapping) else {}
+    profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), Mapping) else {}
+    scoped_hidden: dict[str, set[str]] = {}
+    scoped_enabled: dict[str, bool] = {}
+    for provider_id in scope:
+        profile = profiles.get(provider_id) if isinstance(profiles.get(provider_id), Mapping) else {}
+        scoped_hidden[provider_id] = {str(item or "").strip() for item in _as_string_list(profile.get("hidden_models"))}
+        scoped_enabled[provider_id] = profile.get("enabled", True) is not False
     scoped_entries = [entry for entry in route_entries if str(entry.get("provider_id") or "").strip() in scope]
-    preserved_entries = [
-        entry
-        for entry in _latest_approved_route_entries(root)
-        if str(entry.get("provider_id") or "").strip() not in scope
-    ]
+    preserved_entries: list[dict[str, Any]] = []
+    for entry in _latest_approved_route_entries(root):
+        provider_id = str(entry.get("provider_id") or "").strip()
+        if provider_id in scope:
+            model = str(entry.get("model") or "").strip()
+            if not scoped_enabled.get(provider_id, True):
+                continue
+            if model in scoped_hidden.get(provider_id, set()):
+                continue
+        preserved_entries.append(entry)
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
     for entry in scoped_entries + preserved_entries:

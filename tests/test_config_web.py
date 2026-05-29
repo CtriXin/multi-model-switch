@@ -1184,6 +1184,77 @@ def test_config_web_registry_v2_apply_scoped_provider_routes_preserve_other_chan
     assert second["candidate"]["route_candidates"]["provider_route_count"] == 6
 
 
+def test_config_web_registry_v2_apply_scoped_provider_manual_add_preserves_provider_routes(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+
+    def provider(provider_id, priority, models):
+        return {
+            "original_id": provider_id,
+            "id": provider_id,
+            "name": provider_id,
+            "enabled": True,
+            "role": "primary",
+            "priority": priority,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "manual",
+            "openai_base_url": f"https://{provider_id}.example/v1",
+            "anthropic_base_url": f"https://{provider_id}.example/v1",
+            "api_key": f"sk-{provider_id}-secret",
+            "update_credentials": True,
+            "fallback_models": models,
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [{"id": model, "visible": True} for model in models],
+        }
+
+    first_payload = {
+        "draft": {
+            "provider_default": "tokyo",
+            "providers": [
+                provider("tokyo", 200, ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2.5[1m]"]),
+                provider("tencent", 100, ["mimo-v2.5", "mimo-v2.5-pro"]),
+            ],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "mimo-v2.5"},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        first_payload,
+        config_path=str(config_path),
+    )
+
+    second_payload = json.loads(json.dumps(first_payload))
+    second_payload["draft"]["route_scope_provider_ids"] = ["tencent"]
+    second_payload["draft"]["providers"][1]["fallback_models"] = []
+    second_payload["draft"]["providers"][1]["models"] = []
+    second_payload["draft"]["providers"][1]["extra_models"] = ["mimo-v2.5[1m]"]
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        second_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+
+    def providers_for(model):
+        route = router["routes"][model]
+        leaves = [route["primary"], *(route.get("fallbacks") or [])]
+        return {leaf["provider_id"] for leaf in leaves}
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert providers_for("mimo-v2.5") == {"tokyo", "tencent"}
+    assert providers_for("mimo-v2.5-pro") == {"tokyo", "tencent"}
+    assert providers_for("mimo-v2.5[1m]") == {"tokyo", "tencent"}
+    assert second["candidate"]["route_candidates"]["provider_route_count"] == 6
+
+
 def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"
