@@ -360,22 +360,10 @@ def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
     )
 
 
-def _fetch_latest_semver_tag():
-    from mms_command_tools import fetch_latest_semver_tag
-
-    return fetch_latest_semver_tag(fetch_latest_semver_tags=_fetch_latest_semver_tags)
-
-
 def _extract_semver_text(value):
     from mms_command_tools import extract_semver_text
 
     return extract_semver_text(value)
-
-
-def _parse_semver_text(value):
-    from mms_command_tools import parse_semver_text
-
-    return parse_semver_text(value)
 
 
 def _compare_semver_text(current, latest):
@@ -435,12 +423,6 @@ def _update_notice():
         version_gap=UPDATE_NOTICE_VERSION_GAP,
         prompt_interval_sec=UPDATE_PROMPT_INTERVAL_SEC,
     )
-
-
-def _major_update_notice():
-    from mms_command_tools import major_update_notice
-
-    return major_update_notice(update_notice=_update_notice)
 
 
 def _start_async_update_check():
@@ -614,30 +596,6 @@ def _about_status_snapshot(force_update=False):
     )
 
 
-def _short_update_status_label(status):
-    from mms_command_tools import short_update_status_label
-
-    return short_update_status_label(status, localize=_L)
-
-
-def _format_cli_about_line(cli_status):
-    from mms_command_tools import format_cli_about_line
-
-    return format_cli_about_line(cli_status, localize=_L)
-
-
-def _format_about_latest_value(status):
-    from mms_command_tools import format_about_latest_value
-
-    return format_about_latest_value(status, localize=_L)
-
-
-def _about_check_error_summary(error_text):
-    from mms_command_tools import about_check_error_summary
-
-    return about_check_error_summary(error_text, localize=_L)
-
-
 def _mms_upgrade_shell_command(*, include_clis=False):
     from mms_command_tools import mms_upgrade_shell_command
 
@@ -652,12 +610,6 @@ def _cli_upgrade_shell_command(cli_name):
     from mms_command_tools import cli_upgrade_shell_command
 
     return cli_upgrade_shell_command(cli_name, cli_version_packages=CLI_VERSION_PACKAGES)
-
-
-def _print_about_version_summary(about_snapshot):
-    from mms_command_tools import display_about_version_summary
-
-    return display_about_version_summary(about_snapshot, payload_builder=_about_tui_payload, console=console)
 
 
 def _run_about_upgrade(*, target="mms", include_clis=False):
