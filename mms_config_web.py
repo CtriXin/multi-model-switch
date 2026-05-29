@@ -297,6 +297,47 @@ def _preview_secret_refs_by_provider(config_root: str = "") -> dict[str, str]:
     return {provider_id: secret_ref for provider_id, (_score, secret_ref) in ranked.items()}
 
 
+def _preview_secret_values_by_ref(config_root: str = "") -> dict[str, str]:
+    root = os.path.abspath(os.path.expanduser(config_root)) if config_root else ""
+    if not root:
+        return {}
+    values: dict[str, str] = {}
+    for filename in ("legacy-secrets.json", "webui-secrets.json"):
+        payload = _load_json_file(os.path.join(root, "secrets", filename))
+        entries = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            secret_ref = _safe_text(entry.get("secret_ref"))
+            value = _safe_text(entry.get("value"))
+            if secret_ref and value:
+                values[secret_ref] = value
+    return values
+
+
+def _resolve_preview_provider_secret(
+    provider: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    provider = dict(provider or {})
+    if not _is_preview_config_root(config_path, command_name=command_name):
+        return provider
+    config_root = _config_root_for_snapshot(config_path)
+    provider_id = _safe_text(provider.get("id") or provider.get("provider_id"))
+    secret_ref = _safe_text(provider.get("secret_ref"))
+    if provider_id and not secret_ref:
+        secret_ref = _preview_secret_refs_by_provider(config_root).get(provider_id, "")
+        if secret_ref:
+            provider["secret_ref"] = secret_ref
+    if secret_ref and not _safe_text(provider.get("api_key") or provider.get("openai_api_key") or provider.get("anthropic_api_key")):
+        value = _preview_secret_values_by_ref(config_root).get(secret_ref, "")
+        if value:
+            provider["api_key"] = value
+    return provider
+
+
 def _attach_preview_secret_refs(
     cfg: dict[str, Any],
     *,
@@ -2260,11 +2301,18 @@ def apply_registry_v2_preview_plan(
     }
 
 
-def _provider_from_payload(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _provider_from_payload(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     provider_payload = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
     provider_id = _safe_text(payload.get("provider_id") or provider_payload.get("id"))
     provider = dict(provider_payload)
+    cfg = _hydrate_preview_config_from_latest_bundle(cfg, config_path=config_path, command_name=command_name)
     cfg_provider_ids = {
         _safe_text(item.get("id"))
         for item in (cfg.get("providers", []) if isinstance(cfg, dict) else [])
@@ -2293,7 +2341,7 @@ def _provider_from_payload(cfg: dict[str, Any], payload: dict[str, Any]) -> dict
         provider["anthropic_base_url"] = _safe_text(provider.get("anthropic_base_url")).rstrip("/")
     if provider.get("base_url") and not provider.get("openai_base_url"):
         provider["openai_base_url"] = _safe_text(provider.get("base_url")).rstrip("/")
-    return provider
+    return _resolve_preview_provider_secret(provider, config_path=config_path, command_name=command_name)
 
 
 def probe_provider_models(provider: dict[str, Any], *, force_refresh: bool = False) -> dict[str, Any]:
@@ -2301,8 +2349,14 @@ def probe_provider_models(provider: dict[str, Any], *, force_refresh: bool = Fal
     return mms_core._probe_models(provider, emit_output=False, force_refresh=force_refresh)  # noqa: SLF001
 
 
-def test_provider_models(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    provider = _provider_from_payload(cfg, payload)
+def test_provider_models(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    provider = _provider_from_payload(cfg, payload, config_path=config_path, command_name=command_name)
     started = time.time()
     try:
         probe = probe_provider_models(provider, force_refresh=_truthy(payload.get("force_refresh"), True))
@@ -2346,8 +2400,15 @@ def _join_anthropic_messages_url(base_url: str) -> str:
     return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
 
 
-def run_model_smoke(cfg: dict[str, Any], payload: dict[str, Any], *, chat: bool = False) -> dict[str, Any]:
-    provider = _provider_from_payload(cfg, payload)
+def run_model_smoke(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    chat: bool = False,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    provider = _provider_from_payload(cfg, payload, config_path=config_path, command_name=command_name)
     model = _safe_text(payload.get("model") or payload.get("model_id"))
     if not model:
         return {"ok": False, "error": "请选择要测试的模型。"}
@@ -3529,7 +3590,7 @@ async function load(){const res=await fetch('/api/state');state=await res.json()
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
 $('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
-$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.models){const p=current();p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models`)}else{$('testResult').textContent=JSON.stringify(data,null,2)}};
+$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}}
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
@@ -3583,11 +3644,11 @@ class ConfigWebApp:
 
     def provider_test(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            return test_provider_models(self.cfg, payload)
+            return test_provider_models(self.cfg, payload, config_path=self.config_path, command_name=self.command_name)
 
     def model_test(self, payload: dict[str, Any], *, chat: bool = False) -> dict[str, Any]:
         with self.lock:
-            return run_model_smoke(self.cfg, payload, chat=chat)
+            return run_model_smoke(self.cfg, payload, chat=chat, config_path=self.config_path, command_name=self.command_name)
 
 
 class _SetupWebHandler(BaseHTTPRequestHandler):

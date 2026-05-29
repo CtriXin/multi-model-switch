@@ -249,6 +249,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "p.pending_api_key=true" in html
     assert "p.update_credentials=!!(updateEl&&updateEl.checked)" in html
     assert "p.api_key=$('pKey').value" not in html
+    assert "data.ok&&Array.isArray(data.models)" in html
+    assert "模型拉取失败，请看测试结果" in html
     assert "card provider-editor" in html
     assert ".provider-editor {" in html
     assert "position: sticky;" in html
@@ -956,6 +958,49 @@ def test_config_web_registry_v2_republish_reuses_preview_secret_refs(tmp_path):
     assert second["credential_backend"]["skipped"] is True
     assert {leaf["secret_ref"] for leaf in leaves} == {"pending-webui:demo:api_key"}
     assert all(leaf["api_key"] == "sk-super-secret-value" for leaf in leaves)
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_provider_model_fetch_resolves_preview_secret_ref(monkeypatch, tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    apply_result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    provider_payload = dict(snapshot["providers"][0])
+    provider_payload["api_key"] = ""
+    seen = {}
+
+    def fake_probe(provider, *, force_refresh=False):
+        seen["api_key"] = provider.get("api_key")
+        seen["secret_ref"] = provider.get("secret_ref")
+        return {"models": ["gpt-5.5"], "raw_models": ["gpt-5.5"], "base_source": "remote", "working_url": provider.get("openai_base_url")}
+
+    monkeypatch.setattr(mms_config_web, "probe_provider_models", fake_probe)
+
+    result = mms_config_web.test_provider_models(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        {"provider": provider_payload, "force_refresh": True},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert apply_result["ok"] is True
+    assert result["ok"] is True
+    assert result["models"] == ["gpt-5.5"]
+    assert seen["secret_ref"] == "pending-webui:demo:api_key"
+    assert seen["api_key"] == "sk-super-secret-value"
     assert "sk-super-secret-value" not in encoded
 
 
