@@ -280,11 +280,11 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert mapping["summary"]["counts"]["missing"] == 0
     assert mapping["summary"]["clickable_rows"] == mapping["summary"]["total"]
     assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
-    assert guard["write_policy"] == "manual_cli_human_gate"
+    assert guard["write_policy"] == "read_only_report"
+    assert guard["status"] == "report"
     assert "mmf guard status" in guard["commands"]
-    assert guard["blocked_auto_execute"] is True
-    assert guard["manual_steps"]
-    assert any("snapshots/startup/accepted.json" in item for item in guard["writes"])
+    assert guard["report"]["providers"] >= 1
+    assert "accept baseline" in guard["note"]
     assert guard_accept["status"] == "human_gate"
     assert guard_accept["requires_human_confirmation"] is True
     assert "mmf guard accept" in guard_accept["commands"]

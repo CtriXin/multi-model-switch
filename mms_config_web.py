@@ -1521,10 +1521,10 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             webui_section="能力整合",
             webui_section_id="settings",
             webui_control="Snapshot Guard status/gate report",
-            api_action="guard_status",
+            api_action="guard_accept_gate",
             status="human_gate",
             write_policy="manual_cli_human_gate",
-            verification="/api/settings/report?action=guard_status",
+            verification="/api/settings/report?action=guard_accept_gate",
             manual_check="accept 不自动执行；必须 human double-confirm。",
         ),
         row(
@@ -4383,6 +4383,55 @@ def _settings_gate_report(action: str, *, write_policy: str = "human_gate", note
     }
 
 
+def _snapshot_guard_status_report(cfg: dict[str, Any], *, config_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    mapping_rows = [item for item in _tui_webui_mapping() if item.get("api_action") == "guard_status"]
+    try:
+        mms_core = _load_mms_core()
+        target_config_path = config_path or mms_core._config_write_target_path()  # noqa: SLF001 - read-only status
+        current_snapshot = mms_core._build_config_guard_snapshot(cfg if isinstance(cfg, dict) else {}, config_path=target_config_path)  # noqa: SLF001
+        latest_path = mms_core._config_snapshot_path("startup", "latest.json", config_path=target_config_path)  # noqa: SLF001
+        accepted_path = mms_core._config_snapshot_path("startup", "accepted.json", config_path=target_config_path)  # noqa: SLF001
+        pending_path = mms_core._config_snapshot_path("startup", "pending.json", config_path=target_config_path)  # noqa: SLF001
+        accepted_payload = mms_core._load_json_snapshot(accepted_path) or {}  # noqa: SLF001
+        accepted_snapshot = accepted_payload.get("snapshot") if isinstance(accepted_payload, dict) else None
+        diff_lines = mms_core._snapshot_diff_lines(accepted_snapshot, current_snapshot) if accepted_snapshot else []  # noqa: SLF001
+        status_value = "missing" if not accepted_snapshot else ("drift" if diff_lines else "stable")
+        report = {
+            "status": status_value,
+            "accepted_path": accepted_path,
+            "latest_path": latest_path,
+            "pending_path": pending_path if os.path.exists(pending_path) else "",
+            "real_home": _safe_text(current_snapshot.get("real_home")),
+            "config_path": _safe_text(current_snapshot.get("config_path")),
+            "accounts": len(current_snapshot.get("accounts") or []),
+            "providers": len(current_snapshot.get("providers") or []),
+            "diff_count": len(diff_lines),
+            "diff_preview": diff_lines[:20],
+        }
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": "guard_status",
+            "status": "report",
+            "write_policy": "read_only_report",
+            "commands": [f"{_safe_text(command_name) or 'mms'} guard status"],
+            "report": _sanitize_for_output(report),
+            "mapping": mapping_rows,
+            "note": "只读 Snapshot Guard status；accept baseline 仍在 guard_accept_gate human gate。",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": "guard_status",
+            "status": "report",
+            "write_policy": "read_only_report",
+            "error": f"{type(exc).__name__}: {exc}",
+            "mapping": mapping_rows,
+            "note": "读取 Snapshot Guard status 失败；未执行 accept 或任何写入。",
+        }
+
+
 def build_settings_report(
     cfg: dict[str, Any],
     payload: dict[str, Any] | None = None,
@@ -4560,12 +4609,7 @@ def build_settings_report(
             "note": "WebUI Settings 页可暂存 load_balance profile/default/remove；真正写入仍走保存预览与 confirm。",
         }
     if action == "guard_status":
-        return _settings_gate_report(
-            action,
-            write_policy="manual_cli_human_gate",
-            note="WebUI 当前只显示 Snapshot Guard gate；accept 会改变 config guard baseline，必须 human double-confirm 后走 CLI。",
-            command_name=command_name,
-        )
+        return _snapshot_guard_status_report(snapshot, config_path=config_path, command_name=command_name)
     if action == "language_status":
         return {
             "ok": True,
