@@ -147,6 +147,7 @@ from mms_runtime_network import (
     CLAUDE_NO_PROXY_TOKENS as _CLAUDE_NO_PROXY_TOKENS,
     CLAUDE_PROXY_GUARD_TARGETS as _CLAUDE_PROXY_GUARD_TARGETS,
     apply_proxy_env as _apply_proxy_env_impl,
+    apply_runtime_ip_stack_profile as _apply_runtime_ip_stack_profile_impl,
     apply_runtime_network_profile as _apply_runtime_network_profile_impl,
     base_claude_network_guard as _base_claude_network_guard_impl,
     build_claude_network_guard as _build_claude_network_guard_impl,
@@ -1131,14 +1132,12 @@ def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
 
 
 def _apply_runtime_ip_stack_profile(env, runtime):
-    if not _runtime_force_ipv4(runtime):
-        return env
-    env["MMS_FORCE_IPV4"] = "1"
-    existing = str(env.get("NODE_OPTIONS") or "").strip()
-    token = "--dns-result-order=ipv4first"
-    if token not in existing.split():
-        env["NODE_OPTIONS"] = f"{existing} {token}".strip()
-    return env
+    """Compatibility wrapper for runtime IP stack env projection."""
+    return _apply_runtime_ip_stack_profile_impl(
+        env,
+        runtime,
+        runtime_force_ipv4_fn=_runtime_force_ipv4,
+    )
 
 
 RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")

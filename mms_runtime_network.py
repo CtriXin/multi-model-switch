@@ -94,6 +94,17 @@ def runtime_network_summary(
     return " | ".join(parts)
 
 
+def apply_runtime_ip_stack_profile(env, runtime, *, runtime_force_ipv4_fn):
+    if not runtime_force_ipv4_fn(runtime):
+        return env
+    env["MMS_FORCE_IPV4"] = "1"
+    existing = str(env.get("NODE_OPTIONS") or "").strip()
+    token = "--dns-result-order=ipv4first"
+    if token not in existing.split():
+        env["NODE_OPTIONS"] = f"{existing} {token}".strip()
+    return env
+
+
 def apply_proxy_env(env, proxy_url, no_proxy=""):
     proxy_url = str(proxy_url or "").strip()
     no_proxy = str(no_proxy or "").strip()
