@@ -3600,48 +3600,24 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
-    merged = dict(env_data) if isinstance(env_data, dict) else {}
-    for key in (
-        "CLAUDE_PLUGIN_ROOT",
-        "ECC_PLUGIN_ROOT",
-        "ECC_HOOK_PROFILE",
-        "ECC_DISABLED_HOOKS",
-        "OMC_PLUGIN_ROOT",
-    ):
-        merged.pop(key, None)
-    if not enable_ecc:
-        return merged
-    ecc_root = _resolve_ecc_root()
-    if not ecc_root:
-        return merged
-    merged["CLAUDE_PLUGIN_ROOT"] = ecc_root
-    merged["ECC_PLUGIN_ROOT"] = ecc_root
-    merged.setdefault("ECC_HOOK_PROFILE", "standard")
-    return merged
+    """Compatibility wrapper for ECC session env configuration."""
+    from mms_session_env import configure_ecc_session_env
+
+    return configure_ecc_session_env(env_data, enable_ecc=enable_ecc)
 
 
 def _configure_agent_pack_session_env(env_data, *, agent_pack="none"):
-    merged = _configure_ecc_session_env(env_data, enable_ecc=False)
-    pack = _normalize_agent_pack(agent_pack, default="none")
-    if pack == "ecc":
-        return _configure_ecc_session_env(merged, enable_ecc=True)
-    if pack == "omc":
-        omc_root = _resolve_omc_root()
-        if not omc_root:
-            return merged
-        merged["CLAUDE_PLUGIN_ROOT"] = omc_root
-        merged["OMC_PLUGIN_ROOT"] = omc_root
-    return merged
+    """Compatibility wrapper for agent-pack session env configuration."""
+    from mms_session_env import configure_agent_pack_session_env
+
+    return configure_agent_pack_session_env(env_data, agent_pack=agent_pack)
 
 
 def _session_required_env_from_runtime_env(env):
-    env = env if isinstance(env, dict) else {}
-    required = {}
-    for key in _CLAUDE_SESSION_ENV_KEYS:
-        value = str(env.get(key) or "").strip()
-        if value:
-            required[key] = value
-    return required
+    """Compatibility wrapper for session-required runtime env extraction."""
+    from mms_session_env import session_required_env_from_runtime_env
+
+    return session_required_env_from_runtime_env(env)
 
 
 def _sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
