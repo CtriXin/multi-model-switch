@@ -265,6 +265,12 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
+    assert "这是当前通道的模型清单，不是全局模型池" in html
+    assert "手动补充当前通道模型（extra_models" in html
+    assert "移除全部通道过期隐藏记录" in html
+    assert "过期隐藏记录（不在当前通道模型列表）" in html
+    assert "移除记录不会影响其他通道" in html
+    assert "移除隐藏记录" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
