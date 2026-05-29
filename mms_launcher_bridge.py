@@ -27,6 +27,12 @@ def load_bridge_helpers():
     }
 
 
+def load_speed_stats_helper():
+    from mms_speed_stats import build_provider_speed_scope
+
+    return build_provider_speed_scope
+
+
 def gateway_claude_bridge_context(target, *args, console, signature_fn=inspect.signature, **kwargs):
     if target is None:
         raise RuntimeError("gateway_claude_bridge 未初始化")
@@ -51,4 +57,4 @@ def gateway_claude_bridge_context(target, *args, console, signature_fn=inspect.s
     return target(*args, **filtered)
 
 
-__all__ = ["gateway_claude_bridge_context", "load_bridge_helpers"]
+__all__ = ["gateway_claude_bridge_context", "load_bridge_helpers", "load_speed_stats_helper"]

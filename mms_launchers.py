@@ -256,8 +256,9 @@ def _ensure_speed_stats():
     global build_provider_speed_scope
     if build_provider_speed_scope is not None:
         return
-    from mms_speed_stats import build_provider_speed_scope as _bps
-    build_provider_speed_scope = _bps
+    from mms_launcher_bridge import load_speed_stats_helper
+
+    build_provider_speed_scope = load_speed_stats_helper()
 
 class _LazyConsole:
     _instance = None
