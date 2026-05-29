@@ -4765,16 +4765,17 @@ def _anthropic_probe_target(runtime):
 
 
 def _resolve_model(model_info):
-    """从 model_info dict 中提取 model 名称（单模型场景）"""
-    if isinstance(model_info, str):
-        return model_info
-    return model_info.get("model", model_info.get("sonnet", ""))
+    """Compatibility wrapper for runtime model extraction."""
+    from mms_runtime_models import resolve_model
+
+    return resolve_model(model_info)
 
 
 def _normalized_model_name(model_name):
-    if not isinstance(model_name, str):
-        return ""
-    return model_name.strip()
+    """Compatibility wrapper for model-name normalization."""
+    from mms_runtime_models import normalized_model_name
+
+    return normalized_model_name(model_name)
 
 
 def _strip_one_m_context_suffix(model_name):
