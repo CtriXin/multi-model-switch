@@ -57,6 +57,38 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["save_contract"]["requires_confirm_save"] is True
 
 
+def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
+    cfg = {
+        "providers": [
+            {
+                "id": "preview-provider",
+                "name": "Preview Provider",
+                "enabled": True,
+                "api_key": "sk-super-secret-value",
+                "openai_base_url": "https://preview.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "manual",
+                "fallback_models": ["gpt-preview"],
+                "extra_models": [],
+                "_mms_bundle_runtime": True,
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    provider = snapshot["providers"][0]
+
+    assert provider["fallback_models"] == []
+    assert provider["extra_models"] == []
+    assert provider["models"][0]["id"] == "gpt-preview"
+    assert provider["models"][0]["source"] == "approved"
+
+
 def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
@@ -267,6 +299,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "通道修改已暂存，生成保存预览后再写入" in html
     assert "这是当前通道的模型清单，不是全局模型池" in html
     assert "手动补充当前通道模型（extra_models" in html
+    assert "添加到补充模型库" in html
+    assert "当前通道补充模型库（extra_models）" in html
+    assert "不是待删除列表，也不是全局模型池" in html
+    assert "编辑补充模型库" in html
+    assert "从补充库移除" in html
     assert "移除全部通道过期隐藏记录" in html
     assert "过期隐藏记录（不在当前通道模型列表）" in html
     assert "移除记录不会影响其他通道" in html
