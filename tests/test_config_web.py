@@ -243,6 +243,12 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "applyV2Preview').disabled=!preview" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
+    assert "pending key" in html
+    assert "已输入新 key，保存前会保留（不回显）" in html
+    assert "keyEl.dataset.touched='1'" in html
+    assert "p.pending_api_key=true" in html
+    assert "p.update_credentials=!!(updateEl&&updateEl.checked)" in html
+    assert "p.api_key=$('pKey').value" not in html
     assert "card provider-editor" in html
     assert ".provider-editor {" in html
     assert "position: sticky;" in html
