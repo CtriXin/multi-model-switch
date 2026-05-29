@@ -1179,6 +1179,57 @@ fallback_models = ["stale-model"]
     assert [item["id"] for item in cfg["providers"]] == ["preview-provider"]
 
 
+def test_mmf_preview_runtime_uses_explicit_bundle_default(monkeypatch, tmp_path) -> None:
+    import mms_core
+
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir()
+    _write_latest_approved_router_manifest(
+        preview_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "first-model": {
+                    "primary": {
+                        "provider_id": "first-provider",
+                        "openai_base_url": "https://first.example/v1",
+                        "api_key": "sk-first",
+                        "model_id": "first-model",
+                    },
+                    "fallbacks": [],
+                },
+                "default-model": {
+                    "primary": {
+                        "provider_id": "default-provider",
+                        "openai_base_url": "https://default.example/v1",
+                        "api_key": "sk-default",
+                        "model_id": "default-model",
+                    },
+                    "fallbacks": [],
+                },
+            },
+        },
+        profile_payload={
+            "schema_version": 1,
+            "provider": {"default": "default-provider"},
+            "profiles": {
+                "first-provider": {"name": "First Provider", "protocols": ["openai_chat_completions"]},
+                "default-provider": {"name": "Default Provider", "protocols": ["openai_chat_completions"]},
+            },
+        },
+    )
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "PRIMARY_CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(preview_root))
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(preview_root / "config.toml"))
+
+    cfg = mms_core._load_config_or_preview_bundle()
+
+    assert cfg["_mms_config_source"] == "latest-approved-bundle"
+    assert cfg["provider"]["default"] == "default-provider"
+
+
 def test_bundle_runtime_provider_options_ignore_probe_cache(monkeypatch) -> None:
     import mms_core
 
@@ -1217,6 +1268,56 @@ def test_bundle_runtime_provider_options_ignore_probe_cache(monkeypatch) -> None
 
     assert [item["id"] for item in visible] == ["preview-provider"]
     assert hidden == []
+
+
+def test_bundle_runtime_provider_options_honor_hidden_derived_alias(monkeypatch) -> None:
+    import mms_core
+
+    provider = {
+        "id": "tokyo-provider",
+        "enabled": True,
+        "api_key": "sk-preview-secret",
+        "protocols": ["anthropic_messages"],
+        "supported_clis": ["claude"],
+        "anthropic_base_url": "https://tokyo.example/v1",
+        "models_endpoint": "manual",
+        "fallback_models": ["anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7"],
+        "hidden_models": ["claude-opus-4-6"],
+        "_mms_bundle_runtime": True,
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_account_options_for_model", lambda *_args, **_kwargs: [])
+
+    visible_raw = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "anthropic/claude-opus-4.6"},
+    )
+    hidden_alias = mms_core._provider_options_for_model(
+        {},
+        "claude",
+        provider,
+        [],
+        model_info={"model": "claude-opus-4-6"},
+    )
+
+    assert [item["id"] for item in visible_raw] == ["tokyo-provider"]
+    assert hidden_alias == []
+
+
+def test_bundle_runtime_hiding_raw_variants_suppresses_derived_alias() -> None:
+    import mms_core
+
+    provider = {
+        "id": "tokyo-provider",
+        "models_endpoint": "manual",
+        "fallback_models": ["anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7"],
+        "hidden_models": ["anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7"],
+    }
+
+    assert mms_core._provider_effective_models(provider, None, {}) == []
 
 
 def test_mmf_valid_bundle_without_config_reaches_launcher_selection(monkeypatch, tmp_path) -> None:

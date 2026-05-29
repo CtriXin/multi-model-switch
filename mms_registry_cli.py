@@ -1705,6 +1705,8 @@ def _provider_route_secret_ref(provider: Mapping[str, Any], credential_provider_
 
 def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str, Any]:
     providers = [item for item in (config_payload.get("providers") or []) if isinstance(item, Mapping)]
+    provider_cfg = config_payload.get("provider") if isinstance(config_payload.get("provider"), Mapping) else {}
+    provider_default = str(provider_cfg.get("default") or "").strip()
     profiles: dict[str, dict[str, Any]] = {}
     for provider in providers:
         provider_id = str(provider.get("id") or provider.get("provider_id") or "").strip()
@@ -1723,6 +1725,7 @@ def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str,
     payload = {
         "schema": "mms.registry_v2.profile_candidate.v1",
         "source": "registry-v2-save-candidate",
+        "provider": {"default": provider_default} if provider_default else {},
         "profiles": profiles,
     }
     mms_registry.validate_non_secret_payload(payload, context="registry_v2_profile_candidate")

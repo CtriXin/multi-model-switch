@@ -7078,9 +7078,10 @@ def _provider_supports_mimo_anthropic_selectors(provider):
 
 def _derived_model_aliases(base_models, provider=None):
     aliases = []
-    if any(model_id.startswith("claude-sonnet-4-") for model_id in base_models):
+    claude_tails = [str(model_id or "").strip().lower().rsplit("/", 1)[-1] for model_id in base_models]
+    if any(model_id.startswith("claude-sonnet-4-") or model_id.startswith("claude-sonnet-4.") for model_id in claude_tails):
         aliases.append("claude-sonnet-4-6")
-    if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
+    if any(model_id.startswith("claude-opus-4-") or model_id.startswith("claude-opus-4.") for model_id in claude_tails):
         aliases.append("claude-opus-4-6")
     if _provider_supports_mimo_anthropic_selectors(provider):
         model_set = set(base_models)
@@ -7095,8 +7096,10 @@ def _apply_provider_model_patch(provider, base_result):
     result = dict(base_result)
     base_models = _normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
     extra_models = _normalize_model_id_list(provider.get("extra_models", []))
-    derived_aliases = _derived_model_aliases(base_models, provider)
     hidden_requested = set(_normalize_model_id_list(provider.get("hidden_models", [])))
+    hidden_requested_lower = {model_id.lower() for model_id in hidden_requested}
+    alias_base_models = [model_id for model_id in base_models if model_id.lower() not in hidden_requested_lower]
+    derived_aliases = _derived_model_aliases(alias_base_models, provider)
     base_source = result.get("base_source") or ("fallback" if result.get("used_fallback") else "remote")
 
     effective_models = []
@@ -7132,9 +7135,9 @@ def _apply_provider_model_patch(provider, base_result):
         and not (m.startswith("claude-") and m not in _CLAUDE_KEEP)
     ]
 
-    hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
+    hidden_applied = [model_id for model_id in effective_models if model_id.lower() in hidden_requested_lower]
     if hidden_requested:
-        effective_models = [model_id for model_id in effective_models if model_id not in hidden_requested]
+        effective_models = [model_id for model_id in effective_models if model_id.lower() not in hidden_requested_lower]
     visible_sources = {model_id: model_sources.get(model_id, base_source) for model_id in effective_models}
 
     result["raw_models"] = base_models
@@ -12821,6 +12824,17 @@ def _bundle_runtime_supported_clis(protocols):
     return _normalize_supported_clis(supported, protocols=protocols)
 
 
+def _bundle_runtime_default_provider_id(profile_payload, providers):
+    profile_payload = profile_payload if isinstance(profile_payload, dict) else {}
+    provider_cfg = profile_payload.get("provider") if isinstance(profile_payload.get("provider"), dict) else {}
+    explicit_default = str(provider_cfg.get("default") or profile_payload.get("default_provider") or "").strip()
+    if explicit_default:
+        for provider in providers or []:
+            if provider.get("id") == explicit_default or provider.get("route_provider_id") == explicit_default:
+                return provider.get("id")
+    return providers[0]["id"] if providers else DEFAULT_PROVIDER_ID
+
+
 def _load_preview_runtime_config_from_latest_bundle():
     if not _preview_root_mode():
         return None
@@ -12909,6 +12923,7 @@ def _load_preview_runtime_config_from_latest_bundle():
 
     if not providers:
         return None
+    default_provider_id = _bundle_runtime_default_provider_id(profile_payload, providers)
     return {
         "ui": {"language": "zh"},
         "user": {"role": MODE_ALL},
@@ -12916,7 +12931,7 @@ def _load_preview_runtime_config_from_latest_bundle():
             "probe_async_refresh_after_sec": _PROBE_ASYNC_REFRESH_AFTER,
             "probe_async_min_interval_sec": _PROBE_ASYNC_MIN_INTERVAL,
         },
-        "provider": {"default": providers[0]["id"]},
+        "provider": {"default": default_provider_id},
         "providers": providers,
         "account": {"defaults": {}},
         "accounts": [],

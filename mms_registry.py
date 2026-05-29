@@ -1489,17 +1489,22 @@ def _build_preview_bundle_payloads_from_route_revision(
         }
     if profile_payload:
         raw_profiles = profile_payload.get("profiles") if isinstance(profile_payload.get("profiles"), Mapping) else {}
+        raw_provider = profile_payload.get("provider") if isinstance(profile_payload.get("provider"), Mapping) else {}
         effective_profile_payload = {
             "schema_version": 1,
             "generated_at": generated_at,
             "source": source_label,
+            "provider": dict(raw_provider),
             "profiles": dict(raw_profiles),
         }
+        if not effective_profile_payload["provider"] and str(profile_payload.get("default_provider") or "").strip():
+            effective_profile_payload["provider"] = {"default": str(profile_payload.get("default_provider") or "").strip()}
     else:
         effective_profile_payload = {
             "schema_version": 1,
             "generated_at": generated_at,
             "source": source_label,
+            "provider": {},
             "profiles": profiles,
         }
     validate_non_secret_payload(lineup_payload, context="preview_lineup")

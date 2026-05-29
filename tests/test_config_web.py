@@ -89,6 +89,39 @@ def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
     assert provider["models"][0]["source"] == "approved"
 
 
+def test_config_web_bundle_runtime_exposes_derived_aliases_for_hiding():
+    cfg = {
+        "providers": [
+            {
+                "id": "newapi-personal-tokyo",
+                "name": "Tokyo",
+                "enabled": True,
+                "api_key": "sk-super-secret-value",
+                "anthropic_base_url": "https://tokyo.example/v1",
+                "protocols": ["anthropic_messages"],
+                "supported_clis": ["claude"],
+                "models_endpoint": "manual",
+                "fallback_models": ["anthropic/claude-opus-4.6"],
+                "hidden_models": ["claude-opus-4-6"],
+                "_mms_bundle_runtime": True,
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    provider = snapshot["providers"][0]
+    rows = {row["id"]: row for row in provider["models"]}
+
+    assert "claude-opus-4-6" in rows
+    assert rows["claude-opus-4-6"]["source"] == "derived_alias"
+    assert rows["claude-opus-4-6"]["visible"] is False
+    assert provider["stale_hidden_models"] == []
+
+
 def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     monkeypatch.setattr(
         mms_config_web._load_mms_core(),
@@ -1009,6 +1042,7 @@ def test_config_web_registry_v2_apply_routes_visible_model_rows_without_fallback
     assert set(router["routes"]) == {"qwen3.6-plus"}
     assert router["routes"]["qwen3.6-plus"]["primary"]["provider_id"] == "demo"
     assert profile["profiles"]["demo"]["hidden_models"] == ["noisy-model"]
+    assert profile["provider"]["default"] == "demo"
 
 
 def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):
