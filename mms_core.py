@@ -4151,23 +4151,6 @@ def _mask_email_value(value):
     return mask_email_value(value)
 
 
-def _runtime_network_summary_for_confirm(runtime):
-    from mms_confirm_preview import runtime_network_summary_for_confirm
-
-    return runtime_network_summary_for_confirm(
-        runtime,
-        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
-        runtime_force_ipv4=_runtime_force_ipv4,
-        snapshot_proxy_fingerprint=_snapshot_proxy_fingerprint,
-    )
-
-
-def _load_runtime_identity_preview(runtime):
-    from mms_confirm_preview import load_runtime_identity_preview
-
-    return load_runtime_identity_preview(runtime)
-
-
 def _confirm_context_lines(cli, runtime):
     from mms_confirm_preview import confirm_context_lines
 
