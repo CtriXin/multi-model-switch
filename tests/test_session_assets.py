@@ -65,6 +65,9 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert snapshot["disabled_defaults"]["mcp"] == ["pilot"]
     assert isinstance(snapshot["rows"], list)
     assert isinstance(snapshot["global_roots"], list)
+    assert snapshot["confirm_reference"]["title"] == "TUI 确认页对照"
+    assert {panel["id"] for panel in snapshot["confirm_reference"]["panels"]} == {"summary", "mcp", "skills", "hooks"}
+    assert any(action["key"] == "D / Space" for action in snapshot["confirm_reference"]["actions"])
     assert {view["id"] for view in snapshot["cli_views"]} == {"claude", "codex", "opencode", "agy"}
     assert all(isinstance(view["controls"], list) for view in snapshot["cli_views"])
     assert all(isinstance(view["global_sources"], list) for view in snapshot["cli_views"])
@@ -109,7 +112,11 @@ def test_session_asset_cli_views_mirror_launch_confirm(monkeypatch, tmp_path):
     assert claude["allow_execution_surfaces"] is True
     assert {"mms_dynamic", "global", "other", "skills", "mcp", "hooks"} <= set(claude["counts"])
     assert {"skills", "mcp", "hooks"} <= set(claude["scope_counts"])
+    assert {panel["id"] for panel in claude["panels"]} == {"summary", "mcp", "skills", "hooks"}
+    assert "inactive_by_default" in claude
+    assert "disabled_by_preference" in claude
     assert any(control["label"] == "绕过审批" for control in claude["controls"])
+    assert any(control["key"] == "Tab" for control in claude["controls"])
     assert any(control["label"] == "MCP/技能/钩子注入" for control in claude["controls"])
     assert any(source["label"] == "Claude 全局技能" for source in claude["global_sources"])
     assert any("只读展示" in constraint for constraint in claude["constraints"])

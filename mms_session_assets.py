@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import tomllib
 from typing import Any
 
@@ -503,7 +504,11 @@ def _codex_hook_names(home: str, limit: int = 8) -> tuple[int, list[str]]:
                     command = _safe_text(hook.get("command"))
                     if not command:
                         continue
-                    target = command.split()[-1] if command.split() else command
+                    try:
+                        parts = shlex.split(command)
+                    except ValueError:
+                        parts = command.split()
+                    target = parts[-1] if parts else command
                     names.append(f"{event_name}:{os.path.basename(target)}")
     return len(names), names[:limit]
 
@@ -598,11 +603,82 @@ def _catalog_scope_counts(catalog: dict[str, Any]) -> dict[str, dict[str, int]]:
     return result
 
 
+def _confirm_reference() -> dict[str, Any]:
+    return {
+        "title": "TUI 确认页对照",
+        "source": "mms_tui.confirm_launch_tui + mms_core._build_confirm_preview_catalog",
+        "panels": [
+            {"id": "summary", "label": "摘要", "description": "CLI / Model / Launch / Bypass / Thinking / Effort / Agent Pack 等启动摘要。"},
+            {"id": "mcp", "label": "MCP", "description": "本次启动会注入或继承的 MCP server；可在 TUI 里逐项临时禁用。"},
+            {"id": "skills", "label": "技能", "description": "本次 session 可发现的 skill；按 always / Caveman / NSR / ECC / OMC 展开。"},
+            {"id": "hooks", "label": "钩子", "description": "启动、工具前后、压缩、会话结束等自动 hook；可查看触发点和命令路径。"},
+        ],
+        "actions": [
+            {"key": "Enter", "label": "启动", "description": "按当前开关与禁用选择启动 session。"},
+            {"key": "←/→", "label": "切面板", "description": "在 摘要 / MCP / 技能 / 钩子 面板间切换。"},
+            {"key": "↑/↓", "label": "看条目", "description": "在 MCP / 技能 / 钩子列表中移动，底部显示路径或命令。"},
+            {"key": "D / Space", "label": "禁用选择", "description": "进入禁用模式后，对本次启动逐项关闭 surface。"},
+            {"key": "Tab", "label": "切 Bypass", "description": "切换本次启动是否绕过审批。"},
+            {"key": "M", "label": "切 1M", "description": "仅支持的 Claude Opus/Sonnet 模型显示。"},
+            {"key": "C / N", "label": "Caveman / NSR", "description": "仅对应能力可用时显示。"},
+            {"key": "T / E", "label": "思考 / 强度", "description": "仅支持 thinking/effort 的 Claude/Codex 路径显示。"},
+            {"key": "X", "label": "能力包", "description": "Claude 可用时在 none / ECC / OMC 间切换。"},
+            {"key": "B / Q", "label": "返回 / 取消", "description": "退出确认页，不写回持久配置。"},
+        ],
+        "constraints": [
+            "TUI 确认页是单次启动覆盖层；开关和禁用选择优先级最高，但默认不持久化。",
+            "WebUI 的能力清单来自同一个 preview catalog；WebUI 只解释和生成 preferences.toml 片段。",
+            "全局 Claude/Codex/OpenCode/Antigravity 配置只读展示；不会在本页自动修改。",
+            "Claude OAuth / 受限启动路径可能不注入托管 MCP、技能或钩子。",
+        ],
+    }
+
+
+def _cli_panel_cards(catalog: dict[str, Any]) -> list[dict[str, Any]]:
+    panels = [{"id": "summary", "label": "摘要", "row_count": 1, "scope_counts": {}}]
+    scope_counts = _catalog_scope_counts(catalog)
+    for kind in SURFACE_KINDS:
+        counts = scope_counts.get(kind) or {}
+        panels.append(
+            {
+                "id": kind,
+                "label": _KIND_LABELS.get(kind, kind),
+                "row_count": sum(int(value or 0) for value in counts.values()),
+                "scope_counts": counts,
+            }
+        )
+    return panels
+
+
+def _disabled_key_set(disabled: dict[str, Any], kind: str) -> set[str]:
+    raw = disabled.get(kind) if isinstance(disabled, dict) else []
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple, set)):
+        return set()
+    return {_safe_text(item) for item in raw if _safe_text(item)}
+
+
+def _row_disabled_by_preference(row: dict[str, Any], disabled: dict[str, Any]) -> bool:
+    key = _safe_text(row.get("disable_key") or row.get("title"))
+    if not key:
+        return False
+    kind = row.get("kind")
+    if kind == "mcp":
+        bucket = "mcp"
+    elif kind == "hooks":
+        bucket = "hooks"
+    else:
+        bucket = "skills"
+    return key in _disabled_key_set(disabled, bucket)
+
+
 def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any], catalog: dict[str, Any]) -> list[dict[str, str]]:
     controls = [
         {
             "id": "bypass",
             "label": "绕过审批",
+            "key": "Tab",
             "state": "默认开启" if defaults.get("bypass") is not False else "默认关闭",
             "hint": "对应 TUI 确认页 Tab 切换。",
         }
@@ -612,6 +688,7 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
             {
                 "id": "caveman",
                 "label": "Caveman",
+                "key": "C",
                 "state": "默认开启" if _safe_text(defaults.get("caveman_mode") or "enable") != "disable" else "默认关闭",
                 "hint": "对应 TUI 确认页 C 切换。",
             }
@@ -621,6 +698,7 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
             {
                 "id": "nsr",
                 "label": "NSR",
+                "key": "N",
                 "state": "默认开启" if _safe_text(defaults.get("nsr_mode") or "enable") != "disable" else "默认关闭",
                 "hint": "对应 TUI 确认页 N 切换。",
             }
@@ -631,6 +709,7 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
             {
                 "id": "agent_pack",
                 "label": "能力包",
+                "key": "X",
                 "state": _safe_text(defaults.get("agent_pack") or "none"),
                 "hint": f"对应 TUI 确认页 X 切换；可用：{enabled_packs or '无'}。",
             }
@@ -640,6 +719,7 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
             {
                 "id": "thinking",
                 "label": "思考 / 强度",
+                "key": "T / E",
                 "state": "随模型显示",
                 "hint": "对应 TUI 确认页 T / E；是否出现取决于当前模型能力。",
             }
@@ -649,6 +729,7 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
             {
                 "id": "claude_1m",
                 "label": "1M context",
+                "key": "M",
                 "state": "随模型显示",
                 "hint": "只在支持的 Claude Opus/Sonnet 模型上出现。",
             }
@@ -657,6 +738,7 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
         {
             "id": "execution_surfaces",
             "label": "MCP/技能/钩子注入",
+            "key": "←/→ · D",
             "state": "会注入" if catalog.get("allow_execution_surfaces", True) else "不注入",
             "hint": "与 TUI MCP / 技能 / 钩子面板的数据源一致。",
         }
@@ -664,21 +746,36 @@ def _cli_control_cards(cli: str, flags: dict[str, bool], defaults: dict[str, Any
     return controls
 
 
-def _cli_view(cli: str, cli_rows: list[dict[str, Any]], catalog: dict[str, Any], flags: dict[str, bool], defaults: dict[str, Any], *, home: str) -> dict[str, Any]:
+def _cli_view(
+    cli: str,
+    cli_rows: list[dict[str, Any]],
+    catalog: dict[str, Any],
+    flags: dict[str, bool],
+    defaults: dict[str, Any],
+    disabled: dict[str, Any],
+    *,
+    home: str,
+) -> dict[str, Any]:
     by_group = {group: sum(1 for row in cli_rows if row.get("group") == group) for group in ("mms_dynamic", "global", "other")}
     by_kind = {kind: sum(1 for row in cli_rows if row.get("kind") == kind) for kind in SURFACE_KINDS}
-    disabled = [row for row in cli_rows if not row.get("active_by_default")]
+    inactive = [row for row in cli_rows if not row.get("active_by_default")]
+    disabled_by_preference = [row for row in cli_rows if _row_disabled_by_preference(row, disabled)]
+    agent_pack_options = [name for name in ("ecc", "omc") if flags.get(name)]
+    optional_scopes = [name for name, enabled in flags.items() if enabled]
     return {
         "id": cli,
         "label": _CLI_LABELS.get(cli, cli),
         "row_count": len(cli_rows),
         "allow_execution_surfaces": bool(catalog.get("allow_execution_surfaces", True)),
-        "available_packs": [name for name, enabled in flags.items() if enabled],
+        "available_packs": optional_scopes,
+        "optional_scopes": optional_scopes,
+        "agent_pack_options": agent_pack_options,
         "counts": {
             **by_group,
             **by_kind,
         },
         "scope_counts": _catalog_scope_counts(catalog),
+        "panels": _cli_panel_cards(catalog),
         "controls": _cli_control_cards(cli, flags, defaults, catalog),
         "global_sources": _global_sources_for_cli(cli, cli_rows, home=home),
         "constraints": [
@@ -686,7 +783,9 @@ def _cli_view(cli: str, cli_rows: list[dict[str, Any]], catalog: dict[str, Any],
             "全局 CLI 配置只读展示；WebUI 不自动修改 Claude/Codex/OpenCode/Antigravity 全局文件。",
             "Claude OAuth / 受限启动路径不会注入托管 MCP、技能或钩子。" if not catalog.get("allow_execution_surfaces", True) else "当前启动预览允许注入托管 MCP、技能和钩子。",
         ],
-        "disabled_by_default": len(disabled),
+        "inactive_by_default": len(inactive),
+        "disabled_by_preference": len(disabled_by_preference),
+        "disabled_by_default": len(disabled_by_preference),
     }
 
 
@@ -715,7 +814,7 @@ def build_session_assets_snapshot(
         catalog, flags = _preview_for_cli(mms_core, cli, runtime)
         cli_rows = _flatten_catalog(cli, catalog, home=home)
         rows.extend(cli_rows)
-        cli_views.append(_cli_view(cli, cli_rows, catalog, flags, defaults, home=home))
+        cli_views.append(_cli_view(cli, cli_rows, catalog, flags, defaults, disabled, home=home))
         cli_cards.append(
             {
                 "id": cli,
@@ -762,6 +861,7 @@ def build_session_assets_snapshot(
         ],
         "clis": cli_cards,
         "cli_views": cli_views,
+        "confirm_reference": _confirm_reference(),
         "rows": rows,
         "global_roots": _global_roots(home),
         "launch_defaults": {

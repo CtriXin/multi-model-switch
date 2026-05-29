@@ -356,6 +356,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "assetCards" in html
     assert "asset-search" in html
     assert "asset-list" in html
+    assert "assetConfirmMap" in html
+    assert "function renderAssetConfirmMap()" in html
+    assert "TUI 确认页对照" in html
+    assert "D / Space" in html
     assert "assetCliOverview" in html
     assert "asset-cli-card" in html
     assert "function renderAssetCliOverview()" in html
@@ -363,6 +367,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "只看这个 CLI" in html
     assert "全局来源（只读）" in html
     assert "Tab/C/N/T/E/X/D" in html
+    assert "按开关启用" in html
+    assert "偏好关闭" in html
     assert "Aptos" in html
     assert ".asset-card::before" in html
     assert "overflow-wrap: anywhere" in html

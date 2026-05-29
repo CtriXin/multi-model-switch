@@ -22,10 +22,14 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 能力包如 Caveman、NSR、ECC、OMC 仍然是用户级开关；技能 / MCP / hooks 是能力包展开后的 surface。
 
-## WebUI 第一版
+## WebUI 当前版
 
 当前面板叫 **会话能力中心**，默认用卡片而不是大表格：
 
+- 顶部先显示 **TUI 确认页对照**，解释 `摘要 / MCP / 技能 / 钩子` 四个面板、快捷键和单次启动约束；
+- 再按 Claude / Codex / OpenCode / Antigravity 展示 CLI 总览卡；
+- 每个 CLI 总览卡列出 MMS 动态、全局继承、其它检测、skill/MCP/hook 数量；
+- 每个 CLI 总览卡列出 TUI 控制项、TUI 面板计数、全局来源和全局条目示例；
 - 按“来源 / CLI / 类型”筛选，并支持搜索名称、用途和路径；
 - 卡片正面只显示用途、来源、CLI、类型和默认状态；
 - 路径、触发、`disable_key`、原始说明折叠到“高级信息”；
@@ -38,11 +42,17 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 TUI 启动确认页仍然负责单次启动覆盖：
 
+- `Enter` 按当前开关启动；
+- `←/→` 在 `摘要 / MCP / 技能 / 钩子` 面板间切换；
+- `↑/↓` 浏览 MCP / 技能 / 钩子条目，底部显示路径或命令；
+- `D` 进入禁用选择，`Space` 切换本次启动禁用；
 - `Tab` 切换 bypass；
+- `M` 在支持的 Claude Opus/Sonnet 模型上切换 1M context；
 - `C` 切换 Caveman；
 - `N` 在可用时切换 NSR；
+- `T / E` 在支持的 Claude/Codex 路径上切换 thinking / effort；
 - `X` 切换 Claude agent pack（`none` / `ecc` / `omc`）；
-- MCP / Skills / Hooks 面板可以选择某个显示项，并在本次启动禁用。
+- `B / Q` 返回或取消。
 
 WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认面。
 
