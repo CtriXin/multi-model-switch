@@ -4140,10 +4140,10 @@ def gateway_health_check(provider):
 
 
 def _provider_protocols(provider):
-    protocols = provider.get("protocols", [])
-    if isinstance(protocols, str):
-        return [protocols]
-    return list(protocols)
+    """Compatibility wrapper for provider protocol normalization."""
+    from mms_runtime_urls import provider_protocols
+
+    return provider_protocols(provider)
 
 
 def _provider_supports_cli(provider, cli):
@@ -4744,38 +4744,24 @@ def validate_account_for_cli(cli, account):
 
 
 def _openai_base_url(provider):
-    explicit = str(provider.get("openai_base_url", "")).strip().rstrip("/")
-    if explicit:
-        return explicit
-    base_url = str(provider.get("base_url", "")).strip().rstrip("/")
-    if not base_url:
-        return ""
-    if base_url.endswith("/v1"):
-        return base_url
-    return f"{base_url}/v1"
+    """Compatibility wrapper for effective OpenAI base URL."""
+    from mms_runtime_urls import openai_base_url
+
+    return openai_base_url(provider)
 
 
 def _anthropic_base_url(provider):
-    explicit = str(provider.get("anthropic_base_url", "")).strip().rstrip("/")
-    if explicit:
-        return explicit
-    if "anthropic_messages" not in _provider_protocols(provider):
-        return ""
-    return str(provider.get("base_url", "")).strip().rstrip("/")
+    """Compatibility wrapper for effective Anthropic base URL."""
+    from mms_runtime_urls import anthropic_base_url
+
+    return anthropic_base_url(provider)
 
 
 def _anthropic_probe_target(runtime):
-    configured = _anthropic_base_url(runtime)
-    if configured:
-        return configured.rstrip("/"), "configured"
-    if "anthropic_messages" not in _provider_protocols(runtime):
-        return "", ""
-    openai_url = str(_openai_base_url(runtime) or "").strip().rstrip("/")
-    if not openai_url:
-        return "", ""
-    if openai_url.endswith("/v1"):
-        return openai_url[:-3], "openai_fallback"
-    return openai_url, "openai_fallback"
+    """Compatibility wrapper for Anthropic probe target derivation."""
+    from mms_runtime_urls import anthropic_probe_target
+
+    return anthropic_probe_target(runtime)
 
 
 def _resolve_model(model_info):
