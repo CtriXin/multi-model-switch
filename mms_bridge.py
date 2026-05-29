@@ -1080,7 +1080,7 @@ def _preserve_domestic_reasoning_roundtrip(payload, model_name):
 
 
 def _restore_session_domestic_reasoning_roundtrip(payload, model_name, session_reasoning_content):
-    """Rehydrate tool_result continuations when the client only replays tool_use."""
+    """Rehydrate the latest assistant tool-use group from session-level reasoning."""
     if not _domestic_model_requires_reasoning_content_roundtrip(model_name):
         return False
     reasoning_content = str(session_reasoning_content or "").strip()
@@ -1089,13 +1089,11 @@ def _restore_session_domestic_reasoning_roundtrip(payload, model_name, session_r
     messages = payload.get("messages")
     if not isinstance(messages, list) or not messages:
         return False
-    if not _message_has_only_tool_result_blocks(messages[-1]):
-        return False
 
     tail_index = len(messages) - 1
-    while tail_index >= 0 and _message_has_only_tool_result_blocks(messages[tail_index]):
+    while tail_index >= 0 and str(messages[tail_index].get("role", "")).strip() != "assistant":
         tail_index -= 1
-    if tail_index < 0:
+    if tail_index < 0 or tail_index == len(messages) - 1:
         return False
 
     group_start = tail_index

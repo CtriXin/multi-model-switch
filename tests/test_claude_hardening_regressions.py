@@ -3809,6 +3809,46 @@ def test_restore_session_domestic_reasoning_roundtrip_rehydrates_latest_kimi_too
     assert payload["messages"][3]["reasoning_content"] == "carry this forward"
 
 
+def test_restore_session_domestic_reasoning_roundtrip_rehydrates_compact_resume_tool_group():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "/work previous round"},
+            {"role": "assistant", "content": [{"type": "text", "text": "I will call tools now."}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_a", "name": "Write", "input": {"file": "x"}}],
+            },
+            {
+                "role": "user",
+                "content": "This session is being continued from a previous conversation that ran out of context.",
+            },
+        ]
+    }
+
+    restored = mms_bridge._restore_session_domestic_reasoning_roundtrip(
+        payload,
+        "kimi-k2.6",
+        "carry this forward",
+    )
+
+    assert restored is True
+    assert payload["messages"][1]["reasoning_content"] == "carry this forward"
+    assert payload["messages"][1]["content"][0] == {"type": "thinking", "thinking": "carry this forward"}
+    assert "reasoning_content" not in payload["messages"][2]
+
+    mms_bridge._canonicalize_domestic_anthropic_history(payload, "kimi-k2.6")
+
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user"]
+    assert [block["type"] for block in payload["messages"][1]["content"]] == [
+        "thinking",
+        "text",
+        "tool_use",
+    ]
+    assert payload["messages"][1]["reasoning_content"] == "carry this forward"
+
+
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
     import mms_bridge
 
