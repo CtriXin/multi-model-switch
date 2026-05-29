@@ -66,7 +66,10 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["accounts"][0]["is_default"] is True
     assert snapshot["accounts"][0]["home_dir_configured"] is True
     assert snapshot["accounts"][0]["proxy_configured"] is True
-    assert snapshot["accounts"][0]["webui_write_policy"] == "read_only_human_gate"
+    assert snapshot["accounts"][0]["is_claude_human_only"] is True
+    assert snapshot["accounts"][0]["webui_write_policy"] == "claude_human_only_locked"
+    assert snapshot["account_defaults"] == {"claude": "claude-main"}
+    assert snapshot["account_write_policy"]["claude"] == "human_only_locked"
     assert "http://proxy.example" not in encoded
     assert "/Users/example/.config/mms/accounts/claude-main" not in encoded
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
@@ -115,15 +118,42 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
 
     assert report["ok"] is True
     assert report["write_policy"] == "read_only"
-    assert any(item["webui"] == "read_only_human_gate" for item in report["coverage"])
-    assert accounts["write_policy"] == "read_only_human_gate"
+    assert any(item["webui"] == "draft_review_human_gate" for item in report["coverage"])
+    assert accounts["write_policy"] == "draft_review_human_gate"
     assert accounts["accounts"][0]["id"] == "codex-main"
     assert accounts["accounts"][0]["is_default"] is True
+    assert accounts["account_defaults"] == {"codex": "codex-main"}
+    assert accounts["account_write_policy"]["blocked_fields"]
     assert "http://proxy.example" not in encoded
     assert registry["ok"] is True
     assert registry["write_policy"] == "read_only"
     assert "can initialize SQLite" in registry["note"]
     assert not (tmp_path / "mms-next" / "registry").exists()
+
+
+def test_config_web_json_response_redacts_account_protected_paths():
+    _status, body, _content_type = mms_config_web._json_response(
+        {
+            "config": {
+                "accounts": [
+                    {
+                        "id": "codex-main",
+                        "home_dir": "/Users/example/.config/mms/accounts/codex-main",
+                        "proxy": "http://proxy.example",
+                        "no_proxy": "localhost",
+                    }
+                ]
+            }
+        }
+    )
+    encoded = body.decode("utf-8")
+
+    assert "/Users/example/.config/mms/accounts/codex-main" not in encoded
+    assert "http://proxy.example" not in encoded
+    assert "localhost" not in encoded
+    assert '"home_dir": true' in encoded
+    assert '"proxy": true' in encoded
+    assert '"no_proxy": true' in encoded
 
 
 def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
@@ -436,6 +466,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert 'data-section="settings"' in html
     assert "Settings / Channel 能力" in html
     assert "accountTable" in html
+    assert "function syncAccounts()" in html
+    assert "data-account-default" in html
+    assert "Claude human-only" in html
+    assert "account_defaults:state.account_defaults" in html
     assert "settingsCoverage" in html
     assert "maintenanceActions" in html
     assert "/api/settings/report" in html
@@ -603,6 +637,94 @@ def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path)
     assert plan["summary"]["will_write_policy"] is False
     assert plan["review_summary"]["risks"] == []
     assert plan["review_summary"]["items"][0]["kind"] == "no_change"
+
+
+def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(tmp_path):
+    cfg = {
+        "accounts": [
+            {"id": "claude-main", "name": "Claude Main", "cli": "claude", "priority": 100},
+            {"id": "codex-a", "name": "Codex A", "cli": "codex", "priority": 50},
+            {"id": "codex-b", "name": "Codex B", "cli": "codex", "priority": 40},
+        ],
+        "account": {"defaults": {"claude": "claude-main", "codex": "codex-a"}},
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+    codex_b = next(account for account in draft["accounts"] if account["id"] == "codex-b")
+    codex_b["name"] = "Codex B Edited"
+    codex_b["enabled"] = False
+    codex_b["priority"] = 120
+    draft["account_defaults"]["codex"] = "codex-b"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    assert plan["config"]["account"]["defaults"] == {"claude": "claude-main", "codex": "codex-b"}
+    after_codex_b = next(account for account in plan["config"]["accounts"] if account["id"] == "codex-b")
+    assert after_codex_b["name"] == "Codex B Edited"
+    assert after_codex_b["enabled"] is False
+    assert after_codex_b["priority"] == 120
+    assert any(item["kind"] == "account_default" and item["meta"]["cli"] == "codex" for item in review["items"])
+    assert any(item["kind"] == "account_metadata" and item["meta"]["account_id"] == "codex-b" for item in review["items"])
+    assert any(risk["id"] == "account_default_changed" for risk in review["risks"])
+    assert review["counts"]["account_changes"] == 2
+
+
+def test_config_web_plan_account_snapshot_noops_without_materializing_defaults(tmp_path):
+    cfg, _ = mms_core._ensure_provider_config({
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "manual",
+            }
+        ],
+    })
+    cfg.update({
+        "accounts": [
+            {"id": "codex-a", "name": "Codex A", "cli": "codex"},
+        ],
+        "account": {"defaults": {"codex": "codex-a"}},
+    })
+    cfg["providers"][0].pop("fallback_models", None)
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+
+    assert plan["ok"] is True
+    assert plan["summary"]["will_write_config"] is False
+    assert "priority" not in plan["config"]["accounts"][0]
+    assert "enabled" not in plan["config"]["accounts"][0]
+    assert plan["review_summary"]["items"][0]["kind"] == "no_change"
+
+
+def test_config_web_plan_blocks_claude_account_default_and_metadata_changes(tmp_path):
+    cfg = {
+        "accounts": [
+            {"id": "claude-main", "name": "Claude Main", "cli": "claude", "priority": 100},
+            {"id": "claude-alt", "name": "Claude Alt", "cli": "claude", "priority": 90},
+        ],
+        "account": {"defaults": {"claude": "claude-main"}},
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+    draft["accounts"][0]["name"] = "Claude Edited"
+    draft["account_defaults"]["claude"] = "claude-alt"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+
+    assert plan["ok"] is False
+    assert any("Claude account" in error or "Claude 默认账号" in error for error in plan["errors"])
+    assert plan["config"]["account"]["defaults"] == {"claude": "claude-main"}
+    assert next(account for account in plan["config"]["accounts"] if account["id"] == "claude-main")["name"] == "Claude Main"
 
 
 def test_config_web_review_summary_ignores_unchanged_http_config(tmp_path):
