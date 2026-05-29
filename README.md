@@ -134,6 +134,11 @@ immediately while refreshing `/models` in the background; if a family is still
 missing on the same key, compare provider config/credentials and run
 `mms models` or `mms doctor full`.
 
+Stable legacy route export is conservative: a refreshed provider `/models`
+response may add routes, but it does not drop previously approved local routes
+for the same enabled provider unless the provider is disabled/removed, the
+model is hidden, or WebUI sends an explicit stale-route cleanup scope.
+
 ## Quick Start
 
 Interactive launch:

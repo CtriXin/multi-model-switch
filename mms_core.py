@@ -3505,7 +3505,7 @@ def _trigger_routes_export_after_usage_write():
     ).start()
 
 
-def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False):
+def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False, route_refresh_provider_ids=None):
     """Synchronously refresh the Hive-facing routes export from current config."""
     try:
         from mms_router import export_model_routes
@@ -3516,7 +3516,10 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startu
             if current_cfg is None:
                 return False
             current_cfg = apply_local_overrides(current_cfg)
-        export_model_routes(current_cfg, force=force, startup_safe=startup_safe)
+        kwargs = {"force": force, "startup_safe": startup_safe}
+        if route_refresh_provider_ids:
+            kwargs["route_refresh_provider_ids"] = route_refresh_provider_ids
+        export_model_routes(current_cfg, **kwargs)
         return True
     except Exception as exc:
         if not quiet:

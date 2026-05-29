@@ -103,6 +103,10 @@ Bundle rules:
   first; explicit `force=True` still regenerates legacy root aliases from
   current config. Provider/account priority and bridge routing stay on the
   existing path.
+- In stable legacy roots, `force=True` preserves previously approved provider
+  routes when a refreshed `/models` response temporarily omits a model. Routes
+  are dropped only when the provider is removed/disabled, the model is hidden,
+  or an explicit stale-route cleanup scope is passed by WebUI/CLI tooling.
 
 See `docs/REGISTRY_ARCHITECTURE.md` for the full source/candidate/approved/
 runtime/health layer contract, `privacy_boundary` gates, deletion/tombstone

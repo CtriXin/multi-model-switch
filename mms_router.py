@@ -804,6 +804,98 @@ def _read_existing_lineup_routes():
     return routes if isinstance(routes, dict) else {}
 
 
+def _route_leaf_provider_id(route_leaf):
+    if not isinstance(route_leaf, dict):
+        return ""
+    return _clean_str(route_leaf.get("provider_id"))
+
+
+def _route_has_provider(route_info, provider_id):
+    if not isinstance(route_info, dict) or not provider_id:
+        return False
+    leaves = []
+    primary = route_info.get("primary")
+    if isinstance(primary, dict):
+        leaves.append(primary)
+    leaves.extend(item for item in (route_info.get("fallbacks") or []) if isinstance(item, dict))
+    return any(_route_leaf_provider_id(item) == provider_id for item in leaves)
+
+
+def _provider_preserved_route_leaf(provider_info):
+    return {
+        "provider_id": _clean_str(provider_info.get("provider_id")),
+        "anthropic_base_url": _clean_str(provider_info.get("anthropic_base_url")),
+        "openai_base_url": _clean_str(provider_info.get("openai_base_url")),
+        "api_key": str(provider_info.get("api_key") or ""),
+    }
+
+
+def _preserve_existing_provider_routes(routes, providers_info, *, route_refresh_provider_ids=None):
+    """Keep approved local routes when a provider /models response temporarily shrinks."""
+    try:
+        existing_payload = _read_json_file(MODEL_ROUTES_PATH)
+    except (OSError, json.JSONDecodeError):
+        return routes
+    existing_routes = existing_payload.get("routes") if isinstance(existing_payload.get("routes"), dict) else {}
+    if not existing_routes:
+        return routes
+
+    refresh_scope = {
+        _clean_str(item)
+        for item in (route_refresh_provider_ids or [])
+        if _clean_str(item)
+    }
+    provider_by_id = {
+        _clean_str(info.get("provider_id")): info
+        for info in providers_info
+        if _clean_str(info.get("provider_id"))
+    }
+    hidden_by_provider = {
+        provider_id: {
+            _clean_str(model)
+            for model in (info.get("hidden_models") or [])
+            if _clean_str(model)
+        }
+        for provider_id, info in provider_by_id.items()
+    }
+
+    merged = {
+        model: {
+            "primary": dict(info.get("primary") or {}),
+            "fallbacks": [dict(item) for item in (info.get("fallbacks") or []) if isinstance(item, dict)],
+        }
+        for model, info in routes.items()
+        if isinstance(info, dict)
+    }
+    for model_name, route_info in existing_routes.items():
+        model = _clean_str(model_name)
+        if not model or not isinstance(route_info, dict):
+            continue
+        leaves = []
+        primary = route_info.get("primary")
+        if isinstance(primary, dict):
+            leaves.append(primary)
+        leaves.extend(item for item in (route_info.get("fallbacks") or []) if isinstance(item, dict))
+        for leaf in leaves:
+            provider_id = _route_leaf_provider_id(leaf)
+            provider_info = provider_by_id.get(provider_id)
+            if not provider_info:
+                continue
+            if provider_id in refresh_scope:
+                continue
+            if model in hidden_by_provider.get(provider_id, set()):
+                continue
+            current = merged.setdefault(model, {"primary": {}, "fallbacks": []})
+            if _route_has_provider(current, provider_id):
+                continue
+            preserved_leaf = _provider_preserved_route_leaf(provider_info)
+            if not current.get("primary"):
+                current["primary"] = preserved_leaf
+            elif len(current.setdefault("fallbacks", [])) < 3:
+                current["fallbacks"].append(preserved_leaf)
+    return {model: info for model, info in merged.items() if info.get("primary")}
+
+
 def _canonical_lineup_payload(routes, *, generated_at, source_routes_hash):
     existing_routes = _read_existing_lineup_routes()
     ordered_routes = {}
@@ -1128,7 +1220,7 @@ def _persist_routes_export(routes):
     return _read_json_file(MODEL_ROUTES_PATH)
 
 
-def export_model_routes(cfg=None, force=False, startup_safe=False):
+def export_model_routes(cfg=None, force=False, startup_safe=False, route_refresh_provider_ids=None):
     """导出 Hive 可直接消费的最小路由契约，并做 snapshot 去重。"""
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
@@ -1223,6 +1315,7 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
             "models": models,
             "supported_clis": supported_clis,
             "is_default": is_default,
+            "hidden_models": provider_def.get("hidden_models") or [],
         })
         seen_ids.add(pid)
 
@@ -1306,6 +1399,11 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
             "fallbacks": fallbacks,
         }
 
+    routes = _preserve_existing_provider_routes(
+        routes,
+        providers_info,
+        route_refresh_provider_ids=route_refresh_provider_ids,
+    )
     persisted = _persist_routes_export(routes)
     return persisted.get("routes", {})
 

@@ -149,6 +149,13 @@
 3. `anthropic-beta` 是否从客户端透传到了上游
 4. `cache_control` 是否在服务端中间转换时被吃掉或改坏
 
+### Watchdog / `/models` 注意事项
+
+Claude-compatible relay 的 `/models` 结果不再作为 Claude route 是否可用
+的硬性 presence check。健康检查应优先验证 `/v1/messages` smoke 与 cache
+evidence；`/models` 可以作为 endpoint liveness 参考，但不能因为上游未列出
+某个 Claude-family route 就自动判定 route 缺失或触发 route 删除。
+
 如果 1 成立、2 不成立，基本就是服务端兼容链问题。
 
 ---

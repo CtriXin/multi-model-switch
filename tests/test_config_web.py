@@ -79,6 +79,42 @@ def test_config_web_snapshot_separates_stale_hidden_models():
     assert current["visible"] is False
 
 
+def test_config_web_snapshot_exposes_approved_route_models(tmp_path):
+    routes_path = tmp_path / "model-routes.json"
+    routes_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "retired-route-model": {
+                        "primary": {"provider_id": "demo-provider"},
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo-provider",
+                "name": "Demo",
+                "models_endpoint": "/models",
+                "fallback_models": [],
+                "extra_models": [],
+            }
+        ]
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    provider = snapshot["providers"][0]
+
+    assert provider["approved_route_models"] == ["retired-route-model"]
+    assert provider["models"][0]["id"] == "retired-route-model"
+    assert provider["models"][0]["source"] == "approved_route"
+
+
 def test_config_web_print_summary_exits_without_server(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
@@ -131,6 +167,8 @@ def test_config_web_fetch_models_does_not_persist_to_fallback_models():
     html = mms_config_web._HTML_PAGE
 
     assert "不会自动写入 fallback_models" in html
+    assert "缺失旧 route（默认保留）" in html
+    assert "移除全部通道未匹配隐藏规则" in html
     assert "p.fallback_models=[...new Set(data.models)]" not in html
 
 
@@ -599,6 +637,40 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
     assert any(path.name == "model-policy.json.bak" for path in bak_paths)
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_save_passes_explicit_route_cleanup_scope(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+    policy_path = tmp_path / "model-policy.json"
+    config_path.write_text('[[providers]]\nid = "demo"\nname = "Old"\n', encoding="utf-8")
+    credentials_path.write_text("", encoding="utf-8")
+    policy_path.write_text('{"version":1,"models":{},"projects":{}}\n', encoding="utf-8")
+
+    calls = []
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(
+        mms_core,
+        "_refresh_routes_export_for_hive",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or True,
+    )
+
+    payload = _draft_payload()
+    payload["confirm_save"] = True
+    payload["confirm_phrase"] = "保存配置"
+    payload["route_refresh_provider_ids"] = ["demo"]
+
+    result = mms_config_web.apply_config_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+
+    assert result["ok"] is True
+    assert calls[-1][1]["route_refresh_provider_ids"] == ["demo"]
 
 
 def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):

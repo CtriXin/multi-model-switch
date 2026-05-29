@@ -158,6 +158,18 @@ def _policy_path_for_config(config_path: str = "") -> str:
         return ""
 
 
+def _routes_path_for_config(config_path: str = "") -> str:
+    config_path = os.path.abspath(os.path.expanduser(str(config_path or ""))) if config_path else ""
+    if config_path:
+        return os.path.join(os.path.dirname(config_path), "model-routes.json")
+    try:
+        import mms_router
+
+        return str(getattr(mms_router, "MODEL_ROUTES_PATH", ""))
+    except Exception:
+        return ""
+
+
 def _load_json_file(path: str) -> dict[str, Any]:
     if not path or not os.path.exists(path):
         return {}
@@ -236,7 +248,11 @@ def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | Non
     return caps
 
 
-def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _provider_effective_model_rows(
+    provider: dict[str, Any],
+    policy_payload: dict[str, Any],
+    approved_route_models: list[str] | None = None,
+) -> list[dict[str, Any]]:
     model_sources: dict[str, str] = {}
     provider_id = _safe_text(provider.get("id"))
     cached_raw: list[str] = []
@@ -249,8 +265,21 @@ def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dic
             cached_source = _safe_text(cached.get("base_source") or "remote") or "remote"
     except Exception:
         cached_raw = []
-    for model in cached_raw or _normalize_model_list(provider.get("fallback_models")):
-        model_sources.setdefault(model, cached_source if cached_raw else "fallback")
+    row_models: list[str] = []
+    row_sources: dict[str, str] = {}
+    for item in (provider.get("models") if isinstance(provider.get("models"), list) else []):
+        model_id = _safe_text(item.get("id") or item.get("model")) if isinstance(item, dict) else _safe_text(item)
+        if not model_id:
+            continue
+        row_models.append(model_id)
+        if isinstance(item, dict):
+            row_sources.setdefault(model_id, _safe_text(item.get("source") or "manual") or "manual")
+    fallback_models = _normalize_model_list(provider.get("fallback_models"))
+    approved_models = _normalize_model_list(approved_route_models)
+    base_models = cached_raw or fallback_models or approved_models or row_models
+    for model in base_models:
+        source = cached_source if cached_raw else ("fallback" if fallback_models else ("approved_route" if approved_models else row_sources.get(model, "manual")))
+        model_sources.setdefault(model, source)
     for model in _normalize_model_list(provider.get("extra_models")):
         model_sources.setdefault(model, "extra")
     policy_models = policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}
@@ -279,7 +308,38 @@ def _provider_stale_hidden_models(provider: dict[str, Any], model_rows: list[dic
     return [model for model in _normalize_model_list(provider.get("hidden_models")) if model not in current_ids]
 
 
-def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _approved_route_models_by_provider(config_path: str = "") -> dict[str, list[str]]:
+    routes_payload = _load_json_file(_routes_path_for_config(config_path))
+    routes = routes_payload.get("routes") if isinstance(routes_payload.get("routes"), dict) else {}
+    by_provider: dict[str, list[str]] = {}
+    seen: dict[str, set[str]] = {}
+    for route_model, route_info in routes.items():
+        model_id = _safe_text(route_model)
+        if not model_id or not isinstance(route_info, dict):
+            continue
+        leaves = []
+        primary = route_info.get("primary")
+        if isinstance(primary, dict):
+            leaves.append(primary)
+        leaves.extend(item for item in (route_info.get("fallbacks") or []) if isinstance(item, dict))
+        for leaf in leaves:
+            provider_id = _safe_text(leaf.get("provider_id"))
+            if not provider_id:
+                continue
+            provider_seen = seen.setdefault(provider_id, set())
+            if model_id in provider_seen:
+                continue
+            provider_seen.add(model_id)
+            by_provider.setdefault(provider_id, []).append(model_id)
+    return {provider_id: sorted(models, key=lambda item: item.lower()) for provider_id, models in by_provider.items()}
+
+
+def _provider_summary(
+    provider: dict[str, Any],
+    *,
+    policy_payload: dict[str, Any] | None = None,
+    approved_route_models: list[str] | None = None,
+) -> dict[str, Any]:
     provider = provider if isinstance(provider, dict) else {}
     provider_id = _safe_text(provider.get("id"))
     protocols = provider.get("protocols") if isinstance(provider.get("protocols"), list) else []
@@ -300,7 +360,9 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
     anthropic_base = config_anthropic_base or credential_anthropic_base
     api_key = _safe_text(provider.get("api_key") or provider.get("openai_api_key"))
     policy_payload = policy_payload if isinstance(policy_payload, dict) else {}
-    model_rows = _provider_effective_model_rows(provider, policy_payload)
+    approved_route_models = _normalize_model_list(approved_route_models)
+    model_rows = _provider_effective_model_rows(provider, policy_payload, approved_route_models)
+    approved_route_set = set(approved_route_models)
     return {
         "id": provider_id,
         "original_id": provider_id,
@@ -322,11 +384,12 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "api_key": "",
         "has_api_key": bool(api_key or creds.get("has_api_key")),
         "update_credentials": False,
+        "approved_route_models": approved_route_models,
         "fallback_models": _normalize_model_list(provider.get("fallback_models")),
         "extra_models": _normalize_model_list(provider.get("extra_models")),
         "hidden_models": _normalize_model_list(provider.get("hidden_models")),
         "stale_hidden_models": _provider_stale_hidden_models(provider, model_rows),
-        "model_count": len(dict.fromkeys(models or [row["id"] for row in model_rows])),
+        "model_count": len(dict.fromkeys(models + list(approved_route_set) or [row["id"] for row in model_rows])),
         "models": model_rows,
     }
 
@@ -523,7 +586,16 @@ def build_config_snapshot(
     providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
     policy_path = _policy_path_for_config(config_path)
     policy_payload = _load_json_file(policy_path)
-    provider_rows = [_provider_summary(item, policy_payload=policy_payload) for item in providers if isinstance(item, dict)]
+    approved_routes = _approved_route_models_by_provider(config_path)
+    provider_rows = [
+        _provider_summary(
+            item,
+            policy_payload=policy_payload,
+            approved_route_models=approved_routes.get(_safe_text(item.get("id")), []),
+        )
+        for item in providers
+        if isinstance(item, dict)
+    ]
     vision_sidecar = cfg.get("vision_sidecar") if isinstance(cfg.get("vision_sidecar"), dict) else {}
     rescue = cfg.get("rescue") if isinstance(cfg.get("rescue"), dict) else {}
     provider_default = _safe_text((cfg.get("provider") if isinstance(cfg.get("provider"), dict) else {}).get("default"))
@@ -838,6 +910,25 @@ def _extract_draft(payload: dict[str, Any]) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     draft = payload.get("draft") if isinstance(payload.get("draft"), dict) else payload
     return draft if isinstance(draft, dict) else {}
+
+
+def _route_refresh_provider_ids_from_payload(payload: dict[str, Any] | None) -> list[str]:
+    payload = payload if isinstance(payload, dict) else {}
+    draft = _extract_draft(payload)
+    for source in (payload, draft):
+        values = source.get("route_refresh_provider_ids") or source.get("stale_route_cleanup_provider_ids")
+        if not isinstance(values, list):
+            continue
+        result = []
+        seen = set()
+        for item in values:
+            provider_id = _safe_text(item)
+            if provider_id and provider_id not in seen:
+                seen.add(provider_id)
+                result.append(provider_id)
+        if result:
+            return result
+    return []
 
 
 def _copy_existing_provider(existing: dict[str, Any] | None, provider_payload: dict[str, Any]) -> dict[str, Any]:
@@ -1566,7 +1657,15 @@ def apply_config_plan(
         save_report["model_policy"] = _write_model_policy_audited(policy_path, plan["model_policy"], config_path=target_config_path, reason=f"{reason}:model-policy")
 
     try:
-        save_report["routes_export"] = bool(mms_core._refresh_routes_export_for_hive(plan["config"], force=True, quiet=True, startup_safe=True))  # noqa: SLF001
+        save_report["routes_export"] = bool(  # noqa: SLF001
+            mms_core._refresh_routes_export_for_hive(
+                plan["config"],
+                force=True,
+                quiet=True,
+                startup_safe=True,
+                route_refresh_provider_ids=_route_refresh_provider_ids_from_payload(payload),
+            )
+        )
     except Exception:
         save_report["routes_export"] = False
 
@@ -2556,22 +2655,23 @@ _HTML_PAGE = r"""<!doctype html>
           </div>
           <div class="tab-panel" data-tab-panel="models">
             <div class="model-section">
-              <p class="muted">拉取通道支持的模型列表，或手动添加模型。取消勾选「显示」可将模型隐藏。需要长期保留的模型请使用「手动补充」。</p>
+              <p class="muted">这是当前通道的模型清单，不是全局模型池。拉取缺失的旧 route 默认保留；手动补充会写入当前通道 extra_models，取消勾选「显示」会写入 hidden_models。</p>
               <div class="card">
                 <div class="btns">
                   <button id="fetchModels">拉取当前通道模型</button>
                   <button id="testList" class="secondary">测试 /models</button>
+                  <label class="check"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>拉取后自动标记缺失旧 route 为待清理（本页临时）</span></label>
                   <input id="modelSearch" placeholder="搜索模型" style="max-width:260px">
                 </div>
-                <label style="margin-top:14px">手动补充模型（逗号或换行分隔）</label>
+                <label style="margin-top:14px">手动补充当前通道模型（extra_models，逗号或换行分隔）</label>
                 <textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea>
                 <div class="btns">
-                  <button id="addManualModels" class="secondary">添加到列表</button>
+                  <button id="addManualModels" class="secondary">添加到补充模型库</button>
                   <button id="clearHidden" class="ghost">取消当前通道全部隐藏</button>
-                  <button id="clearAllStaleHidden" class="ghost">一键清理全部通道过期隐藏项</button>
+                  <button id="clearAllStaleHidden" class="ghost">移除全部通道未匹配隐藏规则</button>
                 </div>
-                <div id="modelChips" class="chips" style="margin-top:10px"></div>
               </div>
+              <div id="modelChips" class="card"></div>
               <div class="card" id="staleHiddenBox"></div>
               <div class="table-wrap"><table id="modelTable"></table></div>
             </div>
@@ -2740,11 +2840,12 @@ const sections=[
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false;
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set(); let staleCleanupProviders=new Set();
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
 function current(){return state.providers[activeProvider]}
+function touchProvider(id){if(id)touchedProviders.add(id)}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
 function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
 function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('channel') }
@@ -2757,20 +2858,22 @@ function checks(name,values,allowed){values=values||[];return `<div class="check
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
 function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} $('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...'}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox"><span>保存时更新 credentials.sh（需要填写 API Key；会 backup + audit）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
 function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);$('pKey').oninput=syncProvider;$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
-function syncProvider(){const p=current(); if(!p)return; const old=p.id;p.id=$('pId').value.trim()||p.id;p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');p.api_key=$('pKey').value;p.update_credentials=$('pUpdateCreds').checked;if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
+function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');p.api_key=$('pKey').value;p.update_credentials=$('pUpdateCreds').checked;if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
 function providerModels(p){p=p||{};const map=new Map();const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})})}(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{if(map.has(id))map.get(id).visible=false});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
 function defaultCaps(id){const l=String(id||'').toLowerCase();return {text:true,vision:['mimo-v2.5','mimo-v2-omni','k2.6','k2.6-code-preview','kimi-k2.5','qwen3.6-plus','qwen3.6-flash','qwen3.5-plus'].includes(l)||l.startsWith('claude-')||l.startsWith('gemini-'),tool_use:/^(claude|gpt|o|qwen|kimi|glm|minimax|gemini)/.test(l),reasoning:/gpt-5|qwen3|kimi-k2|glm-5|deepseek|claude/.test(l),long_context:/1m|long|qwen3|kimi-k2|gpt-5|claude/.test(l),cache_sensitive:/^(qwen|kimi|k2\.|glm|deepseek|minimax|mimo)/.test(l)}}
 function providerCurrentIds(p){return new Set(providerModels(p).map(r=>r.id))}
 function staleHiddenModels(p){const ids=providerCurrentIds(p);return [...new Set([...(p.stale_hidden_models||[]),...(p.hidden_models||[]).filter(id=>!ids.has(id))])]}
 function cleanupStaleHidden(p){const stale=staleHiddenModels(p);const doomed=new Set(stale);p.hidden_models=(p.hidden_models||[]).filter(x=>!doomed.has(x));p.stale_hidden_models=[];return stale.length}
-function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{total+=cleanupStaleHidden(p)});renderProviders();toast(total?`已清理 ${total} 个过期 hidden_models`:'没有需要清理的过期隐藏项')}
+function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{total+=cleanupStaleHidden(p)});renderProviders();toast(total?`已移除 ${total} 条未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}
 function visibleModelsForProvider(providerId,{visionFirst=false,includeHidden=false,enabledOnly=false}={}){let rows=[];(state.providers||[]).forEach(p=>{if(providerId&&p.id!==providerId)return;if(enabledOnly&&p.enabled===false)return;providerModels(p).forEach(r=>{if(!includeHidden&&r.visible===false)return;rows.push({...r,provider_id:p.id,provider_name:p.name||p.id,capabilities:{...(r.capabilities||defaultCaps(r.id))}})})});const seen=new Set();rows=rows.filter(r=>{const key=(providerId?'':r.provider_id+'::')+r.id;if(seen.has(key))return false;seen.add(key);return true});rows.sort((a,b)=>{const av=!!(a.capabilities||{}).vision,bv=!!(b.capabilities||{}).vision;if(visionFirst&&av!==bv)return av?-1:1;return (a.provider_id+' '+a.id).localeCompare(b.provider_id+' '+b.id)});return rows}
 function providerOptions(selected,{blankLabel='请选择通道',auto=false,enabledOnly=false}={}){const opts=[];const providers=providerEntries().filter(({p})=>!enabledOnly||p.enabled||p.id===selected);if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动选择 provider</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>${escapeHtml(blankLabel)}</option>`);opts.push(...providers.map(({p})=>{const disabled=p.enabled?'':' [disabled 当前配置值]';return `<option value="${escapeHtml(p.id)}" ${p.id===selected?'selected':''}>${escapeHtml(p.name||p.id)} / ${escapeHtml(p.id)}${disabled}</option>`}));if(selected&&!state.providers.some(p=>p.id===selected))opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
 function modelOptionValue(providerId,row){return providerId?row.id:`${row.provider_id}::${row.id}`}
 function decodeModelSelection(value,currentProvider){const text=String(value||'');if(!text)return{provider_id:currentProvider||'',model:''};const marker='::';if(text.includes(marker)){const [provider_id,...rest]=text.split(marker);return{provider_id,model:rest.join(marker)}}return{provider_id:currentProvider||'',model:text}}
 function modelOptions(providerId,selected,{visionFirst=false,auto=false,defaultModels=[],enabledOnly=false,selectedProvider=''}={}){const rows=visibleModelsForProvider(providerId,{visionFirst,enabledOnly});let opts=[];if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动路线${defaultModels.length?'：'+escapeHtml(defaultModels.join(' / ')):''}</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>请选择模型</option>`);let matched=false;opts.push(...rows.map(r=>{const value=modelOptionValue(providerId,r);const label=providerId?r.id:`${r.provider_id} / ${r.id}`;const tag=(r.capabilities||{}).vision?' [vision]':'';const isSelected=providerId?r.id===selected:((selectedProvider&&r.provider_id===selectedProvider&&r.id===selected)||(!selectedProvider&&r.id===selected));if(isSelected)matched=true;return `<option value="${escapeHtml(value)}" ${isSelected?'selected':''}>${escapeHtml(label)}${tag}</option>`}));if(selected&&!matched)opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
-function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>过期隐藏项</strong><p class="muted">当前没有“已不在通道模型列表里”的 hidden_models。</p>';return}box.innerHTML=`<strong>过期隐藏项（不在当前通道模型列表）</strong><p class="muted">这些多半是之前手动隐藏过、后来通道不再返回的模型。默认保留配置但不放进主表；确认无用后可清理。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">清理</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">清理当前通道过期隐藏项</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已清理 ${count} 个当前通道过期 hidden_models`:'没有需要清理的过期隐藏项')}}
-function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));$('modelChips').innerHTML=(p.extra_models||[]).map(m=>`<span class="chip">${escapeHtml(m)} <button data-rm="${escapeHtml(m)}">×</button></span>`).join('');document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{p.extra_models=(p.extra_models||[]).filter(x=>x!==b.dataset.rm);renderModelTable()});renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
+function staleRouteModels(p){const approved=(p.approved_route_models&&p.approved_route_models.length?p.approved_route_models:(p.fallback_models||[]));const remote=new Set((p.models||[]).filter(r=>r&&r.id).map(r=>String(r.id)));const extras=new Set((p.extra_models||[]).map(x=>String(x)));return [...new Set(approved.filter(id=>id&&!remote.has(String(id))&&!extras.has(String(id))))]}
+function renderStaleRouteBox(p){const box=$('staleRouteBox');if(!box)return;const stale=staleRouteModels(p);if(!stale.length){box.innerHTML='<strong>缺失旧 route</strong><p class="muted">当前没有“本地已批准但本次拉取未返回”的旧 route。</p>';return}const armed=staleCleanupProviders.has(p.id);box.innerHTML=`<strong>缺失旧 route（默认保留）</strong><p class="muted">这些模型在本地已批准 routes 里，但不在当前拉取到的模型列表里。默认不会删除；如果勾选“拉取后自动标记”，本页后续拉取会自动标记清理。避免上游 /models 抖动或 New API 临时关闭导致下游模型被清空。</p><div class="chips">${stale.slice(0,24).map(m=>`<span class="chip">${escapeHtml(m)}</span>`).join('')}${stale.length>24?`<span class="chip">+${stale.length-24}</span>`:''}</div><div class="btns"><button id="armStaleRouteCleanup" class="ghost">${armed?'已标记：保存时清理这些旧 route':'显式标记保存时清理这些旧 route'}</button></div>`;$('armStaleRouteCleanup').onclick=()=>{staleCleanupProviders.add(p.id);touchProvider(p.id);renderStaleRouteBox(p);toast(`已标记 ${p.id}：下次保存会清理 ${stale.length} 条缺失旧 route`)}}
+function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">当前没有“暂时匹配不到模型行”的隐藏规则。</p>';return}box.innerHTML=`<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">这些只是当前通道 hidden_models 里的隐藏规则，暂时没有匹配到当前模型行；不等于远端不存在，也不等于 route 待删除。移除后如果模型仍在远端或 approved routes 里，会重新显示出来。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">移除记录</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">移除当前通道未匹配隐藏规则</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已移除 ${count} 条当前通道未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}}
+function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));const extras=p.extra_models||[];$('modelChips').innerHTML=`<strong>当前通道补充模型库（extra_models）</strong><p class="muted">这些模型是手动补充到当前 provider 的可用模型，会参与当前通道路由；不是待删除列表，也不是全局模型池。</p><div class="chips">${extras.length?extras.map(m=>`<span class="chip">${escapeHtml(m)}${editingExtraModels?` <button data-rm-extra="${escapeHtml(m)}">从补充库移除</button>`:''}</span>`).join(''):'<span class="muted">当前通道暂无手动补充模型。</span>'}</div><div class="btns"><button id="toggleExtraEdit" class="ghost">${editingExtraModels?'完成编辑':'编辑补充模型库'}</button></div><div id="staleRouteBox"></div>`;$('toggleExtraEdit').onclick=()=>{editingExtraModels=!editingExtraModels;renderModelTable()};document.querySelectorAll('[data-rm-extra]').forEach(b=>b.onclick=()=>{p.extra_models=extras.filter(x=>x!==b.dataset.rmExtra);toast(`已从当前通道补充模型库移除 ${b.dataset.rmExtra}`);renderModelTable()});renderStaleRouteBox(p);renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
 function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,source:'hidden',visible:!(p.hidden_models||[]).includes(model),favorite:false,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
 function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [disabled]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
 function syncFallback(){state.rescue=state.rescue||{};state.rescue.fallback_model=$('rescueModel').value.trim();state.rescue.fallback_cli=$('rescueCli').value;state.rescue.hot_fallback_enabled=$('rescueHot').checked;state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.enabled=$('visionEnabled').checked;state.vision_sidecar.provider_id=$('visionProvider').value.trim();state.vision_sidecar.model=$('visionModel').value.trim();state.vision_sidecar.candidates=[...document.querySelectorAll('[data-vision-candidate]')].map(row=>({provider_id:row.querySelector('[data-vc-provider]').value.trim(),model:row.querySelector('[data-vc-model]').value.trim()})).filter(x=>x.provider_id&&x.model)}
@@ -2799,13 +2902,13 @@ function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.op
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">清理 hidden ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}`}
-function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode}))}
+function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode,route_refresh_provider_ids:[...staleCleanupProviders]}))}
 function renderAll(){renderStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
 $('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
-$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.models){const p=current();p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models`)}else{$('testResult').textContent=JSON.stringify(data,null,2)}};
+$('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();if(!p.approved_route_models||!p.approved_route_models.length){p.approved_route_models=(p.models||[]).filter(r=>r&&r.id&&r.source!=='derived_alias').map(r=>r.id)}p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);if($('autoStaleCleanupOnFetch')?.checked&&staleRouteModels(p).length){staleCleanupProviders.add(p.id)}renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(staleCleanupProviders.has(p.id)?`拉取到 ${data.models.length} 个模型；已自动标记缺失旧 route 清理`:`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models；缺失旧 route 默认保留`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}};
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}

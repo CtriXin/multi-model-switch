@@ -184,6 +184,120 @@ def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypat
     assert stat.S_IMODE(latest_path.stat().st_mode) == 0o600
 
 
+def test_export_model_routes_preserves_existing_provider_routes_on_probe_shrink(monkeypatch, tmp_path):
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "demo-provider": {
+                "id": "demo-provider",
+                "provider_name": "Demo Provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://demo.example.com/v1",
+                "api_key": "sk-demo-new",
+                "models": ["new-remote-model"],
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+    (tmp_path / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "old-approved-model": {
+                        "primary": {
+                            "provider_id": "demo-provider",
+                            "openai_base_url": "https://old.example.com/v1",
+                            "anthropic_base_url": "",
+                            "api_key": "sk-old",
+                            "model_id": "old-approved-model",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = {
+        "provider": {"default": "demo-provider"},
+        "providers": [
+            {
+                "id": "demo-provider",
+                "role": "auto",
+                "priority": 75,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "hidden_models": [],
+            }
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True)
+
+    assert routes["new-remote-model"]["primary"]["provider_id"] == "demo-provider"
+    assert routes["old-approved-model"]["primary"]["provider_id"] == "demo-provider"
+    assert routes["old-approved-model"]["primary"]["openai_base_url"] == "https://demo.example.com/v1"
+    assert routes["old-approved-model"]["primary"]["api_key"] == "sk-demo-new"
+
+
+def test_export_model_routes_can_explicitly_cleanup_preserved_provider_routes(monkeypatch, tmp_path):
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "demo-provider": {
+                "id": "demo-provider",
+                "provider_name": "Demo Provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://demo.example.com/v1",
+                "api_key": "sk-demo",
+                "models": ["new-remote-model"],
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+    (tmp_path / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "old-approved-model": {
+                        "primary": {"provider_id": "demo-provider", "openai_base_url": "https://demo.example.com/v1"},
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo-provider",
+                "role": "auto",
+                "priority": 75,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+            }
+        ],
+    }
+
+    routes = mms_router.export_model_routes(
+        cfg,
+        force=True,
+        route_refresh_provider_ids=["demo-provider"],
+    )
+
+    assert "new-remote-model" in routes
+    assert "old-approved-model" not in routes
+
+
 def test_export_model_routes_prefers_verified_latest_approved_bundle(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     import mms_router
