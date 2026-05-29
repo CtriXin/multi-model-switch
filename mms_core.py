@@ -4540,18 +4540,6 @@ _FAMILY_COLD_MAX_USE_COUNT = 3
 _FAMILY_COLD_IDLE_DAYS = 21
 
 
-def _parse_usage_timestamp(value):
-    from mms_command_tools import parse_usage_timestamp
-
-    return parse_usage_timestamp(value)
-
-
-def _usage_recency_score(value, now=None, half_life_days=14):
-    from mms_command_tools import usage_recency_score
-
-    return usage_recency_score(value, now=now, half_life_days=half_life_days)
-
-
 def _sort_family_entries_for_tui(families, preferred_family="", now=None):
     from mms_command_tools import sort_family_entries_for_tui
 
@@ -5674,18 +5662,6 @@ def _load_command_config():
         cfg = _default_config()
         save_config(cfg)
     return apply_local_overrides(cfg)
-
-
-def _session_status_label(item):
-    from mms_command_tools import session_status_label
-
-    return session_status_label(item)
-
-
-def _session_display_id(item):
-    from mms_command_tools import session_display_id
-
-    return session_display_id(item)
 
 
 def _handle_session_ls(cli_name):
