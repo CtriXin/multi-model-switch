@@ -204,6 +204,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "copyApplyCommand" in html
     assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
     assert "function planJsonHint(plan)" in html
+    assert "function renderApplyResult(data)" in html
+    assert "已发布，但 runtime 未就绪" in html
+    assert "mmf 会读到这次保存后的最新 bundle" in html
+    assert "missing key/base URL" in html
     assert "currentApplyCommand()" in html
     assert "/api/registry-v2/apply" in html
     assert "写入预览DB" in html
@@ -847,6 +851,38 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert "sk-super-secret-value" in secret_path.read_text(encoding="utf-8")
     assert not config_path.exists()
     assert not credentials_path.exists()
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_surfaces_runtime_not_ready_without_keys(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    provider = payload["draft"]["providers"][0]
+    provider["api_key"] = ""
+    provider["update_credentials"] = False
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    secret_path = config_root / "secrets" / "webui-secrets.json"
+
+    assert result["ok"] is True
+    assert result["status"] == "verified_not_runtime_ready"
+    assert result["runtime_ready"] is False
+    assert "missing plaintext secrets" in result["runtime_ready_reason"]
+    assert result["runtime_blockers"]["missing_api_key_count"] > 0
+    assert result["runtime_blockers"]["provider_route_count"] == result["publish"]["provider_route_count"]
+    assert result["credential_backend"]["skipped"] is True
+    assert result["credential_backend"]["count"] == 0
+    assert result["next_action"]["label"].startswith("填写 API Key")
+    assert result["verify"]["verified"] is True
+    assert not secret_path.exists()
     assert "sk-super-secret-value" not in encoded
 
 

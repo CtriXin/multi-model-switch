@@ -1988,6 +1988,28 @@ def apply_registry_v2_preview_plan(
         }
 
     verified = bool(verify.get("verified"))
+    runtime_ready = publish.get("runtime_ready") is True
+    missing_api_keys = int(publish.get("missing_api_key_count") or 0)
+    missing_base_urls = int(publish.get("missing_base_url_count") or 0)
+    provider_route_count = int(publish.get("provider_route_count") or 0)
+    route_count = int(publish.get("route_count") or 0)
+    runtime_next_action = {}
+    if verified and not runtime_ready:
+        if missing_api_keys:
+            runtime_next_action = {
+                "label": "填写 API Key 并勾选更新凭据后重新写入预览 DB + 发布",
+                "command": "在 WebUI 通道里输入 API Key，勾选更新凭据，再点写入预览 DB + 发布",
+            }
+        elif missing_base_urls:
+            runtime_next_action = {
+                "label": "补齐 OpenAI/Anthropic base URL 后重新写入预览 DB + 发布",
+                "command": "在 WebUI 通道里补齐 base URL，再点写入预览 DB + 发布",
+            }
+        elif provider_route_count <= 0:
+            runtime_next_action = {
+                "label": "给通道添加至少一个可见模型后重新写入预览 DB + 发布",
+                "command": "在 WebUI 通道里添加 fallback/extra/可见模型，再点写入预览 DB + 发布",
+            }
     credential_backend = {
         "schema": secret_backend.get("schema"),
         "skipped": bool(secret_backend.get("skipped")),
@@ -2008,7 +2030,16 @@ def apply_registry_v2_preview_plan(
     return {
         "ok": verified,
         "schema": "mms.setup_web.registry_v2_apply_result.v1",
-        "status": "verified" if verified else "failed_verify",
+        "status": "verified" if verified and runtime_ready else "verified_not_runtime_ready" if verified else "failed_verify",
+        "runtime_ready": runtime_ready,
+        "runtime_ready_reason": publish.get("runtime_ready_reason") or "",
+        "runtime_blockers": {
+            "missing_api_key_count": missing_api_keys,
+            "missing_base_url_count": missing_base_urls,
+            "provider_route_count": provider_route_count,
+            "route_count": route_count,
+        },
+        "next_action": runtime_next_action,
         "summary": plan.get("summary") or {},
         "warnings": plan.get("warnings") or [],
         "paths": plan.get("paths") or {},
@@ -3282,6 +3313,7 @@ function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.op
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
+function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
 function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">清理 hidden ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
 function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode}))}
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
@@ -3297,7 +3329,7 @@ $('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft
 function currentApplyCommand(){return lastPlan?.registry_v2_save_plan?.apply_plan?.cli_apply_command||'./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json'}
 $('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载 redacted plan JSON')}
 $('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
-$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'预览 DB 已写入并发布':'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
+$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 $('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:var(--danger);font-family:var(--font-mono)">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
