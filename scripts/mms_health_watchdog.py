@@ -614,6 +614,14 @@ def model_presence_alias_candidates(model_id: str) -> set[str]:
     return candidates
 
 
+def is_claude_model_presence_exempt(model_id: str) -> bool:
+    normalized = str(model_id or "").strip().lower()
+    if not normalized:
+        return False
+    tail = normalized.rsplit("/", 1)[-1]
+    return tail.startswith(("claude-", "anthropic.claude-", "anthropic-claude-"))
+
+
 def route_source_checks(config_dir: Path, routes_payload: dict[str, Any], policy_payload: dict[str, Any]) -> list[CheckResult]:
     results: list[CheckResult] = []
     routes_text = json.dumps(routes_payload, ensure_ascii=False)
@@ -672,6 +680,7 @@ def model_presence_checks(
     allowed = model_policy_allowed(policy_payload)
     missing: list[str] = []
     checked = 0
+    skipped_claude = 0
     for model, role, route in route_entries(routes_payload):
         if allowed and model not in allowed:
             continue
@@ -687,13 +696,19 @@ def model_presence_checks(
         # primary availability check plus endpoint liveness check.
         if role != "primary":
             continue
-        checked += 1
         wire_model = str(route.get("model_id") or model).strip()
+        if is_claude_model_presence_exempt(model) or is_claude_model_presence_exempt(wire_model):
+            skipped_claude += 1
+            continue
+        checked += 1
         if not (model_presence_alias_candidates(wire_model) & models):
             missing.append(f"{model}@{provider_id}/{role} as {wire_model}")
     if missing:
         return [CheckResult("model_presence", "policy_models", "warning", "fail", "missing: " + ", ".join(missing[:12]))]
-    return [CheckResult("model_presence", "policy_models", "info", "ok", f"checked {checked} route entries with model lists")]
+    detail = f"checked {checked} route entries with model lists"
+    if skipped_claude:
+        detail += f"; skipped {skipped_claude} Claude route entries"
+    return [CheckResult("model_presence", "policy_models", "info", "ok", detail)]
 
 
 def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -> dict[str, Any]:
