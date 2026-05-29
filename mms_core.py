@@ -118,7 +118,6 @@ from mms_opencode_health import (
 from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID as _OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
-    OPENCODE_DEFAULT_MODEL_PREFERENCES as _OPENCODE_DEFAULT_MODEL_PREFERENCES,
     OPENCODE_DEFAULT_PROFILE_ID as _OPENCODE_DEFAULT_PROFILE_ID,
     OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS as _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS,
     OPENCODE_LITE_PRO_SPECS as _OPENCODE_LITE_PRO_SPECS,
@@ -133,21 +132,13 @@ from mms_opencode_profiles import (
     opencode_profile_selection_ids as _opencode_profile_selection_ids,
 )
 from mms_opencode_routes import (
-    opencode_default_model_rank as _opencode_default_model_rank_impl,
-    opencode_is_mimo_direct_route as _opencode_is_mimo_direct_route_impl,
     opencode_mimo_openai_base_from_anthropic as _opencode_mimo_openai_base_from_anthropic,
-    opencode_normalized_anthropic_base_url as _opencode_normalized_anthropic_base_url_impl,
-    opencode_normalized_openai_base_url as _opencode_normalized_openai_base_url_impl,
-    opencode_provider_matches_route_policy as _opencode_provider_matches_route_policy_impl,
     opencode_provider_protocols as _opencode_provider_protocols,
-    opencode_route_candidate_score as _opencode_route_candidate_score_impl,
-    opencode_route_transport as _opencode_route_transport_impl,
     opencode_route_transport_candidates as _opencode_route_transport_candidates_impl,
 )
 from mms_opencode_resolver import (
     OpenCodeResolverDeps as _OpenCodeResolverDeps,
     find_opencode_model_route as _find_opencode_model_route_impl,
-    resolve_opencode_lite_pro_runtime as _resolve_opencode_lite_pro_runtime_impl,
     resolve_opencode_profile_runtime as _resolve_opencode_profile_runtime_impl,
 )
 from mms_state_io import resolve_mms_config_dir, resolve_real_user_home
@@ -4333,48 +4324,6 @@ def _opencode_default_profile_from_config(cfg):
     )
 
 
-def _opencode_default_model_rank(model_name):
-    return _opencode_default_model_rank_impl(
-        model_name,
-        default_model_preferences=_OPENCODE_DEFAULT_MODEL_PREFERENCES,
-        infer_model_family=_infer_model_family,
-    )
-
-
-def _opencode_normalized_openai_base_url(provider):
-    return _opencode_normalized_openai_base_url_impl(
-        provider,
-        provider_openai_base_url=_provider_openai_base_url,
-    )
-
-
-def _opencode_normalized_anthropic_base_url(provider):
-    return _opencode_normalized_anthropic_base_url_impl(
-        provider,
-        provider_openai_base_url=_provider_openai_base_url,
-        provider_anthropic_base_url=_provider_anthropic_base_url,
-    )
-
-
-def _opencode_is_mimo_direct_route(provider, model_name=""):
-    return _opencode_is_mimo_direct_route_impl(
-        provider,
-        model_name,
-        provider_label=_provider_label,
-    )
-
-
-def _opencode_route_transport(provider, model_name):
-    return _opencode_route_transport_impl(
-        provider,
-        model_name,
-        infer_model_family=_infer_model_family,
-        provider_openai_base_url=_provider_openai_base_url,
-        provider_anthropic_base_url=_provider_anthropic_base_url,
-        provider_label=_provider_label,
-    )
-
-
 def _opencode_route_transport_candidates(provider, model_name):
     return _opencode_route_transport_candidates_impl(
         provider,
@@ -4382,27 +4331,6 @@ def _opencode_route_transport_candidates(provider, model_name):
         infer_model_family=_infer_model_family,
         provider_openai_base_url=_provider_openai_base_url,
         provider_anthropic_base_url=_provider_anthropic_base_url,
-        provider_label=_provider_label,
-    )
-
-
-def _opencode_route_candidate_score(provider, model_name, sequence):
-    return _opencode_route_candidate_score_impl(
-        provider,
-        model_name,
-        sequence,
-        normalize_role=_normalize_role,
-        runtime_priority_for_model=_runtime_priority_for_model,
-        provider_label=_provider_label,
-        role_weights=ROLE_WEIGHTS,
-        default_priority=DEFAULT_PRIORITY,
-    )
-
-
-def _opencode_provider_matches_route_policy(provider, route_policy):
-    return _opencode_provider_matches_route_policy_impl(
-        provider,
-        route_policy,
         provider_label=_provider_label,
     )
 
@@ -4464,16 +4392,6 @@ def _find_opencode_model_route(
         route_policy=route_policy,
         profile_id=profile_id,
         provider_id=provider_id,
-    )
-
-
-def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=_OPENCODE_AGENT_PROFILE_ID):
-    return _resolve_opencode_lite_pro_runtime_impl(
-        cfg,
-        default_provider,
-        default_models,
-        profile_id=profile_id,
-        deps=_opencode_resolver_deps(),
     )
 
 
