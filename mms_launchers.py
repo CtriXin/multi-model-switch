@@ -203,6 +203,7 @@ from mms_session_guard import (
     session_home_is_active as _session_home_is_active_impl,
     write_session_guard_marker as _write_session_guard_marker_impl,
 )
+from mms_session_assets import resolve_local_hooks_dir as _resolve_local_hooks_dir_impl
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
@@ -1161,21 +1162,8 @@ _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").s
 _AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
 _LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
 def _resolve_local_hooks_dir(module_file=None):
-    module_dir = os.path.dirname(os.path.abspath(module_file or __file__))
-    parts = module_dir.split(os.sep)
-    if ".worktrees" in parts:
-        idx = parts.index(".worktrees")
-        canonical_root = os.sep.join(parts[:idx]) or os.sep
-        canonical_hooks = os.path.join(canonical_root, "hooks")
-        required_hooks = (
-            "nsr-codex-hook.sh",
-            "xmem-session-start-hook.sh",
-            "xmem-session-end-hook.sh",
-            "xmem-gateway-hook.sh",
-        )
-        if all(os.path.isfile(os.path.join(canonical_hooks, name)) for name in required_hooks):
-            return canonical_hooks
-    return os.path.join(module_dir, "hooks")
+    """Compatibility wrapper for local hook directory resolution."""
+    return _resolve_local_hooks_dir_impl(module_file or __file__)
 
 
 _LOCAL_HOOKS_DIR = _resolve_local_hooks_dir()
