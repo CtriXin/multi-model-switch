@@ -142,6 +142,22 @@ from mms_runtime_home import (
     runtime_net_mode as _runtime_net_mode_impl,
     validate_home_context_or_exit as _validate_home_context_or_exit_impl,
 )
+from mms_runtime_network import (
+    CLAUDE_NO_PROXY_TOKENS as _CLAUDE_NO_PROXY_TOKENS,
+    CLAUDE_PROXY_GUARD_TARGETS as _CLAUDE_PROXY_GUARD_TARGETS,
+    apply_proxy_env as _apply_proxy_env_impl,
+    apply_runtime_network_profile as _apply_runtime_network_profile_impl,
+    base_claude_network_guard as _base_claude_network_guard_impl,
+    build_claude_network_guard as _build_claude_network_guard_impl,
+    check_proxy_connectivity_or_exit as _check_proxy_connectivity_or_exit_impl,
+    claude_network_guard_cache_key as _claude_network_guard_cache_key_impl,
+    claude_no_proxy_conflicts as _claude_no_proxy_conflicts_impl,
+    enforce_claude_network_guard_or_exit as _enforce_claude_network_guard_or_exit_impl,
+    get_claude_network_guard_preview as _get_claude_network_guard_preview_impl,
+    proxy_dns_mode as _proxy_dns_mode_impl,
+    run_proxy_probe as _run_proxy_probe_impl,
+    split_no_proxy_values as _split_no_proxy_values_impl,
+)
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
@@ -1025,145 +1041,52 @@ def _prepare_oauth_home_context(runtime, env, cli_name):
 
 
 def _apply_proxy_env(env, proxy_url, no_proxy=""):
-    proxy_url = str(proxy_url or "").strip()
-    no_proxy = str(no_proxy or "").strip()
-    if not proxy_url:
-        return env
-    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-        env[key] = proxy_url
-    for key in ("NO_PROXY", "no_proxy"):
-        env[key] = no_proxy
-    return env
-
-
-_CLAUDE_PROXY_GUARD_TARGETS = [
-    ("api", "https://api.anthropic.com"),
-    ("site", "https://claude.ai"),
-    ("auth", "https://anthropic.auth0.com"),
-]
-_CLAUDE_NO_PROXY_TOKENS = (
-    "*",
-    "anthropic.com",
-    "api.anthropic.com",
-    "claude.ai",
-    "claude.com",
-    "clau.de",
-    "anthropic.auth0.com",
-)
+    """Compatibility wrapper for applying proxy env values."""
+    return _apply_proxy_env_impl(env, proxy_url, no_proxy=no_proxy)
 
 
 def _proxy_dns_mode(proxy_url):
-    proxy_url = str(proxy_url or "").strip()
-    if not proxy_url:
-        return "direct"
-    try:
-        scheme = (urlsplit(proxy_url).scheme or "").lower()
-    except Exception:
-        scheme = ""
-    if scheme == "socks5h":
-        return "remote"
-    if scheme == "socks5":
-        return "local-risk"
-    if scheme in {"http", "https"}:
-        return "proxy-likely"
-    return scheme or "proxy"
+    """Compatibility wrapper for proxy DNS mode classification."""
+    return _proxy_dns_mode_impl(proxy_url)
 
 
 def _split_no_proxy_values(no_proxy):
-    raw = str(no_proxy or "").strip()
-    if not raw:
-        return []
-    return [item.strip().lower() for item in raw.split(",") if item.strip()]
+    """Compatibility wrapper for NO_PROXY token splitting."""
+    return _split_no_proxy_values_impl(no_proxy)
 
 
 def _claude_no_proxy_conflicts(no_proxy):
-    values = _split_no_proxy_values(no_proxy)
-    conflicts = []
-    for item in values:
-        normalized = item.lstrip(".")
-        if normalized in _CLAUDE_NO_PROXY_TOKENS:
-            conflicts.append(item)
-            continue
-        for token in _CLAUDE_NO_PROXY_TOKENS:
-            if token == "*":
-                continue
-            if normalized == token or normalized.endswith(f".{token}"):
-                conflicts.append(item)
-                break
-    return sorted(set(conflicts))
+    """Compatibility wrapper for Claude NO_PROXY conflict detection."""
+    return _claude_no_proxy_conflicts_impl(
+        no_proxy,
+        no_proxy_tokens=_CLAUDE_NO_PROXY_TOKENS,
+    )
 
 
 def _run_proxy_probe(proxy_url, target_url, *, no_proxy="", force_ipv4=True, resolve_ip=False):
-    proxy_url = str(proxy_url or "").strip()
-    if _fake_upstream_enabled():
-        return _fake_proxy_probe(
-            target_url,
-            proxy_url=proxy_url,
-            no_proxy=no_proxy,
-            force_ipv4=force_ipv4,
-            resolve_ip=resolve_ip,
-        )
-    curl_bin = shutil.which("curl")
-    if not curl_bin:
-        return {"ok": False, "detail": "curl missing", "http_code": "", "body": ""}
-    cmd = [
-        curl_bin,
-        *(["-4"] if force_ipv4 else []),
-        "--silent",
-        "--show-error",
-        "--location",
-        "--max-time",
-        "8",
-        "--proxy",
+    """Compatibility wrapper for proxy reachability probes."""
+    return _run_proxy_probe_impl(
         proxy_url,
         target_url,
-    ]
-    if resolve_ip:
-        cmd.extend(["--output", "-"])
-    else:
-        cmd.extend(["--head", "--output", "/dev/null", "--write-out", "%{http_code}"])
-    if str(no_proxy or "").strip():
-        cmd.extend(["--noproxy", str(no_proxy).strip()])
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    body = str(result.stdout or "").strip()
-    http_code = body if not resolve_ip else ""
-    detail = str(result.stderr or "").strip()
-    ok = result.returncode == 0
-    if not resolve_ip:
-        ok = ok and bool(http_code) and http_code not in {"000", "407"}
-        if http_code and http_code not in {"000"}:
-            detail = f"HTTP {http_code}" + (f" · {detail}" if detail else "")
-    return {
-        "ok": ok,
-        "detail": detail[:200] + ("..." if len(detail) > 200 else ""),
-        "http_code": http_code,
-        "body": body[:200],
-    }
+        no_proxy=no_proxy,
+        force_ipv4=force_ipv4,
+        resolve_ip=resolve_ip,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+        fake_proxy_probe_fn=_fake_proxy_probe,
+    )
 
 
 def _base_claude_network_guard(runtime, *, require_proxy=False):
-    runtime = dict(runtime or {})
-    proxy_url = str(runtime.get("proxy") or "").strip()
-    no_proxy = str(runtime.get("no_proxy") or "").strip()
-    force_ipv4 = bool(_runtime_force_ipv4(runtime))
-    dns_mode = _proxy_dns_mode(proxy_url)
-    fake_enabled = bool(_fake_upstream_enabled())
-    return {
-        "proxy_required": bool(require_proxy),
-        "proxy_present": bool(proxy_url),
-        "proxy_fingerprint": _proxy_fingerprint(proxy_url),
-        "dns_mode": "fake-local" if fake_enabled else dns_mode,
-        "force_ipv4": force_ipv4,
-        "no_proxy": no_proxy,
-        "no_proxy_conflicts": _claude_no_proxy_conflicts(no_proxy),
-        "targets": [],
-        "ipv4_egress": "-",
-        "ipv6_egress": "blocked" if force_ipv4 else "unknown",
-        "status": "ok",
-        "block_reason": "",
-        "fake_upstream": fake_enabled,
-        "proxy_validation": "skipped_fake" if fake_enabled else "pending",
-    }
+    """Compatibility wrapper for Claude network guard base payloads."""
+    return _base_claude_network_guard_impl(
+        runtime,
+        require_proxy=require_proxy,
+        runtime_force_ipv4_fn=_runtime_force_ipv4,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+        proxy_fingerprint_fn=_proxy_fingerprint,
+        proxy_dns_mode_fn=_proxy_dns_mode,
+        claude_no_proxy_conflicts_fn=_claude_no_proxy_conflicts,
+    )
 
 
 def _claude_bypass_requires_proxy(runtime):
@@ -1193,131 +1116,54 @@ def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
 
 
 def _claude_network_guard_cache_key(runtime, require_proxy):
-    runtime = dict(runtime or {})
-    return (
-        str(runtime.get("id") or runtime.get("name") or "").strip(),
-        str(runtime.get("proxy") or "").strip(),
-        str(runtime.get("no_proxy") or "").strip(),
-        bool(_runtime_force_ipv4(runtime)),
-        bool(require_proxy),
-        bool(_fake_upstream_enabled()),
+    """Compatibility wrapper for Claude network guard cache keys."""
+    return _claude_network_guard_cache_key_impl(
+        runtime,
+        require_proxy,
+        runtime_force_ipv4_fn=_runtime_force_ipv4,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
     )
 
 
 def get_claude_network_guard_preview(runtime, *, require_proxy=False):
-    cache_key = _claude_network_guard_cache_key(runtime, require_proxy)
-    cached = _CLAUDE_NETWORK_GUARD_CACHE.get(cache_key)
-    now = perf_counter()
-    if cached and now - float(cached.get("ts", 0.0) or 0.0) < _CLAUDE_NETWORK_GUARD_TTL_SEC:
-        return dict(cached.get("guard") or {})
-    return _base_claude_network_guard(runtime, require_proxy=require_proxy)
+    """Compatibility wrapper for cached Claude network guard previews."""
+    return _get_claude_network_guard_preview_impl(
+        runtime,
+        require_proxy=require_proxy,
+        cache=_CLAUDE_NETWORK_GUARD_CACHE,
+        ttl_sec=_CLAUDE_NETWORK_GUARD_TTL_SEC,
+        perf_counter_fn=perf_counter,
+        cache_key_fn=_claude_network_guard_cache_key,
+        base_guard_fn=_base_claude_network_guard,
+    )
 
 
 def build_claude_network_guard(runtime, *, require_proxy=False):
-    runtime = dict(runtime or {})
-    proxy_url = str(runtime.get("proxy") or "").strip()
-    no_proxy = str(runtime.get("no_proxy") or "").strip()
-    force_ipv4 = bool(_runtime_force_ipv4(runtime))
-    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
-    cache_key = _claude_network_guard_cache_key(runtime, require_proxy)
-    cached = _CLAUDE_NETWORK_GUARD_CACHE.get(cache_key)
-    now = perf_counter()
-    if cached and now - float(cached.get("ts", 0.0) or 0.0) < _CLAUDE_NETWORK_GUARD_TTL_SEC:
-        return dict(cached.get("guard") or {})
-    guard = _base_claude_network_guard(runtime, require_proxy=require_proxy)
-    if require_proxy and not proxy_url:
-        guard["status"] = "blocked"
-        if auth_mode == "oauth":
-            guard["block_reason"] = "BYPASS 启动要求当前 Claude 官方账号必须配置 proxy"
-        else:
-            guard["block_reason"] = "敏感 Claude provider 的 BYPASS 启动要求当前通道配置 proxy"
-        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
-        return guard
-    if guard["no_proxy_conflicts"]:
-        guard["status"] = "blocked"
-        guard["block_reason"] = "NO_PROXY 命中了 Claude 域名，存在直连泄漏风险"
-        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
-        return guard
-    if not proxy_url:
-        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
-        return guard
-    if _fake_upstream_enabled():
-        guard["proxy_validation"] = "skipped_fake"
-        guard["block_reason"] = "fake upstream 模式下已跳过真实 proxy / egress 校验"
-        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
-        return guard
-
-    failed_targets = []
-    for label, url in _CLAUDE_PROXY_GUARD_TARGETS:
-        probe = _run_proxy_probe(
-            proxy_url or "http://127.0.0.1:0",
-            url,
-            no_proxy=no_proxy,
-            force_ipv4=force_ipv4,
-        )
-        guard["targets"].append(
-            {
-                "label": label,
-                "url": url,
-                "ok": bool(probe.get("ok")),
-                "detail": probe.get("detail", ""),
-            }
-        )
-        if not probe.get("ok"):
-            failed_targets.append(label)
-
-    ipv4_probe = _run_proxy_probe(
-        proxy_url or "http://127.0.0.1:0",
-        "https://api4.ipify.org",
-        no_proxy=no_proxy,
-        force_ipv4=True,
-        resolve_ip=True,
+    """Compatibility wrapper for Claude network guard validation."""
+    return _build_claude_network_guard_impl(
+        runtime,
+        require_proxy=require_proxy,
+        cache=_CLAUDE_NETWORK_GUARD_CACHE,
+        ttl_sec=_CLAUDE_NETWORK_GUARD_TTL_SEC,
+        perf_counter_fn=perf_counter,
+        cache_key_fn=_claude_network_guard_cache_key,
+        base_guard_fn=_base_claude_network_guard,
+        runtime_force_ipv4_fn=_runtime_force_ipv4,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+        run_proxy_probe_fn=_run_proxy_probe,
+        guard_targets=_CLAUDE_PROXY_GUARD_TARGETS,
     )
-    if ipv4_probe.get("ok") and ipv4_probe.get("body"):
-        guard["ipv4_egress"] = ipv4_probe["body"]
-    if not force_ipv4:
-        ipv6_probe = _run_proxy_probe(
-            proxy_url or "http://127.0.0.1:0",
-            "https://api6.ipify.org",
-            no_proxy=no_proxy,
-            force_ipv4=False,
-            resolve_ip=True,
-        )
-        if ipv6_probe.get("ok") and ipv6_probe.get("body"):
-            guard["ipv6_egress"] = ipv6_probe["body"]
-
-    if failed_targets:
-        guard["status"] = "blocked"
-        guard["block_reason"] = f"Claude 关键域名代理检测失败: {', '.join(failed_targets)}"
-    elif guard.get("dns_mode") == "local-risk":
-        guard["status"] = "watch"
-        guard["block_reason"] = "当前 proxy 为 socks5，本地 DNS 解析有风险"
-    else:
-        guard["proxy_validation"] = "validated"
-    _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
-    return guard
 
 
 def _enforce_claude_network_guard_or_exit(runtime, *, require_proxy=False):
-    guard = build_claude_network_guard(runtime, require_proxy=require_proxy)
-    runtime["_network_guard"] = guard
-    if guard.get("status") != "blocked":
-        return guard
-    detail_lines = []
-    if guard.get("block_reason"):
-        detail_lines.append(str(guard["block_reason"]))
-    for item in guard.get("targets") or []:
-        if item.get("ok"):
-            continue
-        detail = str(item.get("detail") or "").strip()
-        detail_lines.append(
-            f"{item.get('label')}: {detail}" if detail else str(item.get("label") or "target")
-        )
-    console.print(
-        f"[red]{runtime.get('id') or runtime.get('name') or 'Claude runtime'} 网络保护阻止启动[/red]"
-        + (f"\n[dim]{' | '.join(detail_lines)}[/dim]" if detail_lines else "")
+    """Compatibility wrapper for enforced Claude network guard checks."""
+    return _enforce_claude_network_guard_or_exit_impl(
+        runtime,
+        require_proxy=require_proxy,
+        build_network_guard_fn=build_claude_network_guard,
+        console=console,
+        exit_fn=sys.exit,
     )
-    sys.exit(1)
 
 
 def _validate_timezone_or_exit(timezone_name, *, label="account"):
@@ -1333,150 +1179,35 @@ def _validate_timezone_or_exit(timezone_name, *, label="account"):
 
 
 def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account", force_ipv4=True):
-    proxy_url = str(proxy_url or "").strip()
-    if not proxy_url:
-        return
-    if _fake_upstream_enabled():
-        probe = _fake_proxy_probe(
-            "https://api.anthropic.com",
-            proxy_url=proxy_url,
-            no_proxy=no_proxy,
-            force_ipv4=force_ipv4,
-            resolve_ip=False,
-        )
-        if probe.get("ok"):
-            return
-        detail = str(probe.get("detail") or probe.get("http_code") or "fake upstream")
-        console.print(
-            f"[red]{label} 配置的 proxy 不可用，已阻止启动[/red]"
-            + (f"\n[dim]{detail}[/dim]" if detail else "")
-        )
-        sys.exit(1)
-    curl_bin = shutil.which("curl")
-    if not curl_bin:
-        console.print(f"[red]{label} 要求强制 proxy，但当前系统没有 curl，无法做启动前连通性检查[/red]")
-        sys.exit(1)
-    cmd = [
-        curl_bin,
-        *(["-4"] if force_ipv4 else []),
-        "--silent",
-        "--show-error",
-        "--head",
-        "--location",
-        "--max-time",
-        "8",
-        "--output",
-        "/dev/null",
-        "--write-out",
-        "%{http_code}",
-        "--proxy",
+    """Compatibility wrapper for startup proxy connectivity checks."""
+    return _check_proxy_connectivity_or_exit_impl(
         proxy_url,
-        "https://api.anthropic.com",
-    ]
-    if str(no_proxy or "").strip():
-        cmd.extend(["--noproxy", str(no_proxy).strip()])
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    http_code = str(result.stdout or "").strip()
-    if result.returncode != 0 or not http_code or http_code in {"000", "407"}:
-        detail = (result.stderr or "").strip()
-        if http_code and http_code not in {"000"}:
-            detail = f"HTTP {http_code}" + (f" · {detail}" if detail else "")
-        if len(detail) > 200:
-            detail = detail[:200] + "..."
-        console.print(
-            f"[red]{label} 配置的 proxy 不可用，已阻止启动[/red]"
-            + (f"\n[dim]{detail}[/dim]" if detail else "")
-        )
-        sys.exit(1)
+        no_proxy,
+        label=label,
+        force_ipv4=force_ipv4,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+        fake_proxy_probe_fn=_fake_proxy_probe,
+        console=console,
+        exit_fn=sys.exit,
+    )
 
 
 def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
-    env = env if isinstance(env, dict) else {}
-    runtime = runtime if isinstance(runtime, dict) else {}
-
-    timezone_name = _validate_timezone_or_exit(
-        runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
-        label=str(runtime.get("id") or runtime.get("name") or runtime.get("cli") or "runtime"),
+    """Compatibility wrapper for runtime network env projection."""
+    return _apply_runtime_network_profile_impl(
+        env,
+        runtime,
+        validate_proxy=validate_proxy,
+        validate_timezone_or_exit_fn=_validate_timezone_or_exit,
+        apply_runtime_locale_profile_fn=_apply_runtime_locale_profile,
+        apply_runtime_ip_stack_profile_fn=_apply_runtime_ip_stack_profile,
+        check_proxy_connectivity_or_exit_fn=_check_proxy_connectivity_or_exit,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+        fake_upstream_status_payload_fn=_fake_upstream_status_payload,
+        proxy_fingerprint_fn=_proxy_fingerprint,
+        runtime_force_ipv4_fn=_runtime_force_ipv4,
+        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
     )
-    if timezone_name:
-        env["TZ"] = timezone_name
-    else:
-        env.pop("TZ", None)
-
-    _apply_runtime_locale_profile(env, runtime)
-    _apply_runtime_ip_stack_profile(env, runtime)
-
-    proxy_url = str(runtime.get("proxy") or "").strip()
-    no_proxy = str(runtime.get("no_proxy") or "").strip()
-    runtime_label = str(runtime.get("id") or runtime.get("name") or runtime.get("cli") or "runtime")
-    proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
-    no_proxy_keys = ("NO_PROXY", "no_proxy")
-    fake_state_keys = (
-        "MMS_FAKE_UPSTREAM_MODE",
-        "MMS_FAKE_UPSTREAM_PROXY",
-        "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
-        "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
-    )
-    ca_keys = ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE")
-
-    if proxy_url and validate_proxy:
-        _check_proxy_connectivity_or_exit(
-            proxy_url,
-            no_proxy,
-            label=runtime_label,
-            force_ipv4=bool(_runtime_force_ipv4(runtime)),
-        )
-
-    if _fake_upstream_enabled():
-        fake_payload = _fake_upstream_status_payload()
-        fake_proxy_url = str(fake_payload.get("proxy_url") or "").strip()
-        if fake_proxy_url:
-            for key in proxy_keys:
-                env[key] = fake_proxy_url
-            env["MMS_FAKE_UPSTREAM_PROXY"] = fake_proxy_url
-        else:
-            for key in proxy_keys:
-                env.pop(key, None)
-            env.pop("MMS_FAKE_UPSTREAM_PROXY", None)
-        env["MMS_FAKE_UPSTREAM_MODE"] = "upstream-proxy"
-        for key in no_proxy_keys:
-            env[key] = "127.0.0.1,localhost,::1"
-        if proxy_url:
-            env["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] = _proxy_fingerprint(proxy_url)
-        else:
-            env.pop("MMS_FAKE_UPSTREAM_ORIGINAL_PROXY", None)
-        if no_proxy:
-            env["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] = no_proxy
-        else:
-            env.pop("MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY", None)
-        ca_cert_path = str(fake_payload.get("ca_cert_path") or "").strip()
-        for key in ca_keys:
-            if ca_cert_path:
-                env[key] = ca_cert_path
-            else:
-                env.pop(key, None)
-        return env
-
-    for key in fake_state_keys:
-        env.pop(key, None)
-    for key in ca_keys:
-        env.pop(key, None)
-
-    if proxy_url:
-        for key in proxy_keys:
-            env[key] = proxy_url
-    else:
-        for key in proxy_keys:
-            env.pop(key, None)
-
-    if no_proxy:
-        for key in no_proxy_keys:
-            env[key] = no_proxy
-    else:
-        for key in no_proxy_keys:
-            env.pop(key, None)
-
-    return env
 
 
 def _apply_runtime_ip_stack_profile(env, runtime):
