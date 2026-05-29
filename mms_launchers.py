@@ -6379,13 +6379,10 @@ def _codex_bounded_resume_entries():
 
 
 def _link_shared_dotfiles(session_home):
-    """Expose user-level Git/SSH config inside isolated HOME sessions."""
-    real_home = _real_user_home()
-    for dot_name in (".ssh", ".gitconfig", ".gitignore_global"):
-        src = os.path.join(real_home, dot_name)
-        dst = os.path.join(session_home, dot_name)
-        if os.path.exists(src) and not os.path.exists(dst) and not os.path.islink(dst):
-            os.symlink(src, dst)
+    """Compatibility wrapper for shared dotfile links in session homes."""
+    from mms_session_assets import link_shared_dotfiles
+
+    return link_shared_dotfiles(session_home)
 
 
 def _link_real_local_bin(session_home):
