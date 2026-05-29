@@ -82,8 +82,8 @@ outside `mms_launchers.py`, but `mms_launchers._build_claude_session_settings`,
 remain the compatibility wrappers. Template loading, settings merge helpers,
 settings inheritance, managed hook configuration, hook/MCP allowlists, disabled
 session-surface filtering, managed snapshot sanitization, session-managed MCP
-discovery/merging, Claude settings reads, session-local writes, and OAuth
-execution-surface stripping must stay monkeypatch-compatible and
+discovery/merging, Claude settings reads, session-local repair writes, and
+OAuth execution-surface stripping must stay monkeypatch-compatible and
 behavior-preserving during module extraction.
 
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：

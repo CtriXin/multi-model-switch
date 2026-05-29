@@ -2406,45 +2406,10 @@ def repair_real_claude_settings_for_startup():
 
 
 def repair_current_session_claude_settings(session_claude_dir):
-    import json as _json
+    """Compatibility wrapper for session-local Claude settings repair."""
+    from mms_claude_settings import repair_current_session_claude_settings as _repair_current
 
-    os.makedirs(session_claude_dir, exist_ok=True)
-    session_path = os.path.join(session_claude_dir, "settings.json")
-    current = {}
-    if os.path.exists(session_path):
-        try:
-            with open(session_path, encoding="utf-8") as f:
-                loaded = _json.load(f)
-            if isinstance(loaded, dict):
-                current = loaded
-        except Exception:
-            current = {}
-    repaired = _merge_claude_settings(current, _load_mms_claude_settings_template())
-    with locked_state_file(session_path):
-        atomic_write_json(session_path, repaired, mode=0o600)
-    return repaired
-
-
-def repair_real_claude_settings_for_startup():
-    return _repair_real_claude_settings()
-
-
-def repair_current_session_claude_settings(session_claude_dir):
-    os.makedirs(session_claude_dir, exist_ok=True)
-    session_path = os.path.join(session_claude_dir, "settings.json")
-    current = {}
-    if os.path.exists(session_path):
-        try:
-            with open(session_path, encoding="utf-8") as f:
-                loaded = json.load(f)
-            if isinstance(loaded, dict):
-                current = loaded
-        except Exception:
-            current = {}
-    repaired = _merge_claude_settings(current, _load_mms_claude_settings_template())
-    with locked_state_file(session_path):
-        atomic_write_json(session_path, repaired, mode=0o600)
-    return repaired
+    return _repair_current(session_claude_dir)
 
 
 def _strip_agent_im_hooks(hooks_data):

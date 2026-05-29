@@ -371,6 +371,29 @@ def write_global_claude_snapshot(snapshot_data):
         _launchers.atomic_write_json(snapshot_path, snapshot_data, mode=0o600)
 
 
+def repair_current_session_claude_settings(session_claude_dir):
+    import mms_launchers as _launchers
+
+    os.makedirs(session_claude_dir, exist_ok=True)
+    session_path = os.path.join(session_claude_dir, "settings.json")
+    current = {}
+    if os.path.exists(session_path):
+        try:
+            with open(session_path, encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                current = loaded
+        except Exception:
+            current = {}
+    repaired = _launchers._merge_claude_settings(
+        current,
+        _launchers._load_mms_claude_settings_template(),
+    )
+    with _launchers.locked_state_file(session_path):
+        _launchers.atomic_write_json(session_path, repaired, mode=0o600)
+    return repaired
+
+
 def merge_claude_settings(base_settings, template_settings):
     import mms_launchers as _launchers
 
