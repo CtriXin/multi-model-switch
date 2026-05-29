@@ -1828,12 +1828,6 @@ def _shell_quote(value):
     return shell_quote(value)
 
 
-def _parse_shell_value(raw):
-    from mms_command_tools import parse_shell_value
-
-    return parse_shell_value(raw)
-
-
 def _load_env_file(path):
     from mms_command_tools import load_env_file
 
@@ -2016,19 +2010,6 @@ def _record_usage(runtime, cli_name, model_info):
     )
 
 
-def _record_scene_usage(scene_name, cli_name, model_info):
-    from mms_command_tools import record_scene_usage
-
-    return record_scene_usage(
-        scene_name,
-        cli_name,
-        model_info,
-        update_usage_stats=_update_usage_stats,
-        iso_now=_iso_now,
-        resolve_model_name=_resolve_model_name,
-    )
-
-
 def _get_scene_usage():
     from mms_command_tools import get_scene_usage
 
@@ -2110,12 +2091,6 @@ def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
         trace_runtime_account_id=_trace_runtime_account_id,
         trace_runtime_bridge=_trace_runtime_bridge,
     )
-
-
-def _trace_source_for(field, value):
-    from mms_command_tools import trace_source_for
-
-    return trace_source_for(field, value, _trace_overrides)
 
 
 def _print_trace(cli_name, model_info, runtime):
@@ -2301,12 +2276,6 @@ def _provider_has_configured_base_url(provider):
     return provider_has_configured_base_url(provider)
 
 
-def _provider_id_variants(provider_id):
-    from mms_command_tools import provider_id_variants
-
-    return provider_id_variants(provider_id)
-
-
 def _resolve_config_provider_id(provider_defs, provider_id):
     from mms_command_tools import resolve_config_provider_id
 
@@ -2317,12 +2286,6 @@ def _config_truthy(value, default=False):
     from mms_command_tools import config_truthy
 
     return config_truthy(value, default=default)
-
-
-def _vision_sidecar_model_candidates_for_provider(provider_id):
-    from mms_command_tools import vision_sidecar_model_candidates_for_provider
-
-    return vision_sidecar_model_candidates_for_provider(provider_id)
 
 
 def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", explicit_provider_id=""):
@@ -2695,12 +2658,6 @@ def _latest_rescue_hot_fallback_event():
     from mms_command_tools import latest_rescue_hot_fallback_event
 
     return latest_rescue_hot_fallback_event(get_recent_events=get_recent_events)
-
-
-def _format_rescue_hot_fallback_event(event):
-    from mms_command_tools import format_rescue_hot_fallback_event
-
-    return format_rescue_hot_fallback_event(event)
 
 
 def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None, hot_fallback_enabled=False):
@@ -3539,12 +3496,6 @@ def _model_validation_findings(provider, probe):
     return model_validation_findings(provider, probe, provider_label=_provider_label)
 
 
-def _rank_recovery_actions(actions):
-    from mms_command_tools import rank_recovery_actions
-
-    return rank_recovery_actions(actions)
-
-
 def _build_model_recovery_actions(cfg, provider, probe):
     from mms_command_tools import build_model_recovery_actions
 
@@ -3800,17 +3751,6 @@ def _model_matches_cli_family(cli_name, model_name):
     )
 
 
-def _models_for_cli_family(cli_name, models):
-    from mms_command_tools import models_for_cli_family
-
-    return models_for_cli_family(
-        cli_name,
-        models,
-        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
-        model_matches_cli_family=lambda name, model, *, cli_model_family_hints: _model_matches_cli_family(name, model),
-    )
-
-
 def _model_matches_account_cli(cli_name, model_name):
     from mms_command_tools import model_matches_account_cli
 
@@ -3867,22 +3807,6 @@ def _provider_effective_models(provider, cached_models, cfg=None):
         cfg,
         schedule_probe_refresh=_schedule_probe_refresh,
         apply_provider_model_patch=_apply_provider_model_patch,
-    )
-
-
-def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models):
-    from mms_command_tools import all_provider_models_for_cli
-
-    return all_provider_models_for_cli(
-        cfg,
-        cli_name,
-        default_provider,
-        default_models,
-        provider_candidates=_provider_candidates,
-        provider_has_configured_base_url=_provider_has_configured_base_url,
-        provider_effective_models=_provider_effective_models,
-        mms_model_visible=_mms_model_visible,
-        provider_supports_model_for_cli=_provider_supports_model_for_cli,
     )
 
 
@@ -4027,16 +3951,6 @@ def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, acc
         resolve_provider_context=resolve_provider_context, resolve_provider_for_cli=_resolve_provider_for_cli,
         probe_models=_probe_models, managed_oauth_clis=MMS_MANAGED_OAUTH_CLIS,
         resolve_account_context=resolve_account_context,
-    )
-
-
-def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, provider_id=None):
-    from mms_command_tools import resolve_provider_runtime
-
-    return resolve_provider_runtime(
-        cfg, cli_name, default_provider, default_models, provider_id=provider_id,
-        resolve_provider_context=resolve_provider_context, resolve_provider_for_cli=_resolve_provider_for_cli,
-        probe_models=_probe_models,
     )
 
 
