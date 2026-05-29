@@ -854,6 +854,38 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert "sk-super-secret-value" not in encoded
 
 
+def test_config_web_preview_snapshot_hydrates_channels_from_latest_bundle(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    apply_result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        payload,
+        config_path=str(config_path),
+    )
+
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "default", "name": "Default Gateway"}], "provider": {"default": "default"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+    provider = snapshot["providers"][0]
+
+    assert apply_result["ok"] is True
+    assert snapshot["provider_default"] == "demo"
+    assert [item["id"] for item in snapshot["providers"]] == ["demo"]
+    assert provider["name"] == "Demo Gateway"
+    assert provider["openai_base_url"] == "https://demo.example/v1"
+    assert provider["anthropic_base_url"] == "https://demo.example/v1"
+    assert provider["has_api_key"] is True
+    assert provider["fallback_models"] == ["gpt-5.5", "qwen3.6-plus"]
+    assert [row["id"] for row in provider["models"]] == ["gpt-5.5", "qwen3.6-plus"]
+    assert "sk-super-secret-value" not in encoded
+
+
 def test_config_web_registry_v2_apply_surfaces_runtime_not_ready_without_keys(tmp_path):
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"

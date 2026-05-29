@@ -218,6 +218,144 @@ def _consumer_bundle_status_for_snapshot(config_path: str = "", *, command_name:
         }
 
 
+def _is_preview_config_root(config_path: str = "", *, command_name: str = "mms") -> bool:
+    config_root = _config_root_for_snapshot(config_path)
+    if not config_root:
+        return False
+    try:
+        from mms_state_io import mms_config_root_status
+
+        return mms_config_root_status(command=command_name, config_dir=config_root).get("mode") == "preview"
+    except Exception:
+        return False
+
+
+def _is_placeholder_provider_config(cfg: dict[str, Any]) -> bool:
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    if not providers:
+        return True
+    if len(providers) != 1 or not isinstance(providers[0], dict):
+        return False
+    provider = providers[0]
+    provider_id = _safe_text(provider.get("id"))
+    name = _safe_text(provider.get("name"))
+    if provider_id not in {"default", "local", ""}:
+        return False
+    if name and name not in {"Default Gateway", "Default", "Local"}:
+        return False
+    configured_models = (
+        _normalize_model_list(provider.get("fallback_models"))
+        or _normalize_model_list(provider.get("extra_models"))
+        or _normalize_model_list(provider.get("models"))
+    )
+    configured_urls = _safe_text(
+        provider.get("openai_base_url")
+        or provider.get("anthropic_base_url")
+        or provider.get("default_openai_base_url")
+        or provider.get("default_anthropic_base_url")
+        or provider.get("base_url")
+    )
+    configured_key = _safe_text(provider.get("api_key") or provider.get("openai_api_key") or provider.get("anthropic_api_key"))
+    return not configured_models and not configured_urls and not configured_key
+
+
+def _read_json_from_verified_file(verified_files: dict[str, Any], key: str) -> dict[str, Any]:
+    row = verified_files.get(key) if isinstance(verified_files.get(key), dict) else {}
+    path = _safe_text(row.get("path"))
+    if not path:
+        return {}
+    return _load_json_file(path)
+
+
+def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any]) -> dict[str, Any]:
+    profiles_payload = _read_json_from_verified_file(verified_files, "profile")
+    router_payload = _read_json_from_verified_file(verified_files, "router")
+    profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), dict) else {}
+    routes = router_payload.get("routes") if isinstance(router_payload.get("routes"), dict) else {}
+    provider_models: dict[str, set[str]] = {}
+    provider_routes: dict[str, dict[str, Any]] = {}
+    for route_model, route in routes.items():
+        if not isinstance(route, dict):
+            continue
+        leaves = []
+        primary = route.get("primary")
+        if isinstance(primary, dict):
+            leaves.append(primary)
+        leaves.extend(item for item in (route.get("fallbacks") or []) if isinstance(item, dict))
+        for leaf in leaves:
+            provider_id = _safe_text(leaf.get("provider_id"))
+            if not provider_id:
+                continue
+            model_id = _safe_text(leaf.get("model") or leaf.get("model_id") or route_model)
+            if model_id:
+                provider_models.setdefault(provider_id, set()).add(model_id)
+            info = provider_routes.setdefault(provider_id, {"openai_base_url": "", "anthropic_base_url": "", "has_api_key": False})
+            if not info["openai_base_url"]:
+                info["openai_base_url"] = _safe_text(leaf.get("openai_base_url"))
+            if not info["anthropic_base_url"]:
+                info["anthropic_base_url"] = _safe_text(leaf.get("anthropic_base_url"))
+            if _safe_text(leaf.get("api_key")):
+                info["has_api_key"] = True
+
+    provider_ids = set(profiles.keys()) | set(provider_models.keys())
+    providers: list[dict[str, Any]] = []
+    for provider_id in sorted(provider_ids):
+        profile = profiles.get(provider_id) if isinstance(profiles.get(provider_id), dict) else {}
+        route_info = provider_routes.get(provider_id, {})
+        providers.append(
+            {
+                "id": provider_id,
+                "name": _safe_text(profile.get("name") or provider_id),
+                "enabled": profile.get("enabled", True) is not False,
+                "role": _safe_text(profile.get("role") or "auto"),
+                "priority": int(profile.get("priority") or 0),
+                "models_endpoint": _safe_text(profile.get("models_endpoint") or "manual"),
+                "protocols": _normalize_model_list(profile.get("protocols")),
+                "supported_clis": _normalize_model_list(profile.get("supported_clis")),
+                "openai_base_url": _safe_text(route_info.get("openai_base_url")),
+                "anthropic_base_url": _safe_text(route_info.get("anthropic_base_url")),
+                "has_api_key": bool(route_info.get("has_api_key")),
+                "fallback_models": sorted(provider_models.get(provider_id, set()), key=str.lower),
+                "extra_models": [],
+                "hidden_models": [],
+            }
+        )
+    role_rank = {"primary": 0, "auto": 1, "fallback": 2}
+    providers.sort(key=lambda item: (role_rank.get(str(item.get("role") or "auto"), 1), -int(item.get("priority") or 0), str(item.get("id") or "")))
+    return {"providers": providers, "provider": {"default": providers[0]["id"] if providers else ""}}
+
+
+def _hydrate_preview_config_from_latest_bundle(
+    cfg: dict[str, Any],
+    *,
+    config_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    """Preview roots may have no legacy config.toml; hydrate the editor from the verified bundle."""
+    cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
+    if not _is_preview_config_root(config_path, command_name=command_name):
+        return cfg
+    if not _is_placeholder_provider_config(cfg):
+        return cfg
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import verify_approved_bundle
+
+        verified = verify_approved_bundle(config_dir=config_root or None)
+    except Exception:
+        return cfg
+    if not verified.get("verified"):
+        return cfg
+    hydrated = _preview_bundle_config_from_verified_files(verified.get("verified_files") if isinstance(verified.get("verified_files"), dict) else {})
+    if not hydrated.get("providers"):
+        return cfg
+    result = copy.deepcopy(cfg)
+    result["providers"] = hydrated["providers"]
+    result["provider"] = hydrated["provider"]
+    result["_preview_bundle_hydrated"] = True
+    return result
+
+
 def _config_v2_promotion_plan_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
     config_root = _config_root_for_snapshot(config_path)
     try:
@@ -426,7 +564,7 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "openai_base_url_source": "config" if config_openai_base else ("credentials" if credential_openai_base else ""),
         "anthropic_base_url_source": "config" if config_anthropic_base else ("credentials" if credential_anthropic_base else ""),
         "api_key": "",
-        "has_api_key": bool(api_key or creds.get("has_api_key")),
+        "has_api_key": bool(api_key or creds.get("has_api_key") or provider.get("has_api_key")),
         "update_credentials": False,
         "fallback_models": _normalize_model_list(provider.get("fallback_models")),
         "extra_models": _normalize_model_list(provider.get("extra_models")),
@@ -626,6 +764,7 @@ def build_config_snapshot(
 ) -> dict[str, Any]:
     """Return a redacted, UI-friendly config snapshot; never mutates config."""
     cfg = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
+    cfg = _hydrate_preview_config_from_latest_bundle(cfg, config_path=config_path, command_name=command_name)
     providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
     policy_path = _policy_path_for_config(config_path)
     policy_payload = _load_json_file(policy_path)
@@ -1359,8 +1498,10 @@ def build_config_plan(
     config_path: str = "",
     preferences_path: str = "",
     include_secrets: bool = False,
+    command_name: str = "mms",
 ) -> dict[str, Any]:
     current_cfg = copy.deepcopy(current_cfg) if isinstance(current_cfg, dict) else {}
+    current_cfg = _hydrate_preview_config_from_latest_bundle(current_cfg, config_path=config_path, command_name=command_name)
     draft = _extract_draft(payload or {})
     providers_payload = draft.get("providers") if isinstance(draft.get("providers"), list) else []
     existing_by_id = {str(item.get("id") or ""): item for item in current_cfg.get("providers", []) if isinstance(item, dict)}
@@ -1926,7 +2067,7 @@ def apply_registry_v2_preview_plan(
         return {"ok": False, "errors": ["写入预览 DB 前必须勾选确认。"], "status": "blocked"}
     if _safe_text(payload.get("confirm_phrase")) != "写入预览DB":
         return {"ok": False, "errors": ["确认文字必须输入：写入预览DB"], "status": "blocked"}
-    plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, include_secrets=True)
+    plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, include_secrets=True, command_name="mmf")
     if not plan.get("ok"):
         return {
             "ok": False,
@@ -3355,13 +3496,13 @@ class ConfigWebApp:
 
     def plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            return build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+            return build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             result = apply_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
             if result.get("ok"):
-                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
                 self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
             return result
 
@@ -3369,7 +3510,7 @@ class ConfigWebApp:
         with self.lock:
             result = apply_registry_v2_preview_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
             if result.get("ok"):
-                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path, command_name=self.command_name)
                 self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
             return result
 
