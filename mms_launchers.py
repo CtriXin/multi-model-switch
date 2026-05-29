@@ -158,6 +158,35 @@ from mms_runtime_network import (
     run_proxy_probe as _run_proxy_probe_impl,
     split_no_proxy_values as _split_no_proxy_values_impl,
 )
+from mms_session_features import (
+    asset_root_preference as _asset_root_preference_impl,
+    default_gpt_reasoning_effort as _default_gpt_reasoning_effort_impl,
+    is_installed_mms_layout as _is_installed_mms_layout_impl,
+    normalize_agent_pack as _normalize_agent_pack_impl,
+    normalize_caveman_mode as _normalize_caveman_mode_impl,
+    normalize_ecc_mode as _normalize_ecc_mode_impl,
+    normalize_nsr_mode as _normalize_nsr_mode_impl,
+    normalize_reasoning_effort as _normalize_reasoning_effort_impl,
+    normalize_thinking_mode as _normalize_thinking_mode_impl,
+    resolve_agent_browser_root as _resolve_agent_browser_root_impl,
+    resolve_caveman_root as _resolve_caveman_root_impl,
+    resolve_ecc_root as _resolve_ecc_root_impl,
+    resolve_nsr_root as _resolve_nsr_root_impl,
+    resolve_omc_root as _resolve_omc_root_impl,
+    resolve_token_saver_root as _resolve_token_saver_root_impl,
+    resolve_toon_root as _resolve_toon_root_impl,
+    resolve_web_access_root as _resolve_web_access_root_impl,
+    resolve_weber_root as _resolve_weber_root_impl,
+    resolve_xmem_root as _resolve_xmem_root_impl,
+    runtime_agent_pack as _runtime_agent_pack_impl,
+    runtime_caveman_enabled as _runtime_caveman_enabled_impl,
+    runtime_ecc_enabled as _runtime_ecc_enabled_impl,
+    runtime_nsr_enabled as _runtime_nsr_enabled_impl,
+    runtime_omc_enabled as _runtime_omc_enabled_impl,
+    runtime_reasoning_effort as _runtime_reasoning_effort_impl,
+    runtime_thinking_enabled as _runtime_thinking_enabled_impl,
+    runtime_vision_sidecar as _runtime_vision_sidecar_impl,
+)
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
@@ -1833,35 +1862,18 @@ def _caveman_available_for_cli(cli_name):
     return str(cli_name or "").strip() in {"claude", "codex", "opencode", "agy"} and bool(_resolve_caveman_root())
 
 
-def _resolve_nsr_root():
-    candidates = []
-    for key in ("MMS_NSR_ROOT", "NSR_ROOT"):
-        explicit = str(os.environ.get(key) or "").strip()
-        if explicit:
-            candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("nsr")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    nsr_home = str(os.environ.get("NSR_HOME") or "").strip()
-    if nsr_home:
-        candidates.append(os.path.abspath(os.path.expanduser(nsr_home)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
-        _real_user_path("auto-skills", "Non-Stop-Run"),
-        _real_user_path("auto-skills", "shared-skills", "looop.deprecated"),
-    ])
+def _session_feature_root_kwargs():
+    return {
+        "module_file": __file__,
+        "real_user_path_fn": _real_user_path,
+        "asset_root_preference_fn": _asset_root_preference,
+        "environ": os.environ,
+    }
 
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if (
-            os.path.isfile(os.path.join(candidate, "scripts", "codex_hook.py"))
-            and os.path.isfile(os.path.join(candidate, "scripts", "claude_hook.py"))
-        ):
-            return candidate
-    return ""
+
+def _resolve_nsr_root():
+    """Compatibility wrapper for NSR root resolution."""
+    return _resolve_nsr_root_impl(**_session_feature_root_kwargs())
 
 
 def _nsr_available_for_cli(cli_name):
@@ -1873,68 +1885,52 @@ def _nsr_available_for_cli(cli_name):
 
 
 def _normalize_nsr_mode(value, default="enable"):
-    raw = str(value or "").strip().lower()
-    if raw in {"", "inherit", "default", "auto"}:
-        return default if default in {"enable", "disable"} else "enable"
-    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
-        return "enable"
-    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
-        return "disable"
-    return default if default in {"enable", "disable"} else "enable"
+    """Compatibility wrapper for NSR mode normalization."""
+    return _normalize_nsr_mode_impl(value, default=default)
 
 
 def _runtime_nsr_enabled(runtime):
-    return _normalize_nsr_mode((runtime or {}).get("nsr_mode", "enable")) == "enable"
+    """Compatibility wrapper for runtime NSR enablement."""
+    return _runtime_nsr_enabled_impl(runtime, normalize_nsr_mode_fn=_normalize_nsr_mode)
 
 
 def _normalize_caveman_mode(value, default="disable"):
-    raw = str(value or "").strip().lower()
-    if raw in {"", "inherit", "default", "auto"}:
-        return default if default in {"auto", "enable", "disable"} else "disable"
-    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
-        return "enable"
-    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
-        return "disable"
-    return default if default in {"auto", "enable", "disable"} else "disable"
+    """Compatibility wrapper for Caveman mode normalization."""
+    return _normalize_caveman_mode_impl(value, default=default)
 
 
 def _runtime_caveman_enabled(runtime):
-    return _normalize_caveman_mode((runtime or {}).get("caveman_mode", "disable")) == "enable"
+    """Compatibility wrapper for runtime Caveman enablement."""
+    return _runtime_caveman_enabled_impl(runtime, normalize_caveman_mode_fn=_normalize_caveman_mode)
 
 
 def _normalize_thinking_mode(value, default="enable"):
-    raw = str(value or "").strip().lower()
-    if raw in {"", "inherit", "default", "auto"}:
-        return default if default in {"auto", "enable", "disable"} else "enable"
-    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
-        return "enable"
-    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
-        return "disable"
-    return default if default in {"auto", "enable", "disable"} else "enable"
+    """Compatibility wrapper for thinking mode normalization."""
+    return _normalize_thinking_mode_impl(value, default=default)
 
 
 def _runtime_thinking_enabled(runtime):
-    return _normalize_thinking_mode((runtime or {}).get("thinking_mode", "enable")) == "enable"
+    """Compatibility wrapper for runtime thinking enablement."""
+    return _runtime_thinking_enabled_impl(runtime, normalize_thinking_mode_fn=_normalize_thinking_mode)
 
 
 def _normalize_reasoning_effort(value, default="high"):
-    raw = str(value or "").strip().lower()
-    if raw in {"low", "medium", "high", "xhigh"}:
-        return raw
-    return default if default in {"low", "medium", "high", "xhigh"} else "high"
+    """Compatibility wrapper for reasoning effort normalization."""
+    return _normalize_reasoning_effort_impl(value, default=default)
 
 
 def _runtime_reasoning_effort(runtime, default="high"):
-    return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
+    """Compatibility wrapper for runtime reasoning effort."""
+    return _runtime_reasoning_effort_impl(
+        runtime,
+        default=default,
+        normalize_reasoning_effort_fn=_normalize_reasoning_effort,
+    )
 
 
 def _runtime_vision_sidecar(runtime):
-    sidecar = (runtime or {}).get("vision_sidecar")
-    if not isinstance(sidecar, dict):
-        return {}
-    if not sidecar.get("enabled", True):
-        return {}
-    return dict(sidecar)
+    """Compatibility wrapper for runtime vision sidecar config."""
+    return _runtime_vision_sidecar_impl(runtime)
 
 
 def _resolve_native_fallback_routes(runtime, model_name):
@@ -1956,50 +1952,29 @@ def _resolve_codex_responses_fallback_routes(runtime, model_name):
 
 
 def _is_installed_mms_layout(module_path=None):
-    current_path = os.path.abspath(module_path or __file__)
-    installed_root = os.path.abspath(_real_user_path(".mms"))
-    try:
-        return os.path.commonpath([current_path, installed_root]) == installed_root
-    except ValueError:
-        return False
+    """Compatibility wrapper for installed MMS layout detection."""
+    return _is_installed_mms_layout_impl(
+        module_path=os.path.abspath(module_path or __file__),
+        real_user_path_fn=_real_user_path,
+    )
 
 
 def _default_gpt_reasoning_effort(module_path=None):
-    return "high" if _is_installed_mms_layout(module_path=module_path) else "xhigh"
+    """Compatibility wrapper for default GPT reasoning effort policy."""
+    return _default_gpt_reasoning_effort_impl(
+        module_path=os.path.abspath(module_path or __file__),
+        is_installed_mms_layout_fn=_is_installed_mms_layout,
+    )
 
 
 def _asset_root_preference(asset_name):
-    try:
-        return str(preference_asset_root(asset_name) or "").strip()
-    except Exception:
-        return ""
+    """Compatibility wrapper for asset root preferences."""
+    return _asset_root_preference_impl(asset_name, preference_asset_root_fn=preference_asset_root)
 
 
 def _resolve_caveman_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("caveman")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
-        _real_user_path("auto-skills", "vendor", "caveman"),
-        _real_user_path("vendor", "caveman"),
-        _real_user_path("caveman"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        activate = os.path.join(candidate, "hooks", "caveman-activate.js")
-        tracker = os.path.join(candidate, "hooks", "caveman-mode-tracker.js")
-        if os.path.isfile(activate) and os.path.isfile(tracker):
-            return candidate
-    return ""
+    """Compatibility wrapper for Caveman root resolution."""
+    return _resolve_caveman_root_impl(**_session_feature_root_kwargs())
 
 
 def _ecc_available_for_claude():
@@ -2011,255 +1986,72 @@ def _omc_available_for_claude():
 
 
 def _normalize_ecc_mode(value, default="disable"):
-    raw = str(value or "").strip().lower()
-    if raw in {"", "inherit", "default", "auto"}:
-        return default if default in {"auto", "enable", "disable"} else "disable"
-    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
-        return "enable"
-    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
-        return "disable"
-    return default if default in {"auto", "enable", "disable"} else "disable"
+    """Compatibility wrapper for ECC/OMC mode normalization."""
+    return _normalize_ecc_mode_impl(value, default=default)
 
 
 def _normalize_agent_pack(value, default="none"):
-    raw = str(value or "").strip().lower()
-    fallback = default if default in {"none", "ecc", "omc"} else "none"
-    if raw in {"", "inherit", "default", "auto"}:
-        return fallback
-    if raw in {"0", "false", "no", "off", "disable", "disabled", "none", "null"}:
-        return "none"
-    if raw in {"ecc", "everything-claude-code", "everything_claude_code"}:
-        return "ecc"
-    if raw in {"omc", "oh-my-claudecode", "oh_my_claudecode", "oh-my-claude-code"}:
-        return "omc"
-    return fallback
+    """Compatibility wrapper for agent pack normalization."""
+    return _normalize_agent_pack_impl(value, default=default)
 
 
 def _runtime_agent_pack(runtime):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    if "agent_pack" in runtime and str(runtime.get("agent_pack") or "").strip():
-        return _normalize_agent_pack(runtime.get("agent_pack"), default="none")
-    if _normalize_ecc_mode(runtime.get("ecc_mode", "disable")) == "enable":
-        return "ecc"
-    if _normalize_ecc_mode(runtime.get("omc_mode", "disable")) == "enable":
-        return "omc"
-    return "none"
+    """Compatibility wrapper for runtime agent pack selection."""
+    return _runtime_agent_pack_impl(
+        runtime,
+        normalize_agent_pack_fn=_normalize_agent_pack,
+        normalize_ecc_mode_fn=_normalize_ecc_mode,
+    )
 
 
 def _runtime_ecc_enabled(runtime):
-    return _runtime_agent_pack(runtime) == "ecc"
+    """Compatibility wrapper for runtime ECC enablement."""
+    return _runtime_ecc_enabled_impl(runtime, runtime_agent_pack_fn=_runtime_agent_pack)
 
 
 def _runtime_omc_enabled(runtime):
-    return _runtime_agent_pack(runtime) == "omc"
+    """Compatibility wrapper for runtime OMC enablement."""
+    return _runtime_omc_enabled_impl(runtime, runtime_agent_pack_fn=_runtime_agent_pack)
 
 
 def _resolve_ecc_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_ECC_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("ecc")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "everything-claude-code"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "everything-claude-code"),
-        _real_user_path("auto-skills", "vendor", "everything-claude-code"),
-        _real_user_path("vendor", "everything-claude-code"),
-        _real_user_path("everything-claude-code"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        hooks_path = os.path.join(candidate, "hooks", "hooks.json")
-        commands_dir = os.path.join(candidate, "commands")
-        skills_dir = os.path.join(candidate, "skills")
-        if os.path.isfile(hooks_path) and os.path.isdir(commands_dir) and os.path.isdir(skills_dir):
-            return candidate
-    return ""
+    """Compatibility wrapper for ECC root resolution."""
+    return _resolve_ecc_root_impl(**_session_feature_root_kwargs())
 
 
 def _resolve_omc_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_OMC_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("omc")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "oh-my-claudecode"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "oh-my-claudecode"),
-        _real_user_path("auto-skills", "installed-skills", "oh-my-claudecode"),
-        _real_user_path("auto-skills", "vendor", "oh-my-claudecode"),
-        _real_user_path("vendor", "oh-my-claudecode"),
-        _real_user_path("oh-my-claudecode"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        hooks_path = os.path.join(candidate, "hooks", "hooks.json")
-        skills_dir = os.path.join(candidate, "skills")
-        plugin_json = os.path.join(candidate, ".claude-plugin", "plugin.json")
-        if os.path.isfile(hooks_path) and os.path.isdir(skills_dir) and os.path.isfile(plugin_json):
-            return candidate
-    return ""
+    """Compatibility wrapper for OMC root resolution."""
+    return _resolve_omc_root_impl(**_session_feature_root_kwargs())
 
 
 def _resolve_web_access_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_WEB_ACCESS_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("web_access")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
-        _real_user_path("auto-skills", "vendor", "web-access"),
-        _real_user_path("vendor", "web-access"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
+    """Compatibility wrapper for web-access root resolution."""
+    return _resolve_web_access_root_impl(**_session_feature_root_kwargs())
 
 
 def _resolve_weber_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_WEBER_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("weber")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber"),
-        _real_user_path("auto-skills", "shared-skills", "weber"),
-        _real_user_path("auto-skills", "vendor", "weber"),
-        _real_user_path("vendor", "weber"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
+    """Compatibility wrapper for Weber root resolution."""
+    return _resolve_weber_root_impl(**_session_feature_root_kwargs())
 
 
 def _resolve_agent_browser_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_AGENT_BROWSER_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("agent_browser")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
-        _real_user_path("auto-skills", "installed-skills", "agent-browser"),
-        _real_user_path("auto-skills", "vendor", "agent-browser"),
-        _real_user_path("vendor", "agent-browser"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
+    """Compatibility wrapper for Agent Browser root resolution."""
+    return _resolve_agent_browser_root_impl(**_session_feature_root_kwargs())
 
 
 def _resolve_toon_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_TOON_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("toon")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toon"),
-        _real_user_path("auto-skills", "vendor", "toon"),
-        _real_user_path("vendor", "toon"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
+    """Compatibility wrapper for TOON root resolution."""
+    return _resolve_toon_root_impl(**_session_feature_root_kwargs())
 
 
 def _resolve_token_saver_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_TOKEN_SAVER_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("token_saver")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
-        _real_user_path("auto-skills", "shared-skills", "token-saver"),
-        _real_user_path("auto-skills", "vendor", "token-saver"),
-        _real_user_path("vendor", "token-saver"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
+    """Compatibility wrapper for token-saver root resolution."""
+    return _resolve_token_saver_root_impl(**_session_feature_root_kwargs())
 
 
 def _resolve_xmem_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_XMEM_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("xmem")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "xmem"),
-        _real_user_path("auto-skills", "shared-skills", "xmem"),
-        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "skills", "xmem"),
-        _real_user_path(".codex", "skills", "xmem"),
-        _real_user_path(".agents", "skills", "xmem"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
+    """Compatibility wrapper for xmem root resolution."""
+    return _resolve_xmem_root_impl(**_session_feature_root_kwargs())
 
 
 def _xmem_cli_path():
