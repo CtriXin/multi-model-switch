@@ -1017,18 +1017,16 @@ def _claude_bypass_requires_proxy(runtime):
 
 
 def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
-    if auth_mode != "oauth":
-        return
-    if cli_name not in {"claude", "codex", "gemini", "agy"}:
-        return
-    dns_mode = _runtime_dns_mode(runtime)
-    if dns_mode == "local-risk":
-        console.print(
-            "[yellow]DNS 风险: 当前 proxy 为 socks5，hostname 可能仍在本地解析；"
-            "更稳的是 socks5h 或由上游 relay 负责 remote DNS[/yellow]"
-        )
-    elif dns_mode == "direct":
-        console.print("[yellow]DNS: 当前为 direct，未经过代理 DNS 路径[/yellow]")
+    """Compatibility wrapper for DNS guard hint display."""
+    from mms_launch_display import emit_dns_guard_hint
+
+    return emit_dns_guard_hint(
+        runtime,
+        cli_name=cli_name,
+        auth_mode=auth_mode,
+        runtime_dns_mode_fn=_runtime_dns_mode,
+        console=console,
+    )
 
 
 def _claude_network_guard_cache_key(runtime, require_proxy):

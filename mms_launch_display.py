@@ -123,6 +123,21 @@ def print_mms_resume_hint(cli_name, session_id, *, resume_command_name_fn, conso
     console.print(f"[dim][MMS] resume:[/dim] [green]{command}[/green]")
 
 
+def emit_dns_guard_hint(runtime, *, cli_name, auth_mode, runtime_dns_mode_fn, console):
+    if auth_mode != "oauth":
+        return
+    if cli_name not in {"claude", "codex", "gemini", "agy"}:
+        return
+    dns_mode = runtime_dns_mode_fn(runtime)
+    if dns_mode == "local-risk":
+        console.print(
+            "[yellow]DNS 风险: 当前 proxy 为 socks5，hostname 可能仍在本地解析；"
+            "更稳的是 socks5h 或由上游 relay 负责 remote DNS[/yellow]"
+        )
+    elif dns_mode == "direct":
+        console.print("[yellow]DNS: 当前为 direct，未经过代理 DNS 路径[/yellow]")
+
+
 def show_launch_info(cli, runtime, auth_mode):
     """启动前轻量展示：gateway 可用模型 + 本地用量统计（失败不阻塞）。"""
     launchers = _launchers()
