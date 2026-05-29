@@ -5531,76 +5531,10 @@ def get_export_env(cli, runtime):
 
 
 def _show_launch_info(cli, runtime, auth_mode):
-    """启动前轻量展示：gateway 可用模型 + 本地用量统计（失败不阻塞）。"""
-    runtime_kind = runtime.get("runtime_kind", "provider")
-    runtime_id = runtime.get("id", "default")
+    """Compatibility wrapper for launch-time display."""
+    from mms_launch_display import show_launch_info
 
-    # ── gateway 可用模型列表 ──
-    if auth_mode == "api_key":
-        try:
-            probe_result = runtime.get("_launch_prefetched_probe")
-            if probe_result is None:
-                probe_result = _probe_models(runtime, emit_output=False)
-            models = list(probe_result.get("models") or [])
-            if models:
-                console.print(f"[dim]可用模型 ({len(models)}): {', '.join(models[:8])}"
-                              f"{'…' if len(models) > 8 else ''}[/dim]")
-        except Exception:
-            pass
-
-    # ── 本地用量统计 ──
-    try:
-        usage_path = _real_user_path(".config", "mms", "usage.json")
-        if os.path.exists(usage_path):
-            with open(usage_path, "r", encoding="utf-8") as f:
-                stats = json.load(f)
-            key = f"{runtime_kind}:{cli}:{runtime_id}"
-            entry = stats.get("sources", {}).get(key)
-            if entry:
-                launches = entry.get("launches", 0)
-                last_model = entry.get("last_model", "")
-                last_at = entry.get("last_used_at", "")[:10]
-                parts = [f"历史启动 {launches} 次"]
-                if last_model:
-                    parts.append(f"上次模型 {last_model}")
-                if last_at:
-                    parts.append(f"最近 {last_at}")
-                console.print(f"[dim]{' | '.join(parts)}[/dim]")
-    except Exception:
-        pass
-
-    if cli == "opencode":
-        profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "lite").strip()
-        if profile_label:
-            console.print(f"[dim]OpenCode profile: {profile_label}[/dim]")
-
-    if cli == "claude":
-        try:
-            one_m = "开启" if _runtime_supports_claude_1m(runtime) else "关闭"
-            mode = _normalize_claude_1m_mode((runtime or {}).get("claude_1m_mode", "auto"))
-            console.print(f"[dim]Claude 1M: {one_m} ({mode})[/dim]")
-        except Exception:
-            pass
-        try:
-            report = runtime.get("_account_guard_report")
-            if report:
-                style = {
-                    "stable": "green",
-                    "watch": "yellow",
-                    "risky": "yellow",
-                    "blocked": "red",
-                }.get(report.get("status"), "dim")
-                console.print(f"[{style}]{_format_account_guard_summary(report)}[/{style}]")
-        except Exception:
-            pass
-    try:
-        console.print(f"[dim]网络: {_runtime_network_summary(runtime)}[/dim]")
-    except Exception:
-        pass
-    try:
-        _emit_dns_guard_hint(runtime, cli_name=cli, auth_mode=auth_mode)
-    except Exception:
-        pass
+    return show_launch_info(cli, runtime, auth_mode)
 
 
 def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
