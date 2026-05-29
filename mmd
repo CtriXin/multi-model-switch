@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+ROOT="/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/.worktrees/pi-runner-smoke"
+export MMS_PI_BIN="$ROOT/scripts/pi-cli-wrapper.sh"
+exec "$ROOT/mms" "$@"
