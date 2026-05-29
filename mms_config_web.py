@@ -24,6 +24,7 @@ _SENSITIVE_CONFIG_KEYS = {"home_dir", "proxy", "no_proxy"}
 _ALLOWED_PROTOCOLS = ("anthropic_messages", "openai_chat_completions")
 _ALLOWED_CLIS = ("claude", "codex", "opencode", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
+_FALLBACK_MODEL_FAMILIES = ("Claude", "GPT", "Gemini", "DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM")
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
 _OPENCODE_REQUIRED_BUILDER_AGENTS = {"mobius-builder-pro", "builder_primary"}
 _REGISTRY_V2_GENERATED_FILES = (
@@ -129,6 +130,41 @@ def _normalize_priority(value: Any, default: int = 100) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, parsed)
+
+
+def _known_model_families() -> list[str]:
+    try:
+        mms_core = _load_mms_core()
+        families = []
+        for entry in getattr(mms_core, "MODEL_FAMILIES", ()):
+            if isinstance(entry, dict):
+                family = _safe_text(entry.get("family"))
+                if family and family not in families:
+                    families.append(family)
+        return families or list(_FALLBACK_MODEL_FAMILIES)
+    except Exception:
+        return list(_FALLBACK_MODEL_FAMILIES)
+
+
+def _canonical_family_name(value: Any) -> str:
+    raw = _safe_text(value)
+    if not raw:
+        return ""
+    for family in _known_model_families():
+        if family.lower() == raw.lower():
+            return family
+    return ""
+
+
+def _normalize_family_priority_overrides(value: Any) -> dict[str, int]:
+    raw = value if isinstance(value, dict) else {}
+    result: dict[str, int] = {}
+    for family, priority in raw.items():
+        canonical = _canonical_family_name(family)
+        if not canonical:
+            continue
+        result[canonical] = _normalize_priority(priority)
+    return result
 
 
 def _sanitize_for_output(value: Any) -> Any:
@@ -753,6 +789,7 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "enabled": provider.get("enabled", True) is not False,
         "role": _safe_text(provider.get("role") or "auto"),
         "priority": provider.get("priority", 100),
+        "family_priority_overrides": _normalize_family_priority_overrides(provider.get("family_priority_overrides")),
         "models_endpoint": _safe_text(provider.get("models_endpoint") or "/models"),
         "protocols": [str(item) for item in protocols if item],
         "supported_clis": [str(item) for item in supported_clis if item],
@@ -810,6 +847,7 @@ def _account_summary(account: dict[str, Any], *, defaults: dict[str, Any] | None
         "cli": cli_name,
         "enabled": account.get("enabled", True) is not False,
         "priority": _normalize_priority(account.get("priority", 100)),
+        "family_priority_overrides": _normalize_family_priority_overrides(account.get("family_priority_overrides")),
         "auth_mode": auth_mode,
         "is_default": is_default,
         "default_label": cli_name.upper() if is_default else "备选",
@@ -867,6 +905,7 @@ def _account_review_fields(account: dict[str, Any] | None) -> dict[str, Any]:
         "name": _safe_text(account.get("name")),
         "enabled": account.get("enabled", True) is not False,
         "priority": _normalize_priority(account.get("priority", 100)),
+        "family_priority_overrides": _normalize_family_priority_overrides(account.get("family_priority_overrides")),
         "note": _safe_text(account.get("note")),
     }
 
@@ -886,6 +925,12 @@ def _copy_existing_account(existing: dict[str, Any], account_payload: dict[str, 
         priority = _normalize_priority(account_payload.get("priority"), _normalize_priority(account.get("priority", 100)))
         if priority != _normalize_priority(account.get("priority", 100)):
             account["priority"] = priority
+    if "family_priority_overrides" in account_payload:
+        overrides = _normalize_family_priority_overrides(account_payload.get("family_priority_overrides"))
+        if overrides:
+            account["family_priority_overrides"] = overrides
+        else:
+            account.pop("family_priority_overrides", None)
     if "note" in account_payload:
         note = _safe_text(account_payload.get("note"))
         if note:
@@ -1057,7 +1102,7 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
         {
             "area": "负载",
             "capability": "load_balance profiles、default、recent history delete gate",
-            "webui": "read_only_summary_plus_human_gate",
+            "webui": "native_profile_editor_plus_history_gate",
             "tui": "keep_for_launch_time_selection",
         },
     ]
@@ -1096,10 +1141,55 @@ def _load_balance_summary(cfg: dict[str, Any] | None) -> dict[str, Any]:
         "default_profile": _safe_text(section.get("default")),
         "profile_count": len(rows),
         "profiles": rows,
-        "write_policy": "read_only_summary",
+        "write_policy": "draft_review_confirmed_save",
         "history_write_policy": "local_artifact_human_gate",
-        "note": "WebUI 当前只展示 load_balance profiles/default；最近项删除会写 lb_history.json，仍保持 human gate。",
+        "note": "WebUI 可暂存 load_balance profiles/default/remove；最近项删除会写 lb_history.json，仍保持 human gate。",
     }
+
+
+def _normalize_load_balance_draft(value: Any, *, errors: list[str] | None = None) -> dict[str, Any]:
+    payload = value if isinstance(value, dict) else {}
+    raw_profiles = payload.get("profiles") if isinstance(payload.get("profiles"), list) else []
+    profiles: dict[str, Any] = {}
+    for item in raw_profiles:
+        if not isinstance(item, dict):
+            continue
+        name = _slug(item.get("name") or item.get("label"), "")
+        if not name:
+            if errors is not None:
+                errors.append("load_balance profile 缺少 name。")
+            continue
+        if name in profiles:
+            if errors is not None:
+                errors.append(f"load_balance profile 重复: {name}")
+            continue
+        profile: dict[str, Any] = {"label": _safe_text(item.get("label") or name), "slots": ["heavy", "medium", "light"]}
+        slots = item.get("slots") if isinstance(item.get("slots"), dict) else {}
+        for slot_name in ("heavy", "medium", "light"):
+            slot = slots.get(slot_name) if isinstance(slots, dict) else {}
+            if not isinstance(slot, dict):
+                slot = {"model": slot}
+            model = _safe_text(slot.get("model") or slot.get("model_id"))
+            provider_id = _safe_text(slot.get("provider_id") or slot.get("provider"))
+            if not model:
+                continue
+            slot_payload = {"model": model}
+            if provider_id:
+                slot_payload["provider"] = provider_id
+            profile[slot_name] = slot_payload
+        if "heavy" not in profile:
+            if errors is not None:
+                errors.append(f"load_balance profile `{name}` 缺少 heavy model。")
+            continue
+        profiles[name] = profile
+    default_name = _slug(payload.get("default_profile") or payload.get("default"), "")
+    if default_name and default_name not in profiles:
+        if errors is not None:
+            errors.append(f"load_balance.default `{default_name}` 不存在。")
+        default_name = ""
+    if not default_name and profiles:
+        default_name = next(iter(profiles))
+    return {"default": default_name, "profiles": profiles} if profiles else {}
 
 
 def _tui_webui_mapping() -> list[dict[str, str]]:
@@ -1227,12 +1317,12 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="调整通道权重",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="provider priority field + save review",
+            webui_control="provider priority + family_priority_overrides fields + save review",
             api_action="provider_channel_status",
             status="native",
             write_policy="draft_review_confirmed_save",
-            verification="/api/plan provider priority diff",
-            manual_check="family_priority_overrides 仍需后续单独 native 编辑器；当前全局 priority 已 WebUI 化。",
+            verification="/api/plan provider priority/family override diff",
+            manual_check="全局 priority 与 family_priority_overrides 都进入 WebUI 草稿和保存预览。",
         ),
         row(
             "channel.family_autosort",
@@ -1255,12 +1345,12 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="选择负载 profile / 最近项",
             webui_section="能力整合",
             webui_section_id="settings",
-            webui_control="load_balance profiles read-only summary",
+            webui_control="load_balance profiles editor + default selector + save review",
             api_action="load_balance_status",
-            status="report",
-            write_policy="read_only_report",
-            verification="/api/settings/report?action=load_balance_status",
-            manual_check="WebUI 配置页只展示 profile/default；实际 launch-time 选择仍在 launcher。",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/plan load_balance diff + /api/settings/report?action=load_balance_status",
+            manual_check="profile/default 设置进入 WebUI 草稿；实际 launch-time 选择仍在 launcher。",
         ),
         row(
             "load_balance.custom_slots",
@@ -1269,12 +1359,12 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="自定义负载 slot",
             webui_section="能力整合",
             webui_section_id="settings",
-            webui_control="load_balance profiles read-only summary",
+            webui_control="load_balance profile heavy/medium/light model fields",
             api_action="load_balance_status",
-            status="report",
-            write_policy="read_only_report",
-            verification="/api/settings/report?action=load_balance_status",
-            manual_check="自定义启动组合不是 config save；WebUI 先展示已配置 profiles。",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/plan load_balance profile diff",
+            manual_check="持久化 profile slot 可在 WebUI 设置；单次启动 custom selection 仍属于 launcher。",
         ),
         row(
             "load_balance.delete_recent",
@@ -1864,6 +1954,7 @@ def build_config_snapshot(
         },
         "providers": provider_rows,
         "provider_default": provider_default or (provider_rows[0]["id"] if provider_rows else ""),
+        "model_families": _known_model_families(),
         "accounts": _account_summaries(cfg),
         "account_defaults": _account_defaults(cfg),
         "account_write_policy": {
@@ -2197,6 +2288,12 @@ def _copy_existing_provider(
     role = _safe_text(provider_payload.get("role") or provider.get("role") or "auto").lower()
     provider["role"] = role if role in _ALLOWED_ROLES else "auto"
     provider["priority"] = _normalize_priority(provider_payload.get("priority", provider.get("priority", 100)))
+    if "family_priority_overrides" in provider_payload:
+        overrides = _normalize_family_priority_overrides(provider_payload.get("family_priority_overrides"))
+        if overrides:
+            provider["family_priority_overrides"] = overrides
+        else:
+            provider.pop("family_priority_overrides", None)
     provider["protocols"] = _normalize_choice_list(provider_payload.get("protocols"), _ALLOWED_PROTOCOLS, _ALLOWED_PROTOCOLS)
     provider["supported_clis"] = _normalize_choice_list(provider_payload.get("supported_clis"), _ALLOWED_CLIS, ("claude", "codex", "opencode"))
     endpoint = _safe_text(provider_payload.get("models_endpoint") or provider.get("models_endpoint") or "/models")
@@ -2443,6 +2540,40 @@ def _build_review_summary(
     for provider_id in sorted(after_ids):
         before = before_providers.get(provider_id, {})
         after = after_providers[provider_id]
+        before_meta = {
+            "name": _safe_text(before.get("name") or provider_id),
+            "enabled": before.get("enabled", True) is not False,
+            "role": _safe_text(before.get("role") or "auto"),
+            "priority": _normalize_priority(before.get("priority", 100)),
+        }
+        after_meta = {
+            "name": _safe_text(after.get("name") or provider_id),
+            "enabled": after.get("enabled", True) is not False,
+            "role": _safe_text(after.get("role") or "auto"),
+            "priority": _normalize_priority(after.get("priority", 100)),
+        }
+        if provider_id in before_ids and _mapping_digest(before_meta) != _mapping_digest(after_meta):
+            add_item(
+                "provider_metadata",
+                f"通道元数据变化：{provider_id}",
+                f"name/enabled/role/priority 将更新；priority `{before_meta['priority']}` -> `{after_meta['priority']}`。",
+                provider_id=provider_id,
+                level="warn",
+                meta={"before": before_meta, "after": after_meta},
+            )
+        before_family = _normalize_family_priority_overrides(before.get("family_priority_overrides"))
+        after_family = _normalize_family_priority_overrides(after.get("family_priority_overrides"))
+        if _mapping_digest(before_family) != _mapping_digest(after_family):
+            changed = sorted(set(before_family) | set(after_family))
+            detail = "；".join(f"{family}: `{before_family.get(family, '-')}` -> `{after_family.get(family, '-')}`" for family in changed)
+            add_item(
+                "provider_family_priority",
+                f"Family 权重变化：{provider_id}",
+                detail,
+                provider_id=provider_id,
+                level="warn",
+                meta={"before": before_family, "after": after_family},
+            )
         before_urls = _provider_urls(before)
         after_urls = _provider_urls(after)
         if provider_id in before_ids:
@@ -2513,6 +2644,18 @@ def _build_review_summary(
     rescue_after = next_cfg.get("rescue") if isinstance(next_cfg.get("rescue"), dict) else {}
     if _mapping_digest(rescue_before) != _mapping_digest(rescue_after):
         add_item("rescue", "Rescue fallback 变化", f"`{_safe_text(rescue_before.get('fallback_model')) or '-'}` -> `{_safe_text(rescue_after.get('fallback_model')) or '-'}`")
+
+    lb_before = current_cfg.get("load_balance") if isinstance(current_cfg.get("load_balance"), dict) else {}
+    lb_after = next_cfg.get("load_balance") if isinstance(next_cfg.get("load_balance"), dict) else {}
+    if _mapping_digest(lb_before) != _mapping_digest(lb_after):
+        before_profiles = (lb_before.get("profiles") if isinstance(lb_before.get("profiles"), dict) else {}) or {}
+        after_profiles = (lb_after.get("profiles") if isinstance(lb_after.get("profiles"), dict) else {}) or {}
+        add_item(
+            "load_balance",
+            "Load balance profile 变化",
+            f"default `{_safe_text(lb_before.get('default')) or '-'}` -> `{_safe_text(lb_after.get('default')) or '-'}`；profiles {len(before_profiles)} -> {len(after_profiles)}。",
+            level="warn",
+        )
 
     vision_before = current_cfg.get("vision_sidecar") if isinstance(current_cfg.get("vision_sidecar"), dict) else {}
     vision_after = next_cfg.get("vision_sidecar") if isinstance(next_cfg.get("vision_sidecar"), dict) else {}
@@ -2788,6 +2931,13 @@ def build_config_plan(
             next_cfg["rescue"] = rescue
         else:
             next_cfg.pop("rescue", None)
+
+    if isinstance(draft.get("load_balance"), dict):
+        load_balance = _normalize_load_balance_draft(draft.get("load_balance"), errors=errors)
+        if load_balance:
+            next_cfg["load_balance"] = load_balance
+        else:
+            next_cfg.pop("load_balance", None)
 
     vision_payload = draft.get("vision_sidecar") if isinstance(draft.get("vision_sidecar"), dict) else {}
     if vision_payload:
@@ -3830,6 +3980,7 @@ def build_settings_report(
                     "enabled": item.get("enabled"),
                     "role": item.get("role"),
                     "priority": item.get("priority"),
+                    "family_priority_overrides": item.get("family_priority_overrides") or {},
                     "model_count": item.get("model_count"),
                 }
                 for item in (snapshot.get("providers") or [])
@@ -3842,9 +3993,10 @@ def build_settings_report(
             "ok": True,
             "schema": "mms.setup_web.settings_report.v1",
             "action": action,
-            "write_policy": "read_only",
-            "status": "report",
+            "write_policy": "draft_review_confirmed_save",
+            "status": "native",
             "load_balance": snapshot.get("load_balance") or {},
+            "note": "WebUI Settings 页可暂存 load_balance profile/default/remove；真正写入仍走保存预览与 confirm。",
         }
     if action == "guard_status":
         return {
@@ -4992,7 +5144,7 @@ _HTML_PAGE = r"""<!doctype html>
     <!-- Fallback -->
     <section class="panel" data-section="fallback">
       <h2>Fallback 设置</h2>
-      <p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。</p>
+      <p>stable legacy 保存写入 config.toml 的 [rescue] / [load_balance] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。</p>
       <div class="grid">
         <div class="card span6">
           <h3>Rescue fallback</h3>
@@ -5098,7 +5250,18 @@ _HTML_PAGE = r"""<!doctype html>
         </div>
         <div class="card span12">
           <h3>Load Balance profiles</h3>
-          <p class="muted">对应 TUI L 负载：WebUI 先展示已配置 profile/default；report action: load_balance_status。最近项删除和 launch-time custom selection 保持 gate/launcher。</p>
+          <p class="muted">对应 TUI L 负载：WebUI 可暂存 profile/default/remove；report action: load_balance_status。最近项删除和 launch-time custom selection 保持 gate/launcher。</p>
+          <div class="grid">
+            <div class="span3"><label>profile name</label><input id="lbProfileName" placeholder="daily"></div>
+            <div class="span3"><label>heavy</label><input id="lbHeavy" placeholder="gpt-5.5"></div>
+            <div class="span3"><label>medium</label><input id="lbMedium" placeholder="qwen3.6-plus"></div>
+            <div class="span3"><label>light</label><input id="lbLight" placeholder="deepseek-v4-flash"></div>
+            <div class="span12 btns">
+              <button id="lbUpsert" class="ghost">新增/更新 profile</button>
+              <button id="lbSetDefault" class="ghost">设为默认</button>
+              <button id="lbRemove" class="danger">删除 profile</button>
+            </div>
+          </div>
           <div class="table-wrap"><table id="loadBalanceTable"></table></div>
         </div>
         <div class="card span12">
@@ -5197,7 +5360,7 @@ const sections=[
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set();
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let touchedLoadBalance=false;
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -5245,10 +5408,15 @@ function renderProviderList(){const list=$('providerList');list.innerHTML=provid
 function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}
 function checks(name,values,allowed){values=values||[];return `<div class="checks">${allowed.map(v=>`<label class="check"><input type="checkbox" name="${name}" value="${v}" ${values.includes(v)?'checked':''}><span>${v}</span></label>`).join('')}</div>`}
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
-function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div><div class="span12 delete-zone"><label>删除通道 typed confirm</label><input id="pDeleteConfirm" placeholder="输入 ${escapeHtml(p.id)} 后从草稿移除"><p class="muted">只从 WebUI 草稿移除；真正写入仍需要保存预览和确认。</p><div class="btns"><button id="deleteProvider" class="danger">从草稿移除通道</button></div></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
-function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);const keyEl=$('pKey');keyEl.oninput=()=>{keyEl.dataset.touched='1';syncProvider()};$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};const del=$('deleteProvider');if(del)del.onclick=deleteCurrentProviderDraft;document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
+function modelFamilies(){return (state.model_families&&state.model_families.length?state.model_families:['Claude','GPT','Gemini','DeepSeek','Qwen','Kimi','Mimo','MiniMax','GLM'])}
+function familyPriorityInputs(values={},name='familyPriority'){return `<div class="grid">${modelFamilies().map(f=>`<div class="span4"><label>${escapeHtml(f)}</label><input data-family-priority="${escapeHtml(name)}" data-family="${escapeHtml(f)}" type="number" min="1" value="${escapeHtml(values[f]||'')}" placeholder="inherit"></div>`).join('')}</div>`}
+function readFamilyPriorityInputs(name='familyPriority'){const result={};document.querySelectorAll(`[data-family-priority="${name}"]`).forEach(input=>{const family=input.dataset.family;const raw=String(input.value||'').trim();if(family&&raw){result[family]=Math.max(1,Number(raw)||100)}});return result}
+function formatFamilyOverrides(values={}){return Object.entries(values||{}).map(([k,v])=>`${k}=${v}`).join(', ')}
+function parseFamilyOverrides(text){const allowed=new Set(modelFamilies());const result={};String(text||'').split(/[\n,]/).map(x=>x.trim()).filter(Boolean).forEach(part=>{const [rawFamily,rawValue]=part.split(/[=:]/);const family=modelFamilies().find(f=>f.toLowerCase()===String(rawFamily||'').trim().toLowerCase());const value=Math.max(1,Number(String(rawValue||'').trim())||0);if(family&&allowed.has(family)&&value>0)result[family]=value});return result}
+function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span12"><label>family_priority_overrides</label><p class="muted">对应 TUI 模型页 +/- 对单个 family 写入的权重覆盖；留空表示继承全局 priority。</p>${familyPriorityInputs(p.family_priority_overrides||{},'providerFamilyPriority')}</div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div><div class="span12 delete-zone"><label>删除通道 typed confirm</label><input id="pDeleteConfirm" placeholder="输入 ${escapeHtml(p.id)} 后从草稿移除"><p class="muted">只从 WebUI 草稿移除；真正写入仍需要保存预览和确认。</p><div class="btns"><button id="deleteProvider" class="danger">从草稿移除通道</button></div></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button></div>`;bindProviderForm()}
+function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);const keyEl=$('pKey');keyEl.oninput=()=>{keyEl.dataset.touched='1';syncProvider()};$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};const del=$('deleteProvider');if(del)del.onclick=deleteCurrentProviderDraft;document.querySelectorAll('input[name="pProtocols"],input[name="pClis"],[data-family-priority="providerFamilyPriority"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
 function deleteCurrentProviderDraft(){const p=current();if(!p)return;const typed=($('pDeleteConfirm')?.value||'').trim();if(typed!==p.id){toast('输入当前 provider ID 后才能从草稿移除');return}if((state.providers||[]).length<=1){toast('至少保留一个 provider；删除最后一个通道请走 CLI/manual gate');return}const removed=p.id;state.providers.splice(activeProvider,1);touchedProviders.add(removed);if(state.provider_default===removed)state.provider_default=(state.providers[0]||{}).id||'';activeProvider=Math.max(0,Math.min(activeProvider,state.providers.length-1));lastPlan=null;renderAll();setSection('save');toast(`${removed} 已从 WebUI 草稿移除，生成保存预览后再写入`)}
-function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);const keyEl=$('pKey');const updateEl=$('pUpdateCreds');p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');const keyText=keyEl?keyEl.value.trim():'';const keyTouched=keyEl?.dataset?.touched==='1';if(keyText){p.api_key=keyText;p.pending_api_key=true;p.has_api_key=true;if(updateEl)updateEl.checked=true}else if(keyTouched){p.api_key='';p.pending_api_key=false}p.update_credentials=!!(updateEl&&updateEl.checked);if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
+function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);const keyEl=$('pKey');const updateEl=$('pUpdateCreds');p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.family_priority_overrides=readFamilyPriorityInputs('providerFamilyPriority');p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');const keyText=keyEl?keyEl.value.trim():'';const keyTouched=keyEl?.dataset?.touched==='1';if(keyText){p.api_key=keyText;p.pending_api_key=true;p.has_api_key=true;if(updateEl)updateEl.checked=true}else if(keyTouched){p.api_key='';p.pending_api_key=false}p.update_credentials=!!(updateEl&&updateEl.checked);if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
 function derivedAliases(base,p){const ids=(base||[]).map(x=>String(x||''));const tails=ids.map(id=>id.toLowerCase().split('/').pop());const aliases=[];if(tails.some(id=>id.startsWith('claude-sonnet-4-')||id.startsWith('claude-sonnet-4.')))aliases.push('claude-sonnet-4-6');if(tails.some(id=>id.startsWith('claude-opus-4-')||id.startsWith('claude-opus-4.')))aliases.push('claude-opus-4-6');const ident=String([p?.id,p?.name,p?.label,p?.provider_profile].filter(Boolean).join(' ')).toLowerCase();const anthropic=String(p?.anthropic_base_url||p?.default_anthropic_base_url||'').toLowerCase();if((anthropic.includes('xiaomimimo.com')||ident.includes('mimo')||ident.includes('xiaomi'))&&!ident.includes('openrouter')){['mimo-v2.5-pro','mimo-v2.5'].forEach(id=>{if(ids.includes(id)&&!ids.includes(`${id}[1m]`))aliases.push(`${id}[1m]`)})}return aliases}
 function providerModels(p){p=p||{};const map=new Map();const hiddenLower=new Set((p.hidden_models||[]).map(x=>String(x||'').toLowerCase()));const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,visible:r.visible!==false&&!hiddenLower.has(String(r.id).toLowerCase()),capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})})}const baseIds=[...map.keys()];derivedAliases(baseIds.filter(id=>!hiddenLower.has(String(id).toLowerCase())),p).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'derived_alias',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{[...map.keys()].forEach(key=>{if(String(key).toLowerCase()===String(id).toLowerCase())map.get(key).visible=false})});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
 function defaultCaps(id){const l=String(id||'').toLowerCase();return {text:true,vision:['mimo-v2.5','mimo-v2-omni','k2.6','k2.6-code-preview','kimi-k2.5','qwen3.6-plus','qwen3.6-flash','qwen3.5-plus'].includes(l)||l.startsWith('claude-')||l.startsWith('gemini-'),tool_use:/^(claude|gpt|o|qwen|kimi|glm|minimax|gemini)/.test(l),reasoning:/gpt-5|qwen3|kimi-k2|glm-5|deepseek|claude/.test(l),long_context:/1m|long|qwen3|kimi-k2|gpt-5|claude/.test(l),cache_sensitive:/^(qwen|kimi|k2\.|glm|deepseek|minimax|mimo)/.test(l)}}
@@ -5291,7 +5459,7 @@ function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)r
 function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的 agent</td></tr>';table.innerHTML=`<thead><tr><th>启用</th><th>Agent</th><th>Preset</th><th>Priority</th><th>Provider</th><th>Model</th><th>Default</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(tr=>{const agent=tr.dataset.ocAgent;const row=visible.find(r=>r.agent===agent);const entry=rosterEntry(agent,row);tr.querySelector('[data-oc-enabled]').onchange=(e)=>{setRosterEnabled(agent,row,e.target.checked);renderOpencodeSummary()};tr.querySelector('[data-oc-preset]').onchange=(e)=>{persistRosterEntry(agent,row,{preset:e.target.value});renderOpencodeAgents()};tr.querySelector('[data-oc-priority]').oninput=(e)=>{persistRosterEntry(agent,row,{priority:Number(e.target.value)});renderOpencodeSummary()};tr.querySelector('[data-oc-provider]').onchange=(e)=>{const sel=e.target;const modelSel=tr.querySelector('[data-oc-model]');modelSel.innerHTML=modelOptions(sel.value,modelSel.value,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:sel.value});setOpencodeOverride(agent,sel.value,tr.querySelector('[data-oc-model]').value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-model]').onchange=(e)=>{setOpencodeOverride(agent,tr.querySelector('[data-oc-provider]').value,e.target.value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-reset]').onclick=()=>{const roster=opencodeRoster();delete roster[agent];const overrides=opencodeOverrides();delete overrides[agent];syncRuntime();renderOpencodeAgents();toast(`${agent} 已恢复默认`)}})}
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function accountLocked(a){return !!a.is_claude_human_only}
-function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100)});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
+function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');const familyEl=tr.querySelector('[data-account-family]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100);if(familyEl)acc.family_priority_overrides=parseFamilyOverrides(familyEl.value)});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
 function mappingStatusLabel(status){return {native:'Native',report:'Report',draft_review:'Draft review',human_gate:'Human gate',missing:'Missing'}[status]||status||'-'}
 function mappingStatusClass(status){return 'status-'+String(status||'missing').replace(/[^a-z0-9_ -]/gi,'').replace(/\s+/g,'_')}
 function mappingActionButton(row){const parts=[];if(row.webui_section_id){parts.push(`<button class="ghost mapping-action" data-section-jump="${escapeHtml(row.webui_section_id)}">打开</button>`)}if(row.api_action){const label=row.status==='human_gate'?'Gate':(row.status==='missing'?'Gap':'Report');parts.push(`<button class="ghost mapping-action" data-settings-action="${escapeHtml(row.api_action)}">${label}</button>`)}return parts.join(' ')}
@@ -5302,19 +5470,24 @@ function syncUiSettings(){state.ui=state.ui||{};state.ui.language=$('uiLanguage'
 function renderUiSettings(mapping){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')};const counts=(state.tui_webui_mapping_summary||{}).counts||{};const missingRows=(mapping||[]).filter(row=>row.status==='missing').map(row=>row.tui_label);if($('settingsGapSummary')){$('settingsGapSummary').innerHTML=`<span class="chip">native ${counts.native||0}</span><span class="chip">report ${counts.report||0}</span><span class="chip">draft ${counts.draft_review||0}</span><span class="chip">gate ${counts.human_gate||0}</span><span class="chip">missing ${counts.missing||0}</span>${missingRows.length?`<span class="chip">仍缺：${escapeHtml(missingRows.join(' / '))}</span>`:'<span class="chip">无 missing 行</span>'}`}}
 function renderEntryAudit(mapping){const box=$('entryAudit');if(!box)return;const specs=[['Main / O 接入','O 接入','add/manage channel'],['Main / P 通道','P 通道','provider browse'],['Main / L 负载','L 负载','load balance'],['Settings','S 设置','settings menu']];box.innerHTML=specs.map(([prefix,label,desc])=>{const rows=(mapping||[]).filter(row=>String(row.tui_area||'').startsWith(prefix));const counts=rows.reduce((acc,row)=>{acc[row.status]=(acc[row.status]||0)+1;return acc},{});const chips=['native','report','draft_review','human_gate','missing'].filter(k=>counts[k]).map(k=>`<span class="chip">${mappingStatusLabel(k)} ${counts[k]}</span>`).join('')||'<span class="chip">无映射</span>';return `<div class="entry-audit-item"><b>${escapeHtml(label)}</b><small>${escapeHtml(desc)}</small><div class="chips">${chips}</div></div>`}).join('')}
 function lbSlotText(slot){slot=slot||{};const model=slot.model||'-';const provider=slot.provider_id?` @ ${slot.provider_id}`:'';return `${model}${provider}`}
-function renderLoadBalance(){const table=$('loadBalanceTable');if(!table)return;const lb=state.load_balance||{};const rows=lb.profiles||[];if(!rows.length){table.innerHTML='<thead><tr><th>Status</th><th>说明</th></tr></thead><tbody><tr><td><span class="tag off">none</span></td><td class="empty-row">当前没有配置 load_balance profiles；TUI L 仍可做 launch-time custom selection。</td></tr></tbody>';return}table.innerHTML=`<thead><tr><th>Default</th><th>Profile</th><th>Heavy</th><th>Medium</th><th>Light</th><th>Policy</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${row.is_default?'<span class="tag">default</span>':'-'}</td><td class="mono">${escapeHtml(row.name||row.label||'-')}</td><td>${escapeHtml(lbSlotText((row.slots||{}).heavy))}</td><td>${escapeHtml(lbSlotText((row.slots||{}).medium))}</td><td>${escapeHtml(lbSlotText((row.slots||{}).light))}</td><td><span class="tag off">${escapeHtml(lb.history_write_policy||'local_artifact_human_gate')}</span></td></tr>`).join('')}</tbody>`}
+function lbDraft(){state.load_balance=state.load_balance||{default_profile:'',profiles:[],history_write_policy:'local_artifact_human_gate'};state.load_balance.profiles=state.load_balance.profiles||[];return state.load_balance}
+function lbProfilePayload(name,label,heavy,medium,light){const slots={};if(heavy)slots.heavy={model:heavy};if(medium)slots.medium={model:medium};if(light)slots.light={model:light};return {name,label:label||name,is_default:false,slots}}
+function syncLoadBalanceControls(){const lb=lbDraft();const name=($('lbProfileName')?.value||'').trim();const heavy=($('lbHeavy')?.value||'').trim();const medium=($('lbMedium')?.value||'').trim();const light=($('lbLight')?.value||'').trim();return {lb,name,heavy,medium,light}}
+function fillLoadBalanceForm(row){$('lbProfileName').value=row.name||'';$('lbHeavy').value=((row.slots||{}).heavy||{}).model||'';$('lbMedium').value=((row.slots||{}).medium||{}).model||'';$('lbLight').value=((row.slots||{}).light||{}).model||''}
+function bindLoadBalanceControls(){const upsert=$('lbUpsert');if(!upsert)return;upsert.onclick=()=>{const {lb,name,heavy,medium,light}=syncLoadBalanceControls();if(!name||!heavy){toast('load_balance profile 需要 name 和 heavy model');return}const next=lbProfilePayload(name,name,heavy,medium,light);const idx=(lb.profiles||[]).findIndex(row=>row.name===name);if(idx>=0)lb.profiles[idx]={...(lb.profiles[idx]||{}),...next};else lb.profiles.push(next);if(!lb.default_profile)lb.default_profile=name;lb.profiles.forEach(row=>row.is_default=row.name===lb.default_profile);touchedLoadBalance=true;renderLoadBalance();setSection('save');toast('load_balance profile 已暂存，生成保存预览后再写入')};$('lbSetDefault').onclick=()=>{const {lb,name}=syncLoadBalanceControls();if(!name||!(lb.profiles||[]).some(row=>row.name===name)){toast('先选择或输入已有 profile name');return}lb.default_profile=name;lb.profiles.forEach(row=>row.is_default=row.name===name);touchedLoadBalance=true;renderLoadBalance();setSection('save');toast('load_balance.default 已暂存')};$('lbRemove').onclick=()=>{const {lb,name}=syncLoadBalanceControls();if(!name){toast('输入要删除的 profile name');return}const before=(lb.profiles||[]).length;lb.profiles=(lb.profiles||[]).filter(row=>row.name!==name);if(before===lb.profiles.length){toast('没有找到该 load_balance profile');return}if(lb.default_profile===name)lb.default_profile=(lb.profiles[0]||{}).name||'';lb.profiles.forEach(row=>row.is_default=row.name===lb.default_profile);touchedLoadBalance=true;renderLoadBalance();setSection('save');toast('load_balance profile 删除已暂存，生成保存预览后再写入')}}
+function renderLoadBalance(){const table=$('loadBalanceTable');if(!table)return;const lb=lbDraft();const rows=lb.profiles||[];bindLoadBalanceControls();if(!rows.length){table.innerHTML='<thead><tr><th>Status</th><th>说明</th></tr></thead><tbody><tr><td><span class="tag off">none</span></td><td class="empty-row">当前没有配置 load_balance profiles；可在上方新增持久化 profile，TUI L 仍可做 launch-time custom selection。</td></tr></tbody>';return}table.innerHTML=`<thead><tr><th>Default</th><th>Profile</th><th>Heavy</th><th>Medium</th><th>Light</th><th>Policy</th><th></th></tr></thead><tbody>${rows.map(row=>`<tr><td>${row.is_default||row.name===lb.default_profile?'<span class="tag">default</span>':'-'}</td><td class="mono">${escapeHtml(row.name||row.label||'-')}</td><td>${escapeHtml(lbSlotText((row.slots||{}).heavy))}</td><td>${escapeHtml(lbSlotText((row.slots||{}).medium))}</td><td>${escapeHtml(lbSlotText((row.slots||{}).light))}</td><td><span class="tag">draft_review</span> <span class="tag off">${escapeHtml(lb.history_write_policy||'local_artifact_human_gate')}</span></td><td><button class="ghost mapping-action" data-lb-edit="${escapeHtml(row.name||'')}">编辑</button></td></tr>`).join('')}</tbody>`;document.querySelectorAll('[data-lb-edit]').forEach(btn=>btn.onclick=()=>{const row=(lb.profiles||[]).find(item=>item.name===btn.dataset.lbEdit);if(row)fillLoadBalanceForm(row)})}
 function renderSettingsCommand(accounts,coverage,mapping){const board=$('settingsCommand');if(!board)return;const policy=state.account_write_policy||{};const summary=state.tui_webui_mapping_summary||{};const counts=summary.counts||{};const editable=accounts.filter(a=>!accountLocked(a)).length;const locked=accounts.filter(a=>accountLocked(a)).length;const nativeCount=counts.native??mapping.filter(r=>r.status==='native').length;const reportCount=(counts.report??mapping.filter(r=>r.status==='report').length)+(counts.draft_review??mapping.filter(r=>r.status==='draft_review').length);const gateCount=(counts.human_gate??mapping.filter(r=>r.status==='human_gate').length)+(counts.missing??mapping.filter(r=>r.status==='missing').length);const empty=accounts.length?'':`<div class="settings-empty-note"><strong>当前配置没有 OAuth account。</strong> 这也是你刚才看不出变化的原因：account draft/default 编辑器只会在存在 account 时出现；本页现在先把能力边界、TUI 降级路径和 human gate 明确展示出来。</div>`;board.innerHTML=`<div class="settings-command-head"><div><div class="settings-kicker">MMX / WEBUI TAKEOVER MAP</div><h3>Settings moved out of TUI</h3><p>这块现在是 settings/channel 迁移指挥台：${mapping.length} 条 TUI action 已逐项映射；能在 WebUI 里安全操作的直接显形，涉及真实账号、Claude config、Snapshot Guard accept、network/write 的动作保留 human gate。</p></div><div class="settings-stamp">${escapeHtml(policy.claude||'human_only_locked')}</div></div><div class="settings-metrics"><div class="settings-metric"><span>accounts loaded</span><strong>${accounts.length}</strong><em>${editable} editable / ${locked} Claude locked</em></div><div class="settings-metric"><span>native webui</span><strong>${nativeCount}</strong><em>direct WebUI controls</em></div><div class="settings-metric"><span>report / draft</span><strong>${reportCount}</strong><em>clickable JSON or save preview</em></div><div class="settings-metric"><span>gates / gaps</span><strong>${gateCount}</strong><em>visible, not hidden in TUI</em></div></div><div class="settings-route"><div class="settings-route-card ready"><b>01 / native controls</b><small>provider 编辑、模型管理、fallback/runtime/save 已经走 WebUI draft + diff。</small></div><div class="settings-route-card report"><b>02 / clickable reports</b><small>registry、about、usage、guard、rescue rows 都能点出 bounded JSON report。</small></div><div class="settings-route-card locked"><b>03 / human gates</b><small>Claude account、OAuth login/remove、Snapshot accept、network/write 操作不自动执行。</small></div><div class="settings-route-card"><b>04 / audit table</b><small>TUI ↔ WebUI 对照表是逐项 check list，不再让迁移范围藏在代码里。</small></div></div>${empty}`}
-function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderSettingsCommand(accounts,coverage,mapping);renderUiSettings(mapping);renderEntryAudit(mapping);renderLoadBalance();const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${escapeHtml(a.timezone||'-')}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="13" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>auth</th><th>home</th><th>proxy</th><th>timezone</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority]').forEach(el=>{el.oninput=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')}});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);const actionLabels=new Map([['tui_mapping','TUI Mapping'],['coverage','覆盖矩阵']]);mapping.forEach(row=>{if(row.api_action&&!actionLabels.has(row.api_action))actionLabels.set(row.api_action,row.tui_label||row.api_action)});$('maintenanceActions').innerHTML=[...actionLabels.entries()].map(([id,label])=>`<button class="ghost" data-settings-action="${escapeHtml(id)}">${escapeHtml(label)}</button>`).join('');bindSettingsActionButtons()}
+function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderSettingsCommand(accounts,coverage,mapping);renderUiSettings(mapping);renderEntryAudit(mapping);renderLoadBalance();const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td><input data-account-family value="${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{}))}" ${locked?'disabled':''} placeholder="GPT=120, Qwen=90" style="min-width:160px"></td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${escapeHtml(a.timezone||'-')}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="14" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>Family</th><th>auth</th><th>home</th><th>proxy</th><th>timezone</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority],[data-account-family]').forEach(el=>{el.oninput=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')}});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);const actionLabels=new Map([['tui_mapping','TUI Mapping'],['coverage','覆盖矩阵']]);mapping.forEach(row=>{if(row.api_action&&!actionLabels.has(row.api_action))actionLabels.set(row.api_action,row.tui_label||row.api_action)});$('maintenanceActions').innerHTML=[...actionLabels.entries()].map(([id,label])=>`<button class="ghost" data-settings-action="${escapeHtml(id)}">${escapeHtml(label)}</button>`).join('');bindSettingsActionButtons()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
 function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
 function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
 function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
-function draft(){syncProvider();syncFallback();syncRuntime();syncAccounts();syncUiSettings();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,accounts:state.accounts,account_defaults:state.account_defaults,rescue:state.rescue,vision_sidecar:state.vision_sidecar,ui:state.ui,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
+function draft(){syncProvider();syncFallback();syncRuntime();syncAccounts();syncUiSettings();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,accounts:state.accounts,account_defaults:state.account_defaults,rescue:state.rescue,...(touchedLoadBalance?{load_balance:state.load_balance}:{}),vision_sidecar:state.vision_sidecar,ui:state.ui,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderSettings();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
-$('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
+$('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,family_priority_overrides:{},models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
 $('modelSearch').oninput=renderModelTable;$('addManualModels').onclick=()=>{const p=current();const vals=$('manualModels').value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);p.extra_models=[...new Set([...(p.extra_models||[]),...vals])];p.hidden_models=(p.hidden_models||[]).filter(x=>!vals.includes(x));$('manualModels').value='';renderModelTable();toast(`已添加 ${vals.length} 个模型`)};$('clearHidden').onclick=()=>{current().hidden_models=[];renderModelTable()};$('clearAllStaleHidden').onclick=cleanupAllStaleHidden
 $('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/provider/models',{provider:current(),force_refresh:true});if(data.ok&&Array.isArray(data.models)){const p=current();if(!p.approved_route_models||!p.approved_route_models.length){p.approved_route_models=(p.models||[]).filter(r=>r&&r.id&&r.source!=='derived_alias').map(r=>r.id)}p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);if($('autoStaleCleanupOnFetch')?.checked&&staleRouteModels(p).length){staleCleanupProviders.add(p.id)}renderModelTable();$('testResult').textContent=JSON.stringify(data,null,2);toast(staleCleanupProviders.has(p.id)?`拉取到 ${data.models.length} 个模型；已自动标记缺失旧 route 清理`:`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models；缺失旧 route 默认保留`)}else{$('testResult').textContent=JSON.stringify(data,null,2);toast(data.error||'模型拉取失败，请看测试结果')}}
@@ -5325,8 +5498,8 @@ $('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft
 function currentApplyCommand(){return lastPlan?.registry_v2_save_plan?.apply_plan?.cli_apply_command||'./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json'}
 $('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载 redacted plan JSON')}
 $('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
-$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}
-$('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}
+$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();touchedLoadBalance=false;renderAll();}}
+$('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();touchedLoadBalance=false;renderAll();}}
 load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:var(--danger);font-family:var(--font-mono)">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
 </body>

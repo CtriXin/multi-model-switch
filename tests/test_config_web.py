@@ -116,8 +116,9 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "connect.add_official")["status"] == "human_gate"
-    assert next(item for item in mapping if item["id"] == "load_balance.profile_select")["status"] == "report"
+    assert next(item for item in mapping if item["id"] == "load_balance.profile_select")["status"] == "native"
     assert snapshot["ui"]["language"] == "zh"
+    assert "Qwen" in snapshot["model_families"]
     assert snapshot["load_balance"]["default_profile"] == "daily"
     assert snapshot["load_balance"]["profiles"][0]["slots"]["heavy"]["provider_id"] == "webui-test-direct-qwen"
     assert "vision_sidecar" in snapshot["snippets"]
@@ -236,7 +237,8 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert "mmf guard status" in guard["commands"]
     assert guard_accept["status"] == "human_gate"
     assert language["status"] == "native"
-    assert load_balance["write_policy"] == "read_only"
+    assert load_balance["write_policy"] == "draft_review_confirmed_save"
+    assert load_balance["status"] == "native"
     assert load_balance["load_balance"]["default_profile"] == "fast"
     assert channel_status["status"] == "native"
     assert channel_status["provider_default"] == "demo"
@@ -567,7 +569,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "写入预览DB" in html
     assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
-    assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
+    assert "stable legacy 保存写入 config.toml 的 [rescue] / [load_balance] / [vision_sidecar]" in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
     assert "stable 写 credentials.sh；preview 写 secret backend" in html
     assert "这里会写入 config.toml 的 [rescue]" not in html
@@ -600,7 +602,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Load Balance profiles" in html
     assert "loadBalanceTable" in html
     assert "function renderLoadBalance" in html
+    assert "lbUpsert" in html
+    assert "load_balance profile 已暂存" in html
     assert "load_balance_status" in html
+    assert "family_priority_overrides" in html
+    assert "function familyPriorityInputs" in html
+    assert "providerFamilyPriority" in html
+    assert "data-account-family" in html
     assert "TUI ↔ WebUI 对照表" in html
     assert "tuiMappingTable" in html
     assert "mappingFilters" in html
@@ -809,6 +817,59 @@ def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(t
     assert any(item["kind"] == "account_metadata" and item["meta"]["account_id"] == "codex-b" for item in review["items"])
     assert any(risk["id"] == "account_default_changed" for risk in review["risks"])
     assert review["counts"]["account_changes"] == 2
+
+
+def test_config_web_plan_family_priority_and_load_balance_drafts_are_reviewed(tmp_path):
+    cfg = {
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "models_endpoint": "/models",
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "priority": 100}],
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "accounts", "account_defaults", "load_balance")}
+    draft["providers"][0]["family_priority_overrides"] = {"GPT": 145, "Qwen": 90}
+    draft["accounts"][0]["family_priority_overrides"] = {"GPT": 130}
+    draft["load_balance"] = {
+        "default_profile": "daily",
+        "profiles": [
+            {
+                "name": "daily",
+                "label": "daily",
+                "slots": {
+                    "heavy": {"model": "gpt-5.5", "provider_id": "demo"},
+                    "medium": {"model": "qwen3.6-plus"},
+                    "light": {"model": "deepseek-v4-flash"},
+                },
+            }
+        ],
+    }
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    provider = plan["config"]["providers"][0]
+    assert provider["family_priority_overrides"] == {"GPT": 145, "Qwen": 90}
+    assert plan["config"]["accounts"][0]["family_priority_overrides"] == {"GPT": 130}
+    assert plan["config"]["load_balance"]["default"] == "daily"
+    assert plan["config"]["load_balance"]["profiles"]["daily"]["heavy"] == {"model": "gpt-5.5", "provider": "demo"}
+    assert any(item["kind"] == "provider_family_priority" for item in review["items"])
+    assert any(item["kind"] == "account_metadata" for item in review["items"])
+    assert any(item["kind"] == "load_balance" for item in review["items"])
+    assert "family_priority_overrides" in plan["diffs"]["config_toml"]
+    assert "[load_balance]" in plan["diffs"]["config_toml"]
 
 
 def test_config_web_plan_ui_language_draft_is_reviewed(tmp_path):
