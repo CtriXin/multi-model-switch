@@ -103,6 +103,14 @@ compatibility wrappers. Restore-state noise stripping, sensitive gateway auth
 scrubbing, OAuth token freshness selection, and project trust allowlists must
 stay behavior-preserving during module extraction.
 
+2026-05-29 implementation note: Claude state read/copy and project trust
+helpers may live outside `mms_launchers.py`, but
+`_load_real_claude_ui_state_seed`, `_load_real_claude_project_state`,
+`_ensure_claude_project_trust`, and `_copy_claude_state_json` remain the
+compatibility wrappers. Read-only real-home seed lookup, session-local
+`.claude.json` copy-in sanitization, disabled MCP filtering, and trust dialog
+state materialization must stay behavior-preserving during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去

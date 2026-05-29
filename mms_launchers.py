@@ -4823,43 +4823,17 @@ def _sanitize_claude_project_state_map(projects_data):
 
 
 def _load_real_claude_ui_state_seed():
-    import json as _json
+    """Compatibility wrapper for reading real Claude UI state seed."""
+    from mms_claude_state import load_real_claude_ui_state_seed
 
-    real_json = _real_user_path(".claude.json")
-    if not os.path.exists(real_json):
-        return {}
-    try:
-        with open(real_json, encoding="utf-8") as f:
-            loaded = _json.load(f)
-        if not isinstance(loaded, dict):
-            return {}
-        return _sanitize_claude_ui_state_seed_payload(loaded)
-    except Exception:
-        return {}
+    return load_real_claude_ui_state_seed()
 
 
 def _load_real_claude_project_state(project_path):
-    import json as _json
+    """Compatibility wrapper for reading real Claude project state."""
+    from mms_claude_state import load_real_claude_project_state
 
-    real_json = _real_user_path(".claude.json")
-    normalized_project = os.path.realpath(str(project_path or "").strip())
-    if not normalized_project or not os.path.exists(real_json):
-        return None
-    try:
-        with open(real_json, encoding="utf-8") as f:
-            loaded = _json.load(f)
-        if not isinstance(loaded, dict):
-            return None
-        projects = loaded.get("projects")
-        if not isinstance(projects, dict):
-            return None
-        project_state = projects.get(normalized_project)
-        if not isinstance(project_state, dict):
-            return None
-        cleaned = _sanitize_claude_project_state_entry(project_state)
-        return cleaned or None
-    except Exception:
-        return None
+    return load_real_claude_project_state(project_path)
 
 
 def _sanitize_oauth_claude_state_payload(data):
@@ -4988,72 +4962,23 @@ def _ensure_claude_project_trust(
     allow_execution_surfaces=True,
     disabled_session_surfaces=None,
 ):
-    payload = dict(data) if isinstance(data, dict) else {}
-    project_path = os.path.realpath(str(project_path or "").strip())
-    projects = payload.get("projects")
-    if not isinstance(projects, dict):
-        projects = {}
+    """Compatibility wrapper for Claude project trust state materialization."""
+    from mms_claude_state import ensure_claude_project_trust
 
-    entry = {}
-    if isinstance(project_state, dict):
-        entry.update(project_state)
-    elif isinstance(projects.get(project_path), dict):
-        entry.update(projects[project_path])
-
-    entry.setdefault("allowedTools", [])
-    entry.setdefault("mcpContextUris", [])
-    entry.setdefault("mcpServers", {})
-    entry.setdefault("enabledMcpjsonServers", [])
-    entry.setdefault("disabledMcpjsonServers", [])
-    if not allow_execution_surfaces:
-        entry["mcpServers"] = {}
-        entry["enabledMcpjsonServers"] = []
-        entry["disabledMcpjsonServers"] = []
-    else:
-        entry["mcpServers"] = _filter_mcp_servers_by_disabled(
-            entry.get("mcpServers"),
-            disabled_session_surfaces,
-        )
-        disabled_mcp = _normalize_session_surface_disabled(disabled_session_surfaces).get("mcp", set())
-        if disabled_mcp:
-            entry["enabledMcpjsonServers"] = [
-                name for name in entry.get("enabledMcpjsonServers", [])
-                if str(name or "").strip() not in disabled_mcp
-            ]
-    entry["hasTrustDialogAccepted"] = True
-    entry["hasCompletedProjectOnboarding"] = True
-    entry["hasClaudeMdExternalIncludesApproved"] = True
-    entry["hasClaudeMdExternalIncludesWarningShown"] = True
-    seen_count = entry.get("projectOnboardingSeenCount")
-    if isinstance(seen_count, (int, float)) and not isinstance(seen_count, bool):
-        entry["projectOnboardingSeenCount"] = max(int(seen_count), 1)
-    else:
-        entry["projectOnboardingSeenCount"] = 1
-    entry.setdefault("lastGracefulShutdown", False)
-
-    projects[project_path] = entry
-    payload["projects"] = projects
-    return payload
+    return ensure_claude_project_trust(
+        data,
+        project_path,
+        project_state=project_state,
+        allow_execution_surfaces=allow_execution_surfaces,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
 
 def _copy_claude_state_json(src, dst, *, mode="restore"):
-    import json as _json
+    """Compatibility wrapper for Claude state JSON copy/sanitization."""
+    from mms_claude_state import copy_claude_state_json
 
-    payload = {}
-    if os.path.exists(src):
-        try:
-            with open(src, encoding="utf-8") as f:
-                loaded = _json.load(f)
-            if isinstance(loaded, dict):
-                payload = loaded
-        except Exception:
-            payload = {}
-    if mode == "oauth":
-        payload = _sanitize_oauth_claude_state_payload(payload)
-    else:
-        payload = _strip_claude_restore_state(payload)
-    with locked_state_file(dst):
-        atomic_write_json(dst, payload, mode=0o600)
+    return copy_claude_state_json(src, dst, mode=mode)
 
 
 def _parse_iso8601_utc(value):
