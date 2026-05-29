@@ -25,7 +25,9 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v3.2.6`
+当前稳定版：`v3.3.1`
+
+New Feature 分支：`main`（跟随下一次稳定发布前的最新迭代）
 
 这一代的重点：
 
@@ -56,14 +58,33 @@ MMS 会内建通用版 `xmem` skill 和静默 session closeout hook；默认不�
 
 ## 安装 / 升级
 
+推荐稳定版安装（跟随最新公开稳定 Release）：
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --latest-release
 ```
 
-默认行为：
+New Feature 安装（跟随 `main` 的最新迭代）：
 
-- 安装最新 semver tag
-- 在 `~/.mms` 创建隔离 MMS runtime
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --main
+```
+
+当前稳定版精确 pin（`v3.3.1`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.1/install.sh | bash -s --
+```
+
+通道说明：
+
+- `--latest-release` 跟随最新的人为稳定 GitHub Release
+- `--main` 跟随默认分支上的最新 feature 迭代
+- 不带参数时仍会安装最新 semver tag；它可能比当前稳定发布线更激进
+
+在选定 ref/channel 之后，默认行为是：
+
+- 把指定版本安装到隔离的 `~/.mms` runtime
 - 把 `mms`、`mmslogs` 链接到 `~/.local/bin`
 - 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
 - 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
@@ -95,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.6/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.1/install.sh | bash -s --
 ```
 
 安装后自检：
