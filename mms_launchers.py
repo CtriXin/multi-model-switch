@@ -2993,185 +2993,73 @@ def _token_saver_script_path():
 
 
 def _is_caveman_hook_command(command_text):
-    command_text = str(command_text or "").strip().lower()
-    if not command_text:
-        return False
-    markers = (
-        "caveman-activate.js",
-        "caveman-mode-tracker.js",
-        "caveman mode active",
-    )
-    return any(marker in command_text for marker in markers)
+    """Compatibility wrapper for caveman hook command detection."""
+    from mms_hook_commands import is_caveman_hook_command
+
+    return is_caveman_hook_command(command_text)
 
 
 def _is_codex_rtk_hook_command(command_text):
-    command_text = str(command_text or "").strip().lower()
-    if not command_text:
-        return False
-    markers = (
-        "codex-rtk-rewrite.sh",
-        "rtk-rewrite.sh",
-        "rtk rewrite",
-    )
-    return any(marker in command_text for marker in markers)
+    """Compatibility wrapper for Codex RTK hook command detection."""
+    from mms_hook_commands import is_codex_rtk_hook_command
+
+    return is_codex_rtk_hook_command(command_text)
 
 
 def _is_ecc_hook_command(command_text):
-    command_text = str(command_text or "").strip().lower()
-    if not command_text:
-        return False
-    markers = (
-        "plugin-hook-bootstrap.js",
-        "run-with-flags.js",
-        "run-with-flags-shell.sh",
-        "session-start-bootstrap.js",
-        "pre-bash-dispatcher.js",
-        "post-bash-dispatcher.js",
-        "quality-gate.js",
-        "stop-format-typecheck.js",
-        "continuous-learning-v2/hooks/observe.sh",
-        "everything-claude-code",
-    )
-    return any(marker in command_text for marker in markers)
+    """Compatibility wrapper for ECC hook command detection."""
+    from mms_hook_commands import is_ecc_hook_command
+
+    return is_ecc_hook_command(command_text)
 
 
 def _is_omc_hook_command(command_text):
-    command_text = str(command_text or "").strip().lower()
-    if not command_text:
-        return False
-    markers = (
-        "oh-my-claudecode",
-        "keyword-detector.mjs",
-        "skill-injector.mjs",
-        "session-start.mjs",
-        "project-memory-session.mjs",
-        "wiki-session-start.mjs",
-        "setup-init.mjs",
-        "setup-maintenance.mjs",
-        "pre-tool-enforcer.mjs",
-        "permission-handler.mjs",
-        "post-tool-verifier.mjs",
-        "project-memory-posttool.mjs",
-        "post-tool-rules-injector.mjs",
-        "post-tool-use-failure.mjs",
-        "subagent-tracker.mjs",
-        "verify-deliverables.mjs",
-        "project-memory-precompact.mjs",
-        "wiki-pre-compact.mjs",
-        "context-guard-stop.mjs",
-        "persistent-mode.mjs",
-        "code-simplifier.mjs",
-        "session-end.mjs",
-        "wiki-session-end.mjs",
-    )
-    return any(marker in command_text for marker in markers)
+    """Compatibility wrapper for OMC hook command detection."""
+    from mms_hook_commands import is_omc_hook_command
+
+    return is_omc_hook_command(command_text)
 
 
 def _is_mms_managed_hook_command(command_text):
-    command_text = str(command_text or "").strip().lower()
-    if not command_text:
-        return False
-    markers = (
-        "claude-feishu-webfetch-guard.sh",
-        "hive-compact-hook.sh",
-        "brainkeeper-session-start-hook.sh",
-        "brainkeeper-session-end-hook.sh",
-        "brainkeeper-token-monitor-hook.sh",
-        "mindkeeper-session-start-hook.sh",
-        "mindkeeper-session-end-hook.sh",
-        "mindkeeper-token-monitor-hook.sh",
-        "claude-codegraph-auto-index.sh",
-        "mms-resume-hint.sh",
-        "xmem-session-start-hook.sh",
-        "xmem-session-end-hook.sh",
-        "xmem-gateway-hook.sh",
-        "claude-map-auto-index.sh",
-        "nsr-claude-hook.sh",
-        "nsr-codex-hook.sh",
-        "nsr-builtin-hook.py",
-        "scmp_hook.py --host codex",
-        "caveman-activate.js",
-        "caveman-mode-tracker.js",
-        "everything-claude-code",
-        "oh-my-claudecode",
-    )
-    return any(marker in command_text for marker in markers)
+    """Compatibility wrapper for MMS-managed hook command detection."""
+    from mms_hook_commands import is_mms_managed_hook_command
+
+    return is_mms_managed_hook_command(command_text)
 
 
 def _is_legacy_loop_hook_command(command_text):
-    command_text = str(command_text or "").strip().lower()
-    if not command_text:
-        return False
-    markers = (
-        "looop",
-        "bugloop",
-        "nightly-fix",
-        "nightly-debug",
-    )
-    return any(marker in command_text for marker in markers)
+    """Compatibility wrapper for legacy loop hook command detection."""
+    from mms_hook_commands import is_legacy_loop_hook_command
+
+    return is_legacy_loop_hook_command(command_text)
 
 
 def _is_nsr_hook_command(command_text):
-    command_text = str(command_text or "").strip().lower()
-    if not command_text:
-        return False
-    if any(
-        marker in command_text
-        for marker in (
-            "nsr-claude-hook.sh",
-            "nsr-codex-hook.sh",
-            "nsr-builtin-hook.py",
-            "non-stop-run",
-            "looop.deprecated",
-            "mms_nsr",
-        )
-    ):
-        return True
-    if (
-        ("codex_hook.py" in command_text or "claude_hook.py" in command_text)
-        and ("nsr" in command_text or "non-stop" in command_text or "looop" in command_text)
-    ):
-        return True
-    return False
+    """Compatibility wrapper for NSR hook command detection."""
+    from mms_hook_commands import is_nsr_hook_command
+
+    return is_nsr_hook_command(command_text)
 
 
 def _is_loop_family_hook_command(command_text):
-    return _is_legacy_loop_hook_command(command_text) or _is_nsr_hook_command(command_text)
+    """Compatibility wrapper for loop-family hook command detection."""
+    from mms_hook_commands import is_loop_family_hook_command
+
+    return is_loop_family_hook_command(command_text)
 
 
 def _is_looop_hook_command(command_text):
-    # Backward-compatible alias for older tests/callers.
-    return _is_legacy_loop_hook_command(command_text)
+    """Backward-compatible alias for older tests/callers."""
+    from mms_hook_commands import is_looop_hook_command
+
+    return is_looop_hook_command(command_text)
 
 
 def _hook_command_targets_exist(command_text):
-    command_text = str(command_text or "").strip()
-    if not command_text:
-        return True
-    try:
-        parts = shlex.split(command_text)
-    except ValueError:
-        parts = command_text.split()
-    if not parts:
-        return True
+    """Compatibility wrapper for hook command executable target checks."""
+    from mms_hook_commands import hook_command_targets_exist
 
-    candidates = []
-    first = parts[0]
-    if os.path.isabs(first):
-        candidates.append(first)
-
-    runner = os.path.basename(first)
-    if runner in {"bash", "sh", "zsh", "node", "python", "python3"}:
-        for token in parts[1:]:
-            if token.startswith("-"):
-                continue
-            if os.path.isabs(token):
-                candidates.append(token)
-            break
-
-    if not candidates:
-        return True
-    return all(os.path.exists(candidate) for candidate in candidates)
+    return hook_command_targets_exist(command_text)
 
 
 def _filter_missing_managed_hook_commands(hooks_data):
@@ -3210,8 +3098,10 @@ def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None)
 
 
 def _mcp_command_has_path(command):
-    command = str(command or "").strip()
-    return bool(command and (os.path.isabs(command) or os.sep in command))
+    """Compatibility wrapper for MCP command path detection."""
+    from mms_hook_commands import mcp_command_has_path
+
+    return mcp_command_has_path(command)
 
 
 def _normalize_session_mcp_server_spec(name, spec, *, env=None):
