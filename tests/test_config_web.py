@@ -91,7 +91,9 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     }
     assert {item["id"] for item in mapping} >= {"provider.credentials", "account.login", "registry.publish_approved", "guard.accept"}
     assert next(item for item in mapping if item["id"] == "guard.accept")["status"] == "human_gate"
-    assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "missing"
+    assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
+    assert snapshot["ui"]["language"] == "zh"
     assert "vision_sidecar" in snapshot["snippets"]
     assert [step["id"] for step in snapshot["setup_flow"]] == [
         "channel",
@@ -173,7 +175,7 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert guard["write_policy"] == "manual_cli_human_gate"
     assert "mmf guard status" in guard["commands"]
     assert guard_accept["status"] == "human_gate"
-    assert language["status"] == "missing"
+    assert language["status"] == "native"
     assert not (tmp_path / "mms-next" / "registry").exists()
 
 
@@ -521,6 +523,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "data-account-default" in html
     assert "Claude human-only" in html
     assert "account_defaults:state.account_defaults" in html
+    assert "uiLanguage" in html
+    assert "saveUiLanguage" in html
+    assert "settingsGapSummary" in html
+    assert "ui:state.ui" in html
     assert "settingsCoverage" in html
     assert "TUI ↔ WebUI 对照表" in html
     assert "tuiMappingTable" in html
@@ -528,6 +534,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function renderTuiMapping" in html
     assert "data-map-filter" in html
     assert "data-section-jump" in html
+    assert "pDeleteConfirm" in html
+    assert "deleteProvider" in html
+    assert "function deleteCurrentProviderDraft()" in html
     assert "tui_mapping" in html
     assert "maintenanceActions" in html
     assert "/api/settings/report" in html
@@ -727,6 +736,43 @@ def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(t
     assert any(item["kind"] == "account_metadata" and item["meta"]["account_id"] == "codex-b" for item in review["items"])
     assert any(risk["id"] == "account_default_changed" for risk in review["risks"])
     assert review["counts"]["account_changes"] == 2
+
+
+def test_config_web_plan_ui_language_draft_is_reviewed(tmp_path):
+    cfg = {"ui": {"language": "zh"}}
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        {"draft": {"ui": {"language": "en"}}},
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert plan["ok"] is True
+    assert plan["config"]["ui"]["language"] == "en"
+    assert any(item["kind"] == "ui_language" for item in plan["review_summary"]["items"])
+    assert 'language = "en"' in plan["diffs"]["config_toml"]
+
+
+def test_config_web_plan_provider_delete_draft_is_reviewed(tmp_path):
+    cfg = {
+        "provider": {"default": "first"},
+        "providers": [
+            {"id": "first", "name": "First", "models_endpoint": "/models"},
+            {"id": "second", "name": "Second", "models_endpoint": "/models"},
+        ],
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "provider_default")}
+    draft["providers"] = [provider for provider in draft["providers"] if provider["id"] == "second"]
+    draft["provider_default"] = "second"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    assert [provider["id"] for provider in plan["config"]["providers"]] == ["second"]
+    assert plan["config"]["provider"]["default"] == "second"
+    assert any(item["kind"] == "provider_removed" and item["provider_id"] == "first" for item in review["items"])
+    assert any(risk["id"] == "provider_removed" and risk["provider_id"] == "first" for risk in review["risks"])
 
 
 def test_config_web_plan_account_snapshot_noops_without_materializing_defaults(tmp_path):
