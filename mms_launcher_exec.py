@@ -7,6 +7,49 @@ import subprocess
 import sys
 
 
+def print_session_summary(bridge_info, *, print_fn=print):
+    """Print a compact session summary when a local bridge exits."""
+    if not bridge_info or not isinstance(bridge_info, dict):
+        return
+    server = bridge_info.get("_server")
+    if not server or not hasattr(server, "session_request_count"):
+        return
+    reqs = getattr(server, "session_request_count", 0)
+    if reqs == 0:
+        return
+    inp = getattr(server, "session_input_tokens", 0)
+    out = getattr(server, "session_output_tokens", 0)
+    start = getattr(server, "session_start_time", 0)
+    if start:
+        import time
+
+        elapsed = time.time() - start
+    else:
+        elapsed = 0
+    if elapsed >= 3600:
+        dur = f"{int(elapsed // 3600)}h {int((elapsed % 3600) // 60)}m"
+    elif elapsed >= 60:
+        dur = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+    else:
+        dur = f"{int(elapsed)}s"
+
+    def _fmt_tokens(n):
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}K"
+        return str(n)
+
+    model = getattr(server, "heavy_model", None) or getattr(server, "model_name", "?")
+    parts = [dur, model, f"{reqs} reqs"]
+    if inp or out:
+        parts.append(f"{_fmt_tokens(inp)} in + {_fmt_tokens(out)} out")
+    try:
+        print_fn(f"\n\033[2m[MMS] {' · '.join(parts)}\033[0m")
+    except Exception:
+        pass
+
+
 def exec_or_run(
     cmd,
     env,
