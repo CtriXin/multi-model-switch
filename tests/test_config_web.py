@@ -84,6 +84,7 @@ def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
     provider = snapshot["providers"][0]
 
     assert provider["fallback_models"] == []
+    assert provider["approved_route_models"] == ["gpt-preview"]
     assert provider["extra_models"] == []
     assert provider["models"][0]["id"] == "gpt-preview"
     assert provider["models"][0]["source"] == "approved"
