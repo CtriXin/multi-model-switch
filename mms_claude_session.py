@@ -252,6 +252,24 @@ def link_claude_library_entries(session_home, entries=None):
         os.symlink(src, dst)
 
 
+def link_real_local_bin(session_home):
+    import mms_launchers as _launchers
+
+    real_bin = _launchers._real_user_path(".local", "bin")
+    if not os.path.isdir(real_bin):
+        return
+    session_local = os.path.join(session_home, ".local")
+    if os.path.islink(session_local):
+        try:
+            os.unlink(session_local)
+        except OSError:
+            return
+    os.makedirs(session_local, exist_ok=True)
+    dst = os.path.join(session_local, "bin")
+    if not os.path.exists(dst) and not os.path.islink(dst):
+        os.symlink(real_bin, dst)
+
+
 def ensure_account_library_entries(account_home, entries=None):
     import mms_launchers as _launchers
 

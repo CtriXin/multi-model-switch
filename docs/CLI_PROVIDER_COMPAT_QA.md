@@ -132,6 +132,12 @@ the compatibility wrappers. Keychains-only exposure, broad `Library` symlink
 replacement, and account-local Library linking must stay behavior-preserving
 during module extraction.
 
+2026-05-29 implementation note: Claude session `.local/bin` exposure may live
+outside `mms_launchers.py`, but `_link_real_local_bin` remains the compatibility
+wrapper. Exposing only real `~/.local/bin`, replacing broad `.local` symlinks,
+and avoiding whole-`.local` inheritance must stay behavior-preserving during
+module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去

@@ -6393,19 +6393,10 @@ def _link_shared_dotfiles(session_home):
 
 
 def _link_real_local_bin(session_home):
-    real_bin = _real_user_path(".local", "bin")
-    if not os.path.isdir(real_bin):
-        return
-    session_local = os.path.join(session_home, ".local")
-    if os.path.islink(session_local):
-        try:
-            os.unlink(session_local)
-        except OSError:
-            return
-    os.makedirs(session_local, exist_ok=True)
-    dst = os.path.join(session_local, "bin")
-    if not os.path.exists(dst) and not os.path.islink(dst):
-        os.symlink(real_bin, dst)
+    """Compatibility wrapper for exposing real ~/.local/bin in Claude sessions."""
+    from mms_claude_session import link_real_local_bin
+
+    return link_real_local_bin(session_home)
 
 
 def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
