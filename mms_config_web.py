@@ -1682,10 +1682,15 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
         ("registry.fetch_openrouter", "fetch_openrouter", "拉取 OpenRouter Catalog", "fetch_openrouter_gate", "human_gate", "network_human_gate"),
         ("registry.diff_openrouter", "diff_openrouter", "对比 OpenRouter Candidate", "diff_openrouter_gate", "human_gate", "network_human_gate"),
         ("registry.publish_approved", "publish_approved", "发布 Approved Bundle", "publish_approved_gate", "human_gate", "write_human_gate"),
-        ("registry.verify_approved", "verify_approved", "验证 Approved Bundle", "verify_approved_gate", "human_gate", "manual_cli_human_gate"),
+        ("registry.verify_approved", "verify_approved", "验证 Approved Bundle", "verify_approved", "report", "read_only_report"),
         ("registry.doctor", "doctor", "Registry Doctor / 状态", "registry_status", "report", "read_only_report"),
     ]
     for row_id, action_id, label, api_action, status, write_policy in registry_rows:
+        manual_check = (
+            "只读 manifest/hash 验证，可直接在 WebUI 执行；publish 仍 human-gated。"
+            if action_id == "verify_approved"
+            else "read-only 可直接点；network/write 类先 gate，不静默执行。"
+        )
         rows.append(
             row(
                 row_id,
@@ -1699,7 +1704,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
                 status=status,
                 write_policy=write_policy,
                 verification=f"/api/settings/report?action={api_action}" if api_action else "/api/plan",
-                manual_check="read-only 可直接点；network/write 类先 gate，不静默执行。",
+                manual_check=manual_check,
             )
         )
 
@@ -4258,6 +4263,31 @@ def build_settings_report(
             "report": snapshot.get("model_source_status") or {},
             "note": "registry_status CLI can initialize SQLite; WebUI uses model_source_status instead to stay read-only.",
         }
+    if action == "verify_approved":
+        config_root = _config_root_for_snapshot(config_path)
+        try:
+            from mms_registry_cli import verify_approved_bundle
+
+            report = verify_approved_bundle(config_dir=config_root or None)
+            return {
+                "ok": True,
+                "schema": "mms.setup_web.settings_report.v1",
+                "action": action,
+                "write_policy": "read_only_report",
+                "status": "report",
+                "report": _sanitize_for_output(report),
+                "note": "只读验证 latest-approved manifest/hash；不会 publish、写入 bundle 或修改真实 config。",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "schema": "mms.setup_web.settings_report.v1",
+                "action": action,
+                "write_policy": "read_only_report",
+                "status": "report",
+                "error": f"{type(exc).__name__}: {exc}",
+                "note": "只读验证 latest-approved manifest/hash 失败；WebUI 没有执行 publish/write。",
+            }
     if action == "provider_usage_summary":
         return {
             "ok": True,
@@ -4380,7 +4410,6 @@ def build_settings_report(
         "fetch_openrouter_gate": ("network_human_gate", "Fetch OpenRouter Catalog 需要联网；当前保持 human gate。"),
         "diff_openrouter_gate": ("network_human_gate", "OpenRouter diff 可能依赖外部 catalog；当前保持 human gate。"),
         "publish_approved_gate": ("write_human_gate", "发布 approved bundle 是写入动作；WebUI 只允许通过保存/发布审计流执行。"),
-        "verify_approved_gate": ("manual_cli_human_gate", "verify approved 当前保留 CLI/manual path。"),
         "rescue_create_demo_gate": ("local_artifact_human_gate", "生成 demo rescue packet 会写本地 artifact；当前不自动执行。"),
         "rescue_handover_gate": ("planned_human_confirm", "fallback handover 写 artifact；后续需要 WebUI confirm flow。"),
         "about_refresh_gate": ("network_human_gate", "刷新版本检查可能联网；当前不自动执行。"),
@@ -4406,6 +4435,7 @@ def build_settings_report(
             "preview_doctor",
             "check_staleness",
             "registry_status",
+            "verify_approved",
             "provider_usage_summary",
             "connect_gateway_status",
             "provider_channel_status",

@@ -89,6 +89,13 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
     mapping = snapshot["tui_webui_mapping"]
     assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
+    assert snapshot["tui_webui_mapping_summary"]["counts"] == {
+        "native": 19,
+        "report": 16,
+        "draft_review": 3,
+        "human_gate": 19,
+        "missing": 0,
+    }
     assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
     assert snapshot["tui_webui_mapping_summary"]["clickable_rows"] == len(mapping)
     assert snapshot["tui_webui_mapping_summary"]["rows_with_open_target"] == len(mapping)
@@ -123,6 +130,10 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "connect.add_official")["status"] == "human_gate"
     assert next(item for item in mapping if item["id"] == "load_balance.profile_select")["status"] == "native"
+    verify_approved = next(item for item in mapping if item["id"] == "registry.verify_approved")
+    assert verify_approved["status"] == "report"
+    assert verify_approved["api_action"] == "verify_approved"
+    assert verify_approved["write_policy"] == "read_only_report"
     assert snapshot["ui"]["language"] == "zh"
     assert "Qwen" in snapshot["model_families"]
     assert snapshot["load_balance"]["default_profile"] == "daily"
@@ -279,6 +290,7 @@ def test_config_web_human_gate_reports_are_actionable(tmp_path):
     assert gate_actions
     assert "about_upgrade_gate" in gate_actions
     assert "refresh_due_sources_gate" in gate_actions
+    assert "verify_approved_gate" not in gate_actions
     for action in gate_actions:
         report = mms_config_web.build_settings_report(
             cfg,
@@ -310,6 +322,34 @@ def test_config_web_human_gate_reports_are_actionable(tmp_path):
     assert "mmf registry scheduled-refresh --dry-run --no-network" in scheduled["commands"]
     assert "mmf registry publish-approved" in publish["commands"]
     assert any("model-registry.latest-approved.json" in item for item in publish["writes"])
+
+
+def test_config_web_verify_approved_report_is_read_only(monkeypatch, tmp_path):
+    import mms_registry_cli
+
+    calls = {}
+
+    def fake_verify_approved_bundle(**kwargs):
+        calls.update(kwargs)
+        return {"verified": True, "manifest_path": "generated/model-registry.latest-approved.json"}
+
+    monkeypatch.setattr(mms_registry_cli, "verify_approved_bundle", fake_verify_approved_bundle)
+
+    config_root = tmp_path / "mms-next"
+    report = mms_config_web.build_settings_report(
+        {},
+        {"action": "verify_approved"},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert report["ok"] is True
+    assert report["status"] == "report"
+    assert report["write_policy"] == "read_only_report"
+    assert report["report"]["verified"] is True
+    assert calls["config_dir"] == str(config_root)
+    assert "不会 publish" in report["note"]
+    assert not config_root.exists()
 
 
 def test_config_web_json_response_redacts_account_protected_paths():
