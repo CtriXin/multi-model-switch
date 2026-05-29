@@ -70,6 +70,12 @@ outside `mms_launchers.py`, but the public compatibility contract is unchanged:
 keeps the same cache key / `/v1/messages` probe / OpenAI fallback outcomes, and
 must stay monkeypatch-compatible for launcher regression tests.
 
+2026-05-29 implementation note: Claude model-slot and context helpers may live
+outside `mms_launchers.py`, but `mms_launchers._apply_claude_model_overrides`,
+`_effective_context_window`, and `_runtime_supports_claude_1m` remain the
+compatibility wrappers. Claude `[1m]` suffix rules, MiMo selector stripping, and
+sensitive-provider 1M defaults must not change during module extraction.
+
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
 - 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去

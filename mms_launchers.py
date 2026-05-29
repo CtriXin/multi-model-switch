@@ -541,16 +541,21 @@ def _lookup_context_window(model_name, provider_id=None):
     return None
 
 def _runtime_supports_claude_1m(runtime):
-    explicit = _normalize_claude_1m_mode((runtime or {}).get("claude_1m_mode", "auto"))
-    if explicit == "enable":
-        return True
-    if explicit == "disable":
-        return False
-    provider_id = str((runtime or {}).get("id", "")).strip().lower()
-    disabled_ids = _provider_id_set_from_env("MMS_CLAUDE_DISABLE_1M_PROVIDER_IDS")
-    if provider_id and provider_id in disabled_ids:
-        return False
-    return not _runtime_declares_sensitive_claude(runtime)
+    """Compatibility wrapper for Claude 1M support policy."""
+    from mms_claude_model import runtime_supports_claude_1m
+
+    return runtime_supports_claude_1m(runtime)
+
+
+def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
+    """Compatibility wrapper for Claude-routed context window resolution."""
+    from mms_claude_model import effective_context_window
+
+    return effective_context_window(
+        *models,
+        enable_claude_1m=enable_claude_1m,
+        provider_id=provider_id,
+    )
 
 
 def _runtime_is_sensitive_claude_provider(runtime):
@@ -559,24 +564,6 @@ def _runtime_is_sensitive_claude_provider(runtime):
     return (provider_id and provider_id in sensitive_ids) or _runtime_declares_sensitive_claude(runtime)
 
 
-def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
-    """取所有活跃模型中最小的 context window。
-    智能路由场景下 heavy/medium/light 可能是不同模型，
-    conversation context 必须 fit 最小的那个。
-    """
-    windows = []
-    for m in models:
-        if not m:
-            continue
-        raw_model = str(m).strip()
-        clean = raw_model.replace("[1m]", "").strip()
-        w = _lookup_context_window(raw_model, provider_id=provider_id)
-        if not enable_claude_1m:
-            lower = clean.lower()
-            if lower.startswith("claude-") and "haiku" not in lower:
-                w = 200_000
-        windows.append(w or _DEFAULT_CONTEXT_WINDOW)
-    return min(windows) if windows else _DEFAULT_CONTEXT_WINDOW
 
 
 @contextmanager
@@ -8126,141 +8113,66 @@ def _normalized_model_name(model_name):
 
 
 def _strip_one_m_context_suffix(model_name):
-    normalized = _normalized_model_name(model_name)
-    if not normalized:
-        return ""
-    return (
-        normalized.replace(_ONE_M_CONTEXT_SUFFIX, "")
-        .replace(_ONE_M_CONTEXT_SUFFIX.upper(), "")
-        .strip()
-    )
+    """Compatibility wrapper for Claude 1M suffix stripping."""
+    from mms_claude_model import strip_one_m_context_suffix
+
+    return strip_one_m_context_suffix(model_name)
 
 
 def _is_claude_family_model_name(model_name):
-    lower = _strip_one_m_context_suffix(model_name).lower()
-    return any(token in lower for token in ("claude", "opus", "sonnet", "haiku"))
+    """Compatibility wrapper for Claude family model detection."""
+    from mms_claude_model import is_claude_family_model_name
+
+    return is_claude_family_model_name(model_name)
 
 
 def _is_mimo_one_m_context_selector(model_name):
-    normalized = _normalized_model_name(model_name).lower()
-    if "/" in normalized:
-        normalized = normalized.rsplit("/", 1)[-1]
-    return normalized in {
-        f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}",
-        f"mimo-v2.5{_ONE_M_CONTEXT_SUFFIX}",
-    }
+    """Compatibility wrapper for MiMo 1M selector detection."""
+    from mms_claude_model import is_mimo_one_m_context_selector
+
+    return is_mimo_one_m_context_selector(model_name)
 
 
 def _claude_visible_model_name(model_name, *, fallback_model=""):
-    """Return a model name safe for Claude Code's selected-model validation."""
-    normalized = _normalized_model_name(model_name)
-    if not normalized:
-        return _normalized_model_name(fallback_model)
-    fallback = _normalized_model_name(fallback_model) or "claude-sonnet-4-6"
-    if not _is_claude_family_model_name(normalized):
-        return fallback
-    if (
-        _ONE_M_CONTEXT_SUFFIX in normalized.lower()
-        and not _is_claude_family_model_name(normalized)
-        and _is_mimo_one_m_context_selector(normalized)
-    ):
-        return _strip_one_m_context_suffix(normalized)
-    return normalized
+    """Compatibility wrapper for Claude-visible model slot names."""
+    from mms_claude_model import claude_visible_model_name
+
+    return claude_visible_model_name(model_name, fallback_model=fallback_model)
 
 
 def _apply_claude_visible_model_overrides(target, model_name, *, fallback_model=""):
-    visible_model = _claude_visible_model_name(model_name, fallback_model=fallback_model)
-    if not visible_model:
-        return ""
-    for key in (
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-        "ANTHROPIC_REASONING_MODEL",
-        "CLAUDE_CODE_SUBAGENT_MODEL",
-    ):
-        target[key] = visible_model
-    return visible_model
+    """Compatibility wrapper for Claude-visible model overrides."""
+    from mms_claude_model import apply_claude_visible_model_overrides
+
+    return apply_claude_visible_model_overrides(target, model_name, fallback_model=fallback_model)
 
 
 def _claude_resume_model_name(*candidates):
-    for candidate in candidates:
-        normalized = _normalized_model_name(candidate)
-        if normalized:
-            return normalized
-    return ""
+    """Compatibility wrapper for Claude resume model normalization."""
+    from mms_claude_model import claude_resume_model_name
+
+    return claude_resume_model_name(*candidates)
 
 
 def _primary_claude_model(model_info):
-    if isinstance(model_info, dict):
-        for key in ("model", "sonnet", "opus", "haiku"):
-            value = _normalized_model_name(model_info.get(key))
-            if value:
-                return value
-        return ""
-    return _normalized_model_name(model_info)
+    """Compatibility wrapper for Claude primary model selection."""
+    from mms_claude_model import primary_claude_model
+
+    return primary_claude_model(model_info)
 
 
 def _with_1m_suffix(model_name, *, enable_1m=True):
-    """对 opus/sonnet Claude 模型追加 [1m] 后缀以启用 1M context。
-    Haiku 不支持 1M。非 Claude 模型不能把 [1m] 暴露给 Claude Code model slot。
-    Claude Code 会在 API 请求前自动剥离 Claude-family 的 [1m]。
-    """
-    normalized = _normalized_model_name(model_name)
-    if not normalized:
-        return normalized
-    lower = normalized.lower()
-    if _ONE_M_CONTEXT_SUFFIX in lower:
-        if (
-            not _is_claude_family_model_name(normalized)
-            and _is_mimo_one_m_context_selector(normalized)
-        ):
-            return _strip_one_m_context_suffix(normalized)
-        return normalized
-    if not enable_1m:
-        return normalized
-    # opus 和 sonnet 支持 1M context
-    if any(k in lower for k in ("opus", "sonnet")) and "haiku" not in lower:
-        return normalized + _ONE_M_CONTEXT_SUFFIX
-    return normalized
+    """Compatibility wrapper for Claude 1M model suffixing."""
+    from mms_claude_model import with_1m_suffix
+
+    return with_1m_suffix(model_name, enable_1m=enable_1m)
 
 
 def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
-    primary_model = _primary_claude_model(model_info)
-    if not primary_model:
-        return ""
+    """Compatibility wrapper for Claude model env overrides."""
+    from mms_claude_model import apply_claude_model_overrides
 
-    if isinstance(model_info, dict):
-        opus_model = _normalized_model_name(model_info.get("opus")) or primary_model
-        sonnet_model = _normalized_model_name(model_info.get("sonnet")) or primary_model
-        haiku_model = _normalized_model_name(model_info.get("haiku")) or primary_model
-        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(opus_model, enable_1m=enable_1m)
-        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(sonnet_model, enable_1m=enable_1m)
-        target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku_model  # haiku 不支持 1M
-        target["ANTHROPIC_MODEL"] = _with_1m_suffix(primary_model, enable_1m=enable_1m)
-        target["ANTHROPIC_REASONING_MODEL"] = _with_1m_suffix(
-            sonnet_model or primary_model,
-            enable_1m=enable_1m,
-        )
-        subagent_model = _normalized_model_name(model_info.get("subagent")) or sonnet_model or primary_model
-        target["CLAUDE_CODE_SUBAGENT_MODEL"] = _with_1m_suffix(
-            subagent_model,
-            enable_1m=enable_1m,
-        )
-        return primary_model
-
-    primary_1m = _with_1m_suffix(primary_model, enable_1m=enable_1m)
-    for key in (
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_REASONING_MODEL",
-        "CLAUDE_CODE_SUBAGENT_MODEL",
-    ):
-        target[key] = primary_1m
-    target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = primary_model  # haiku slot 不加 [1m]
-    return primary_model
+    return apply_claude_model_overrides(target, model_info, enable_1m=enable_1m)
 
 
 def launch_claude(model_info, runtime, once=False, extra_args=None):
