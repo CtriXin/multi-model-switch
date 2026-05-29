@@ -158,6 +158,17 @@ def claude_no_proxy_conflicts(no_proxy, *, no_proxy_tokens=CLAUDE_NO_PROXY_TOKEN
     return sorted(set(conflicts))
 
 
+def claude_bypass_requires_proxy(runtime, *, runtime_is_sensitive_claude_provider_fn):
+    runtime = dict(runtime or {})
+    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
+    runtime_cli = str(runtime.get("cli") or "").strip()
+    if auth_mode == "oauth" and runtime_cli == "claude":
+        return True
+    if auth_mode == "api_key":
+        return runtime_is_sensitive_claude_provider_fn(runtime)
+    return False
+
+
 def run_proxy_probe(
     proxy_url,
     target_url,

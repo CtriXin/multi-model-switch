@@ -150,6 +150,7 @@ from mms_runtime_network import (
     apply_runtime_network_profile as _apply_runtime_network_profile_impl,
     base_claude_network_guard as _base_claude_network_guard_impl,
     build_claude_network_guard as _build_claude_network_guard_impl,
+    claude_bypass_requires_proxy as _claude_bypass_requires_proxy_impl,
     check_proxy_connectivity_or_exit as _check_proxy_connectivity_or_exit_impl,
     claude_network_guard_cache_key as _claude_network_guard_cache_key_impl,
     claude_no_proxy_conflicts as _claude_no_proxy_conflicts_impl,
@@ -1006,14 +1007,11 @@ def _base_claude_network_guard(runtime, *, require_proxy=False):
 
 
 def _claude_bypass_requires_proxy(runtime):
-    runtime = dict(runtime or {})
-    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
-    runtime_cli = str(runtime.get("cli") or "").strip()
-    if auth_mode == "oauth" and runtime_cli == "claude":
-        return True
-    if auth_mode == "api_key":
-        return _runtime_is_sensitive_claude_provider(runtime)
-    return False
+    """Compatibility wrapper for Claude BYPASS proxy requirement policy."""
+    return _claude_bypass_requires_proxy_impl(
+        runtime,
+        runtime_is_sensitive_claude_provider_fn=_runtime_is_sensitive_claude_provider,
+    )
 
 
 def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
