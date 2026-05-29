@@ -174,20 +174,12 @@ Passive assets are available naturally in MMS-launched sessions. NSR is also ena
 
 This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giving each MMS session the selected skills, hooks, and MCP surfaces.
 
-## WebUI Inventory
+## WebUI 能力目录
 
-`mms config web` exposes a read-only **Session Skills / MCP / Hooks** panel. It
-uses the same launch preview catalog as the TUI confirmation screen, then groups
-items by:
+`mms config web` 提供只读的 **会话能力中心**。它复用 TUI 启动确认页的 launch preview catalog，但按普通用户更容易理解的方式分组：
 
-- `MMS dynamic`: session-local skills, MCP, hooks, and OpenCode plugins injected
-  by MMS;
-- `Global / inherited`: user-owned Claude/Codex/OpenCode config or plugins that
-  MMS can see but should not silently edit;
-- `Other detected`: launch-preview items that need conservative path review.
+- `MMS 动态注入`：MMS 在 session 启动时临时注入的技能、MCP 服务、hooks 和 OpenCode 插件；
+- `全局继承`：用户自己已有的 Claude/Codex/OpenCode 配置或插件，MMS 可以看到，但 WebUI 不会静默编辑；
+- `其它检测项`：启动预览能看到、但需要保守检查路径的条目。
 
-The panel is for discovery and snippet generation only. Persistent defaults
-still belong in `preferences.toml`, and real `~/.config/mms/**` writes remain
-under the human gate. The WebUI can also build an in-memory "default off" draft
-for displayed skills/MCP/hooks; copying that snippet does not change runtime
-behavior until the human applies it to `preferences.toml`.
+面板默认用卡片展示用途、来源、CLI、类型和默认状态；路径、触发、`disable_key` 和原始说明折叠在“高级信息”里。它只用于发现能力和生成片段，持久默认值仍属于 `preferences.toml`，真实 `~/.config/mms/**` 写入继续受 human gate 保护。WebUI 里的“默认关闭”只是内存草稿；复制片段不会改变 runtime 行为，只有用户把片段应用到 `preferences.toml` 后才会生效。

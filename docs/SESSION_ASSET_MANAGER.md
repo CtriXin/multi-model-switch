@@ -1,71 +1,57 @@
-# MMS Session Asset Manager
+# MMS 会话能力中心
 
-Status: first WebUI inventory slice.
+状态：WebUI 第一版只读目录 + 默认关闭草稿。
 
-## User Problem
+## 用户问题
 
-Users can see model/provider config in WebUI, but skills, MCP servers, hooks,
-and optional agent packs are harder to reason about:
+模型和通道已经能在 WebUI 里看懂，但技能、MCP 服务、hooks 和能力包仍然容易混在一起：
 
-- which item is global and affects plain Claude/Codex/OpenCode;
-- which item is injected only by MMS for the current session;
-- which CLI receives it;
-- which file path owns it;
-- whether it is passive, enabled by default, or gated by a pack toggle.
+- 哪些来自用户自己的全局 CLI 配置；
+- 哪些是 MMS 启动 session 时临时注入；
+- 哪个 CLI 会拿到它；
+- 文件路径或触发点在哪里；
+- 默认会带上、按能力包启用，还是应该默认关闭。
 
-## UX Model
+## 展示模型
 
-The WebUI should explain assets in three layers:
+WebUI 按三层解释，不把技术字段一口气摊开：
 
-1. **Global / inherited**: user-owned CLI config or plugins. MMS may inherit or
-   preview these, but WebUI should not silently edit them.
-2. **MMS dynamic**: session-local skills, MCP servers, plugins, and hooks that
-   MMS injects at launch. These are safe to visualize and disable per session.
-3. **Optional packs**: Caveman, NSR, ECC, OMC. The pack switch is the user-level
-   control; MCP/skills/hooks are the expanded surfaces underneath it.
+1. **MMS 动态注入**：启动 session 时临时加入的技能、MCP 服务、插件和 hooks；默认不污染全局 CLI。
+2. **全局继承**：用户已有的 Claude/Codex/OpenCode 配置或插件；WebUI 只读展示，不静默编辑。
+3. **其它检测项**：启动预览能看到但还未明确归类的条目，保守展示并把路径放进高级信息。
 
-## First WebUI Slice
+能力包如 Caveman、NSR、ECC、OMC 仍然是用户级开关；技能 / MCP / hooks 是能力包展开后的 surface。
 
-The first slice adds a read-only **Session Skills / MCP / Hooks** panel:
+## WebUI 第一版
 
-- tab by `MMS dynamic`, `Global / inherited`, and `Other detected`;
-- filter by CLI: `Claude`, `Codex`, `OpenCode`, `Antigravity`;
-- filter by surface kind: `Skills`, `MCP`, `Hooks`;
-- show name, description, origin, path/trigger, and `disable_key`;
-- let users tick a **default off** draft for any displayed item and generate the
-  corresponding `preferences.toml` snippet;
-- show common global roots and whether they exist;
-- show the current `preferences.toml` snippet for launch defaults and disabled
-  session surfaces.
+当前面板叫 **会话能力中心**，默认用卡片而不是大表格：
 
-This slice does not write `~/.config/mms/preferences.toml`. It keeps the
-existing human-gate rule: WebUI can display, edit-in-memory, copy, and explain
-the target snippet, then a later audited preferences writer can be added.
+- 按“来源 / CLI / 类型”筛选，并支持搜索名称、用途和路径；
+- 卡片正面只显示用途、来源、CLI、类型和默认状态；
+- 路径、触发、`disable_key`、原始说明折叠到“高级信息”；
+- 勾选“默认关闭”只更新页面内草稿，并生成 `preferences.toml` 片段；
+- 全局位置单独只读展示，避免用户误以为 WebUI 会改全局 CLI。
 
-## TUI Relationship
+这一版不会写 `~/.config/mms/preferences.toml`。它只负责展示、解释、内存编辑和复制片段；后续如果要真实写入，仍要走 audited preferences writer 和 human gate。
 
-The TUI confirmation screen already has the per-launch runtime control:
+## TUI 关系
 
-- `Tab` toggles bypass;
-- `C` toggles Caveman;
-- `N` toggles NSR when available;
-- `X` cycles Claude agent pack (`none` / `ecc` / `omc`);
-- the MCP / Skills / Hooks panels allow selecting a displayed item and disabling
-  it for this launch.
+TUI 启动确认页仍然负责单次启动覆盖：
 
-The WebUI should be the discovery and configuration overview. The TUI remains
-the final per-launch override surface.
+- `Tab` 切换 bypass；
+- `C` 切换 Caveman；
+- `N` 在可用时切换 NSR；
+- `X` 切换 Claude agent pack（`none` / `ecc` / `omc`）；
+- MCP / Skills / Hooks 面板可以选择某个显示项，并在本次启动禁用。
 
-## Persistence Contract
+WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认面。
 
-Current read/write boundaries:
+## 持久化边界
 
-- `preferences.toml` is the right persistent home for `bypass`,
-  `caveman_mode`, `nsr_mode`, `agent_pack`, and disabled session surfaces.
-- `config.toml` / registry DB remain model/provider/routing truth, not the place
-  for per-session asset toggles.
-- Global Claude/Codex/OpenCode config should stay read-only unless the human
-  explicitly enters a global installer/config flow.
+当前读写边界：
 
-Future save support should therefore be an audited preferences writer, not a
-side effect of the model/provider save flow.
+- `preferences.toml` 才是 `bypass`、`caveman_mode`、`nsr_mode`、`agent_pack` 和 disabled session surfaces 的持久偏好位置。
+- `config.toml` / registry DB 继续作为 model/provider/routing 真源，不承载 per-session 能力开关。
+- 全局 Claude/Codex/OpenCode 配置保持只读，除非用户明确进入全局安装或配置流程。
+
+因此，未来保存支持应该是独立的 audited preferences writer，而不是模型/通道保存流程的副作用。

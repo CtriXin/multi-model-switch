@@ -74,6 +74,22 @@ def test_session_asset_rows_have_user_facing_fields(monkeypatch, tmp_path):
 
     assert rows
     sample = rows[0]
-    assert {"cli", "kind", "title", "summary", "group", "origin", "disable_key"} <= set(sample)
+    assert {
+        "cli",
+        "kind",
+        "kind_label",
+        "title",
+        "summary",
+        "technical_summary",
+        "group",
+        "group_label",
+        "origin",
+        "origin_label",
+        "disable_key",
+    } <= set(sample)
     assert sample["kind"] in {"skills", "mcp", "hooks"}
     assert sample["group"] in {"mms_dynamic", "global", "other"}
+    assert sample["kind_label"] in {"技能", "MCP 服务", "自动钩子"}
+    assert sample["group_label"] in {"MMS 动态注入", "全局继承", "其它检测项"}
+    assert "web" in sample["title"]
+    assert "联网" in sample["summary"] or "浏览" in sample["summary"]

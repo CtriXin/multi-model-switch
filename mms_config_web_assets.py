@@ -61,6 +61,7 @@ _HTML_PAGE = r"""<!doctype html>
       text-rendering: optimizeLegibility;
       -webkit-font-smoothing: antialiased;
       min-height: 100vh;
+      overflow-x: clip;
     }
     img, svg { display: block; max-width: 100%; }
     a { color: inherit; text-decoration: none; }
@@ -122,6 +123,7 @@ _HTML_PAGE = r"""<!doctype html>
     .content {
       display: grid;
       gap: 24px;
+      min-width: 0;
     }
 
     /* ===== Sidebar nav ===== */
@@ -167,6 +169,7 @@ _HTML_PAGE = r"""<!doctype html>
       padding: 28px;
       box-shadow: var(--shadow-sm);
       transition: box-shadow .2s ease;
+      min-width: 0;
     }
     .panel:hover {
       box-shadow: var(--shadow);
@@ -199,6 +202,7 @@ _HTML_PAGE = r"""<!doctype html>
       background: var(--bg);
       padding: 18px;
       transition: border-color .15s ease, box-shadow .15s ease;
+      min-width: 0;
     }
     .card:hover {
       border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
@@ -209,6 +213,7 @@ _HTML_PAGE = r"""<!doctype html>
       display: grid;
       grid-template-columns: repeat(12, 1fr);
       gap: 14px;
+      min-width: 0;
     }
     .span4 { grid-column: span 4; }
     .span5 { grid-column: span 5; }
@@ -730,8 +735,184 @@ _HTML_PAGE = r"""<!doctype html>
       font-family: var(--font-mono);
       font-size: 12px;
       font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .hide { display: none !important; }
+
+    /* ===== Session asset manager ===== */
+    .asset-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(240px, .8fr);
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .asset-hero .card {
+      background: linear-gradient(135deg, var(--surface), var(--bg));
+    }
+    .asset-count {
+      display: block;
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 750;
+      letter-spacing: -0.04em;
+      margin-bottom: 6px;
+    }
+    .asset-manager {
+      display: grid;
+      gap: 14px;
+    }
+    .asset-toolbar {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 14px;
+      background: var(--bg);
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+    .asset-toolbar-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .asset-toolbar-row strong {
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 64px;
+    }
+    .asset-search {
+      max-width: 340px;
+      min-width: 220px;
+      flex: 1 1 260px;
+    }
+    .asset-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      min-width: 0;
+    }
+    .asset-card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      background: var(--surface);
+    }
+    .asset-card.is-disabled {
+      border-color: var(--warn);
+      background: color-mix(in oklch, var(--warn-soft) 34%, var(--surface));
+    }
+    .asset-card.is-global {
+      background: color-mix(in oklch, var(--fg-soft) 55%, var(--surface));
+    }
+    .asset-card-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+    }
+    .asset-title {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .asset-subline {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+    }
+    .asset-desc {
+      color: var(--fg);
+      font-size: 13.5px;
+      line-height: 1.65;
+      overflow-wrap: anywhere;
+    }
+    .asset-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      min-width: 0;
+    }
+    .asset-action {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 12.5px;
+      min-width: 0;
+    }
+    .asset-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      flex: 0 0 auto;
+      color: var(--fg);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+    }
+    .asset-switch input {
+      width: auto;
+      accent-color: var(--warn);
+      cursor: pointer;
+    }
+    .asset-details {
+      border-top: 1px dashed var(--border);
+      padding-top: 10px;
+      min-width: 0;
+    }
+    .asset-details summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12.5px;
+      font-weight: 600;
+      user-select: none;
+    }
+    .asset-detail-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .asset-detail-grid p {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .asset-empty {
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      text-align: center;
+      color: var(--muted);
+      background: var(--bg);
+    }
+    .asset-config-card details {
+      margin-top: 12px;
+    }
+    .asset-config-card summary {
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .asset-roots {
+      display: grid;
+      gap: 10px;
+    }
+    .asset-root {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: var(--surface);
+      min-width: 0;
+    }
 
     /* ===== Section entrance animation ===== */
     [data-section] {
@@ -762,7 +943,20 @@ _HTML_PAGE = r"""<!doctype html>
       }
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
       .oc-summary { grid-template-columns: 1fr 1fr; }
+      .asset-hero { grid-template-columns: 1fr; }
       .panel { padding: 20px; }
+    }
+    @media (max-width: 560px) {
+      header { padding: 18px 14px 14px; }
+      .shell { padding: 12px; }
+      .panel { padding: 16px; border-radius: var(--radius); }
+      .asset-list { grid-template-columns: 1fr; }
+      .asset-card-head { grid-template-columns: 1fr; }
+      .asset-action { align-items: flex-start; flex-direction: column; }
+      .asset-toolbar-row { align-items: stretch; flex-direction: column; }
+      .asset-toolbar-row strong { min-width: 0; }
+      .asset-search { min-width: 0; max-width: none; }
+      .toast { left: 12px; right: 12px; bottom: 12px; max-width: none; }
     }
   </style>
 </head>
@@ -941,29 +1135,44 @@ _HTML_PAGE = r"""<!doctype html>
 
     <!-- Session 能力面板 -->
     <section class="panel" data-section="sessionAssets">
-      <h2>Session Skills / MCP / Hooks</h2>
-      <p>把 Global / inherited 和 MMS dynamic 分开看：Global 来自用户 CLI 全局配置，MMS dynamic 是启动 session 时按 CLI、能力包和开关临时注入。</p>
-      <div class="grid" id="assetSummary"></div>
-      <div class="card">
-        <div class="filterbar" id="assetTabs"></div>
-        <div class="filterbar" id="assetCliFilters"></div>
-        <div class="filterbar" id="assetKindFilters"></div>
-        <div class="table-wrap"><table id="assetTable"></table></div>
+      <h2>会话能力中心</h2>
+      <p>这里解释“启动一个 CLI session 时会带上哪些能力”。默认先看 MMS 动态注入；全局继承只读展示，技术路径和开关 key 都放进高级信息里。</p>
+      <div class="asset-hero" id="assetSummary"></div>
+      <div class="asset-manager">
+        <div class="asset-toolbar">
+          <div class="asset-toolbar-row">
+            <strong>来源</strong>
+            <div class="filterbar" id="assetTabs"></div>
+          </div>
+          <div class="asset-toolbar-row">
+            <strong>CLI</strong>
+            <div class="filterbar" id="assetCliFilters"></div>
+          </div>
+          <div class="asset-toolbar-row">
+            <strong>类型</strong>
+            <div class="filterbar" id="assetKindFilters"></div>
+            <input class="asset-search" id="assetSearch" placeholder="搜索能力名称、用途、路径">
+          </div>
+        </div>
+        <div class="asset-list" id="assetCards"></div>
       </div>
       <div class="grid">
-        <div class="card span6">
-          <h3>配置写到哪里</h3>
+        <div class="card span6 asset-config-card">
+          <h3>默认关闭草稿</h3>
           <p class="muted" id="assetConfigContract">WebUI 当前只读展示能力目录；勾选“默认关闭”只会更新下方 snippet，不会自动写真实配置。</p>
           <div class="btns">
-            <button id="copyAssetPrefs" class="secondary">复制 preferences snippet</button>
+            <button id="copyAssetPrefs" class="secondary">复制偏好片段</button>
             <button id="resetAssetPrefs" class="ghost">恢复当前偏好</button>
           </div>
-          <pre class="result" id="assetPreferenceSnippet"></pre>
+          <details>
+            <summary>查看要写入 preferences.toml 的片段</summary>
+            <pre class="result" id="assetPreferenceSnippet"></pre>
+          </details>
         </div>
         <div class="card span6">
-          <h3>Global roots</h3>
-          <p class="muted">这些目录/文件可能影响 MMS 之外的 CLI；本页只读展示，不自动修改。</p>
-          <div id="assetGlobalRoots"></div>
+          <h3>全局位置（只读）</h3>
+          <p class="muted">这些目录/文件可能影响 MMS 之外的 CLI。本页只解释来源，不自动改用户全局配置。</p>
+          <div class="asset-roots" id="assetGlobalRoots"></div>
         </div>
       </div>
     </section>
@@ -1027,13 +1236,13 @@ const sections=[
   ['source','真源状态','DB / legacy / bundle'],
   ['channel','通道配置','URL / Key / 协议 / 模型'],
   ['test','模型测试','ping / chat smoke'],
-  ['fallback','Fallback','rescue / vision'],
+  ['fallback','Fallback','救援模型 / Vision'],
   ['runtime','运行默认值','preferred CLI / OpenCode'],
-  ['sessionAssets','能力面板','skills / MCP / hooks'],
+  ['sessionAssets','能力面板','技能 / MCP / 钩子'],
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let assetTab='mms_dynamic'; let assetCli='all'; let assetKind='all'; let assetDisabledDraft=null;
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let assetTab='mms_dynamic'; let assetCli='all'; let assetKind='all'; let assetQuery=''; let assetDisabledDraft=null;
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -1127,17 +1336,28 @@ function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function assetRows(){const assets=state.session_assets||{};return Array.isArray(assets.rows)?assets.rows:[]}
 function assetDetail(row,label){const wanted=String(label||'').toLowerCase();for(const item of (row.details||[])){if(String(item.label||'').toLowerCase()===wanted)return item.display||item.value||''}return ''}
+function assetDetailsHtml(row){const details=Array.isArray(row.details)?row.details:[];const lines=details.map(item=>`<p><strong>${escapeHtml(item.label||'详情')}</strong>：<span class="mono">${escapeHtml(item.display||item.value||'-')}</span></p>`);const raw=row.technical_summary&&row.technical_summary!==row.summary?`<p><strong>原始说明</strong>：${escapeHtml(row.technical_summary)}</p>`:'';const key=`<p><strong>关闭 key</strong>：<span class="mono">${escapeHtml(row.disable_key||row.title||'-')}</span></p>`;return [...lines,raw,key].filter(Boolean).join('')}
+function assetSearchHaystack(row){return [row.title,row.summary,row.technical_summary,row.cli_label,row.kind_label,row.group_label,row.origin_label,row.scope_label,row.disable_key,...((row.details||[]).map(d=>`${d.label} ${d.display||d.value}`))].join(' ').toLowerCase()}
 function assetFilterButton(id,label,current,attr){return `<button class="ghost ${current===id?'active':''}" ${attr}="${escapeHtml(id)}">${escapeHtml(label)}</button>`}
+function uniqueTexts(values){return [...new Set((values||[]).map(v=>String(v||'').trim()).filter(Boolean))]}
 function cloneAssetDisabledDefaults(){const source=(state.session_assets||{}).disabled_defaults||{};const result={skills:[],mcp:[],hooks:[]};for(const key of ['skills','mcp','hooks']){const values=Array.isArray(source[key])?source[key]:[];result[key]=[...new Set(values.map(x=>String(x||'').trim()).filter(Boolean))]}return result}
 function ensureAssetDisabledDraft(){if(!assetDisabledDraft)assetDisabledDraft=cloneAssetDisabledDefaults();for(const key of ['skills','mcp','hooks']){if(!Array.isArray(assetDisabledDraft[key]))assetDisabledDraft[key]=[]}return assetDisabledDraft}
 function assetDisabledKind(kind){return kind==='mcp'?'mcp':(kind==='hooks'?'hooks':'skills')}
+function assetKindLabel(kind){return kind==='mcp'?'MCP 服务':(kind==='hooks'?'自动钩子':'技能')}
 function assetIsDefaultDisabled(row){const kind=assetDisabledKind(row.kind);const key=String(row.disable_key||row.title||'').trim();return !!key&&ensureAssetDisabledDraft()[kind].includes(key)}
 function setAssetDefaultDisabled(row,checked){const kind=assetDisabledKind(row.kind);const key=String(row.disable_key||row.title||'').trim();if(!key)return;const draft=ensureAssetDisabledDraft();draft[kind]=draft[kind].filter(x=>x!==key);if(checked)draft[kind].push(key);draft[kind]=[...new Set(draft[kind])].sort()}
-function assetArrayToml(values){return `[${[...new Set((values||[]).map(x=>String(x||'').trim()).filter(Boolean))].sort().map(v=>`"${v.replaceAll('\\','\\\\').replaceAll('"','\\"')}"`).join(', ')}]`}
-function renderAssetPreferenceSnippet(){const assets=state.session_assets||{};const defaults=assets.launch_defaults||{};const draft=ensureAssetDisabledDraft();const snippet=[`[launch.defaults]`,`caveman_mode = "${escapeHtml(defaults.caveman_mode||'enable')}"`,`nsr_mode = "${escapeHtml(defaults.nsr_mode||'enable')}"`,`agent_pack = "${escapeHtml(defaults.agent_pack||'none')}"`,`bypass = ${defaults.bypass===false?'false':'true'}`,'',`[session_surfaces.disabled]`,`skills = ${assetArrayToml(draft.skills)}`,`mcp = ${assetArrayToml(draft.mcp)}`,`hooks = ${assetArrayToml(draft.hooks)}`].join('\n');$('assetPreferenceSnippet').textContent=snippet;return snippet}
-function bindAssetPreferenceButtons(){const copy=$('copyAssetPrefs');const reset=$('resetAssetPrefs');if(copy)copy.onclick=async()=>{const snippet=renderAssetPreferenceSnippet();try{await navigator.clipboard.writeText(snippet);toast('preferences snippet 已复制')}catch(_err){toast('无法访问剪贴板，snippet 已显示在页面')}};if(reset)reset.onclick=()=>{assetDisabledDraft=cloneAssetDisabledDefaults();renderSessionAssets();toast('已恢复为当前 preferences.toml 状态')}}
-function renderAssetFilters(){const assets=state.session_assets||{};const tabs=[['all','All',assetRows().length],...(assets.tabs||[]).map(t=>[t.id,t.title,t.row_count])];$('assetTabs').innerHTML=tabs.map(([id,label,count])=>assetFilterButton(id,`${label} (${count||0})`,assetTab,'data-asset-tab')).join('');document.querySelectorAll('[data-asset-tab]').forEach(btn=>btn.onclick=()=>{assetTab=btn.dataset.assetTab;renderSessionAssets()});const cliRows=[['all','All CLI'],...(assets.clis||[]).map(c=>[c.id,`${c.label} (${c.row_count||0})`])];$('assetCliFilters').innerHTML=cliRows.map(([id,label])=>assetFilterButton(id,label,assetCli,'data-asset-cli')).join('');document.querySelectorAll('[data-asset-cli]').forEach(btn=>btn.onclick=()=>{assetCli=btn.dataset.assetCli;renderSessionAssets()});const kinds=[['all','All surface'],['skills','Skills'],['mcp','MCP'],['hooks','Hooks']];$('assetKindFilters').innerHTML=kinds.map(([id,label])=>assetFilterButton(id,label,assetKind,'data-asset-kind')).join('');document.querySelectorAll('[data-asset-kind]').forEach(btn=>btn.onclick=()=>{assetKind=btn.dataset.assetKind;renderSessionAssets()})}
-function renderSessionAssets(){if(!$('assetTable'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};ensureAssetDisabledDraft();$('assetSummary').innerHTML=`<div class="card span4"><h3>MMS dynamic</h3><p class="muted">session-local 注入，不改 global config。</p><span class="tag">${summary.mms_dynamic||0} items</span><span class="tag">skills ${summary.skills||0}</span></div><div class="card span4"><h3>Global / inherited</h3><p class="muted">来自 CLI 全局配置或已安装插件；这里只读。</p><span class="tag ${summary.global?'':'off'}">${summary.global||0} items</span><span class="tag">MCP ${summary.mcp||0}</span></div><div class="card span4"><h3>默认关闭草稿</h3><p class="muted">勾选后生成 snippet；TUI 启动确认页可临时打开。</p><span class="tag">skills ${ensureAssetDisabledDraft().skills.length}</span><span class="tag">MCP ${ensureAssetDisabledDraft().mcp.length}</span><span class="tag">hooks ${ensureAssetDisabledDraft().hooks.length}</span></div>`;renderAssetFilters();let rows=assetRows().filter(row=>(assetTab==='all'||row.group===assetTab)&&(assetCli==='all'||row.cli===assetCli)&&(assetKind==='all'||row.kind===assetKind));$('assetTable').innerHTML=`<thead><tr><th>默认关闭</th><th>CLI</th><th>Surface</th><th>来源</th><th>名称</th><th>说明</th><th>路径 / 触发</th><th>开关 key</th></tr></thead><tbody>${rows.length?rows.map((row,idx)=>{const path=assetDetail(row,'路径')||assetDetail(row,'Path')||assetDetail(row,'URL')||assetDetail(row,'触发')||assetDetail(row,'Trigger');const groupLabel=row.group==='mms_dynamic'?'MMS dynamic':(row.group==='global'?'Global':'Other');const disabled=assetIsDefaultDisabled(row);return `<tr data-asset-row="${idx}"><td><input type="checkbox" data-asset-disable="${idx}" ${disabled?'checked':''}></td><td>${escapeHtml(row.cli_label||row.cli)}</td><td><span class="tag">${escapeHtml(row.kind)}</span><br><span class="muted">${escapeHtml(row.scope_label||row.scope)}</span></td><td><span class="tag ${row.group==='global'?'off':''}">${escapeHtml(groupLabel)}</span><br><span class="muted">${escapeHtml(row.origin||'')}</span></td><td class="mono">${escapeHtml(row.title||'')}</td><td>${escapeHtml(row.summary||'')}</td><td class="mono">${escapeHtml(path||'-')}</td><td class="mono">${escapeHtml(row.disable_key||'-')}</td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的能力条目</td></tr>'}</tbody>`;document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});$('assetConfigContract').textContent=`持久默认值：${contract.persistent_path||'~/.config/mms/preferences.toml'}；${contract.launch_override||''} ${contract.webui_write_scope||''}`;renderAssetPreferenceSnippet();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<p><span class="tag ${root.exists?'':'off'}">${root.exists?'exists':'missing'}</span> <span class="mono">${escapeHtml(root.path)}</span><br><span class="muted">${escapeHtml(root.label)}${root.skill_count?` · skills ${root.skill_count}`:''}</span></p>`).join('')||'<p class="muted">无 global roots 信息</p>'}
+function assetTomlString(value){return String(value||'').replaceAll('\\','\\\\').replaceAll('"','\\"')}
+function assetArrayToml(values){return `[${[...new Set((values||[]).map(x=>String(x||'').trim()).filter(Boolean))].sort().map(v=>`"${assetTomlString(v)}"`).join(', ')}]`}
+function renderAssetPreferenceSnippet(){const assets=state.session_assets||{};const defaults=assets.launch_defaults||{};const draft=ensureAssetDisabledDraft();const snippet=[`[launch.defaults]`,`caveman_mode = "${assetTomlString(defaults.caveman_mode||'enable')}"`,`nsr_mode = "${assetTomlString(defaults.nsr_mode||'enable')}"`,`agent_pack = "${assetTomlString(defaults.agent_pack||'none')}"`,`bypass = ${defaults.bypass===false?'false':'true'}`,'',`[session_surfaces.disabled]`,`skills = ${assetArrayToml(draft.skills)}`,`mcp = ${assetArrayToml(draft.mcp)}`,`hooks = ${assetArrayToml(draft.hooks)}`].join('\n');$('assetPreferenceSnippet').textContent=snippet;return snippet}
+function bindAssetPreferenceButtons(){const copy=$('copyAssetPrefs');const reset=$('resetAssetPrefs');if(copy)copy.onclick=async()=>{const snippet=renderAssetPreferenceSnippet();try{await navigator.clipboard.writeText(snippet);toast('偏好片段已复制')}catch(_err){toast('无法访问剪贴板，片段已显示在页面')}};if(reset)reset.onclick=()=>{assetDisabledDraft=cloneAssetDisabledDefaults();renderSessionAssets();toast('已恢复为当前 preferences.toml 状态')}}
+function renderAssetFilters(){const assets=state.session_assets||{};const tabs=[['all','全部来源',assetRows().length],...(assets.tabs||[]).map(t=>[t.id,t.title,t.row_count])];$('assetTabs').innerHTML=tabs.map(([id,label,count])=>assetFilterButton(id,`${label} (${count||0})`,assetTab,'data-asset-tab')).join('');document.querySelectorAll('[data-asset-tab]').forEach(btn=>btn.onclick=()=>{assetTab=btn.dataset.assetTab;renderSessionAssets()});const cliRows=[['all','全部 CLI'],...(assets.clis||[]).map(c=>[c.id,`${c.label} (${c.row_count||0})`])];$('assetCliFilters').innerHTML=cliRows.map(([id,label])=>assetFilterButton(id,label,assetCli,'data-asset-cli')).join('');document.querySelectorAll('[data-asset-cli]').forEach(btn=>btn.onclick=()=>{assetCli=btn.dataset.assetCli;renderSessionAssets()});const kinds=[['all','全部类型'],['skills','技能'],['mcp','MCP 服务'],['hooks','自动钩子']];$('assetKindFilters').innerHTML=kinds.map(([id,label])=>assetFilterButton(id,label,assetKind,'data-asset-kind')).join('');document.querySelectorAll('[data-asset-kind]').forEach(btn=>btn.onclick=()=>{assetKind=btn.dataset.assetKind;renderSessionAssets()});const search=$('assetSearch');if(search){search.value=assetQuery;search.oninput=()=>{assetQuery=search.value.trim().toLowerCase();renderSessionAssets()}}}
+function baseFilteredAssetRows(){return assetRows().filter(row=>(assetTab==='all'||row.group===assetTab)&&(assetCli==='all'||row.cli===assetCli)&&(assetKind==='all'||row.kind===assetKind))}
+function mergeAssetRows(rows){if(assetCli!=='all')return rows;const groups=new Map();for(const row of rows){const key=[row.group,row.kind,row.disable_key||row.title,row.title].join('::');if(!groups.has(key)){groups.set(key,{...row,details:[],_cliLabels:[],_scopeLabels:[],_origins:[],_detailsSeen:new Set()})}const item=groups.get(key);item._cliLabels.push(row.cli_label||row.cli);item._scopeLabels.push(row.scope_label||row.scope);item._origins.push(row.origin_label||row.origin);for(const detail of (row.details||[])){const detailKey=`${detail.label}::${detail.display||detail.value}`;if(!item._detailsSeen.has(detailKey)){item._detailsSeen.add(detailKey);item.details.push(detail)}}}return [...groups.values()].map(row=>{const cliLabels=uniqueTexts(row._cliLabels);const scopeLabels=uniqueTexts(row._scopeLabels);const origins=uniqueTexts(row._origins);delete row._cliLabels;delete row._scopeLabels;delete row._origins;delete row._detailsSeen;row.cli_label=cliLabels.join(' / ');row.scope_label=scopeLabels.length>1?'多种启用条件':(scopeLabels[0]||row.scope_label);row.origin_label=origins.length>1?'多来源检测':(origins[0]||row.origin_label);row.merged_count=cliLabels.length;row.details=[{label:'适用 CLI',value:cliLabels.join(' / '),display:cliLabels.join(' / ')},...row.details];return row})}
+function filteredAssetRows(){const query=assetQuery.trim().toLowerCase();return mergeAssetRows(baseFilteredAssetRows()).filter(row=>!query||assetSearchHaystack(row).includes(query))}
+function assetStatusText(row,disabled){if(disabled)return '默认关闭';if(row.scope==='always')return '默认带上';return '按开关启用'}
+function assetGroupTagClass(row){return row.group==='global'?'off':(row.group==='other'?'off':'')}
+function renderAssetCard(row,idx){const disabled=assetIsDefaultDisabled(row);const source=row.group_label||row.group||'未归类';const kind=row.kind_label||assetKindLabel(row.kind);const path=assetDetail(row,'路径')||assetDetail(row,'Path')||assetDetail(row,'URL')||assetDetail(row,'触发')||assetDetail(row,'Trigger');const status=assetStatusText(row,disabled);const globalClass=row.group==='global'?' is-global':'';const disabledClass=disabled?' is-disabled':'';const mergeTag=row.merged_count>1?`<span class="tag off">适用 ${row.merged_count} 个 CLI</span>`:'';return `<article class="card asset-card${globalClass}${disabledClass}" data-asset-row="${idx}"><div class="asset-card-head"><div><div class="asset-title">${escapeHtml(row.title||'未命名能力')}</div><div class="asset-subline">${escapeHtml(row.cli_label||row.cli||'CLI')} · ${escapeHtml(kind)} · ${escapeHtml(row.scope_label||row.scope||'默认')}</div></div><span class="tag ${assetGroupTagClass(row)}">${escapeHtml(source)}</span></div><p class="asset-desc">${escapeHtml(row.summary||'暂无说明。')}</p><div class="asset-meta"><span class="tag">${escapeHtml(row.origin_label||row.origin||'来源未知')}</span><span class="tag ${disabled?'off':''}">${escapeHtml(status)}</span>${mergeTag}${path?`<span class="tag off">有技术详情</span>`:''}</div><div class="asset-action"><span>${disabled?'已加入关闭草稿；启动确认页仍可临时打开。':'需要时可加入默认关闭草稿，当前不会写真实配置。'}</span><label class="asset-switch"><input type="checkbox" data-asset-disable="${idx}" ${disabled?'checked':''}>默认关闭</label></div><details class="asset-details"><summary>高级信息：路径、触发和 key</summary><div class="asset-detail-grid">${assetDetailsHtml(row)}</div></details></article>`}
+function renderSessionAssets(){if(!$('assetCards'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};const draft=ensureAssetDisabledDraft();const displayCount=filteredAssetRows().length;$('assetSummary').innerHTML=`<div class="card"><span class="asset-count">${summary.mms_dynamic||0}</span><h3>MMS 动态注入</h3><p class="muted">启动 session 时临时带上，不污染全局 CLI。当前筛选显示 ${displayCount} 张卡片；未选具体 CLI 时会合并同名能力，减少重复。</p><div class="asset-meta"><span class="tag">技能 ${summary.skills||0}</span><span class="tag">MCP 服务 ${summary.mcp||0}</span><span class="tag">自动钩子 ${summary.hooks||0}</span><span class="tag off">全局继承 ${summary.global||0}</span></div></div><div class="card"><span class="asset-count">${draft.skills.length+draft.mcp.length+draft.hooks.length}</span><h3>默认关闭草稿</h3><p class="muted">勾选卡片里的“默认关闭”只生成 preferences.toml 片段；WebUI 不会直接改真实配置。</p><div class="asset-meta"><span class="tag">技能 ${draft.skills.length}</span><span class="tag">MCP ${draft.mcp.length}</span><span class="tag">钩子 ${draft.hooks.length}</span></div></div>`;renderAssetFilters();const rows=filteredAssetRows();$('assetCards').innerHTML=rows.length?rows.map((row,idx)=>renderAssetCard(row,idx)).join(''):`<div class="asset-empty">没有匹配的能力。可以清空搜索，或切换来源 / CLI / 类型筛选。</div>`;document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});$('assetConfigContract').textContent=`持久偏好位置：${contract.persistent_path||'~/.config/mms/preferences.toml'}。${contract.webui_write_scope||'当前 WebUI 只生成片段，不直接写入。'} ${contract.launch_override||''}`;renderAssetPreferenceSnippet();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<div class="asset-root"><p><span class="tag ${root.exists?'':'off'}">${root.exists?'存在':'未找到'}</span> <strong>${escapeHtml(root.label)}</strong></p><p class="mono">${escapeHtml(root.path)}</p><p class="muted">${root.skill_count?`发现 ${root.skill_count} 个技能；`:''}${escapeHtml(root.note||'只读展示，不自动修改。')}</p></div>`).join('')||'<p class="muted">没有全局位置记录。</p>'}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}

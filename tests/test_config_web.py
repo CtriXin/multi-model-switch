@@ -350,14 +350,19 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
     assert 'data-section="sessionAssets"' in html
-    assert "Session Skills / MCP / Hooks" in html
+    assert "会话能力中心" in html
     assert "function renderSessionAssets()" in html
     assert "assetPreferenceSnippet" in html
+    assert "assetCards" in html
+    assert "asset-search" in html
+    assert "asset-list" in html
+    assert "overflow-wrap: anywhere" in html
     assert "默认关闭草稿" in html
     assert "copyAssetPrefs" in html
-    assert "TUI 启动确认页可临时打开" in html
-    assert "Global / inherited" in html
-    assert "MMS dynamic" in html
+    assert "启动确认页仍可临时打开" in html
+    assert "全局继承" in html
+    assert "MMS 动态注入" in html
+    assert "高级信息：路径、触发和 key" in html
     assert "已发布，但 runtime 未就绪" in html
     assert "mmf 会读到这次保存后的最新 bundle" in html
     assert "missing key/base URL" in html

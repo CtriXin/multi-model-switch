@@ -41,6 +41,30 @@ _MMS_MANAGED_NAMES = {
     "xmem opencode plugin",
 }
 
+_KIND_LABELS = {
+    "skills": "技能",
+    "mcp": "MCP 服务",
+    "hooks": "自动钩子",
+}
+
+_ASSET_SUMMARIES = {
+    "agent-browser": "轻量浏览器自动化，适合不需要登录态的页面检查、截图和本地 WebUI 验证。",
+    "auto-github-contributor": "GitHub 贡献辅助能力，安装后才会出现；默认不改用户全局配置。",
+    "caveman": "低 token 沟通模式，适合长会话压缩表达；只有启用 Caveman 时才生效。",
+    "ecc": "Claude 工程工作流能力包，包含规则、命令和质量检查；适合更重的工程约束。",
+    "hive": "多 agent 执行/评审入口，适合把复杂任务拆分给 worker。",
+    "nsr": "长任务 continuation 钩子，降低目标中断；默认不挂 startup/prompt 噪音钩子。",
+    "omc": "Claude 编排能力包，包含 team / verify loop 等更主动的工作流。",
+    "pilot": "规划和执行包生成入口，适合先拆任务、再交给其它执行器。",
+    "rtk opencode plugin": "OpenCode 的 token 节省插件，自动压缩或改写高噪音命令输出。",
+    "toon": "把结构化 JSON、状态包和 handoff 压成更省 token 的格式。",
+    "token-saver": "长日志、大 diff、重复状态的省 token 工具；多数时候由 agent 自动使用。",
+    "web-access": "联网和登录态浏览能力，适合搜索、网页读取、公司后台或需要真实 Chrome 的任务。",
+    "weber": "网页任务路由器：帮 agent 判断该用本地 WebUI、登录态浏览器还是轻量抓取。",
+    "xmem": "跨项目记忆和事实索引能力；适合找历史决策、路径、部署和 bug 线索。",
+    "xmem opencode plugin": "OpenCode 会话启动/结束时轻量同步 xmem，不把知识正文硬塞进上下文。",
+}
+
 
 def _safe_text(value: Any) -> str:
     return str(value or "").strip()
@@ -196,6 +220,44 @@ def _scope_label(scope: str) -> str:
     return mapping.get(scope, scope)
 
 
+def _origin_label(origin: str) -> str:
+    mapping = {
+        "MMS optional pack": "MMS 可选能力包",
+        "MMS managed": "MMS 动态注入",
+        "MMS session skill": "MMS 会话技能",
+        "MMS managed path": "MMS 托管路径",
+        "Repo managed": "当前仓库托管",
+        "Global CLI config": "全局 CLI 配置",
+        "User installed path": "用户安装路径",
+        "Inherited MCP": "继承的 MCP",
+        "Detected at launch": "启动时检测到",
+    }
+    return mapping.get(origin, origin or "未知来源")
+
+
+def _group_label(group: str) -> str:
+    mapping = {
+        "mms_dynamic": "MMS 动态注入",
+        "global": "全局继承",
+        "other": "其它检测项",
+    }
+    return mapping.get(group, group or "其它")
+
+
+def _asset_summary(kind: str, title: str, summary: str) -> str:
+    key = _safe_text(title).lower()
+    if key in _ASSET_SUMMARIES:
+        return _ASSET_SUMMARIES[key]
+    if summary and any("\u4e00" <= ch <= "\u9fff" for ch in summary):
+        return summary
+    fallback = {
+        "skills": "会话内可调用的能力。具体触发方式由 agent 根据任务判断，技术路径在详情里。",
+        "mcp": "给当前 CLI 注入的工具服务。通常由 agent 调用，普通用户只需要知道用途和来源。",
+        "hooks": "会在特定时机自动运行的钩子。建议谨慎开启，先看触发时机和来源。",
+    }
+    return fallback.get(kind, "启动预览检测到的能力项。")
+
+
 def _flatten_catalog(cli: str, catalog: dict[str, Any], *, home: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     allow_execution_surfaces = bool(catalog.get("allow_execution_surfaces", True))
@@ -223,14 +285,18 @@ def _flatten_catalog(cli: str, catalog: dict[str, Any], *, home: str) -> list[di
                         "cli": cli,
                         "cli_label": _CLI_LABELS.get(cli, cli),
                         "kind": kind,
+                        "kind_label": _KIND_LABELS.get(kind, kind),
                         "scope": scope,
                         "scope_label": _scope_label(scope),
                         "title": title,
-                        "summary": summary,
+                        "summary": _asset_summary(kind, title, summary),
+                        "technical_summary": summary,
                         "details": _normalize_details(raw_details, home=home),
                         "disable_key": _safe_text(entry.get("disable_key") or title),
                         "group": origin["group"],
+                        "group_label": _group_label(origin["group"]),
                         "origin": origin["origin"],
+                        "origin_label": _origin_label(origin["origin"]),
                         "active_by_default": scope == "always" and allow_execution_surfaces,
                     }
                 )
@@ -280,13 +346,13 @@ def _load_preferences(mms_core: Any | None) -> dict[str, Any]:
 
 def _global_roots(home: str) -> list[dict[str, Any]]:
     candidates = [
-        ("Claude project/global skills", "~/.claude/skills"),
-        ("Codex global skills", "~/.codex/skills"),
-        ("Shared agent skills", "~/.agents/skills"),
-        ("Claude MCP legacy file", "~/.claude.json"),
-        ("Codex config", "~/.codex/config.toml"),
-        ("Codex hooks", "~/.codex/hooks.json"),
-        ("OpenCode config", "~/.config/opencode"),
+        ("Claude 全局技能目录", "~/.claude/skills"),
+        ("Codex 全局技能目录", "~/.codex/skills"),
+        ("共享 agent 技能目录", "~/.agents/skills"),
+        ("Claude MCP 旧配置文件", "~/.claude.json"),
+        ("Codex 配置文件", "~/.codex/config.toml"),
+        ("Codex hooks 文件", "~/.codex/hooks.json"),
+        ("OpenCode 配置目录", "~/.config/opencode"),
     ]
     rows = []
     for label, raw_path in candidates:
@@ -308,7 +374,7 @@ def _global_roots(home: str) -> list[dict[str, Any]]:
                 "path": raw_path,
                 "exists": exists,
                 "skill_count": skill_count,
-                "note": "只读展示；WebUI 不自动修改 global CLI 配置。",
+                "note": "只读展示；WebUI 不自动修改全局 CLI 配置。",
             }
         )
     return rows
@@ -415,19 +481,19 @@ def build_session_assets_snapshot(
         "tabs": [
             {
                 "id": "mms_dynamic",
-                "title": "MMS dynamic",
+                "title": "MMS 动态注入",
                 "description": "MMS 在启动 session 时按 CLI 和开关动态注入；默认不污染 global config。",
                 "row_count": counts["mms_dynamic"],
             },
             {
                 "id": "global",
-                "title": "Global / inherited",
+                "title": "全局继承",
                 "description": "来自用户全局 Claude/Codex/OpenCode 配置或已安装插件；WebUI 只读展示。",
                 "row_count": counts["global"],
             },
             {
                 "id": "other",
-                "title": "Other detected",
+                "title": "其它检测项",
                 "description": "启动预览能看到但暂未归类的条目，需要保守展示路径。",
                 "row_count": counts["other"],
             },
