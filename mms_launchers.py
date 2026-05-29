@@ -12,7 +12,6 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from zoneinfo import ZoneInfo
 
 from mms_account_state import activated_claude_account_state, seed_agy_state, seed_claude_state, seed_gemini_state
 from mms_account_guard import (
@@ -120,6 +119,7 @@ from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_runtime_env import (
     apply_runtime_locale_profile as _apply_runtime_locale_profile_impl,
     runtime_locale_env as _runtime_locale_env_impl,
+    validate_timezone_or_exit as _validate_timezone_or_exit_impl,
 )
 from mms_runtime_context import (
     DEFAULT_CONTEXT_WINDOW as _DEFAULT_CONTEXT_WINDOW,
@@ -1088,15 +1088,13 @@ def _enforce_claude_network_guard_or_exit(runtime, *, require_proxy=False):
 
 
 def _validate_timezone_or_exit(timezone_name, *, label="account"):
-    timezone_name = str(timezone_name or "").strip()
-    if not timezone_name:
-        return ""
-    try:
-        ZoneInfo(timezone_name)
-    except Exception:
-        console.print(f"[red]{label} 配置了无效时区: {timezone_name}[/red]")
-        sys.exit(1)
-    return timezone_name
+    """Compatibility wrapper for startup timezone validation."""
+    return _validate_timezone_or_exit_impl(
+        timezone_name,
+        label=label,
+        console=console,
+        exit_fn=sys.exit,
+    )
 
 
 def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account", force_ipv4=True):

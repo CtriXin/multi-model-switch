@@ -7,6 +7,7 @@ compatibility wrappers and monkeypatch-based tests keep the same behavior.
 from __future__ import annotations
 
 import os
+from zoneinfo import ZoneInfo
 
 
 def runtime_locale_env(runtime=None, *, normalize_language_fn):
@@ -40,6 +41,18 @@ def apply_runtime_locale_profile(env, runtime=None, *, runtime_locale_env_fn):
     env = env if isinstance(env, dict) else {}
     env.update(runtime_locale_env_fn(runtime))
     return env
+
+
+def validate_timezone_or_exit(timezone_name, *, label="account", console, exit_fn, zone_info_cls=ZoneInfo):
+    timezone_name = str(timezone_name or "").strip()
+    if not timezone_name:
+        return ""
+    try:
+        zone_info_cls(timezone_name)
+    except Exception:
+        console.print(f"[red]{label} 配置了无效时区: {timezone_name}[/red]")
+        exit_fn(1)
+    return timezone_name
 
 
 def scrub_claude_oauth_env(env):
