@@ -801,6 +801,35 @@ def load_provider_browse_tui_tools():
     }
 
 
+def load_export_model_routes():
+    return __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes
+
+
+def load_model_routes_exporter():
+    router = __import__("mms_router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])
+    return router.MODEL_ROUTES_PATH, router.export_model_routes
+
+
+def load_check_and_offer_install():
+    return __import__("mms_installer", fromlist=["check_and_offer_install"]).check_and_offer_install
+
+
+def load_claude_network_guard_preview():
+    launchers = __import__(
+        "mms_launchers",
+        fromlist=["get_claude_network_guard_preview", "_claude_bypass_requires_proxy"],
+    )
+    return launchers.get_claude_network_guard_preview, launchers._claude_bypass_requires_proxy
+
+
+def load_claude_network_guard_enforcer():
+    launchers = __import__(
+        "mms_launchers",
+        fromlist=["_enforce_claude_network_guard_or_exit", "_claude_bypass_requires_proxy"],
+    )
+    return launchers._enforce_claude_network_guard_or_exit, launchers._claude_bypass_requires_proxy
+
+
 def handle_tui_launch_candidate_action(
     cfg,
     action_type,

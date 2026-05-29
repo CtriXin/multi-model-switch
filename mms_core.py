@@ -4890,7 +4890,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             priority_changes,
             apply_runtime_priority_changes=_apply_runtime_priority_changes,
             save_config=save_config,
-            export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
+            export_model_routes_loader=tui_flow.load_export_model_routes,
         )
 
     cli = None
@@ -5005,10 +5005,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 probe_cache=_PROBE_CACHE,
                 ensure_provider_credentials=ensure_provider_credentials,
                 probe_models=_probe_models,
-                provider_mgmt_export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
-                routes_export_loader=lambda: (
-                    lambda router: (router.MODEL_ROUTES_PATH, router.export_model_routes)
-                )(__import__("mms_router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])),
+                provider_mgmt_export_model_routes_loader=tui_flow.load_export_model_routes,
+                routes_export_loader=tui_flow.load_model_routes_exporter,
                 registry_cli_loader=tui_flow.load_registry_cli_tools,
                 registry_truth_tui_payload=_registry_truth_tui_payload,
                 print_settings_error_report=_print_settings_error_report,
@@ -5111,21 +5109,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             runtime_runtime,
             once=once,
             check_cli_installed=check_cli_installed,
-            check_and_offer_install_loader=lambda: __import__(
-                "mms_installer",
-                fromlist=["check_and_offer_install"],
-            ).check_and_offer_install,
+            check_and_offer_install_loader=tui_flow.load_check_and_offer_install,
             select_and_apply_opencode_profile=_select_and_apply_opencode_profile,
             runtime_with_launch_preferences=_runtime_with_launch_preferences,
             runtime_with_vision_sidecar=_runtime_with_vision_sidecar,
             clean_model_info=_clean_model_info,
             get_export_env=get_export_env,
-            network_guard_preview_loader=lambda: (
-                lambda launchers: (
-                    launchers.get_claude_network_guard_preview,
-                    launchers._claude_bypass_requires_proxy,
-                )
-            )(__import__("mms_launchers", fromlist=["get_claude_network_guard_preview", "_claude_bypass_requires_proxy"])),
+            network_guard_preview_loader=tui_flow.load_claude_network_guard_preview,
             confirm_tui=confirm_tui,
             confirm_context_lines=_confirm_context_lines,
             caveman_available_for_cli=_caveman_available_for_cli,
@@ -5135,12 +5125,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             model_info_looks_domestic=_model_info_looks_domestic,
             default_reasoning_effort_for_model_info=_default_reasoning_effort_for_model_info,
             build_confirm_preview_catalog=_build_confirm_preview_catalog,
-            network_guard_enforcer_loader=lambda: (
-                lambda launchers: (
-                    launchers._enforce_claude_network_guard_or_exit,
-                    launchers._claude_bypass_requires_proxy,
-                )
-            )(__import__("mms_launchers", fromlist=["_enforce_claude_network_guard_or_exit", "_claude_bypass_requires_proxy"])),
+            network_guard_enforcer_loader=tui_flow.load_claude_network_guard_enforcer,
             merge_disabled_session_surfaces=_merge_disabled_session_surfaces,
             launch_with_tracking=_launch_with_tracking,
         )
