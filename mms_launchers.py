@@ -4554,97 +4554,50 @@ def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRAR
 
 
 def _macos_security_bin():
-    if sys.platform != "darwin":
-        return ""
-    for candidate in ("/usr/bin/security", shutil.which("security")):
-        if candidate and os.path.exists(candidate):
-            return candidate
-    return ""
+    """Compatibility wrapper for macOS security binary discovery."""
+    from mms_agy_security import macos_security_bin
+
+    return macos_security_bin()
 
 
 def _agy_keychain_path(account_home):
-    return os.path.join(account_home, "Library", "Keychains", "login.keychain-db")
+    """Compatibility wrapper for AGY account keychain path."""
+    from mms_agy_security import agy_keychain_path
+
+    return agy_keychain_path(account_home)
 
 
 def _agy_security_home_env(security_home):
-    env = os.environ.copy()
-    env["HOME"] = security_home
-    env["MMS_SESSION_HOME"] = security_home
-    env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-    env["XDG_CONFIG_HOME"] = os.path.join(security_home, ".config")
-    env["XDG_CACHE_HOME"] = os.path.join(security_home, ".cache")
-    env["XDG_DATA_HOME"] = os.path.join(security_home, ".local", "share")
-    env["XDG_STATE_HOME"] = os.path.join(security_home, ".local", "state")
-    return env
+    """Compatibility wrapper for AGY security command env."""
+    from mms_agy_security import agy_security_home_env
+
+    return agy_security_home_env(security_home)
 
 
 def _run_agy_security_command(security_bin, args, *, security_home, check=False):
-    try:
-        result = subprocess.run(
-            [security_bin, *args],
-            env=_agy_security_home_env(security_home),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        )
-    except Exception:
-        return False
-    return result.returncode == 0 or not check
+    """Compatibility wrapper for AGY security command execution."""
+    from mms_agy_security import run_agy_security_command
+
+    return run_agy_security_command(
+        security_bin,
+        args,
+        security_home=security_home,
+        check=check,
+    )
 
 
 def _ensure_agy_account_keychain(account_home, session_home=None):
-    """Create a per-account default keychain before Antigravity OAuth writes."""
-    account_home = os.path.abspath(os.path.expanduser(str(account_home or "").strip()))
-    if not account_home:
-        return ""
-    keychain_path = _agy_keychain_path(account_home)
-    os.makedirs(os.path.dirname(keychain_path), exist_ok=True)
-    os.makedirs(os.path.join(account_home, "Library", "Preferences"), exist_ok=True)
+    """Compatibility wrapper for AGY account keychain preparation."""
+    from mms_agy_security import ensure_agy_account_keychain
 
-    security_bin = _macos_security_bin()
-    if not security_bin:
-        return keychain_path
-
-    security_home = os.path.abspath(os.path.expanduser(str(session_home or account_home).strip()))
-    os.makedirs(security_home, exist_ok=True)
-    if not os.path.exists(keychain_path):
-        if not _run_agy_security_command(
-            security_bin,
-            ["create-keychain", "-p", "", keychain_path],
-            security_home=security_home,
-            check=True,
-        ):
-            return keychain_path
-
-    _run_agy_security_command(security_bin, ["set-keychain-settings", "-lut", "21600", keychain_path], security_home=security_home)
-    _run_agy_security_command(security_bin, ["unlock-keychain", "-p", "", keychain_path], security_home=security_home)
-    _run_agy_security_command(security_bin, ["list-keychains", "-d", "user", "-s", keychain_path], security_home=security_home)
-    _run_agy_security_command(security_bin, ["default-keychain", "-d", "user", "-s", keychain_path], security_home=security_home)
-    return keychain_path
+    return ensure_agy_account_keychain(account_home, session_home=session_home)
 
 
 def _install_agy_security_wrapper(session_home, account_home, env):
-    security_bin = _macos_security_bin()
-    if not security_bin:
-        return ""
-    wrapper_dir = os.path.join(session_home, ".mms", "bin")
-    os.makedirs(wrapper_dir, exist_ok=True)
-    wrapper_path = os.path.join(wrapper_dir, "security")
-    wrapper = [
-        "#!/bin/sh",
-        f'export HOME={json.dumps(session_home)}',
-        f'export MMS_SESSION_HOME={json.dumps(session_home)}',
-        f'export MMS_AGY_ACCOUNT_HOME={json.dumps(account_home)}',
-        f'export PATH={json.dumps("/usr/bin:/bin:/usr/sbin:/sbin")}',
-        f'export XDG_CONFIG_HOME={json.dumps(os.path.join(session_home, ".config"))}',
-        f'export XDG_CACHE_HOME={json.dumps(os.path.join(session_home, ".cache"))}',
-        f'export XDG_DATA_HOME={json.dumps(os.path.join(session_home, ".local", "share"))}',
-        f'export XDG_STATE_HOME={json.dumps(os.path.join(session_home, ".local", "state"))}',
-        f'exec {json.dumps(security_bin)} "$@"',
-        "",
-    ]
-    _write_real_home_script(wrapper_path, wrapper)
-    return wrapper_path
+    """Compatibility wrapper for AGY session security wrapper install."""
+    from mms_agy_security import install_agy_security_wrapper
+
+    return install_agy_security_wrapper(session_home, account_home, env)
 
 
 def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
