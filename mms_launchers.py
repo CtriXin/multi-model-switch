@@ -1957,13 +1957,6 @@ def _is_loop_family_hook_command(command_text):
     return is_loop_family_hook_command(command_text)
 
 
-def _is_looop_hook_command(command_text):
-    """Backward-compatible alias for older tests/callers."""
-    from mms_hook_commands import is_looop_hook_command
-
-    return is_looop_hook_command(command_text)
-
-
 def _hook_command_targets_exist(command_text):
     """Compatibility wrapper for hook command executable target checks."""
     from mms_hook_commands import hook_command_targets_exist
@@ -3703,13 +3696,6 @@ def _copy_tree_files_if_missing(src, dst):
     from mms_claude_session import copy_tree_files_if_missing
 
     return copy_tree_files_if_missing(src, dst)
-
-
-def _normalized_claude_slot_account(value):
-    """Compatibility wrapper for Claude slot account normalization."""
-    from mms_claude_session import normalized_claude_slot_account
-
-    return normalized_claude_slot_account(value)
 
 
 def _claude_project_resume_dir_names(project_path):
