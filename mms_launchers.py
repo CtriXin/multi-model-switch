@@ -3431,38 +3431,6 @@ def _resolve_real_home_command_path(command_name, env=None):
     )
 
 
-def _mmc_entry_path():
-    """Compatibility wrapper for the retired MMC entry path."""
-    from mms_mmc_launch import mmc_entry_path
-
-    return mmc_entry_path()
-
-
-def _assert_safe_mmc_delegate_binary(path_value, *, label):
-    """Compatibility wrapper for MMC delegate binary validation."""
-    from mms_mmc_launch import assert_safe_mmc_delegate_binary
-
-    return assert_safe_mmc_delegate_binary(path_value, label=label)
-
-
-def _build_mmc_delegate_env():
-    """Compatibility wrapper for MMC delegate env building."""
-    from mms_mmc_launch import build_mmc_delegate_env
-
-    return build_mmc_delegate_env()
-
-
-def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
-    """Compatibility wrapper for retired MMC launch env projection."""
-    from mms_mmc_launch import mmc_launch_env_overrides
-
-    return mmc_launch_env_overrides(
-        model_info,
-        runtime,
-        enable_claude_1m=enable_claude_1m,
-    )
-
-
 def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS"):
     """Compatibility wrapper for OAuth Claude manual-only hard cut."""
     from mms_mmc_launch import exit_oauth_claude_manual_only
