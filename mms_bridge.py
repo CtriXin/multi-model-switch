@@ -4140,19 +4140,79 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 ########################################################################
 
 
-def _responses_input_to_messages(instructions, input_items):
+def _responses_reasoning_item_text(item):
+    if not isinstance(item, dict):
+        return ""
+
+    parts = []
+
+    def _append_text(value):
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                parts.append(text)
+
+    def _append_part_list(values):
+        if isinstance(values, str):
+            _append_text(values)
+            return
+        if not isinstance(values, list):
+            return
+        for value in values:
+            if isinstance(value, str):
+                _append_text(value)
+                continue
+            if not isinstance(value, dict):
+                continue
+            _append_text(value.get("text"))
+            summary_text = value.get("summary_text")
+            if isinstance(summary_text, dict):
+                _append_text(summary_text.get("text"))
+            else:
+                _append_text(summary_text)
+
+    _append_text(item.get("text"))
+    _append_text(item.get("summary_text"))
+    _append_part_list(item.get("summary"))
+    _append_part_list(item.get("content"))
+    return "\n\n".join(parts).strip()
+
+
+def _responses_input_to_messages(instructions, input_items, model_name=""):
     """Convert Responses API 'input' array to Chat Completions 'messages'."""
     messages = []
     if instructions:
         messages.append({"role": "system", "content": instructions})
 
     pending_tool_calls = []
+    pending_reasoning_content = ""
+    requires_roundtrip = _domestic_model_requires_reasoning_content_roundtrip(model_name)
+
+    def _assistant_message(message):
+        if (
+            requires_roundtrip
+            and pending_reasoning_content
+            and isinstance(message, dict)
+            and str(message.get("role") or "") == "assistant"
+        ):
+            message["reasoning_content"] = pending_reasoning_content
+        return message
 
     for item in input_items or []:
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
         role = item.get("role")
+
+        if item_type == "reasoning":
+            reasoning_text = _responses_reasoning_item_text(item)
+            if reasoning_text:
+                pending_reasoning_content = (
+                    f"{pending_reasoning_content}\n\n{reasoning_text}".strip()
+                    if pending_reasoning_content
+                    else reasoning_text
+                )
+            continue
 
         if item_type == "function_call":
             pending_tool_calls.append({
@@ -4168,19 +4228,20 @@ def _responses_input_to_messages(instructions, input_items):
         if item_type == "function_call_output":
             # Flush any pending tool_calls first
             if pending_tool_calls:
-                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
                 pending_tool_calls = []
             messages.append({
                 "role": "tool",
                 "tool_call_id": item.get("call_id", ""),
                 "content": str(item.get("output", "")),
             })
+            pending_reasoning_content = ""
             continue
 
         if role in ("user", "assistant", "system"):
             # Flush pending tool_calls before a new message
             if pending_tool_calls:
-                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
                 pending_tool_calls = []
 
             content_parts = item.get("content")
@@ -4205,14 +4266,16 @@ def _responses_input_to_messages(instructions, input_items):
 
             if role == "assistant" and item_type == "message":
                 # Check if this message also has tool_calls embedded
-                messages.append({"role": "assistant", "content": content})
+                messages.append(_assistant_message({"role": "assistant", "content": content}))
             else:
                 messages.append({"role": role, "content": content})
+                if role != "assistant":
+                    pending_reasoning_content = ""
             continue
 
     # Flush remaining pending tool_calls
     if pending_tool_calls:
-        messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+        messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
 
     return messages
 
@@ -4258,6 +4321,11 @@ def _chat_messages_to_anthropic_payload(chat_messages, model_name, *, stream=Tru
             })
             continue
         blocks = []
+        reasoning_content = ""
+        if role == "assistant":
+            reasoning_content = str(message.get("reasoning_content") or "").strip()
+        if reasoning_content:
+            blocks.append({"type": "thinking", "thinking": reasoning_content})
         if content:
             blocks.append({"type": "text", "text": str(content)})
         for tool_call in message.get("tool_calls") or []:
@@ -4305,7 +4373,11 @@ def _responses_tools_to_anthropic(tools):
 
 
 def _responses_payload_to_anthropic_messages_payload(payload, model_name):
-    chat_messages = _responses_input_to_messages(payload.get("instructions", ""), payload.get("input", []))
+    chat_messages = _responses_input_to_messages(
+        payload.get("instructions", ""),
+        payload.get("input", []),
+        model_name,
+    )
     anthropic_payload = _chat_messages_to_anthropic_payload(
         chat_messages,
         model_name,
@@ -5185,6 +5257,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
+            model_name,
         )
         chat_payload = {
             "model": model_name,
@@ -5590,6 +5663,7 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
+            model_name,
         )
         chat_payload = {
             "model": model_name,
