@@ -121,6 +121,16 @@ from mms_runtime_context import (
     lookup_context_window as _lookup_context_window_impl,
     provider_advertises_plain_mimo_1m as _provider_advertises_plain_mimo_1m_impl,
 )
+from mms_runtime_home import (
+    build_home_context as _build_home_context_impl,
+    home_context_lines as _home_context_lines_impl,
+    normalize_path as _normalize_path_impl,
+    path_is_within as _path_is_within_impl,
+    prepare_oauth_home_context as _prepare_oauth_home_context_impl,
+    runtime_dns_mode as _runtime_dns_mode_impl,
+    runtime_net_mode as _runtime_net_mode_impl,
+    validate_home_context_or_exit as _validate_home_context_or_exit_impl,
+)
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
@@ -1064,182 +1074,72 @@ def _real_home_wrapper_scrub_lines():
 
 
 def _normalize_path(value):
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    return os.path.abspath(os.path.expanduser(text))
+    """Compatibility wrapper for HOME path normalization."""
+    return _normalize_path_impl(value)
 
 
 def _path_is_within(path, root):
-    path = _normalize_path(path)
-    root = _normalize_path(root)
-    if not path or not root:
-        return False
-    try:
-        return os.path.commonpath([path, root]) == root
-    except ValueError:
-        return False
+    """Compatibility wrapper for path containment checks."""
+    return _path_is_within_impl(path, root)
 
 
 def _runtime_net_mode(runtime):
-    if _fake_upstream_enabled():
-        return "fake"
-    return "proxy" if str((runtime or {}).get("proxy") or "").strip() else "direct"
+    """Compatibility wrapper for runtime network mode labels."""
+    return _runtime_net_mode_impl(
+        runtime,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+    )
 
 
 def _runtime_dns_mode(runtime):
-    if _fake_upstream_enabled():
-        return "fake-local"
-    return _proxy_dns_mode((runtime or {}).get("proxy") or "")
+    """Compatibility wrapper for runtime DNS mode labels."""
+    return _runtime_dns_mode_impl(
+        runtime,
+        fake_upstream_enabled_fn=_fake_upstream_enabled,
+        proxy_dns_mode_fn=_proxy_dns_mode,
+    )
 
 
 def _build_home_context(env, runtime, cli_name):
-    env = env or {}
-    runtime = dict(runtime or {})
-    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
-    real_home_values = {}
-    for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
-        value = _normalize_path(env.get(key) or os.environ.get(key) or "")
-        if value:
-            real_home_values[key] = value
-    if not real_home_values:
-        real_home_values["derived"] = _real_user_home()
-    unique_real_homes = sorted(set(real_home_values.values()))
-    real_home = unique_real_homes[0] if unique_real_homes else ""
-    effective_home = _normalize_path(env.get("HOME") or "")
-    session_home = _normalize_path(env.get("MMS_SESSION_HOME") or "")
-    account_home = _normalize_path(runtime.get("home_dir") or "")
-    xdg_config_home = _normalize_path(env.get("XDG_CONFIG_HOME") or "")
-    gemini_cli_home = _normalize_path(env.get("GEMINI_CLI_HOME") or "")
-    config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
-    expected_session_home = auth_mode == "oauth" and (
-        cli_name == "claude"
-        or (cli_name in {"codex", "agy"} and effective_home and effective_home != real_home)
+    """Compatibility wrapper for launch HOME context construction."""
+    return _build_home_context_impl(
+        env,
+        runtime,
+        cli_name,
+        real_user_home_fn=_real_user_home,
+        real_user_path_fn=_real_user_path,
+        runtime_locale_env_fn=_runtime_locale_env,
+        runtime_net_mode_fn=_runtime_net_mode,
+        runtime_dns_mode_fn=_runtime_dns_mode,
     )
-    locale_value = str(env.get("LC_ALL") or env.get("LANG") or _runtime_locale_env(runtime).get("LANG") or "").strip()
-    return {
-        "cli": str(cli_name or "").strip(),
-        "auth_mode": auth_mode,
-        "real_home": real_home,
-        "real_home_values": real_home_values,
-        "real_home_conflict": len(unique_real_homes) > 1,
-        "effective_home": effective_home,
-        "session_home": session_home,
-        "account_home": account_home,
-        "gemini_cli_home": gemini_cli_home,
-        "xdg_config_home": xdg_config_home,
-        "config_root": config_root,
-        "net_mode": _runtime_net_mode(runtime),
-        "dns_mode": _runtime_dns_mode(runtime),
-        "locale": locale_value,
-        "expected_session_home": expected_session_home,
-    }
 
 
 def _validate_home_context_or_exit(context):
-    context = dict(context or {})
-    cli_name = context.get("cli") or "cli"
-    auth_mode = context.get("auth_mode") or "api_key"
-    real_home = context.get("real_home") or ""
-    effective_home = context.get("effective_home") or ""
-    session_home = context.get("session_home") or ""
-    account_home = context.get("account_home") or ""
-    xdg_config_home = context.get("xdg_config_home") or ""
-    config_root = context.get("config_root") or ""
-    gemini_cli_home = context.get("gemini_cli_home") or ""
-
-    def _block(reason):
-        console.print(f"[red]{cli_name} HOME 保护阻止启动[/red]\n[dim]{reason}[/dim]")
-        sys.exit(1)
-
-    if context.get("real_home_conflict"):
-        detail = " | ".join(
-            f"{key}={value}" for key, value in sorted((context.get("real_home_values") or {}).items())
-        )
-        _block(f"REAL_HOME hints 不一致：{detail}")
-    if not real_home:
-        _block("无法解析真实 HOME")
-
-    if auth_mode != "oauth":
-        if effective_home and real_home and not _path_is_within(config_root, real_home):
-            _block(f"config_root 异常：{config_root}")
-        return context
-
-    if context.get("expected_session_home"):
-        if not effective_home:
-            _block("缺少 HOME")
-        if not session_home:
-            _block("缺少 MMS_SESSION_HOME")
-        if effective_home != session_home:
-            _block(f"HOME 与 MMS_SESSION_HOME 不一致：HOME={effective_home} | SESSION={session_home}")
-        if effective_home == real_home:
-            _block(f"隔离账号 HOME 落回真实 HOME：{effective_home}")
-        if account_home:
-            sessions_root = os.path.join(account_home, "s")
-            if not _path_is_within(session_home, sessions_root):
-                _block(f"session HOME 不在账号隔离目录内：{session_home}")
-        if cli_name in {"codex", "agy"}:
-            expected_xdg = os.path.join(session_home, ".config")
-            if xdg_config_home and xdg_config_home != expected_xdg:
-                _block(f"XDG_CONFIG_HOME 未跟随 session HOME：{xdg_config_home}")
-    elif cli_name == "gemini":
-        if not gemini_cli_home:
-            _block("缺少 GEMINI_CLI_HOME")
-        if gemini_cli_home == real_home:
-            _block(f"GEMINI_CLI_HOME 落回真实 HOME：{gemini_cli_home}")
-        if account_home and gemini_cli_home != account_home:
-            _block(f"GEMINI_CLI_HOME 与账号目录不一致：{gemini_cli_home}")
-
-    if session_home and _path_is_within(config_root, session_home):
-        _block(f"config_root 不应落在 session HOME 内：{config_root}")
-    if gemini_cli_home and _path_is_within(config_root, gemini_cli_home):
-        _block(f"config_root 不应落在账号 HOME 内：{config_root}")
-    return context
+    """Compatibility wrapper for launch HOME context validation."""
+    return _validate_home_context_or_exit_impl(
+        context,
+        console=console,
+        path_is_within_fn=_path_is_within,
+        exit_fn=sys.exit,
+    )
 
 
 def _home_context_lines(context):
-    context = dict(context or {})
-    lines = []
-    real_home = context.get("real_home") or ""
-    if real_home:
-        lines.append(f"HOME real={real_home}")
-    session_home = context.get("session_home") or ""
-    if session_home:
-        lines.append(f"HOME session={session_home}")
-    account_home = context.get("account_home") or ""
-    if account_home:
-        lines.append(f"HOME account={account_home}")
-    gemini_cli_home = context.get("gemini_cli_home") or ""
-    if gemini_cli_home:
-        lines.append(f"GEMINI_CLI_HOME={gemini_cli_home}")
-    extras = []
-    xdg_config_home = context.get("xdg_config_home") or ""
-    if xdg_config_home:
-        extras.append(f"xdg={xdg_config_home}")
-    config_root = context.get("config_root") or ""
-    if config_root:
-        extras.append(f"config_root={config_root}")
-    net_mode = context.get("net_mode") or ""
-    if net_mode:
-        extras.append(f"net={net_mode}")
-    dns_mode = context.get("dns_mode") or ""
-    if dns_mode:
-        extras.append(f"dns={dns_mode}")
-    locale_value = context.get("locale") or ""
-    if locale_value:
-        extras.append(f"lang={locale_value}")
-    if extras:
-        lines.append(" | ".join(extras))
-    return lines
+    """Compatibility wrapper for launch HOME context display lines."""
+    return _home_context_lines_impl(context)
 
 
 def _prepare_oauth_home_context(runtime, env, cli_name):
-    context = _build_home_context(env, runtime, cli_name)
-    _validate_home_context_or_exit(context)
-    runtime["_home_context"] = dict(context)
-    for line in _home_context_lines(context):
-        console.print(f"[dim]{line}[/dim]")
-    return context
+    """Compatibility wrapper for OAuth HOME context preparation."""
+    return _prepare_oauth_home_context_impl(
+        runtime,
+        env,
+        cli_name,
+        build_home_context_fn=_build_home_context,
+        validate_home_context_fn=_validate_home_context_or_exit,
+        home_context_lines_fn=_home_context_lines,
+        console=console,
+    )
 
 
 def _apply_proxy_env(env, proxy_url, no_proxy=""):
