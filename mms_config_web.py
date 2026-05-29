@@ -1051,6 +1051,388 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
     ]
 
 
+def _tui_webui_mapping() -> list[dict[str, str]]:
+    """Trace every Settings/Channel TUI action to its WebUI destination."""
+
+    def row(
+        row_id: str,
+        *,
+        tui_area: str,
+        tui_action_id: str,
+        tui_label: str,
+        webui_section: str,
+        webui_control: str,
+        status: str,
+        write_policy: str,
+        verification: str,
+        manual_check: str,
+        webui_section_id: str = "",
+        api_action: str = "",
+    ) -> dict[str, str]:
+        return {
+            "id": row_id,
+            "tui_area": tui_area,
+            "tui_action_id": tui_action_id,
+            "tui_label": tui_label,
+            "webui_section": webui_section,
+            "webui_section_id": webui_section_id,
+            "webui_control": webui_control,
+            "api_action": api_action,
+            "status": status,
+            "write_policy": write_policy,
+            "verification": verification,
+            "manual_check": manual_check,
+        }
+
+    rows = [
+        row(
+            "settings.provider_mgmt",
+            tui_area="Settings",
+            tui_action_id="provider_mgmt",
+            tui_label="Provider 管理",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="左侧 provider list、通道配置 tab、模型配置 tab、保存审计",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/plan diff + /api/save or /api/registry-v2/apply",
+            manual_check="检查 provider add/edit/default/model list 是否都能进入保存预览。",
+        ),
+        row(
+            "settings.account_mgmt",
+            tui_area="Settings",
+            tui_action_id="account_mgmt",
+            tui_label="账号管理",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="账号 / OAuth 通道表 + 非 Claude account 草稿",
+            api_action="accounts",
+            status="draft_review",
+            write_policy="draft_review_human_gate",
+            verification="/api/settings/report?action=accounts redacts home_dir/proxy",
+            manual_check="非 Claude account 可改 name/enabled/priority/default；Claude/login/remove 保持锁定。",
+        ),
+        row(
+            "settings.registry",
+            tui_area="Settings",
+            tui_action_id="registry",
+            tui_label="模型真源",
+            webui_section="真源状态 + 能力整合",
+            webui_section_id="source",
+            webui_control="真源状态 cards + report buttons + save/apply flow",
+            api_action="model_source_status",
+            status="report",
+            write_policy="read_only_report",
+            verification="/api/settings/report?action=model_source_status",
+            manual_check="写入类 registry 操作必须继续走 save/apply human gate。",
+        ),
+        row(
+            "settings.guard",
+            tui_area="Settings",
+            tui_action_id="guard",
+            tui_label="启动快照",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="Snapshot Guard status/gate report",
+            api_action="guard_status",
+            status="human_gate",
+            write_policy="manual_cli_human_gate",
+            verification="/api/settings/report?action=guard_status",
+            manual_check="accept 不自动执行；必须 human double-confirm。",
+        ),
+        row(
+            "settings.rescue",
+            tui_area="Settings",
+            tui_action_id="rescue",
+            tui_label="中断/救援",
+            webui_section="Fallback",
+            webui_section_id="fallback",
+            webui_control="rescue fallback/hot fallback 表单 + rescue events report",
+            api_action="rescue_events",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="fallback form feeds /api/plan; events use /api/settings/report?action=rescue_events",
+            manual_check="fallback 写入前必须生成保存预览；packet handover 仍未自动写。",
+        ),
+        row(
+            "settings.language",
+            tui_area="Settings",
+            tui_action_id="language",
+            tui_label="界面语言",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="read-only language status report",
+            api_action="language_status",
+            status="missing",
+            write_policy="planned",
+            verification="/api/settings/report?action=language_status",
+            manual_check="WebUI 还没有 ui.language select/save；暂不伪装完成。",
+        ),
+        row(
+            "settings.routes_export",
+            tui_area="Settings",
+            tui_action_id="routes_export",
+            tui_label="Legacy 路由导出",
+            webui_section="保存 / 审计",
+            webui_section_id="save",
+            webui_control="生成保存预览、stable audited save、preview DB publish",
+            api_action="routes_export",
+            status="native",
+            write_policy="save_flow_or_preview_publish",
+            verification="/api/plan + /api/save or /api/registry-v2/apply",
+            manual_check="直接导出按钮不单独暴露；保存/发布流负责 routes artifacts。",
+        ),
+        row(
+            "settings.about",
+            tui_area="Settings",
+            tui_action_id="about",
+            tui_label="关于",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="About report",
+            api_action="about",
+            status="report",
+            write_policy="read_only_report",
+            verification="/api/settings/report?action=about",
+            manual_check="upgrade 动作仍是 manual CLI/human gate。",
+        ),
+        row(
+            "provider.local_usage",
+            tui_area="Channel / Provider",
+            tui_action_id="provider:1",
+            tui_label="查看本地统计",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="provider list usage chips + usage summary report",
+            api_action="provider_usage_summary",
+            status="report",
+            write_policy="read_only_report",
+            verification="/api/settings/report?action=provider_usage_summary",
+            manual_check="完整 Rich usage table 尚未迁移；先提供 summary。",
+        ),
+        row(
+            "provider.models",
+            tui_area="Channel / Provider",
+            tui_action_id="provider:2",
+            tui_label="模型管理",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="模型配置 tab、fetch models、extra_models、hidden_models、capability toggles",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/provider/models + /api/plan",
+            manual_check="检查模型拉取、隐藏/补充、capability toggle、stale cleanup。",
+        ),
+        row(
+            "provider.default",
+            tui_area="Channel / Provider",
+            tui_action_id="provider:3",
+            tui_label="设为默认网关",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="设为默认 provider checkbox",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/plan review_summary.default_provider",
+            manual_check="默认 provider 变化必须出现在保存摘要。",
+        ),
+        row(
+            "provider.rename",
+            tui_area="Channel / Provider",
+            tui_action_id="provider:4",
+            tui_label="重命名",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="内部 ID + 显示名 fields",
+            status="native",
+            write_policy="draft_review_confirmed_save",
+            verification="/api/plan provider rename/remove/add diff",
+            manual_check="ID 变化会影响 route scope，必须看 diff。",
+        ),
+        row(
+            "provider.credentials",
+            tui_area="Channel / Provider",
+            tui_action_id="provider:5",
+            tui_label="编辑地址和 Key",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="OpenAI/Anthropic base URL、models_endpoint、API Key pending save",
+            status="native",
+            write_policy="audited_secret_write",
+            verification="/api/plan redacts key; save writes audited secret backend",
+            manual_check="API Key 只显示 pending，不回显明文。",
+        ),
+        row(
+            "provider.remove",
+            tui_area="Channel / Provider",
+            tui_action_id="provider:6",
+            tui_label="删除通道",
+            webui_section="通道配置",
+            webui_section_id="channel",
+            webui_control="not exposed yet",
+            api_action="provider_remove_gate",
+            status="missing",
+            write_policy="planned_human_confirm",
+            verification="mapping marks missing; no silent delete path",
+            manual_check="需要后续加 WebUI delete with typed confirm。",
+        ),
+        row(
+            "account.local_usage",
+            tui_area="Channel / Account",
+            tui_action_id="account:1",
+            tui_label="查看本地统计",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="account table usage columns + account summary report",
+            api_action="accounts",
+            status="report",
+            write_policy="read_only_report",
+            verification="/api/settings/report?action=accounts",
+            manual_check="完整 Rich usage table 尚未迁移；先提供 summary。",
+        ),
+        row(
+            "account.login",
+            tui_area="Channel / Account",
+            tui_action_id="account:2",
+            tui_label="重新登录",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="human gate report only",
+            api_action="account_login_gate",
+            status="human_gate",
+            write_policy="manual_login_only",
+            verification="/api/settings/report?action=account_login_gate",
+            manual_check="登录会碰全局/OAuth 状态，WebUI 不自动执行。",
+        ),
+        row(
+            "account.default",
+            tui_area="Channel / Account",
+            tui_action_id="account:3",
+            tui_label="设为默认官方通道",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="non-Claude default radio buttons",
+            api_action="accounts",
+            status="draft_review",
+            write_policy="draft_review_human_gate",
+            verification="/api/plan blocks Claude default and accepts non-Claude default",
+            manual_check="Claude default radio disabled；非 Claude 进入保存预览。",
+        ),
+        row(
+            "account.rename_edit",
+            tui_area="Channel / Account",
+            tui_action_id="account:4/5",
+            tui_label="重命名 / 编辑通道",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="non-Claude name/enabled/priority draft fields",
+            api_action="accounts",
+            status="draft_review",
+            write_policy="draft_review_human_gate",
+            verification="/api/plan blocks protected fields",
+            manual_check="home_dir/proxy/no_proxy/Claude metadata 不进入 WebUI write。",
+        ),
+        row(
+            "account.remove",
+            tui_area="Channel / Account",
+            tui_action_id="account:6",
+            tui_label="删除通道",
+            webui_section="能力整合",
+            webui_section_id="settings",
+            webui_control="human gate report only",
+            api_action="account_remove_gate",
+            status="human_gate",
+            write_policy="manual_remove_only",
+            verification="/api/settings/report?action=account_remove_gate",
+            manual_check="删除账号目录/登录状态必须由 human 手动确认。",
+        ),
+    ]
+
+    registry_rows = [
+        ("registry.model_source_status", "model_source_status", "查看 Model Source Status", "model_source_status", "report", "read_only_report"),
+        ("registry.consumer_bundle_status", "consumer_bundle_status", "查看 Consumer Bundle", "consumer_bundle_status", "report", "read_only_report"),
+        ("registry.v2_save_plan", "registry_v2_save_plan", "查看 v2 Save Plan", "", "native", "save_preview"),
+        ("registry.config_v2_promotion_plan", "config_v2_promotion_plan", "查看 Promote Plan", "config_v2_promotion_plan", "report", "read_only_report"),
+        ("registry.config_v2_release_readiness", "config_v2_release_readiness", "查看 4.0 Readiness", "config_v2_release_readiness", "report", "read_only_report"),
+        ("registry.preview_doctor", "preview_doctor", "运行 Preview Doctor", "preview_doctor", "report", "read_only_report"),
+        ("registry.check_staleness", "check_staleness", "检查 Source Staleness", "check_staleness", "report", "read_only_report"),
+        ("registry.refresh_due_sources", "refresh_due_sources", "刷新到期 Sources", "refresh_due_sources_gate", "human_gate", "network_write_human_gate"),
+        ("registry.scheduled_dry_run", "scheduled_dry_run", "定时刷新 Dry Run", "scheduled_refresh_gate", "human_gate", "network_human_gate"),
+        ("registry.scheduled_no_network", "scheduled_no_network", "定时刷新 No Network", "scheduled_refresh_gate", "human_gate", "manual_cli_human_gate"),
+        ("registry.refresh_sources", "refresh_sources", "刷新全部 Sources", "refresh_sources_gate", "human_gate", "network_write_human_gate"),
+        ("registry.fetch_openrouter", "fetch_openrouter", "拉取 OpenRouter Catalog", "fetch_openrouter_gate", "human_gate", "network_human_gate"),
+        ("registry.diff_openrouter", "diff_openrouter", "对比 OpenRouter Candidate", "diff_openrouter_gate", "human_gate", "network_human_gate"),
+        ("registry.publish_approved", "publish_approved", "发布 Approved Bundle", "publish_approved_gate", "human_gate", "write_human_gate"),
+        ("registry.verify_approved", "verify_approved", "验证 Approved Bundle", "verify_approved_gate", "human_gate", "manual_cli_human_gate"),
+        ("registry.doctor", "doctor", "Registry Doctor / 状态", "registry_status", "report", "read_only_report"),
+    ]
+    for row_id, action_id, label, api_action, status, write_policy in registry_rows:
+        rows.append(
+            row(
+                row_id,
+                tui_area="Settings / Registry",
+                tui_action_id=action_id,
+                tui_label=label,
+                webui_section="能力整合",
+                webui_section_id="settings",
+                webui_control="TUI ↔ WebUI 对照表 action button",
+                api_action=api_action,
+                status=status,
+                write_policy=write_policy,
+                verification=f"/api/settings/report?action={api_action}" if api_action else "/api/plan",
+                manual_check="read-only 可直接点；network/write 类先 gate，不静默执行。",
+            )
+        )
+
+    extra_rows = [
+        ("guard.status", "Settings / Snapshot Guard", "status", "查看当前 Snapshot 状态", "guard_status", "report", "read_only_report"),
+        ("guard.accept", "Settings / Snapshot Guard", "accept", "接受当前 Snapshot", "guard_accept_gate", "human_gate", "manual_cli_human_gate"),
+        ("rescue.default", "Settings / Rescue", "choose_route_default/manual_default", "设置全局默认 fallback", "", "native", "draft_review_confirmed_save"),
+        ("rescue.clear_default", "Settings / Rescue", "clear_default", "清除全局默认 fallback", "", "native", "draft_review_confirmed_save"),
+        ("rescue.hot_fallback", "Settings / Rescue", "enable_hot_fallback/disable_hot_fallback", "开启/关闭 hot fallback", "", "native", "draft_review_confirmed_save"),
+        ("rescue.view_packets", "Settings / Rescue", "view_packets", "查看最近失败 / rescue packet", "rescue_events", "report", "read_only_report"),
+        ("rescue.create_demo", "Settings / Rescue", "create_demo", "生成测试 rescue packet", "rescue_create_demo_gate", "human_gate", "local_artifact_human_gate"),
+        ("rescue.handover", "Settings / Rescue", "handover/manual_handover", "生成 fallback handover", "rescue_handover_gate", "missing", "planned_human_confirm"),
+        ("rescue.view_md_paths", "Settings / Rescue", "view_md/show_paths", "查看 rescue.md / 显示文件路径", "rescue_events", "report", "read_only_report"),
+        ("about.refresh", "Settings / About", "refresh_versions", "刷新版本检查", "about_refresh_gate", "human_gate", "network_human_gate"),
+        ("about.upgrade", "Settings / About", "upgrade_mms/upgrade_codex_cli/upgrade_claude_cli", "升级 MMS / CLI", "about_upgrade_gate", "human_gate", "manual_cli_human_gate"),
+    ]
+    for row_id, area, action_id, label, api_action, status, write_policy in extra_rows:
+        rows.append(
+            row(
+                row_id,
+                tui_area=area,
+                tui_action_id=action_id,
+                tui_label=label,
+                webui_section="Fallback" if area.endswith("Rescue") and status == "native" else "能力整合",
+                webui_section_id="fallback" if area.endswith("Rescue") and status == "native" else "settings",
+                webui_control="Fallback form" if area.endswith("Rescue") and status == "native" else "TUI ↔ WebUI 对照表 action button",
+                api_action=api_action,
+                status=status,
+                write_policy=write_policy,
+                verification=f"/api/settings/report?action={api_action}" if api_action else "/api/plan",
+                manual_check="native 走保存预览；gate/missing 不会伪装成已迁移。",
+            )
+        )
+    return rows
+
+
+def _tui_webui_mapping_summary(rows: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    rows = rows if isinstance(rows, list) else _tui_webui_mapping()
+    counts = {"native": 0, "report": 0, "draft_review": 0, "human_gate": 0, "missing": 0}
+    for item in rows:
+        status = _safe_text(item.get("status"))
+        if status in counts:
+            counts[status] += 1
+    return {
+        "schema": "mms.setup_web.tui_mapping_summary.v1",
+        "total": len(rows),
+        "counts": counts,
+        "source_files": ["mms_tui.py:_settings_menu", "mms_core.py settings/provider/account/rescue action handlers"],
+        "policy": "native/report rows are WebUI-owned; human_gate/missing rows keep TUI/CLI as emergency or manual path.",
+    }
+
+
 def _normalize_agent_model_overrides(value: Any) -> dict[str, dict[str, str]]:
     raw = value if isinstance(value, dict) else {}
     result: dict[str, dict[str, str]] = {}
@@ -1257,6 +1639,7 @@ def build_config_snapshot(
         recommendations.append("建议先设置 rescue fallback model，失败时可以稳定交接。")
     if not any(row.get("anthropic_base_url") for row in provider_rows):
         recommendations.append("CN / dual-protocol 模型建议保留 Anthropic /v1/messages 路径，避免 cache 退化。")
+    tui_webui_mapping = _tui_webui_mapping()
     return {
         "schema": "mms.setup_web.snapshot.v2",
         "mode": "interactive_audited_save",
@@ -1280,6 +1663,8 @@ def build_config_snapshot(
         },
         "settings_actions": _settings_action_cards(),
         "webui_capability_coverage": _webui_capability_coverage(),
+        "tui_webui_mapping": tui_webui_mapping,
+        "tui_webui_mapping_summary": _tui_webui_mapping_summary(tui_webui_mapping),
         "vision_sidecar": _sanitized_mapping(vision_sidecar),
         "rescue": _sanitized_mapping(rescue),
         "runtime": {
@@ -3068,6 +3453,19 @@ def run_model_smoke(
         return {"ok": False, "provider_id": provider.get("id"), "model": model, "protocol": protocol, "error": str(exc), "trace": traceback.format_exc(limit=3)}
 
 
+def _settings_gate_report(action: str, *, write_policy: str = "human_gate", note: str = "") -> dict[str, Any]:
+    mapping_rows = [item for item in _tui_webui_mapping() if item.get("api_action") == action]
+    return {
+        "ok": True,
+        "schema": "mms.setup_web.settings_report.v1",
+        "action": action,
+        "write_policy": write_policy,
+        "status": "human_gate",
+        "note": note or "该 TUI 动作会触发 network/write/OAuth/global-config 风险；WebUI 当前只显示 gate，不会自动执行。",
+        "mapping": mapping_rows,
+    }
+
+
 def build_settings_report(
     cfg: dict[str, Any],
     payload: dict[str, Any] | None = None,
@@ -3080,6 +3478,16 @@ def build_settings_report(
     payload = payload if isinstance(payload, dict) else {}
     action = _safe_text(payload.get("action") or "coverage")
     snapshot = build_config_snapshot(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+    mapping = snapshot.get("tui_webui_mapping") or []
+    if action in {"tui_mapping", "tui_webui_mapping"}:
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": action,
+            "write_policy": "mixed",
+            "summary": snapshot.get("tui_webui_mapping_summary") or _tui_webui_mapping_summary(mapping),
+            "mapping": mapping,
+        }
     if action in {"coverage", "capability_coverage"}:
         return {
             "ok": True,
@@ -3088,6 +3496,7 @@ def build_settings_report(
             "write_policy": "read_only",
             "coverage": snapshot.get("webui_capability_coverage") or [],
             "settings_actions": snapshot.get("settings_actions") or [],
+            "tui_webui_mapping_summary": snapshot.get("tui_webui_mapping_summary") or {},
         }
     if action in {"accounts", "account_status"}:
         return {
@@ -3108,6 +3517,23 @@ def build_settings_report(
         return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "report": snapshot.get("config_v2_promotion_plan") or {}}
     if action in {"config_v2_release_readiness", "release_readiness"}:
         return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "report": snapshot.get("config_v2_release_readiness") or {}}
+    if action == "registry_v2_save_plan":
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": action,
+            "write_policy": "save_preview",
+            "note": "WebUI 的 v2 Save Plan 由“保存 / 审计”页的“生成保存预览”生成；不在 settings report 里构造假 plan。",
+            "webui_section": "save",
+        }
+    if action == "check_staleness":
+        try:
+            from mms_registry_cli import source_freshness
+
+            report = source_freshness()
+            return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "write_policy": "read_only", "report": _sanitize_for_output(report)}
+        except Exception as exc:
+            return {"ok": False, "schema": "mms.setup_web.settings_report.v1", "action": action, "error": f"{type(exc).__name__}: {exc}"}
     if action == "preview_doctor":
         config_root = _config_root_for_snapshot(config_path)
         try:
@@ -3126,6 +3552,57 @@ def build_settings_report(
             "report": snapshot.get("model_source_status") or {},
             "note": "registry_status CLI can initialize SQLite; WebUI uses model_source_status instead to stay read-only.",
         }
+    if action == "provider_usage_summary":
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": action,
+            "write_policy": "read_only",
+            "providers": [
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "usage": item.get("usage") or {},
+                    "model_count": item.get("model_count"),
+                    "enabled": item.get("enabled"),
+                    "role": item.get("role"),
+                    "priority": item.get("priority"),
+                }
+                for item in (snapshot.get("providers") or [])
+                if isinstance(item, dict)
+            ],
+        }
+    if action == "guard_status":
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": action,
+            "write_policy": "manual_cli_human_gate",
+            "status": "human_gate",
+            "commands": [f"{command_name} guard status", f"{command_name} guard accept"],
+            "note": "WebUI 当前只显示 Snapshot Guard gate；accept 会改变 config guard baseline，必须 human double-confirm 后走 CLI。",
+        }
+    if action == "language_status":
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": action,
+            "write_policy": "planned",
+            "status": "missing",
+            "ui_language": _safe_text((cfg.get("ui") if isinstance(cfg.get("ui"), dict) else {}).get("language") or "zh"),
+            "note": "WebUI 还没有 ui.language selector/save path；该行保持 missing，避免把未迁移能力伪装成已完成。",
+        }
+    if action == "routes_export":
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": action,
+            "write_policy": "save_flow_or_preview_publish",
+            "status": "native",
+            "webui_section": "save",
+            "note": "Legacy model-routes.json 不再单独做 settings 按钮；WebUI 保存/preview publish 会产出对应 routes artifacts。",
+            "writes": (snapshot.get("save_contract") or {}).get("preview_v2_writes") or [],
+        }
     if action == "about":
         try:
             mms_core = _load_mms_core()
@@ -3141,22 +3618,50 @@ def build_settings_report(
             return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "write_policy": "read_only", "events": _sanitize_for_output(events)}
         except Exception as exc:
             return {"ok": False, "schema": "mms.setup_web.settings_report.v1", "action": action, "error": f"{type(exc).__name__}: {exc}"}
+    gate_actions = {
+        "guard_accept_gate": ("manual_cli_human_gate", "Snapshot Guard accept 会更新 guard baseline；WebUI 不自动执行。"),
+        "provider_remove_gate": ("planned_human_confirm", "删除 provider 需要 typed confirm + diff review；本 slice 只标出缺口。"),
+        "account_login_gate": ("manual_login_only", "OAuth login 会写外部账号状态；WebUI 当前不触发。"),
+        "account_remove_gate": ("manual_remove_only", "删除 account 可能删除账号目录/登录状态；WebUI 当前不触发。"),
+        "refresh_due_sources_gate": ("network_write_human_gate", "刷新 registry source 可能触发 network/write；当前保持 human gate。"),
+        "scheduled_refresh_gate": ("network_human_gate", "scheduled refresh 需要单独确认执行模式；当前保持 human gate。"),
+        "refresh_sources_gate": ("network_write_human_gate", "刷新全部 sources 是 network/write 动作；当前保持 human gate。"),
+        "fetch_openrouter_gate": ("network_human_gate", "Fetch OpenRouter Catalog 需要联网；当前保持 human gate。"),
+        "diff_openrouter_gate": ("network_human_gate", "OpenRouter diff 可能依赖外部 catalog；当前保持 human gate。"),
+        "publish_approved_gate": ("write_human_gate", "发布 approved bundle 是写入动作；WebUI 只允许通过保存/发布审计流执行。"),
+        "verify_approved_gate": ("manual_cli_human_gate", "verify approved 当前保留 CLI/manual path。"),
+        "rescue_create_demo_gate": ("local_artifact_human_gate", "生成 demo rescue packet 会写本地 artifact；当前不自动执行。"),
+        "rescue_handover_gate": ("planned_human_confirm", "fallback handover 写 artifact；后续需要 WebUI confirm flow。"),
+        "about_refresh_gate": ("network_human_gate", "刷新版本检查可能联网；当前不自动执行。"),
+        "about_upgrade_gate": ("manual_cli_human_gate", "升级 MMS/Codex/Claude CLI 是外部写入/安装动作；必须 human 手动执行。"),
+    }
+    if action in gate_actions:
+        write_policy, note = gate_actions[action]
+        return _settings_gate_report(action, write_policy=write_policy, note=note)
     return {
         "ok": False,
         "schema": "mms.setup_web.settings_report.v1",
         "action": action,
         "error": "unknown settings report action",
         "available_actions": [
+            "tui_mapping",
             "coverage",
             "accounts",
             "model_source_status",
             "consumer_bundle_status",
+            "registry_v2_save_plan",
             "config_v2_promotion_plan",
             "config_v2_release_readiness",
             "preview_doctor",
+            "check_staleness",
             "registry_status",
+            "provider_usage_summary",
+            "guard_status",
+            "language_status",
+            "routes_export",
             "about",
             "rescue_events",
+            *sorted(gate_actions.keys()),
         ],
     }
 
@@ -3481,6 +3986,39 @@ _HTML_PAGE = r"""<!doctype html>
       padding: 12px;
       margin: 12px 0 0;
       color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+    }
+    .mapping-card {
+      background:
+        radial-gradient(circle at top right, color-mix(in oklch, var(--accent) 10%, transparent), transparent 32%),
+        var(--bg);
+    }
+    .mapping-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+    .filterbar.compact {
+      margin: 0;
+      justify-content: flex-end;
+    }
+    .mapping-action {
+      border-radius: 0;
+      padding: 6px 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .status-native { background: var(--ok-soft); color: var(--ok); }
+    .status-report { background: var(--warn-soft); color: color-mix(in oklch, var(--warn) 72%, black); }
+    .status-draft_review { background: var(--accent-soft); color: var(--accent); }
+    .status-human_gate { background: var(--danger-soft); color: var(--danger); }
+    .status-missing {
+      background: var(--fg-soft);
+      color: var(--muted);
+      border: 1px dashed color-mix(in oklch, var(--fg) 18%, var(--border));
     }
 
     /* ===== Grid system ===== */
@@ -4041,7 +4579,8 @@ _HTML_PAGE = r"""<!doctype html>
       }
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
       .oc-summary { grid-template-columns: 1fr 1fr; }
-      .settings-command-head, .settings-metrics, .settings-route { grid-template-columns: 1fr; }
+      .settings-command-head, .settings-metrics, .settings-route, .mapping-head { grid-template-columns: 1fr; }
+      .filterbar.compact { justify-content: flex-start; }
       .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
       .settings-stamp { white-space: normal; }
       .panel { padding: 20px; }
@@ -4236,6 +4775,16 @@ _HTML_PAGE = r"""<!doctype html>
           <h3>功能覆盖矩阵</h3>
           <div class="table-wrap"><table id="settingsCoverage"></table></div>
         </div>
+        <div class="card span12 mapping-card">
+          <div class="mapping-head">
+            <div>
+              <h3>TUI ↔ WebUI 对照表</h3>
+              <p class="muted">逐项对应 TUI settings/channel action：native 直接在 WebUI 操作，report 可点击取 JSON，human gate/missing 明确保留，不伪装完成。</p>
+            </div>
+            <div id="mappingFilters" class="filterbar compact"></div>
+          </div>
+          <div class="table-wrap"><table id="tuiMappingTable"></table></div>
+        </div>
         <div class="card span5">
           <h3>维护动作</h3>
           <p class="muted">按钮只返回 JSON report；真正写入仍走保存页的 diff + confirm，或后续单独 HumanGate flow。</p>
@@ -4313,7 +4862,7 @@ const sections=[
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / docs']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let touchedProviders=new Set(); let staleCleanupProviders=new Set();
+let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set();
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -4407,8 +4956,14 @@ function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function accountLocked(a){return !!a.is_claude_human_only}
 function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100)});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
-function renderSettingsCommand(accounts,coverage){const board=$('settingsCommand');if(!board)return;const policy=state.account_write_policy||{};const editable=accounts.filter(a=>!accountLocked(a)).length;const locked=accounts.filter(a=>accountLocked(a)).length;const nativeCount=coverage.filter(r=>String(r.webui||'').includes('native')).length;const reportCount=coverage.filter(r=>String(r.webui||'').includes('read_only')||String(r.webui||'').includes('report')).length;const gateCount=coverage.filter(r=>String(r.webui||'').includes('human_gate')||String(r.webui||'').includes('manual_cli')).length;const empty=accounts.length?'':`<div class="settings-empty-note"><strong>当前配置没有 OAuth account。</strong> 这也是你刚才看不出变化的原因：account draft/default 编辑器只会在存在 account 时出现；本页现在先把能力边界、TUI 降级路径和 human gate 明确展示出来。</div>`;board.innerHTML=`<div class="settings-command-head"><div><div class="settings-kicker">MMX / WEBUI TAKEOVER MAP</div><h3>Settings moved out of TUI</h3><p>这块现在是 settings/channel 迁移指挥台：能在 WebUI 里安全操作的直接显形；会碰真实账号、Claude config 或 Snapshot Guard accept 的动作必须留在 human gate。</p></div><div class="settings-stamp">${escapeHtml(policy.claude||'human_only_locked')}</div></div><div class="settings-metrics"><div class="settings-metric"><span>accounts loaded</span><strong>${accounts.length}</strong><em>${editable} editable / ${locked} Claude locked</em></div><div class="settings-metric"><span>native webui</span><strong>${nativeCount}</strong><em>channel + runtime flows</em></div><div class="settings-metric"><span>report-only</span><strong>${reportCount}</strong><em>safe maintenance surface</em></div><div class="settings-metric"><span>human gates</span><strong>${gateCount}</strong><em>no silent real-config writes</em></div></div><div class="settings-route"><div class="settings-route-card ready"><b>01 / account drafts</b><small>非 Claude account 的 name、enabled、priority、default 会进入保存预览，不会绕过 diff。</small></div><div class="settings-route-card locked"><b>02 / Claude lock</b><small>Claude account default、home_dir、proxy、login/remove 保持 human-only。</small></div><div class="settings-route-card report"><b>03 / reports</b><small>coverage、registry、about、rescue events 只返回 read-only JSON report。</small></div><div class="settings-route-card"><b>04 / TUI downgrade</b><small>WebUI 覆盖后，TUI 退成 emergency/read-only，而不是主配置面。</small></div></div>${empty}`}
-function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];renderSettingsCommand(accounts,coverage);const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${escapeHtml(a.timezone||'-')}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="13" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>auth</th><th>home</th><th>proxy</th><th>timezone</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority]').forEach(el=>{el.oninput=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')}});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;const actions=[['coverage','覆盖矩阵'],['accounts','账号摘要'],['model_source_status','真源状态'],['consumer_bundle_status','Bundle'],['config_v2_promotion_plan','Promotion plan'],['config_v2_release_readiness','Readiness'],['preview_doctor','Preview doctor'],['registry_status','Registry status'],['about','About'],['rescue_events','Rescue events']];$('maintenanceActions').innerHTML=actions.map(([id,label])=>`<button class="ghost" data-settings-action="${id}">${label}</button>`).join('');document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;$('settingsReport').textContent='读取中...';const data=await api('/api/settings/report',{action});$('settingsReport').textContent=JSON.stringify(data,null,2);toast(data.ok?`${btn.textContent} report 已刷新`:`${btn.textContent} report 失败`)}})}
+function mappingStatusLabel(status){return {native:'Native',report:'Report',draft_review:'Draft review',human_gate:'Human gate',missing:'Missing'}[status]||status||'-'}
+function mappingStatusClass(status){return 'status-'+String(status||'missing').replace(/[^a-z0-9_ -]/gi,'').replace(/\s+/g,'_')}
+function mappingActionButton(row){const parts=[];if(row.webui_section_id){parts.push(`<button class="ghost mapping-action" data-section-jump="${escapeHtml(row.webui_section_id)}">打开</button>`)}if(row.api_action){const label=row.status==='human_gate'?'Gate':(row.status==='missing'?'Gap':'Report');parts.push(`<button class="ghost mapping-action" data-settings-action="${escapeHtml(row.api_action)}">${label}</button>`)}return parts.join(' ')}
+function renderMappingFilters(mapping){const box=$('mappingFilters');if(!box)return;const count=s=>mapping.filter(row=>s==='all'||row.status===s).length;const filters=[['all','全部'],['native','Native'],['report','Report'],['draft_review','Draft'],['human_gate','Gate'],['missing','Missing']];box.innerHTML=filters.map(([id,label])=>`<button class="${settingsMappingFilter===id?'active':''}" data-map-filter="${id}">${label} ${count(id)}</button>`).join('');document.querySelectorAll('[data-map-filter]').forEach(btn=>{btn.onclick=()=>{settingsMappingFilter=btn.dataset.mapFilter;renderSettings()}})}
+function renderTuiMapping(mapping){renderMappingFilters(mapping);const rows=(settingsMappingFilter==='all'?mapping:mapping.filter(row=>row.status===settingsMappingFilter));const body=rows.length?rows.map(row=>`<tr><td class="mono">${escapeHtml(row.tui_area)}<br><span class="muted">${escapeHtml(row.tui_action_id)}</span></td><td>${escapeHtml(row.tui_label)}</td><td>${escapeHtml(row.webui_section)}<br><span class="muted">${escapeHtml(row.webui_control)}</span></td><td><span class="tag ${mappingStatusClass(row.status)}">${mappingStatusLabel(row.status)}</span><br><span class="muted">${escapeHtml(row.write_policy)}</span></td><td class="default-route">${escapeHtml(row.verification||'-')}<br><span class="muted">${escapeHtml(row.manual_check||'')}</span></td><td>${mappingActionButton(row)}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-row">当前筛选没有条目</td></tr>';$('tuiMappingTable').innerHTML=`<thead><tr><th>TUI area/action</th><th>TUI label</th><th>WebUI 落点</th><th>Status</th><th>验证 / check</th><th>操作</th></tr></thead><tbody>${body}</tbody>`}
+function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;$('settingsReport').textContent='读取中...';const data=await api('/api/settings/report',{action});$('settingsReport').textContent=JSON.stringify(data,null,2);toast(data.ok?`${btn.textContent} report 已刷新`:`${btn.textContent} report 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
+function renderSettingsCommand(accounts,coverage,mapping){const board=$('settingsCommand');if(!board)return;const policy=state.account_write_policy||{};const summary=state.tui_webui_mapping_summary||{};const counts=summary.counts||{};const editable=accounts.filter(a=>!accountLocked(a)).length;const locked=accounts.filter(a=>accountLocked(a)).length;const nativeCount=counts.native??mapping.filter(r=>r.status==='native').length;const reportCount=(counts.report??mapping.filter(r=>r.status==='report').length)+(counts.draft_review??mapping.filter(r=>r.status==='draft_review').length);const gateCount=(counts.human_gate??mapping.filter(r=>r.status==='human_gate').length)+(counts.missing??mapping.filter(r=>r.status==='missing').length);const empty=accounts.length?'':`<div class="settings-empty-note"><strong>当前配置没有 OAuth account。</strong> 这也是你刚才看不出变化的原因：account draft/default 编辑器只会在存在 account 时出现；本页现在先把能力边界、TUI 降级路径和 human gate 明确展示出来。</div>`;board.innerHTML=`<div class="settings-command-head"><div><div class="settings-kicker">MMX / WEBUI TAKEOVER MAP</div><h3>Settings moved out of TUI</h3><p>这块现在是 settings/channel 迁移指挥台：${mapping.length} 条 TUI action 已逐项映射；能在 WebUI 里安全操作的直接显形，涉及真实账号、Claude config、Snapshot Guard accept、network/write 的动作保留 human gate。</p></div><div class="settings-stamp">${escapeHtml(policy.claude||'human_only_locked')}</div></div><div class="settings-metrics"><div class="settings-metric"><span>accounts loaded</span><strong>${accounts.length}</strong><em>${editable} editable / ${locked} Claude locked</em></div><div class="settings-metric"><span>native webui</span><strong>${nativeCount}</strong><em>direct WebUI controls</em></div><div class="settings-metric"><span>report / draft</span><strong>${reportCount}</strong><em>clickable JSON or save preview</em></div><div class="settings-metric"><span>gates / gaps</span><strong>${gateCount}</strong><em>visible, not hidden in TUI</em></div></div><div class="settings-route"><div class="settings-route-card ready"><b>01 / native controls</b><small>provider 编辑、模型管理、fallback/runtime/save 已经走 WebUI draft + diff。</small></div><div class="settings-route-card report"><b>02 / clickable reports</b><small>registry、about、usage、guard、rescue rows 都能点出 bounded JSON report。</small></div><div class="settings-route-card locked"><b>03 / human gates</b><small>Claude account、OAuth login/remove、Snapshot accept、network/write 操作不自动执行。</small></div><div class="settings-route-card"><b>04 / audit table</b><small>TUI ↔ WebUI 对照表是逐项 check list，不再让迁移范围藏在代码里。</small></div></div>${empty}`}
+function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderSettingsCommand(accounts,coverage,mapping);const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${escapeHtml(a.timezone||'-')}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td></tr>`}).join(''):'<tr><td colspan="13" class="empty-row">没有配置 OAuth/account 通道</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>auth</th><th>home</th><th>proxy</th><th>timezone</th><th>启动</th><th>最近</th><th>WebUI 写入</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority]').forEach(el=>{el.oninput=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')}});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);const actionLabels=new Map([['tui_mapping','TUI Mapping'],['coverage','覆盖矩阵']]);mapping.forEach(row=>{if(row.api_action&&!actionLabels.has(row.api_action))actionLabels.set(row.api_action,row.tui_label||row.api_action)});$('maintenanceActions').innerHTML=[...actionLabels.entries()].map(([id,label])=>`<button class="ghost" data-settings-action="${escapeHtml(id)}">${escapeHtml(label)}</button>`).join('');bindSettingsActionButtons()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}

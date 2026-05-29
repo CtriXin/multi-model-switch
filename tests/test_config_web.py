@@ -77,6 +77,21 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert "sk-super-secret-value" not in encoded
     assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置"}
     assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
+    mapping = snapshot["tui_webui_mapping"]
+    assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
+    assert {item["tui_action_id"] for item in mapping} >= {
+        "provider_mgmt",
+        "account_mgmt",
+        "registry",
+        "guard",
+        "rescue",
+        "language",
+        "routes_export",
+        "about",
+    }
+    assert {item["id"] for item in mapping} >= {"provider.credentials", "account.login", "registry.publish_approved", "guard.accept"}
+    assert next(item for item in mapping if item["id"] == "guard.accept")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "missing"
     assert "vision_sidecar" in snapshot["snippets"]
     assert [step["id"] for step in snapshot["setup_flow"]] == [
         "channel",
@@ -114,6 +129,30 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
         config_path=str(tmp_path / "mms-next" / "config.toml"),
         command_name="mmf",
     )
+    mapping = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "tui_mapping"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    guard = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "guard_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    guard_accept = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "guard_accept_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    language = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "language_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
     encoded = json.dumps(accounts, ensure_ascii=False)
 
     assert report["ok"] is True
@@ -128,6 +167,13 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert registry["ok"] is True
     assert registry["write_policy"] == "read_only"
     assert "can initialize SQLite" in registry["note"]
+    assert mapping["ok"] is True
+    assert mapping["summary"]["counts"]["human_gate"] > 0
+    assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
+    assert guard["write_policy"] == "manual_cli_human_gate"
+    assert "mmf guard status" in guard["commands"]
+    assert guard_accept["status"] == "human_gate"
+    assert language["status"] == "missing"
     assert not (tmp_path / "mms-next" / "registry").exists()
 
 
@@ -476,6 +522,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Claude human-only" in html
     assert "account_defaults:state.account_defaults" in html
     assert "settingsCoverage" in html
+    assert "TUI ↔ WebUI 对照表" in html
+    assert "tuiMappingTable" in html
+    assert "mappingFilters" in html
+    assert "function renderTuiMapping" in html
+    assert "data-map-filter" in html
+    assert "data-section-jump" in html
+    assert "tui_mapping" in html
     assert "maintenanceActions" in html
     assert "/api/settings/report" in html
     assert "human-gated" in html
