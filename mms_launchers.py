@@ -4952,67 +4952,30 @@ def _show_launch_info(cli, runtime, auth_mode):
 
 
 def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
-    """统一启动入口"""
-    runtime = dict(runtime)
-    launcher = LAUNCHERS.get(cli)
-    if not launcher:
-        console.print(f"[red]不支持的 CLI: {cli}[/red]")
-        sys.exit(1)
-    auth_mode = runtime.get("auth_mode", "api_key")
-    if auth_mode == "oauth_bridge":
-        source_label = runtime.get("name", runtime.get("id", "account"))
-        source_kind = "官方桥接"
-    elif auth_mode == "oauth":
-        validate_account_for_cli(runtime.get("cli", cli), runtime)
-        source_label = runtime.get("name", runtime.get("id", "account"))
-        source_kind = "账号档案"
-    elif _is_opencode_global_profile_runtime(cli, runtime):
-        source_label = runtime.get("name", runtime.get("id", "global-opencode-omo"))
-        source_kind = "OpenCode 全局配置"
-    else:
-        validate_provider_for_cli(cli, runtime)
-        source_label = runtime.get("name", runtime.get("id", "provider"))
-        source_kind = "模型源"
+    """Compatibility wrapper for the unified launcher dispatch entrypoint."""
+    from mms_launcher_dispatch import launch_cli as launch_cli_dispatch
 
-    if cli == "claude" and auth_mode == "oauth":
-        # OAuth Claude 已下线为 standalone 入口；MMS 不再读取或判定其并发 state。
-        runtime.pop("_account_guard_report", None)
-    if cli == "claude" and auth_mode in {"oauth", "api_key"} and runtime.get("bypass"):
-        _enforce_claude_network_guard_or_exit(
-            runtime,
-            require_proxy=_claude_bypass_requires_proxy(runtime),
-        )
-
-    model_display = _resolve_model(model_info) if not isinstance(model_info, dict) else \
-        model_info.get("model", model_info.get("sonnet", "多模型配置"))
-
-    if cli == "claude" and auth_mode == "oauth":
-        _exit_oauth_claude_manual_only(runtime, model_info, caller="launch_cli")
-    if cli == "claude" and auth_mode == "api_key":
-        prefetched_probe = None
-        try:
-            with _launch_status("预读取模型列表中...", spinner="dots") as step_start:
-                prefetched_probe = _probe_models(runtime, emit_output=False)
-            models = list((prefetched_probe or {}).get("models") or [])
-            detail = f"{len(models)} 个模型"
-            base_source = (prefetched_probe or {}).get("base_source")
-            if base_source:
-                detail += f" · {base_source}"
-            _print_launch_step_done("启动前模型预读取", step_start, detail)
-        except Exception:
-            console.print("[yellow]· 启动前模型预读取失败，后续继续按默认流程处理[/yellow]")
-        runtime["_launch_prefetched_probe"] = prefetched_probe
-
-    console.print(f"\n[bold green]🚀 启动 {cli}[/bold green] — {model_display}")
-    console.print(f"[dim]{source_kind}: {source_label} ({runtime.get('id', 'default')})[/dim]")
-    console.print(f"[dim]认证方式: {auth_mode}[/dim]")
-    _show_launch_info(cli, runtime, auth_mode)
-    console.print("[dim]─" * 40 + "[/dim]\n")
-
-    if extra_args:
-        launcher(model_info, runtime, once=once, extra_args=list(extra_args))
-    else:
-        launcher(model_info, runtime, once=once)
+    return launch_cli_dispatch(
+        cli,
+        model_info,
+        runtime,
+        once=once,
+        extra_args=extra_args,
+        launchers=LAUNCHERS,
+        console=console,
+        validate_account_for_cli_fn=validate_account_for_cli,
+        validate_provider_for_cli_fn=validate_provider_for_cli,
+        is_opencode_global_profile_runtime_fn=_is_opencode_global_profile_runtime,
+        enforce_claude_network_guard_or_exit_fn=_enforce_claude_network_guard_or_exit,
+        claude_bypass_requires_proxy_fn=_claude_bypass_requires_proxy,
+        resolve_model_fn=_resolve_model,
+        exit_oauth_claude_manual_only_fn=_exit_oauth_claude_manual_only,
+        probe_models_fn=_probe_models,
+        launch_status_fn=_launch_status,
+        print_launch_step_done_fn=_print_launch_step_done,
+        show_launch_info_fn=_show_launch_info,
+        exit_fn=sys.exit,
+    )
 
 
 def _write_runtime_config(prefix, content):
