@@ -208,4 +208,4 @@ This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giv
 - `全局继承`：用户自己已有的 Claude/Codex/OpenCode 配置或插件，MMS 可以看到，但 WebUI 不会静默编辑；
 - `其它检测项`：启动预览能看到、但需要保守检查路径的条目。
 
-面板默认用卡片展示用途、来源、CLI、类型和默认状态；路径、触发、`disable_key` 和原始说明折叠在“高级信息”里。Global Skill 数量较多时会按组折叠，例如 `lark-*` 会进入 Lark CLI 技能组，并能整组加入默认关闭草稿。默认关闭仍属于 `preferences.toml`；WebUI 的“应用到 preferences.toml”会单独保存 Skill/MCP/Hook 偏好，创建 backup + audit，不混入模型/provider 保存。
+面板默认用卡片展示用途、来源、CLI、类型和默认状态；路径、触发、`disable_key` 和原始说明折叠在“高级信息”里。Global Skill 数量较多时会按组折叠，例如 `lark-*` 会进入 Lark CLI 技能组，并能整组加入默认关闭草稿。默认关闭仍属于 `preferences.toml`；WebUI 只有在本次草稿相对当前 preferences 有变化时才显示底部保存栏，点击“保存并应用”会单独保存 Skill/MCP/Hook 偏好，创建 backup + audit，不混入模型/provider 保存。

@@ -26,7 +26,7 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 当前面板叫 **Skill / MCP 管理**，默认按“操作入口”组织，而不是先解释来源：
 
-- 顶部先显示当前管理范围、待应用关闭项，以及三个操作入口：在这里开/关、添加到 MMS 动态、添加到 Global；
+- 顶部先显示当前管理范围、本次未保存变化，以及三个操作入口：在这里开/关、添加到 MMS 动态、添加到 Global；
 - 然后进入来源/CLI/类型筛选和能力卡片，**当前加载来源 / 路径诊断** 放在卡片区之后并默认折叠；
 - **当前加载来源 / 路径诊断** 只做 resolver 诊断，展开后显示全部 vendor / agent-pack / MCP 根，不再截断前几个；
 - `全局继承` 会展开 Claude / Codex 的真实全局 Skill 清单，而不是只显示 TUI preview 抽样；
@@ -37,13 +37,13 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 - 按“来源 / CLI / 类型”筛选，并支持搜索名称、用途和路径；
 - 卡片正面只显示用途、来源、CLI、类型和默认状态；
 - 路径、触发、`disable_key`、原始说明折叠到“高级信息”；
-- 勾选“默认关闭”只更新页面内草稿，并生成 `preferences.toml` 片段；
-- **应用默认关闭** 是 preferences.toml 的单独保存区，仍保留复制片段作为 fallback；**Global 添加位置** 只显示最常用落点，已检测到的其它全局/plugin 位置默认折叠；
+- 勾选“默认关闭”只更新页面内草稿；当草稿相对当前 preferences 有变化时，底部出现固定保存栏；改回原状态后保存栏自动消失；
+- 底部保存栏是 preferences.toml 的单独保存区，仍保留复制片段作为 fallback；**Global 添加位置** 只显示最常用落点，已检测到的其它全局/plugin 位置默认折叠；
 - Claude / Codex 自己全局目录下的 Skill 可以加入“默认关闭草稿”；MMS 启动时会在 session-local merge 阶段过滤这些名字，不会删除真实全局目录。
 - 宿主级共享候选和 Codex plugin cache 仍是只读展示，避免 WebUI 承诺 launcher 当前不能保证的继承过滤。
 - 全局 Skill 量很大时按技能组折叠展示，例如 `lark-*` 会进入 **Lark CLI 技能组**，并支持把可过滤的同组项一次性加入/移出“默认关闭草稿”。
 
-这一版不会把 Skill/MCP/Hook 偏好混进模型/provider 保存。`应用默认关闭` 会走独立 preferences writer：确认后只写 `preferences.toml`，并创建 backup + audit；复制片段仍作为 fallback。
+这一版不会把 Skill/MCP/Hook 偏好混进模型/provider 保存。底部保存栏会走独立 preferences writer：确认后只写 `preferences.toml`，并创建 backup + audit；复制片段仍作为 fallback。
 
 ## 安装版 / 开发版位置
 

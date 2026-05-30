@@ -816,36 +816,68 @@ _HTML_PAGE = r"""<!doctype html>
     .asset-control-card .btns {
       margin-top: 10px;
     }
-    .asset-control-primary {
-      grid-column: 1 / -1;
-      border-color: color-mix(in oklch, var(--accent) 34%, var(--border));
-      background:
-        linear-gradient(135deg, oklch(100% 0 0), oklch(98% 0.018 145));
+    .asset-pending-bar {
+      position: fixed;
+      left: max(14px, env(safe-area-inset-left));
+      right: max(14px, env(safe-area-inset-right));
+      bottom: max(14px, env(safe-area-inset-bottom));
+      z-index: 80;
+      display: none;
+      pointer-events: none;
     }
-    .asset-control-save {
+    .asset-pending-bar.is-visible {
+      display: block;
+      animation: assetBarIn .18s ease both;
+    }
+    @keyframes assetBarIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .asset-pending-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      pointer-events: auto;
       display: grid;
-      grid-template-columns: minmax(190px, 1.2fr) minmax(150px, .8fr) auto;
+      grid-template-columns: minmax(220px, 1fr) minmax(360px, auto);
+      gap: 12px;
+      align-items: center;
+      border: 1px solid color-mix(in oklch, var(--accent) 42%, var(--border));
+      border-radius: 22px;
+      padding: 12px 14px;
+      background:
+        linear-gradient(135deg, oklch(100% 0 0 / .96), oklch(97.5% 0.018 155 / .96));
+      box-shadow: 0 20px 60px oklch(20% 0.02 220 / .18);
+      backdrop-filter: blur(14px);
+    }
+    .asset-pending-title {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-weight: 760;
+    }
+    .asset-pending-actions {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) minmax(140px, .8fr) auto auto;
       align-items: end;
       gap: 8px;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px dashed var(--border);
     }
-    .asset-control-save label:not(.check) {
+    .asset-pending-actions label:not(.check) {
       font-size: 12px;
       font-weight: 720;
       color: var(--muted);
     }
-    .asset-control-save input[type="text"] {
+    .asset-pending-actions input[type="text"] {
       width: 100%;
       min-width: 0;
     }
     .asset-confirm-field {
       min-width: 0;
     }
-    .asset-save-result {
+    .asset-pending-result {
       grid-column: 1 / -1;
       min-height: 20px;
+      margin: 0;
     }
     .asset-source-strip {
       display: block;
@@ -1376,7 +1408,8 @@ _HTML_PAGE = r"""<!doctype html>
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
       .oc-summary { grid-template-columns: 1fr 1fr; }
       .asset-hero { grid-template-columns: 1fr; }
-      .asset-control-save { grid-template-columns: 1fr; align-items: stretch; }
+      .asset-pending-inner { grid-template-columns: 1fr; }
+      .asset-pending-actions { grid-template-columns: 1fr; align-items: stretch; }
       .asset-confirm-grid { grid-template-columns: 1fr; }
       .asset-cli-grid { grid-template-columns: 1fr 1fr; }
       .panel { padding: 20px; }
@@ -1572,7 +1605,7 @@ _HTML_PAGE = r"""<!doctype html>
     <!-- Session 能力面板 -->
     <section class="panel" data-section="sessionAssets">
       <h2>Skill / MCP 管理</h2>
-      <p>这里就是会话能力的配置入口：筛选 Skill / MCP / Hook，勾选默认关闭，然后直接应用到 preferences.toml。</p>
+      <p>这里就是会话能力的配置入口：筛选 Skill / MCP / Hook，勾选默认关闭；只有产生未保存变化时，底部才会出现保存栏。</p>
       <div class="asset-hero" id="assetSummary"></div>
       <div class="asset-control-help" id="assetControlHelp"></div>
       <div class="asset-manager">
@@ -1602,7 +1635,7 @@ _HTML_PAGE = r"""<!doctype html>
       <div class="grid asset-ops-grid">
         <div class="card span6 asset-config-card asset-ops-card">
           <h3>备份：复制 TOML 片段</h3>
-          <p class="muted" id="assetConfigContract">这里保留可复制片段，正常保存请用顶部“在这里开 / 关并保存”。</p>
+          <p class="muted" id="assetConfigContract">这里保留可复制片段；正常保存请使用底部出现的未保存变化栏。</p>
           <div class="btns">
             <button id="copyAssetPrefs" class="ghost">复制偏好片段</button>
             <button id="resetAssetPrefs" class="ghost">恢复当前偏好</button>
@@ -1623,6 +1656,7 @@ _HTML_PAGE = r"""<!doctype html>
           </details>
         </div>
       </div>
+      <div class="asset-pending-bar" id="assetPendingBar"></div>
     </section>
 
     <!-- 保存 / 审计 -->
@@ -1799,7 +1833,8 @@ function assetTomlString(value){return String(value||'').replaceAll('\\','\\\\')
 function assetArrayToml(values){return `[${[...new Set((values||[]).map(x=>String(x||'').trim()).filter(Boolean))].sort().map(v=>`"${assetTomlString(v)}"`).join(', ')}]`}
 function renderAssetPreferenceSnippet(){const assets=state.session_assets||{};const defaults=assets.launch_defaults||{};const install=assets.managed_install||{};const draft=ensureAssetDisabledDraft();const managedRoot=install.real_root||install.root||'~/.local/share/mms/assets';const snippet=[`[launch.defaults]`,`caveman_mode = "${assetTomlString(defaults.caveman_mode||'enable')}"`,`nsr_mode = "${assetTomlString(defaults.nsr_mode||'enable')}"`,`agent_pack = "${assetTomlString(defaults.agent_pack||'none')}"`,`bypass = ${defaults.bypass===false?'false':'true'}`,'',`[session_surfaces.disabled]`,`skills = ${assetArrayToml(draft.skills)}`,`mcp = ${assetArrayToml(draft.mcp)}`,`hooks = ${assetArrayToml(draft.hooks)}`,'',`[assets]`,`managed_enabled = ${install.enabled===false?'false':'true'}`,`managed_root = "${assetTomlString(managedRoot)}"`].join('\n');$('assetPreferenceSnippet').textContent=snippet;return snippet}
 function assetPreferencesPayload(){const assets=state.session_assets||{};const install=assets.managed_install||{};const draft=ensureAssetDisabledDraft();return {disabled:{skills:[...draft.skills],mcp:[...draft.mcp],hooks:[...draft.hooks]},assets:{managed_enabled:install.enabled!==false,managed_root:install.real_root||install.root||'~/.local/share/mms/assets'}}}
-function bindAssetPreferenceButtons(){const copy=$('copyAssetPrefs');const reset=$('resetAssetPrefs');const apply=$('applyAssetPrefs');const confirm=$('assetConfirmPrefs');const phrase=$('assetConfirmPhrase');const result=$('assetPrefsResult');if(confirm){confirm.checked=assetConfirmPrefsChecked;confirm.onchange=()=>{assetConfirmPrefsChecked=confirm.checked}}if(phrase){phrase.value=assetConfirmPhraseValue;phrase.oninput=()=>{assetConfirmPhraseValue=phrase.value}}if(result)result.textContent=assetPrefsResultText;if(copy)copy.onclick=async()=>{const snippet=renderAssetPreferenceSnippet();try{await navigator.clipboard.writeText(snippet);toast('偏好片段已复制')}catch(_err){toast('无法访问剪贴板，片段已显示在页面')}};if(reset)reset.onclick=()=>{assetDisabledDraft=cloneAssetDisabledDefaults();renderSessionAssets();toast('已恢复为当前 preferences.toml 状态')};if(apply)apply.onclick=async()=>{if(confirm)assetConfirmPrefsChecked=confirm.checked;if(phrase)assetConfirmPhraseValue=phrase.value;const payload=assetPreferencesPayload();const data=await api('/api/preferences/apply',{...payload,confirm_preferences:assetConfirmPrefsChecked,confirm_phrase:assetConfirmPhraseValue,reason:'setup-web-ui:asset-preferences'});assetPrefsResultText=data.ok?(data.status==='no_change'?'偏好没有变化。':`已写入 ${data.target_path||'preferences.toml'}；backup ${data.backup_path||'-'}`):(data.errors||[data.error||'保存被阻止']).join('；');if(result)result.textContent=assetPrefsResultText;toast(data.ok?(data.status==='no_change'?'偏好没有变化':'Skill/MCP 偏好已保存'):'Skill/MCP 偏好保存被阻止');if(data.ok){assetConfirmPrefsChecked=false;assetConfirmPhraseValue='';const res=await fetch('/api/state');state=await res.json();assetDisabledDraft=null;renderAll()}}}
+function renderAssetPendingBar(){const bar=$('assetPendingBar');if(!bar)return;const diff=assetDraftDiff();if(!diff.total){bar.classList.remove('is-visible');bar.innerHTML='';assetConfirmPrefsChecked=false;assetConfirmPhraseValue='';assetPrefsResultText='有未保存变化时，底部会出现保存栏。';return}const labels={skills:'Skill',mcp:'MCP',hooks:'Hook'};const chips=['skills','mcp','hooks'].map(key=>diff[key].length?`<span class="tag">${labels[key]} ${diff[key].length}</span>`:'').join('');bar.classList.add('is-visible');bar.innerHTML=`<div class="asset-pending-inner"><div><div class="asset-pending-title"><span>有 ${diff.total} 项未保存变化</span>${chips}</div><p class="muted">确认后只写 preferences.toml；如果你把开关改回原状态，这条保存栏会自动消失。</p></div><div class="asset-pending-actions"><label class="check"><input id="assetConfirmPrefs" type="checkbox"><span>确认只保存 Skill/MCP/Hook 偏好</span></label><div class="asset-confirm-field"><label for="assetConfirmPhrase">确认文字</label><input id="assetConfirmPhrase" type="text" placeholder="保存偏好"></div><button id="applyAssetPrefs" class="secondary">保存并应用</button><button id="discardAssetPrefs" class="ghost">放弃变化</button><p class="muted asset-pending-result" id="assetPrefsResult">${escapeHtml(assetPrefsResultText)}</p></div></div>`}
+function bindAssetPreferenceButtons(){const copy=$('copyAssetPrefs');const reset=$('resetAssetPrefs');const discard=$('discardAssetPrefs');const apply=$('applyAssetPrefs');const confirm=$('assetConfirmPrefs');const phrase=$('assetConfirmPhrase');const result=$('assetPrefsResult');const resetDraft=()=>{assetDisabledDraft=cloneAssetDisabledDefaults();assetConfirmPrefsChecked=false;assetConfirmPhraseValue='';assetPrefsResultText='已放弃未保存变化。';renderSessionAssets();toast('已恢复为当前 preferences.toml 状态')};if(confirm){confirm.checked=assetConfirmPrefsChecked;confirm.onchange=()=>{assetConfirmPrefsChecked=confirm.checked}}if(phrase){phrase.value=assetConfirmPhraseValue;phrase.oninput=()=>{assetConfirmPhraseValue=phrase.value}}if(result)result.textContent=assetPrefsResultText;if(copy)copy.onclick=async()=>{const snippet=renderAssetPreferenceSnippet();try{await navigator.clipboard.writeText(snippet);toast('偏好片段已复制')}catch(_err){toast('无法访问剪贴板，片段已显示在页面')}};if(reset)reset.onclick=resetDraft;if(discard)discard.onclick=resetDraft;if(apply)apply.onclick=async()=>{if(confirm)assetConfirmPrefsChecked=confirm.checked;if(phrase)assetConfirmPhraseValue=phrase.value;const payload=assetPreferencesPayload();const data=await api('/api/preferences/apply',{...payload,confirm_preferences:assetConfirmPrefsChecked,confirm_phrase:assetConfirmPhraseValue,reason:'setup-web-ui:asset-preferences'});assetPrefsResultText=data.ok?(data.status==='no_change'?'偏好没有变化。':`已写入 ${data.target_path||'preferences.toml'}；backup ${data.backup_path||'-'}`):(data.errors||[data.error||'保存被阻止']).join('；');if(result)result.textContent=assetPrefsResultText;toast(data.ok?(data.status==='no_change'?'偏好没有变化':'Skill/MCP 偏好已保存'):'Skill/MCP 偏好保存被阻止');if(data.ok){assetConfirmPrefsChecked=false;assetConfirmPhraseValue='';const res=await fetch('/api/state');state=await res.json();assetDisabledDraft=null;renderAll()}}}
 function renderAssetControlHelp(){
   const box=$('assetControlHelp');
   if(!box)return;
@@ -1811,7 +1846,7 @@ function renderAssetControlHelp(){
   const globalCanClose=rows.filter(row=>row.group==='global'&&assetDisableSupported(row)).length;
   const prefPath=contract.persistent_path||'~/.config/mms/preferences.toml';
   const managedRoot=install.root||contract.managed_assets_root||'~/.local/share/mms/assets';
-  box.innerHTML=`<article class="asset-control-card asset-control-primary"><h3>在这里开 / 关并保存</h3><p class="muted">1）在下面卡片勾“默认关闭”；2）这里勾确认、输入“保存偏好”；3）点“应用到 preferences.toml”。下一次 MMS 启动生效。</p><p><span class="tag">可关闭 ${canClose}</span><span class="tag">Global 可关闭 ${globalCanClose}</span></p><div class="asset-control-save"><label class="check"><input id="assetConfirmPrefs" type="checkbox"><span>确认只写 Skill/MCP/Hook 偏好，不改模型和通道</span></label><div class="asset-confirm-field"><label for="assetConfirmPhrase">确认文字</label><input id="assetConfirmPhrase" type="text" placeholder="保存偏好"></div><div class="btns"><button id="applyAssetPrefs" class="secondary">应用到 preferences.toml</button></div><p class="muted asset-save-result" id="assetPrefsResult">不会走模型配置审计；这里只保存 Skill/MCP/Hook 偏好。</p></div><div class="btns"><button class="ghost" data-asset-jump-tab="mms_dynamic" data-asset-jump-kind="all">管理 MMS 动态</button><button class="ghost" data-asset-jump-tab="global" data-asset-jump-kind="skills">管理 Global Skill</button><button class="ghost" data-asset-jump-tab="all" data-asset-jump-kind="mcp">管理 MCP</button></div></article><article class="asset-control-card"><h3>添加到 MMS 动态</h3><p class="muted">固定放到 MMS managed assets root；推荐放 symlink，不复制大包。launcher 会优先读这里，再回退 vendor / 历史路径。</p><p class="mono">${escapeHtml(managedRoot)}</p><p class="muted">偏好文件：${escapeHtml(prefPath)}</p><div class="btns"><button class="ghost" data-asset-open-sources="1">查看当前加载路径</button></div></article><article class="asset-control-card"><h3>添加到 Global</h3><p class="muted">想让原生 CLI 也能看到，就放到对应全局目录；本页可帮 MMS 启动时默认关闭 Claude/Codex Global Skill。</p><p class="mono">Claude: ~/.claude/skills/&lt;name&gt;</p><p class="mono">Codex: ~/.codex/skills/&lt;name&gt;</p></article>`;
+  box.innerHTML=`<article class="asset-control-card"><h3>在这里开 / 关</h3><p class="muted">在下面卡片右侧勾“默认关闭”。一旦和当前 preferences 不同，页面底部会出现“保存并应用”栏；改回原状后自动消失。</p><p><span class="tag">可关闭 ${canClose}</span><span class="tag">Global 可关闭 ${globalCanClose}</span></p><div class="btns"><button class="ghost" data-asset-jump-tab="mms_dynamic" data-asset-jump-kind="all">管理 MMS 动态</button><button class="ghost" data-asset-jump-tab="global" data-asset-jump-kind="skills">管理 Global Skill</button><button class="ghost" data-asset-jump-tab="all" data-asset-jump-kind="mcp">管理 MCP</button></div></article><article class="asset-control-card"><h3>添加到 MMS 动态</h3><p class="muted">固定放到 MMS managed assets root；推荐放 symlink，不复制大包。launcher 会优先读这里，再回退 vendor / 历史路径。</p><p class="mono">${escapeHtml(managedRoot)}</p><p class="muted">偏好文件：${escapeHtml(prefPath)}</p><div class="btns"><button class="ghost" data-asset-open-sources="1">查看当前加载路径</button></div></article><article class="asset-control-card"><h3>添加到 Global</h3><p class="muted">想让原生 CLI 也能看到，就放到对应全局目录；本页可帮 MMS 启动时默认关闭 Claude/Codex Global Skill。</p><p class="mono">Claude: ~/.claude/skills/&lt;name&gt;</p><p class="mono">Codex: ~/.codex/skills/&lt;name&gt;</p></article>`;
   document.querySelectorAll('[data-asset-jump-tab]').forEach(btn=>{btn.onclick=()=>{assetTab=btn.dataset.assetJumpTab||assetTab;assetKind=btn.dataset.assetJumpKind||assetKind;assetCli='all';renderSessionAssets();toast('已切换管理范围')}});
   document.querySelectorAll('[data-asset-open-sources]').forEach(btn=>{btn.onclick=()=>{const diag=document.querySelector('#assetManagedRoots details.asset-source-diagnostic');if(diag){diag.open=true;diag.scrollIntoView({block:'nearest',behavior:'smooth'});toast('已展开当前加载路径')}}})
 }
@@ -1836,13 +1871,13 @@ function assetGroupedRows(rows){const groups=new Map();rows.forEach((row,idx)=>{
 function assetGroupStateKey(name){return [assetTab,assetCli,assetKind,String(name||'')].join('::')}
 function assetGroupShouldOpen(name,groupIdx,disabledCount){const key=assetGroupStateKey(name);if(Object.prototype.hasOwnProperty.call(assetGroupOpenState,key))return !!assetGroupOpenState[key];return groupIdx<2||disabledCount>0}
 function renderAssetRows(rows){if(!(assetTab==='global'&&assetKind==='skills'))return rows.map((row,idx)=>renderAssetCard(row,idx)).join('');return assetGroupedRows(rows).map(([name,items],groupIdx)=>{const supported=items.filter(item=>assetDisableSupported(item.row));const disabled=supported.filter(item=>assetIsDefaultDisabled(item.row));const allDisabled=supported.length>0&&disabled.length===supported.length;const state=supported.length?`${disabled.length?'已关 '+disabled.length+'/'+supported.length:'可关闭 '+supported.length}`:'只读';const cards=items.map(item=>renderAssetCard(item.row,item.idx)).join('');const open=assetGroupShouldOpen(name,groupIdx,disabled.length)?' open':'';const action=supported.length?`<div class="asset-group-actions"><button class="ghost" data-asset-group-disable="${escapeHtml(name)}">${allDisabled?'保持整组关闭':'整组默认关闭'}</button><button class="ghost" data-asset-group-enable="${escapeHtml(name)}">取消整组关闭</button></div>`:'<span class="tag off">当前只读</span>';return `<details class="asset-group"${open} data-asset-group-details="${escapeHtml(name)}"><summary><span>${escapeHtml(name)}</span><span><span class="tag">${items.length} 个</span> <span class="tag ${supported.length?'':'off'}">${escapeHtml(state)}</span></span></summary><div class="asset-group-note"><p class="muted">${escapeHtml(assetSkillFamilyHint(name))}</p>${action}</div><div class="asset-group-cards">${cards}</div></details>`}).join('')}
-function renderSessionAssets(){if(!$('assetCards'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};const draft=ensureAssetDisabledDraft();const displayCount=filteredAssetRows().length;$('assetSummary').innerHTML=`<div class="card"><span class="asset-count">${displayCount}</span><h3>当前管理范围</h3><p class="muted">下面这些卡片就是当前筛选到的 Skill / MCP / Hook；在卡片上直接勾“默认关闭”。</p><div class="asset-meta"><span class="tag">全部 ${summary.total||0}</span><span class="tag">Skill ${summary.skills||0}</span><span class="tag">MCP ${summary.mcp||0}</span><span class="tag">Hook ${summary.hooks||0}</span></div></div><div class="card"><span class="asset-count">${draft.skills.length+draft.mcp.length+draft.hooks.length}</span><h3>待应用关闭项</h3><p class="muted">这里统计本页已选的默认关闭草稿；点击顶部应用按钮后，MMS 启动才会生效。</p><div class="asset-meta"><span class="tag">Skill ${draft.skills.length}</span><span class="tag">MCP ${draft.mcp.length}</span><span class="tag">Hook ${draft.hooks.length}</span><span class="tag off">Global ${summary.global||0}</span></div></div>`;renderAssetControlHelp();renderAssetManagedRoots();renderAssetFilters();const rows=filteredAssetRows();$('assetCards').innerHTML=rows.length?renderAssetRows(rows):`<div class="asset-empty">没有匹配的能力。可以清空搜索，或切换来源 / CLI / 类型筛选。</div>`;renderAssetConfirmMap();renderAssetCliOverview();document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});document.querySelectorAll('[data-asset-group-details]').forEach(details=>{details.onclick=(event)=>{const target=event.target;if(target&&target.closest&&target.closest('summary'))assetGroupOpenState[assetGroupStateKey(details.dataset.assetGroupDetails||'')]=!details.open};details.ontoggle=()=>{assetGroupOpenState[assetGroupStateKey(details.dataset.assetGroupDetails||'')]=details.open}});document.querySelectorAll('[data-asset-group-disable]').forEach(btn=>{btn.onclick=()=>{const name=btn.dataset.assetGroupDisable;rows.filter(row=>assetSkillFamily(row)===name&&assetDisableSupported(row)).forEach(row=>setAssetDefaultDisabled(row,true));renderAssetPreferenceSnippet();renderSessionAssets();toast(`${name} 已加入默认关闭草稿`)}});document.querySelectorAll('[data-asset-group-enable]').forEach(btn=>{btn.onclick=()=>{const name=btn.dataset.assetGroupEnable;rows.filter(row=>assetSkillFamily(row)===name&&assetDisableSupported(row)).forEach(row=>setAssetDefaultDisabled(row,false));renderAssetPreferenceSnippet();renderSessionAssets();toast(`${name} 已移出默认关闭草稿`)}});$('assetConfigContract').textContent=`持久偏好位置：${contract.persistent_path||'~/.config/mms/preferences.toml'}。固定安装根：${contract.managed_assets_root||'~/.local/share/mms/assets'}。${contract.webui_write_scope||'当前 WebUI 只生成片段，不直接写入。'} ${contract.launch_override||''}`;renderAssetPreferenceSnippet();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<div class="asset-root"><p><span class="tag ${root.exists?'':'off'}">${root.exists?'存在':'未找到'}</span> <strong>${escapeHtml(root.label)}</strong></p><p class="mono">${escapeHtml(root.path)}</p><p class="muted">${root.skill_count?`发现 ${root.skill_count} 个技能；`:''}${escapeHtml(root.note||'只读展示，不自动修改。')}</p></div>`).join('')||'<p class="muted">没有全局位置记录。</p>'}
+function renderSessionAssets(){if(!$('assetCards'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};const draft=ensureAssetDisabledDraft();const pending=assetDraftDiff();const displayCount=filteredAssetRows().length;$('assetSummary').innerHTML=`<div class="card"><span class="asset-count">${displayCount}</span><h3>当前管理范围</h3><p class="muted">下面这些卡片就是当前筛选到的 Skill / MCP / Hook；在卡片上直接勾“默认关闭”。</p><div class="asset-meta"><span class="tag">全部 ${summary.total||0}</span><span class="tag">Skill ${summary.skills||0}</span><span class="tag">MCP ${summary.mcp||0}</span><span class="tag">Hook ${summary.hooks||0}</span></div></div><div class="card"><span class="asset-count">${pending.total}</span><h3>本次未保存变化</h3><p class="muted">只统计相对当前 preferences 的变化；改回原状态后底部保存栏会消失。</p><div class="asset-meta"><span class="tag">Skill ${pending.skills.length}</span><span class="tag">MCP ${pending.mcp.length}</span><span class="tag">Hook ${pending.hooks.length}</span><span class="tag off">当前关闭 ${draft.skills.length+draft.mcp.length+draft.hooks.length}</span></div></div>`;renderAssetControlHelp();renderAssetManagedRoots();renderAssetFilters();const rows=filteredAssetRows();$('assetCards').innerHTML=rows.length?renderAssetRows(rows):`<div class="asset-empty">没有匹配的能力。可以清空搜索，或切换来源 / CLI / 类型筛选。</div>`;renderAssetConfirmMap();renderAssetCliOverview();document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});document.querySelectorAll('[data-asset-group-details]').forEach(details=>{details.onclick=(event)=>{const target=event.target;if(target&&target.closest&&target.closest('summary'))assetGroupOpenState[assetGroupStateKey(details.dataset.assetGroupDetails||'')]=!details.open};details.ontoggle=()=>{assetGroupOpenState[assetGroupStateKey(details.dataset.assetGroupDetails||'')]=details.open}});document.querySelectorAll('[data-asset-group-disable]').forEach(btn=>{btn.onclick=()=>{const name=btn.dataset.assetGroupDisable;rows.filter(row=>assetSkillFamily(row)===name&&assetDisableSupported(row)).forEach(row=>setAssetDefaultDisabled(row,true));renderAssetPreferenceSnippet();renderSessionAssets();toast(`${name} 已加入默认关闭草稿`)}});document.querySelectorAll('[data-asset-group-enable]').forEach(btn=>{btn.onclick=()=>{const name=btn.dataset.assetGroupEnable;rows.filter(row=>assetSkillFamily(row)===name&&assetDisableSupported(row)).forEach(row=>setAssetDefaultDisabled(row,false));renderAssetPreferenceSnippet();renderSessionAssets();toast(`${name} 已移出默认关闭草稿`)}});$('assetConfigContract').textContent=`持久偏好位置：${contract.persistent_path||'~/.config/mms/preferences.toml'}。固定安装根：${contract.managed_assets_root||'~/.local/share/mms/assets'}。${contract.webui_write_scope||'当前 WebUI 只生成片段，不直接写入。'} ${contract.launch_override||''}`;renderAssetPreferenceSnippet();renderAssetPendingBar();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<div class="asset-root"><p><span class="tag ${root.exists?'':'off'}">${root.exists?'存在':'未找到'}</span> <strong>${escapeHtml(root.label)}</strong></p><p class="mono">${escapeHtml(root.path)}</p><p class="muted">${root.skill_count?`发现 ${root.skill_count} 个技能；`:''}${escapeHtml(root.note||'只读展示，不自动修改。')}</p></div>`).join('')||'<p class="muted">没有全局位置记录。</p>'}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
 function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
 function assetDraftDiff(){const base=cloneAssetDisabledDefaults();const draft=ensureAssetDisabledDraft();const result={skills:[],mcp:[],hooks:[],total:0};for(const key of ['skills','mcp','hooks']){const before=new Set(base[key]||[]);const after=new Set(draft[key]||[]);result[key]=[...new Set([...before,...after])].filter(value=>before.has(value)!==after.has(value)).sort();result.total+=result[key].length}return result}
-function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const configItems=items.filter(item=>item.kind!=='no_change');const assetDiff=assetDraftDiff();const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';let itemHtml=configItems.length?configItems.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">模型/通道配置没有变化。</p>';if(assetDiff.total){itemHtml+=`<p><span class="tag">能力草稿</span> <strong>Skill/MCP 默认关闭草稿有 ${assetDiff.total} 项</strong> 这不会通过“保存审计”写入；请回到 Skill / MCP 管理顶部的“在这里开 / 关并保存”，点击“应用到 preferences.toml”。</p>`}$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">配置变化 ${configItems.length}</span><span class="chip">能力草稿 ${assetDiff.total}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
+function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const configItems=items.filter(item=>item.kind!=='no_change');const assetDiff=assetDraftDiff();const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';let itemHtml=configItems.length?configItems.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">模型/通道配置没有变化。</p>';if(assetDiff.total){itemHtml+=`<p><span class="tag">能力草稿</span> <strong>Skill/MCP 默认关闭草稿有 ${assetDiff.total} 项</strong> 这不会通过“保存审计”写入；请回到 Skill / MCP 管理，使用底部未保存变化栏点击“保存并应用”。</p>`}$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">配置变化 ${configItems.length}</span><span class="chip">能力草稿 ${assetDiff.total}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
 function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
 function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderSessionAssets();renderRefs()}
