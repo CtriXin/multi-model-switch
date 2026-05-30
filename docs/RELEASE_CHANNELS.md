@@ -12,9 +12,12 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 
 当前实现注意：
 
-- 已发布安装器仍主要提供 `mms` / `mmf` / `mmslogs`；`mmd` / `mmg` 作为目标入口名记录在这里。
-- 在 `mmd` / `mmg` 安装链接真正落地前，不要在用户文档或回复里暗示它们已经可执行。
-- `mms` 是现有 primary launcher shim：Stable / pinned `main` 指向 stable root；Dev / Canary 安装生成的 `mms` shim 指向 preview DB root，直到 `mmd` / `mmg` 安装链接正式落地。
+- 本机维护者命令由 `scripts/link_local_channel_commands.sh` 生成到 `~/.local/bin`。
+- `mms` 固定为 public installed copy：`/Users/xin/.mms/mms`，默认 root `/Users/xin/.config/mms`，只用于公开版本复现。
+- `mmd` 指向 stable worktree：`.worktrees/stable-v3.3-no-db/mms`，默认 root `/Users/xin/.config/mms`。
+- `mmf` 指向 dev worktree：`.worktrees/dev/mmf`，强制 root `/Users/xin/.config/mms-next`。
+- `mmg` 指向 canary worktree：`.worktrees/canary/mms`，强制 root `/Users/xin/.config/mms-next`。
+- `mmm` 指向当前 main worktree 的 `mms`，默认 root `/Users/xin/.config/mms`。
 
 ## 通道定义
 
@@ -33,18 +36,24 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 - 开发过程中发现的 bug 必须先修复，再进入 Stable；Stable 不接收“已知会破坏主流程”的变更。
 - 等 stable 追上当前主功能后，目标语义是 `main == Stable/default == mmd`；日常开发不要继续直接把 `main` 当 Dev。
 
-## 未来 CLI / root 目标语义
+## 本机命令矩阵
 
 这段是给 LLM / agent 的长期产品约定，避免把 branch channel 和 config root 混在一起：
 
-- `main`：未来等同 Stable/default branch；固定对应 `MMD/mmd` 目标入口，等待 stable 追到当前能力后切换完成。
-- `dev`：作者平时常用的开发通道；固定对应 `MMF/mmf`，默认读取 `~/.config/mms-next`。
-- `canary`：最激进的金丝雀通道；固定对应 `MMG/mmg` 目标入口，默认读取 `~/.config/mms-next`。
-- 当前已经实现的入口仍然是 `mms` / `mmf`：
-  - `mms` 会按安装 channel 选择 stable root 或 preview DB root。
-  - `mmf -> ~/.config/mms-next`，显式 preview config root。
-- `mmd` / `mmg` 是目标命名；实现前不要在代码、文档或用户回复里暗示它们已可用。
-- 新逻辑上 `Dev channel` 与 `mmf` 语义绑定，`Canary channel` 与 `mmg` 语义绑定；实现细节仍要避免把 branch checkout 和 config root 误写成互相覆盖的同一件事。
+| Command | 语义 | 当前目标 | Config root | 用途 |
+|---|---|---|---|---|
+| `mms` | Public installed MMS | `/Users/xin/.mms/mms` | `/Users/xin/.config/mms` | 只用于公开版本问题复现 |
+| `mmd` | Stable | `.worktrees/stable-v3.3-no-db/mms` | `/Users/xin/.config/mms` | stable 线验证 |
+| `mmf` | Dev | `.worktrees/dev/mmf` | `/Users/xin/.config/mms-next` | 日常开发 / DB preview |
+| `mmg` | Canary | `.worktrees/canary/mms` | `/Users/xin/.config/mms-next` | 每日实验 / 快速回滚 |
+| `mmm` | Main | 当前 main worktree 的 `mms` | `/Users/xin/.config/mms` | main 过渡观察入口 |
+
+- `main`：未来等同 Stable/default branch；当前用 `mmm` 明确区分 main 过渡入口。
+- `dev`：作者平时常用的开发通道；固定对应 `MMF/mmf`。
+- `canary`：最激进的金丝雀通道；固定对应 `MMG/mmg`。
+- 后续 Canary 迭代默认自动吸收 `main` 和 `dev` 的新内容，再继续 Canary 自身小步提交。
+- 重新生成本机命令时运行：`scripts/link_local_channel_commands.sh`。
+- 不要把 `mms` 当本地开发入口；`mms` 后续只代表 public installed copy。
 
 ## 安装命令
 

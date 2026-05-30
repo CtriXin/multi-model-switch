@@ -35,7 +35,7 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
 
-当前实现注意：已发布安装器仍主要提供 `mms` / `mmf` / `mmslogs`；`mmd` / `mmg` 是目标入口名，在安装链接真正落地前不要写成“已经可执行”。Dev / Canary 安装生成的 primary `mms` shim 会先按 channel 指向 `~/.config/mms-next` preview DB root。
+当前本机维护者命令已固定：`mms` = public installed copy（`/Users/xin/.mms/mms`）；`mmd` = stable worktree（`.worktrees/stable-v3.3-no-db/mms`，root=`/Users/xin/.config/mms`）；`mmf` = dev worktree（`.worktrees/dev/mmf`，root=`/Users/xin/.config/mms-next`）；`mmg` = canary worktree（`.worktrees/canary/mms`，root=`/Users/xin/.config/mms-next`）；`mmm` = main worktree（当前 main 的 `mms`，root=`/Users/xin/.config/mms`）。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
 ## 安装 / 升级
 
@@ -95,16 +95,18 @@ mms test --provider <provider-id> --cli codex
 长期固定语义是：
 
 ```text
-mmd -> Stable / main       # target stable entrypoint；当前 stable/current launcher 仍主要是 mms
-mmf -> Dev / dev branch    # preview root，适合试 Config v2 / Web UI / registry DB
-mmg -> Canary / canary     # target canary entrypoint
+mms -> public installed copy  # /Users/xin/.mms/mms，root ~/.config/mms
+mmd -> Stable worktree        # .worktrees/stable-v3.3-no-db/mms，root ~/.config/mms
+mmf -> Dev worktree           # .worktrees/dev/mmf，root ~/.config/mms-next
+mmg -> Canary worktree        # .worktrees/canary/mms，root ~/.config/mms-next
+mmm -> Main worktree          # 当前 main 的 mms，root ~/.config/mms
 ```
 
-当前默认安装仍只有一套代码在 `~/.mms`，并已经暴露 `mms` / `mmf` / `mmslogs`。过渡期 root 语义是：Stable / pinned `main` 的 `mms` 读取 `~/.config/mms`；Dev / Canary 安装生成的 `mms` 和显式 `mmf` 读取 `~/.config/mms-next` preview DB / latest-approved bundle。另一台家里工作机如果要和白天电脑保持一致，建议安装同一个 `Dev` channel / pinned commit，并同步 preview DB 所需 bundle / secrets；如果想同时试 Stable 和 Canary，先用 VM、独立用户或明确安装前缀隔离，不要让两个 channel 同时覆盖同一个 `~/.mms`。
+当前本机用 `scripts/link_local_channel_commands.sh` 把 5 个命令写到 `~/.local/bin`。另一台家里工作机如果要和白天电脑保持一致，建议同样准备 dev/canary/stable/main worktree 后运行这个脚本；如果只是普通用户安装，仍使用公开 `mms` 安装命令。
 
 ## Web UI 教程：从通道到模型可见性
 
-Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。Dev / Canary 安装后的 `mms config web` 默认就是 preview DB root；Stable 或 pinned `main` 的 `mms config web` 仍是 stable/current root 的 legacy audited save。想不看 channel、强制进入 preview root，也可以启动：
+Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动:
 
 ```bash
 mmf config web

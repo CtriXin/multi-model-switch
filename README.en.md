@@ -93,10 +93,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 Channel behavior:
 
-- `stable` is the pure stable channel; after the catch-up window, `main` is Stable/default and keeps the stable root `~/.config/mms`.
-- `dev` follows the `dev` branch for daily work and uses the preview DB root `~/.config/mms-next`.
-- `canary` follows the `canary` branch for daily experiments, uses `~/.config/mms-next`, and should use frequent small commits so rollback stays easy.
-- Current installers mainly expose `mms`, `mmf`, and `mmslogs`; `mmd` and `mmg` are target entrypoint names until their install links land. During the transition, a Dev/Canary-installed primary `mms` shim points to the preview DB root.
+Maintainer-local commands are fixed as: `mms` = public installed copy (`/Users/xin/.mms/mms`); `mmd` = stable worktree (`.worktrees/stable-v3.3-no-db/mms`, root=`/Users/xin/.config/mms`); `mmf` = dev worktree (`.worktrees/dev/mmf`, root=`/Users/xin/.config/mms-next`); `mmg` = canary worktree (`.worktrees/canary/mms`, root=`/Users/xin/.config/mms-next`); `mmm` = main worktree (current main `mms`, root=`/Users/xin/.config/mms`). Regenerate local commands with `scripts/link_local_channel_commands.sh`.
 
 Fresh-machine install with optional CLI bootstrap:
 
@@ -112,18 +109,20 @@ mms models
 mmf config web
 ```
 
-Note: Dev / Canary select both the code branch and the preview DB root for the generated primary `mms` shim. Stable / explicit `--ref main` keep `mms` on the stable legacy root. Use `mmf config web` whenever you want to force the preview root regardless of channel.
+Note: `mmf` and `mmg` are preview DB entrypoints. Use `mmf config web` or `mmg config web` for `Write preview DB + publish`; `mms config web` intentionally shows the public installed stable/current legacy save path.
 
 See also: [Release channels](docs/RELEASE_CHANNELS.md) and [Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
 
 ## Config V2 Preview Root
 
-Config v2 is available as a preview path before it becomes the stable default. Long-term entrypoint semantics are `mmd` for Stable/main, `mmf` for Dev/dev, and `mmg` for Canary/canary. During the transition, current installs expose `mms` as the primary shim and `mmf` as the explicit preview-root shim:
+Config v2 is available as a preview path before it becomes the stable default. Maintainer-local command semantics are:
 
 ```text
-mms --channel stable / --ref main -> ~/.config/mms
-mms --channel dev/canary         -> ~/.config/mms-next
-mmf                              -> ~/.config/mms-next
+mms -> public installed copy, /Users/xin/.mms/mms, root ~/.config/mms
+mmd -> Stable worktree, .worktrees/stable-v3.3-no-db/mms, root ~/.config/mms
+mmf -> Dev worktree, .worktrees/dev/mmf, root ~/.config/mms-next
+mmg -> Canary worktree, .worktrees/canary/mms, root ~/.config/mms-next
+mmm -> Main worktree, current main mms, root ~/.config/mms
 ```
 
 Recommended preview flow:

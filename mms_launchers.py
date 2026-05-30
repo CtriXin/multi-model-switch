@@ -8,7 +8,9 @@ import shlex
 import shutil
 import sys
 import subprocess
-from datetime import datetime
+import tempfile
+import builtins
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
@@ -273,12 +275,51 @@ def _ensure_speed_stats():
 
     build_provider_speed_scope = load_speed_stats_helper()
 
+
+class _PlainStatus:
+    def __init__(self, message):
+        self.message = message
+
+    def __enter__(self):
+        builtins.print(_strip_rich_markup(self.message))
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _PlainConsole:
+    def print(self, *objects, sep=" ", end="\n", file=None, **_kwargs):
+        rendered = [_strip_rich_markup(obj) for obj in objects]
+        builtins.print(*rendered, sep=sep, end=end, file=file or sys.stdout)
+
+    def status(self, message, **_kwargs):
+        return _PlainStatus(message)
+
+    def log(self, *objects, **kwargs):
+        self.print(*objects, **kwargs)
+
+
+_RICH_MARKUP_RE = re.compile(r"\[/?(?:bold|dim|red|green|yellow|cyan|blue|magenta|white|black)(?:\s+[a-z_]+)*\]")
+
+
+def _strip_rich_markup(value):
+    if not isinstance(value, str):
+        return value
+    return _RICH_MARKUP_RE.sub("", value)
+
+
 class _LazyConsole:
     _instance = None
     def __getattr__(self, name):
         if _LazyConsole._instance is None:
-            from rich.console import Console
-            _LazyConsole._instance = Console()
+            try:
+                from rich.console import Console
+                _LazyConsole._instance = Console()
+            except ModuleNotFoundError as exc:
+                if (exc.name or "").split(".", 1)[0] != "rich":
+                    raise
+                _LazyConsole._instance = _PlainConsole()
         return getattr(_LazyConsole._instance, name)
 
 console = _LazyConsole()
