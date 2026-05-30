@@ -403,7 +403,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Aptos" in html
     assert ".asset-card::before" in html
     assert "overflow-wrap: anywhere" in html
-    assert "应用默认关闭" in html
+    assert "在这里开 / 关并保存" in html
+    assert "asset-control-primary" in html
+    assert "备份：复制 TOML 片段" in html
     assert "查看已检测到的 Global / plugin 位置" in html
     assert "asset-ops-grid" in html
     assert "copyAssetPrefs" in html
