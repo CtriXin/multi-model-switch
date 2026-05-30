@@ -23,15 +23,17 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 ## 版本通道：Stable / Dev / Canary
 
-我们采用类似 Chrome 的三通道策略，避免 `main` 同时承担“稳定版”和“日常开发版”的语义。
+我们采用类似 Chrome 的三通道策略，并把 branch / channel / 入口语义固定下来：
 
-| 通道 | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
-|---|---|---|---|---|
-| Stable | `--channel stable` | 普通用户、主力生产环境 | 慢，跟随 GitHub Release / stable 分支 | 完整 smoke 后推进 |
-| Dev | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支；当前 `main` 会同步一段时间 | targeted tests 通过 |
-| Canary | `--channel canary` | 专门试新功能/回归验证的机器 | 最快，可每日同步 | 允许短期破，但必须可回滚 |
+| 通道 | 固定关系 | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
+|---|---|---|---|---|---|
+| Stable | `Stable == main == MMD/mmd` | `--channel stable` | 普通用户、主力生产环境 | 慢，最终固定到 `main` | 纯稳定上线版本，完整 smoke 后推进 |
+| Dev | `Dev == dev branch == MMF/mmf` | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支 | 开发中稳定，targeted tests 通过 |
+| Canary | `Canary == canary branch == MMG/mmg` | `--channel canary` | 每天测试的实验机器 / session | 最快，可每日同步 | 小步高频 commit，允许短期破，但必须方便回滚 |
 
-分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。当前过渡期建议：`main` 暂不停止迭代；`dev` 和 `canary` 已从当前 `main` 切出并推送；之后日常新功能优先进入 `dev` / `canary`，Stable 单独 review 后推进。
+分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
+
+当前实现注意：已发布安装器仍主要提供 `mms` / `mmf` / `mmslogs`；`mmd` / `mmg` 是目标入口名，在安装链接真正落地前不要写成“已经可执行”。
 
 ## 安装 / 升级
 
@@ -86,20 +88,21 @@ mms test --provider <provider-id> --cli claude
 mms test --provider <provider-id> --cli codex
 ```
 
-## MMS 和 MMF：不是两套程序，是两套配置 root
+## 通道入口和当前配置 root
 
-默认安装只有一套代码在 `~/.mms`，但会暴露两个入口：
+长期固定语义是：
 
 ```text
-mms -> ~/.config/mms       # stable/current root，日常启动
-mmf -> ~/.config/mms-next  # preview root，适合试 Config v2 / Web UI / registry DB
+mmd -> Stable / main       # target stable entrypoint；当前 stable/current launcher 仍是 mms
+mmf -> Dev / dev branch    # preview root，适合试 Config v2 / Web UI / registry DB
+mmg -> Canary / canary     # target canary entrypoint
 ```
 
-所以你现在看到的“本地两套”主要是 **MMS + MMF 两个 config root**，不是 Stable/Dev 两个安装目录。另一台家里工作机如果要和白天电脑保持一致，建议安装同一个 `Dev` channel / pinned commit，然后同步必要的 provider 配置；如果想同时试 Stable 和 Canary，当前建议通过 `mms` / `mmf` 的 root 隔离来做，不要让两个安装器互相覆盖 `~/.mms`。
+当前默认安装仍只有一套代码在 `~/.mms`，并已经暴露 `mms` / `mmf` / `mmslogs`。所以你现在看到的“本地两套”主要是 **stable/current root + preview root**，不是两套代码安装目录。另一台家里工作机如果要和白天电脑保持一致，建议安装同一个 `Dev` channel / pinned commit，然后同步必要的 provider 配置；如果想同时试 Stable 和 Canary，先用 VM、独立用户或明确安装前缀隔离，不要让两个 channel 同时覆盖同一个 `~/.mms`。
 
 ## Web UI 教程：从通道到模型可见性
 
-Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：**写入预览 DB 不是 Dev channel 决定的，而是 `mmf` preview root 决定的**。如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
+Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` 是 Dev/preview 入口，所以预览 DB 保存也跟 `mmf` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
 
 ```bash
 mmf config web
@@ -217,7 +220,7 @@ CodeGraph 初始化提示：
 
 ## Release checklist
 
-1. 从 `dev` / `main` 挑选已验证变更进入 Stable 候选。
+1. 从 `dev` 挑选已验证变更进入 Stable 候选；同步窗口结束后，`main` 本身就是 Stable/default。
 2. 运行 installer check、config check、关键 launcher smoke、Web UI save-plan smoke。
 3. 更新 README / release notes，明确 Stable / Dev / Canary 安装命令。
 4. 打 tag，推送 GitHub Release。

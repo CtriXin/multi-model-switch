@@ -27,7 +27,9 @@ It helps you:
 
 Current stable release: `v3.3.1`
 
-Feature branch: `main` (tracks the newest iteration before the next stable cut)
+Stable target branch: `main` after the current catch-up window.
+
+Daily development branch: `dev`.
 
 Key changes in this generation:
 
@@ -58,7 +60,11 @@ MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It
 
 ## Install Or Upgrade
 
-The main README is now Chinese-first. English users can still install with the same three explicit channels:
+The main README is Chinese-first. English users can still install with the same three explicit channels. The channel contract is frozen unless a human explicitly changes the release/channel policy:
+
+- `Stable == main == MMD/mmd`
+- `Dev == dev branch == MMF/mmf`
+- `Canary == canary branch == MMG/mmg`
 
 ### Stable: recommended for normal users
 
@@ -87,10 +93,10 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 Channel behavior:
 
-- `stable` follows the newest human-stabilized GitHub Release / stable line.
-- `dev` follows the active development ref; it maps to the `dev` branch unless `MMS_INSTALL_DEV_REF` is overridden.
-- `canary` follows the `canary` branch and may break temporarily.
-- `mms` and `mmf` are two config roots from the same install, not two code installations: `mms -> ~/.config/mms`, `mmf -> ~/.config/mms-next`.
+- `stable` is the pure stable channel; after the catch-up window, `main` is Stable/default.
+- `dev` follows the `dev` branch for daily work and should remain development-stable.
+- `canary` follows the `canary` branch for daily experiments; use frequent small commits so rollback stays easy.
+- Current installers mainly expose `mms`, `mmf`, and `mmslogs`; `mmd` and `mmg` are target entrypoint names until their install links land.
 
 Fresh-machine install with optional CLI bootstrap:
 
@@ -106,14 +112,13 @@ mms models
 mmf config web
 ```
 
-Note: Dev channel selects the code branch. The preview DB save button is controlled by the config root. Use `mmf config web` for `Write preview DB + publish`; `mms config web` intentionally shows the stable legacy save path.
+Note: `mmf` is the Dev/preview workflow entrypoint. Use `mmf config web` for `Write preview DB + publish`; `mms config web` intentionally shows the stable/current legacy save path.
 
 See also: [Release channels](docs/RELEASE_CHANNELS.md) and [Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
 
 ## Config V2 Preview Root
 
-Config v2 is available as a preview path before it becomes the stable default.
-Use `mms` for the current stable root and `mmf` for the isolated preview root:
+Config v2 is available as a preview path before it becomes the stable default. Long-term entrypoint semantics are `mmd` for Stable/main, `mmf` for Dev/dev, and `mmg` for Canary/canary. Current installs still expose `mms` for the stable/current root and `mmf` for the isolated preview root:
 
 ```text
 mms -> ~/.config/mms
