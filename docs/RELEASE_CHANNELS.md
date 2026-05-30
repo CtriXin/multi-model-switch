@@ -15,7 +15,20 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 - `main` 暂时不停止迭代，会和 `dev` 同步一段时间，避免已有安装入口突然断档。
 - `dev` 和 `canary` 已从当前 main 切出；后续新功能优先进入 `dev` / `canary`。
 - `release/stable-v3.3-no-db` 继续作为 stable 维护线，逐步 cherry-pick 已验证的 Web UI / Thinking / model route 修复。
-- 等 stable 追上当前主功能后，再把 GitHub default branch 是否继续叫 `main` 单独决策。
+- 等 stable 追上当前主功能后，目标语义是 `main == Stable/default`；日常开发不要继续直接把 `main` 当 Dev。
+
+## 未来 CLI / root 目标语义
+
+这段是给 LLM / agent 的长期产品约定，避免把 branch channel 和 config root 混在一起：
+
+- `main`：未来等同 Stable/default branch；等待 stable 追到当前能力后再切换。
+- `dev`：作者平时常用的开发通道；目标上对应日常 preview 工作流。
+- `canary`：最激进的金丝雀通道；目标上可以对应未来 `mmg` 入口。
+- 当前已经实现的入口仍然是 `mms` / `mmf`：
+  - `mms -> ~/.config/mms`，stable/current config root。
+  - `mmf -> ~/.config/mms-next`，preview config root。
+- `mmg` 只是目标命名，还没有实现；实现前不要在代码、文档或用户回复里暗示 `mmg` 已可用。
+- `Dev channel` 决定安装代码 ref；`mmf` 决定打开 preview config root。两者相关但不是同一个开关。
 
 ## 安装命令
 
