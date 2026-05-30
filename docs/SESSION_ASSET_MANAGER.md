@@ -29,7 +29,7 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 - 顶部直接显示能力清单：**MMS 动态来源**、来源/CLI/类型筛选和能力卡片优先出现；
 - **MMS 动态来源** 显示当前 resolver 实际选中的全部 vendor / agent-pack / MCP 根，不再截断前几个；
 - `全局继承` 会展开 Claude / Codex 的真实全局 Skill 清单，而不是只显示 TUI preview 抽样；
-- Claude 和 Codex 分开统计：Claude 看 `~/.claude/skills` + `~/.agents/skills`，Codex 看 `~/.codex/skills` + `~/.agents/skills` + Codex plugin cache；
+- Claude 和 Codex 分开统计：Claude 看 `~/.claude/skills`，Codex 看 `~/.codex/skills` + Codex plugin cache；`~/.agents/skills` 作为宿主级共享候选展示，不等于两者 launcher 都强制继承；
 - **TUI 确认页对照** 和 Claude / Codex / OpenCode / Antigravity 的 CLI 总览卡放在可展开区域，避免一进页面像介绍文档；
 - 每个 CLI 总览卡列出 MMS 动态、全局继承、其它检测、skill/MCP/hook 数量；
 - 每个 CLI 总览卡列出 TUI 控制项、TUI 面板计数、全局来源和全局条目示例；

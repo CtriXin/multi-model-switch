@@ -548,12 +548,12 @@ def _global_skill_root_specs(cli: str) -> list[dict[str, Any]]:
     if cli == "claude":
         return [
             {"path": "~/.claude/skills", "label": "Claude 全局技能", "origin": "Global Claude skill", "recursive": False},
-            {"path": "~/.agents/skills", "label": "共享 agent 技能", "origin": "Shared agent skill", "recursive": False},
+            {"path": "~/.agents/skills", "label": "共享 agent 技能（宿主级）", "origin": "Shared agent skill", "recursive": False},
         ]
     if cli == "codex":
         return [
             {"path": "~/.codex/skills", "label": "Codex 全局技能", "origin": "Global Codex skill", "recursive": False},
-            {"path": "~/.agents/skills", "label": "共享 agent 技能", "origin": "Shared agent skill", "recursive": False},
+            {"path": "~/.agents/skills", "label": "共享 agent 技能（宿主级）", "origin": "Shared agent skill", "recursive": False},
             {"path": "~/.codex/plugins/cache/openai-bundled", "label": "Codex bundled plugin 技能", "origin": "Codex plugin skill", "recursive": True},
             {"path": "~/.codex/plugins/cache/openai-primary-runtime", "label": "Codex runtime plugin 技能", "origin": "Codex plugin skill", "recursive": True},
         ]
