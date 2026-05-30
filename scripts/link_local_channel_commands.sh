@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin:${PATH:-}"
 
 # Link the maintainer's local command matrix without touching ~/.config/mms.
 # mms = public installed copy, mmd = stable worktree, mmf = dev worktree,
