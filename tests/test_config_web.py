@@ -861,6 +861,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "payload.provider_id=current().id" in html
     assert "不会把其他通道混进来" in html
     assert "暂无通道使用统计" in html
+    assert "usage-model-table" in html
+    assert "usage-detail" in html
+    assert "CLI 明细（按需展开）" in html
     assert "模型</th><th>来源</th><th>显示状态</th><th>启动次数" in html
     assert "function copyGateCommand" in html
     assert "data-copy-gate-command" in html

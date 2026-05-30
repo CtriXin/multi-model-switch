@@ -5463,29 +5463,36 @@ _HTML_PAGE = r"""<!doctype html>
     .provider-editor-shell {
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 14px;
     }
     .provider-form-tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 8px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 5px;
+      padding: 5px;
       border: 1.5px solid var(--border);
-      border-radius: var(--radius-lg);
+      border-radius: 18px;
       background:
-        radial-gradient(circle at 12% 0%, color-mix(in oklch, var(--accent) 12%, transparent) 0, transparent 34%),
-        var(--bg);
+        radial-gradient(circle at 8% 0%, color-mix(in oklch, var(--accent) 10%, transparent) 0, transparent 30%),
+        color-mix(in oklch, var(--bg) 82%, var(--surface));
     }
     .provider-form-tab {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-height: 38px;
       background: transparent;
       color: var(--muted);
       border: 1px solid transparent;
       box-shadow: none;
-      padding: 8px 13px;
-      border-radius: calc(var(--radius) - 2px);
-      font-size: 13px;
-      font-weight: 600;
+      padding: 7px 10px;
+      border-radius: 13px;
+      font-size: 12.5px;
+      font-weight: 700;
+      line-height: 1.2;
     }
+    .provider-form-tab .muted { display: none; }
     .provider-form-tab:hover {
       color: var(--fg);
       background: var(--surface);
@@ -5495,7 +5502,9 @@ _HTML_PAGE = r"""<!doctype html>
       color: var(--surface);
       background: var(--fg);
       border-color: var(--fg);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, .12);
     }
+    .provider-form-tab.active .muted { color: rgba(255,255,255,.72); }
     .provider-form-panel { display: none; }
     .provider-form-panel.active {
       display: block;
@@ -5522,24 +5531,36 @@ _HTML_PAGE = r"""<!doctype html>
     .provider-action-grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
-      gap: 14px;
+      gap: 10px;
     }
     .explain-card {
+      display: flex;
+      flex-direction: column;
       border: 1.5px solid var(--border);
       border-radius: var(--radius);
       background: var(--surface);
-      padding: 16px;
+      padding: 13px;
       box-shadow: var(--shadow-sm);
+      min-height: 170px;
     }
     .explain-card h4 {
-      margin-bottom: 8px;
-      font-size: 15px;
+      margin-bottom: 6px;
+      font-size: 14px;
+      line-height: 1.35;
     }
     .explain-card p {
       color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
+      font-size: 12.5px;
+      line-height: 1.55;
       white-space: normal;
+      margin-bottom: 10px;
+    }
+    .explain-card button {
+      align-self: flex-start;
+      margin-top: auto;
+      padding: 7px 12px;
+      font-size: 12.5px;
+      border-radius: 13px;
     }
     .provider-editor-actions {
       border-top: 1px solid var(--border);
@@ -5566,7 +5587,50 @@ _HTML_PAGE = r"""<!doctype html>
       min-width: 760px;
     }
     .result .usage-report .table-wrap,
-    .result .account-report .table-wrap { margin-top: 12px; }
+    .result .account-report .table-wrap { margin-top: 10px; }
+    .usage-report .chips {
+      gap: 5px;
+      margin: 8px 0 12px;
+    }
+    .usage-report .chip {
+      padding: 4px 9px;
+      font-size: 11.5px;
+    }
+    .result .usage-report table.usage-model-table {
+      min-width: 0;
+      table-layout: fixed;
+      font-size: 12.5px;
+    }
+    .usage-model-table th,
+    .usage-model-table td {
+      padding: 8px 10px;
+      vertical-align: middle;
+    }
+    .usage-model-table th:nth-child(1) { width: 36%; }
+    .usage-model-table th:nth-child(2) { width: 16%; }
+    .usage-model-table th:nth-child(3) { width: 12%; }
+    .usage-model-table th:nth-child(4) { width: 11%; }
+    .usage-model-table th:nth-child(5) { width: 11%; }
+    .usage-model-table th:nth-child(6) { width: 14%; }
+    .usage-model-table td:first-child {
+      font-family: var(--font-mono);
+      word-break: break-word;
+    }
+    .usage-detail {
+      margin-top: 12px;
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      padding: 11px 12px;
+    }
+    .usage-detail summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--fg);
+      user-select: none;
+    }
+    .usage-detail summary::marker { color: var(--muted); }
+    .usage-detail .table-wrap { margin-top: 10px; }
 
     .model-section {
       display: flex;
@@ -5889,6 +5953,8 @@ _HTML_PAGE = r"""<!doctype html>
         overflow: visible;
       }
       .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
+      .provider-form-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .provider-form-tab { justify-content: flex-start; }
       .oc-summary, .model-inventory-summary { grid-template-columns: 1fr 1fr; }
       .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid, .acceptance-head { grid-template-columns: 1fr; }
       .filterbar.compact { justify-content: flex-start; }
@@ -6460,11 +6526,11 @@ function renderProviderUsageReport(data,targetId='settingsReport'){
   const totalLaunches=providers.reduce((sum,p)=>sum+Number((p.usage||{}).launches||0),0);
   if(channelScoped&&!providers.length){target.innerHTML='<div class="usage-report"><h4>当前通道使用统计</h4><p class="muted">当前通道没有可读取的 usage 记录。</p></div>';return}
   const providerRows=!channelScoped&&providers.length?`<div class="table-wrap"><table><thead><tr><th>通道 ID</th><th>名称</th><th>状态</th><th>role</th><th>priority</th><th>模型数</th><th>启动</th><th>最近使用</th><th>常用模型</th></tr></thead><tbody>${providers.map(p=>`<tr><td class="mono">${escapeHtml(p.id||'-')}</td><td>${escapeHtml(p.name||'-')}</td><td>${p.enabled?'<span class="tag">启用</span>':'<span class="tag off">禁用</span>'}</td><td>${escapeHtml(p.role||'-')}</td><td>${Number(p.priority||0)}</td><td>${Number(p.model_count||0)}</td><td>${Number((p.usage||{}).launches||0)}</td><td>${escapeHtml((p.usage||{}).last_used_at||'-')}</td><td>${escapeHtml(reportTopModels(p.usage_rows||[]))}</td></tr>`).join('')}</tbody></table></div>`:'';
-  const modelSections=providers.map(p=>{const modelRows=providerModelUsageRows(p);const usedCount=modelRows.filter(row=>Number(row.launches||0)>0).length;const rows=modelRows.length?modelRows.map(row=>`<tr><td class="mono">${escapeHtml(row.id)}</td><td><span class="tag ${row.visible?'':'off'}">${modelSourceLabel(row.source)}</span>${row.favorite?'<span class="tag">收藏</span>':''}</td><td>${row.visible?'显示':'隐藏'}</td><td>${Number(row.launches||0)}</td><td>${escapeHtml(row.last_cli||'-')}</td><td>${escapeHtml(row.last_used_at||'-')}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-row">当前通道没有模型清单</td></tr>';return `<div class="chips"><span class="chip">当前通道 ${escapeHtml(p.name||p.id||'-')}</span><span class="chip mono">${escapeHtml(p.id||'-')}</span><span class="chip">模型 ${modelRows.length}</span><span class="chip">有使用 ${usedCount}</span><span class="chip">总启动 ${Number((p.usage||{}).launches||0)}</span><span class="chip">最近 ${escapeHtml((p.usage||{}).last_used_at||'-')}</span></div><div class="table-wrap"><table><thead><tr><th>模型</th><th>来源</th><th>显示状态</th><th>启动次数</th><th>最近 CLI</th><th>最近使用</th></tr></thead><tbody>${rows}</tbody></table></div>`}).join('')||'<p class="muted">暂无通道使用统计</p>';
+  const modelSections=providers.map(p=>{const modelRows=providerModelUsageRows(p);const usedCount=modelRows.filter(row=>Number(row.launches||0)>0).length;const rows=modelRows.length?modelRows.map(row=>`<tr><td>${escapeHtml(row.id)}</td><td><span class="tag ${row.visible?'':'off'}">${modelSourceLabel(row.source)}</span>${row.favorite?'<span class="tag">收藏</span>':''}</td><td>${row.visible?'显示':'隐藏'}</td><td>${Number(row.launches||0)}</td><td>${escapeHtml(row.last_cli||'-')}</td><td>${escapeHtml(row.last_used_at||'-')}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-row">当前通道没有模型清单</td></tr>';return `<div class="chips usage-summary"><span class="chip">当前通道 ${escapeHtml(p.name||p.id||'-')}</span><span class="chip mono">${escapeHtml(p.id||'-')}</span><span class="chip">模型 ${modelRows.length}</span><span class="chip">有使用 ${usedCount}</span><span class="chip">总启动 ${Number((p.usage||{}).launches||0)}</span><span class="chip">最近 ${escapeHtml((p.usage||{}).last_used_at||'-')}</span></div><div class="table-wrap usage-table-wrap"><table class="usage-model-table"><thead><tr><th>模型</th><th>来源</th><th>显示状态</th><th>启动次数</th><th>最近 CLI</th><th>最近使用</th></tr></thead><tbody>${rows}</tbody></table></div>`}).join('')||'<p class="muted">暂无通道使用统计</p>';
   const detailRows=providers.map(p=>usageDetailRows(p.id||p.name||'-',p.usage_rows||[])).join('')||'<tr><td colspan="7" class="empty-row">暂无 CLI 维度使用明细</td></tr>';
   const title=channelScoped?'当前通道使用统计':'通道使用统计汇总';
   const note=channelScoped?'只读报告：只展示当前选中通道，并按这个通道内的模型展开启动次数；不会把其他通道混进来。':'只读报告：展示全部 provider usage 汇总；通道页按钮会自动限定到当前通道。';
-  target.innerHTML=`<div class="usage-report"><h4>${title}</h4><p>${note}</p><div class="chips"><span class="chip">统计范围 ${channelScoped?'当前通道':'全部通道'}</span><span class="chip">总启动 ${totalLaunches}</span><span class="chip">写入策略 ${writePolicyLabel(data.write_policy||'read_only')}</span></div>${providerRows}${modelSections}<div class="table-wrap"><table><thead><tr><th>通道 ID</th><th>CLI</th><th>明细名</th><th>启动</th><th>最近模型</th><th>最近使用</th><th>Top models</th></tr></thead><tbody>${detailRows}</tbody></table></div></div>`;
+  target.innerHTML=`<div class="usage-report"><h4>${title}</h4><p>${note}</p><div class="chips"><span class="chip">统计范围 ${channelScoped?'当前通道':'全部通道'}</span><span class="chip">总启动 ${totalLaunches}</span><span class="chip">写入策略 ${writePolicyLabel(data.write_policy||'read_only')}</span></div>${providerRows}${modelSections}<details class="usage-detail"><summary>CLI 明细（按需展开）</summary><div class="table-wrap"><table><thead><tr><th>通道 ID</th><th>CLI</th><th>明细名</th><th>启动</th><th>最近模型</th><th>最近使用</th><th>Top models</th></tr></thead><tbody>${detailRows}</tbody></table></div></details></div>`;
 }
 function renderAccountStatusReport(data,targetId='settingsReport'){
   const target=$(targetId)||$('settingsReport');if(!target)return;
