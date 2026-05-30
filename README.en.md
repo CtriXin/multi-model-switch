@@ -27,7 +27,9 @@ It helps you:
 
 Current stable release: `v3.3.1`
 
-Feature branch: `main` (tracks the newest iteration before the next stable cut)
+Stable target branch: `main` after the current catch-up window.
+
+Daily development branch: `dev`.
 
 Key changes in this generation:
 
@@ -58,7 +60,11 @@ MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It
 
 ## Install Or Upgrade
 
-The main README is now Chinese-first. English users can still install with the same three explicit channels:
+The main README is Chinese-first. English users can still install with the same three explicit channels. The channel contract is frozen unless a human explicitly changes the release/channel policy:
+
+- `Stable == main == MMD/mmd`
+- `Dev == dev branch == MMF/mmf`
+- `Canary == canary branch == MMG/mmg`
 
 ### Stable: recommended for normal users
 
@@ -87,10 +93,10 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 Channel behavior:
 
-- `stable` follows the newest human-stabilized GitHub Release / stable line.
-- `dev` follows the active development ref and makes the primary `mms` entrypoint read the preview DB root `~/.config/mms-next`.
-- `canary` follows the `canary` branch, may break temporarily, and also reads `~/.config/mms-next` by default.
-- `stable` and explicit `--ref main` keep the primary `mms` entrypoint on `~/.config/mms`; `mmf` is always the explicit preview-root entrypoint.
+- `stable` is the pure stable channel; after the catch-up window, `main` is Stable/default and keeps the stable root `~/.config/mms`.
+- `dev` follows the `dev` branch for daily work and uses the preview DB root `~/.config/mms-next`.
+- `canary` follows the `canary` branch for daily experiments, uses `~/.config/mms-next`, and should use frequent small commits so rollback stays easy.
+- Current installers mainly expose `mms`, `mmf`, and `mmslogs`; `mmd` and `mmg` are target entrypoint names until their install links land. During the transition, a Dev/Canary-installed primary `mms` shim points to the preview DB root.
 
 Fresh-machine install with optional CLI bootstrap:
 
@@ -106,14 +112,13 @@ mms models
 mmf config web
 ```
 
-Note: Dev / Canary now select both the code branch and the preview DB root for the primary `mms` entrypoint. Stable / explicit `--ref main` keep `mms` on the stable legacy root. Use `mmf config web` whenever you want to force the preview root regardless of channel.
+Note: Dev / Canary select both the code branch and the preview DB root for the generated primary `mms` shim. Stable / explicit `--ref main` keep `mms` on the stable legacy root. Use `mmf config web` whenever you want to force the preview root regardless of channel.
 
 See also: [Release channels](docs/RELEASE_CHANNELS.md) and [Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
 
 ## Config V2 Preview Root
 
-Config v2 is available as a preview path before it becomes the stable default.
-Root mapping:
+Config v2 is available as a preview path before it becomes the stable default. Long-term entrypoint semantics are `mmd` for Stable/main, `mmf` for Dev/dev, and `mmg` for Canary/canary. During the transition, current installs expose `mms` as the primary shim and `mmf` as the explicit preview-root shim:
 
 ```text
 mms --channel stable / --ref main -> ~/.config/mms

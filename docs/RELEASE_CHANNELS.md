@@ -2,21 +2,49 @@
 
 MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放心装”和“作者每天快速迭代”分开。
 
+## 固定通道契约
+
+除非人类明确要求修改 release/channel contract，否则 LLM / agent 不要重命名、重映射或混用以下关系：
+
+- `Stable == main == MMD/mmd`：纯稳定上线版本；等待 stable 追到当前能力后，`main` 就是默认稳定分支。
+- `Dev == dev branch == MMF/mmf`：日常开发通道；给作者工作机常用，但仍要保持“开发中稳定”。
+- `Canary == canary branch == MMG/mmg`：每天测试的实验通道；小步迭代、频繁 commit，方便随时回滚。
+
+当前实现注意：
+
+- 已发布安装器仍主要提供 `mms` / `mmf` / `mmslogs`；`mmd` / `mmg` 作为目标入口名记录在这里。
+- 在 `mmd` / `mmg` 安装链接真正落地前，不要在用户文档或回复里暗示它们已经可执行。
+- `mms` 是现有 primary launcher shim：Stable / pinned `main` 指向 stable root；Dev / Canary 安装生成的 `mms` shim 指向 preview DB root，直到 `mmd` / `mmg` 安装链接正式落地。
+
 ## 通道定义
 
-| Channel | Git source | Config root | 安装参数 | 用户 | 规则 |
-|---|---|---|---|---|---|
-| Stable | GitHub Release / `release/stable-*` | `~/.config/mms` | `--channel stable` / `--stable` | 普通用户、生产环境 | 慢更新，只收验证过的修复和兼容功能 |
-| Main / pinned branch | `main` or explicit `--ref main` | `~/.config/mms` | `--ref main` | 兼容旧入口 / 主线对照 | 不默认启用 preview DB |
-| Dev | `dev` | `~/.config/mms-next` preview DB | `--channel dev` / `--dev` | 作者日常工作机、需要最新修复的人 | 小步提交，targeted tests 通过即可推进 |
-| Canary | `canary` | `~/.config/mms-next` preview DB | `--channel canary` / `--canary` | 测试机、夜间试验 | 最快，可破，但必须可回滚 |
+| Channel | 固定关系 | Git source | Config root | 安装参数 | 用户 | 规则 |
+|---|---|---|---|---|---|---|
+| Stable | Stable == `main` == `mmd` | `main` / GitHub Release / `release/stable-*` | `~/.config/mms` | `--channel stable` / `--stable` | 普通用户、生产环境 | 纯稳定上线版本，只收验证过的修复和兼容功能 |
+| Main / pinned branch | Stable 对照入口 | explicit `--ref main` | `~/.config/mms` | `--ref main` | 兼容旧入口 / 主线对照 | 不默认启用 preview DB |
+| Dev | Dev == `dev` == `mmf` | `dev` | `~/.config/mms-next` preview DB | `--channel dev` / `--dev` | 作者日常工作机、需要最新修复的人 | 开发中稳定，小步提交，targeted tests 通过 |
+| Canary | Canary == `canary` == `mmg` | `canary` | `~/.config/mms-next` preview DB | `--channel canary` / `--canary` | 测试机、夜间试验 | 最快实验分支，小步高频 commit，必须方便回滚 |
 
 ## 当前过渡策略
 
 - `main` 暂时不停止迭代，会和 `dev` 同步一段时间，避免已有安装入口突然断档；但 `main` / pinned `--ref main` 仍读 stable root `~/.config/mms`。
-- `dev` 和 `canary` 已从当前 main 切出；后续新功能优先进入 `dev` / `canary`，并默认使用 `~/.config/mms-next` preview DB / latest-approved bundle。
+- `dev` 和 `canary` 已从当前 main 切出；后续新功能优先进入 `dev` / `canary`，并默认使用 `~/.config/mms-next` preview DB / latest-approved bundle，再按验证结果进入 Stable。
 - `release/stable-v3.3-no-db` 继续作为 stable 维护线，逐步 cherry-pick 已验证的 Web UI / Thinking / model route 修复。
-- 等 stable 追上当前主功能后，再把 GitHub default branch 是否继续叫 `main` 单独决策。
+- 开发过程中发现的 bug 必须先修复，再进入 Stable；Stable 不接收“已知会破坏主流程”的变更。
+- 等 stable 追上当前主功能后，目标语义是 `main == Stable/default == mmd`；日常开发不要继续直接把 `main` 当 Dev。
+
+## 未来 CLI / root 目标语义
+
+这段是给 LLM / agent 的长期产品约定，避免把 branch channel 和 config root 混在一起：
+
+- `main`：未来等同 Stable/default branch；固定对应 `MMD/mmd` 目标入口，等待 stable 追到当前能力后切换完成。
+- `dev`：作者平时常用的开发通道；固定对应 `MMF/mmf`，默认读取 `~/.config/mms-next`。
+- `canary`：最激进的金丝雀通道；固定对应 `MMG/mmg` 目标入口，默认读取 `~/.config/mms-next`。
+- 当前已经实现的入口仍然是 `mms` / `mmf`：
+  - `mms` 会按安装 channel 选择 stable root 或 preview DB root。
+  - `mmf -> ~/.config/mms-next`，显式 preview config root。
+- `mmd` / `mmg` 是目标命名；实现前不要在代码、文档或用户回复里暗示它们已可用。
+- 新逻辑上 `Dev channel` 与 `mmf` 语义绑定，`Canary channel` 与 `mmg` 语义绑定；实现细节仍要避免把 branch checkout 和 config root 误写成互相覆盖的同一件事。
 
 ## 安装命令
 
@@ -65,6 +93,8 @@ Dev 候选至少需要：
 Canary 候选至少需要：
 
 - 能启动或能回滚
+- 小步迭代 commit
+- 高频 commit，保证随时能按 commit 回滚
 - 记录破坏面，不假装稳定
 
 ## 两台个人工作机
