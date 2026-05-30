@@ -547,15 +547,15 @@ def _skill_dir_entries(raw_path: str, *, home: str, recursive: bool = False) -> 
 def _global_skill_root_specs(cli: str) -> list[dict[str, Any]]:
     if cli == "claude":
         return [
-            {"path": "~/.claude/skills", "label": "Claude 全局技能", "origin": "Global Claude skill", "recursive": False},
-            {"path": "~/.agents/skills", "label": "共享 agent 技能（宿主级）", "origin": "Shared agent skill", "recursive": False},
+            {"path": "~/.claude/skills", "label": "Claude 全局技能", "origin": "Global Claude skill", "recursive": False, "disable_supported": True},
+            {"path": "~/.agents/skills", "label": "共享 agent 技能（宿主级）", "origin": "Shared agent skill", "recursive": False, "disable_supported": False},
         ]
     if cli == "codex":
         return [
-            {"path": "~/.codex/skills", "label": "Codex 全局技能", "origin": "Global Codex skill", "recursive": False},
-            {"path": "~/.agents/skills", "label": "共享 agent 技能（宿主级）", "origin": "Shared agent skill", "recursive": False},
-            {"path": "~/.codex/plugins/cache/openai-bundled", "label": "Codex bundled plugin 技能", "origin": "Codex plugin skill", "recursive": True},
-            {"path": "~/.codex/plugins/cache/openai-primary-runtime", "label": "Codex runtime plugin 技能", "origin": "Codex plugin skill", "recursive": True},
+            {"path": "~/.codex/skills", "label": "Codex 全局技能", "origin": "Global Codex skill", "recursive": False, "disable_supported": True},
+            {"path": "~/.agents/skills", "label": "共享 agent 技能（宿主级）", "origin": "Shared agent skill", "recursive": False, "disable_supported": False},
+            {"path": "~/.codex/plugins/cache/openai-bundled", "label": "Codex bundled plugin 技能", "origin": "Codex plugin skill", "recursive": True, "disable_supported": False},
+            {"path": "~/.codex/plugins/cache/openai-primary-runtime", "label": "Codex runtime plugin 技能", "origin": "Codex plugin skill", "recursive": True, "disable_supported": False},
         ]
     return []
 
@@ -587,14 +587,14 @@ def _global_skill_inventory_rows(cli: str, *, home: str) -> list[dict[str, Any]]
                         {"label": "全局根", "value": raw_path, "display": raw_path},
                         {"label": "来源", "value": root_label, "display": root_label},
                     ],
-                    "disable_key": os.path.basename(name),
+                    "disable_key": f"{cli}:{os.path.basename(name)}" if spec.get("disable_supported") else os.path.basename(name),
                     "group": "global",
                     "group_label": _group_label("global"),
                     "origin": str(spec.get("origin") or "Global CLI config"),
                     "origin_label": root_label,
                     "active_by_default": True,
                     "inventory_only": True,
-                    "disable_supported": False,
+                    "disable_supported": bool(spec.get("disable_supported")),
                 }
             )
     return rows

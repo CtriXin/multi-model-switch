@@ -93,7 +93,14 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert all(isinstance(view["global_sources"], list) for view in snapshot["cli_views"])
     global_skill_rows = [row for row in snapshot["rows"] if row.get("inventory_only") and row.get("group") == "global"]
     assert {row["title"] for row in global_skill_rows} >= {"claude-global", "codex-global", "shared-global", "browser"}
-    assert all(row["disable_supported"] is False for row in global_skill_rows)
+    claude_global = next(row for row in global_skill_rows if row["title"] == "claude-global")
+    codex_global = next(row for row in global_skill_rows if row["title"] == "codex-global")
+    shared_global = next(row for row in global_skill_rows if row["title"] == "shared-global")
+    assert claude_global["disable_supported"] is True
+    assert claude_global["disable_key"] == "claude:claude-global"
+    assert codex_global["disable_supported"] is True
+    assert codex_global["disable_key"] == "codex:codex-global"
+    assert shared_global["disable_supported"] is False
     claude = next(view for view in snapshot["cli_views"] if view["id"] == "claude")
     codex = next(view for view in snapshot["cli_views"] if view["id"] == "codex")
     assert any(src["label"] == "Claude 全局技能" and src["count"] == 1 for src in claude["global_sources"])

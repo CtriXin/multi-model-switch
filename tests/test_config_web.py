@@ -367,6 +367,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function assetDisableSupported(row)" in html
     assert "全局 Skill 当前只读展示" in html
     assert "不可在此关闭" in html
+    assert "function renderAssetRows(rows)" in html
+    assert "function assetSkillFamilyHint(name)" in html
+    assert "Lark CLI 技能组" in html
+    assert "整组默认关闭" in html
+    assert "asset-group-cards" in html
     assert "展开查看各 CLI 的 TUI 确认页能力和来源" in html
     assert "assetConfirmMap" in html
     assert "function renderAssetConfirmMap()" in html

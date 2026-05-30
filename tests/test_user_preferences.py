@@ -26,7 +26,7 @@ reasoning_effort = "low"
 disabled_session_surfaces = {{ skills = ["agent-browser"], mcp = ["pilot"] }}
 
 [session_surfaces.disabled]
-skills = ["web-access", "web-access"]
+skills = ["web-access", "web-access", "claude:frontend-design"]
 hooks = ["/tmp/drop.sh"]
 
 [assets.roots]
@@ -56,7 +56,7 @@ base_url = "https://should-not-load.example"
         "mcp": ["pilot"],
     }
     assert prefs["session_surfaces"]["disabled"] == {
-        "skills": ["web-access"],
+        "skills": ["web-access", "claude:frontend-design"],
         "hooks": ["/tmp/drop.sh"],
     }
     assert prefs["assets"]["roots"] == {"web_access": str(skill_root), "xmem": str(xmem_root)}

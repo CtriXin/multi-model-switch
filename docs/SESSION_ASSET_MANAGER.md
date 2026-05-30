@@ -38,7 +38,9 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 - 路径、触发、`disable_key`、原始说明折叠到“高级信息”；
 - 勾选“默认关闭”只更新页面内草稿，并生成 `preferences.toml` 片段；
 - 全局位置单独只读展示，避免用户误以为 WebUI 会改全局 CLI。
-- 全局 Skill 卡片是完整清单/只读展示；当前“默认关闭草稿”只保证 MMS 动态 Skill、MCP、hooks 以及可过滤的 MCP/hooks 生效，任意 Global Skill 默认关闭需要后续在 launcher 继承过滤里实现。
+- Claude / Codex 自己全局目录下的 Skill 可以加入“默认关闭草稿”；MMS 启动时会在 session-local merge 阶段过滤这些名字，不会删除真实全局目录。
+- 宿主级共享候选和 Codex plugin cache 仍是只读展示，避免 WebUI 承诺 launcher 当前不能保证的继承过滤。
+- 全局 Skill 量很大时按技能组折叠展示，例如 `lark-*` 会进入 **Lark CLI 技能组**，并支持把可过滤的同组项一次性加入/移出“默认关闭草稿”。
 
 这一版不会写 `~/.config/mms/preferences.toml`。它只负责展示、解释、内存编辑和复制片段；后续如果要真实写入，仍要走 audited preferences writer 和 human gate。
 
@@ -76,6 +78,7 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 - `preferences.toml` 才是 `bypass`、`caveman_mode`、`nsr_mode`、`agent_pack` 和 disabled session surfaces 的持久偏好位置。
 - `config.toml` / registry DB 继续作为 model/provider/routing 真源，不承载 per-session 能力开关。
 - 全局 Claude/Codex/OpenCode 配置保持只读，除非用户明确进入全局安装或配置流程。
+- `session_surfaces.disabled.skills` 支持 `claude:<skill>` / `codex:<skill>` 这种 CLI-scoped Global Skill 过滤；不带前缀的名字仍可用于 MMS 动态 skill 或手动全局过滤。
 
 因此，未来保存支持应该是独立的 audited preferences writer，而不是模型/通道保存流程的副作用。
 

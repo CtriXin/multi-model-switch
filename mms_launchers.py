@@ -3881,6 +3881,24 @@ def _session_skill_disabled(disabled_session_surfaces, skill_name):
     return _session_surface_disabled(disabled_session_surfaces, "skills", skill_name)
 
 
+def _disabled_skill_names_for_cli(disabled_session_surfaces, cli_name=""):
+    disabled = _normalize_session_surface_disabled(disabled_session_surfaces).get("skills", set())
+    cli_name = str(cli_name or "").strip().lower()
+    names = set()
+    prefix = f"{cli_name}:" if cli_name else ""
+    for value in disabled:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if ":" not in text:
+            names.add(text)
+        elif prefix and text.lower().startswith(prefix):
+            scoped = text.split(":", 1)[1].strip()
+            if scoped:
+                names.add(scoped)
+    return names
+
+
 def _caveman_claude_activate_command(caveman_root):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     return (
@@ -4743,6 +4761,12 @@ def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_sourc
                 continue
             os.symlink(src, link)
 
+    for item in exclude_names:
+        link = os.path.join(merged_dir, item)
+        if os.path.islink(link) or os.path.isfile(link):
+            os.unlink(link)
+        elif os.path.isdir(link):
+            shutil.rmtree(link)
     if os.path.exists(dst) or os.path.islink(dst):
         _merge_dir(os.path.realpath(dst))
     _merge_dir(extra_dir)
@@ -6728,6 +6752,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             skip_real_entries={"settings.json"},
             source_claude_dir=account_claude_dir,
             allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
+            disabled_session_surfaces=disabled_session_surfaces,
         )
         _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir)
         _overlay_web_access_session_entries(
@@ -6820,7 +6845,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
-            codex_resume_writeback_root = _overlay_codex_shared_resume(home_dir, session_home)
+            codex_resume_writeback_root = _overlay_codex_shared_resume(
+                home_dir,
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             _overlay_web_access_session_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
@@ -6901,7 +6930,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
     return env
 
 
-def _overlay_codex_shared_resume(home_dir, session_home):
+def _overlay_codex_shared_resume(home_dir, session_home, *, disabled_session_surfaces=None):
     account_codex_dir = os.path.join(home_dir, ".codex")
     real_codex_dir = _real_user_path(".codex")
     if os.path.realpath(account_codex_dir) == os.path.realpath(real_codex_dir):
@@ -6923,7 +6952,12 @@ def _overlay_codex_shared_resume(home_dir, session_home):
             continue
         src = os.path.join(account_codex_dir, entry)
         dst = os.path.join(session_codex_dir, entry)
-        _materialize_codex_session_entry(entry, src, dst)
+        _materialize_codex_session_entry_filtered(
+            entry,
+            src,
+            dst,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
 
     source_roots = [account_codex_dir]
     source_roots.extend(
@@ -6978,6 +7012,29 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 
 
 def _materialize_codex_session_entry(entry, src, dst):
+    # Back-compat wrapper: default path preserves the old broad symlink/merge.
+    return _materialize_codex_session_entry_filtered(entry, src, dst)
+
+
+def _materialize_codex_session_entry_filtered(entry, src, dst, *, disabled_session_surfaces=None):
+    if entry == "skills" and os.path.isdir(src):
+        disabled_names = _disabled_skill_names_for_cli(disabled_session_surfaces, "codex")
+        if disabled_names or (os.path.isdir(dst) and not os.path.islink(dst)):
+            if os.path.islink(dst):
+                os.unlink(dst)
+            os.makedirs(dst, exist_ok=True)
+            for child in os.listdir(src):
+                if child in disabled_names:
+                    child_dst = os.path.join(dst, child)
+                    if os.path.islink(child_dst) or os.path.isfile(child_dst):
+                        os.unlink(child_dst)
+                    continue
+                child_src = os.path.join(src, child)
+                child_dst = os.path.join(dst, child)
+                if os.path.exists(child_dst) or os.path.islink(child_dst):
+                    continue
+                os.symlink(child_src, child_dst)
+            return
     if os.path.isdir(src) and os.path.isdir(dst):
         os.makedirs(dst, exist_ok=True)
         for child in os.listdir(src):
@@ -9370,6 +9427,7 @@ def _prepare_claude_session_tree(
     skip_real_entries=None,
     source_claude_dir=None,
     allowed_source_entries=None,
+    disabled_session_surfaces=None,
 ):
     current_cwd = os.path.realpath(_safe_getcwd())
     normalized_account_id = str(account_id or "").strip()
@@ -9404,7 +9462,20 @@ def _prepare_claude_session_tree(
                 continue
             src = os.path.join(scoped_claude_dir, entry)
             dst = os.path.join(session_claude_dir, entry)
-            if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+            if not os.path.exists(src) and not os.path.islink(src):
+                continue
+            if entry == "skills":
+                disabled_names = _disabled_skill_names_for_cli(disabled_session_surfaces, "claude")
+                if disabled_names:
+                    _overlay_session_entry_dir(
+                        session_claude_dir,
+                        os.path.join(session_home, ".mms-global-skill-overlay", "claude"),
+                        "skills",
+                        scoped_claude_dir,
+                        exclude_names=disabled_names,
+                    )
+                    continue
+            if os.path.exists(dst) or os.path.islink(dst):
                 continue
             os.symlink(src, dst)
     for entry in CLAUDE_PERSISTENT_ENTRIES:
@@ -9658,6 +9729,7 @@ def _claude_gateway_env(
             runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
             resume_model=resume_model,
             skip_real_entries={"settings.json"},
+            disabled_session_surfaces=disabled_session_surfaces,
         )
     report = runtime.get("_account_guard_report")
     if report:
@@ -10207,7 +10279,12 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
                 continue
             src = os.path.join(real_codex_dir, entry)
             dst = os.path.join(codex_dir, entry)
-            _materialize_codex_session_entry(entry, src, dst)
+            _materialize_codex_session_entry_filtered(
+                entry,
+                src,
+                dst,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
     source_roots = [gateway_codex_dir]
     source_roots.extend(sibling_codex_roots)
     source_roots.append(real_codex_dir)

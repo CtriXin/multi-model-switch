@@ -97,6 +97,8 @@ mcp = []
 hooks = []
 ```
 
+`skills` accepts MMS dynamic skill names such as `web-access`, and CLI-scoped Global Skill filters such as `claude:frontend-design` or `codex:bugfix`. Scoped Global Skill filters only affect MMS-launched sessions; they do not delete or edit `~/.claude/skills` or `~/.codex/skills`.
+
 `[assets.roots]` accepts:
 
 ```text
@@ -182,4 +184,4 @@ This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giv
 - `全局继承`：用户自己已有的 Claude/Codex/OpenCode 配置或插件，MMS 可以看到，但 WebUI 不会静默编辑；
 - `其它检测项`：启动预览能看到、但需要保守检查路径的条目。
 
-面板默认用卡片展示用途、来源、CLI、类型和默认状态；路径、触发、`disable_key` 和原始说明折叠在“高级信息”里。它只用于发现能力和生成片段，持久默认值仍属于 `preferences.toml`，真实 `~/.config/mms/**` 写入继续受 human gate 保护。WebUI 里的“默认关闭”只是内存草稿；复制片段不会改变 runtime 行为，只有用户把片段应用到 `preferences.toml` 后才会生效。
+面板默认用卡片展示用途、来源、CLI、类型和默认状态；路径、触发、`disable_key` 和原始说明折叠在“高级信息”里。Global Skill 数量较多时会按组折叠，例如 `lark-*` 会进入 Lark CLI 技能组，并能整组加入默认关闭草稿。它只用于发现能力和生成片段，持久默认值仍属于 `preferences.toml`，真实 `~/.config/mms/**` 写入继续受 human gate 保护。WebUI 里的“默认关闭”只是内存草稿；复制片段不会改变 runtime 行为，只有用户把片段应用到 `preferences.toml` 后才会生效。
