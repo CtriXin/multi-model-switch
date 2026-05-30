@@ -1128,9 +1128,9 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
         },
         {
             "area": "账号",
-            "capability": "OAuth/account 状态、默认值、登录、编辑、删除、metadata、timezone、note",
+            "capability": "CLI account 默认值、启用状态、priority、metadata、timezone、note；OAuth 登录主流程下线",
             "webui": "draft_review_human_gate",
-            "tui": "keep_emergency_only_for_login_remove_and_claude_human_gate",
+            "tui": "keep_emergency_only_for_remove_and_claude_human_gate",
         },
         {
             "area": "设置",
@@ -1333,14 +1333,14 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_area="Main / O 接入",
             tui_action_id="connect_official",
             tui_label="添加官方通道 / OAuth 登录",
-            webui_section="Settings / 账号",
+            webui_section="Settings / 兼容说明",
             webui_section_id="settings",
-            webui_control="通道报告与确认 tab + 账号模块里的官方登录说明",
+            webui_control="OAuth/AGY 官方登录已从 WebUI 主流程下线；仅保留只读兼容说明",
             api_action="connect_official_gate",
-            status="human_gate",
-            write_policy="manual_login_only",
+            status="report",
+            write_policy="deprecated_read_only_compat",
             verification="/api/settings/report?action=connect_official_gate",
-            manual_check="OAuth login 会写账号状态；WebUI 只说明人工步骤，不自动拉起登录。",
+            manual_check="新配置使用 API Key 通道；旧 OAuth/AGY 账号只做兼容查看，不再作为新增入口。",
         ),
         row(
             "connect.manage_channels",
@@ -4062,15 +4062,15 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "保留 pending drift，只在 WebUI/CLI 里查看 status。",
         },
         "connect_official_gate": {
-            "title": "添加官方 OAuth/account 通道",
-            "risk_level": "high",
-            "commands": [f"{command} config account.add codex", f"{command} config account.add agy", f"{command} config account.login <account-id>", f"{command} config account.list"],
+            "title": "OAuth / AGY 官方登录已下线",
+            "risk_level": "low",
+            "commands": [],
             "manual_steps": [
-                "只对 Codex/AGY 账号执行；Claude OAuth 独立入口已下线，Claude config 仍 human-only。",
-                "添加或登录前先确认要写入的 account id、CLI、HOME/proxy 边界。",
-                "完成后回到 WebUI 点击账号状态或生成保存预览核对 diff。",
+                "不再新增 WebUI OAuth / AGY 官方登录能力。",
+                "已有 account 只保留默认值、priority、note 等兼容配置。",
+                "新配置走 API Key provider，并通过保存预览写入。",
             ],
-            "writes": account_writes,
+            "writes": [],
             "safe_alternative": "网关 API Key 通道使用 WebUI Add provider + 保存预览，不走 OAuth。",
         },
         "migrate_config_gate": {
@@ -4417,7 +4417,7 @@ def build_settings_report(
             "accounts": snapshot.get("accounts") or [],
             "account_defaults": snapshot.get("account_defaults") or {},
             "account_write_policy": snapshot.get("account_write_policy") or {},
-            "note": "WebUI 支持非 Claude account 的 name/enabled/priority/family/timezone/Claude 1M/note/default 草稿预览；login/remove/rename/home_dir/proxy 与 Claude account 仍 需要人工确认。",
+            "note": "WebUI 支持已有非 Claude account 的 name/enabled/priority/family/timezone/Claude 1M/note/default 草稿预览；OAuth / AGY 新登录主流程已下线，remove/rename/home_dir/proxy 与 Claude account 仍 需要人工确认。",
         }
     if action in {"model_source_status", "source"}:
         return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "report": snapshot.get("model_source_status") or {}}
@@ -4595,11 +4595,34 @@ def build_settings_report(
             return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "write_policy": "read_only", "events": _sanitize_for_output(events)}
         except Exception as exc:
             return {"ok": False, "schema": "mms.setup_web.settings_report.v1", "action": action, "error": f"{type(exc).__name__}: {exc}"}
+    if action == "connect_official_gate":
+        mapping_rows = [item for item in mapping if item.get("api_action") == action]
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.settings_report.v1",
+            "action": action,
+            "title": "OAuth / AGY 官方登录已下线",
+            "status": "deprecated",
+            "risk_level": "low",
+            "write_policy": "deprecated_read_only_compat",
+            "blocked_auto_execute": True,
+            "requires_human_confirmation": False,
+            "copyable": False,
+            "commands": [],
+            "manual_steps": [
+                "WebUI 不再提供新的 OAuth / AGY 官方登录入口。",
+                "新通道请在「通道配置」里维护 Base URL、API Key、protocol 和模型清单。",
+                "已存在的 account 只保留默认值、priority、note 等兼容配置；login/remove/Claude account 仍按人工边界处理。",
+            ],
+            "writes": [],
+            "safe_alternative": "使用 API Key provider：通道配置 -> 新增通道 -> 生成保存预览 -> 写入。",
+            "note": "OAuth/AGY 官方登录已从 WebUI 主流程下线；这里只解释兼容边界，不提供登录命令。",
+            "mapping": mapping_rows,
+        }
     gate_actions = {
         "guard_accept_gate": ("manual_cli_human_gate", "Snapshot Guard accept 会更新 guard baseline；WebUI 不自动执行。"),
         "provider_remove_gate": ("planned_human_confirm", "删除 provider 需要 typed confirm + diff review；本 slice 只标出缺口。"),
         "provider_network_gate": ("network_policy_human_gate", "proxy/no_proxy 可能包含凭据并影响网络隔离；WebUI 不回显或自动写入。"),
-        "connect_official_gate": ("manual_login_only", "用于 Codex/AGY 官方账号 OAuth 登录；这不是 API Key 通道保存。登录会写账号状态，WebUI 只给人工步骤；Claude 仍 human-only。"),
         "migrate_config_gate": ("manual_cli_human_gate", "配置迁移会读写真实配置树；必须人工确认迁移源、目标和备份。"),
         "family_autosort_gate": ("speed_stats_write_human_gate", "用于按测速 / 使用统计重排 priority 与 family_priority_overrides；会批量影响路由优先级，所以 WebUI 只显示人工确认说明。"),
         "account_login_gate": ("manual_login_only", "OAuth login 会写外部账号状态；WebUI 当前不触发。"),
@@ -4640,6 +4663,7 @@ def build_settings_report(
             "verify_approved",
             "provider_usage_summary",
             "connect_gateway_status",
+            "connect_official_gate",
             "provider_channel_status",
             "guard_status",
             "language_status",
@@ -5230,11 +5254,13 @@ _HTML_PAGE = r"""<!doctype html>
       grid-template-columns: repeat(12, 1fr);
       gap: 14px;
     }
+    .span3 { grid-column: span 3; }
     .span4 { grid-column: span 4; }
     .span5 { grid-column: span 5; }
     .span6 { grid-column: span 6; }
     .span7 { grid-column: span 7; }
     .span8 { grid-column: span 8; }
+    .span9 { grid-column: span 9; }
     .span12 { grid-column: span 12; }
 
     /* ===== Forms ===== */
@@ -5632,6 +5658,168 @@ _HTML_PAGE = r"""<!doctype html>
     .usage-detail summary::marker { color: var(--muted); }
     .usage-detail .table-wrap { margin-top: 10px; }
 
+    .settings-console {
+      display: grid;
+      gap: 14px;
+    }
+    .settings-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: end;
+      border: 1.5px solid color-mix(in oklch, var(--fg) 18%, var(--border));
+      border-radius: var(--radius-xl);
+      padding: 18px;
+      background:
+        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 14%, transparent), transparent 34%),
+        linear-gradient(135deg, color-mix(in oklch, var(--surface) 84%, var(--bg)), var(--surface));
+      box-shadow: var(--shadow-sm);
+    }
+    .settings-hero h3 {
+      font-size: clamp(22px, 3.2vw, 36px);
+      letter-spacing: -.035em;
+      line-height: 1.05;
+      margin-bottom: 8px;
+    }
+    .settings-hero p {
+      color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+      max-width: 760px;
+    }
+    .settings-hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .settings-tabs {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: color-mix(in oklch, var(--bg) 70%, var(--surface));
+    }
+    .settings-tab {
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      box-shadow: none;
+      padding: 10px 12px;
+      min-height: 62px;
+    }
+    .settings-tab strong,
+    .settings-tab span {
+      display: block;
+    }
+    .settings-tab strong {
+      color: inherit;
+      font-size: 13.5px;
+      margin-bottom: 3px;
+    }
+    .settings-tab span {
+      color: color-mix(in oklch, var(--muted) 84%, var(--fg));
+      font-size: 11.5px;
+      line-height: 1.35;
+    }
+    .settings-tab:hover {
+      background: var(--surface);
+      border-color: var(--border);
+      color: var(--fg);
+    }
+    .settings-tab.active {
+      background: var(--fg);
+      border-color: var(--fg);
+      color: var(--surface);
+    }
+    .settings-tab.active span { color: rgba(255,255,255,.74); }
+    .settings-tab-panel { display: none; }
+    .settings-tab-panel.active {
+      display: block;
+      animation: fadeIn .18s ease both;
+    }
+    .settings-panel-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .setting-edit-card {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      padding: 15px;
+      box-shadow: var(--shadow-sm);
+    }
+    .setting-edit-card h3 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 7px;
+    }
+    .settings-next-step {
+      border: 1.5px dashed color-mix(in oklch, var(--accent) 40%, var(--border));
+      background: color-mix(in oklch, var(--accent) 8%, transparent);
+      border-radius: var(--radius-lg);
+      padding: 14px;
+    }
+    .account-config-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .account-config-card {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      background:
+        linear-gradient(180deg, color-mix(in oklch, var(--surface) 92%, var(--bg)), var(--surface));
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .account-config-card.locked {
+      border-style: dashed;
+      background: color-mix(in oklch, var(--bg) 74%, var(--surface));
+    }
+    .account-card-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+    .account-card-head h4 {
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+    .account-fields {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .account-fields label { margin-top: 0; }
+    .account-advanced {
+      margin-top: 12px;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      background: color-mix(in oklch, var(--bg) 70%, transparent);
+      padding: 10px 12px;
+    }
+    .account-advanced summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--fg);
+    }
+    .account-advanced summary::marker { color: var(--muted); }
+    .settings-compat-note {
+      border-left: 3px solid var(--warn);
+      background: color-mix(in oklch, var(--warn) 10%, transparent);
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+    }
+
     .model-section {
       display: flex;
       flex-direction: column;
@@ -5753,6 +5941,11 @@ _HTML_PAGE = r"""<!doctype html>
     }
     .chip:hover {
       border-color: color-mix(in oklch, var(--accent) 25%, var(--border));
+    }
+    .chip.off {
+      color: var(--muted);
+      background: color-mix(in oklch, var(--bg) 72%, var(--surface));
+      border-color: color-mix(in oklch, var(--border) 82%, var(--muted));
     }
     .chip button {
       padding: 0 4px;
@@ -5952,15 +6145,19 @@ _HTML_PAGE = r"""<!doctype html>
         max-height: none;
         overflow: visible;
       }
-      .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
+      .span3, .span4, .span5, .span6, .span7, .span8, .span9, .span12 { grid-column: span 12; }
       .provider-form-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .provider-form-tab { justify-content: flex-start; }
-      .oc-summary, .model-inventory-summary { grid-template-columns: 1fr 1fr; }
-      .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid, .acceptance-head { grid-template-columns: 1fr; }
+      .oc-summary, .model-inventory-summary, .settings-tabs, .account-config-grid { grid-template-columns: 1fr 1fr; }
+      .settings-hero, .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid, .acceptance-head { grid-template-columns: 1fr; }
+      .settings-hero-actions { justify-content: flex-start; }
       .filterbar.compact { justify-content: flex-start; }
       .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
       .settings-stamp { white-space: normal; }
       .panel { padding: 20px; }
+    }
+    @media (max-width: 680px) {
+      .settings-tabs, .account-config-grid, .account-fields { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -6165,71 +6362,141 @@ _HTML_PAGE = r"""<!doctype html>
     <!-- Settings -->
     <section class="panel" data-section="settings">
       <h2>设置</h2>
-      <p>设置页只处理真正属于设置的能力：界面语言、账号/OAuth 状态、Snapshot Guard、关于和人工确认。通道、模型和真源动作已经放回各自模块。</p>
-      <div class="grid">
-        <div class="card span4">
-          <h3>界面语言</h3>
-          <p class="muted">对应 TUI Settings → 界面语言。这里进入 WebUI 草稿；真正写入仍走保存 / 审计。</p>
-          <label>ui.language</label>
-          <select id="uiLanguage">
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-          </select>
-          <div class="btns">
-            <button id="saveUiLanguage" class="ghost">暂存语言修改</button>
-            <button class="ghost" data-settings-action="language_status" data-report-target="settingsReport">语言状态</button>
+      <p>这里是 WebUI 配置台：日常配置在当前页面改草稿，统一去保存页生成 diff / 审计摘要；TUI 后续只保留启动、应急和人工确认兜底。</p>
+      <div class="settings-console">
+        <div class="settings-hero">
+          <div>
+            <h3>把设置从 TUI 迁到可保存的 WebUI 表单</h3>
+            <p>用户只需要记住启动命令；通道、模型、Fallback、Runtime 和账号默认值都在 WebUI 里完成配置，再通过保存预览写入。</p>
+            <div id="settingsGapSummary" class="chips"></div>
+          </div>
+          <div class="settings-hero-actions">
+            <button class="secondary" data-section-jump="save">生成保存预览</button>
+            <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
           </div>
         </div>
-        <div class="card span8">
-          <h3>启动快照守卫（Snapshot Guard）</h3>
-          <p class="muted">状态是只读报告；接受 baseline 需要人工确认，不在 WebUI 自动执行。</p>
-          <div id="settingsGapSummary" class="chips"></div>
-          <div class="btns">
-            <button class="ghost" data-settings-action="guard_status" data-report-target="settingsReport">快照状态</button>
-            <button class="ghost" data-settings-action="guard_accept_gate" data-report-target="settingsReport">接受基线确认</button>
-            <button class="ghost" data-settings-action="migrate_config_gate" data-report-target="settingsReport">迁移确认</button>
+
+        <div class="settings-tabs" id="settingsTabs">
+          <button class="settings-tab" data-settings-tab="basics"><strong>常用设置</strong><span>语言 / 保存入口</span></button>
+          <button class="settings-tab" data-settings-tab="accounts"><strong>账号默认值</strong><span>default / priority / note</span></button>
+          <button class="settings-tab" data-settings-tab="guard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
+          <button class="settings-tab" data-settings-tab="about"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
+          <button class="settings-tab" data-settings-tab="audit"><strong>验收辅助</strong><span>折叠的 TUI 对照</span></button>
+        </div>
+
+        <div class="settings-tab-panel" data-settings-panel="basics">
+          <div class="settings-panel-grid">
+            <div class="setting-edit-card span5">
+              <h3>界面语言 <span class="tag">可配置</span></h3>
+              <p class="muted">进入 WebUI 草稿，写入仍走保存 / 审计。</p>
+              <label>ui.language</label>
+              <select id="uiLanguage">
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+              <div class="btns">
+                <button id="saveUiLanguage" class="ghost">暂存语言修改</button>
+                <button class="ghost" data-settings-action="language_status" data-report-target="settingsReport">语言状态</button>
+              </div>
+            </div>
+            <div class="setting-edit-card span4">
+              <h3>配置入口 <span class="tag">主路径</span></h3>
+              <p class="muted">通道 URL/API Key、模型补丁、Fallback、Runtime 默认值都在各自模块配置，不再回到 TUI 里点散落菜单。</p>
+              <div class="btns">
+                <button class="ghost" data-section-jump="channel">通道配置</button>
+                <button class="ghost" data-section-jump="fallback">Fallback 设置</button>
+                <button class="ghost" data-section-jump="runtime">运行默认值</button>
+              </div>
+            </div>
+            <div class="settings-next-step span3">
+              <h3>保存规则</h3>
+              <p class="muted">修改后先生成保存预览；preview root 写 DB candidate + latest-approved bundle，stable root 走 backup + audit。</p>
+              <button class="secondary" data-section-jump="save">去保存审计</button>
+            </div>
           </div>
         </div>
-        <div class="card span12">
-          <h3>账号 / OAuth 通道</h3>
-          <p class="muted">支持非 Claude account 的 name/enabled/priority/default 草稿预览；Claude account、login/remove/rename、home_dir/proxy/no_proxy 仍是 需要人工确认，不会静默写入。</p>
-          <div class="btns" id="accountModuleActions">
-            <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">账号状态</button>
-            <button class="ghost" data-settings-action="connect_official_gate" data-report-target="settingsReport">官方登录确认</button>
-            <button class="ghost" data-settings-action="account_network_gate" data-report-target="settingsReport">账号网络确认</button>
-          </div>
-          <div class="table-wrap"><table id="accountTable"></table></div>
-        </div>
-        <div class="card span6">
-          <h3>关于 / 版本</h3>
-          <p class="muted">关于页默认只读缓存状态；刷新版本检查和升级命令都需要人工确认。</p>
-          <div class="btns">
-            <button class="ghost" data-settings-action="about" data-report-target="settingsReport">关于状态</button>
-            <button class="ghost" data-settings-action="about_refresh_gate" data-report-target="settingsReport">刷新版本确认</button>
-            <button class="ghost" data-settings-action="about_upgrade_gate" data-report-target="settingsReport">升级确认</button>
+
+        <div class="settings-tab-panel" data-settings-panel="accounts">
+          <div class="setting-edit-card">
+            <h3>CLI 账号默认值 <span class="tag">草稿预览</span></h3>
+            <p class="muted">这里配置已有 account 的默认选择、启用状态、priority、timezone 和 note；Claude account 仍是 human-only。OAuth / AGY 官方登录不再作为 WebUI 主流程。</p>
+            <div class="btns" id="accountModuleActions">
+              <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
+              <button class="ghost" data-section-jump="save">保存账号草稿</button>
+            </div>
+            <div id="accountTable" class="account-config-grid"></div>
           </div>
         </div>
-        <div class="card span6">
-          <h3>设置覆盖摘要</h3>
-          <p class="muted">这里只保留模块级覆盖摘要；完整逐项表折叠在验收辅助里，避免把它当成功能入口。</p>
-          <div class="table-wrap"><table id="settingsCoverage"></table></div>
+
+        <div class="settings-tab-panel" data-settings-panel="guard">
+          <div class="settings-panel-grid">
+            <div class="setting-edit-card span6">
+              <h3>启动快照守卫（Snapshot Guard）</h3>
+              <p class="muted">状态是只读报告；接受 baseline 需要人工确认，不在 WebUI 自动执行。</p>
+              <div class="btns">
+                <button class="ghost" data-settings-action="guard_status" data-report-target="settingsReport">快照状态</button>
+                <button class="ghost" data-settings-action="guard_accept_gate" data-report-target="settingsReport">接受基线确认</button>
+              </div>
+            </div>
+            <div class="setting-edit-card span6">
+              <h3>迁移 / 网络边界</h3>
+              <p class="muted">会触发真实配置、账号目录、proxy/no_proxy 或迁移写入的动作保持人工确认；WebUI 只显示影响面。</p>
+              <div class="btns">
+                <button class="ghost" data-settings-action="migrate_config_gate" data-report-target="settingsReport">迁移确认</button>
+                <button class="ghost" data-settings-action="account_network_gate" data-report-target="settingsReport">账号网络确认</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="card span12">
+
+        <div class="settings-tab-panel" data-settings-panel="about">
+          <div class="settings-panel-grid">
+            <div class="setting-edit-card span6">
+              <h3>关于 / 版本</h3>
+              <p class="muted">默认读取缓存状态；刷新版本检查和升级命令都需要人工确认。</p>
+              <div class="btns">
+                <button class="ghost" data-settings-action="about" data-report-target="settingsReport">关于状态</button>
+                <button class="ghost" data-settings-action="about_refresh_gate" data-report-target="settingsReport">刷新版本确认</button>
+                <button class="ghost" data-settings-action="about_upgrade_gate" data-report-target="settingsReport">升级确认</button>
+              </div>
+            </div>
+            <div class="settings-compat-note span6">
+              <strong>OAuth 主流程已下线</strong>
+              <p>AGY / OAuth 仅作为旧 account 兼容状态查看；新增可用通道请走 API Key provider。</p>
+              <details class="account-advanced">
+                <summary>查看已下线兼容说明</summary>
+                <div class="btns">
+                  <button class="ghost" data-settings-action="connect_official_gate" data-report-target="settingsReport">查看下线说明</button>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-tab-panel" data-settings-panel="audit">
+          <details class="setting-edit-card" open>
+            <summary>开发验收辅助，不作为用户设置入口</summary>
+            <p class="muted">这些表只用于核对 TUI 功能迁移，不再占据设置主页面。</p>
+            <div class="table-wrap"><table id="settingsCoverage"></table></div>
+          </details>
+          <details class="setting-edit-card mapping-card" id="mappingAuditDetails">
+            <summary>验收辅助：TUI ↔ WebUI 对照表</summary>
+            <div class="mapping-head">
+              <div>
+                <h3>TUI ↔ WebUI 对照表</h3>
+                <p class="muted">功能入口应在通道、模型测试、真源、Fallback、Runtime 或设置对应 tab 里；这里仅做验收证据。</p>
+              </div>
+              <div id="mappingFilters" class="filterbar compact"></div>
+            </div>
+            <div id="acceptancePanel" class="acceptance-panel"></div>
+            <div class="table-wrap"><table id="tuiMappingTable"></table></div>
+          </details>
+        </div>
+
+        <div class="setting-edit-card">
           <h3>报告 / 人工确认</h3>
           <div class="result" id="settingsReport">选择一个设置动作查看结果</div>
         </div>
-        <details class="card span12 mapping-card" id="mappingAuditDetails">
-          <summary>验收辅助：TUI ↔ WebUI 对照表</summary>
-          <div class="mapping-head">
-            <div>
-              <h3>TUI ↔ WebUI 对照表</h3>
-              <p class="muted">这是辅助验收视图，不是功能整合页；功能入口应在通道、模型测试、真源、Fallback 或设置对应模块里。</p>
-            </div>
-            <div id="mappingFilters" class="filterbar compact"></div>
-          </div>
-          <div id="acceptancePanel" class="acceptance-panel"></div>
-          <div class="table-wrap"><table id="tuiMappingTable"></table></div>
-        </details>
       </div>
     </section>
 
@@ -6294,11 +6561,11 @@ const sections=[
   ['test','模型测试','ping / chat smoke'],
   ['fallback','Fallback','rescue / vision'],
   ['runtime','运行默认值','首选 CLI / OpenCode'],
-  ['settings','设置','账号 / Guard / 关于'],
+  ['settings','设置','配置台 / 账号 / 安全'],
   ['save','保存审计','diff / backup / audit'],
   ['refs','本地参考','配置契约 / 文档']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let activeProviderFormTab='basic'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let lastGateCommands=[]; let checkedMappingRows=new Set();
+let state=null; let activeProvider=0; let activeProviderTab='config'; let activeProviderFormTab='basic'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsActiveTab='accounts'; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let lastGateCommands=[]; let checkedMappingRows=new Set();
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -6312,7 +6579,7 @@ function renderStatus(){const providers=state.providers||[];const root=(state.mo
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function yn(value){return value?'是':'否'}
 function enumLabel(value){const key=String(value??'');const map={ok:'正常',missing:'缺失',unknown:'未知',ready:'就绪','not ready':'未就绪',not_ready:'未就绪',auto:'自动',enable:'启用',disable:'禁用',enabled:'已启用',disabled:'已禁用',configured:'已配置',none:'未配置',imported:'已导入',not_imported:'未导入',blocked:'已拦截',high:'高风险',medium:'中风险',low:'低风险',critical:'严重',required:'必需',redacted:'已脱敏',included:'包含明文'};return map[key]||key||'-'}
-function writePolicyLabel(policy){const key=String(policy||'');const map={native:'原生',report:'报告',draft_review:'草稿预览',human_gate:'人工确认',missing:'缺失',report_only:'只读报告',native_test_panel:'原生测试面板',planned:'待补齐',existing_save_flow:'现有保存流程',manual_cli_only:'仅人工 CLI',draft_review_confirmed_save:'草稿预览后确认保存',manual_login_only:'仅人工登录',mixed_draft_review_human_gate:'草稿预览 + 人工确认',manual_cli_human_gate:'人工 CLI 确认',read_only_report:'只读报告',draft_review_human_gate:'草稿预览 + 人工确认',save_flow_or_preview_publish:'保存流程 / preview 发布',audited_secret_write:'审计凭据写入',network_policy_human_gate:'网络策略人工确认',account_home_human_gate:'账号 home 人工确认',account_network_human_gate:'账号网络人工确认',manual_remove_only:'仅人工删除',read_only:'只读',mixed:'混合',save_preview:'保存预览',network_write_human_gate:'联网写入人工确认',network_human_gate:'联网人工确认',write_human_gate:'写入人工确认',local_artifact_human_gate:'本地产物人工确认',speed_stats_write_human_gate:'速度统计写入人工确认',deprecated_read_only_compat:'已下线，只读兼容',deprecated_no_webui_iteration:'已下线，不再迭代',claude_human_only_locked:'Claude 人工锁定',can_degrade_after_save_flow_verified:'保存链路验证后可弱化',can_degrade_after_route_guard_verified:'route guard 验证后可弱化',can_degrade_after_report_smoke:'报告 smoke 后可弱化',keep_emergency_only_for_login_remove_and_claude_human_gate:'仅保留登录/删除/Claude 人工确认应急',read_only_reports_plus_existing_apply:'只读报告 + 现有 apply',can_degrade_report_display_after_webui_smoke:'WebUI smoke 后可弱化报告展示',keep_until_webui_double_confirm_flow_exists:'保留到 WebUI 双确认流程补齐',can_degrade_config_display_after_save_flow_verified:'保存链路验证后可弱化配置展示',keep_emergency_only_until_handover_write_flow_exists:'保留应急直到 handover 写入流程补齐',report_or_planned:'报告或待补齐',keep_small:'保留最小入口',module_native_controls_plus_reports:'模块原生控件 + 报告',keep_as_keyboard_launcher_until_webui_launch_surface_exists:'保留键盘 launcher，直到 WebUI 启动面补齐'};return map[key]||key||'-'}
+function writePolicyLabel(policy){const key=String(policy||'');const map={native:'原生',report:'报告',draft_review:'草稿预览',human_gate:'人工确认',missing:'缺失',report_only:'只读报告',native_test_panel:'原生测试面板',planned:'待补齐',existing_save_flow:'现有保存流程',manual_cli_only:'仅人工 CLI',draft_review_confirmed_save:'草稿预览后确认保存',manual_login_only:'仅人工登录',mixed_draft_review_human_gate:'草稿预览 + 人工确认',manual_cli_human_gate:'人工 CLI 确认',read_only_report:'只读报告',draft_review_human_gate:'草稿预览 + 人工确认',save_flow_or_preview_publish:'保存流程 / preview 发布',audited_secret_write:'审计凭据写入',network_policy_human_gate:'网络策略人工确认',account_home_human_gate:'账号 home 人工确认',account_network_human_gate:'账号网络人工确认',manual_remove_only:'仅人工删除',read_only:'只读',mixed:'混合',save_preview:'保存预览',network_write_human_gate:'联网写入人工确认',network_human_gate:'联网人工确认',write_human_gate:'写入人工确认',local_artifact_human_gate:'本地产物人工确认',speed_stats_write_human_gate:'速度统计写入人工确认',deprecated_read_only_compat:'已下线，只读兼容',deprecated_no_webui_iteration:'已下线，不再迭代',claude_human_only_locked:'Claude 人工锁定',can_degrade_after_save_flow_verified:'保存链路验证后可弱化',can_degrade_after_route_guard_verified:'route guard 验证后可弱化',can_degrade_after_report_smoke:'报告 smoke 后可弱化',keep_emergency_only_for_login_remove_and_claude_human_gate:'仅保留登录/删除/Claude 人工确认应急',keep_emergency_only_for_remove_and_claude_human_gate:'仅保留删除/Claude 人工确认应急',read_only_reports_plus_existing_apply:'只读报告 + 现有 apply',can_degrade_report_display_after_webui_smoke:'WebUI smoke 后可弱化报告展示',keep_until_webui_double_confirm_flow_exists:'保留到 WebUI 双确认流程补齐',can_degrade_config_display_after_save_flow_verified:'保存链路验证后可弱化配置展示',keep_emergency_only_until_handover_write_flow_exists:'保留应急直到 handover 写入流程补齐',report_or_planned:'报告或待补齐',keep_small:'保留最小入口',module_native_controls_plus_reports:'模块原生控件 + 报告',keep_as_keyboard_launcher_until_webui_launch_surface_exists:'保留键盘 launcher，直到 WebUI 启动面补齐'};return map[key]||key||'-'}
 function clickTargetsLabel(text){const map={open_section:'打开模块',settings_report:'查看报告',save_preview:'保存预览',human_gate_card:'人工确认卡片',missing_gap:'缺口'};return String(text||'-').split(' + ').map(x=>map[x]||x).join(' + ')}
 function riskLabel(level){return enumLabel(level||'high')}
 function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;const modeName=preview?'MMF preview / DB truth':'MMS stable / legacy compatibility';if($('saveModeHint')){$('saveModeHint').innerHTML=preview?'当前是 <strong>mmf + ~/.config/mms-next</strong>：日常只需要“生成保存预览” → “写入预览 DB + 发布”。':'当前是 <strong>mms stable</strong>：使用 legacy audited save，仍会 backup + audit。'}if($('saveModeLead')){$('saveModeLead').textContent=preview?'保存前先生成 diff。写入只落到当前 preview root 的 DB candidate，并发布 latest-approved bundle；API Key 不会出现在 diff 或响应里。':'保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；API Key 不会出现在 diff 或响应里。'}if($('confirmPhraseLabel')){$('confirmPhraseLabel').textContent=preview?'输入确认文字：写入预览DB':'输入确认文字：保存配置'}if($('confirmPhrase')){$('confirmPhrase').placeholder=preview?'写入预览DB':'保存配置'}if($('saveCompatibilityNote')){$('saveCompatibilityNote').textContent=preview?'旧版“确认保存”在 mmf 中已隐藏；下载 JSON / CLI apply 只在 Advanced / Recovery 里作为 fallback。':'stable legacy 保存写入 config.toml / credentials.sh / model-policy，并保留 backup + audit；preview DB 发布请用 mmf。'}document.querySelectorAll('.legacy-save-action').forEach(el=>el.classList.toggle('hide',preview));if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'MMF preview 已隐藏 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').classList.toggle('hide',!preview);$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?modeName:'Stable root 不能写 preview DB，请用 mmf preview root'}if($('advancedPlanTools')){$('advancedPlanTools').open=false}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
@@ -6418,8 +6685,8 @@ function renderProviderForm(){
     <div class="${panelClass('reports')}" data-provider-form-panel="reports">
       <div class="provider-action-grid">
         <div class="explain-card span4"><h4>使用统计</h4><p>读取当前通道的 usage 明细，并按这个通道内的模型展开启动次数；不会把其他通道混进来。</p><button type="button" class="ghost" data-settings-action="provider_usage_summary" data-report-target="channelReport">查看当前通道使用统计</button></div>
-        <div class="explain-card span4"><h4>自动排序用途说明</h4><p>用于按测速 / 使用统计给 provider priority 或 family_priority_overrides 排序。因为会批量影响路由优先级，WebUI 只显示人工确认说明，不自动执行。</p><button type="button" class="ghost" data-settings-action="family_autosort_gate" data-report-target="channelReport">查看自动排序说明</button></div>
-        <div class="explain-card span4"><h4>官方账号登录说明（OAuth）</h4><p>用于 Codex / AGY 官方账号登录，不是 API Key 通道保存。登录会写 OAuth/account 状态；Claude 仍是 human-only。</p><button type="button" class="ghost" data-settings-action="connect_official_gate" data-report-target="channelReport">查看官方登录说明</button></div>
+        <div class="explain-card span4"><h4>保存审计入口</h4><p>这里改的是持久通道配置。填完 Base URL、API Key、protocol、模型补丁后，统一到保存页生成 diff 和审计摘要。</p><button type="button" class="ghost" data-section-jump="save">去生成保存预览</button></div>
+        <div class="explain-card span4"><h4>高级人工确认</h4><p>网络策略、自动排序这类会影响路由或本机边界的动作，不再放主路径；需要时只看说明，不自动执行。</p><button type="button" class="ghost" data-settings-action="provider_network_gate" data-report-target="channelReport">查看网络配置人工确认</button></div>
         <div class="span12"><div class="result module-report" id="channelReport">选择上方动作查看表格报告或人工确认说明。</div></div>
       </div>
     </div>
@@ -6537,7 +6804,7 @@ function renderAccountStatusReport(data,targetId='settingsReport'){
   const accounts=Array.isArray(data.accounts)?data.accounts:[];
   const defaults=data.account_defaults||{};
   const rows=accounts.length?accounts.map(a=>{const cli=String(a.cli||'').toLowerCase();const isDefault=defaults[cli]===a.id;return `<tr><td class="mono">${escapeHtml(a.id||'-')}</td><td>${escapeHtml(a.name||'-')}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td>${isDefault?'是':'否'}</td><td>${a.enabled?'<span class="tag">启用</span>':'<span class="tag off">禁用</span>'}</td><td>${Number(a.priority||0)}</td><td>${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{})||'-')}</td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${Number((a.usage||{}).launches||0)}</td><td>${escapeHtml((a.usage||{}).last_used_at||'-')}</td><td>${escapeHtml(reportTopModels(a.usage_rows||[]))}</td><td>${a.is_claude_human_only?'<span class="tag off">Claude 人工锁定</span>':`<span class="tag">${writePolicyLabel(a.webui_write_policy||'draft_review')}</span>`}</td></tr>`}).join(''):'<tr><td colspan="12" class="empty-row">暂无账号状态</td></tr>';
-  target.innerHTML=`<div class="account-report"><h4>账号 / OAuth 状态</h4><p>${escapeHtml(data.note||'只读表格展示；登录、删除、重命名和 Claude account 仍保持人工确认。')}</p><div class="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>状态</th><th>priority</th><th>Family</th><th>auth</th><th>启动</th><th>最近</th><th>常用模型</th><th>写入边界</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  target.innerHTML=`<div class="account-report"><h4>账号状态</h4><p>${escapeHtml(data.note||'只读表格展示；OAuth / AGY 新登录主流程已下线，删除、重命名和 Claude account 仍保持人工确认。')}</p><div class="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>状态</th><th>priority</th><th>Family</th><th>auth</th><th>启动</th><th>最近</th><th>常用模型</th><th>写入边界</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function renderSettingsReport(data,targetId='settingsReport'){
   const target=$(targetId)||$('settingsReport');if(!target)return;
@@ -6549,8 +6816,35 @@ function renderSettingsReport(data,targetId='settingsReport'){
 function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;const targetId=btn.dataset.reportTarget||'settingsReport';const target=$(targetId)||$('settingsReport');if(target)target.textContent='读取中...';const payload={action};if(btn.dataset.accountId)payload.account_id=btn.dataset.accountId;if(btn.dataset.providerId)payload.provider_id=btn.dataset.providerId;if(action==='provider_usage_summary'&&targetId==='channelReport'&&current()?.id)payload.provider_id=current().id;const data=await api('/api/settings/report',payload);renderSettingsReport(data,targetId);if(targetId==='channelReport')switchProviderFormTab('reports');toast(data.ok?`${btn.textContent} 已刷新`:`${btn.textContent} 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
 function syncUiSettings(){state.ui=state.ui||{};state.ui.language=$('uiLanguage')?.value||'zh'}
 function renderUiSettings(mapping){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')};const counts=(state.tui_webui_mapping_summary||{}).counts||{};const missingRows=(mapping||[]).filter(row=>row.status==='missing').map(row=>row.tui_label);if($('settingsGapSummary')){$('settingsGapSummary').innerHTML=`<span class="chip">原生 ${counts.native||0}</span><span class="chip">报告 ${counts.report||0}</span><span class="chip">草稿 ${counts.draft_review||0}</span><span class="chip">人工确认 ${counts.human_gate||0}</span><span class="chip">缺失 ${counts.missing||0}</span>${missingRows.length?`<span class="chip">仍缺：${escapeHtml(missingRows.join(' / '))}</span>`:'<span class="chip">无缺失行</span>'}`}}
-function accountActionButtons(a){const id=escapeHtml(a.id||'');return `<div class="btns"><button class="ghost mapping-action" data-settings-action="account_login_gate" data-report-target="settingsReport" data-account-id="${id}">重新登录</button><button class="ghost mapping-action" data-settings-action="account_rename_gate" data-report-target="settingsReport" data-account-id="${id}">重命名</button><button class="ghost mapping-action" data-settings-action="account_network_gate" data-report-target="settingsReport" data-account-id="${id}">网络</button><button class="ghost mapping-action" data-settings-action="account_remove_gate" data-report-target="settingsReport" data-account-id="${id}">删除</button></div>`}
-function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderUiSettings(mapping);const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude 人工锁定</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td><input data-account-family value="${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{}))}" ${locked?'disabled':''} placeholder="GPT=120, Qwen=90" style="min-width:160px"></td><td>${locked?escapeHtml(a.claude_1m_mode||'auto'):`<select data-account-claude-1m><option value="auto" ${(a.claude_1m_mode||'auto')==='auto'?'selected':''}>自动</option><option value="enable" ${a.claude_1m_mode==='enable'?'selected':''}>启用</option><option value="disable" ${a.claude_1m_mode==='disable'?'selected':''}>禁用</option></select>`}</td><td>${locked?escapeHtml(a.timezone||'-'):`<input data-account-timezone value="${escapeHtml(a.timezone||'')}" placeholder="Asia/Singapore" style="min-width:140px">`}</td><td>${locked?escapeHtml(a.note||''):`<input data-account-note value="${escapeHtml(a.note||'')}" placeholder="note" style="min-width:130px">`}</td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${yn(a.home_dir_configured)}</td><td>${yn(a.proxy_configured)}</td><td>${yn(a.no_proxy_configured)}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${writePolicyLabel(a.webui_write_policy||'read_only')}</span></td><td>${accountActionButtons(a)}</td></tr>`}).join(''):'<tr><td colspan="18" class="empty-row">没有配置 OAuth/account 通道；可使用上方 官方登录确认 查看人工登录边界。</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>priority</th><th>Family</th><th>Claude 1M</th><th>timezone</th><th>note</th><th>auth</th><th>home</th><th>proxy</th><th>no_proxy</th><th>启动</th><th>最近</th><th>WebUI 写入</th><th>动作</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority],[data-account-family],[data-account-claude-1m],[data-account-timezone],[data-account-note]').forEach(el=>{const handler=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')};el.oninput=handler;el.onchange=handler});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>区域</th><th>能力</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')||String(row.webui||'').includes('待补齐')||String(row.webui||'').includes('人工确认')?'off':''}">${writePolicyLabel(row.webui)}</span></td><td>${writePolicyLabel(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);bindSettingsActionButtons()}
+function switchSettingsTab(tab){
+  settingsActiveTab=tab||'accounts';
+  const panels=[...document.querySelectorAll('[data-settings-panel]')];
+  if(!panels.some(p=>p.dataset.settingsPanel===settingsActiveTab))settingsActiveTab='accounts';
+  document.querySelectorAll('[data-settings-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsTab===settingsActiveTab));
+  panels.forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===settingsActiveTab));
+}
+function bindSettingsTabs(){document.querySelectorAll('[data-settings-tab]').forEach(btn=>{btn.onclick=()=>switchSettingsTab(btn.dataset.settingsTab)})}
+function accountActionButtons(a){const id=escapeHtml(a.id||'');return `<details class="account-advanced"><summary>兼容 / 危险动作（已降级）</summary><p class="muted">登录、重命名、网络和删除会碰外部账号状态或本机目录，不作为 WebUI 日常配置主流程。</p><div class="btns"><button class="ghost mapping-action" data-settings-action="account_login_gate" data-report-target="settingsReport" data-account-id="${id}">登录兼容说明</button><button class="ghost mapping-action" data-settings-action="account_rename_gate" data-report-target="settingsReport" data-account-id="${id}">重命名确认</button><button class="ghost mapping-action" data-settings-action="account_network_gate" data-report-target="settingsReport" data-account-id="${id}">网络确认</button><button class="ghost mapping-action" data-settings-action="account_remove_gate" data-report-target="settingsReport" data-account-id="${id}">删除确认</button></div></details>`}
+function accountConfigCard(a){
+  const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;const name=escapeHtml(a.name||a.id||'-');const id=escapeHtml(a.id||'');const defaultInput=`<label class="check"><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${id}" ${isDefault?'checked':''} ${locked?'disabled':''}><span>设为 ${escapeHtml((a.cli||'-').toUpperCase())} 默认账号</span></label>`;
+  const fieldHtml=locked?`<div class="account-fields"><div class="span6"><label>名称</label><p class="mono">${name}</p></div><div class="span3"><label>priority</label><p class="mono">${Number(a.priority||100)}</p></div><div class="span3"><label>Claude 1M</label><p class="mono">${escapeHtml(a.claude_1m_mode||'auto')}</p></div><div class="span3"><label>timezone</label><p class="mono">${escapeHtml(a.timezone||'-')}</p></div><div class="span3"><label>note</label><p>${escapeHtml(a.note||'-')}</p></div></div>`:`<div class="account-fields"><div class="span6"><label>名称</label><input data-account-name value="${name}"></div><div class="span3"><label>priority</label><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}"></div><div class="span3"><label>Claude 1M</label><select data-account-claude-1m><option value="auto" ${(a.claude_1m_mode||'auto')==='auto'?'selected':''}>自动</option><option value="enable" ${a.claude_1m_mode==='enable'?'selected':''}>启用</option><option value="disable" ${a.claude_1m_mode==='disable'?'selected':''}>禁用</option></select></div><div class="span3"><label>timezone</label><input data-account-timezone value="${escapeHtml(a.timezone||'')}" placeholder="Asia/Singapore"></div><div class="span9"><label>note</label><input data-account-note value="${escapeHtml(a.note||'')}" placeholder="备注会进入保存预览"></div></div>`;
+  const family=locked?`<p class="mono">${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{})||'继承')}</p>`:`<input data-account-family value="${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{}))}" placeholder="GPT=120, Qwen=90">`;
+  return `<div class="account-config-card ${locked?'locked':''}" data-account-id="${id}"><div class="account-card-head"><div><h4>${name}</h4><p class="mono">${id}</p></div><div class="chips"><span class="chip">${escapeHtml((a.cli||'-').toUpperCase())}</span><span class="chip ${a.enabled?'':'off'}">${a.enabled?'启用':'禁用'}</span>${isDefault?'<span class="chip">默认</span>':''}${locked?'<span class="chip off">Claude 人工锁定</span>':''}</div></div>${locked?'<p class="muted">Claude account 只读展示，不允许 WebUI 自动写入。</p>':`<label class="check"><input data-account-enabled type="checkbox" ${a.enabled?'checked':''}><span>启用这个账号</span></label>`}${defaultInput}${fieldHtml}<details class="account-advanced"><summary>Family 权重覆盖（不常用）</summary><p class="muted">平时留空继承账号 priority；只在某个 family 需要单独排序时填写。</p>${family}</details><div class="chips"><span class="chip">auth ${escapeHtml(a.auth_mode||'-')}</span><span class="chip">home ${yn(a.home_dir_configured)}</span><span class="chip">proxy ${yn(a.proxy_configured)}</span><span class="chip">启动 ${Number((a.usage||{}).launches||0)}</span><span class="chip">最近 ${escapeHtml((a.usage||{}).last_used_at||'-')}</span><span class="chip ${locked?'off':''}">${writePolicyLabel(a.webui_write_policy||'read_only')}</span></div>${accountActionButtons(a)}</div>`
+}
+function renderSettings(){
+  state.account_defaults=state.account_defaults||{};
+  const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];
+  renderUiSettings(mapping);
+  const accountEmpty='<div class="settings-compat-note"><strong>暂无 CLI account</strong><p>API Key provider 请在「通道配置」维护。OAuth / AGY 官方登录已不再作为新增主流程。</p></div>';
+  if($('accountTable')){$('accountTable').innerHTML=accounts.length?accounts.map(accountConfigCard).join(''):accountEmpty}
+  document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority],[data-account-family],[data-account-claude-1m],[data-account-timezone],[data-account-note]').forEach(el=>{const handler=()=>{syncAccounts();toast('账号草稿已暂存，生成保存预览后再写入')};el.oninput=handler;el.onchange=handler});
+  document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('账号默认值已暂存，生成保存预览后再写入')}});
+  if($('settingsCoverage')){$('settingsCoverage').innerHTML=`<thead><tr><th>区域</th><th>能力</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')||String(row.webui||'').includes('待补齐')||String(row.webui||'').includes('人工确认')?'off':''}">${writePolicyLabel(row.webui)}</span></td><td>${writePolicyLabel(row.tui)}</td></tr>`).join('')}</tbody>`}
+  renderTuiMapping(mapping);
+  bindSettingsTabs();
+  bindSettingsActionButtons();
+  switchSettingsTab(settingsActiveTab);
+}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的审查产物。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'已脱敏':'含明文'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}

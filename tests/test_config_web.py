@@ -109,9 +109,9 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
     assert snapshot["tui_webui_mapping_summary"]["counts"] == {
         "native": 19,
-        "report": 16,
+        "report": 17,
         "draft_review": 3,
-        "human_gate": 21,
+        "human_gate": 20,
         "missing": 0,
     }
     assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
@@ -150,7 +150,9 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert next(item for item in mapping if item["id"] == "guard.accept")["status"] == "human_gate"
     assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
-    assert next(item for item in mapping if item["id"] == "connect.add_official")["status"] == "human_gate"
+    official_row = next(item for item in mapping if item["id"] == "connect.add_official")
+    assert official_row["status"] == "report"
+    assert official_row["write_policy"] == "deprecated_read_only_compat"
     assert next(item for item in mapping if item["id"] == "provider.model_patch_reset")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "provider.advanced_metadata")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "provider.network_policy")["status"] == "human_gate"
@@ -284,10 +286,11 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert language["status"] == "native"
     assert channel_status["status"] == "native"
     assert channel_status["provider_default"] == "demo"
-    assert official_gate["status"] == "human_gate"
+    assert official_gate["status"] == "deprecated"
+    assert official_gate["write_policy"] == "deprecated_read_only_compat"
     assert official_gate["blocked_auto_execute"] is True
-    assert "mmf config account.add codex" in official_gate["commands"]
-    assert "Claude OAuth 独立入口已下线" in " ".join(official_gate["manual_steps"])
+    assert official_gate["commands"] == []
+    assert "OAuth / AGY 官方登录入口" in " ".join(official_gate["manual_steps"])
     assert autosort_gate["write_policy"] == "speed_stats_write_human_gate"
     assert "WebUI 已提供手工 family priority 草稿" in autosort_gate["safe_alternative"]
     assert any(item["id"] == "provider.network_policy" for item in mapping["mapping"])
@@ -774,13 +777,17 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
-    assert "['settings','设置','账号 / Guard / 关于']" in html
+    assert "['settings','设置','配置台 / 账号 / 安全']" in html
     assert 'data-section="settings"' in html
     assert "<h2>设置</h2>" in html
-    assert "通道、模型和真源动作已经放回各自模块" in html
+    assert "这里是 WebUI 配置台" in html
+    assert "把设置从 TUI 迁到可保存的 WebUI 表单" in html
+    assert "data-settings-tab" in html
+    assert "function switchSettingsTab" in html
     assert "Snapshot Guard" in html
     assert "accountModuleActions" in html
     assert "accountActionButtons" in html
+    assert "account-config-grid" in html
     assert "sourceReport" in html
     assert "channelReport" in html
     assert "data-provider-form-tab" in html
@@ -792,8 +799,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Family 权重覆盖（不常用）" in html
     assert "默认继承 priority" in html
     assert "provider-advanced" in html
-    assert "自动排序用途说明" in html
-    assert "官方账号登录说明（OAuth）" in html
+    assert "保存审计入口" in html
+    assert "自动排序用途说明" not in html
+    assert "官方账号登录说明（OAuth）" not in html
+    assert "OAuth 主流程已下线" in html
+    assert "查看已下线兼容说明" in html
     assert "OAuth 确认" not in html
     assert "自动排序确认" not in html
     assert "modelInventorySummary" in html
