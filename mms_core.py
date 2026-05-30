@@ -233,6 +233,7 @@ hooks = []                    # hook names or paths shown on confirm screen
 # Optional custom roots; env vars like MMS_WEB_ACCESS_ROOT still win.
 # web_access = "~/my-skills/web-access"
 # weber = "~/my-skills/weber"
+# codegraph = "~/vendor/codegraph"
 # token_saver = "~/vendor/token-saver"
 # toon = "~/vendor/toon"
 # xmem = "~/auto-skills/shared-skills/xmem"
@@ -3294,6 +3295,7 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
     "auto_github_contributor": "auto_github_contributor",
     "auto-github-contributor": "auto_github_contributor",
     "caveman": "caveman",
+    "codegraph": "codegraph",
     "nsr": "nsr",
     "ecc": "ecc",
     "omc": "omc",
@@ -8741,6 +8743,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             _resolve_agent_browser_root,
             _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
+            _resolve_codegraph_root,
             _resolve_ecc_root,
             _resolve_nsr_root,
             _resolve_omc_root,
@@ -9321,6 +9324,13 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             _append_skill_entries(
                 "always",
                 [{"name": "agent-browser", "path": _skill_path(agent_browser_root)}],
+                _L("会话技能", "Session skill"),
+            )
+        if _resolve_codegraph_root():
+            codegraph_root = _resolve_codegraph_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "codegraph", "path": _skill_path(codegraph_root)}],
                 _L("会话技能", "Session skill"),
             )
         if _resolve_toon_root():
@@ -12509,7 +12519,7 @@ def _display_preferences_help():
     console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
     console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
-    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
+    console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
     console.print("\n[bold]Overlay order:[/bold]")

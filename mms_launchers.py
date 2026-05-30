@@ -3425,6 +3425,31 @@ def _resolve_agent_browser_root():
     return ""
 
 
+def _resolve_codegraph_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_CODEGRAPH_ROOT") or os.environ.get("MMS_CODEGRAPH_SKILL_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("codegraph")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "codegraph"),
+        _real_user_path("auto-skills", "shared-skills", "codegraph"),
+        _real_user_path("auto-skills", "vendor", "codegraph"),
+        _real_user_path("vendor", "codegraph"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
 def _resolve_toon_root():
     candidates = []
     explicit = str(os.environ.get("MMS_TOON_ROOT") or "").strip()
@@ -4971,6 +4996,15 @@ def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled
     _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
+def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    codegraph_root = _resolve_codegraph_root()
+    if not codegraph_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-codegraph-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "codegraph", codegraph_root, disabled_session_surfaces=disabled_session_surfaces)
+
+
 def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     toon_root = _resolve_toon_root()
     if not toon_root:
@@ -5155,6 +5189,7 @@ def _overlay_agy_session_assets(
     _overlay_web_access_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_weber_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_agent_browser_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_codegraph_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_xmem_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -5172,6 +5207,7 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_caveman_session_entries=_overlay_caveman_session_entries,
         overlay_web_access_session_entries=_overlay_web_access_session_entries,
         overlay_weber_session_entries=_overlay_weber_session_entries,
+        overlay_codegraph_session_entries=_overlay_codegraph_session_entries,
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
         overlay_xmem_session_entries=_overlay_xmem_session_entries,
@@ -6817,6 +6853,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             session_home,
             disabled_session_surfaces=disabled_session_surfaces,
         )
+        _overlay_codegraph_session_entries(
+            session_claude_dir,
+            session_home,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
         _overlay_xmem_session_entries(
             session_claude_dir,
             session_home,
@@ -6914,6 +6955,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
+            _overlay_codegraph_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             _overlay_toon_session_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
@@ -6961,6 +7007,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
                 "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+                "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
                 "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
@@ -9831,6 +9878,7 @@ def _claude_gateway_env(
                 "agent_pack": agent_pack,
                 "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+                "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
                 "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
@@ -9880,6 +9928,7 @@ def _claude_gateway_env(
         )
         _overlay_web_access_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_codegraph_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_xmem_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -10303,6 +10352,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_web_access_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_weber_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_agent_browser_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_codegraph_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_xmem_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -10340,6 +10390,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
             "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
             "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+            "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
             "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
@@ -10662,6 +10713,7 @@ def _opencode_gateway_env(runtime, model_info=None):
         runtime_caveman_enabled=_runtime_caveman_enabled,
         resolve_web_access_root=_resolve_web_access_root,
         resolve_weber_root=_resolve_weber_root,
+        resolve_codegraph_root=_resolve_codegraph_root,
         resolve_toon_root=_resolve_toon_root,
         resolve_token_saver_root=_resolve_token_saver_root,
         resolve_xmem_root=_resolve_xmem_root,

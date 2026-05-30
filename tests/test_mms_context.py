@@ -322,6 +322,48 @@ def test_resolve_token_saver_root_prefers_bundled_vendor(monkeypatch, tmp_path):
     assert Path(mms_launchers._resolve_token_saver_root()) == bundled_root
 
 
+def test_resolve_codegraph_root_prefers_bundled_vendor(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    install_root = tmp_path / "mms-install"
+    bundled_root = install_root / "vendor" / "codegraph"
+    shared_root = home / "auto-skills" / "shared-skills" / "codegraph"
+    bundled_root.mkdir(parents=True)
+    shared_root.mkdir(parents=True)
+    (bundled_root / "SKILL.md").write_text("# bundled codegraph\n", encoding="utf-8")
+    (shared_root / "SKILL.md").write_text("# shared codegraph\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(home))
+    monkeypatch.delenv("MMS_CODEGRAPH_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CODEGRAPH_SKILL_ROOT", raising=False)
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
+
+    assert Path(mms_launchers._resolve_codegraph_root()) == bundled_root
+
+
+def test_overlay_codegraph_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    session_home = tmp_path / "session-home"
+    parent_dir = session_home / ".codex"
+    existing_skills = tmp_path / "existing-skills"
+    codegraph_root = tmp_path / "codegraph"
+    parent_dir.mkdir(parents=True)
+    (existing_skills / "keep-skill").mkdir(parents=True)
+    codegraph_root.mkdir()
+    (codegraph_root / "SKILL.md").write_text("# codegraph\n", encoding="utf-8")
+    os.symlink(existing_skills, parent_dir / "skills")
+
+    monkeypatch.setenv("MMS_CODEGRAPH_ROOT", str(codegraph_root))
+
+    mms_launchers._overlay_codegraph_session_entries(str(parent_dir), str(session_home))
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "codegraph")
+    assert (parent_dir / "skills" / "codegraph" / "SKILL.md").read_text(encoding="utf-8") == "# codegraph\n"
+
+
 def test_overlay_weber_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 

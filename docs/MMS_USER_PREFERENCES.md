@@ -62,6 +62,7 @@ hooks = []
 web_access = "~/my-skills/web-access"
 weber = "~/my-skills/weber"
 agent_browser = "~/my-skills/agent-browser"
+codegraph = "~/vendor/codegraph"
 token_saver = "~/vendor/token-saver"
 toon = "~/vendor/toon"
 xmem = "~/vendor/xmem"
@@ -103,7 +104,7 @@ hooks = []
 `[assets.roots]` accepts:
 
 ```text
-web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor
+web_access, weber, agent_browser, codegraph, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor
 ```
 
 Env vars like `MMS_WEB_ACCESS_ROOT` and `MMS_ECC_ROOT` still take priority over `preferences.toml`.
