@@ -174,12 +174,12 @@ When a user asks "MMS 该改哪个配置":
 1. Run or cite `mms config preferences.help`.
 2. Read this document.
 3. Prefer `preferences.toml` for daily preferences like `thinking_mode`, `reasoning_effort`, `bypass`, `nsr_mode`, `agent_pack`, and disabled session surfaces.
-4. Do not write real `~/.config/mms/**` automatically. Propose a TOML snippet or diff and ask the human to apply/confirm.
+4. Do not write real `~/.config/mms/**` automatically. Propose a TOML snippet/diff, or use the WebUI preferences writer only after the human explicitly confirms.
 5. If the requested change touches credentials, accounts, provider routes, proxy, OAuth, real `HOME`, or Claude config, treat it as a human-gate change and do not auto-apply.
 
 ## Lazy Session Assets
 
-MMS-installed assets are copied under `~/.mms/vendor/` during install. Launchers then symlink them into each isolated session only when that session starts.
+MMS-managed assets live under `~/.local/share/mms/assets` by default. Launchers then symlink them into each isolated session only when that session starts.
 
 Common roots:
 
@@ -202,10 +202,10 @@ This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giv
 
 ## WebUI 能力目录
 
-`mms config web` 提供只读的 **会话能力中心**。它复用 TUI 启动确认页的 launch preview catalog，但按普通用户更容易理解的方式分组：
+`mms config web` 提供 **Skill / MCP 管理**。它复用 TUI 启动确认页的 launch preview catalog，但按普通用户更容易理解的方式分组：
 
 - `MMS 动态注入`：MMS 在 session 启动时临时注入的技能、MCP 服务、hooks 和 OpenCode 插件；
 - `全局继承`：用户自己已有的 Claude/Codex/OpenCode 配置或插件，MMS 可以看到，但 WebUI 不会静默编辑；
 - `其它检测项`：启动预览能看到、但需要保守检查路径的条目。
 
-面板默认用卡片展示用途、来源、CLI、类型和默认状态；路径、触发、`disable_key` 和原始说明折叠在“高级信息”里。Global Skill 数量较多时会按组折叠，例如 `lark-*` 会进入 Lark CLI 技能组，并能整组加入默认关闭草稿。它只用于发现能力和生成片段，持久默认值仍属于 `preferences.toml`，真实 `~/.config/mms/**` 写入继续受 human gate 保护。WebUI 里的“默认关闭”只是内存草稿；复制片段不会改变 runtime 行为，只有用户把片段应用到 `preferences.toml` 后才会生效。
+面板默认用卡片展示用途、来源、CLI、类型和默认状态；路径、触发、`disable_key` 和原始说明折叠在“高级信息”里。Global Skill 数量较多时会按组折叠，例如 `lark-*` 会进入 Lark CLI 技能组，并能整组加入默认关闭草稿。默认关闭仍属于 `preferences.toml`；WebUI 的“应用到 preferences.toml”会单独保存 Skill/MCP/Hook 偏好，创建 backup + audit，不混入模型/provider 保存。

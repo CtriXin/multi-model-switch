@@ -356,6 +356,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "这里就是会话能力的配置入口" in html
     assert "function renderSessionAssets()" in html
     assert "assetPreferenceSnippet" in html
+    assert "applyAssetPrefs" in html
+    assert "/api/preferences/apply" in html
+    assert "保存偏好" in html
     assert "assetCards" in html
     assert "assetControlHelp" in html
     assert "添加到 MMS 动态" in html
@@ -1837,6 +1840,57 @@ def test_config_web_registry_v2_apply_requires_explicit_preview_confirmation(tmp
     assert result["status"] == "blocked"
     assert "确认" in result["errors"][0]
     assert not config_root.exists()
+
+
+def test_config_web_preferences_apply_uses_backup_and_audit(tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    preferences_path.write_text(
+        '[launch.defaults]\nbypass = false\n\n[assets.roots]\nweb_access = "/tmp/web"\n',
+        encoding="utf-8",
+    )
+    payload = {
+        "disabled": {"skills": ["web-access", "claude:lark-doc"], "mcp": ["pilot"], "hooks": ["echo hi"]},
+        "assets": {"managed_enabled": True, "managed_root": str(tmp_path / "assets")},
+        "confirm_preferences": True,
+        "confirm_phrase": "保存偏好",
+        "reason": "test:asset-preferences",
+    }
+
+    plan = mms_config_web.build_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    result = mms_config_web.apply_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    saved = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert plan["will_write"] is True
+    assert result["ok"] is True
+    assert result["status"] == "saved"
+    assert result["backup_path"]
+    assert (tmp_path / "config-audit.jsonl").exists()
+    assert saved["launch"]["defaults"]["bypass"] is False
+    assert saved["assets"]["roots"]["web_access"] == "/tmp/web"
+    assert saved["assets"]["managed_root"] == str(tmp_path / "assets")
+    assert saved["session_surfaces"]["disabled"]["skills"] == ["web-access", "claude:lark-doc"]
+    assert saved["session_surfaces"]["disabled"]["mcp"] == ["pilot"]
+
+
+def test_config_web_preferences_apply_requires_confirmation(tmp_path):
+    result = mms_config_web.apply_preferences_plan(
+        {"disabled": {"skills": ["web-access"]}},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert not (tmp_path / "preferences.toml").exists()
 
 
 def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):

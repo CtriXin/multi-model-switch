@@ -38,12 +38,12 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 - 卡片正面只显示用途、来源、CLI、类型和默认状态；
 - 路径、触发、`disable_key`、原始说明折叠到“高级信息”；
 - 勾选“默认关闭”只更新页面内草稿，并生成 `preferences.toml` 片段；
-- **应用默认关闭** 是复制片段的操作区；**Global 添加位置** 只显示最常用落点，已检测到的其它全局/plugin 位置默认折叠；
+- **应用默认关闭** 是 preferences.toml 的单独保存区，仍保留复制片段作为 fallback；**Global 添加位置** 只显示最常用落点，已检测到的其它全局/plugin 位置默认折叠；
 - Claude / Codex 自己全局目录下的 Skill 可以加入“默认关闭草稿”；MMS 启动时会在 session-local merge 阶段过滤这些名字，不会删除真实全局目录。
 - 宿主级共享候选和 Codex plugin cache 仍是只读展示，避免 WebUI 承诺 launcher 当前不能保证的继承过滤。
 - 全局 Skill 量很大时按技能组折叠展示，例如 `lark-*` 会进入 **Lark CLI 技能组**，并支持把可过滤的同组项一次性加入/移出“默认关闭草稿”。
 
-这一版不会写 `~/.config/mms/preferences.toml`。它只负责展示、解释、内存编辑和复制片段；后续如果要真实写入，仍要走 audited preferences writer 和 human gate。
+这一版不会把 Skill/MCP/Hook 偏好混进模型/provider 保存。`应用默认关闭` 会走独立 preferences writer：确认后只写 `preferences.toml`，并创建 backup + audit；复制片段仍作为 fallback。
 
 ## 安装版 / 开发版位置
 
@@ -105,7 +105,7 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 
 ## 固定展示位置与固定安装位置
 
-当前已完成的是 WebUI 固定管理入口：`Skill / MCP 管理`。首屏用于筛选、开关和复制偏好片段；**当前加载来源 / 路径诊断** 会按实际 resolver 展示安装版/开发版当前选中的根，但默认折叠，避免抢占主要管理区。
+当前已完成的是 WebUI 固定管理入口：`Skill / MCP 管理`。首屏用于筛选、开关和保存偏好；**当前加载来源 / 路径诊断** 会按实际 resolver 展示安装版/开发版当前选中的根，但默认折叠，避免抢占主要管理区。
 
 当前也已经有固定安装根：`~/.local/share/mms/assets`。现有持久配置入口包括 `[assets].managed_root` 和 `[assets.roots]`；前者是统一根，后者是单个能力的覆盖。任何写入 `~/.config/mms/preferences.toml` 仍必须走 human gate。
 

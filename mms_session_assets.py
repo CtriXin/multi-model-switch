@@ -1101,7 +1101,7 @@ def build_session_assets_snapshot(
             "persistent_path": preferences_path or "~/.config/mms/preferences.toml",
             "managed_assets_root": _managed_install_contract(home, mms_core).get("root"),
             "launch_override": "TUI 启动确认页本次切换优先级最高，但不写回真实配置。",
-            "webui_write_scope": "当前 WebUI 面板先做 read-only inventory + snippet；后续保存 preferences 仍需 HumanGate。",
+            "webui_write_scope": "本页可单独写 preferences.toml；不混入模型/provider 保存。",
         },
         "guidance": [
             "先看 MMS dynamic：这些是 MMS session 才注入的能力，适合按 CLI/任务开关。",

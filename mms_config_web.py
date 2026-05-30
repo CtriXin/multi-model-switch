@@ -1173,9 +1173,9 @@ def build_setup_flow() -> list[dict[str, Any]]:
         {
             "id": "session_assets",
             "title": "7. Session 能力面板",
-            "summary": "只读区分 MMS dynamic 与 Global/inherited 的 skills、MCP、hooks，并给出 preferences.toml 开关位置。",
+            "summary": "区分 MMS dynamic 与 Global/inherited 的 skills、MCP、hooks，并可单独保存 preferences.toml 偏好。",
             "fields": ["cli", "kind", "origin", "path", "disable_key", "default_state"],
-            "actions": ["filter_by_cli", "filter_by_origin", "copy_preferences_snippet"],
+            "actions": ["filter_by_cli", "filter_by_origin", "save_preferences", "copy_preferences_snippet"],
         },
     ]
 
@@ -2307,6 +2307,181 @@ def _write_model_policy_audited(policy_path: str, payload: dict[str, Any], *, co
     return {"target_path": os.path.abspath(policy_path), "backup_path": backup_path, "bak_path": _bak_path_for_backup(backup_path)}
 
 
+def _preferences_target_path(*, config_path: str = "", preferences_path: str = "") -> str:
+    preferences_path = _safe_text(preferences_path)
+    if preferences_path:
+        return os.path.abspath(os.path.expanduser(preferences_path))
+    if config_path:
+        return os.path.join(os.path.dirname(os.path.abspath(config_path)), "preferences.toml")
+    mms_core = _load_mms_core()
+    paths = getattr(mms_core, "PREFERENCES_PATHS", None)
+    if isinstance(paths, list) and paths:
+        return os.path.abspath(os.path.expanduser(str(paths[0])))
+    return os.path.abspath(os.path.expanduser("~/.config/mms/preferences.toml"))
+
+
+def _preferences_lock_path(*, config_path: str = "", preferences_path: str = "") -> str:
+    if config_path:
+        return os.path.abspath(config_path)
+    target = _preferences_target_path(config_path=config_path, preferences_path=preferences_path)
+    return os.path.join(os.path.dirname(target), "config.toml")
+
+
+def _load_preferences_raw(path: str) -> dict[str, Any]:
+    if not os.path.exists(path):
+        return {}
+    mms_core = _load_mms_core()
+    try:
+        loaded = mms_core._load_toml_file(path)  # noqa: SLF001
+    except Exception:
+        loaded = {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _normalize_asset_preferences_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    disabled = payload.get("disabled")
+    if not isinstance(disabled, dict):
+        disabled = ((payload.get("session_surfaces") or {}).get("disabled") if isinstance(payload.get("session_surfaces"), dict) else {})
+    assets = payload.get("assets") if isinstance(payload.get("assets"), dict) else {}
+    mms_core = _load_mms_core()
+    sanitize_disabled = getattr(mms_core, "_sanitize_disabled_session_surfaces", None)
+    if callable(sanitize_disabled):
+        disabled_clean = sanitize_disabled(disabled)
+    else:
+        disabled_clean = {}
+    normalized: dict[str, Any] = {"session_surfaces": {"disabled": disabled_clean}, "assets": {}}
+    if "managed_enabled" in assets:
+        normalized["assets"]["managed_enabled"] = _truthy(assets.get("managed_enabled"), default=True)
+    managed_root = _safe_text(assets.get("managed_root"))
+    if managed_root:
+        normalized["assets"]["managed_root"] = os.path.abspath(os.path.expanduser(managed_root))
+    return normalized
+
+
+def _merge_asset_preferences(current: dict[str, Any], asset_preferences: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(current) if isinstance(current, dict) else {}
+    session_surfaces = result.get("session_surfaces") if isinstance(result.get("session_surfaces"), dict) else {}
+    disabled = ((asset_preferences.get("session_surfaces") or {}).get("disabled") if isinstance(asset_preferences.get("session_surfaces"), dict) else {})
+    session_surfaces["disabled"] = copy.deepcopy(disabled) if isinstance(disabled, dict) else {}
+    result["session_surfaces"] = session_surfaces
+
+    assets = result.get("assets") if isinstance(result.get("assets"), dict) else {}
+    incoming_assets = asset_preferences.get("assets") if isinstance(asset_preferences.get("assets"), dict) else {}
+    for key in ("managed_enabled", "managed_root"):
+        if key in incoming_assets:
+            assets[key] = incoming_assets[key]
+    result["assets"] = assets
+    return result
+
+
+def build_preferences_plan(
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    target_path = _preferences_target_path(config_path=config_path, preferences_path=preferences_path)
+    current = _load_preferences_raw(target_path)
+    asset_preferences = _normalize_asset_preferences_payload(payload)
+    next_prefs = _merge_asset_preferences(current, asset_preferences)
+    before_text = _toml_text(current)
+    after_text = _toml_text(next_prefs)
+    diff_text = _diff_text(before_text, after_text, before_name="preferences.toml(before)", after_name="preferences.toml(after)")
+    disabled = ((asset_preferences.get("session_surfaces") or {}).get("disabled") or {}) if isinstance(asset_preferences.get("session_surfaces"), dict) else {}
+    return {
+        "ok": True,
+        "schema": "mms.setup_web.preferences_plan.v1",
+        "status": "planned",
+        "target_path": target_path,
+        "exists": os.path.exists(target_path),
+        "will_write": bool(diff_text),
+        "diff": diff_text,
+        "preferences": next_prefs,
+        "summary": {
+            "skills": len(disabled.get("skills") or []),
+            "mcp": len(disabled.get("mcp") or []),
+            "hooks": len(disabled.get("hooks") or []),
+            "managed_root": ((asset_preferences.get("assets") or {}).get("managed_root") if isinstance(asset_preferences.get("assets"), dict) else ""),
+        },
+    }
+
+
+def _copy_preferences_backup(target_path: str, *, lock_path: str) -> str:
+    mms_core = _load_mms_core()
+    backup_root = mms_core._config_backup_root(lock_path)  # noqa: SLF001
+    backup_dir = os.path.join(backup_root, f"preferences-write-{mms_core._local_now_slug()}")  # noqa: SLF001
+    os.makedirs(backup_dir, exist_ok=True)
+    if os.path.exists(target_path):
+        backup_path = os.path.join(backup_dir, os.path.basename(target_path))
+        shutil.copy2(target_path, backup_path)
+        shutil.copy2(target_path, f"{backup_path}.bak")
+        return backup_path
+    marker_path = os.path.join(backup_dir, f"{os.path.basename(target_path) or 'preferences.toml'}.missing")
+    with open(marker_path, "w", encoding="utf-8") as handle:
+        handle.write(f"missing before preferences write: {target_path}\n")
+    os.chmod(marker_path, 0o600)
+    return marker_path
+
+
+def apply_preferences_plan(
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    if not _truthy(payload.get("confirm_preferences"), False):
+        return {"ok": False, "schema": "mms.setup_web.preferences_save_result.v1", "status": "blocked", "errors": ["保存 Skill/MCP 偏好前必须勾选确认。"]}
+    if _safe_text(payload.get("confirm_phrase")) != "保存偏好":
+        return {"ok": False, "schema": "mms.setup_web.preferences_save_result.v1", "status": "blocked", "errors": ["确认文字必须输入：保存偏好"]}
+    plan = build_preferences_plan(payload, config_path=config_path, preferences_path=preferences_path)
+    if not plan.get("will_write"):
+        return {
+            "ok": True,
+            "schema": "mms.setup_web.preferences_save_result.v1",
+            "status": "no_change",
+            "target_path": plan.get("target_path"),
+            "summary": plan.get("summary") or {},
+            "message": "preferences.toml 已是当前 Skill/MCP 偏好。",
+        }
+
+    mms_core = _load_mms_core()
+    target_path = str(plan.get("target_path") or "")
+    lock_path = _preferences_lock_path(config_path=config_path, preferences_path=preferences_path)
+    reason = _safe_text(payload.get("reason")) or "setup-web-ui:asset-preferences"
+    with mms_core._locked_config_write(lock_path):  # noqa: SLF001
+        before_sha1 = mms_core._sha1_file(target_path)  # noqa: SLF001
+        backup_path = _copy_preferences_backup(target_path, lock_path=lock_path)
+        mms_core._atomic_write_toml(target_path, plan["preferences"])  # noqa: SLF001
+        try:
+            os.chmod(target_path, 0o600)
+        except OSError:
+            pass
+        after_sha1 = mms_core._sha1_file(target_path)  # noqa: SLF001
+        _append_audit(
+            config_path=lock_path,
+            target_path=target_path,
+            backup_path=backup_path,
+            reason=reason,
+            before_sha1=before_sha1,
+            after_sha1=after_sha1,
+            function="setup_web_save_preferences",
+        )
+    return {
+        "ok": True,
+        "schema": "mms.setup_web.preferences_save_result.v1",
+        "status": "saved",
+        "target_path": target_path,
+        "backup_path": backup_path,
+        "bak_path": _bak_path_for_backup(backup_path),
+        "summary": plan.get("summary") or {},
+        "diff": plan.get("diff") or "",
+        "audit_tail": _latest_audit_rows(lock_path),
+    }
+
+
 def apply_config_plan(
     current_cfg: dict[str, Any] | None,
     payload: dict[str, Any] | None,
@@ -2786,6 +2961,14 @@ class ConfigWebApp:
                 self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
             return result
 
+    def preferences_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return build_preferences_plan(payload, config_path=self.config_path, preferences_path=self.preferences_path)
+
+    def preferences_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return apply_preferences_plan(payload, config_path=self.config_path, preferences_path=self.preferences_path)
+
     def provider_test(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             return test_provider_models(self.cfg, payload, config_path=self.config_path, command_name=self.command_name)
@@ -2865,6 +3048,13 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/registry-v2/apply":
                 result = app.registry_v2_apply(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/preferences/plan":
+                self._send(*_json_response(app.preferences_plan(payload)))
+                return
+            if path == "/api/preferences/apply":
+                result = app.preferences_apply(payload)
                 self._send(*_json_response(result, status=200 if result.get("ok") else 400))
                 return
             self._send(404, b"not found\n", "text/plain; charset=utf-8")
