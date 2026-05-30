@@ -793,9 +793,39 @@ _HTML_PAGE = r"""<!doctype html>
       margin-top: 14px;
     }
     .asset-source-strip {
+      display: block;
+      min-width: 0;
+    }
+    .asset-source-diagnostic {
+      border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+      border-radius: var(--radius-lg);
+      padding: 12px 14px;
+      background:
+        linear-gradient(135deg, oklch(99% 0.01 188), oklch(100% 0 0));
+      min-width: 0;
+    }
+    .asset-source-diagnostic summary {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-weight: 760;
+      min-width: 0;
+    }
+    .asset-source-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .asset-source-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 10px;
+      margin-top: 12px;
       min-width: 0;
     }
     .asset-source-mini {
@@ -1472,7 +1502,7 @@ _HTML_PAGE = r"""<!doctype html>
     <!-- Session 能力面板 -->
     <section class="panel" data-section="sessionAssets">
       <h2>Skill / MCP 管理</h2>
-      <p>先看当前实际加载位置和能力卡片：MMS 动态注入可生成默认关闭片段，Global 只做只读对照。</p>
+      <p>先管理能力卡片；来源诊断默认折叠，只用来确认安装版 / 开发版实际从哪里加载。</p>
       <div class="asset-manager">
         <div class="asset-source-strip" id="assetManagedRoots"></div>
         <div class="asset-toolbar">
@@ -1693,7 +1723,7 @@ function assetTomlString(value){return String(value||'').replaceAll('\\','\\\\')
 function assetArrayToml(values){return `[${[...new Set((values||[]).map(x=>String(x||'').trim()).filter(Boolean))].sort().map(v=>`"${assetTomlString(v)}"`).join(', ')}]`}
 function renderAssetPreferenceSnippet(){const assets=state.session_assets||{};const defaults=assets.launch_defaults||{};const draft=ensureAssetDisabledDraft();const snippet=[`[launch.defaults]`,`caveman_mode = "${assetTomlString(defaults.caveman_mode||'enable')}"`,`nsr_mode = "${assetTomlString(defaults.nsr_mode||'enable')}"`,`agent_pack = "${assetTomlString(defaults.agent_pack||'none')}"`,`bypass = ${defaults.bypass===false?'false':'true'}`,'',`[session_surfaces.disabled]`,`skills = ${assetArrayToml(draft.skills)}`,`mcp = ${assetArrayToml(draft.mcp)}`,`hooks = ${assetArrayToml(draft.hooks)}`].join('\n');$('assetPreferenceSnippet').textContent=snippet;return snippet}
 function bindAssetPreferenceButtons(){const copy=$('copyAssetPrefs');const reset=$('resetAssetPrefs');if(copy)copy.onclick=async()=>{const snippet=renderAssetPreferenceSnippet();try{await navigator.clipboard.writeText(snippet);toast('偏好片段已复制')}catch(_err){toast('无法访问剪贴板，片段已显示在页面')}};if(reset)reset.onclick=()=>{assetDisabledDraft=cloneAssetDisabledDefaults();renderSessionAssets();toast('已恢复为当前 preferences.toml 状态')}}
-function renderAssetManagedRoots(){const box=$('assetManagedRoots');if(!box)return;const roots=(state.session_assets||{}).managed_roots||[];const visible=Array.isArray(roots)?roots.filter(Boolean):[];if(!visible.length){box.innerHTML='<div class="asset-source-mini asset-source-intro"><strong>MMS 动态来源</strong><p class="muted">当前没有解析到动态 skill/MCP 根；请查看单卡高级信息。</p></div>';return}const rootCard=(root)=>{const exists=!!root.exists;const count=Number(root.skill_count||0);const real=root.real_path&&root.real_path!==root.path?`<details class="asset-source-real"><summary>真实路径</summary><p class="mono">${escapeHtml(root.real_path)}</p></details>`:'';return `<div class="asset-source-mini ${exists?'':'is-missing'}"><div class="asset-source-head"><strong class="asset-source-title">${escapeHtml(root.name||'-')}</strong><span class="tag ${exists?'':'off'}">${escapeHtml(root.surface||'Skill')}</span></div><p class="mono asset-source-path">${escapeHtml(root.path||'-')}</p><div class="asset-source-foot"><span class="tag ${exists?'':'off'}">${exists?'已解析':'未找到'}</span><span class="muted">${escapeHtml(root.root_kind||'来源未知')}${count?` · ${count} 个 skill`:''}</span></div>${real}</div>`};box.innerHTML=`<div class="asset-source-mini asset-source-intro"><div class="asset-source-head"><strong>MMS 动态来源</strong><span class="tag">${visible.length} 个根</span></div><p class="muted">安装版和开发版都看这里：这里展示当前 resolver 实际选中的 vendor / agent-pack / MCP 根；启动 session 时再软链到隔离 HOME。</p></div>${visible.map(rootCard).join('')}`}
+function renderAssetManagedRoots(){const box=$('assetManagedRoots');if(!box)return;const roots=(state.session_assets||{}).managed_roots||[];const visible=Array.isArray(roots)?roots.filter(Boolean):[];if(!visible.length){box.innerHTML='<details class="asset-source-diagnostic"><summary><span>当前加载来源 / 路径诊断</span><span class="tag off">未解析</span></summary><p class="muted">当前没有解析到动态 Skill/MCP 根；可在单卡高级信息里继续排查。</p></details>';return}const resolved=visible.filter(root=>!!root.exists).length;const skillRoots=visible.filter(root=>String(root.surface||'').toLowerCase().includes('skill')).length;const mcpRoots=visible.filter(root=>String(root.surface||'').toLowerCase().includes('mcp')).length;const rootCard=(root)=>{const exists=!!root.exists;const count=Number(root.skill_count||0);const real=root.real_path&&root.real_path!==root.path?`<p><strong>真实路径</strong>：<span class="mono">${escapeHtml(root.real_path)}</span></p>`:'';return `<div class="asset-source-mini ${exists?'':'is-missing'}"><div class="asset-source-head"><strong class="asset-source-title">${escapeHtml(root.name||'-')}</strong><span class="tag ${exists?'':'off'}">${exists?'已解析':'未找到'}</span></div><div class="asset-source-foot"><span class="tag">${escapeHtml(root.surface||'Skill')}</span><span class="muted">${escapeHtml(root.root_kind||'来源未知')}${count?` · ${count} 个 skill`:''}</span></div><details class="asset-source-real"><summary>路径</summary><p class="mono asset-source-path">${escapeHtml(root.path||'-')}</p>${real}</details></div>`};box.innerHTML=`<details class="asset-source-diagnostic"><summary><span>当前加载来源 / 路径诊断</span><span class="asset-source-summary"><span class="tag">${visible.length} 个来源</span><span class="tag">已解析 ${resolved}</span><span class="tag">Skill ${skillRoots}</span><span class="tag">MCP ${mcpRoots}</span></span></summary><p class="muted">这些只是 MMS 动态能力的来源位置，不是单个 Skill 开关；展开后用于确认安装版 / 开发版实际从哪里加载，启动 session 时再软链到隔离 HOME。</p><div class="asset-source-grid">${visible.map(rootCard).join('')}</div></details>`}
 function assetCliViews(){const assets=state.session_assets||{};return Array.isArray(assets.cli_views)?assets.cli_views:[]}
 function assetCliChip(label,value,cls=''){return `<span class="tag ${cls}">${escapeHtml(label)} ${escapeHtml(value)}</span>`}
 function assetPanelTag(panel){const counts=panel.scope_counts||{};const detail=panel.id==='summary'?'启动摘要':`默认 ${counts.always||0} / 开关 ${Number(counts.caveman||0)+Number(counts.nsr||0)+Number(counts.ecc||0)+Number(counts.omc||0)}`;return `<span class="tag">${escapeHtml(panel.label||panel.id)}：${escapeHtml(detail)}</span>`}

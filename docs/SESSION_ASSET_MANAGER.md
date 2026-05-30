@@ -26,8 +26,8 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 当前面板叫 **Skill / MCP 管理**，默认用卡片而不是大表格：
 
-- 顶部直接显示能力清单：**MMS 动态来源**、来源/CLI/类型筛选和能力卡片优先出现；
-- **MMS 动态来源** 显示当前 resolver 实际选中的全部 vendor / agent-pack / MCP 根，不再截断前几个；
+- 顶部直接进入来源/CLI/类型筛选和能力卡片，**当前加载来源 / 路径诊断** 默认折叠；
+- **当前加载来源 / 路径诊断** 只做 resolver 诊断，展开后显示全部 vendor / agent-pack / MCP 根，不再截断前几个；
 - `全局继承` 会展开 Claude / Codex 的真实全局 Skill 清单，而不是只显示 TUI preview 抽样；
 - Claude 和 Codex 分开统计：Claude 看 `~/.claude/skills`，Codex 看 `~/.codex/skills` + Codex plugin cache；`~/.agents/skills` 作为宿主级共享候选展示，不等于两者 launcher 都强制继承；
 - **TUI 确认页对照** 和 Claude / Codex / OpenCode / Antigravity 的 CLI 总览卡放在可展开区域，避免一进页面像介绍文档；
@@ -51,7 +51,7 @@ MMS 动态 skill/MCP 不要求复制到某一个全局 skill 目录；运行时�
 - 开发版通常来自当前 worktree 的 `vendor/` 或 `agent-packs/`；
 - 安装版通常来自 MMS 安装包内部的 `vendor/` / `agent-packs/`；
 - 用户显式覆盖或历史安装可能来自 `~/auto-skills/installed-skills`、`~/auto-skills/shared-skills`、`~/auto-skills/vendor`、`~/.agents/skills`、`~/.codex/skills` 等；
-- WebUI 的 **MMS 动态来源** 按实际 resolver 结果全量展示，所以本地和安装版可能路径不同，但管理入口是同一个。
+- WebUI 的 **当前加载来源 / 路径诊断** 按实际 resolver 结果全量展示，所以本地和安装版可能路径不同，但管理入口是同一个。
 
 ## TUI 关系
 
@@ -84,10 +84,10 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 
 ## 固定展示位置 vs 真实安装位置
 
-当前已完成的是 WebUI 固定展示入口：`Skill / MCP 管理` 里的 **MMS 动态来源**。它会按实际 resolver 展示安装版/开发版当前选中的根。
+当前已完成的是 WebUI 固定展示入口：`Skill / MCP 管理` 里的 **当前加载来源 / 路径诊断**。它会按实际 resolver 展示安装版/开发版当前选中的根，但默认折叠，避免抢占主要管理区。
 
 还没有完成“把所有动态 Skill/MCP 物理整合到一个真实文件夹再统一安装”。现有持久配置入口是 `[assets.roots]`，用户可以在 `preferences.toml` 指定某个动态 skill 的真实根，例如 `web_access = "~/my-skills/web-access"`；但任何写入 `~/.config/mms/preferences.toml` 都必须走 human gate。
 
 ## 交互参考
 
-这一版更接近 [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) / [Smithery](https://smithery.ai/) 这类管理中心的信息层级：先显示当前连接/来源、状态和可筛选能力，再把高级协议或 CLI 细节折叠起来。
+这一版更接近 MCP Inspector / Smithery 这类管理中心的信息层级：先显示可筛选能力和状态，把来源路径、协议细节或 CLI 细节折叠起来。
