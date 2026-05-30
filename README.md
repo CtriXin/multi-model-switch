@@ -30,10 +30,10 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 | 通道 | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
 |---|---|---|---|---|
 | Stable | `--channel stable` | 普通用户、主力生产环境 | 慢，跟随 GitHub Release / stable 分支 | 完整 smoke 后推进 |
-| Dev | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，当前过渡期跟随 `main`；分支切好后跟随 `dev` | targeted tests 通过 |
+| Dev | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支；当前 `main` 会同步一段时间 | targeted tests 通过 |
 | Canary | `--channel canary` | 专门试新功能/回归验证的机器 | 最快，可每日同步 | 允许短期破，但必须可回滚 |
 
-分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。当前过渡期建议：`main` 暂不停止迭代；`dev` 和 `canary` 先从当前 `main` 切出；等 `release/stable-*` 追上后，再把稳定发布节奏固定下来。
+分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。当前过渡期建议：`main` 暂不停止迭代；`dev` 和 `canary` 已从当前 `main` 切出并推送；之后日常新功能优先进入 `dev` / `canary`，Stable 单独 review 后推进。
 
 ## 安装 / 升级
 
@@ -101,7 +101,7 @@ mmf -> ~/.config/mms-next  # preview root，适合试 Config v2 / Web UI / regis
 
 ## Web UI 教程：从通道到模型可见性
 
-Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。启动：
+Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：**写入预览 DB 不是 Dev channel 决定的，而是 `mmf` preview root 决定的**。如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
 
 ```bash
 mmf config web
