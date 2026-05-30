@@ -789,6 +789,62 @@ _HTML_PAGE = r"""<!doctype html>
       display: grid;
       gap: 14px;
     }
+    .asset-manager + .asset-hero {
+      margin-top: 14px;
+    }
+    .asset-source-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      min-width: 0;
+    }
+    .asset-source-mini {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 11px 12px;
+      background: oklch(100% 0 0 / 0.68);
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .asset-source-mini.asset-source-intro {
+      background:
+        linear-gradient(135deg, oklch(98.5% 0.014 188), oklch(100% 0 0));
+      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+    }
+    .asset-source-mini.is-missing {
+      background: oklch(98% 0.004 240 / 0.8);
+      opacity: .82;
+    }
+    .asset-source-head,
+    .asset-source-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .asset-source-title {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .asset-source-path {
+      margin: 6px 0 4px;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .asset-source-real {
+      margin-top: 6px;
+      font-size: 12px;
+    }
+    .asset-source-real summary {
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .asset-source-mini strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
     .asset-confirm-map {
       display: grid;
       gap: 12px;
@@ -957,10 +1013,34 @@ _HTML_PAGE = r"""<!doctype html>
       border: 1px solid transparent;
       background: oklch(100% 0 0 / 0.7);
       color: oklch(33% 0.02 230);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 650;
       box-shadow: 0 1px 0 oklch(100% 0 0 / 0.7) inset;
     }
     .asset-toolbar .filterbar button:hover {
       border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+    }
+    .asset-toolbar .filterbar button.active,
+    .asset-toolbar .filterbar button[aria-pressed="true"],
+    .asset-toolbar .filterbar button.ghost.active {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: oklch(100% 0 0);
+      box-shadow:
+        0 0 0 1px color-mix(in oklch, var(--accent) 28%, transparent),
+        0 6px 16px oklch(41% 0.11 168 / 0.16);
+    }
+    .asset-toolbar .filterbar button.active::before,
+    .asset-toolbar .filterbar button[aria-pressed="true"]::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: .9;
+      flex: 0 0 auto;
     }
     .asset-search {
       max-width: 340px;
@@ -1347,12 +1427,10 @@ _HTML_PAGE = r"""<!doctype html>
 
     <!-- Session 能力面板 -->
     <section class="panel" data-section="sessionAssets">
-      <h2>会话能力中心</h2>
-      <p>这里解释“启动一个 CLI session 时会带上哪些能力”。默认先看 MMS 动态注入；全局继承只读展示，技术路径和开关 key 都放进高级信息里。</p>
-      <div class="asset-hero" id="assetSummary"></div>
-      <div class="card asset-confirm-map" id="assetConfirmMap"></div>
-      <div class="asset-cli-grid" id="assetCliOverview"></div>
+      <h2>Skill / MCP 管理</h2>
+      <p>先看当前实际加载位置和能力卡片：MMS 动态注入可生成默认关闭片段，Global 只做只读对照。</p>
       <div class="asset-manager">
+        <div class="asset-source-strip" id="assetManagedRoots"></div>
         <div class="asset-toolbar">
           <div class="asset-toolbar-row">
             <strong>来源</strong>
@@ -1370,6 +1448,12 @@ _HTML_PAGE = r"""<!doctype html>
         </div>
         <div class="asset-list" id="assetCards"></div>
       </div>
+      <div class="asset-hero" id="assetSummary"></div>
+      <details class="oc-advanced" id="assetCliDetails">
+        <summary>展开查看各 CLI 的 TUI 确认页能力和来源</summary>
+        <div class="card asset-confirm-map" id="assetConfirmMap"></div>
+        <div class="asset-cli-grid" id="assetCliOverview"></div>
+      </details>
       <div class="grid">
         <div class="card span6 asset-config-card">
           <h3>默认关闭草稿</h3>
@@ -1552,7 +1636,7 @@ function assetRows(){const assets=state.session_assets||{};return Array.isArray(
 function assetDetail(row,label){const wanted=String(label||'').toLowerCase();for(const item of (row.details||[])){if(String(item.label||'').toLowerCase()===wanted)return item.display||item.value||''}return ''}
 function assetDetailsHtml(row){const details=Array.isArray(row.details)?row.details:[];const lines=details.map(item=>`<p><strong>${escapeHtml(item.label||'详情')}</strong>：<span class="mono">${escapeHtml(item.display||item.value||'-')}</span></p>`);const raw=row.technical_summary&&row.technical_summary!==row.summary?`<p><strong>原始说明</strong>：${escapeHtml(row.technical_summary)}</p>`:'';const key=`<p><strong>关闭 key</strong>：<span class="mono">${escapeHtml(row.disable_key||row.title||'-')}</span></p>`;return [...lines,raw,key].filter(Boolean).join('')}
 function assetSearchHaystack(row){return [row.title,row.summary,row.technical_summary,row.cli_label,row.kind_label,row.group_label,row.origin_label,row.scope_label,row.disable_key,...((row.details||[]).map(d=>`${d.label} ${d.display||d.value}`))].join(' ').toLowerCase()}
-function assetFilterButton(id,label,current,attr){return `<button class="ghost ${current===id?'active':''}" ${attr}="${escapeHtml(id)}">${escapeHtml(label)}</button>`}
+function assetFilterButton(id,label,current,attr){const active=current===id;return `<button class="ghost ${active?'active':''}" aria-pressed="${active?'true':'false'}" ${attr}="${escapeHtml(id)}">${escapeHtml(label)}</button>`}
 function uniqueTexts(values){return [...new Set((values||[]).map(v=>String(v||'').trim()).filter(Boolean))]}
 function cloneAssetDisabledDefaults(){const source=(state.session_assets||{}).disabled_defaults||{};const result={skills:[],mcp:[],hooks:[]};for(const key of ['skills','mcp','hooks']){const values=Array.isArray(source[key])?source[key]:[];result[key]=[...new Set(values.map(x=>String(x||'').trim()).filter(Boolean))]}return result}
 function ensureAssetDisabledDraft(){if(!assetDisabledDraft)assetDisabledDraft=cloneAssetDisabledDefaults();for(const key of ['skills','mcp','hooks']){if(!Array.isArray(assetDisabledDraft[key]))assetDisabledDraft[key]=[]}return assetDisabledDraft}
@@ -1564,6 +1648,7 @@ function assetTomlString(value){return String(value||'').replaceAll('\\','\\\\')
 function assetArrayToml(values){return `[${[...new Set((values||[]).map(x=>String(x||'').trim()).filter(Boolean))].sort().map(v=>`"${assetTomlString(v)}"`).join(', ')}]`}
 function renderAssetPreferenceSnippet(){const assets=state.session_assets||{};const defaults=assets.launch_defaults||{};const draft=ensureAssetDisabledDraft();const snippet=[`[launch.defaults]`,`caveman_mode = "${assetTomlString(defaults.caveman_mode||'enable')}"`,`nsr_mode = "${assetTomlString(defaults.nsr_mode||'enable')}"`,`agent_pack = "${assetTomlString(defaults.agent_pack||'none')}"`,`bypass = ${defaults.bypass===false?'false':'true'}`,'',`[session_surfaces.disabled]`,`skills = ${assetArrayToml(draft.skills)}`,`mcp = ${assetArrayToml(draft.mcp)}`,`hooks = ${assetArrayToml(draft.hooks)}`].join('\n');$('assetPreferenceSnippet').textContent=snippet;return snippet}
 function bindAssetPreferenceButtons(){const copy=$('copyAssetPrefs');const reset=$('resetAssetPrefs');if(copy)copy.onclick=async()=>{const snippet=renderAssetPreferenceSnippet();try{await navigator.clipboard.writeText(snippet);toast('偏好片段已复制')}catch(_err){toast('无法访问剪贴板，片段已显示在页面')}};if(reset)reset.onclick=()=>{assetDisabledDraft=cloneAssetDisabledDefaults();renderSessionAssets();toast('已恢复为当前 preferences.toml 状态')}}
+function renderAssetManagedRoots(){const box=$('assetManagedRoots');if(!box)return;const roots=(state.session_assets||{}).managed_roots||[];const visible=Array.isArray(roots)?roots.filter(Boolean):[];if(!visible.length){box.innerHTML='<div class="asset-source-mini asset-source-intro"><strong>MMS 动态来源</strong><p class="muted">当前没有解析到动态 skill/MCP 根；请查看单卡高级信息。</p></div>';return}const rootCard=(root)=>{const exists=!!root.exists;const count=Number(root.skill_count||0);const real=root.real_path&&root.real_path!==root.path?`<details class="asset-source-real"><summary>真实路径</summary><p class="mono">${escapeHtml(root.real_path)}</p></details>`:'';return `<div class="asset-source-mini ${exists?'':'is-missing'}"><div class="asset-source-head"><strong class="asset-source-title">${escapeHtml(root.name||'-')}</strong><span class="tag ${exists?'':'off'}">${escapeHtml(root.surface||'Skill')}</span></div><p class="mono asset-source-path">${escapeHtml(root.path||'-')}</p><div class="asset-source-foot"><span class="tag ${exists?'':'off'}">${exists?'已解析':'未找到'}</span><span class="muted">${escapeHtml(root.root_kind||'来源未知')}${count?` · ${count} 个 skill`:''}</span></div>${real}</div>`};box.innerHTML=`<div class="asset-source-mini asset-source-intro"><div class="asset-source-head"><strong>MMS 动态来源</strong><span class="tag">${visible.length} 个根</span></div><p class="muted">安装版和开发版都看这里：这里展示当前 resolver 实际选中的 vendor / agent-pack / MCP 根；启动 session 时再软链到隔离 HOME。</p></div>${visible.map(rootCard).join('')}`}
 function assetCliViews(){const assets=state.session_assets||{};return Array.isArray(assets.cli_views)?assets.cli_views:[]}
 function assetCliChip(label,value,cls=''){return `<span class="tag ${cls}">${escapeHtml(label)} ${escapeHtml(value)}</span>`}
 function assetPanelTag(panel){const counts=panel.scope_counts||{};const detail=panel.id==='summary'?'启动摘要':`默认 ${counts.always||0} / 开关 ${Number(counts.caveman||0)+Number(counts.nsr||0)+Number(counts.ecc||0)+Number(counts.omc||0)}`;return `<span class="tag">${escapeHtml(panel.label||panel.id)}：${escapeHtml(detail)}</span>`}
@@ -1578,7 +1663,7 @@ function filteredAssetRows(){const query=assetQuery.trim().toLowerCase();return 
 function assetStatusText(row,disabled){if(disabled)return '默认关闭';if(row.scope==='always')return '默认带上';return '按开关启用'}
 function assetGroupTagClass(row){return row.group==='global'?'off':(row.group==='other'?'off':'')}
 function renderAssetCard(row,idx){const disabled=assetIsDefaultDisabled(row);const source=row.group_label||row.group||'未归类';const kind=row.kind_label||assetKindLabel(row.kind);const path=assetDetail(row,'路径')||assetDetail(row,'Path')||assetDetail(row,'URL')||assetDetail(row,'触发')||assetDetail(row,'Trigger');const status=assetStatusText(row,disabled);const globalClass=row.group==='global'?' is-global':'';const disabledClass=disabled?' is-disabled':'';const mergeTag=row.merged_count>1?`<span class="tag off">适用 ${row.merged_count} 个 CLI</span>`:'';return `<article class="card asset-card${globalClass}${disabledClass}" data-asset-row="${idx}"><div class="asset-card-head"><div><div class="asset-title">${escapeHtml(row.title||'未命名能力')}</div><div class="asset-subline">${escapeHtml(row.cli_label||row.cli||'CLI')} · ${escapeHtml(kind)} · ${escapeHtml(row.scope_label||row.scope||'默认')}</div></div><span class="tag ${assetGroupTagClass(row)}">${escapeHtml(source)}</span></div><p class="asset-desc">${escapeHtml(row.summary||'暂无说明。')}</p><div class="asset-meta"><span class="tag">${escapeHtml(row.origin_label||row.origin||'来源未知')}</span><span class="tag ${disabled?'off':''}">${escapeHtml(status)}</span>${mergeTag}${path?`<span class="tag off">有技术详情</span>`:''}</div><div class="asset-action"><span>${disabled?'已加入关闭草稿；启动确认页仍可临时打开。':'需要时可加入默认关闭草稿，当前不会写真实配置。'}</span><label class="asset-switch"><input type="checkbox" data-asset-disable="${idx}" ${disabled?'checked':''}>默认关闭</label></div><details class="asset-details"><summary>高级信息：路径、触发和 key</summary><div class="asset-detail-grid">${assetDetailsHtml(row)}</div></details></article>`}
-function renderSessionAssets(){if(!$('assetCards'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};const draft=ensureAssetDisabledDraft();const displayCount=filteredAssetRows().length;$('assetSummary').innerHTML=`<div class="card"><span class="asset-count">${summary.mms_dynamic||0}</span><h3>MMS 动态注入</h3><p class="muted">启动 session 时临时带上，不污染全局 CLI。当前筛选显示 ${displayCount} 张卡片；未选具体 CLI 时会合并同名能力，减少重复。</p><div class="asset-meta"><span class="tag">技能 ${summary.skills||0}</span><span class="tag">MCP 服务 ${summary.mcp||0}</span><span class="tag">自动钩子 ${summary.hooks||0}</span><span class="tag off">全局继承 ${summary.global||0}</span></div></div><div class="card"><span class="asset-count">${draft.skills.length+draft.mcp.length+draft.hooks.length}</span><h3>默认关闭草稿</h3><p class="muted">勾选卡片里的“默认关闭”只生成 preferences.toml 片段；WebUI 不会直接改真实配置；启动确认页仍可临时打开。</p><div class="asset-meta"><span class="tag">技能 ${draft.skills.length}</span><span class="tag">MCP ${draft.mcp.length}</span><span class="tag">钩子 ${draft.hooks.length}</span></div></div>`;renderAssetConfirmMap();renderAssetCliOverview();renderAssetFilters();const rows=filteredAssetRows();$('assetCards').innerHTML=rows.length?rows.map((row,idx)=>renderAssetCard(row,idx)).join(''):`<div class="asset-empty">没有匹配的能力。可以清空搜索，或切换来源 / CLI / 类型筛选。</div>`;document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});$('assetConfigContract').textContent=`持久偏好位置：${contract.persistent_path||'~/.config/mms/preferences.toml'}。${contract.webui_write_scope||'当前 WebUI 只生成片段，不直接写入。'} ${contract.launch_override||''}`;renderAssetPreferenceSnippet();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<div class="asset-root"><p><span class="tag ${root.exists?'':'off'}">${root.exists?'存在':'未找到'}</span> <strong>${escapeHtml(root.label)}</strong></p><p class="mono">${escapeHtml(root.path)}</p><p class="muted">${root.skill_count?`发现 ${root.skill_count} 个技能；`:''}${escapeHtml(root.note||'只读展示，不自动修改。')}</p></div>`).join('')||'<p class="muted">没有全局位置记录。</p>'}
+function renderSessionAssets(){if(!$('assetCards'))return;const assets=state.session_assets||{};const summary=assets.summary||{};const contract=assets.configuration_contract||{};const draft=ensureAssetDisabledDraft();const displayCount=filteredAssetRows().length;$('assetSummary').innerHTML=`<div class="card"><span class="asset-count">${summary.mms_dynamic||0}</span><h3>MMS 动态注入</h3><p class="muted">启动 session 时临时带上，不污染全局 CLI。当前筛选显示 ${displayCount} 张卡片；未选具体 CLI 时会合并同名能力，减少重复。</p><div class="asset-meta"><span class="tag">技能 ${summary.skills||0}</span><span class="tag">MCP 服务 ${summary.mcp||0}</span><span class="tag">自动钩子 ${summary.hooks||0}</span><span class="tag off">全局继承 ${summary.global||0}</span></div></div><div class="card"><span class="asset-count">${draft.skills.length+draft.mcp.length+draft.hooks.length}</span><h3>默认关闭草稿</h3><p class="muted">勾选卡片里的“默认关闭”只生成 preferences.toml 片段；WebUI 不会直接改真实配置；启动确认页仍可临时打开。</p><div class="asset-meta"><span class="tag">技能 ${draft.skills.length}</span><span class="tag">MCP ${draft.mcp.length}</span><span class="tag">钩子 ${draft.hooks.length}</span></div></div>`;renderAssetManagedRoots();renderAssetFilters();const rows=filteredAssetRows();$('assetCards').innerHTML=rows.length?rows.map((row,idx)=>renderAssetCard(row,idx)).join(''):`<div class="asset-empty">没有匹配的能力。可以清空搜索，或切换来源 / CLI / 类型筛选。</div>`;renderAssetConfirmMap();renderAssetCliOverview();document.querySelectorAll('[data-asset-disable]').forEach(input=>{input.onchange=()=>{const row=rows[Number(input.dataset.assetDisable)];setAssetDefaultDisabled(row,input.checked);renderAssetPreferenceSnippet();renderSessionAssets()}});$('assetConfigContract').textContent=`持久偏好位置：${contract.persistent_path||'~/.config/mms/preferences.toml'}。${contract.webui_write_scope||'当前 WebUI 只生成片段，不直接写入。'} ${contract.launch_override||''}`;renderAssetPreferenceSnippet();bindAssetPreferenceButtons();$('assetGlobalRoots').innerHTML=(assets.global_roots||[]).map(root=>`<div class="asset-root"><p><span class="tag ${root.exists?'':'off'}">${root.exists?'存在':'未找到'}</span> <strong>${escapeHtml(root.label)}</strong></p><p class="mono">${escapeHtml(root.path)}</p><p class="muted">${root.skill_count?`发现 ${root.skill_count} 个技能；`:''}${escapeHtml(root.note||'只读展示，不自动修改。')}</p></div>`).join('')||'<p class="muted">没有全局位置记录。</p>'}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}

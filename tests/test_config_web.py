@@ -350,12 +350,21 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
     assert 'data-section="sessionAssets"' in html
-    assert "会话能力中心" in html
+    assert "Skill / MCP 管理" in html
     assert "function renderSessionAssets()" in html
     assert "assetPreferenceSnippet" in html
     assert "assetCards" in html
     assert "asset-search" in html
     assert "asset-list" in html
+    assert "assetManagedRoots" in html
+    assert "function renderAssetManagedRoots()" in html
+    assert "MMS 动态来源" in html
+    assert "这里展示当前 resolver 实际选中的 vendor / agent-pack / MCP 根" in html
+    assert "roots.filter(Boolean)" in html
+    assert "roots.slice(0,6)" not in html
+    assert ".asset-toolbar .filterbar button.active" in html
+    assert 'aria-pressed="${active?' in html
+    assert "展开查看各 CLI 的 TUI 确认页能力和来源" in html
     assert "assetConfirmMap" in html
     assert "function renderAssetConfirmMap()" in html
     assert "TUI 确认页对照" in html

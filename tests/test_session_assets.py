@@ -1,4 +1,5 @@
 import mms_session_assets
+import mms_launchers
 
 
 class _FakeCore:
@@ -47,6 +48,10 @@ def _patch_core(monkeypatch, tmp_path):
 
 def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     _patch_core(monkeypatch, tmp_path)
+    managed_root = tmp_path / "auto-skills" / "installed-skills" / "web-access"
+    managed_root.mkdir(parents=True)
+    (managed_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
+    monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: str(managed_root))
     snapshot = mms_session_assets.build_session_assets_snapshot(
         {},
         config_path="/tmp/mms/config.toml",
@@ -64,6 +69,12 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert snapshot["disabled_defaults"]["skills"] == ["agent-browser"]
     assert snapshot["disabled_defaults"]["mcp"] == ["pilot"]
     assert isinstance(snapshot["rows"], list)
+    assert isinstance(snapshot["managed_roots"], list)
+    managed_web = next(root for root in snapshot["managed_roots"] if root["name"] == "web-access")
+    assert managed_web["surface"] == "Skill"
+    assert managed_web["exists"] is True
+    assert managed_web["root_kind"] == "安装/管理镜像"
+    assert managed_web["skill_count"] == 1
     assert isinstance(snapshot["global_roots"], list)
     assert snapshot["confirm_reference"]["title"] == "TUI 确认页对照"
     assert {panel["id"] for panel in snapshot["confirm_reference"]["panels"]} == {"summary", "mcp", "skills", "hooks"}

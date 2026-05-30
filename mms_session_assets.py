@@ -384,6 +384,92 @@ def _global_roots(home: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _asset_root_kind(path: str, *, home: str) -> str:
+    expanded = _expand_path(path, home=home)
+    package_root = _repo_root()
+    checks = [
+        (package_root, "MMS 当前包内"),
+        (os.path.join(home, "auto-skills", "installed-skills"), "安装/管理镜像"),
+        (os.path.join(home, "auto-skills", "shared-skills"), "共享 skill"),
+        (os.path.join(home, "auto-skills", "vendor"), "用户 vendor"),
+        (os.path.join(home, ".agents", "skills"), "共享 agent skills"),
+        (os.path.join(home, ".codex", "skills"), "Codex 全局 skills"),
+    ]
+    for root, label in checks:
+        try:
+            if os.path.commonpath([expanded, os.path.abspath(root)]) == os.path.abspath(root):
+                return label
+        except (OSError, ValueError):
+            continue
+    try:
+        if os.path.commonpath([expanded, home]) == home:
+            return "用户目录"
+    except ValueError:
+        pass
+    return "外部路径"
+
+
+def _asset_root_skill_count(path: str) -> int:
+    if not path or not os.path.exists(path):
+        return 0
+    count = 1 if os.path.isfile(os.path.join(path, "SKILL.md")) else 0
+    for child in ("skills", os.path.join(".claude", "skills"), os.path.join(".agents", "skills")):
+        root = os.path.join(path, child)
+        if not os.path.isdir(root):
+            continue
+        try:
+            count += sum(1 for name in os.listdir(root) if os.path.isfile(os.path.join(root, name, "SKILL.md")))
+        except OSError:
+            pass
+    return count
+
+
+def _managed_roots(home: str) -> list[dict[str, Any]]:
+    try:
+        import mms_launchers  # type: ignore
+    except Exception:
+        return []
+    specs = [
+        ("web-access", "Skill", "_resolve_web_access_root"),
+        ("weber", "Skill", "_resolve_weber_root"),
+        ("agent-browser", "Skill", "_resolve_agent_browser_root"),
+        ("toon", "Skill", "_resolve_toon_root"),
+        ("token-saver", "Skill", "_resolve_token_saver_root"),
+        ("xmem", "Skill", "_resolve_xmem_root"),
+        ("auto-github-contributor", "Skill", "_resolve_auto_github_contributor_root"),
+        ("caveman", "能力包", "_resolve_caveman_root"),
+        ("nsr", "能力包", "_resolve_nsr_root"),
+        ("ecc", "能力包", "_resolve_ecc_root"),
+        ("omc", "能力包", "_resolve_omc_root"),
+        ("hive", "MCP", "_resolve_hive_root"),
+        ("pilot", "MCP", "_resolve_pilot_root"),
+    ]
+    rows = []
+    for name, surface, resolver_name in specs:
+        resolver = getattr(mms_launchers, resolver_name, None)
+        if not callable(resolver):
+            continue
+        try:
+            path = _safe_text(resolver())
+        except Exception:
+            path = ""
+        if not path:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "surface": surface,
+                "path": _abbrev_path(path, home=home),
+                "real_path": os.path.abspath(os.path.expanduser(path)),
+                "exists": os.path.exists(path),
+                "root_kind": _asset_root_kind(path, home=home),
+                "skill_count": _asset_root_skill_count(path),
+                "note": "实际加载位置；开发版通常在当前 worktree/vendor，安装版通常在 MMS 安装包的 vendor 或用户管理镜像。",
+            }
+        )
+    return rows
+
+
 def _disabled_defaults(prefs: dict[str, Any]) -> dict[str, list[str]]:
     disabled = (((prefs.get("session_surfaces") or {}).get("disabled") or {}) if isinstance(prefs, dict) else {})
     result: dict[str, list[str]] = {}
@@ -863,6 +949,7 @@ def build_session_assets_snapshot(
         "cli_views": cli_views,
         "confirm_reference": _confirm_reference(),
         "rows": rows,
+        "managed_roots": _managed_roots(home),
         "global_roots": _global_roots(home),
         "launch_defaults": {
             "caveman_mode": _safe_text(defaults.get("caveman_mode") or "enable"),

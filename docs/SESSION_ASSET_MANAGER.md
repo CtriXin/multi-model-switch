@@ -24,10 +24,11 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 ## WebUI 当前版
 
-当前面板叫 **会话能力中心**，默认用卡片而不是大表格：
+当前面板叫 **Skill / MCP 管理**，默认用卡片而不是大表格：
 
-- 顶部先显示 **TUI 确认页对照**，解释 `摘要 / MCP / 技能 / 钩子` 四个面板、快捷键和单次启动约束；
-- 再按 Claude / Codex / OpenCode / Antigravity 展示 CLI 总览卡；
+- 顶部直接显示能力清单：**MMS 动态来源**、来源/CLI/类型筛选和能力卡片优先出现；
+- **MMS 动态来源** 显示当前 resolver 实际选中的全部 vendor / agent-pack / MCP 根，不再截断前几个；
+- **TUI 确认页对照** 和 Claude / Codex / OpenCode / Antigravity 的 CLI 总览卡放在可展开区域，避免一进页面像介绍文档；
 - 每个 CLI 总览卡列出 MMS 动态、全局继承、其它检测、skill/MCP/hook 数量；
 - 每个 CLI 总览卡列出 TUI 控制项、TUI 面板计数、全局来源和全局条目示例；
 - 按“来源 / CLI / 类型”筛选，并支持搜索名称、用途和路径；
@@ -37,6 +38,15 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 - 全局位置单独只读展示，避免用户误以为 WebUI 会改全局 CLI。
 
 这一版不会写 `~/.config/mms/preferences.toml`。它只负责展示、解释、内存编辑和复制片段；后续如果要真实写入，仍要走 audited preferences writer 和 human gate。
+
+## 安装版 / 开发版位置
+
+MMS 动态 skill/MCP 不要求复制到某一个全局 skill 目录；运行时会按当前安装形态解析真实来源，再软链到本次 session 的隔离 HOME：
+
+- 开发版通常来自当前 worktree 的 `vendor/` 或 `agent-packs/`；
+- 安装版通常来自 MMS 安装包内部的 `vendor/` / `agent-packs/`；
+- 用户显式覆盖或历史安装可能来自 `~/auto-skills/installed-skills`、`~/auto-skills/shared-skills`、`~/auto-skills/vendor`、`~/.agents/skills`、`~/.codex/skills` 等；
+- WebUI 的 **MMS 动态来源** 按实际 resolver 结果全量展示，所以本地和安装版可能路径不同，但管理入口是同一个。
 
 ## TUI 关系
 
@@ -65,3 +75,7 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 - 全局 Claude/Codex/OpenCode 配置保持只读，除非用户明确进入全局安装或配置流程。
 
 因此，未来保存支持应该是独立的 audited preferences writer，而不是模型/通道保存流程的副作用。
+
+## 交互参考
+
+这一版更接近 [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) / [Smithery](https://smithery.ai/) 这类管理中心的信息层级：先显示当前连接/来源、状态和可筛选能力，再把高级协议或 CLI 细节折叠起来。
