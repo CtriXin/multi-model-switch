@@ -1656,7 +1656,6 @@ _HTML_PAGE = r"""<!doctype html>
           </details>
         </div>
       </div>
-      <div class="asset-pending-bar" id="assetPendingBar"></div>
     </section>
 
     <!-- 保存 / 审计 -->
@@ -1712,6 +1711,7 @@ _HTML_PAGE = r"""<!doctype html>
     </section>
   </main>
 </div>
+<div class="asset-pending-bar" id="assetPendingBar"></div>
 <div class="toast" id="toast"></div>
 <script>
 const sections=[
