@@ -48,6 +48,15 @@ def _patch_core(monkeypatch, tmp_path):
 
 def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     _patch_core(monkeypatch, tmp_path)
+    for rel in (
+        ".claude/skills/claude-global",
+        ".codex/skills/codex-global",
+        ".agents/skills/shared-global",
+        ".codex/plugins/cache/openai-bundled/browser/1.0/skills/browser",
+    ):
+        skill_dir = tmp_path / rel
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(f"---\ndescription: {rel}\n---\n", encoding="utf-8")
     managed_root = tmp_path / "auto-skills" / "installed-skills" / "web-access"
     managed_root.mkdir(parents=True)
     (managed_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
@@ -82,6 +91,13 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert {view["id"] for view in snapshot["cli_views"]} == {"claude", "codex", "opencode", "agy"}
     assert all(isinstance(view["controls"], list) for view in snapshot["cli_views"])
     assert all(isinstance(view["global_sources"], list) for view in snapshot["cli_views"])
+    global_skill_rows = [row for row in snapshot["rows"] if row.get("inventory_only") and row.get("group") == "global"]
+    assert {row["title"] for row in global_skill_rows} >= {"claude-global", "codex-global", "shared-global", "browser"}
+    assert all(row["disable_supported"] is False for row in global_skill_rows)
+    claude = next(view for view in snapshot["cli_views"] if view["id"] == "claude")
+    codex = next(view for view in snapshot["cli_views"] if view["id"] == "codex")
+    assert any(src["label"] == "Claude 全局技能" and src["count"] == 1 for src in claude["global_sources"])
+    assert any(src["label"] == "Codex bundled plugin 技能" and src["count"] == 1 for src in codex["global_sources"])
 
 
 def test_session_asset_rows_have_user_facing_fields(monkeypatch, tmp_path):

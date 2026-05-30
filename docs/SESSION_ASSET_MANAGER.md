@@ -28,6 +28,8 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 - 顶部直接显示能力清单：**MMS 动态来源**、来源/CLI/类型筛选和能力卡片优先出现；
 - **MMS 动态来源** 显示当前 resolver 实际选中的全部 vendor / agent-pack / MCP 根，不再截断前几个；
+- `全局继承` 会展开 Claude / Codex 的真实全局 Skill 清单，而不是只显示 TUI preview 抽样；
+- Claude 和 Codex 分开统计：Claude 看 `~/.claude/skills` + `~/.agents/skills`，Codex 看 `~/.codex/skills` + `~/.agents/skills` + Codex plugin cache；
 - **TUI 确认页对照** 和 Claude / Codex / OpenCode / Antigravity 的 CLI 总览卡放在可展开区域，避免一进页面像介绍文档；
 - 每个 CLI 总览卡列出 MMS 动态、全局继承、其它检测、skill/MCP/hook 数量；
 - 每个 CLI 总览卡列出 TUI 控制项、TUI 面板计数、全局来源和全局条目示例；
@@ -36,6 +38,7 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 - 路径、触发、`disable_key`、原始说明折叠到“高级信息”；
 - 勾选“默认关闭”只更新页面内草稿，并生成 `preferences.toml` 片段；
 - 全局位置单独只读展示，避免用户误以为 WebUI 会改全局 CLI。
+- 全局 Skill 卡片是完整清单/只读展示；当前“默认关闭草稿”只保证 MMS 动态 Skill、MCP、hooks 以及可过滤的 MCP/hooks 生效，任意 Global Skill 默认关闭需要后续在 launcher 继承过滤里实现。
 
 这一版不会写 `~/.config/mms/preferences.toml`。它只负责展示、解释、内存编辑和复制片段；后续如果要真实写入，仍要走 audited preferences writer 和 human gate。
 
@@ -75,6 +78,12 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 - 全局 Claude/Codex/OpenCode 配置保持只读，除非用户明确进入全局安装或配置流程。
 
 因此，未来保存支持应该是独立的 audited preferences writer，而不是模型/通道保存流程的副作用。
+
+## 固定展示位置 vs 真实安装位置
+
+当前已完成的是 WebUI 固定展示入口：`Skill / MCP 管理` 里的 **MMS 动态来源**。它会按实际 resolver 展示安装版/开发版当前选中的根。
+
+还没有完成“把所有动态 Skill/MCP 物理整合到一个真实文件夹再统一安装”。现有持久配置入口是 `[assets.roots]`，用户可以在 `preferences.toml` 指定某个动态 skill 的真实根，例如 `web_access = "~/my-skills/web-access"`；但任何写入 `~/.config/mms/preferences.toml` 都必须走 human gate。
 
 ## 交互参考
 

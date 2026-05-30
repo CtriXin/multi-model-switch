@@ -364,6 +364,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "roots.slice(0,6)" not in html
     assert ".asset-toolbar .filterbar button.active" in html
     assert 'aria-pressed="${active?' in html
+    assert "function assetDisableSupported(row)" in html
+    assert "全局 Skill 当前只读展示" in html
+    assert "不可在此关闭" in html
     assert "展开查看各 CLI 的 TUI 确认页能力和来源" in html
     assert "assetConfirmMap" in html
     assert "function renderAssetConfirmMap()" in html

@@ -350,28 +350,23 @@ def _load_preferences(mms_core: Any | None) -> dict[str, Any]:
 
 def _global_roots(home: str) -> list[dict[str, Any]]:
     candidates = [
-        ("Claude 全局技能目录", "~/.claude/skills"),
-        ("Codex 全局技能目录", "~/.codex/skills"),
-        ("共享 agent 技能目录", "~/.agents/skills"),
-        ("Claude MCP 旧配置文件", "~/.claude.json"),
-        ("Codex 配置文件", "~/.codex/config.toml"),
-        ("Codex hooks 文件", "~/.codex/hooks.json"),
-        ("OpenCode 配置目录", "~/.config/opencode"),
+        ("Claude 全局技能目录", "~/.claude/skills", False),
+        ("Codex 全局技能目录", "~/.codex/skills", False),
+        ("共享 agent 技能目录", "~/.agents/skills", False),
+        ("Codex bundled plugin 技能缓存", "~/.codex/plugins/cache/openai-bundled", True),
+        ("Codex runtime plugin 技能缓存", "~/.codex/plugins/cache/openai-primary-runtime", True),
+        ("Claude MCP 旧配置文件", "~/.claude.json", False),
+        ("Codex 配置文件", "~/.codex/config.toml", False),
+        ("Codex hooks 文件", "~/.codex/hooks.json", False),
+        ("OpenCode 配置目录", "~/.config/opencode", False),
     ]
     rows = []
-    for label, raw_path in candidates:
+    for label, raw_path, recursive in candidates:
         expanded = _expand_path(raw_path, home=home)
         exists = os.path.exists(expanded)
         skill_count = 0
         if os.path.isdir(expanded):
-            try:
-                skill_count = sum(
-                    1
-                    for name in os.listdir(expanded)
-                    if os.path.isfile(os.path.join(expanded, name, "SKILL.md"))
-                )
-            except OSError:
-                skill_count = 0
+            skill_count = len(_skill_dir_entries(raw_path, home=home, recursive=recursive))
         rows.append(
             {
                 "label": label,
@@ -521,17 +516,88 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
 
 
 def _skill_dir_items(raw_path: str, *, home: str, limit: int = 8) -> tuple[int, list[str]]:
+    entries = _skill_dir_entries(raw_path, home=home, recursive=False)
+    return len(entries), [entry["name"] for entry in entries[:limit]]
+
+
+def _skill_dir_entries(raw_path: str, *, home: str, recursive: bool = False) -> list[dict[str, str]]:
     expanded = _expand_path(raw_path, home=home)
     if not os.path.isdir(expanded):
-        return 0, []
-    names = []
+        return []
+    entries: list[dict[str, str]] = []
     try:
-        for name in sorted(os.listdir(expanded)):
-            if os.path.isfile(os.path.join(expanded, name, "SKILL.md")):
-                names.append(name)
+        if recursive:
+            for root, dirs, files in os.walk(expanded, followlinks=False):
+                dirs[:] = sorted(dirs)
+                if "SKILL.md" not in files:
+                    continue
+                rel = os.path.relpath(root, expanded)
+                name = os.path.basename(root) if rel == "." else rel
+                entries.append({"name": name, "path": os.path.join(root, "SKILL.md")})
+        else:
+            for name in sorted(os.listdir(expanded)):
+                skill_md = os.path.join(expanded, name, "SKILL.md")
+                if os.path.isfile(skill_md):
+                    entries.append({"name": name, "path": skill_md})
     except OSError:
-        return 0, []
-    return len(names), names[:limit]
+        return []
+    return entries
+
+
+def _global_skill_root_specs(cli: str) -> list[dict[str, Any]]:
+    if cli == "claude":
+        return [
+            {"path": "~/.claude/skills", "label": "Claude 全局技能", "origin": "Global Claude skill", "recursive": False},
+            {"path": "~/.agents/skills", "label": "共享 agent 技能", "origin": "Shared agent skill", "recursive": False},
+        ]
+    if cli == "codex":
+        return [
+            {"path": "~/.codex/skills", "label": "Codex 全局技能", "origin": "Global Codex skill", "recursive": False},
+            {"path": "~/.agents/skills", "label": "共享 agent 技能", "origin": "Shared agent skill", "recursive": False},
+            {"path": "~/.codex/plugins/cache/openai-bundled", "label": "Codex bundled plugin 技能", "origin": "Codex plugin skill", "recursive": True},
+            {"path": "~/.codex/plugins/cache/openai-primary-runtime", "label": "Codex runtime plugin 技能", "origin": "Codex plugin skill", "recursive": True},
+        ]
+    return []
+
+
+def _global_skill_inventory_rows(cli: str, *, home: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for spec in _global_skill_root_specs(cli):
+        raw_path = str(spec.get("path") or "")
+        root_label = str(spec.get("label") or "全局技能")
+        entries = _skill_dir_entries(raw_path, home=home, recursive=bool(spec.get("recursive")))
+        for entry in entries:
+            name = _safe_text(entry.get("name"))
+            path = _safe_text(entry.get("path"))
+            if not name or not path:
+                continue
+            rows.append(
+                {
+                    "cli": cli,
+                    "cli_label": _CLI_LABELS.get(cli, cli),
+                    "kind": "skills",
+                    "kind_label": _KIND_LABELS["skills"],
+                    "scope": "global",
+                    "scope_label": "全局继承",
+                    "title": os.path.basename(name),
+                    "summary": _skill_description(path, home=home) or "来自真实用户全局目录的 skill；WebUI 只读展示它是否会被当前 CLI 继承。",
+                    "technical_summary": f"{root_label}: {name}",
+                    "details": [
+                        {"label": "路径", "value": path, "display": _abbrev_path(path, home=home)},
+                        {"label": "全局根", "value": raw_path, "display": raw_path},
+                        {"label": "来源", "value": root_label, "display": root_label},
+                    ],
+                    "disable_key": os.path.basename(name),
+                    "group": "global",
+                    "group_label": _group_label("global"),
+                    "origin": str(spec.get("origin") or "Global CLI config"),
+                    "origin_label": root_label,
+                    "active_by_default": True,
+                    "inventory_only": True,
+                    "disable_supported": False,
+                }
+            )
+    return rows
 
 
 def _load_json_dict(path: str, *, home: str) -> dict[str, Any]:
@@ -627,7 +693,7 @@ def _append_global_source(
 
 def _global_sources_for_cli(cli: str, cli_rows: list[dict[str, Any]], *, home: str) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
-    preview_global = [row for row in cli_rows if row.get("group") == "global"]
+    preview_global = [row for row in cli_rows if row.get("group") == "global" and not row.get("inventory_only")]
     for kind in SURFACE_KINDS:
         items = sorted({str(row.get("title") or "") for row in preview_global if row.get("kind") == kind and row.get("title")})
         if items:
@@ -643,14 +709,20 @@ def _global_sources_for_cli(cli: str, cli_rows: list[dict[str, Any]], *, home: s
             )
 
     if cli == "claude":
-        for raw_path, label in (("~/.claude/skills", "Claude 全局技能"), ("~/.agents/skills", "共享 agent 技能")):
-            count, items = _skill_dir_items(raw_path, home=home)
+        for spec in _global_skill_root_specs(cli):
+            raw_path = str(spec.get("path") or "")
+            label = str(spec.get("label") or "全局技能")
+            entries = _skill_dir_entries(raw_path, home=home, recursive=bool(spec.get("recursive")))
+            count, items = len(entries), [entry["name"] for entry in entries[:8]]
             _append_global_source(sources, surface="skills", label=label, path=raw_path, count=count, items=items, home=home)
         mcp_names = _claude_json_mcp_names(home)
         _append_global_source(sources, surface="mcp", label="Claude 全局 MCP", path="~/.claude.json", count=len(mcp_names), items=mcp_names[:8], home=home)
     elif cli == "codex":
-        for raw_path, label in (("~/.codex/skills", "Codex 全局技能"), ("~/.agents/skills", "共享 agent 技能")):
-            count, items = _skill_dir_items(raw_path, home=home)
+        for spec in _global_skill_root_specs(cli):
+            raw_path = str(spec.get("path") or "")
+            label = str(spec.get("label") or "全局技能")
+            entries = _skill_dir_entries(raw_path, home=home, recursive=bool(spec.get("recursive")))
+            count, items = len(entries), [entry["name"] for entry in entries[:8]]
             _append_global_source(sources, surface="skills", label=label, path=raw_path, count=count, items=items, home=home)
         claude_mcp_names = _claude_json_mcp_names(home)
         _append_global_source(
@@ -899,6 +971,7 @@ def build_session_assets_snapshot(
         }
         catalog, flags = _preview_for_cli(mms_core, cli, runtime)
         cli_rows = _flatten_catalog(cli, catalog, home=home)
+        cli_rows.extend(_global_skill_inventory_rows(cli, home=home))
         rows.extend(cli_rows)
         cli_views.append(_cli_view(cli, cli_rows, catalog, flags, defaults, disabled, home=home))
         cli_cards.append(
