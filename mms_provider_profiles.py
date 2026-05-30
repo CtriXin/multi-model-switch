@@ -138,6 +138,30 @@ _PROTOCOL_KEYED_PROFILE_SECTIONS = (
     "budget",
 )
 
+_COMPATIBILITY_PROFILE_SECTIONS = (
+    "api_formats",
+    "auth_headers",
+    "body_patches",
+    "budget",
+    "context_windows",
+    "endpoints",
+    "effort",
+    "match",
+    "model_aliases",
+    "model_overrides",
+    "parameter_aliases",
+    "thinking",
+)
+
+
+def _profile_has_compatibility_data(profile: dict[str, Any]) -> bool:
+    if not isinstance(profile, dict):
+        return False
+    return any(
+        isinstance(profile.get(section), dict) and profile.get(section)
+        for section in _COMPATIBILITY_PROFILE_SECTIONS
+    )
+
 
 def _protocol_family(protocol: Any) -> str:
     normalized = _lower(protocol)
@@ -180,6 +204,8 @@ def _profile_protocol_rank(profile: dict[str, Any], *, protocol: str, model_name
 
 
 def _profile_match_score(profile_id: str, profile: dict[str, Any], *, provider_id: str, base_url: str, model_name: str) -> int:
+    if not _profile_has_compatibility_data(profile):
+        return 0
     match = profile.get("match") if isinstance(profile.get("match"), dict) else {}
     if match.get("profile_only"):
         return 0
@@ -225,7 +251,9 @@ def resolve_provider_profile(
     profiles = load_provider_profiles().get("profiles") or {}
     explicit = _clean(profile_id or runtime.get("profile") or runtime.get("provider_profile"))
     if explicit and isinstance(profiles.get(explicit), dict):
-        return explicit, copy.deepcopy(profiles[explicit])
+        explicit_profile = profiles[explicit]
+        if _profile_has_compatibility_data(explicit_profile):
+            return explicit, copy.deepcopy(explicit_profile)
 
     provider = _clean(provider_id or runtime.get("id") or runtime.get("provider_id"))
     base = _clean(
