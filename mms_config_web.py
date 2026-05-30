@@ -5692,37 +5692,45 @@ _HTML_PAGE = r"""<!doctype html>
       justify-content: flex-end;
     }
     .settings-tabs {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 8px;
-      padding: 8px;
+      display: flex;
+      gap: 6px;
+      padding: 6px;
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       background: color-mix(in oklch, var(--bg) 70%, var(--surface));
+      overflow-x: auto;
+      scrollbar-width: thin;
     }
     .settings-tab {
+      flex: 1 0 150px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
       border: 1px solid transparent;
       border-radius: var(--radius);
       background: transparent;
       color: var(--muted);
       text-align: left;
       box-shadow: none;
-      padding: 10px 12px;
-      min-height: 62px;
+      padding: 8px 10px;
+      min-height: 42px;
+      white-space: nowrap;
     }
     .settings-tab strong,
     .settings-tab span {
-      display: block;
+      display: inline;
+      white-space: nowrap;
     }
     .settings-tab strong {
       color: inherit;
-      font-size: 13.5px;
-      margin-bottom: 3px;
+      font-size: 13px;
+      line-height: 1;
     }
     .settings-tab span {
       color: color-mix(in oklch, var(--muted) 84%, var(--fg));
-      font-size: 11.5px;
-      line-height: 1.35;
+      font-size: 11px;
+      line-height: 1;
     }
     .settings-tab:hover {
       background: var(--surface);
