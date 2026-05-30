@@ -276,6 +276,7 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     _write_skill(caveman_root / "skills", "caveman")
     web_access = _write_skill(tmp_path / "web-access-root", "web-access")
     weber = _write_skill(tmp_path / "weber-root", "weber")
+    codegraph = _write_skill(tmp_path / "codegraph-root", "codegraph")
     toon = _write_skill(tmp_path / "toon-root", "toon")
     token_saver = _write_skill(tmp_path / "token-root", "token-saver")
 
@@ -289,6 +290,7 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: str(caveman_root))
     monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: str(web_access))
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: str(weber))
+    monkeypatch.setattr(mms_launchers, "_resolve_codegraph_root", lambda: str(codegraph))
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: str(toon))
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: str(token_saver))
     rtk_plugin = tmp_path / "opencode-rtk.ts"
@@ -305,7 +307,7 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     assert "plugin" not in payload
     assert (config_dir / "plugins" / "mms-rtk.ts").is_symlink()
     assert (config_dir / "plugins" / "mms-rtk.ts").resolve() == rtk_plugin
-    for name in ("caveman", "web-access", "weber", "toon", "token-saver"):
+    for name in ("caveman", "web-access", "weber", "codegraph", "toon", "token-saver"):
         assert (config_dir / "skills" / name).is_symlink()
         assert (config_dir / "skills" / name / "SKILL.md").exists()
     packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
@@ -313,6 +315,7 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     assert features["caveman"] == "enabled"
     assert features["opencode_rtk"] == "enabled"
     assert features["web_access"] == "enabled"
+    assert features["codegraph"] == "enabled"
 
 
 def test_opencode_gateway_env_can_disable_bypass(monkeypatch, tmp_path):

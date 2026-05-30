@@ -44,6 +44,10 @@ def _resolve_agent_browser_root():
     return _launchers()._resolve_agent_browser_root()
 
 
+def _resolve_codegraph_root():
+    return _launchers()._resolve_codegraph_root()
+
+
 def _resolve_toon_root():
     return _launchers()._resolve_toon_root()
 
@@ -266,6 +270,15 @@ def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled
     overlay_root = os.path.join(session_home, ".mms-agent-browser-overlay")
     os.makedirs(overlay_root, exist_ok=True)
     _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root, disabled_session_surfaces=disabled_session_surfaces)
+
+
+def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    codegraph_root = _resolve_codegraph_root()
+    if not codegraph_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-codegraph-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "codegraph", codegraph_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
 def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):

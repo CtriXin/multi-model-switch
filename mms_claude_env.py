@@ -68,6 +68,7 @@ def build_claude_gateway_env(
         _merge_claude_ui_state_seed,
         _overlay_auto_github_contributor_session_entries,
         _overlay_caveman_session_entries,
+        _overlay_codegraph_session_entries,
         _overlay_ecc_session_entries,
         _overlay_omc_session_entries,
         _overlay_project_scoped_claude_resume_state,
@@ -82,6 +83,7 @@ def build_claude_gateway_env(
         _real_user_path,
         _reserve_session_home,
         _resolve_auto_github_contributor_root,
+        _resolve_codegraph_root,
         _resolve_token_saver_root,
         _resolve_toon_root,
         _resolve_web_access_root,
@@ -304,6 +306,7 @@ def build_claude_gateway_env(
                 "agent_pack": agent_pack,
                 "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+                "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
                 "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
@@ -353,6 +356,7 @@ def build_claude_gateway_env(
         )
         _overlay_web_access_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_codegraph_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_xmem_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)

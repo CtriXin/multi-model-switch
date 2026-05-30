@@ -182,6 +182,7 @@ from mms_session_features import (
     resolve_agent_browser_root as _resolve_agent_browser_root_impl,
     resolve_auto_github_contributor_root as _resolve_auto_github_contributor_root_impl,
     resolve_caveman_root as _resolve_caveman_root_impl,
+    resolve_codegraph_root as _resolve_codegraph_root_impl,
     resolve_ecc_root as _resolve_ecc_root_impl,
     resolve_nsr_root as _resolve_nsr_root_impl,
     resolve_omc_root as _resolve_omc_root_impl,
@@ -1875,6 +1876,11 @@ def _resolve_agent_browser_root():
     return _resolve_agent_browser_root_impl(**_session_feature_root_kwargs())
 
 
+def _resolve_codegraph_root():
+    """Compatibility wrapper for CodeGraph skill root resolution."""
+    return _resolve_codegraph_root_impl(**_session_feature_root_kwargs())
+
+
 def _resolve_toon_root():
     """Compatibility wrapper for TOON root resolution."""
     return _resolve_toon_root_impl(**_session_feature_root_kwargs())
@@ -2409,6 +2415,17 @@ def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled
     )
 
 
+def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    """Compatibility wrapper for CodeGraph session overlays."""
+    from mms_session_overlays import _overlay_codegraph_session_entries as overlay_codegraph_session_entries
+
+    return overlay_codegraph_session_entries(
+        parent_dir,
+        session_home,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+
+
 def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for TOON session overlays."""
     from mms_session_overlays import _overlay_toon_session_entries as overlay_toon_session_entries
@@ -2484,6 +2501,7 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_caveman_session_entries=_overlay_caveman_session_entries,
         overlay_web_access_session_entries=_overlay_web_access_session_entries,
         overlay_weber_session_entries=_overlay_weber_session_entries,
+        overlay_codegraph_session_entries=_overlay_codegraph_session_entries,
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
         overlay_xmem_session_entries=_overlay_xmem_session_entries,
@@ -4140,6 +4158,7 @@ def _opencode_gateway_env(runtime, model_info=None):
         runtime_caveman_enabled=_runtime_caveman_enabled,
         resolve_web_access_root=_resolve_web_access_root,
         resolve_weber_root=_resolve_weber_root,
+        resolve_codegraph_root=_resolve_codegraph_root,
         resolve_toon_root=_resolve_toon_root,
         resolve_token_saver_root=_resolve_token_saver_root,
         resolve_xmem_root=_resolve_xmem_root,

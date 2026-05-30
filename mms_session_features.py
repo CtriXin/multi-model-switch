@@ -349,6 +349,28 @@ def resolve_agent_browser_root(**kwargs):
     )
 
 
+def resolve_codegraph_root(**kwargs):
+    environ = kwargs.get("environ", os.environ)
+    candidates = []
+    explicit = str(environ.get("MMS_CODEGRAPH_ROOT") or environ.get("MMS_CODEGRAPH_SKILL_ROOT") or "").strip()
+    if explicit:
+        candidates.append(expand_candidate(explicit))
+    pref = kwargs["asset_root_preference_fn"]("codegraph")
+    if pref:
+        candidates.append(expand_candidate(pref))
+    module_dir = _module_dir(kwargs["module_file"])
+    real_user_path_fn = kwargs["real_user_path_fn"]
+    candidates.extend(
+        [
+            os.path.join(module_dir, "vendor", "codegraph"),
+            real_user_path_fn("auto-skills", "shared-skills", "codegraph"),
+            real_user_path_fn("auto-skills", "vendor", "codegraph"),
+            real_user_path_fn("vendor", "codegraph"),
+        ]
+    )
+    return _dedupe_existing(candidates, lambda candidate: os.path.isfile(os.path.join(candidate, "SKILL.md")))
+
+
 def resolve_toon_root(**kwargs):
     return resolve_skill_root(
         env_key="MMS_TOON_ROOT",

@@ -229,6 +229,7 @@ def build_confirm_preview_catalog(
             _resolve_agent_browser_root,
             _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
+            _resolve_codegraph_root,
             _resolve_ecc_root,
             _resolve_nsr_root,
             _resolve_omc_root,
@@ -809,6 +810,13 @@ def build_confirm_preview_catalog(
             _append_skill_entries(
                 "always",
                 [{"name": "agent-browser", "path": _skill_path(agent_browser_root)}],
+                _L("会话技能", "Session skill"),
+            )
+        if _resolve_codegraph_root():
+            codegraph_root = _resolve_codegraph_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "codegraph", "path": _skill_path(codegraph_root)}],
                 _L("会话技能", "Session skill"),
             )
         if _resolve_toon_root():

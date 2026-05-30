@@ -221,6 +221,7 @@ hooks = []                    # hook names or paths shown on confirm screen
 # Optional custom roots; env vars like MMS_WEB_ACCESS_ROOT still win.
 # web_access = "~/my-skills/web-access"
 # weber = "~/my-skills/weber"
+# codegraph = "~/vendor/codegraph"
 # token_saver = "~/vendor/token-saver"
 # toon = "~/vendor/toon"
 # xmem = "~/auto-skills/shared-skills/xmem"
@@ -1751,6 +1752,7 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
     "auto_github_contributor": "auto_github_contributor",
     "auto-github-contributor": "auto_github_contributor",
     "caveman": "caveman",
+    "codegraph": "codegraph",
     "nsr": "nsr",
     "ecc": "ecc",
     "omc": "omc",
