@@ -373,6 +373,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "全局 Skill 当前只读展示" in html
     assert "不可在此关闭" in html
     assert "function renderAssetRows(rows)" in html
+    assert "assetGroupOpenState" in html
+    assert "data-asset-group-details" in html
     assert "function assetSkillFamilyHint(name)" in html
     assert "Lark CLI 技能组" in html
     assert "整组默认关闭" in html
