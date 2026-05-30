@@ -574,6 +574,8 @@ def test_install_script_has_optional_token_saver_pack():
     assert "~/.claude/skills/token-saver" in text
     assert 'write_mms_script_wrapper "token-saver"' in text
     assert 'write_mms_script_wrapper "mms-context"' in text
+    assert 'write_mms_script_wrapper "token-gain"' in text
+    assert 'write_mms_script_wrapper "mms-gain"' in text
     assert 'write_mms_script_wrapper "mms-toon"' in text
 
 

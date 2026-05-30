@@ -17,7 +17,7 @@ import mms_toon
 DEFAULT_THRESHOLD_CHARS = 4000
 DEFAULT_THRESHOLD_LINES = 120
 DEFAULT_SNIPPET_CHARS = 1100
-CONTEXT_ALIASES = {"put", "search", "show", "list", "path"}
+CONTEXT_ALIASES = {"put", "search", "show", "list", "path", "stats", "gain"}
 SIGNAL_MARKERS = (
     "assertionerror",
     "exception",
@@ -177,6 +177,8 @@ def _print_stored_summary(payload: dict[str, object]) -> None:
     print(f"chars: {payload['chars']}")
     print(f"lines: {payload['lines']}")
     print(f"snippet_chars: {len(str(payload.get('display_snippet') or ''))}")
+    print(f"approx_saved_chars: {payload.get('saved_chars') or 0}")
+    print(f"approx_gain: {payload.get('gain_pct') or 0}%")
     print("snippet:")
     snippet = str(payload.get("display_snippet") or "").strip()
     if snippet:
@@ -237,14 +239,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
     tags = list(args.tag or [])
     tags.extend(_command_tags(command))
     tags.extend(["token-saver", f"exit:{completed.returncode}"])
+    display_snippet = _summary_snippet(output, args.snippet_chars)
+    visible_chars = len(display_snippet)
     record = mms_context.put_context(
         output,
         title=title,
         kind=args.kind or "tool-output",
         tags=_dedupe(tags),
         store_dir=args.store_dir,
+        visible_chars=visible_chars,
     )
     payload = asdict(record)
+    saved_chars = max(0, len(output) - visible_chars)
+    gain_pct = round((saved_chars / len(output) * 100), 1) if output else 0.0
     payload.update(
         {
             "stored": True,
@@ -252,7 +259,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "exit_code": completed.returncode,
             "command": command,
             "store_dir": str(mms_context._store_dir(args.store_dir)),
-            "display_snippet": _summary_snippet(output, args.snippet_chars),
+            "display_snippet": display_snippet,
+            "visible_chars": visible_chars,
+            "saved_chars": saved_chars,
+            "gain_pct": gain_pct,
             "threshold_chars": threshold_chars,
             "threshold_lines": threshold_lines,
         }
@@ -298,7 +308,29 @@ def build_parser() -> argparse.ArgumentParser:
     toon.add_argument("--stats", action="store_true", help="Print format stats to stderr.")
     toon.set_defaults(func=_cmd_toon)
 
+    for name in ("stats", "gain"):
+        stats = subparsers.add_parser(name, help="Show estimated context-saving gain for stored refs.")
+        stats.add_argument("--limit", type=int, default=mms_context.DEFAULT_STATS_LIMIT, help="Top records to show.")
+        stats.add_argument("--kind", default="", help="Only include records with this kind.")
+        stats.add_argument("--tag", default="", help="Only include records with this tag.")
+        stats.add_argument("--all-stores", action="store_true", help="Include discovered MMS session stores.")
+        stats.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+        stats.set_defaults(func=lambda args: mms_context.main(_context_stats_argv(args)))
+
     return parser
+
+
+def _context_stats_argv(args: argparse.Namespace) -> list[str]:
+    argv = ["stats", "--limit", str(args.limit)]
+    if args.kind:
+        argv.extend(["--kind", args.kind])
+    if args.tag:
+        argv.extend(["--tag", args.tag])
+    if args.all_stores:
+        argv.append("--all-stores")
+    if args.json:
+        argv.append("--json")
+    return argv
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -691,7 +691,7 @@ prompt_optional_install_choices() {
             note_optional_pack_detected " token-saver" "token-saver"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional token saving"
-            echo "  Token Saver installs a shared Codex/Claude skill and local command for large-output refs/snippets."
+            echo "  Token Saver installs a shared Codex/Claude skill and local commands for large-output refs/snippets plus gain stats."
             echo "  Use it for long logs, test output, broad rg, git diff/show, and noisy diagnostics."
             echo "  Agents use the low-level commands automatically; users can just say /token-saver or ask to save context."
             if confirm_from_tty "Install Token Saver for Codex and Claude? [y/N]: " "n"; then
@@ -699,7 +699,7 @@ prompt_optional_install_choices() {
             fi
         else
             echo "可选省 token 工具"
-            echo "  Token Saver 会安装 Codex/Claude 共用 skill 和本机命令，用 ref/snippet 收纳长输出。"
+            echo "  Token Saver 会安装 Codex/Claude 共用 skill 和本机命令，用 ref/snippet 收纳长输出并显示 gain 统计。"
             echo "  适合长日志、测试输出、大范围 rg、git diff/show 和 noisy diagnostics。"
             echo "  底层命令由 agent 自动使用；用户只需要说 /token-saver 或“省点 context”。"
             if confirm_from_tty "是否为 Codex 和 Claude 安装 Token Saver？[y/N]: " "n"; then
@@ -3721,13 +3721,15 @@ install_xmem_installed_skills_mirror() {
 install_optional_token_saver() {
     echo ""
     echo "$(t "正在安装 Token Saver..." "Installing Token Saver...")"
-    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/token-saver、~/.claude/skills/token-saver 和 ~/.local/bin/token-saver/mms-context/mms-toon。" "This optional pack writes ~/.codex/skills/token-saver, ~/.claude/skills/token-saver, and ~/.local/bin/token-saver/mms-context/mms-toon.")"
+    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/token-saver、~/.claude/skills/token-saver 和 ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon。" "This optional pack writes ~/.codex/skills/token-saver, ~/.claude/skills/token-saver, and ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon.")"
     echo "  $(t "它不写 ~/.config/mms，也不修改模型、账号、proxy 或 reasoning 配置。" "It does not write ~/.config/mms or change model, account, proxy, or reasoning settings.")"
 
     install_token_saver_skill_link "$REAL_HOME/.codex/skills/token-saver" || true
     install_token_saver_skill_link "$REAL_HOME/.claude/skills/token-saver" || true
     write_mms_script_wrapper "token-saver" || true
     write_mms_script_wrapper "mms-context" || true
+    write_mms_script_wrapper "token-gain" || true
+    write_mms_script_wrapper "mms-gain" || true
     write_mms_script_wrapper "mms-toon" || true
     install_token_saver_installed_skills_mirror || true
 }
@@ -4338,7 +4340,7 @@ fi
 
 if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
     echo "• $(t "附带安装 Token Saver" "Optional Token Saver"): on"
-    echo "  $(t "会写入 Codex/Claude skill 和 ~/.local/bin/token-saver/mms-context/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude skills and ~/.local/bin/token-saver/mms-context/mms-toon, without writing ~/.config/mms.")"
+    echo "  $(t "会写入 Codex/Claude skill 和 ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude skills and ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon, without writing ~/.config/mms.")"
 fi
 
 if [ "$INSTALL_TOON" -eq 1 ]; then
@@ -4602,7 +4604,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
 
     if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
-        echo "  $(t "Token Saver 已安装：Codex/Claude skill、token-saver/mms-context/mms-toon 命令。" "Token Saver installed: Codex/Claude skill plus token-saver/mms-context/mms-toon commands.")"
+        echo "  $(t "Token Saver 已安装：Codex/Claude skill、token-saver/mms-context/token-gain/mms-gain/mms-toon 命令。" "Token Saver installed: Codex/Claude skill plus token-saver/mms-context/token-gain/mms-gain/mms-toon commands.")"
         echo "  $(t "普通 export-only Codex/Claude 会话现在可以靠 skill 自动使用长输出 ref/snippet。" "Plain export-only Codex/Claude sessions can now use long-output refs/snippets through the skill.")"
         echo ""
     fi

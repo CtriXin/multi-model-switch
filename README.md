@@ -346,7 +346,7 @@ Add `--dry-run` to preview the install plan without writing files, for example `
 
 `--install-read-once` installs Claude Read token-saving hooks. Within one session it warns on repeated reads of unchanged files and prefers diffs after edits. It works automatically; users do not need to remember a command.
 
-`--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
+`--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. `token-gain` / `mms-gain` / `token-saver gain` show estimated saved chars and gain percentage for stored refs, and a normal shell falls back to the most recent non-empty MMS session store when the current repo store is empty. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
 
 `--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for structured JSON/status/handoff compression in export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default. Do not use TOON for prose, code, raw logs, secrets, or exact CLI/API JSON.
 
