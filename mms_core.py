@@ -749,6 +749,12 @@ LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
 def current_command():
+    explicit = str(os.environ.get("MMS_COMMAND_NAME") or "").strip()
+    if explicit:
+        return explicit
+    invoked = os.path.basename(str(sys.argv[0] or "")).strip()
+    if invoked:
+        return invoked
     return PRIMARY_COMMAND
 
 
