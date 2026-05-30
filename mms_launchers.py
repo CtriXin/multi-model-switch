@@ -3098,11 +3098,46 @@ def _normalize_caveman_mode(value, default="disable"):
         return "enable"
     if raw in {"0", "false", "no", "off", "disable", "disabled"}:
         return "disable"
+    if _normalize_caveman_level(raw, default=""):
+        return "enable"
     return default if default in {"auto", "enable", "disable"} else "disable"
 
 
 def _runtime_caveman_enabled(runtime):
     return _normalize_caveman_mode((runtime or {}).get("caveman_mode", "disable")) == "enable"
+
+
+def _normalize_caveman_level(value, default="light"):
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if raw in {"", "inherit", "default", "auto", "enable", "enabled", "on", "true", "1"}:
+        return default if default in {"", "light", "standard", "full"} else "light"
+    if raw in {"light", "lite", "low"}:
+        return "light"
+    if raw in {"standard", "normal", "medium"}:
+        return "standard"
+    if raw in {"full", "ultra", "high"}:
+        return "full"
+    return default if default in {"", "light", "standard", "full"} else "light"
+
+
+def _runtime_caveman_level(runtime):
+    runtime = runtime or {}
+    level = runtime.get("caveman_level")
+    if level is None:
+        level = runtime.get("caveman_mode")
+    return _normalize_caveman_level(level, default="light")
+
+
+def _caveman_hook_mode(caveman_level):
+    return {
+        "light": "lite",
+        "standard": "full",
+        "full": "ultra",
+    }.get(_normalize_caveman_level(caveman_level), "lite")
+
+
+def _caveman_hook_env_prefix(caveman_level):
+    return f"CAVEMAN_DEFAULT_MODE={shlex.quote(_caveman_hook_mode(caveman_level))} "
 
 
 def _normalize_thinking_mode(value, default="enable"):
@@ -3884,9 +3919,10 @@ def _session_skill_disabled(disabled_session_surfaces, skill_name):
     return _session_surface_disabled(disabled_session_surfaces, "skills", skill_name)
 
 
-def _caveman_claude_activate_command(caveman_root):
+def _caveman_claude_activate_command(caveman_root, caveman_level="light"):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     return (
+        _caveman_hook_env_prefix(caveman_level) +
         "CAVEMAN_HOOK_COMPACT=1 "
         "CAVEMAN_HOOK_EVENT=SessionStart "
         f"node {json.dumps(script_path)}"
@@ -3898,11 +3934,12 @@ def _caveman_claude_tracker_command(caveman_root):
     return f"node {json.dumps(script_path)}"
 
 
-def _caveman_codex_activate_command(caveman_root):
+def _caveman_codex_activate_command(caveman_root, caveman_level="light"):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     if not os.path.isfile(script_path):
         return ""
     return (
+        _caveman_hook_env_prefix(caveman_level) +
         "CAVEMAN_HOOK_COMPACT=1 "
         "CAVEMAN_HOOK_EVENT=SessionStart "
         'CLAUDE_CONFIG_DIR="$HOME/.codex" '
@@ -3910,8 +3947,8 @@ def _caveman_codex_activate_command(caveman_root):
     )
 
 
-def _caveman_codex_hook_payload(caveman_root):
-    command = _caveman_codex_activate_command(caveman_root)
+def _caveman_codex_hook_payload(caveman_root, caveman_level="light"):
+    command = _caveman_codex_activate_command(caveman_root, caveman_level=caveman_level)
     if command:
         return {
             "type": "command",
@@ -3968,8 +4005,8 @@ def _codex_shell_hook_payload(command_text, *, timeout=None, status_message=None
     return payload
 
 
-def _codex_caveman_session_hook(caveman_root):
-    hook_payload = _caveman_codex_hook_payload(caveman_root)
+def _codex_caveman_session_hook(caveman_root, caveman_level="light"):
+    hook_payload = _caveman_codex_hook_payload(caveman_root, caveman_level=caveman_level)
     return _codex_shell_hook_payload(
         hook_payload.get("command"),
         timeout=hook_payload.get("timeout"),
@@ -3977,14 +4014,14 @@ def _codex_caveman_session_hook(caveman_root):
     )
 
 
-def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
+def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
     hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
     if not enable_caveman:
         return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
 
     caveman_root = _resolve_caveman_root()
-    replacement = _codex_caveman_session_hook(caveman_root) if caveman_root else {}
+    replacement = _codex_caveman_session_hook(caveman_root, caveman_level=caveman_level) if caveman_root else {}
     replaced = False
     configured = {}
 
@@ -4081,7 +4118,7 @@ def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
     return hooks_data
 
 
-def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
+def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     hooks_data = _filter_hook_commands(hooks_data, _is_caveman_hook_command)
     if not enable_caveman:
         return hooks_data
@@ -4091,7 +4128,7 @@ def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
     hooks_data = _append_shell_command_hook(
         hooks_data,
         "SessionStart",
-        _caveman_claude_activate_command(caveman_root),
+        _caveman_claude_activate_command(caveman_root, caveman_level=caveman_level),
         timeout=5,
         status_message="Loading caveman mode...",
     )
@@ -4146,9 +4183,20 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
     return _merge_claude_hooks(hooks_data, omc_hooks)
 
 
-def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_nsr=False, disabled_session_surfaces=None):
+def _build_codex_session_hooks(
+    base_hooks=None,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    enable_nsr=False,
+    disabled_session_surfaces=None,
+):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
-    hooks_data = _configure_codex_caveman_hooks(payload.get("hooks"), enable_caveman=enable_caveman)
+    hooks_data = _configure_codex_caveman_hooks(
+        payload.get("hooks"),
+        enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
+    )
     hooks_data = _configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
     hooks_data = _append_shell_command_hook(
         hooks_data,
@@ -5058,11 +5106,15 @@ def _write_agy_mcp_config(plugin_dir, *, disabled_session_surfaces=None):
         _remove_file_if_exists(path)
 
 
-def _write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfaces=None):
+def _write_agy_hooks(plugin_dir, *, enable_caveman=False, caveman_level="light", disabled_session_surfaces=None):
     _remove_file_if_exists(os.path.join(plugin_dir, "hooks.json"))
     hooks_data = _merge_mms_session_hooks({})
     if enable_caveman:
-        hooks_data = _configure_claude_caveman_hooks(hooks_data, enable_caveman=True)
+        hooks_data = _configure_claude_caveman_hooks(
+            hooks_data,
+            enable_caveman=True,
+            caveman_level=caveman_level,
+        )
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _filter_missing_managed_hook_commands(hooks_data)
     hooks_dir = os.path.join(plugin_dir, "hooks")
@@ -5074,7 +5126,14 @@ def _write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfa
         _remove_file_if_exists(path)
 
 
-def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
+def _overlay_agy_session_assets(
+    account_home,
+    session_home,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    disabled_session_surfaces=None,
+):
     if not account_home or not session_home:
         return
     plugin_dir = _ensure_agy_plugin_dir(account_home)
@@ -5083,6 +5142,7 @@ def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=Fa
     _write_agy_hooks(
         plugin_dir,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         disabled_session_surfaces=disabled_session_surfaces,
     )
     if enable_caveman:
@@ -6271,6 +6331,7 @@ def _build_claude_session_settings(
     default_env=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -6311,6 +6372,7 @@ def _build_claude_session_settings(
     hooks = _configure_claude_caveman_hooks(
         hooks,
         enable_caveman=bool(enable_caveman and allow_execution_surfaces),
+        caveman_level=caveman_level,
     )
     hooks = _configure_claude_nsr_hooks(
         hooks,
@@ -6406,6 +6468,7 @@ def _write_claude_session_settings(
     base_settings=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -6423,6 +6486,7 @@ def _write_claude_session_settings(
         default_env=default_env,
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         enable_nsr=enable_nsr,
         enable_ecc=enable_ecc,
         enable_omc=enable_omc,
@@ -6801,6 +6865,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             home_dir,
             session_home,
             enable_caveman=_runtime_caveman_enabled(account),
+            caveman_level=_runtime_caveman_level(account),
             disabled_session_surfaces=disabled_session_surfaces,
         )
         host_context_env = _install_host_context_env(
@@ -9685,6 +9750,7 @@ def _claude_gateway_env(
     provider_id = runtime.get("id", "")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    caveman_level = _runtime_caveman_level(runtime)
     enable_nsr = _runtime_nsr_enabled(runtime)
     enable_ecc = agent_pack == "ecc"
     enable_omc = agent_pack == "omc"
@@ -9787,6 +9853,7 @@ def _claude_gateway_env(
             default_env=default_settings_env,
             base_settings=session_base_settings,
             enable_caveman=enable_caveman,
+            caveman_level=caveman_level,
             enable_nsr=enable_nsr,
             enable_ecc=enable_ecc,
             enable_omc=enable_omc,
@@ -9941,6 +10008,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     with open(auth_path, "w") as f:
         _json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": openai_key}, f)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    caveman_level = _runtime_caveman_level(runtime)
     enable_nsr = _runtime_nsr_enabled(runtime)
     real_codex_dir = _real_user_path(".codex")
     real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
@@ -9971,6 +10039,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         session_hooks = _build_codex_session_hooks(
             base_hooks,
             enable_caveman=enable_caveman,
+            caveman_level=caveman_level,
             enable_nsr=enable_nsr,
             disabled_session_surfaces=disabled_session_surfaces,
         )

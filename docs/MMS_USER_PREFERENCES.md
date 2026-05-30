@@ -38,6 +38,7 @@ config.toml -> override.toml -> preferences.toml allowlist -> confirm screen cha
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
 caveman_mode = "enable"       # enable | disable
+caveman_level = "light"       # light | standard | full
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
@@ -50,6 +51,7 @@ agent_pack = "ecc"
 
 [launch.cli.agy]
 caveman_mode = "enable"
+caveman_level = "light"
 
 [session_surfaces.disabled]
 skills = ["agent-browser"]
@@ -78,6 +80,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | `thinking_mode` | `enable` / `disable` | Default Thinking toggle for supported `Claude` / `Codex` routes |
 | `reasoning_effort` | `low` / `medium` / `high` / `xhigh` | Default effort when the selected model profile supports it |
 | `caveman_mode` | `enable` / `disable` | Default session-local Caveman overlay |
+| `caveman_level` | `light` / `standard` / `full` | Default Caveman intensity when enabled |
 | `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `enable`, without startup/prompt hooks |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
