@@ -28,6 +28,8 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
+DEV_CHANNEL_REF="${MMS_INSTALL_DEV_REF:-main}"
+CANARY_CHANNEL_REF="${MMS_INSTALL_CANARY_REF:-canary}"
 DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.3.1}"
 BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
@@ -415,8 +417,11 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-xmem] [--xmem-ref <tag-or-branch>] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
+  bash install.sh [--channel stable|dev|canary] [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-xmem] [--xmem-ref <tag-or-branch>] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
+  bash install.sh --stable
+  bash install.sh --dev
+  bash install.sh --canary
   bash install.sh --main
   bash install.sh --latest-tag
   bash install.sh --latest-release
@@ -424,8 +429,9 @@ $(t "用法:" "Usage:")
   bash install.sh --check
 
 $(t "说明:" "Notes:")
-  - $(t "默认远程安装/升级使用最新 semver tag" "By default, remote install/upgrade uses the latest semver tag")
-  - $(t "--ref 可指定版本号或分支，例如 v1.2.0 / main" "--ref can pin a specific version or branch, for example v1.2.0 / main")
+  - $(t "推荐显式选择 --channel stable|dev|canary；默认远程安装/升级仍兼容旧行为使用最新 semver tag" "Prefer explicit --channel stable|dev|canary; default remote install/upgrade remains backward-compatible and uses the latest semver tag")
+  - $(t "--stable / --dev / --canary 是 --channel stable|dev|canary 的短别名" "--stable / --dev / --canary are short aliases for --channel stable|dev|canary")
+  - $(t "--ref 可指定版本号或分支，例如 v1.2.0 / main / dev / canary" "--ref can pin a specific version or branch, for example v1.2.0 / main / dev / canary")
   - $(t "--version 仅显示当前脚本将安装的版本，不执行安装" "--version prints the version/ref this script would install without installing")
   - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
   - $(t "--dry-run 只显示本次会写入/安装/初始化什么，不创建 venv、不复制文件、不运行 setup" "--dry-run only prints what would be written/installed/initialized; it does not create a venv, copy files, or run setup")
@@ -1015,11 +1021,14 @@ download_remote_source() {
     fi
     ref="$(normalize_install_ref "$ref")"
 
-    if [ "$ref" = "main" ]; then
-        archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/main.tar.gz"
-    else
-        archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/${ref}.tar.gz"
-    fi
+    case "$ref" in
+        v[0-9]*.[0-9]*.[0-9]*)
+            archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/${ref}.tar.gz"
+            ;;
+        *)
+            archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${ref}.tar.gz"
+            ;;
+    esac
 
     echo "$(t "正在下载源码归档" "Downloading source archive"): $archive_url"
     if ! download_url_to_file "$archive_url" "$tarball"; then
@@ -1125,14 +1134,20 @@ prepare_source_dir() {
 
 resolve_requested_ref() {
     local ref="$INSTALL_REF"
-    if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "latest-release" ]; then
+    if [ -z "$ref" ] && { [ "$INSTALL_CHANNEL" = "stable" ] || [ "$INSTALL_CHANNEL" = "latest-release" ]; }; then
         ref="$(resolve_latest_release_tag || true)"
         if [ -n "$ref" ]; then
-            echo "✓ latest release: $ref"
+            echo "✓ stable release: $ref"
         else
-            echo "⚠ $(t "获取 latest release 失败，回退到最新 tag" "Failed to fetch latest release, falling back to latest tag")"
+            echo "⚠ $(t "获取 stable/latest release 失败，回退到最新 tag" "Failed to fetch stable/latest release, falling back to latest tag")"
             INSTALL_CHANNEL="latest-tag"
         fi
+    fi
+    if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "dev" ]; then
+        ref="$DEV_CHANNEL_REF"
+    fi
+    if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "canary" ]; then
+        ref="$CANARY_CHANNEL_REF"
     fi
     if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "latest-tag" ]; then
         ref="$(resolve_latest_tag || true)"
@@ -2267,7 +2282,9 @@ print_version_overview() {
 
     echo "$(t "版本概览" "Version overview")"
     echo "  $(t "当前已安装" "Currently installed"): ${installed_ref:-$(t "未安装" "none")}"
-    echo "  $(t "稳定版（latest release）" "Stable release (latest release)"): ${stable_ref:-$(t "未获取" "unavailable")}"
+    echo "  $(t "稳定版（Stable/latest release）" "Stable release (latest release)"): ${stable_ref:-$(t "未获取" "unavailable")}"
+    echo "  $(t "Dev ref" "Dev ref"): $DEV_CHANNEL_REF"
+    echo "  $(t "Canary ref" "Canary ref"): $CANARY_CHANNEL_REF"
     echo "  $(t "线上最新（latest tag）" "Latest upstream tag (latest tag)"): ${latest_tag_ref:-$(t "未获取" "unavailable")}"
     echo "  $(t "本次准备安装" "Planned install ref"): ${RESOLVED_INSTALL_REF:-local-source}"
     echo "  $(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
@@ -4232,6 +4249,28 @@ while [[ $# -gt 0 ]]; do
             shift
             parse_install_cli_arg "${1:-}"
             INSTALL_CLI_EXPLICIT=1
+            ;;
+        --channel)
+            shift
+            if [[ -z "${1:-}" ]] || [[ "$1" != "stable" && "$1" != "dev" && "$1" != "canary" ]]; then
+                echo "❌ $(t "--channel 只支持 stable / dev / canary" "--channel only supports stable / dev / canary")"
+                usage
+                exit 1
+            fi
+            INSTALL_REF=""
+            INSTALL_CHANNEL="$1"
+            ;;
+        --stable)
+            INSTALL_REF=""
+            INSTALL_CHANNEL="stable"
+            ;;
+        --dev)
+            INSTALL_REF=""
+            INSTALL_CHANNEL="dev"
+            ;;
+        --canary)
+            INSTALL_REF=""
+            INSTALL_CHANNEL="canary"
             ;;
         --ref)
             shift
