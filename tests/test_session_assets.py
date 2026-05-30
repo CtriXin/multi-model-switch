@@ -13,7 +13,14 @@ class _FakeCore:
         return {
             "launch": {"defaults": {"bypass": True, "caveman_mode": "enable", "nsr_mode": "disable", "agent_pack": "none"}},
             "session_surfaces": {"disabled": {"skills": ["agent-browser"], "mcp": ["pilot"], "hooks": []}},
+            "assets": {"managed_enabled": True, "managed_root": f"{self.home}/.local/share/mms/assets", "roots": {}},
         }
+
+    def managed_assets_enabled(self):
+        return True
+
+    def managed_assets_root(self):
+        return f"{self.home}/.local/share/mms/assets"
 
     def _caveman_available_for_cli(self, _cli):
         return True
@@ -74,6 +81,10 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert {cli["id"] for cli in snapshot["clis"]} == {"claude", "codex", "opencode", "agy"}
     assert "preferences.toml" in snapshot["configuration_contract"]["persistent_path"]
     assert "[session_surfaces.disabled]" in snapshot["preference_snippet"]
+    assert "[assets]" in snapshot["preference_snippet"]
+    assert "managed_root" in snapshot["preference_snippet"]
+    assert snapshot["managed_install"]["root"].endswith(".local/share/mms/assets")
+    assert snapshot["configuration_contract"]["managed_assets_root"].endswith(".local/share/mms/assets")
     assert snapshot["launch_defaults"]["bypass"] is True
     assert snapshot["disabled_defaults"]["skills"] == ["agent-browser"]
     assert snapshot["disabled_defaults"]["mcp"] == ["pilot"]
@@ -83,6 +94,7 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert managed_web["surface"] == "Skill"
     assert managed_web["exists"] is True
     assert managed_web["root_kind"] == "安装/管理镜像"
+    assert managed_web["install_path"].endswith(".local/share/mms/assets/skills/web-access")
     assert managed_web["skill_count"] == 1
     assert isinstance(snapshot["global_roots"], list)
     assert snapshot["confirm_reference"]["title"] == "TUI 确认页对照"

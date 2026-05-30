@@ -47,7 +47,25 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 ## 安装版 / 开发版位置
 
-MMS 动态 skill/MCP 不要求复制到某一个全局 skill 目录；运行时会按当前安装形态解析真实来源，再软链到本次 session 的隔离 HOME：
+MMS 动态 skill/MCP/hook 现在有一个固定的用户级安装根：
+
+```text
+~/.local/share/mms/assets/
+  skills/<skill-name>/SKILL.md
+  mcp/<mcp-name>/...
+  packs/<pack-name>/...
+  hooks/<hook-name>/...
+  packages/<asset-name>/...   # 兼容兜底
+```
+
+推荐把真实包软链到这个目录，而不是复制完整目录。launcher 的读取顺序是：
+
+1. 显式 env，例如 `MMS_WEB_ACCESS_ROOT`；
+2. `preferences.toml` 的 `[assets.roots]` 单项覆盖；
+3. 固定 managed assets root：`~/.local/share/mms/assets` 或 `[assets].managed_root`；
+4. 开发版 / 安装版内置的 `vendor/`、`agent-packs/` 和历史兼容路径。
+
+运行时仍然会把最终解析到的来源软链到本次 session 的隔离 HOME，不会把包复制进每个隔离环境：
 
 - 开发版通常来自当前 worktree 的 `vendor/` 或 `agent-packs/`；
 - 安装版通常来自 MMS 安装包内部的 `vendor/` / `agent-packs/`；
@@ -77,17 +95,19 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 当前读写边界：
 
 - `preferences.toml` 才是 `bypass`、`caveman_mode`、`nsr_mode`、`agent_pack` 和 disabled session surfaces 的持久偏好位置。
+- `[assets].managed_root` 是固定 managed assets 安装根；默认是 `~/.local/share/mms/assets`。
+- `[assets].managed_enabled = false` 可以关闭固定根读取；env 显式 root 仍可用于调试。
 - `config.toml` / registry DB 继续作为 model/provider/routing 真源，不承载 per-session 能力开关。
 - 全局 Claude/Codex/OpenCode 配置保持只读，除非用户明确进入全局安装或配置流程。
 - `session_surfaces.disabled.skills` 支持 `claude:<skill>` / `codex:<skill>` 这种 CLI-scoped Global Skill 过滤；不带前缀的名字仍可用于 MMS 动态 skill 或手动全局过滤。
 
 因此，未来保存支持应该是独立的 audited preferences writer，而不是模型/通道保存流程的副作用。
 
-## 固定展示位置 vs 真实安装位置
+## 固定展示位置与固定安装位置
 
 当前已完成的是 WebUI 固定管理入口：`Skill / MCP 管理`。首屏用于筛选、开关和复制偏好片段；**当前加载来源 / 路径诊断** 会按实际 resolver 展示安装版/开发版当前选中的根，但默认折叠，避免抢占主要管理区。
 
-还没有完成“把所有动态 Skill/MCP 物理整合到一个真实文件夹再统一安装”。现有持久配置入口是 `[assets.roots]`，用户可以在 `preferences.toml` 指定某个动态 skill 的真实根，例如 `web_access = "~/my-skills/web-access"`；但任何写入 `~/.config/mms/preferences.toml` 都必须走 human gate。
+当前也已经有固定安装根：`~/.local/share/mms/assets`。现有持久配置入口包括 `[assets].managed_root` 和 `[assets.roots]`；前者是统一根，后者是单个能力的覆盖。任何写入 `~/.config/mms/preferences.toml` 仍必须走 human gate。
 
 ## 交互参考
 

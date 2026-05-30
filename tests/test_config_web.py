@@ -359,13 +359,15 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "assetCards" in html
     assert "assetControlHelp" in html
     assert "添加到 MMS 动态" in html
+    assert "MMS managed assets root" in html
+    assert "managed_root" in html
     assert "在这里开 / 关" in html
     assert "asset-search" in html
     assert "asset-list" in html
     assert "assetManagedRoots" in html
     assert "function renderAssetManagedRoots()" in html
     assert "当前加载来源 / 路径诊断" in html
-    assert "不是单个 Skill 开关" in html
+    assert "launcher 优先读固定根" in html
     assert "asset-source-diagnostic" in html
     assert "roots.filter(Boolean)" in html
     assert "roots.slice(0,6)" not in html

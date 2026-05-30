@@ -424,6 +424,10 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
         import mms_launchers  # type: ignore
     except Exception:
         return []
+    mms_core = _load_mms_core()
+    install = _managed_install_contract(home, mms_core)
+    install_root = _safe_text(install.get("real_root"))
+    install_surface = {"Skill": "skills", "能力包": "packs", "MCP": "mcp"}
     specs = [
         ("web-access", "Skill", "_resolve_web_access_root"),
         ("weber", "Skill", "_resolve_weber_root"),
@@ -450,6 +454,11 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
             path = ""
         if not path:
             continue
+        install_dir = ""
+        install_dir_real = ""
+        if install_root:
+            install_dir_real = os.path.join(install_root, install_surface.get(surface, "packages"), name)
+            install_dir = _abbrev_path(install_dir_real, home=home)
         rows.append(
             {
                 "name": name,
@@ -458,11 +467,56 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
                 "real_path": os.path.abspath(os.path.expanduser(path)),
                 "exists": os.path.exists(path),
                 "root_kind": _asset_root_kind(path, home=home),
+                "install_path": install_dir,
+                "install_real_path": install_dir_real,
+                "install_exists": bool(install_dir_real and os.path.exists(install_dir_real)),
                 "skill_count": _asset_root_skill_count(path),
-                "note": "实际加载位置；开发版通常在当前 worktree/vendor，安装版通常在 MMS 安装包的 vendor 或用户管理镜像。",
+                "note": "实际加载位置；固定安装版优先读取 MMS managed assets root，找不到才回退到开发版/vendor/历史路径。",
             }
         )
     return rows
+
+
+def _managed_install_contract(home: str, mms_core: Any | None = None) -> dict[str, Any]:
+    root = ""
+    enabled = True
+    if mms_core is not None:
+        try:
+            enabled = bool(mms_core.managed_assets_enabled())
+        except Exception:
+            enabled = True
+        try:
+            root = _safe_text(mms_core.managed_assets_root())
+        except Exception:
+            root = ""
+    if not root:
+        root = os.path.join(home, ".local", "share", "mms", "assets")
+    real_root = os.path.abspath(os.path.expanduser(root))
+
+    def child(name: str) -> dict[str, Any]:
+        real = os.path.join(real_root, name)
+        return {
+            "name": name,
+            "path": _abbrev_path(real, home=home),
+            "real_path": real,
+            "exists": os.path.isdir(real),
+        }
+
+    return {
+        "enabled": enabled,
+        "root": _abbrev_path(real_root, home=home),
+        "real_root": real_root,
+        "exists": os.path.isdir(real_root),
+        "children": [child(name) for name in ("skills", "mcp", "packs", "hooks", "packages")],
+        "layout": {
+            "skills": "skills/<skill-name>/SKILL.md",
+            "mcp": "mcp/<mcp-name>/...",
+            "packs": "packs/<pack-name>/...",
+            "hooks": "hooks/<hook-name>/...",
+            "packages": "packages/<asset-name>/... 作为兼容兜底",
+        },
+        "note": "这是 MMS 固定 managed assets 安装根；建议用 symlink 指向真实包，launcher 会优先读取这里。",
+    }
 
 
 def _disabled_defaults(prefs: dict[str, Any]) -> dict[str, list[str]]:
@@ -494,11 +548,17 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
         return "[" + ", ".join(f'"{_safe_text(item)}"' for item in values if _safe_text(item)) + "]"
 
     defaults = ((prefs.get("launch") or {}).get("defaults") or {}) if isinstance(prefs, dict) else {}
+    assets = (prefs.get("assets") or {}) if isinstance(prefs, dict) else {}
+    mms_core = _load_mms_core()
+    install = _managed_install_contract(_real_home(mms_core), mms_core)
     caveman = _safe_text(defaults.get("caveman_mode") or "enable")
     nsr = _safe_text(defaults.get("nsr_mode") or "enable")
     agent_pack = _safe_text(defaults.get("agent_pack") or "none")
     bypass = defaults.get("bypass")
     bypass_text = "true" if bypass is not False else "false"
+    managed_enabled = assets.get("managed_enabled")
+    managed_enabled_text = "false" if managed_enabled is False else "true"
+    managed_root = _safe_text(assets.get("managed_root") or install.get("real_root") or "~/.local/share/mms/assets")
     return "\n".join(
         [
             "[launch.defaults]",
@@ -511,6 +571,10 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
             f"skills = {_list('skills')}",
             f"mcp = {_list('mcp')}",
             f"hooks = {_list('hooks')}",
+            "",
+            "[assets]",
+            f"managed_enabled = {managed_enabled_text}",
+            f'managed_root = "{managed_root}"',
         ]
     )
 
@@ -1023,6 +1087,7 @@ def build_session_assets_snapshot(
         "confirm_reference": _confirm_reference(),
         "rows": rows,
         "managed_roots": _managed_roots(home),
+        "managed_install": _managed_install_contract(home, mms_core),
         "global_roots": _global_roots(home),
         "launch_defaults": {
             "caveman_mode": _safe_text(defaults.get("caveman_mode") or "enable"),
@@ -1034,6 +1099,7 @@ def build_session_assets_snapshot(
         "preference_snippet": _preference_snippet(prefs),
         "configuration_contract": {
             "persistent_path": preferences_path or "~/.config/mms/preferences.toml",
+            "managed_assets_root": _managed_install_contract(home, mms_core).get("root"),
             "launch_override": "TUI 启动确认页本次切换优先级最高，但不写回真实配置。",
             "webui_write_scope": "当前 WebUI 面板先做 read-only inventory + snippet；后续保存 preferences 仍需 HumanGate。",
         },

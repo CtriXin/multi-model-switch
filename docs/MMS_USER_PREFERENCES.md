@@ -56,6 +56,10 @@ skills = ["agent-browser"]
 mcp = ["pilot"]
 hooks = []
 
+[assets]
+managed_enabled = true
+managed_root = "~/.local/share/mms/assets"
+
 [assets.roots]
 web_access = "~/my-skills/web-access"
 weber = "~/my-skills/weber"
@@ -99,13 +103,33 @@ hooks = []
 
 `skills` accepts MMS dynamic skill names such as `web-access`, and CLI-scoped Global Skill filters such as `claude:frontend-design` or `codex:bugfix`. Scoped Global Skill filters only affect MMS-launched sessions; they do not delete or edit `~/.claude/skills` or `~/.codex/skills`.
 
+`[assets]` accepts:
+
+| Key | Values | Effect |
+| --- | --- | --- |
+| `managed_enabled` | `true` / `false` | Whether launcher reads the fixed MMS managed assets root |
+| `managed_root` | path | Fixed install root for MMS-only optional skills, MCP servers, packs, and hooks; default `~/.local/share/mms/assets` |
+
+Managed assets root layout:
+
+```text
+~/.local/share/mms/assets/
+  skills/<skill-name>/SKILL.md
+  mcp/<mcp-name>/...
+  packs/<pack-name>/...
+  hooks/<hook-name>/...
+  packages/<asset-name>/...
+```
+
+Put symlinks here when possible. Launcher resolves this fixed root before built-in `vendor/` fallback, then symlinks the selected assets into each isolated session.
+
 `[assets.roots]` accepts:
 
 ```text
 web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor
 ```
 
-Env vars like `MMS_WEB_ACCESS_ROOT` and `MMS_ECC_ROOT` still take priority over `preferences.toml`.
+Env vars like `MMS_WEB_ACCESS_ROOT`, `MMS_ECC_ROOT`, and `MMS_MANAGED_ASSETS_ROOT` still take priority over `preferences.toml`.
 
 ## Denied / Ignored Keys
 

@@ -227,6 +227,10 @@ skills = []                   # e.g. ["agent-browser", "token-saver"]
 mcp = []                      # e.g. ["pilot", "hive"]
 hooks = []                    # hook names or paths shown on confirm screen
 
+[assets]
+managed_enabled = true        # true = read fixed MMS managed assets root
+managed_root = "~/.local/share/mms/assets"
+
 [assets.roots]
 # Optional custom roots; env vars like MMS_WEB_ACCESS_ROOT still win.
 # web_access = "~/my-skills/web-access"
@@ -3279,13 +3283,24 @@ def _sanitize_asset_roots(payload):
     return result
 
 
+def _sanitize_managed_assets_root(value):
+    path = str(value or "").strip()
+    if not path:
+        return ""
+    return os.path.abspath(os.path.expanduser(path))
+
+
 def _sanitize_user_preferences(raw):
     raw = raw if isinstance(raw, dict) else {}
     launch = raw.get("launch") if isinstance(raw.get("launch"), dict) else {}
     session_surfaces = raw.get("session_surfaces") if isinstance(raw.get("session_surfaces"), dict) else {}
     assets = raw.get("assets") if isinstance(raw.get("assets"), dict) else {}
 
-    result = {"launch": {"defaults": {}, "cli": {}}, "session_surfaces": {"disabled": {}}, "assets": {"roots": {}}}
+    result = {
+        "launch": {"defaults": {}, "cli": {}},
+        "session_surfaces": {"disabled": {}},
+        "assets": {"roots": {}, "managed_enabled": True, "managed_root": ""},
+    }
     result["launch"]["defaults"] = _sanitize_launch_preferences(launch.get("defaults"))
     cli_tables = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
     for cli_name, table in cli_tables.items():
@@ -3298,6 +3313,14 @@ def _sanitize_user_preferences(raw):
     global_disabled = _sanitize_disabled_session_surfaces(session_surfaces.get("disabled"))
     if global_disabled:
         result["session_surfaces"]["disabled"] = global_disabled
+    managed_enabled = _pref_bool(assets.get("managed_enabled", assets.get("enabled")))
+    if managed_enabled is not None:
+        result["assets"]["managed_enabled"] = managed_enabled
+    managed_root = _sanitize_managed_assets_root(
+        assets.get("managed_root", assets.get("root"))
+    )
+    if managed_root:
+        result["assets"]["managed_root"] = managed_root
     roots = _sanitize_asset_roots(assets.get("roots"))
     if roots:
         result["assets"]["roots"] = roots
@@ -3322,6 +3345,36 @@ def preference_asset_root(asset_name):
     if not key:
         return ""
     return str(load_user_preferences().get("assets", {}).get("roots", {}).get(key) or "").strip()
+
+
+def managed_assets_enabled():
+    explicit_root = str(os.environ.get("MMS_MANAGED_ASSETS_ROOT") or os.environ.get("MMS_ASSETS_ROOT") or "").strip()
+    if explicit_root:
+        return True
+    try:
+        prefs = load_user_preferences()
+    except Exception:
+        prefs = {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    return assets.get("managed_enabled") is not False
+
+
+def managed_assets_root():
+    """Return the stable user-owned MMS assets root without creating it."""
+    explicit = str(os.environ.get("MMS_MANAGED_ASSETS_ROOT") or os.environ.get("MMS_ASSETS_ROOT") or "").strip()
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+    try:
+        prefs = load_user_preferences()
+    except Exception:
+        prefs = {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    configured = str(assets.get("managed_root") or "").strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    return os.path.join(resolve_real_user_home(), ".local", "share", "mms", "assets")
 
 
 def _merge_disabled_session_surfaces(*payloads):
@@ -12424,6 +12477,7 @@ def _display_preferences_help():
     console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, nsr_mode, agent_pack, bypass")
     console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
+    console.print("  assets: managed_enabled, managed_root")
     console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")

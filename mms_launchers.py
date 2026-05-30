@@ -98,6 +98,8 @@ from mms_core import (
     _runtime_httpx_request,
     detect_working_base_url,
     load_config,
+    managed_assets_enabled,
+    managed_assets_root,
     preference_asset_root,
 )
 from mms_fake_upstream import (
@@ -3044,6 +3046,7 @@ def _resolve_nsr_root():
     nsr_home = str(os.environ.get("NSR_HOME") or "").strip()
     if nsr_home:
         candidates.append(os.path.abspath(os.path.expanduser(nsr_home)))
+    candidates.extend(_managed_asset_root_candidates("packs", "nsr", "non-stop-run"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
         _real_user_path("auto-skills", "shared-skills", "nsr"),
@@ -3175,6 +3178,43 @@ def _asset_root_preference(asset_name):
         return ""
 
 
+def _managed_asset_root_candidates(surface, *names):
+    try:
+        if not managed_assets_enabled():
+            return []
+        root = str(managed_assets_root() or "").strip()
+    except Exception:
+        return []
+    if not root:
+        return []
+    root = os.path.abspath(os.path.expanduser(root))
+    surface = str(surface or "").strip()
+    candidates = []
+    for name in names:
+        raw = str(name or "").strip()
+        if not raw:
+            continue
+        variants = [raw]
+        alt = raw.replace("_", "-")
+        if alt not in variants:
+            variants.append(alt)
+        alt = raw.replace("-", "_")
+        if alt not in variants:
+            variants.append(alt)
+        for variant in variants:
+            if surface:
+                candidates.append(os.path.join(root, surface, variant))
+            candidates.append(os.path.join(root, "packages", variant))
+    deduped = []
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
 def _resolve_caveman_root():
     candidates = []
     explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
@@ -3183,6 +3223,7 @@ def _resolve_caveman_root():
     pref = _asset_root_preference("caveman")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("packs", "caveman"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
         _real_user_path("auto-skills", "vendor", "caveman"),
@@ -3262,6 +3303,7 @@ def _resolve_ecc_root():
     pref = _asset_root_preference("ecc")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("packs", "ecc", "everything-claude-code"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "everything-claude-code"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "everything-claude-code"),
@@ -3291,6 +3333,7 @@ def _resolve_omc_root():
     pref = _asset_root_preference("omc")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("packs", "omc", "oh-my-claudecode"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "oh-my-claudecode"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "oh-my-claudecode"),
@@ -3321,6 +3364,7 @@ def _resolve_web_access_root():
     pref = _asset_root_preference("web_access")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "web-access", "web_access"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
         _real_user_path("auto-skills", "vendor", "web-access"),
@@ -3345,6 +3389,7 @@ def _resolve_weber_root():
     pref = _asset_root_preference("weber")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "weber"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber"),
         _real_user_path("auto-skills", "shared-skills", "weber"),
@@ -3370,6 +3415,7 @@ def _resolve_agent_browser_root():
     pref = _asset_root_preference("agent_browser")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "agent-browser", "agent_browser"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
         _real_user_path("auto-skills", "installed-skills", "agent-browser"),
@@ -3395,6 +3441,7 @@ def _resolve_toon_root():
     pref = _asset_root_preference("toon")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "toon"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toon"),
         _real_user_path("auto-skills", "vendor", "toon"),
@@ -3419,6 +3466,7 @@ def _resolve_token_saver_root():
     pref = _asset_root_preference("token_saver")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "token-saver", "token_saver"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
         _real_user_path("auto-skills", "shared-skills", "token-saver"),
@@ -3444,6 +3492,7 @@ def _resolve_xmem_root():
     pref = _asset_root_preference("xmem")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "xmem"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "xmem"),
         _real_user_path("auto-skills", "shared-skills", "xmem"),
@@ -3493,6 +3542,7 @@ def _resolve_auto_github_contributor_root():
     pref = _asset_root_preference("auto_github_contributor")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "auto-github-contributor", "auto_github_contributor"))
     candidates.extend([
         _real_user_path("auto-skills", "installed-skills", "auto-github-contributor"),
         _real_user_path("auto-skills", "vendor", "auto-github-contributor", "skills", "auto-github-contributor"),
@@ -5346,6 +5396,7 @@ def _resolve_hive_root(module_path=None):
     install_home = str(os.environ.get("HIVE_HOME") or "").strip()
     if install_home:
         candidates.append(os.path.abspath(os.path.expanduser(install_home)))
+    candidates.extend(_managed_asset_root_candidates("mcp", "hive"))
 
     module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
     local_candidates = [
@@ -5393,6 +5444,7 @@ def _resolve_pilot_root(module_path=None):
     explicit = str(os.environ.get("MMS_PILOT_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend(_managed_asset_root_candidates("mcp", "pilot"))
 
     module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
     auto_skills_root = os.path.dirname(os.path.dirname(module_dir))
