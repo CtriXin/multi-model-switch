@@ -2866,6 +2866,73 @@ def _merge_claude_hooks(existing_hooks, template_hooks):
     return merged
 
 
+def _load_managed_hook_file(path):
+    path = str(path or "").strip()
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    hooks_data = payload.get("hooks") if isinstance(payload.get("hooks"), dict) else payload
+    if not isinstance(hooks_data, dict):
+        return {}
+    filtered = {}
+    for event_name, groups in hooks_data.items():
+        if not isinstance(groups, list):
+            continue
+        kept_groups = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            hook_items = group.get("hooks")
+            if not isinstance(hook_items, list):
+                continue
+            kept_hooks = []
+            for hook in hook_items:
+                if not isinstance(hook, dict):
+                    continue
+                if str(hook.get("type") or "").strip() != "command":
+                    continue
+                command = str(hook.get("command") or "").strip()
+                if not command or not _hook_command_targets_exist(command):
+                    continue
+                kept_hooks.append(dict(hook))
+            if kept_hooks:
+                next_group = dict(group)
+                next_group["hooks"] = kept_hooks
+                kept_groups.append(next_group)
+        if kept_groups:
+            filtered[str(event_name)] = kept_groups
+    return filtered
+
+
+def _load_managed_session_hooks():
+    try:
+        if not managed_assets_enabled():
+            return {}
+        root = os.path.join(managed_assets_root(), "hooks")
+    except Exception:
+        return {}
+    if not os.path.isdir(root):
+        return {}
+    paths = [os.path.join(root, "hooks.json")]
+    try:
+        for name in sorted(os.listdir(root)):
+            candidate = os.path.join(root, name, "hooks.json")
+            if os.path.isfile(candidate):
+                paths.append(candidate)
+    except OSError:
+        return {}
+    merged = {}
+    for path in paths:
+        merged = _merge_claude_hooks(merged, _load_managed_hook_file(path))
+    return merged
+
+
 def _merge_claude_statusline(existing):
     merged = dict(existing) if isinstance(existing, dict) else {}
     merged.update(_CLAUDE_STATUSLINE_CONFIG)
@@ -2994,6 +3061,7 @@ def _append_shell_command_hook(
 
 def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     hooks_data = _merge_claude_hooks(existing_hooks, template_hooks)
+    hooks_data = _merge_claude_hooks(hooks_data, _load_managed_session_hooks())
     hooks_data = _append_command_hook(
         hooks_data,
         "PreToolUse",
@@ -4215,6 +4283,7 @@ def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
     hooks_data = _configure_codex_caveman_hooks(payload.get("hooks"), enable_caveman=enable_caveman)
     hooks_data = _configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
+    hooks_data = _merge_claude_hooks(hooks_data, _load_managed_session_hooks())
     hooks_data = _append_shell_command_hook(
         hooks_data,
         "Stop",

@@ -199,6 +199,42 @@ def test_asset_root_preference_is_below_env_and_above_defaults(monkeypatch, tmp_
     assert mms_launchers._resolve_web_access_root() == str(env_root)
 
 
+def test_managed_assets_root_can_provide_session_hooks(monkeypatch, tmp_path):
+    import json
+    import mms_launchers
+
+    hooks_dir = tmp_path / "managed-assets" / "hooks" / "demo"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [{"type": "command", "command": "echo managed-hook"}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "managed_assets_enabled", lambda: True)
+    monkeypatch.setattr(mms_launchers, "managed_assets_root", lambda: str(tmp_path / "managed-assets"))
+
+    hooks = mms_launchers._load_managed_session_hooks()
+    assert hooks["Stop"][0]["hooks"][0]["command"] == "echo managed-hook"
+
+    codex_payload = mms_launchers._build_codex_session_hooks({})
+    commands = [
+        hook["command"]
+        for group in codex_payload["hooks"]["Stop"]
+        for hook in group["hooks"]
+    ]
+    assert "echo managed-hook" in commands
+
+
 def test_config_preferences_help_and_example_are_discoverable(monkeypatch):
     import mms_core
 
