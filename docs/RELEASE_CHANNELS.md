@@ -7,13 +7,13 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 | Channel | Git source | 安装参数 | 用户 | 规则 |
 |---|---|---|---|---|
 | Stable | GitHub Release / `release/stable-*` | `--channel stable` / `--stable` | 普通用户、生产环境 | 慢更新，只收验证过的修复和兼容功能 |
-| Dev | 过渡期为 `main`，切分后为 `dev` | `--channel dev` / `--dev` | 作者日常工作机、需要最新修复的人 | 小步提交，targeted tests 通过即可推进 |
+| Dev | `dev` | `--channel dev` / `--dev` | 作者日常工作机、需要最新修复的人 | 小步提交，targeted tests 通过即可推进 |
 | Canary | `canary` | `--channel canary` / `--canary` | 测试机、夜间试验 | 最快，可破，但必须可回滚 |
 
 ## 当前过渡策略
 
-- `main` 暂时不停止迭代，因为当前真实工作流仍在 main 上。
-- `dev` 和 `canary` 可以先从当前 main 切出，后续新功能优先进入 `dev` / `canary`。
+- `main` 暂时不停止迭代，会和 `dev` 同步一段时间，避免已有安装入口突然断档。
+- `dev` 和 `canary` 已从当前 main 切出；后续新功能优先进入 `dev` / `canary`。
 - `release/stable-v3.3-no-db` 继续作为 stable 维护线，逐步 cherry-pick 已验证的 Web UI / Thinking / model route 修复。
 - 等 stable 追上当前主功能后，再把 GitHub default branch 是否继续叫 `main` 单独决策。
 

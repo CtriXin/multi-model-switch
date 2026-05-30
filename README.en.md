@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Channel behavior:
 
 - `stable` follows the newest human-stabilized GitHub Release / stable line.
-- `dev` follows the active development ref; during the transition it maps to `main` unless `MMS_INSTALL_DEV_REF` is overridden.
+- `dev` follows the active development ref; it maps to the `dev` branch unless `MMS_INSTALL_DEV_REF` is overridden.
 - `canary` follows the `canary` branch and may break temporarily.
 - `mms` and `mmf` are two config roots from the same install, not two code installations: `mms -> ~/.config/mms`, `mmf -> ~/.config/mms-next`.
 
@@ -105,6 +105,8 @@ mms doctor
 mms models
 mmf config web
 ```
+
+Note: Dev channel selects the code branch. The preview DB save button is controlled by the config root. Use `mmf config web` for `Write preview DB + publish`; `mms config web` intentionally shows the stable legacy save path.
 
 See also: [Release channels](docs/RELEASE_CHANNELS.md) and [Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
 

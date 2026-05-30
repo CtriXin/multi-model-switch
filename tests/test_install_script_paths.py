@@ -378,6 +378,12 @@ def test_piped_channel_flags_resolve_stable_dev_and_canary_refs():
     assert "Install channel: canary" in canary.stdout
 
 
+def test_dev_channel_defaults_to_dev_branch():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'DEV_CHANNEL_REF="${MMS_INSTALL_DEV_REF:-dev}"' in text
+
+
 def test_install_script_uses_npm_first_cli_installs():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")

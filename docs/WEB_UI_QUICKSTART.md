@@ -4,7 +4,7 @@ Web UI 是 MMS 当前最适合做教程的配置入口。它比 TUI 更适合截
 
 ## 启动
 
-Preview root 推荐用 `mmf`：
+Preview root 推荐用 `mmf`。如果保存页显示的是 `保存配置`，说明你打开的是 `mms config web` stable root；要写 `预览 DB + latest-approved bundle` 必须用 `mmf`：
 
 ```bash
 mmf config web
