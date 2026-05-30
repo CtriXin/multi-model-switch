@@ -65,6 +65,30 @@ def test_command_metadata_helpers_preserve_wrapper_values(monkeypatch):
     import mms_core
 
     assert mms_command_tools.current_command(primary_command="mmg") == "mmg"
+    assert (
+        mms_command_tools.current_command(
+            primary_command="mms",
+            environ={"MMS_COMMAND_NAME": "mmg"},
+            argv0="/tmp/mms",
+        )
+        == "mmg"
+    )
+    assert (
+        mms_command_tools.current_command(
+            primary_command="mms",
+            environ={"MMS_COMMAND_NAME": "mmd"},
+            argv0="/tmp/mms",
+        )
+        == "mmd"
+    )
+    assert (
+        mms_command_tools.current_command(
+            primary_command="mms",
+            environ={"MMS_COMMAND_NAME": "unsafe"},
+            argv0="/tmp/mms",
+        )
+        == "mms"
+    )
     assert mms_command_tools.display_title() == "MMS"
     assert mms_command_tools.display_title("MMG") == "MMG"
 
