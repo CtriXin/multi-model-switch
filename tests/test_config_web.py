@@ -102,15 +102,16 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
-    assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置", "主屏入口", "负载"}
+    assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置", "主屏入口"}
+    assert "负载" not in {item["area"] for item in snapshot["webui_capability_coverage"]}
     assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
     mapping = snapshot["tui_webui_mapping"]
     assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
     assert snapshot["tui_webui_mapping_summary"]["counts"] == {
-        "native": 21,
+        "native": 19,
         "report": 16,
         "draft_review": 3,
-        "human_gate": 22,
+        "human_gate": 21,
         "missing": 0,
     }
     assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
@@ -135,8 +136,6 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "connect.add_official",
         "channel.provider_browse",
         "channel.family_autosort",
-        "load_balance.profile_select",
-        "load_balance.delete_recent",
         "provider.credentials",
         "provider.model_patch_reset",
         "provider.advanced_metadata",
@@ -152,7 +151,6 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "connect.add_official")["status"] == "human_gate"
-    assert next(item for item in mapping if item["id"] == "load_balance.profile_select")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "provider.model_patch_reset")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "provider.advanced_metadata")["status"] == "native"
     assert next(item for item in mapping if item["id"] == "provider.network_policy")["status"] == "human_gate"
@@ -163,6 +161,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert verify_approved["status"] == "report"
     assert verify_approved["api_action"] == "verify_approved"
     assert verify_approved["write_policy"] == "read_only_report"
+    assert not any(str(item["id"]).startswith("load_balance.") for item in mapping)
     assert snapshot["ui"]["language"] == "zh"
     assert "Qwen" in snapshot["model_families"]
     assert snapshot["load_balance"]["default_profile"] == "daily"
@@ -237,12 +236,6 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
         config_path=str(tmp_path / "mms-next" / "config.toml"),
         command_name="mmf",
     )
-    load_balance = mms_config_web.build_settings_report(
-        cfg,
-        {"action": "load_balance_status"},
-        config_path=str(tmp_path / "mms-next" / "config.toml"),
-        command_name="mmf",
-    )
     channel_status = mms_config_web.build_settings_report(
         cfg,
         {"action": "provider_channel_status"},
@@ -289,9 +282,6 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert guard_accept["requires_human_confirmation"] is True
     assert "mmf guard accept" in guard_accept["commands"]
     assert language["status"] == "native"
-    assert load_balance["write_policy"] == "draft_review_confirmed_save"
-    assert load_balance["status"] == "native"
-    assert load_balance["load_balance"]["default_profile"] == "fast"
     assert channel_status["status"] == "native"
     assert channel_status["provider_default"] == "demo"
     assert official_gate["status"] == "human_gate"
@@ -753,7 +743,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "写入预览DB" in html
     assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
-    assert "stable legacy 保存写入 config.toml 的 [rescue] / [load_balance] / [vision_sidecar]" in html
+    assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
+    assert "已下线的负载均衡不在本轮 WebUI 迭代范围" in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
     assert "stable 写 credentials.sh；preview 写 secret backend" in html
     assert "这里会写入 config.toml 的 [rescue]" not in html
@@ -762,14 +753,22 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
-    assert "['settings','能力整合','accounts / reports / parity']" in html
+    assert "['settings','设置','accounts / guard / about']" in html
     assert 'data-section="settings"' in html
-    assert "Settings / Channel 能力" in html
-    assert "settingsCommand" in html
-    assert "MMX / WEBUI TAKEOVER MAP" in html
-    assert "Settings moved out of TUI" in html
-    assert "当前配置没有 OAuth account" in html
-    assert "function renderSettingsCommand" in html
+    assert "<h2>设置</h2>" in html
+    assert "通道、模型和真源动作已经放回各自模块" in html
+    assert "Snapshot Guard" in html
+    assert "accountModuleActions" in html
+    assert "accountActionButtons" in html
+    assert "sourceReport" in html
+    assert "channelReport" in html
+    assert "modelInventorySummary" in html
+    assert "modelConfigResult" in html
+    assert "testListBtn" in html
+    assert "fallbackReport" in html
+    assert "settingsCommand" not in html
+    assert "MMX / WEBUI TAKEOVER MAP" not in html
+    assert "Settings moved out of TUI" not in html
     assert "accountTable" in html
     assert "function syncAccounts()" in html
     assert "data-account-default" in html
@@ -780,15 +779,14 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "settingsGapSummary" in html
     assert "ui:state.ui" in html
     assert "settingsCoverage" in html
-    assert "主屏 O/P/L/S 入口覆盖" in html
-    assert "entryAudit" in html
-    assert "function renderEntryAudit" in html
-    assert "Load Balance profiles" in html
-    assert "loadBalanceTable" in html
-    assert "function renderLoadBalance" in html
-    assert "lbUpsert" in html
-    assert "load_balance profile 已暂存" in html
-    assert "load_balance_status" in html
+    assert "主屏 O/P/L/S 入口覆盖" not in html
+    assert "entryAudit" not in html
+    assert "function renderEntryAudit" not in html
+    assert "Load Balance profiles" not in html
+    assert "loadBalanceTable" not in html
+    assert "function renderLoadBalance" not in html
+    assert "lbUpsert" not in html
+    assert "load_balance_status" not in html
     assert "family_priority_overrides" in html
     assert "function familyPriorityInputs" in html
     assert "providerFamilyPriority" in html
@@ -817,11 +815,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "pDeleteConfirm" in html
     assert "deleteProvider" in html
     assert "function deleteCurrentProviderDraft()" in html
-    assert "tui_mapping" in html
-    assert "maintenanceActions" in html
+    assert "maintenanceActions" not in html
     assert "/api/settings/report" in html
     assert "human-gated" in html
-    assert "Human Gate 操作卡" in html
+    assert "Report / Human Gate" in html
     assert "function renderGateReport" in html
     assert "function copyGateCommand" in html
     assert "data-copy-gate-command" in html
@@ -838,7 +835,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "p.update_credentials=!!(updateEl&&updateEl.checked)" in html
     assert "p.api_key=$('pKey').value" not in html
     assert "data.ok&&Array.isArray(data.models)" in html
-    assert "模型拉取失败，请看测试结果" in html
+    assert "模型拉取失败，请看模型配置结果" in html
     assert "card provider-editor" in html
     assert ".provider-editor {" in html
     assert "position: sticky;" in html
@@ -1037,7 +1034,7 @@ def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(t
     assert review["counts"]["account_changes"] == 2
 
 
-def test_config_web_plan_family_priority_and_load_balance_drafts_are_reviewed(tmp_path):
+def test_config_web_plan_family_priority_drafts_are_reviewed(tmp_path):
     cfg = {
         "provider": {"default": "demo"},
         "providers": [
@@ -1056,23 +1053,9 @@ def test_config_web_plan_family_priority_and_load_balance_drafts_are_reviewed(tm
         "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "priority": 100}],
     }
     snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
-    draft = {key: snapshot[key] for key in ("providers", "accounts", "account_defaults", "load_balance")}
+    draft = {key: snapshot[key] for key in ("providers", "accounts", "account_defaults")}
     draft["providers"][0]["family_priority_overrides"] = {"GPT": 145, "Qwen": 90}
     draft["accounts"][0]["family_priority_overrides"] = {"GPT": 130}
-    draft["load_balance"] = {
-        "default_profile": "daily",
-        "profiles": [
-            {
-                "name": "daily",
-                "label": "daily",
-                "slots": {
-                    "heavy": {"model": "gpt-5.5", "provider_id": "demo"},
-                    "medium": {"model": "qwen3.6-plus"},
-                    "light": {"model": "deepseek-v4-flash"},
-                },
-            }
-        ],
-    }
 
     plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
     review = plan["review_summary"]
@@ -1081,13 +1064,10 @@ def test_config_web_plan_family_priority_and_load_balance_drafts_are_reviewed(tm
     provider = plan["config"]["providers"][0]
     assert provider["family_priority_overrides"] == {"GPT": 145, "Qwen": 90}
     assert plan["config"]["accounts"][0]["family_priority_overrides"] == {"GPT": 130}
-    assert plan["config"]["load_balance"]["default"] == "daily"
-    assert plan["config"]["load_balance"]["profiles"]["daily"]["heavy"] == {"model": "gpt-5.5", "provider": "demo"}
     assert any(item["kind"] == "provider_family_priority" for item in review["items"])
     assert any(item["kind"] == "account_metadata" for item in review["items"])
-    assert any(item["kind"] == "load_balance" for item in review["items"])
     assert "family_priority_overrides" in plan["diffs"]["config_toml"]
-    assert "[load_balance]" in plan["diffs"]["config_toml"]
+    assert "[load_balance]" not in plan["diffs"]["config_toml"]
 
 
 def test_config_web_plan_ui_language_draft_is_reviewed(tmp_path):
