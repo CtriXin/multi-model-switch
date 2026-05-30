@@ -1923,10 +1923,22 @@ def _mms_context_script_path():
     return launcher_script_path(__file__, "mms-context")
 
 
+def _mms_gain_script_path():
+    from mms_launcher_export import launcher_script_path
+
+    return launcher_script_path(__file__, "mms-gain")
+
+
 def _token_saver_script_path():
     from mms_launcher_export import launcher_script_path
 
     return launcher_script_path(__file__, "token-saver")
+
+
+def _token_gain_script_path():
+    from mms_launcher_export import launcher_script_path
+
+    return launcher_script_path(__file__, "token-gain")
 
 
 def _is_caveman_hook_command(command_text):
@@ -3643,7 +3655,9 @@ def _install_session_command_wrappers(session_home, env):
         wrapper_commands=_SESSION_REAL_HOME_WRAPPER_COMMANDS,
         mms_toon_script_path=_mms_toon_script_path,
         mms_context_script_path=_mms_context_script_path,
+        mms_gain_script_path=_mms_gain_script_path,
         token_saver_script_path=_token_saver_script_path,
+        token_gain_script_path=_token_gain_script_path,
         xmem_cli_path=_xmem_cli_path,
     )
 
@@ -4423,7 +4437,9 @@ def get_export_env(cli, runtime, model_info=None):
         inject_host_capability_hints=_inject_host_capability_hints,
         mms_toon_script_path=_mms_toon_script_path,
         mms_context_script_path=_mms_context_script_path,
+        mms_gain_script_path=_mms_gain_script_path,
         token_saver_script_path=_token_saver_script_path,
+        token_gain_script_path=_token_gain_script_path,
         xmem_cli_path=_xmem_cli_path,
         safe_getcwd=_safe_getcwd,
     )

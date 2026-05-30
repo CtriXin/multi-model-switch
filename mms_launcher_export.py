@@ -403,8 +403,10 @@ def install_session_command_wrappers(
     wrapper_commands,
     mms_toon_script_path,
     mms_context_script_path,
-    token_saver_script_path,
-    xmem_cli_path,
+    mms_gain_script_path=None,
+    token_saver_script_path=None,
+    token_gain_script_path=None,
+    xmem_cli_path=None,
 ):
     """Install wrappers for tools that must run against the real HOME."""
     wrapper_dir = os.path.join(session_home, ".mms", "bin")
@@ -451,7 +453,7 @@ def install_session_command_wrappers(
 
     install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env)
 
-    toon_script = mms_toon_script_path()
+    toon_script = mms_toon_script_path() if callable(mms_toon_script_path) else ""
     if toon_script:
         toon_wrapper_path = os.path.join(wrapper_dir, "mms-toon")
         toon_wrapper = "\n".join(
@@ -467,7 +469,7 @@ def install_session_command_wrappers(
         if isinstance(env, dict):
             env["MMS_TOON_BIN"] = toon_wrapper_path
 
-    context_script = mms_context_script_path()
+    context_script = mms_context_script_path() if callable(mms_context_script_path) else ""
     if context_script:
         context_wrapper_path = os.path.join(wrapper_dir, "mms-context")
         context_wrapper = "\n".join(
@@ -484,7 +486,24 @@ def install_session_command_wrappers(
             env["MMS_CONTEXT_BIN"] = context_wrapper_path
             env["MMS_CONTEXT_DIR"] = os.path.join(session_home, ".mms", "context-store")
 
-    token_saver_script = token_saver_script_path()
+    mms_gain_script = mms_gain_script_path() if callable(mms_gain_script_path) else ""
+    if mms_gain_script:
+        mms_gain_wrapper_path = os.path.join(wrapper_dir, "mms-gain")
+        mms_gain_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(mms_gain_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(mms_gain_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(mms_gain_wrapper)
+        os.chmod(mms_gain_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["MMS_GAIN_BIN"] = mms_gain_wrapper_path
+            env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
+
+    token_saver_script = token_saver_script_path() if callable(token_saver_script_path) else ""
     if token_saver_script:
         token_saver_wrapper_path = os.path.join(wrapper_dir, "token-saver")
         token_saver_wrapper = "\n".join(
@@ -502,7 +521,25 @@ def install_session_command_wrappers(
             env["MMS_TOKEN_SAVER_BIN"] = token_saver_wrapper_path
             env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
 
-    xmem_script = xmem_cli_path()
+    token_gain_script = token_gain_script_path() if callable(token_gain_script_path) else ""
+    if token_gain_script:
+        token_gain_wrapper_path = os.path.join(wrapper_dir, "token-gain")
+        token_gain_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(token_gain_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(token_gain_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(token_gain_wrapper)
+        os.chmod(token_gain_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["TOKEN_GAIN_BIN"] = token_gain_wrapper_path
+            env["MMS_TOKEN_GAIN_BIN"] = token_gain_wrapper_path
+            env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
+
+    xmem_script = xmem_cli_path() if callable(xmem_cli_path) else ""
     if xmem_script:
         xmem_wrapper_path = os.path.join(wrapper_dir, "xmem")
         xmem_wrapper = "\n".join(
@@ -604,9 +641,11 @@ def build_export_env(
     inject_host_capability_hints,
     mms_toon_script_path,
     mms_context_script_path,
-    token_saver_script_path,
-    xmem_cli_path,
-    safe_getcwd,
+    mms_gain_script_path=None,
+    token_saver_script_path=None,
+    token_gain_script_path=None,
+    xmem_cli_path=None,
+    safe_getcwd=os.getcwd,
 ):
     """Build export-only environment variables without launching a CLI."""
     runtime = runtime if isinstance(runtime, dict) else {}
@@ -650,24 +689,33 @@ def build_export_env(
     if cli in {"claude", "codex"}:
         inject_host_capability_hints(exports)
 
-    toon_script = mms_toon_script_path()
-    context_script = mms_context_script_path()
-    token_saver_script = token_saver_script_path()
-    xmem_script = xmem_cli_path()
+    toon_script = mms_toon_script_path() if callable(mms_toon_script_path) else ""
+    context_script = mms_context_script_path() if callable(mms_context_script_path) else ""
+    mms_gain_script = mms_gain_script_path() if callable(mms_gain_script_path) else ""
+    token_saver_script = token_saver_script_path() if callable(token_saver_script_path) else ""
+    token_gain_script = token_gain_script_path() if callable(token_gain_script_path) else ""
+    xmem_script = xmem_cli_path() if callable(xmem_cli_path) else ""
     if cli in {"claude", "codex", "opencode", "pi"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
             exports["MMS_CONTEXT_BIN"] = context_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(safe_getcwd(), ".mms", "context-store"))
+        if mms_gain_script:
+            exports["MMS_GAIN_BIN"] = mms_gain_script
+            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(safe_getcwd(), ".mms", "context-store"))
         if token_saver_script:
             exports["TOKEN_SAVER_BIN"] = token_saver_script
             exports["MMS_TOKEN_SAVER_BIN"] = token_saver_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(safe_getcwd(), ".mms", "context-store"))
+        if token_gain_script:
+            exports["TOKEN_GAIN_BIN"] = token_gain_script
+            exports["MMS_TOKEN_GAIN_BIN"] = token_gain_script
+            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(safe_getcwd(), ".mms", "context-store"))
         if xmem_script:
             exports["XMEM_BIN"] = xmem_script
             exports["MMS_XMEM_BIN"] = xmem_script
-        first_script = toon_script or context_script or token_saver_script or xmem_script
+        first_script = toon_script or context_script or mms_gain_script or token_saver_script or token_gain_script or xmem_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
     return exports

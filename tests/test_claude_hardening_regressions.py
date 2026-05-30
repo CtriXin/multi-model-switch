@@ -1393,6 +1393,32 @@ def test_caveman_codex_activate_defaults_to_lite_without_override(tmp_path):
     assert context.startswith("CAVEMAN MODE ACTIVE (lite).")
 
 
+def test_mms_caveman_level_maps_to_hook_mode(tmp_path):
+    import mms_launchers
+
+    caveman_root = tmp_path / "caveman"
+    hooks_dir = caveman_root / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+
+    assert mms_launchers._normalize_caveman_mode("standard") == "enable"
+    assert mms_launchers._runtime_caveman_level({"caveman_level": "lite"}) == "light"
+    assert mms_launchers._runtime_caveman_level({"caveman_level": "standard"}) == "standard"
+    assert mms_launchers._runtime_caveman_level({"caveman_level": "full"}) == "full"
+    assert "CAVEMAN_DEFAULT_MODE=lite" in mms_launchers._caveman_claude_activate_command(
+        str(caveman_root),
+        caveman_level="light",
+    )
+    assert "CAVEMAN_DEFAULT_MODE=full" in mms_launchers._caveman_codex_activate_command(
+        str(caveman_root),
+        caveman_level="standard",
+    )
+    assert "CAVEMAN_DEFAULT_MODE=ultra" in mms_launchers._caveman_codex_activate_command(
+        str(caveman_root),
+        caveman_level="full",
+    )
+
+
 def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

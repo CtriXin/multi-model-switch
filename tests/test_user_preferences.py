@@ -83,6 +83,7 @@ def test_runtime_preferences_merge_defaults_cli_and_disabled_surfaces():
             "defaults": {
                 "thinking_mode": "enable",
                 "reasoning_effort": "xhigh",
+                "caveman_level": "full",
                 "bypass": False,
                 "disabled_session_surfaces": {"skills": ["token-saver"]},
             },
@@ -110,6 +111,7 @@ def test_runtime_preferences_merge_defaults_cli_and_disabled_surfaces():
     assert runtime["reasoning_effort"] == "medium"
     assert result["thinking_mode"] == "enable"
     assert result["reasoning_effort"] == "low"
+    assert result["caveman_level"] == "full"
     assert result["bypass"] is False
     assert result["disabled_session_surfaces"] == {
         "skills": ["existing", "web-access", "token-saver"],
@@ -137,6 +139,14 @@ def test_runtime_preferences_do_not_reapply_after_confirm_changes():
     assert mms_core._runtime_with_launch_preferences({"_mms_preferences": prefs}, runtime, "codex") is runtime
     assert runtime["reasoning_effort"] == "medium"
     assert runtime["bypass"] is True
+
+
+def test_runtime_caveman_enabled_default_accepts_off_and_levels():
+    import mms_core
+
+    assert mms_core._runtime_caveman_enabled_default({"caveman_mode": "off"}) is False
+    assert mms_core._runtime_caveman_enabled_default({"caveman_mode": "standard"}) is True
+    assert mms_core._runtime_caveman_enabled_default({}) is True
 
 
 def test_launch_with_tracking_applies_preferences_safety_net(monkeypatch):

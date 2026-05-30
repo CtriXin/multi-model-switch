@@ -1,7 +1,7 @@
 ---
 name: token-saver
 description: Session behavior pack for automatic token-saving decisions. Use when handling large tool output, structured data for another model, repeated handoff/status context, long logs, or when the user asks to save tokens/context. Prefer this unified pack over remembering separate TOON or context commands.
-allowed-tools: Bash(token-saver:*), Bash($TOKEN_SAVER_BIN:*), Bash($MMS_TOKEN_SAVER_BIN:*), Bash(mms-context:*), Bash($MMS_CONTEXT_BIN:*), Bash(mms-toon:*), Bash($MMS_TOON_BIN:*)
+allowed-tools: Bash(token-saver:*), Bash($TOKEN_SAVER_BIN:*), Bash($MMS_TOKEN_SAVER_BIN:*), Bash(token-gain:*), Bash($TOKEN_GAIN_BIN:*), Bash($MMS_TOKEN_GAIN_BIN:*), Bash(mms-context:*), Bash($MMS_CONTEXT_BIN:*), Bash(mms-gain:*), Bash($MMS_GAIN_BIN:*), Bash(mms-toon:*), Bash($MMS_TOON_BIN:*)
 ---
 
 # Token Saver
@@ -65,6 +65,12 @@ Then respond with:
 - next action
 
 Use `mms-context search` and `mms-context show` only when the stored output is needed again.
+
+Use `token-gain`, `mms-gain`, `token-saver gain`, or `mms-context gain` when the user asks
+whether Token Saver is actually saving context. The stats are estimates: `stored_chars`
+is full local output, `visible_chars` is the stored snippet size, and `saved_chars` /
+`gain_pct` approximate the text kept out of chat. From a normal shell, `gain` falls back
+to the most recent non-empty MMS session context store when the current repo store is empty.
 
 Use `token-saver toon` or `mms-toon --auto` yourself when:
 

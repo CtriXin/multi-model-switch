@@ -230,6 +230,15 @@ hooks = []                    # hook names or paths shown on confirm screen
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
 """
+
+
+def _runtime_caveman_enabled_default(runtime, default=True):
+    from mms_session_features import normalize_caveman_mode
+
+    fallback = "enable" if default else "disable"
+    return normalize_caveman_mode((runtime or {}).get("caveman_mode", fallback), default=fallback) == "enable"
+
+
 CONFIG_AUDIT_LOG = "config-audit.jsonl"
 CONFIG_LOCK_FILE = "config.toml.lock"
 CONFIG_GUARD_FILES = ("AGENTS.md", "CLAUDE.md")

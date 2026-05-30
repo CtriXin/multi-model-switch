@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mms_session_features import normalize_caveman_level
+from mms_session_features import normalize_caveman_level, normalize_caveman_mode
 
 
 @dataclass(frozen=True)
@@ -2719,7 +2719,7 @@ def confirm_tui_options(
         "once": once,
         "context_lines": context_lines,
         "has_caveman": has_caveman,
-        "caveman_enabled_default": str(runtime.get("caveman_mode", "enable")).strip().lower() != "disable",
+        "caveman_enabled_default": normalize_caveman_mode(runtime.get("caveman_mode", "enable"), default="enable") == "enable",
         "caveman_level_default": default_caveman_level,
         "has_nsr": has_nsr,
         "nsr_enabled_default": str(runtime.get("nsr_mode", "enable")).strip().lower() == "enable",

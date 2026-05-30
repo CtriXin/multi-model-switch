@@ -19,6 +19,8 @@ ITEMS_DIR = "items"
 REF_PREFIX = "mmsctx://"
 DEFAULT_SHOW_CHARS = 4000
 DEFAULT_SNIPPET_CHARS = 360
+DEFAULT_STATS_LIMIT = 10
+DEFAULT_STATS_STORE_LIMIT = 12
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,9 @@ class ContextRecord:
     lines: int
     sha256: str
     snippet: str
+    visible_chars: int
+    saved_chars: int
+    gain_pct: float
 
 
 def _utc_now() -> str:
@@ -58,6 +63,76 @@ def _default_store_dir() -> Path:
 
 def _store_dir(path: str | None = None) -> Path:
     return Path(path).expanduser() if path else _default_store_dir()
+
+
+def _explicit_store_selected(path: str | None = None) -> bool:
+    if str(path or "").strip():
+        return True
+    if str(os.environ.get("MMS_CONTEXT_DIR") or "").strip():
+        return True
+    if str(os.environ.get("MMS_SESSION_HOME") or "").strip():
+        return True
+    return False
+
+
+def _real_home_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME", "HOME"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            candidates.append(Path(value).expanduser())
+    try:
+        candidates.append(Path.home())
+    except RuntimeError:
+        pass
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _load_records(root: Path) -> list[dict[str, Any]]:
+    return list(_load_index(root)["records"])
+
+
+def _discover_context_store_dirs(primary: Path, *, limit: int = DEFAULT_STATS_STORE_LIMIT) -> list[Path]:
+    """Find recent MMS session context stores for human-facing gain checks."""
+    candidates: list[Path] = []
+    for home in _real_home_candidates():
+        config_root = home / ".config" / "mms"
+        if not config_root.exists():
+            continue
+        try:
+            matches = config_root.glob("*/s/*/.mms/context-store")
+            for root in matches:
+                if root == primary:
+                    continue
+                index_path = _index_path(root)
+                if not index_path.exists():
+                    continue
+                if not _load_records(root):
+                    continue
+                candidates.append(root)
+        except OSError:
+            continue
+
+    unique: dict[str, Path] = {}
+    for root in candidates:
+        unique.setdefault(str(root.resolve()), root)
+
+    def _sort_key(root: Path) -> float:
+        try:
+            return _index_path(root).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    return sorted(unique.values(), key=_sort_key, reverse=True)[: max(0, limit)]
 
 
 def _index_path(root: Path) -> Path:
@@ -151,6 +226,7 @@ def put_context(
     kind: str = "text",
     tags: list[str] | None = None,
     store_dir: str | None = None,
+    visible_chars: int | None = None,
 ) -> ContextRecord:
     root = _store_dir(store_dir)
     _ensure_store(root)
@@ -163,6 +239,12 @@ def put_context(
     item_path = _items_root(root) / item_name
     _write_text_secure(item_path, body)
 
+    snippet = _trim_snippet(body)
+    body_chars = len(body)
+    estimated_visible_chars = len(snippet) if visible_chars is None else max(0, int(visible_chars))
+    estimated_visible_chars = min(body_chars, estimated_visible_chars)
+    saved_chars = max(0, body_chars - estimated_visible_chars)
+    gain_pct = round((saved_chars / body_chars * 100), 1) if body_chars else 0.0
     record = ContextRecord(
         id=record_id,
         created_at=created_at,
@@ -170,10 +252,13 @@ def put_context(
         kind=str(kind or "text").strip() or "text",
         tags=[str(tag).strip() for tag in (tags or []) if str(tag).strip()],
         path=str(item_path.relative_to(root)),
-        chars=len(body),
+        chars=body_chars,
         lines=body.count("\n") + (1 if body else 0),
         sha256=sha,
-        snippet=_trim_snippet(body),
+        snippet=snippet,
+        visible_chars=estimated_visible_chars,
+        saved_chars=saved_chars,
+        gain_pct=gain_pct,
     )
     index = _load_index(root)
     records = [asdict(record), *index["records"]]
@@ -244,6 +329,128 @@ def _print_record(record: dict[str, Any], *, snippet_key: str = "snippet") -> No
     if snippet:
         print("snippet:")
         print(snippet)
+
+
+def _record_visible_chars(record: dict[str, Any]) -> int:
+    """Estimate how much text entered chat for this stored item."""
+    snippet = str(record.get("snippet") or "")
+    return len(snippet)
+
+
+def _record_gain(record: dict[str, Any], *, store_dir: Path | None = None) -> dict[str, Any]:
+    chars = max(0, int(record.get("chars") or 0))
+    visible_value = record.get("visible_chars")
+    if visible_value is None:
+        visible_chars = min(chars, max(0, _record_visible_chars(record)))
+    else:
+        visible_chars = min(chars, max(0, int(visible_value or 0)))
+    saved_chars = max(0, chars - visible_chars)
+    gain_pct = round((saved_chars / chars * 100), 1) if chars else 0.0
+    item = {
+        "ref": _record_ref(str(record.get("id") or "")),
+        "title": record.get("title") or "",
+        "kind": record.get("kind") or "",
+        "chars": chars,
+        "lines": max(0, int(record.get("lines") or 0)),
+        "visible_chars": visible_chars,
+        "saved_chars": saved_chars,
+        "gain_pct": gain_pct,
+    }
+    if store_dir is not None:
+        item["store_dir"] = str(store_dir)
+    return item
+
+
+def context_stats(
+    *,
+    store_dir: str | None = None,
+    limit: int = DEFAULT_STATS_LIMIT,
+    kind: str = "",
+    tag: str = "",
+    all_stores: bool = False,
+) -> dict[str, Any]:
+    root = _store_dir(store_dir)
+    primary_records = _load_records(root)
+    explicit_store = _explicit_store_selected(store_dir)
+    roots_and_records: list[tuple[Path, list[dict[str, Any]]]] = [(root, primary_records)]
+    scope = "active"
+    if not explicit_store and (all_stores or not primary_records):
+        discovered = _discover_context_store_dirs(root)
+        if discovered:
+            if all_stores:
+                roots_and_records.extend((item, _load_records(item)) for item in discovered)
+                scope = "all"
+            else:
+                roots_and_records = [(discovered[0], _load_records(discovered[0]))]
+                root = discovered[0]
+                scope = "auto-discovered"
+
+    kind_filter = str(kind or "").strip()
+    tag_filter = str(tag or "").strip()
+    gains: list[dict[str, Any]] = []
+    active_roots: list[Path] = []
+    seen_roots: set[str] = set()
+    for item_root, records in roots_and_records:
+        root_key = str(item_root)
+        if root_key not in seen_roots:
+            seen_roots.add(root_key)
+            active_roots.append(item_root)
+        filtered = records
+        if kind_filter:
+            filtered = [record for record in filtered if str(record.get("kind") or "") == kind_filter]
+        if tag_filter:
+            filtered = [
+                record
+                for record in filtered
+                if tag_filter in {str(item) for item in (record.get("tags") or [])}
+            ]
+        gains.extend(_record_gain(record, store_dir=item_root) for record in filtered)
+    stored_chars = sum(item["chars"] for item in gains)
+    visible_chars = sum(item["visible_chars"] for item in gains)
+    saved_chars = sum(item["saved_chars"] for item in gains)
+    stored_lines = sum(item["lines"] for item in gains)
+    gain_pct = round((saved_chars / stored_chars * 100), 1) if stored_chars else 0.0
+    top_records = sorted(gains, key=lambda item: item["saved_chars"], reverse=True)[: max(0, limit)]
+    return {
+        "store_dir": str(root),
+        "store_dirs": [str(item) for item in active_roots],
+        "scope": scope,
+        "records": len(gains),
+        "stored_chars": stored_chars,
+        "stored_lines": stored_lines,
+        "visible_chars": visible_chars,
+        "saved_chars": saved_chars,
+        "gain_pct": gain_pct,
+        "filters": {"kind": kind_filter, "tag": tag_filter},
+        "top_records": top_records,
+    }
+
+
+def _print_stats(payload: dict[str, Any]) -> None:
+    print("mms-context stats")
+    print(f"store_dir: {payload.get('store_dir') or ''}")
+    scope = str(payload.get("scope") or "active")
+    if scope != "active":
+        print(f"scope: {scope}")
+    store_dirs = [str(item) for item in (payload.get("store_dirs") or []) if str(item)]
+    if len(store_dirs) > 1:
+        print(f"store_dirs: {len(store_dirs)}")
+    print(f"records: {payload.get('records') or 0}")
+    print(f"stored_chars: {payload.get('stored_chars') or 0}")
+    print(f"visible_chars: {payload.get('visible_chars') or 0}")
+    print(f"saved_chars: {payload.get('saved_chars') or 0}")
+    print(f"gain: {payload.get('gain_pct') or 0}%")
+    print(f"stored_lines: {payload.get('stored_lines') or 0}")
+    top_records = payload.get("top_records") or []
+    if top_records:
+        print("top_records:")
+        for index, item in enumerate(top_records, 1):
+            print(
+                f"[{index}] {item.get('ref')} "
+                f"saved={item.get('saved_chars')} "
+                f"gain={item.get('gain_pct')}% "
+                f"title={item.get('title')}"
+            )
 
 
 def _cmd_put(args: argparse.Namespace) -> int:
@@ -327,6 +534,21 @@ def _cmd_path(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_stats(args: argparse.Namespace) -> int:
+    payload = context_stats(
+        store_dir=args.store_dir,
+        limit=args.limit,
+        kind=args.kind or "",
+        tag=args.tag or "",
+        all_stores=bool(args.all_stores),
+    )
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    _print_stats(payload)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mms-context",
@@ -363,6 +585,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     path = subparsers.add_parser("path", help="Print active context store directory.")
     path.set_defaults(func=_cmd_path)
+
+    for name in ("stats", "gain"):
+        stats = subparsers.add_parser(name, help="Show estimated context-saving gain for stored refs.")
+        stats.add_argument("--limit", type=int, default=DEFAULT_STATS_LIMIT, help="Top records to show.")
+        stats.add_argument("--kind", default="", help="Only include records with this kind.")
+        stats.add_argument("--tag", default="", help="Only include records with this tag.")
+        stats.add_argument("--all-stores", action="store_true", help="Include discovered MMS session stores.")
+        stats.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+        stats.set_defaults(func=_cmd_stats)
     return parser
 
 
