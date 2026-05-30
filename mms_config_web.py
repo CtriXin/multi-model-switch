@@ -774,11 +774,12 @@ def _runtime_usage_rows(runtime_kind: str, runtime_id: str) -> list[dict[str, An
         if not isinstance(item, dict):
             continue
         models = item.get("models") if isinstance(item.get("models"), dict) else {}
-        top_models = [
+        model_usage = [
             {"model": _safe_text(model), "launches": count_value(count)}
-            for model, count in sorted(models.items(), key=lambda pair: count_value(pair[1]), reverse=True)[:8]
+            for model, count in sorted(models.items(), key=lambda pair: count_value(pair[1]), reverse=True)
             if _safe_text(model)
         ]
+        top_models = model_usage[:8]
         result.append(
             {
                 "cli": _safe_text(item.get("cli")),
@@ -789,6 +790,7 @@ def _runtime_usage_rows(runtime_kind: str, runtime_id: str) -> list[dict[str, An
                 "last_model": _safe_text(item.get("last_model")),
                 "last_used_at": _safe_text(item.get("last_used_at")),
                 "top_models": top_models,
+                "model_usage": model_usage,
             }
         )
     return result
@@ -4486,11 +4488,17 @@ def build_settings_report(
                 "note": "只读验证 latest-approved manifest/hash 失败；WebUI 没有执行 publish/write。",
             }
     if action == "provider_usage_summary":
+        requested_provider_id = _safe_text(payload.get("provider_id"))
+        provider_items = [item for item in (snapshot.get("providers") or []) if isinstance(item, dict)]
+        if requested_provider_id:
+            provider_items = [item for item in provider_items if _safe_text(item.get("id")) == requested_provider_id]
         return {
             "ok": True,
             "schema": "mms.setup_web.settings_report.v1",
             "action": action,
             "write_policy": "read_only",
+            "provider_id": requested_provider_id,
+            "scope": "provider" if requested_provider_id else "all_providers",
             "providers": [
                 {
                     "id": item.get("id"),
@@ -4500,10 +4508,19 @@ def build_settings_report(
                     "enabled": item.get("enabled"),
                     "role": item.get("role"),
                     "priority": item.get("priority"),
+                    "models": [
+                        {
+                            "id": row.get("id"),
+                            "source": row.get("source"),
+                            "visible": row.get("visible", True),
+                            "favorite": row.get("favorite", False),
+                        }
+                        for row in (item.get("models") or [])
+                        if isinstance(row, dict) and row.get("id")
+                    ],
                     "usage_rows": item.get("usage_rows") or [],
                 }
-                for item in (snapshot.get("providers") or [])
-                if isinstance(item, dict)
+                for item in provider_items
             ],
         }
     if action == "connect_gateway_status":
@@ -6334,7 +6351,7 @@ function renderProviderForm(){
     </div>
     <div class="${panelClass('reports')}" data-provider-form-panel="reports">
       <div class="provider-action-grid">
-        <div class="explain-card span4"><h4>使用统计</h4><p>读取当前配置里的 provider usage 明细，并用表格展示启动次数、最近使用和常用模型；不会改配置。</p><button type="button" class="ghost" data-settings-action="provider_usage_summary" data-report-target="channelReport">查看使用统计</button></div>
+        <div class="explain-card span4"><h4>使用统计</h4><p>读取当前通道的 usage 明细，并按这个通道内的模型展开启动次数；不会把其他通道混进来。</p><button type="button" class="ghost" data-settings-action="provider_usage_summary" data-report-target="channelReport">查看当前通道使用统计</button></div>
         <div class="explain-card span4"><h4>自动排序用途说明</h4><p>用于按测速 / 使用统计给 provider priority 或 family_priority_overrides 排序。因为会批量影响路由优先级，WebUI 只显示人工确认说明，不自动执行。</p><button type="button" class="ghost" data-settings-action="family_autosort_gate" data-report-target="channelReport">查看自动排序说明</button></div>
         <div class="explain-card span4"><h4>官方账号登录说明（OAuth）</h4><p>用于 Codex / AGY 官方账号登录，不是 API Key 通道保存。登录会写 OAuth/account 状态；Claude 仍是 human-only。</p><button type="button" class="ghost" data-settings-action="connect_official_gate" data-report-target="channelReport">查看官方登录说明</button></div>
         <div class="span12"><div class="result module-report" id="channelReport">选择上方动作查看表格报告或人工确认说明。</div></div>
@@ -6423,13 +6440,31 @@ function bindGateCopyButtons(){document.querySelectorAll('[data-copy-gate-comman
 function renderGateReport(data,targetId='settingsReport'){const mapping=data.mapping||[];const mappingHtml=mapping.length?mapping.map(row=>`<span class="chip">${escapeHtml(row.tui_area||'-')} / ${escapeHtml(row.tui_label||row.tui_action_id||'-')}</span>`).join(''):'<span class="chip">无 mapping 行</span>';const writes=gateArray(data.writes);const writeText=writes.length?writes:['无直接写入；仍保留人工确认。'];const target=$(targetId)||$('settingsReport');if(!target)return;target.innerHTML=`<div class="gate-report"><div class="gate-plate"><div class="gate-head"><div><h4>${escapeHtml(data.title||data.action||'人工确认')}</h4><p>${escapeHtml(data.note||'该动作需要人工确认，WebUI 不自动执行。')}</p></div><div class="gate-risk">${riskLabel(data.risk_level||'high')} / 已拦截</div></div><div class="chips"><span class="chip">${writePolicyLabel(data.write_policy||'human_gate')}</span><span class="chip">${data.requires_human_confirmation?'需要人工确认':'只读'}</span><span class="chip">${data.blocked_auto_execute?'禁止自动执行':'允许自动执行'}</span><span class="chip">${data.copyable?'可复制命令':'仅人工'}</span></div></div><div class="gate-grid"><div class="gate-box"><h5>可复制命令</h5>${gateCommands(data.commands)}</div><div class="gate-box"><h5>人工步骤</h5>${gateList(data.manual_steps,'按项目 人工确认 规则人工处理。')}</div><div class="gate-box"><h5>写入范围</h5>${gateList(writeText)}</div><div class="gate-box"><h5>更安全的 WebUI 路径</h5><p>${escapeHtml(data.safe_alternative||'使用只读报告或保存页 diff 预览。')}</p><div class="chips">${mappingHtml}</div></div></div><details class="gate-raw"><summary>原始 JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`;bindGateCopyButtons()}
 function reportTopModels(rows=[]){const top=[];(rows||[]).forEach(row=>{(row.top_models||[]).forEach(item=>{if(item&&item.model)top.push(`${item.model} × ${item.launches||0}`)})});return top.slice(0,6).join(' / ')||'-'}
 function usageDetailRows(ownerId,rows=[]){const safeRows=Array.isArray(rows)?rows:[];if(!safeRows.length)return '';return safeRows.map(row=>`<tr><td class="mono">${escapeHtml(ownerId)}</td><td>${escapeHtml(row.cli||'-')}</td><td>${escapeHtml(row.name||row.id||'-')}</td><td>${Number(row.launches||0)}</td><td class="mono">${escapeHtml(row.last_model||'-')}</td><td>${escapeHtml(row.last_used_at||'-')}</td><td>${escapeHtml(reportTopModels([row]))}</td></tr>`).join('')}
+function modelUsageKey(id){return String(id||'').trim().toLowerCase()}
+function providerModelUsageRows(p){
+  const counts=new Map();const lastUsed=new Map();const lastCli=new Map();
+  (p.usage_rows||[]).forEach(row=>{
+    (row.model_usage||row.top_models||[]).forEach(item=>{const key=modelUsageKey(item.model);if(!key)return;counts.set(key,(counts.get(key)||0)+Number(item.launches||0))});
+    const lastKey=modelUsageKey(row.last_model);if(lastKey){lastUsed.set(lastKey,row.last_used_at||'');lastCli.set(lastKey,row.cli||'')}
+  });
+  const modelRows=Array.isArray(p.models)?p.models:[];const seen=new Set();
+  const rows=modelRows.map(row=>{const id=String(row.id||'').trim();const key=modelUsageKey(id);seen.add(key);return {id,source:row.source||'manual',visible:row.visible!==false,favorite:!!row.favorite,launches:counts.get(key)||0,last_used_at:lastUsed.get(key)||'',last_cli:lastCli.get(key)||''}}).filter(row=>row.id);
+  counts.forEach((launches,key)=>{if(seen.has(key))return;const display=(p.usage_rows||[]).flatMap(row=>row.model_usage||row.top_models||[]).find(item=>modelUsageKey(item.model)===key)?.model||key;rows.push({id:display,source:'usage-only',visible:true,favorite:false,launches,last_used_at:lastUsed.get(key)||'',last_cli:lastCli.get(key)||''})});
+  return rows.sort((a,b)=>Number(b.launches||0)-Number(a.launches||0)||a.id.localeCompare(b.id));
+}
 function renderProviderUsageReport(data,targetId='settingsReport'){
   const target=$(targetId)||$('settingsReport');if(!target)return;
-  const providers=Array.isArray(data.providers)?data.providers:[];
+  let providers=Array.isArray(data.providers)?data.providers:[];
+  if(targetId==='channelReport'&&current()){const activeId=current().id;providers=providers.filter(p=>p.id===activeId);if(providers.length===1){providers=[{...providers[0],models:providerModels(current())}]}}
+  const channelScoped=targetId==='channelReport';
   const totalLaunches=providers.reduce((sum,p)=>sum+Number((p.usage||{}).launches||0),0);
-  const providerRows=providers.length?providers.map(p=>`<tr><td class="mono">${escapeHtml(p.id||'-')}</td><td>${escapeHtml(p.name||'-')}</td><td>${p.enabled?'<span class="tag">启用</span>':'<span class="tag off">禁用</span>'}</td><td>${escapeHtml(p.role||'-')}</td><td>${Number(p.priority||0)}</td><td>${Number(p.model_count||0)}</td><td>${Number((p.usage||{}).launches||0)}</td><td>${escapeHtml((p.usage||{}).last_used_at||'-')}</td><td>${escapeHtml(reportTopModels(p.usage_rows||[]))}</td></tr>`).join(''):'<tr><td colspan="9" class="empty-row">暂无通道使用统计</td></tr>';
+  if(channelScoped&&!providers.length){target.innerHTML='<div class="usage-report"><h4>当前通道使用统计</h4><p class="muted">当前通道没有可读取的 usage 记录。</p></div>';return}
+  const providerRows=!channelScoped&&providers.length?`<div class="table-wrap"><table><thead><tr><th>通道 ID</th><th>名称</th><th>状态</th><th>role</th><th>priority</th><th>模型数</th><th>启动</th><th>最近使用</th><th>常用模型</th></tr></thead><tbody>${providers.map(p=>`<tr><td class="mono">${escapeHtml(p.id||'-')}</td><td>${escapeHtml(p.name||'-')}</td><td>${p.enabled?'<span class="tag">启用</span>':'<span class="tag off">禁用</span>'}</td><td>${escapeHtml(p.role||'-')}</td><td>${Number(p.priority||0)}</td><td>${Number(p.model_count||0)}</td><td>${Number((p.usage||{}).launches||0)}</td><td>${escapeHtml((p.usage||{}).last_used_at||'-')}</td><td>${escapeHtml(reportTopModels(p.usage_rows||[]))}</td></tr>`).join('')}</tbody></table></div>`:'';
+  const modelSections=providers.map(p=>{const modelRows=providerModelUsageRows(p);const usedCount=modelRows.filter(row=>Number(row.launches||0)>0).length;const rows=modelRows.length?modelRows.map(row=>`<tr><td class="mono">${escapeHtml(row.id)}</td><td><span class="tag ${row.visible?'':'off'}">${modelSourceLabel(row.source)}</span>${row.favorite?'<span class="tag">收藏</span>':''}</td><td>${row.visible?'显示':'隐藏'}</td><td>${Number(row.launches||0)}</td><td>${escapeHtml(row.last_cli||'-')}</td><td>${escapeHtml(row.last_used_at||'-')}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-row">当前通道没有模型清单</td></tr>';return `<div class="chips"><span class="chip">当前通道 ${escapeHtml(p.name||p.id||'-')}</span><span class="chip mono">${escapeHtml(p.id||'-')}</span><span class="chip">模型 ${modelRows.length}</span><span class="chip">有使用 ${usedCount}</span><span class="chip">总启动 ${Number((p.usage||{}).launches||0)}</span><span class="chip">最近 ${escapeHtml((p.usage||{}).last_used_at||'-')}</span></div><div class="table-wrap"><table><thead><tr><th>模型</th><th>来源</th><th>显示状态</th><th>启动次数</th><th>最近 CLI</th><th>最近使用</th></tr></thead><tbody>${rows}</tbody></table></div>`}).join('')||'<p class="muted">暂无通道使用统计</p>';
   const detailRows=providers.map(p=>usageDetailRows(p.id||p.name||'-',p.usage_rows||[])).join('')||'<tr><td colspan="7" class="empty-row">暂无 CLI 维度使用明细</td></tr>';
-  target.innerHTML=`<div class="usage-report"><h4>通道使用统计</h4><p>只读报告：展示 provider usage 摘要和 TUI 同源明细，不写配置，也不显示原始 JSON。</p><div class="chips"><span class="chip">通道 ${providers.length}</span><span class="chip">总启动 ${totalLaunches}</span><span class="chip">写入策略 ${writePolicyLabel(data.write_policy||'read_only')}</span></div><div class="table-wrap"><table><thead><tr><th>通道 ID</th><th>名称</th><th>状态</th><th>role</th><th>priority</th><th>模型数</th><th>启动</th><th>最近使用</th><th>常用模型</th></tr></thead><tbody>${providerRows}</tbody></table></div><div class="table-wrap"><table><thead><tr><th>通道 ID</th><th>CLI</th><th>明细名</th><th>启动</th><th>最近模型</th><th>最近使用</th><th>Top models</th></tr></thead><tbody>${detailRows}</tbody></table></div></div>`;
+  const title=channelScoped?'当前通道使用统计':'通道使用统计汇总';
+  const note=channelScoped?'只读报告：只展示当前选中通道，并按这个通道内的模型展开启动次数；不会把其他通道混进来。':'只读报告：展示全部 provider usage 汇总；通道页按钮会自动限定到当前通道。';
+  target.innerHTML=`<div class="usage-report"><h4>${title}</h4><p>${note}</p><div class="chips"><span class="chip">统计范围 ${channelScoped?'当前通道':'全部通道'}</span><span class="chip">总启动 ${totalLaunches}</span><span class="chip">写入策略 ${writePolicyLabel(data.write_policy||'read_only')}</span></div>${providerRows}${modelSections}<div class="table-wrap"><table><thead><tr><th>通道 ID</th><th>CLI</th><th>明细名</th><th>启动</th><th>最近模型</th><th>最近使用</th><th>Top models</th></tr></thead><tbody>${detailRows}</tbody></table></div></div>`;
 }
 function renderAccountStatusReport(data,targetId='settingsReport'){
   const target=$(targetId)||$('settingsReport');if(!target)return;
@@ -6445,7 +6480,7 @@ function renderSettingsReport(data,targetId='settingsReport'){
   if(data&&(data.blocked_auto_execute||data.requires_human_confirmation||data.status==='human_gate')){renderGateReport(data,targetId);return}
   target.textContent=JSON.stringify(data,null,2)
 }
-function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;const targetId=btn.dataset.reportTarget||'settingsReport';const target=$(targetId)||$('settingsReport');if(target)target.textContent='读取中...';const payload={action};if(btn.dataset.accountId)payload.account_id=btn.dataset.accountId;if(btn.dataset.providerId)payload.provider_id=btn.dataset.providerId;const data=await api('/api/settings/report',payload);renderSettingsReport(data,targetId);if(targetId==='channelReport')switchProviderFormTab('reports');toast(data.ok?`${btn.textContent} 已刷新`:`${btn.textContent} 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
+function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;const targetId=btn.dataset.reportTarget||'settingsReport';const target=$(targetId)||$('settingsReport');if(target)target.textContent='读取中...';const payload={action};if(btn.dataset.accountId)payload.account_id=btn.dataset.accountId;if(btn.dataset.providerId)payload.provider_id=btn.dataset.providerId;if(action==='provider_usage_summary'&&targetId==='channelReport'&&current()?.id)payload.provider_id=current().id;const data=await api('/api/settings/report',payload);renderSettingsReport(data,targetId);if(targetId==='channelReport')switchProviderFormTab('reports');toast(data.ok?`${btn.textContent} 已刷新`:`${btn.textContent} 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
 function syncUiSettings(){state.ui=state.ui||{};state.ui.language=$('uiLanguage')?.value||'zh'}
 function renderUiSettings(mapping){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')};const counts=(state.tui_webui_mapping_summary||{}).counts||{};const missingRows=(mapping||[]).filter(row=>row.status==='missing').map(row=>row.tui_label);if($('settingsGapSummary')){$('settingsGapSummary').innerHTML=`<span class="chip">原生 ${counts.native||0}</span><span class="chip">报告 ${counts.report||0}</span><span class="chip">草稿 ${counts.draft_review||0}</span><span class="chip">人工确认 ${counts.human_gate||0}</span><span class="chip">缺失 ${counts.missing||0}</span>${missingRows.length?`<span class="chip">仍缺：${escapeHtml(missingRows.join(' / '))}</span>`:'<span class="chip">无缺失行</span>'}`}}
 function accountActionButtons(a){const id=escapeHtml(a.id||'');return `<div class="btns"><button class="ghost mapping-action" data-settings-action="account_login_gate" data-report-target="settingsReport" data-account-id="${id}">重新登录</button><button class="ghost mapping-action" data-settings-action="account_rename_gate" data-report-target="settingsReport" data-account-id="${id}">重命名</button><button class="ghost mapping-action" data-settings-action="account_network_gate" data-report-target="settingsReport" data-account-id="${id}">网络</button><button class="ghost mapping-action" data-settings-action="account_remove_gate" data-report-target="settingsReport" data-account-id="${id}">删除</button></div>`}

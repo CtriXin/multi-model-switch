@@ -366,7 +366,10 @@ def test_config_web_usage_reports_include_tui_detail_rows(monkeypatch, tmp_path)
 
     monkeypatch.setattr(mms_core, "_usage_rows_for_runtime", fake_usage_rows)
     cfg = {
-        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["qwen3.6-plus"]}],
+        "providers": [
+            {"id": "demo", "name": "Demo", "fallback_models": ["qwen3.6-plus", "gpt-5.5", "unused-model"]},
+            {"id": "other", "name": "Other", "fallback_models": ["other-model"]},
+        ],
         "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex"}],
         "account": {"defaults": {"codex": "codex-main"}},
     }
@@ -383,12 +386,30 @@ def test_config_web_usage_reports_include_tui_detail_rows(monkeypatch, tmp_path)
         config_path=str(tmp_path / "mms-next" / "config.toml"),
         command_name="mmf",
     )
+    scoped_provider_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_usage_summary", "provider_id": "demo"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
 
     provider_rows = provider_report["providers"][0]["usage_rows"]
     account_rows = account_report["accounts"][0]["usage_rows"]
     assert provider_rows[0]["runtime_kind"] == "provider"
     assert provider_rows[0]["launches"] == 7
     assert provider_rows[0]["top_models"][0] == {"model": "qwen3.6-plus", "launches": 5}
+    assert provider_rows[0]["model_usage"] == [
+        {"model": "qwen3.6-plus", "launches": 5},
+        {"model": "gpt-5.5", "launches": 2},
+    ]
+    assert len(provider_report["providers"]) == 2
+    assert scoped_provider_report["scope"] == "provider"
+    assert [item["id"] for item in scoped_provider_report["providers"]] == ["demo"]
+    assert [item["id"] for item in scoped_provider_report["providers"][0]["models"]] == [
+        "gpt-5.5",
+        "qwen3.6-plus",
+        "unused-model",
+    ]
     assert account_rows[0]["runtime_kind"] == "account"
     assert account_rows[0]["id"] == "codex-main"
 
@@ -834,9 +855,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "报告 / 人工确认" in html
     assert "function renderGateReport" in html
     assert "function renderProviderUsageReport" in html
-    assert "通道使用统计" in html
+    assert "function providerModelUsageRows" in html
+    assert "当前通道使用统计" in html
+    assert "查看当前通道使用统计" in html
+    assert "payload.provider_id=current().id" in html
+    assert "不会把其他通道混进来" in html
     assert "暂无通道使用统计" in html
-    assert "不显示原始 JSON" in html
+    assert "模型</th><th>来源</th><th>显示状态</th><th>启动次数" in html
     assert "function copyGateCommand" in html
     assert "data-copy-gate-command" in html
     assert "blocked_auto_execute" in html
