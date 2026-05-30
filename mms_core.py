@@ -595,6 +595,8 @@ def _cli_upgrade_shell_command(cli_name):
 def _run_about_upgrade(*, target="mms", include_clis=False):
     from mms_command_tools import mms_upgrade_shell_command, run_about_upgrade
 
+    _ensure_rich()
+
     def mms_upgrade_command(*, include_clis=False):
         return mms_upgrade_shell_command(
             include_clis=include_clis,
@@ -1543,6 +1545,7 @@ def _snapshot_prompt_allowed():
 def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
     from mms_command_tools import confirm_startup_snapshot_drift
 
+    _ensure_rich()
     return confirm_startup_snapshot_drift(
         diff_lines,
         accepted_path=accepted_path,
