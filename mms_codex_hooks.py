@@ -13,11 +13,12 @@ def _launchers():
     return _module
 
 
-def caveman_codex_activate_command(caveman_root):
+def caveman_codex_activate_command(caveman_root, caveman_level="light"):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     if not os.path.isfile(script_path):
         return ""
     return (
+        _launchers()._caveman_hook_env_prefix(caveman_level) +
         "CAVEMAN_HOOK_COMPACT=1 "
         "CAVEMAN_HOOK_EVENT=SessionStart "
         'CLAUDE_CONFIG_DIR="$HOME/.codex" '
@@ -25,8 +26,8 @@ def caveman_codex_activate_command(caveman_root):
     )
 
 
-def caveman_codex_hook_payload(caveman_root):
-    command = _launchers()._caveman_codex_activate_command(caveman_root)
+def caveman_codex_hook_payload(caveman_root, caveman_level="light"):
+    command = _launchers()._caveman_codex_activate_command(caveman_root, caveman_level=caveman_level)
     if command:
         return {
             "type": "command",
@@ -83,8 +84,8 @@ def codex_shell_hook_payload(command_text, *, timeout=None, status_message=None)
     return payload
 
 
-def codex_caveman_session_hook(caveman_root):
-    hook_payload = _launchers()._caveman_codex_hook_payload(caveman_root)
+def codex_caveman_session_hook(caveman_root, caveman_level="light"):
+    hook_payload = _launchers()._caveman_codex_hook_payload(caveman_root, caveman_level=caveman_level)
     return _launchers()._codex_shell_hook_payload(
         hook_payload.get("command"),
         timeout=hook_payload.get("timeout"),
@@ -92,14 +93,14 @@ def codex_caveman_session_hook(caveman_root):
     )
 
 
-def configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
+def configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     hooks_data = _launchers()._filter_hook_commands(hooks_data, _launchers()._is_loop_family_hook_command)
     hooks_data = _launchers()._filter_hook_commands(hooks_data, _launchers()._is_codex_rtk_hook_command)
     if not enable_caveman:
         return _launchers()._filter_hook_commands(hooks_data, _launchers()._is_caveman_hook_command)
 
     caveman_root = _launchers()._resolve_caveman_root()
-    replacement = _launchers()._codex_caveman_session_hook(caveman_root) if caveman_root else {}
+    replacement = _launchers()._codex_caveman_session_hook(caveman_root, caveman_level=caveman_level) if caveman_root else {}
     replaced = False
     configured = {}
 
@@ -173,9 +174,20 @@ def configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
     return hooks_data
 
 
-def build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_nsr=False, disabled_session_surfaces=None):
+def build_codex_session_hooks(
+    base_hooks=None,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    enable_nsr=False,
+    disabled_session_surfaces=None,
+):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
-    hooks_data = _launchers()._configure_codex_caveman_hooks(payload.get("hooks"), enable_caveman=enable_caveman)
+    hooks_data = _launchers()._configure_codex_caveman_hooks(
+        payload.get("hooks"),
+        enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
+    )
     hooks_data = _launchers()._configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
     hooks_data = _launchers()._append_shell_command_hook(
         hooks_data,

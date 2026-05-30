@@ -151,6 +151,7 @@ def build_account_env(account, *, validate_proxy=True, model_info=None):
             home_dir,
             session_home,
             enable_caveman=_launchers._runtime_caveman_enabled(account),
+            caveman_level=_launchers._runtime_caveman_level(account),
             disabled_session_surfaces=disabled_session_surfaces,
         )
         host_context_env = _launchers._install_host_context_env(

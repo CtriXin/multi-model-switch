@@ -80,11 +80,15 @@ def write_agy_mcp_config(plugin_dir, *, disabled_session_surfaces=None):
         remove_file_if_exists(path)
 
 
-def write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfaces=None):
+def write_agy_hooks(plugin_dir, *, enable_caveman=False, caveman_level="light", disabled_session_surfaces=None):
     remove_file_if_exists(os.path.join(plugin_dir, "hooks.json"))
     hooks_data = _launchers()._merge_mms_session_hooks({})
     if enable_caveman:
-        hooks_data = _launchers()._configure_claude_caveman_hooks(hooks_data, enable_caveman=True)
+        hooks_data = _launchers()._configure_claude_caveman_hooks(
+            hooks_data,
+            enable_caveman=True,
+            caveman_level=caveman_level,
+        )
     hooks_data = _launchers()._filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _launchers()._filter_missing_managed_hook_commands(hooks_data)
     hooks_dir = os.path.join(plugin_dir, "hooks")
@@ -96,7 +100,14 @@ def write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfac
         remove_file_if_exists(path)
 
 
-def overlay_agy_session_assets(account_home, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
+def overlay_agy_session_assets(
+    account_home,
+    session_home,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    disabled_session_surfaces=None,
+):
     if not account_home or not session_home:
         return
     plugin_dir = ensure_agy_plugin_dir(account_home)
@@ -105,6 +116,7 @@ def overlay_agy_session_assets(account_home, session_home, *, enable_caveman=Fal
     write_agy_hooks(
         plugin_dir,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         disabled_session_surfaces=disabled_session_surfaces,
     )
     if enable_caveman:

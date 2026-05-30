@@ -17,6 +17,7 @@ def test_load_user_preferences_sanitizes_allowlist(monkeypatch, tmp_path):
 thinking_mode = "disable"
 reasoning_effort = "xhigh"
 caveman_mode = "enable"
+caveman_level = "standard"
 nsr_mode = "enable"
 bypass = false
 api_key = "sk-should-be-ignored"
@@ -47,6 +48,7 @@ base_url = "https://should-not-load.example"
         "thinking_mode": "disable",
         "reasoning_effort": "xhigh",
         "caveman_mode": "enable",
+        "caveman_level": "standard",
         "nsr_mode": "enable",
         "bypass": False,
     }

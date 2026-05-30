@@ -809,10 +809,19 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert "/tmp/keep-session-start.sh" in session_start_commands
     caveman_activate_commands = [command for command in session_start_commands if "caveman-activate.js" in command]
     assert len(caveman_activate_commands) == 1
+    assert "CAVEMAN_DEFAULT_MODE=lite" in caveman_activate_commands[0]
     assert "CAVEMAN_HOOK_COMPACT=1" in caveman_activate_commands[0]
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_activate_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_activate_commands[0]
     assert user_prompt_commands == []
+
+
+def test_caveman_hook_mode_maps_launch_levels():
+    import mms_launchers
+
+    assert mms_launchers._caveman_hook_mode("light") == "lite"
+    assert mms_launchers._caveman_hook_mode("standard") == "full"
+    assert mms_launchers._caveman_hook_mode("full") == "ultra"
 
 
 def test_filter_claude_session_hooks_drops_stale_managed_stop_hook(tmp_path):
@@ -1025,6 +1034,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert "/tmp/notify.sh" in enabled_commands
     caveman_commands = [command for command in enabled_commands if "caveman-activate.js" in command]
     assert len(caveman_commands) == 1
+    assert "CAVEMAN_DEFAULT_MODE=lite" in caveman_commands[0]
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
     assert mms_launchers._XMEM_SESSION_START_HOOK not in enabled_commands
@@ -1074,7 +1084,7 @@ def test_build_codex_session_hooks_replaces_inherited_compact_caveman_with_sessi
     assert session_commands == [
         "/tmp/map.sh",
         (
-            'CAVEMAN_HOOK_COMPACT=1 CAVEMAN_HOOK_EVENT=SessionStart '
+            'CAVEMAN_DEFAULT_MODE=lite CAVEMAN_HOOK_COMPACT=1 CAVEMAN_HOOK_EVENT=SessionStart '
             'CLAUDE_CONFIG_DIR="$HOME/.codex" '
             f'node "{caveman_root / "hooks" / "caveman-activate.js"}"'
         ),

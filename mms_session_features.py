@@ -74,6 +74,19 @@ def runtime_nsr_enabled(runtime, *, normalize_nsr_mode_fn=normalize_nsr_mode):
     return normalize_nsr_mode_fn((runtime or {}).get("nsr_mode", "enable")) == "enable"
 
 
+def normalize_caveman_level(value, default="light"):
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if raw in {"", "inherit", "default", "auto", "enable", "enabled", "on", "true", "1"}:
+        return default if default in {"", "light", "standard", "full"} else "light"
+    if raw in {"light", "lite", "low"}:
+        return "light"
+    if raw in {"standard", "normal", "medium"}:
+        return "standard"
+    if raw in {"full", "ultra", "high"}:
+        return "full"
+    return default if default in {"", "light", "standard", "full"} else "light"
+
+
 def normalize_caveman_mode(value, default="disable"):
     raw = str(value or "").strip().lower()
     if raw in {"", "inherit", "default", "auto"}:
@@ -82,11 +95,21 @@ def normalize_caveman_mode(value, default="disable"):
         return "enable"
     if raw in {"0", "false", "no", "off", "disable", "disabled"}:
         return "disable"
+    if normalize_caveman_level(raw, default=""):
+        return "enable"
     return default if default in {"auto", "enable", "disable"} else "disable"
 
 
 def runtime_caveman_enabled(runtime, *, normalize_caveman_mode_fn=normalize_caveman_mode):
     return normalize_caveman_mode_fn((runtime or {}).get("caveman_mode", "disable")) == "enable"
+
+
+def runtime_caveman_level(runtime, *, normalize_caveman_level_fn=normalize_caveman_level):
+    runtime = runtime or {}
+    level = runtime.get("caveman_level")
+    if level is None:
+        level = runtime.get("caveman_mode")
+    return normalize_caveman_level_fn(level, default="light")
 
 
 def normalize_thinking_mode(value, default="enable"):

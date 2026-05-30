@@ -4,6 +4,7 @@ import json
 import copy
 import os
 import re
+import shlex
 import shutil
 import sys
 import subprocess
@@ -172,6 +173,7 @@ from mms_session_features import (
     default_gpt_reasoning_effort as _default_gpt_reasoning_effort_impl,
     is_installed_mms_layout as _is_installed_mms_layout_impl,
     normalize_agent_pack as _normalize_agent_pack_impl,
+    normalize_caveman_level as _normalize_caveman_level_impl,
     normalize_caveman_mode as _normalize_caveman_mode_impl,
     normalize_ecc_mode as _normalize_ecc_mode_impl,
     normalize_nsr_mode as _normalize_nsr_mode_impl,
@@ -190,6 +192,7 @@ from mms_session_features import (
     resolve_xmem_root as _resolve_xmem_root_impl,
     runtime_agent_pack as _runtime_agent_pack_impl,
     runtime_caveman_enabled as _runtime_caveman_enabled_impl,
+    runtime_caveman_level as _runtime_caveman_level_impl,
     runtime_ecc_enabled as _runtime_ecc_enabled_impl,
     runtime_nsr_enabled as _runtime_nsr_enabled_impl,
     runtime_omc_enabled as _runtime_omc_enabled_impl,
@@ -1715,6 +1718,28 @@ def _runtime_caveman_enabled(runtime):
     return _runtime_caveman_enabled_impl(runtime, normalize_caveman_mode_fn=_normalize_caveman_mode)
 
 
+def _normalize_caveman_level(value, default="light"):
+    """Compatibility wrapper for Caveman intensity normalization."""
+    return _normalize_caveman_level_impl(value, default=default)
+
+
+def _runtime_caveman_level(runtime):
+    """Compatibility wrapper for runtime Caveman intensity."""
+    return _runtime_caveman_level_impl(runtime, normalize_caveman_level_fn=_normalize_caveman_level)
+
+
+def _caveman_hook_mode(caveman_level):
+    return {
+        "light": "lite",
+        "standard": "full",
+        "full": "ultra",
+    }.get(_normalize_caveman_level(caveman_level), "lite")
+
+
+def _caveman_hook_env_prefix(caveman_level):
+    return f"CAVEMAN_DEFAULT_MODE={shlex.quote(_caveman_hook_mode(caveman_level))} "
+
+
 def _normalize_thinking_mode(value, default="enable"):
     """Compatibility wrapper for thinking mode normalization."""
     return _normalize_thinking_mode_impl(value, default=default)
@@ -2045,9 +2070,10 @@ def _session_skill_disabled(disabled_session_surfaces, skill_name):
     return session_skill_disabled(disabled_session_surfaces, skill_name)
 
 
-def _caveman_claude_activate_command(caveman_root):
+def _caveman_claude_activate_command(caveman_root, caveman_level="light"):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     return (
+        _caveman_hook_env_prefix(caveman_level) +
         "CAVEMAN_HOOK_COMPACT=1 "
         "CAVEMAN_HOOK_EVENT=SessionStart "
         f"node {json.dumps(script_path)}"
@@ -2059,18 +2085,18 @@ def _caveman_claude_tracker_command(caveman_root):
     return f"node {json.dumps(script_path)}"
 
 
-def _caveman_codex_activate_command(caveman_root):
+def _caveman_codex_activate_command(caveman_root, caveman_level="light"):
     """Compatibility wrapper for Codex caveman activation command."""
     from mms_codex_hooks import caveman_codex_activate_command
 
-    return caveman_codex_activate_command(caveman_root)
+    return caveman_codex_activate_command(caveman_root, caveman_level=caveman_level)
 
 
-def _caveman_codex_hook_payload(caveman_root):
+def _caveman_codex_hook_payload(caveman_root, caveman_level="light"):
     """Compatibility wrapper for Codex caveman hook payload."""
     from mms_codex_hooks import caveman_codex_hook_payload
 
-    return caveman_codex_hook_payload(caveman_root)
+    return caveman_codex_hook_payload(caveman_root, caveman_level=caveman_level)
 
 
 def _codex_shell_hook_payload(command_text, *, timeout=None, status_message=None):
@@ -2080,18 +2106,22 @@ def _codex_shell_hook_payload(command_text, *, timeout=None, status_message=None
     return codex_shell_hook_payload(command_text, timeout=timeout, status_message=status_message)
 
 
-def _codex_caveman_session_hook(caveman_root):
+def _codex_caveman_session_hook(caveman_root, caveman_level="light"):
     """Compatibility wrapper for Codex caveman session hook rendering."""
     from mms_codex_hooks import codex_caveman_session_hook
 
-    return codex_caveman_session_hook(caveman_root)
+    return codex_caveman_session_hook(caveman_root, caveman_level=caveman_level)
 
 
-def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
+def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     """Compatibility wrapper for Codex caveman hook configuration."""
     from mms_codex_hooks import configure_codex_caveman_hooks
 
-    return configure_codex_caveman_hooks(hooks_data, enable_caveman=enable_caveman)
+    return configure_codex_caveman_hooks(
+        hooks_data,
+        enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
+    )
 
 
 def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
@@ -2108,11 +2138,15 @@ def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
     return configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
 
 
-def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
+def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     """Compatibility wrapper for Claude caveman hook configuration."""
     from mms_claude_settings import configure_claude_caveman_hooks
 
-    return configure_claude_caveman_hooks(hooks_data, enable_caveman=enable_caveman)
+    return configure_claude_caveman_hooks(
+        hooks_data,
+        enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
+    )
 
 
 def _load_ecc_claude_hooks():
@@ -2143,13 +2177,21 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
     return configure_claude_omc_hooks(hooks_data, enable_omc=enable_omc)
 
 
-def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_nsr=False, disabled_session_surfaces=None):
+def _build_codex_session_hooks(
+    base_hooks=None,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    enable_nsr=False,
+    disabled_session_surfaces=None,
+):
     """Compatibility wrapper for Codex session hook payload construction."""
     from mms_codex_hooks import build_codex_session_hooks
 
     return build_codex_session_hooks(
         base_hooks,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         enable_nsr=enable_nsr,
         disabled_session_surfaces=disabled_session_surfaces,
     )
@@ -2411,7 +2453,14 @@ def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *
     )
 
 
-def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
+def _overlay_agy_session_assets(
+    account_home,
+    session_home,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    disabled_session_surfaces=None,
+):
     """Compatibility wrapper for AGY session plugin overlays."""
     from mms_agy_assets import overlay_agy_session_assets
 
@@ -2419,6 +2468,7 @@ def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=Fa
         account_home,
         session_home,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         disabled_session_surfaces=disabled_session_surfaces,
     )
 
@@ -2933,6 +2983,7 @@ def _build_claude_session_settings(
     default_env=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -2947,6 +2998,7 @@ def _build_claude_session_settings(
         default_env=default_env,
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         enable_nsr=enable_nsr,
         enable_ecc=enable_ecc,
         enable_omc=enable_omc,
@@ -2962,6 +3014,7 @@ def _write_claude_session_settings(
     base_settings=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -2977,6 +3030,7 @@ def _write_claude_session_settings(
         base_settings=base_settings,
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         enable_nsr=enable_nsr,
         enable_ecc=enable_ecc,
         enable_omc=enable_omc,

@@ -197,6 +197,7 @@ PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
 caveman_mode = "enable"       # enable | disable
+caveman_level = "light"       # light | standard | full
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
@@ -209,6 +210,7 @@ agent_pack = "ecc"
 
 [launch.cli.agy]
 caveman_mode = "enable"
+caveman_level = "light"
 
 [session_surfaces.disabled]
 skills = []                   # e.g. ["agent-browser", "token-saver"]

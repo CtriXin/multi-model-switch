@@ -3236,6 +3236,17 @@ def pref_reasoning_effort(value):
     return raw if raw in {"low", "medium", "high", "xhigh"} else ""
 
 
+def pref_caveman_level(value):
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if raw in {"light", "lite", "low"}:
+        return "light"
+    if raw in {"standard", "normal", "medium"}:
+        return "standard"
+    if raw in {"full", "ultra", "high"}:
+        return "full"
+    return ""
+
+
 def pref_agent_pack(value):
     if value is None:
         return ""
@@ -3301,6 +3312,9 @@ def sanitize_launch_preferences(payload):
     caveman_mode = pref_enable_disable(payload.get("caveman_mode"))
     if caveman_mode:
         result["caveman_mode"] = caveman_mode
+    caveman_level = pref_caveman_level(payload.get("caveman_level"))
+    if caveman_level:
+        result["caveman_level"] = caveman_level
     nsr_mode = pref_enable_disable(payload.get("nsr_mode"))
     if nsr_mode:
         result["nsr_mode"] = nsr_mode
@@ -11722,7 +11736,7 @@ def display_preferences_help(*, command_name, preference_paths, preferences_doc_
     console.print(f"  {command_name} config preferences.doc")
     console.print(f"  {command_name} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
-    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, nsr_mode, agent_pack, bypass")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
     console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
     console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")

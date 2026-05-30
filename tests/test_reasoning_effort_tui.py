@@ -25,6 +25,7 @@ def test_confirm_tui_thinking_and_effort_defaults():
     assert confirm_tui.__kwdefaults__["ecc_enabled_default"] is False
     assert confirm_tui.__kwdefaults__["agent_pack_default"] == "none"
     assert confirm_tui.__kwdefaults__["nsr_enabled_default"] is True
+    assert confirm_tui.__kwdefaults__["caveman_level_default"] == "light"
 
 
 def test_confirm_profile_capabilities_read_mimo_thinking(monkeypatch, tmp_path):
@@ -93,6 +94,7 @@ def test_launcher_flow_confirm_tui_keeps_ecc_default_off():
 
     assert options["ecc_enabled_default"] is False
     assert options["agent_pack_default"] == "ecc"
+    assert options["caveman_level_default"] == "light"
     assert options["runtime"] is runtime
 
 

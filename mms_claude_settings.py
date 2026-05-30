@@ -886,7 +886,7 @@ def configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     return hooks_data
 
 
-def configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
+def configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     import mms_launchers as _launchers
 
     hooks_data = _launchers._filter_hook_commands(hooks_data, _launchers._is_caveman_hook_command)
@@ -898,7 +898,7 @@ def configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
     hooks_data = _launchers._append_shell_command_hook(
         hooks_data,
         "SessionStart",
-        _launchers._caveman_claude_activate_command(caveman_root),
+        _launchers._caveman_claude_activate_command(caveman_root, caveman_level=caveman_level),
         timeout=5,
         status_message="Loading caveman mode...",
     )
@@ -1109,6 +1109,7 @@ def build_claude_session_settings(
     default_env=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -1151,6 +1152,7 @@ def build_claude_session_settings(
     hooks = _launchers._configure_claude_caveman_hooks(
         hooks,
         enable_caveman=bool(enable_caveman and allow_execution_surfaces),
+        caveman_level=caveman_level,
     )
     hooks = _launchers._configure_claude_nsr_hooks(
         hooks,
@@ -1246,6 +1248,7 @@ def write_claude_session_settings(
     base_settings=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -1263,6 +1266,7 @@ def write_claude_session_settings(
         default_env=default_env,
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         enable_nsr=enable_nsr,
         enable_ecc=enable_ecc,
         enable_omc=enable_omc,

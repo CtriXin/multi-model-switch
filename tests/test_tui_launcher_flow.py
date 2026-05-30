@@ -3489,8 +3489,13 @@ def test_normalize_confirm_result_supports_current_tuple_shape() -> None:
         "reasoning_effort": "medium",
         "disabled_session_surfaces": surfaces,
         "nsr_enabled": True,
+        "caveman_level": "light",
         "confirm_returned_surfaces": True,
     }
+    assert normalize_confirm_result(
+        ("", True, True, True, "omc", False, "medium", surfaces, True, "full"),
+        "high",
+    )["caveman_level"] == "full"
 
 
 def test_normalize_confirm_result_supports_legacy_tuple_shapes() -> None:
@@ -3504,6 +3509,7 @@ def test_normalize_confirm_result_supports_legacy_tuple_shapes() -> None:
         "reasoning_effort": "high",
         "disabled_session_surfaces": {},
         "nsr_enabled": False,
+        "caveman_level": "light",
         "confirm_returned_surfaces": False,
     }
     assert normalize_confirm_result(("b", False, True), "low")["caveman_enabled"] is False
@@ -3533,6 +3539,7 @@ def test_apply_confirm_runtime_preferences_sets_claude_modes() -> None:
         "ecc_mode": "disable",
         "omc_mode": "enable",
         "caveman_mode": "enable",
+        "caveman_level": "light",
         "nsr_mode": "enable",
         "disabled_session_surfaces": {"xmem": True},
         "thinking_mode": "disable",
@@ -3566,6 +3573,7 @@ def test_apply_confirm_runtime_preferences_merges_legacy_surfaces() -> None:
     assert runtime == {
         "disabled_session_surfaces": {"context": True, "toon": True},
         "caveman_mode": "disable",
+        "caveman_level": "light",
         "nsr_mode": "disable",
         "thinking_mode": "enable",
         "reasoning_effort": "high",
@@ -3603,6 +3611,7 @@ def test_build_confirm_capability_context_enables_domestic_claude_addons() -> No
         "has_ecc": True,
         "has_omc": True,
         "default_reasoning_effort": "low",
+        "default_caveman_level": "light",
         "preview_catalog": {
             "preview": {
                 "has_caveman": True,
@@ -3661,6 +3670,7 @@ def test_confirm_tui_options_preserves_confirm_defaults() -> None:
         "context_lines": ["ctx"],
         "has_caveman": True,
         "caveman_enabled_default": False,
+        "caveman_level_default": "light",
         "has_nsr": True,
         "nsr_enabled_default": True,
         "has_ecc": False,
@@ -3712,6 +3722,7 @@ def test_run_confirm_tui_prompt_builds_options_and_normalizes_result() -> None:
             "reasoning_effort": "medium",
             "disabled_session_surfaces": {"toon": True},
             "nsr_enabled": True,
+            "caveman_level": "light",
             "confirm_returned_surfaces": True,
         },
         "has_nsr": True,
@@ -3728,6 +3739,7 @@ def test_run_confirm_tui_prompt_builds_options_and_normalizes_result() -> None:
     assert calls[2][3]["once"] is True
     assert calls[2][3]["context_lines"] == ["ctx"]
     assert calls[2][3]["reasoning_effort_default"] == "low"
+    assert calls[2][3]["caveman_level_default"] == "light"
     assert calls[2][3]["preview_catalog"] == {
         "preview": {"has_caveman": True, "has_nsr": True, "has_ecc": True, "has_omc": True}
     }
@@ -3762,6 +3774,7 @@ def test_resolve_confirm_launch_action_maps_exit_back_and_launch_preferences() -
             "bypass": True,
             "claude_1m_enabled": True,
             "caveman_enabled": False,
+            "caveman_level": "light",
             "agent_pack": "omc",
             "thinking_enabled": True,
             "reasoning_effort": "medium",
@@ -3784,6 +3797,7 @@ def test_resolve_confirm_launch_action_maps_exit_back_and_launch_preferences() -
             "disabled_session_surfaces": {"toon": True},
             "nsr_enabled": True,
             "has_nsr": True,
+            "caveman_level": "light",
             "confirm_returned_surfaces": True,
         },
     }
@@ -3813,6 +3827,7 @@ def test_execute_confirmed_launch_applies_flags_preferences_and_launches() -> No
         "nsr_enabled": True,
         "has_nsr": True,
         "confirm_returned_surfaces": True,
+        "caveman_level": "full",
     }
 
     result = execute_confirmed_launch(
@@ -3839,6 +3854,7 @@ def test_execute_confirmed_launch_applies_flags_preferences_and_launches() -> No
         "ecc_mode": "enable",
         "omc_mode": "disable",
         "caveman_mode": "enable",
+        "caveman_level": "full",
         "nsr_mode": "enable",
         "disabled_session_surfaces": {"toon": True},
         "thinking_mode": "disable",
@@ -4003,6 +4019,7 @@ def test_handle_tui_launch_confirmation_launches_with_prepared_runtime() -> None
             "preferred": True,
             "bypass": True,
             "caveman_mode": "enable",
+            "caveman_level": "light",
             "nsr_mode": "disable",
             "disabled_session_surfaces": {},
             "thinking_mode": "enable",

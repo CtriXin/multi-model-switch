@@ -52,6 +52,7 @@ def build_codex_gateway_env(runtime, base_url, model_info=None):
         _resolve_xmem_root,
         _refresh_codex_current_hook_trust_cache,
         _runtime_caveman_enabled,
+        _runtime_caveman_level,
         _runtime_nsr_enabled,
         _safe_getcwd,
         _scrub_inherited_runtime_env,
@@ -115,6 +116,7 @@ def build_codex_gateway_env(runtime, base_url, model_info=None):
     with open(auth_path, "w") as f:
         _json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": openai_key}, f)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    caveman_level = _runtime_caveman_level(runtime)
     enable_nsr = _runtime_nsr_enabled(runtime)
     real_codex_dir = _real_user_path(".codex")
     real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
@@ -145,6 +147,7 @@ def build_codex_gateway_env(runtime, base_url, model_info=None):
         session_hooks = _build_codex_session_hooks(
             base_hooks,
             enable_caveman=enable_caveman,
+            caveman_level=caveman_level,
             enable_nsr=enable_nsr,
             disabled_session_surfaces=disabled_session_surfaces,
         )

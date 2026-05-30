@@ -2664,6 +2664,7 @@ def confirm_tui(
     *,
     has_caveman=False,
     caveman_enabled_default=False,
+    caveman_level_default="light",
     has_nsr=False,
     nsr_enabled_default=True,
     has_ecc=False,
@@ -2677,11 +2678,12 @@ def confirm_tui(
 ):
     """确认启动 TUI。
 
-    返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled)。
+    返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled, caveman_level)。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow / run bypass
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
     caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
+    caveman_level: "light" / "standard" / "full"，仅 Caveman 开启时有效
     nsr_enabled: bool，仅 claude/codex 且 NSR hook 可用时有效，True 时本次会话开启 NSR hooks
     agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
     thinking_enabled: bool，仅 GPT / 已验证 domestic thinking 路径有效
@@ -2716,6 +2718,26 @@ def confirm_tui(
 
     def _supports_domestic_effort_token(token):
         return token.startswith("deepseek")
+
+    def _normalize_caveman_level(value):
+        raw = str(value or "").strip().lower().replace("_", "-")
+        if raw in {"light", "lite", "low"}:
+            return "light"
+        if raw in {"standard", "normal", "medium"}:
+            return "standard"
+        if raw in {"full", "ultra", "high"}:
+            return "full"
+        return "light"
+
+    def _caveman_level_text(value):
+        value = str(value or "").strip().lower()
+        if value == "disable":
+            return _L("关闭", "Off")
+        if value == "standard":
+            return "Standard"
+        if value == "full":
+            return "Full"
+        return "Light"
 
     def _supports_claude_1m_toggle(info):
         values = []
@@ -2966,6 +2988,10 @@ def confirm_tui(
         default_pack = "ecc" if bool(has_ecc and ecc_enabled_default) else "none"
     has_agent_pack = len(pack_options) > 1
     pack_key = _ECC_TOGGLE_KEY
+    caveman_options = ["disable", "light", "standard", "full"]
+    initial_caveman_level = _normalize_caveman_level(caveman_level_default)
+    if not (has_caveman and caveman_enabled_default):
+        initial_caveman_level = "disable"
 
     def _agent_pack_text(value):
         value = str(value or "none").strip().lower()
@@ -3014,7 +3040,7 @@ def confirm_tui(
 
         bypass_mode = initial_bypass_mode
         claude_1m_mode = False
-        caveman_mode = bool(has_caveman and caveman_enabled_default)
+        caveman_level = initial_caveman_level
         nsr_mode = bool(has_nsr and nsr_enabled_default)
         agent_pack = default_pack
         thinking_mode = bool(has_thinking and initial_thinking_enabled)
@@ -3030,6 +3056,9 @@ def confirm_tui(
                 for key, values in preview_disabled.items()
                 if values
             }
+
+        def _caveman_enabled():
+            return bool(has_caveman and caveman_level != "disable")
 
         def _effort_attr(value, enabled=True):
             if not enabled:
@@ -3063,7 +3092,7 @@ def confirm_tui(
                 one_m_text = _L("开启", "On") if claude_1m_mode else _L("关闭", "Off")
                 info_lines.append(("1M", f"[M] {one_m_text}", "one_m"))
             if has_caveman:
-                caveman_text = _L("开启", "On") if caveman_mode else _L("关闭", "Off")
+                caveman_text = _caveman_level_text(caveman_level)
                 info_lines.append((_confirm_label("Caveman"), f"[C] {caveman_text}", "caveman"))
             if has_nsr:
                 nsr_text = _L("开启", "On") if nsr_mode else _L("关闭", "Off")
@@ -3088,7 +3117,7 @@ def confirm_tui(
                 for panel_key in ("mcp", "skills", "hooks"):
                     preview_items = _collect_preview_items(
                         panel_key,
-                        caveman_enabled=caveman_mode,
+                        caveman_enabled=_caveman_enabled(),
                         nsr_enabled=nsr_mode,
                         agent_pack=agent_pack,
                     )
@@ -3123,7 +3152,7 @@ def confirm_tui(
             if has_claude_1m:
                 footer_actions.append([("M", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_DIM)])
             if has_caveman:
-                footer_actions.append([("C", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 Caveman", "Toggle Caveman"), curses.color_pair(1) | curses.A_DIM)])
+                footer_actions.append([("C", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 Caveman 档位", "Cycle Caveman"), curses.color_pair(1) | curses.A_DIM)])
             if has_nsr:
                 footer_actions.append([("N", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 NSR", "Toggle NSR"), curses.color_pair(1) | curses.A_DIM)])
             if has_thinking:
@@ -3264,7 +3293,7 @@ def confirm_tui(
                     if style == "bypass":
                         val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
                     elif style == "caveman":
-                        val_attr = curses.color_pair(5) | curses.A_BOLD if caveman_mode else curses.color_pair(4)
+                        val_attr = curses.color_pair(5) | curses.A_BOLD if _caveman_enabled() else curses.color_pair(4)
                     elif style == "nsr":
                         val_attr = curses.color_pair(5) | curses.A_BOLD if nsr_mode else curses.color_pair(4)
                     elif style == "thinking":
@@ -3293,7 +3322,18 @@ def confirm_tui(
             stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ("", bypass_mode, claude_1m_mode, caveman_mode, agent_pack, thinking_mode, effort_mode, _disabled_payload(), nsr_mode)
+                return (
+                    "",
+                    bypass_mode,
+                    claude_1m_mode,
+                    _caveman_enabled(),
+                    agent_pack,
+                    thinking_mode,
+                    effort_mode,
+                    _disabled_payload(),
+                    nsr_mode,
+                    _normalize_caveman_level(caveman_level),
+                )
             elif key in (ord('b'), ord('B')):
                 return ("b", False, False, False, "none", True, effort_default, {}, False)
             elif key in (ord('q'), ord('Q'), 27):
@@ -3331,7 +3371,8 @@ def confirm_tui(
             elif key in (ord('m'), ord('M')) and has_claude_1m:
                 claude_1m_mode = not claude_1m_mode
             elif key in (ord('c'), ord('C')) and has_caveman:
-                caveman_mode = not caveman_mode
+                current_idx = caveman_options.index(caveman_level) if caveman_level in caveman_options else 0
+                caveman_level = caveman_options[(current_idx + 1) % len(caveman_options)]
             elif key in (ord('n'), ord('N')) and has_nsr:
                 nsr_mode = not nsr_mode
             elif key in (ord('t'), ord('T')) and has_thinking:

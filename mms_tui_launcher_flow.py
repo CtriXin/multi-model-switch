@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from mms_session_features import normalize_caveman_level
+
 
 @dataclass(frozen=True)
 class TuiFamilyPayloadDeps:
@@ -2502,14 +2504,31 @@ def confirm_agent_pack(value):
     return "ecc" if bool(value) else "none"
 
 
-def normalize_confirm_result(result, default_reasoning_effort):
+def normalize_confirm_result(result, default_reasoning_effort, default_caveman_level="light"):
     disabled_session_surfaces = {}
     agent_pack = "none"
     nsr_enabled = False
     confirm_returned_surfaces = False
+    caveman_level = normalize_caveman_level(default_caveman_level, default="light")
 
     if isinstance(result, tuple):
-        if len(result) >= 9:
+        if len(result) >= 10:
+            (
+                action,
+                bypass,
+                claude_1m_enabled,
+                caveman_enabled,
+                pack_value,
+                thinking_enabled,
+                reasoning_effort,
+                disabled_session_surfaces,
+                nsr_enabled,
+                caveman_level,
+            ) = result[:10]
+            agent_pack = confirm_agent_pack(pack_value)
+            caveman_level = normalize_caveman_level(caveman_level, default=default_caveman_level)
+            confirm_returned_surfaces = True
+        elif len(result) >= 9:
             (
                 action,
                 bypass,
@@ -2581,6 +2600,7 @@ def normalize_confirm_result(result, default_reasoning_effort):
         "reasoning_effort": reasoning_effort,
         "disabled_session_surfaces": disabled_session_surfaces,
         "nsr_enabled": nsr_enabled,
+        "caveman_level": normalize_caveman_level(caveman_level, default=default_caveman_level),
         "confirm_returned_surfaces": confirm_returned_surfaces,
     }
 
@@ -2599,6 +2619,7 @@ def apply_confirm_runtime_preferences(
     has_nsr,
     confirm_returned_surfaces,
     merge_disabled_session_surfaces,
+    caveman_level="light",
 ):
     if cli_name == "claude":
         runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
@@ -2607,6 +2628,7 @@ def apply_confirm_runtime_preferences(
         runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
     if cli_name in {"claude", "codex", "opencode", "pi", "agy"}:
         runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
+        runtime["caveman_level"] = normalize_caveman_level(caveman_level, default="light")
         runtime["nsr_mode"] = "enable" if (has_nsr and nsr_enabled) else "disable"
         if confirm_returned_surfaces:
             runtime["disabled_session_surfaces"] = (
@@ -2654,6 +2676,10 @@ def build_confirm_capability_context(
         str(runtime.get("reasoning_effort", "")).strip().lower()
         or default_reasoning_effort_for_model_info(clean_model_info)
     )
+    default_caveman_level = normalize_caveman_level(
+        runtime.get("caveman_level") or runtime.get("caveman_mode"),
+        default="light",
+    )
     preview_catalog = build_confirm_preview_catalog(
         cli_name,
         runtime,
@@ -2669,6 +2695,7 @@ def build_confirm_capability_context(
         "has_ecc": has_ecc,
         "has_omc": has_omc,
         "default_reasoning_effort": default_reasoning_effort,
+        "default_caveman_level": default_caveman_level,
         "preview_catalog": preview_catalog,
     }
 
@@ -2685,6 +2712,7 @@ def confirm_tui_options(
     runtime,
     default_reasoning_effort,
     preview_catalog,
+    default_caveman_level="light",
 ):
     return {
         "env_vars": env_vars,
@@ -2692,6 +2720,7 @@ def confirm_tui_options(
         "context_lines": context_lines,
         "has_caveman": has_caveman,
         "caveman_enabled_default": str(runtime.get("caveman_mode", "enable")).strip().lower() != "disable",
+        "caveman_level_default": default_caveman_level,
         "has_nsr": has_nsr,
         "nsr_enabled_default": str(runtime.get("nsr_mode", "enable")).strip().lower() == "enable",
         "has_ecc": has_ecc,
@@ -2749,6 +2778,7 @@ def run_confirm_tui_prompt(
             has_omc=confirm_context["has_omc"],
             runtime=runtime,
             default_reasoning_effort=confirm_context["default_reasoning_effort"],
+            default_caveman_level=confirm_context["default_caveman_level"],
             preview_catalog=confirm_context["preview_catalog"],
         ),
     )
@@ -2759,6 +2789,7 @@ def run_confirm_tui_prompt(
         "confirm_result": normalize_confirm_result(
             result,
             confirm_context["default_reasoning_effort"],
+            confirm_context["default_caveman_level"],
         ),
         "has_nsr": confirm_context["has_nsr"],
     }
@@ -2776,6 +2807,7 @@ def resolve_confirm_launch_action(confirm_result, *, has_nsr):
         "runtime_preferences": {
             "claude_1m_enabled": confirm_result["claude_1m_enabled"],
             "caveman_enabled": confirm_result["caveman_enabled"],
+            "caveman_level": confirm_result.get("caveman_level", "light"),
             "agent_pack": confirm_result["agent_pack"],
             "thinking_enabled": confirm_result["thinking_enabled"],
             "reasoning_effort": confirm_result["reasoning_effort"],

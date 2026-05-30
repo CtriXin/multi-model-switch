@@ -89,6 +89,7 @@ def build_claude_gateway_env(
         _resolve_xmem_root,
         _runtime_agent_pack,
         _runtime_caveman_enabled,
+        _runtime_caveman_level,
         _runtime_is_sensitive_claude_provider,
         _runtime_nsr_enabled,
         _runtime_supports_claude_1m,
@@ -222,6 +223,7 @@ def build_claude_gateway_env(
     provider_id = runtime.get("id", "")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    caveman_level = _runtime_caveman_level(runtime)
     enable_nsr = _runtime_nsr_enabled(runtime)
     enable_ecc = agent_pack == "ecc"
     enable_omc = agent_pack == "omc"
@@ -324,6 +326,7 @@ def build_claude_gateway_env(
             default_env=default_settings_env,
             base_settings=session_base_settings,
             enable_caveman=enable_caveman,
+            caveman_level=caveman_level,
             enable_nsr=enable_nsr,
             enable_ecc=enable_ecc,
             enable_omc=enable_omc,
