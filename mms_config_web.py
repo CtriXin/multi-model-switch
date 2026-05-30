@@ -1108,55 +1108,55 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
     return [
         {
             "area": "通道",
-            "capability": "provider add/edit/default/role/priority/base URL/key/protocol/CLI/timezone/note/Claude 1M",
+            "capability": "provider 新增/编辑/默认/role/priority/Base URL/API Key/protocol/CLI/timezone/note/Claude 1M",
             "webui": "native",
             "tui": "can_degrade_after_save_flow_verified",
         },
         {
             "area": "通道",
-            "capability": "模型拉取、manual extra_models、hidden_models、capability tags",
+            "capability": "模型拉取、手动 extra_models、hidden_models、能力标签",
             "webui": "native",
             "tui": "can_degrade_after_route_guard_verified",
         },
         {
             "area": "通道",
-            "capability": "本地 usage / last-used / health overlay",
+            "capability": "本地使用统计 / 最近使用 / 健康覆盖层",
             "webui": "read_only_detail_report",
             "tui": "can_degrade_after_report_smoke",
         },
         {
             "area": "账号",
-            "capability": "OAuth/account status/default/login/edit/remove/metadata/timezone/note",
+            "capability": "OAuth/account 状态、默认值、登录、编辑、删除、metadata、timezone、note",
             "webui": "draft_review_human_gate",
             "tui": "keep_emergency_only_for_login_remove_and_claude_human_gate",
         },
         {
             "area": "设置",
-            "capability": "Registry truth / preview doctor / bundle/readiness/status",
+            "capability": "Registry 真源、preview doctor、Bundle、就绪度和状态",
             "webui": "read_only_reports_plus_existing_apply",
             "tui": "can_degrade_report_display_after_webui_smoke",
         },
         {
             "area": "设置",
-            "capability": "Snapshot Guard accept / real config drift acceptance",
+            "capability": "Snapshot Guard 接受基线 / 真实配置 drift 确认",
             "webui": "manual_cli_human_gate",
             "tui": "keep_until_webui_double_confirm_flow_exists",
         },
         {
             "area": "设置",
-            "capability": "Rescue fallback config",
+            "capability": "Rescue fallback 配置",
             "webui": "native",
             "tui": "can_degrade_config_display_after_save_flow_verified",
         },
         {
             "area": "设置",
-            "capability": "Rescue packet browsing / fallback handover",
+            "capability": "Rescue packet 浏览 / fallback 交接",
             "webui": "read_only_report",
             "tui": "keep_emergency_only_until_handover_write_flow_exists",
         },
         {
             "area": "设置",
-            "capability": "UI language and About/version checks",
+            "capability": "界面语言和关于/版本检查",
             "webui": "report_or_planned",
             "tui": "keep_small",
         },
@@ -1284,11 +1284,11 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             click_targets.append("missing_gap")
         click_text = " + ".join(dict.fromkeys(click_targets))
         if status == "human_gate":
-            acceptance_check = "点 Gate 查看风险/写入范围/命令；只复制命令，不在 WebUI 自动执行。"
+            acceptance_check = "点人工确认查看风险/写入范围/命令；只复制命令，不在 WebUI 自动执行。"
         elif status == "report":
-            acceptance_check = "点 Report 确认 API 返回 ok/read-only JSON。"
+            acceptance_check = "点报告确认 API 返回 ok/只读 JSON。"
         elif status == "draft_review":
-            acceptance_check = "编辑草稿后生成保存预览，确认 review summary 和 diff。"
+            acceptance_check = "编辑草稿后生成保存预览，确认审查摘要和 diff。"
         elif status == "native":
             acceptance_check = "点打开 WebUI 落点；如修改配置，继续生成保存预览确认。"
         else:
@@ -1319,7 +1319,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="添加网关通道",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="Add provider button + provider editor + save review",
+            webui_control="添加通道按钮 + 通道编辑器 + 保存预览",
             api_action="connect_gateway_status",
             status="native",
             write_policy="draft_review_confirmed_save",
@@ -1333,7 +1333,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="添加官方通道 / OAuth 登录",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="账号 / OAuth 通道卡片里的 official account human gate",
+            webui_control="账号 / OAuth 通道卡片里的官方账号人工确认",
             api_action="connect_official_gate",
             status="human_gate",
             write_policy="manual_login_only",
@@ -1347,12 +1347,12 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="管理现有通道",
             webui_section="通道配置 + Settings / 账号",
             webui_section_id="channel",
-            webui_control="Provider editor + account table module actions",
+            webui_control="通道编辑器 + 账号表模块动作",
             api_action="tui_mapping",
             status="native",
             write_policy="mixed_draft_review_human_gate",
             verification="/api/settings/report?action=tui_mapping",
-            manual_check="网关通道 native；官方账号危险动作 human-gated。",
+            manual_check="网关通道 native；官方账号危险动作 需要人工确认。",
         ),
         row(
             "connect.migrate_config",
@@ -1361,7 +1361,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="迁移配置到 mms",
             webui_section="能力整合",
             webui_section_id="settings",
-            webui_control="migration human gate report",
+            webui_control="迁移人工确认报告",
             api_action="migrate_config_gate",
             status="human_gate",
             write_policy="manual_cli_human_gate",
@@ -1375,7 +1375,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="浏览 / 选择通道",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="provider list, usage chips, default and priority fields",
+            webui_control="通道列表、使用统计标签、默认值和 priority 字段",
             api_action="provider_usage_summary",
             status="report",
             write_policy="read_only_report",
@@ -1389,7 +1389,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="模型页切换通道来源",
             webui_section="通道配置 + Runtime",
             webui_section_id="channel",
-            webui_control="default provider, priority fields, runtime/opencode model selectors",
+            webui_control="默认通道、priority 字段、runtime/opencode 模型选择器",
             api_action="provider_channel_status",
             status="native",
             write_policy="draft_review_confirmed_save",
@@ -1403,7 +1403,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="调整通道权重",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="provider priority + family_priority_overrides fields + save review",
+            webui_control="通道 priority + family_priority_overrides 字段 + 保存预览",
             api_action="provider_channel_status",
             status="native",
             write_policy="draft_review_confirmed_save",
@@ -1417,7 +1417,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="按 speed stats 智能排序",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="通道配置模块里的 auto-rank human gate",
+            webui_control="通道配置模块里的自动排序人工确认",
             api_action="family_autosort_gate",
             status="human_gate",
             write_policy="speed_stats_write_human_gate",
@@ -1431,7 +1431,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="Provider 管理",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="左侧 provider list、通道配置 tab、模型配置 tab、保存审计",
+            webui_control="左侧通道列表、通道配置 tab、模型配置 tab、保存审计",
             status="native",
             write_policy="draft_review_confirmed_save",
             verification="/api/plan diff + /api/save or /api/registry-v2/apply",
@@ -1458,12 +1458,12 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="模型真源",
             webui_section="真源状态",
             webui_section_id="source",
-            webui_control="真源状态 cards + report buttons + save/apply flow",
+            webui_control="真源状态 卡片 + 报告按钮 + 保存 / 应用流程",
             api_action="model_source_status",
             status="report",
             write_policy="read_only_report",
             verification="/api/settings/report?action=model_source_status",
-            manual_check="写入类 registry 操作必须继续走 save/apply human gate。",
+            manual_check="写入类 registry 操作必须继续走 save/apply 人工确认。",
         ),
         row(
             "settings.guard",
@@ -1472,7 +1472,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="启动快照",
             webui_section="Settings / Snapshot Guard",
             webui_section_id="settings",
-            webui_control="Snapshot Guard status/gate report",
+            webui_control="Snapshot 快照状态 / 人工确认报告",
             api_action="guard_accept_gate",
             status="human_gate",
             write_policy="manual_cli_human_gate",
@@ -1486,7 +1486,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="中断/救援",
             webui_section="Fallback",
             webui_section_id="fallback",
-            webui_control="rescue fallback/hot fallback 表单 + rescue events report",
+            webui_control="rescue fallback / hot fallback 表单 + rescue 事件报告",
             api_action="rescue_events",
             status="native",
             write_policy="draft_review_confirmed_save",
@@ -1500,7 +1500,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="界面语言",
             webui_section="Settings / 界面语言",
             webui_section_id="settings",
-            webui_control="界面语言 selector + 保存审计",
+            webui_control="界面语言选择器 + 保存审计",
             api_action="language_status",
             status="native",
             write_policy="draft_review_confirmed_save",
@@ -1514,7 +1514,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="Legacy 路由导出",
             webui_section="保存 / 审计",
             webui_section_id="save",
-            webui_control="生成保存预览、stable audited save、preview DB publish",
+            webui_control="生成保存预览、stable 审计保存、preview DB 发布",
             api_action="routes_export",
             status="native",
             write_policy="save_flow_or_preview_publish",
@@ -1526,14 +1526,14 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_area="Settings",
             tui_action_id="about",
             tui_label="关于",
-            webui_section="Settings / About",
+            webui_section="Settings / 关于",
             webui_section_id="settings",
-            webui_control="About report",
+            webui_control="关于状态",
             api_action="about",
             status="report",
             write_policy="read_only_report",
             verification="/api/settings/report?action=about",
-            manual_check="upgrade 动作仍是 manual CLI/human gate。",
+            manual_check="upgrade 动作仍是 manual CLI/人工确认。",
         ),
         row(
             "provider.local_usage",
@@ -1542,7 +1542,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="查看本地统计",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="provider list usage chips + usage summary report",
+            webui_control="通道列表使用统计标签 + 使用统计报告",
             api_action="provider_usage_summary",
             status="report",
             write_policy="read_only_report",
@@ -1556,7 +1556,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="模型管理",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="模型配置 tab、fetch models、extra_models、hidden_models、capability toggles",
+            webui_control="模型配置 tab、拉取模型、extra_models、hidden_models、能力开关",
             status="native",
             write_policy="draft_review_confirmed_save",
             verification="/api/provider/models + /api/plan",
@@ -1569,7 +1569,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="恢复默认模型补丁",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="模型配置 tab restore model patch button",
+            webui_control="模型配置 tab 恢复模型补丁按钮",
             status="native",
             write_policy="draft_review_confirmed_save",
             verification="/api/plan extra_models/hidden_models diff",
@@ -1582,7 +1582,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="设为默认网关",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="设为默认 provider checkbox",
+            webui_control="设为默认通道复选框",
             status="native",
             write_policy="draft_review_confirmed_save",
             verification="/api/plan review_summary.default_provider",
@@ -1595,7 +1595,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="重命名",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="内部 ID + 显示名 fields",
+            webui_control="内部 ID + 显示名字段",
             status="native",
             write_policy="draft_review_confirmed_save",
             verification="/api/plan provider rename/remove/add diff",
@@ -1608,7 +1608,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="编辑地址和 Key",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="OpenAI/Anthropic base URL、models_endpoint、API Key pending save",
+            webui_control="OpenAI/Anthropic Base URL、models_endpoint、API Key 待保存",
             status="native",
             write_policy="audited_secret_write",
             verification="/api/plan redacts key; save writes audited secret backend",
@@ -1621,7 +1621,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="编辑 Claude 1M / timezone / note",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="provider advanced metadata fields",
+            webui_control="通道高级 metadata 字段",
             status="native",
             write_policy="draft_review_confirmed_save",
             verification="/api/plan provider_metadata review_summary",
@@ -1634,7 +1634,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="编辑 proxy / no_proxy",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="通道配置模块里的 provider network policy human gate",
+            webui_control="通道配置模块里的通道网络策略人工确认",
             api_action="provider_network_gate",
             status="human_gate",
             write_policy="network_policy_human_gate",
@@ -1648,7 +1648,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="删除通道",
             webui_section="通道配置",
             webui_section_id="channel",
-            webui_control="typed provider ID confirm + save review summary",
+            webui_control="输入通道 ID 确认 + 保存预览摘要",
             status="native",
             write_policy="draft_review_confirmed_save",
             verification="/api/plan review_summary.provider_removed",
@@ -1661,7 +1661,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="查看本地统计",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="account table usage columns + account summary report",
+            webui_control="账号表使用统计列 + 账号摘要报告",
             api_action="accounts",
             status="report",
             write_policy="read_only_report",
@@ -1675,7 +1675,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="重新登录",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="账号表 action 按钮里的 login human gate",
+            webui_control="账号表动作按钮里的登录人工确认",
             api_action="account_login_gate",
             status="human_gate",
             write_policy="manual_login_only",
@@ -1689,7 +1689,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="设为默认官方通道",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="non-Claude default radio buttons",
+            webui_control="非 Claude 默认账号单选按钮",
             api_action="accounts",
             status="draft_review",
             write_policy="draft_review_human_gate",
@@ -1703,7 +1703,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="重命名",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="账号表 action 按钮里的 rename human gate",
+            webui_control="账号表动作按钮里的重命名人工确认",
             api_action="account_rename_gate",
             status="human_gate",
             write_policy="account_home_human_gate",
@@ -1717,7 +1717,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="编辑通道",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="non-Claude name/enabled/priority/family/timezone/Claude 1M/note draft fields",
+            webui_control="非 Claude 名称/启用/priority/family/timezone/Claude 1M/note 草稿字段",
             api_action="accounts",
             status="draft_review",
             write_policy="draft_review_human_gate",
@@ -1731,7 +1731,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="编辑账号 proxy / no_proxy",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="账号表 action 按钮里的 network policy human gate",
+            webui_control="账号表动作按钮里的网络策略人工确认",
             api_action="account_network_gate",
             status="human_gate",
             write_policy="account_network_human_gate",
@@ -1745,7 +1745,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             tui_label="删除通道",
             webui_section="Settings / 账号",
             webui_section_id="settings",
-            webui_control="账号表 action 按钮里的 remove human gate",
+            webui_control="账号表动作按钮里的删除人工确认",
             api_action="account_remove_gate",
             status="human_gate",
             write_policy="manual_remove_only",
@@ -1755,28 +1755,28 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
     ]
 
     registry_rows = [
-        ("registry.model_source_status", "model_source_status", "查看 Model Source Status", "model_source_status", "report", "read_only_report"),
-        ("registry.consumer_bundle_status", "consumer_bundle_status", "查看 Consumer Bundle", "consumer_bundle_status", "report", "read_only_report"),
-        ("registry.v2_save_plan", "registry_v2_save_plan", "查看 v2 Save Plan", "", "native", "save_preview"),
-        ("registry.config_v2_promotion_plan", "config_v2_promotion_plan", "查看 Promote Plan", "config_v2_promotion_plan", "report", "read_only_report"),
-        ("registry.config_v2_release_readiness", "config_v2_release_readiness", "查看 4.0 Readiness", "config_v2_release_readiness", "report", "read_only_report"),
-        ("registry.preview_doctor", "preview_doctor", "运行 Preview Doctor", "preview_doctor", "report", "read_only_report"),
-        ("registry.check_staleness", "check_staleness", "检查 Source Staleness", "check_staleness", "report", "read_only_report"),
-        ("registry.refresh_due_sources", "refresh_due_sources", "刷新到期 Sources", "refresh_due_sources_gate", "human_gate", "network_write_human_gate"),
-        ("registry.scheduled_dry_run", "scheduled_dry_run", "定时刷新 Dry Run", "scheduled_refresh_gate", "human_gate", "network_human_gate"),
-        ("registry.scheduled_no_network", "scheduled_no_network", "定时刷新 No Network", "scheduled_refresh_gate", "human_gate", "manual_cli_human_gate"),
-        ("registry.refresh_sources", "refresh_sources", "刷新全部 Sources", "refresh_sources_gate", "human_gate", "network_write_human_gate"),
-        ("registry.fetch_openrouter", "fetch_openrouter", "拉取 OpenRouter Catalog", "fetch_openrouter_gate", "human_gate", "network_human_gate"),
-        ("registry.diff_openrouter", "diff_openrouter", "对比 OpenRouter Candidate", "diff_openrouter_gate", "human_gate", "network_human_gate"),
-        ("registry.publish_approved", "publish_approved", "发布 Approved Bundle", "publish_approved_gate", "human_gate", "write_human_gate"),
-        ("registry.verify_approved", "verify_approved", "验证 Approved Bundle", "verify_approved", "report", "read_only_report"),
-        ("registry.doctor", "doctor", "Registry Doctor / 状态", "registry_status", "report", "read_only_report"),
+        ("registry.model_source_status", "model_source_status", "查看模型真源状态", "model_source_status", "report", "read_only_report"),
+        ("registry.consumer_bundle_status", "consumer_bundle_status", "查看消费端 Bundle", "consumer_bundle_status", "report", "read_only_report"),
+        ("registry.v2_save_plan", "registry_v2_save_plan", "查看 v2 保存计划", "", "native", "save_preview"),
+        ("registry.config_v2_promotion_plan", "config_v2_promotion_plan", "查看晋级计划", "config_v2_promotion_plan", "report", "read_only_report"),
+        ("registry.config_v2_release_readiness", "config_v2_release_readiness", "查看 4.0 就绪度", "config_v2_release_readiness", "report", "read_only_report"),
+        ("registry.preview_doctor", "preview_doctor", "运行预览诊断", "preview_doctor", "report", "read_only_report"),
+        ("registry.check_staleness", "check_staleness", "检查 source 过期状态", "check_staleness", "report", "read_only_report"),
+        ("registry.refresh_due_sources", "refresh_due_sources", "刷新到期 source", "refresh_due_sources_gate", "human_gate", "network_write_human_gate"),
+        ("registry.scheduled_dry_run", "scheduled_dry_run", "定时刷新 dry run", "scheduled_refresh_gate", "human_gate", "network_human_gate"),
+        ("registry.scheduled_no_network", "scheduled_no_network", "定时刷新 no-network", "scheduled_refresh_gate", "human_gate", "manual_cli_human_gate"),
+        ("registry.refresh_sources", "refresh_sources", "刷新全部 source", "refresh_sources_gate", "human_gate", "network_write_human_gate"),
+        ("registry.fetch_openrouter", "fetch_openrouter", "拉取 OpenRouter catalog", "fetch_openrouter_gate", "human_gate", "network_human_gate"),
+        ("registry.diff_openrouter", "diff_openrouter", "对比 OpenRouter candidate", "diff_openrouter_gate", "human_gate", "network_human_gate"),
+        ("registry.publish_approved", "publish_approved", "发布已批准 Bundle", "publish_approved_gate", "human_gate", "write_human_gate"),
+        ("registry.verify_approved", "verify_approved", "验证已批准 Bundle", "verify_approved", "report", "read_only_report"),
+        ("registry.doctor", "doctor", "Registry 诊断 / 状态", "registry_status", "report", "read_only_report"),
     ]
     for row_id, action_id, label, api_action, status, write_policy in registry_rows:
         manual_check = (
-            "只读 manifest/hash 验证，可直接在 WebUI 执行；publish 仍 human-gated。"
+            "只读 manifest/hash 验证，可直接在 WebUI 执行；publish 仍 需要人工确认。"
             if action_id == "verify_approved"
-            else "read-only 可直接点；network/write 类先 gate，不静默执行。"
+            else "只读项可直接点；network/write 类先人工确认，不静默执行。"
         )
         rows.append(
             row(
@@ -1786,7 +1786,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
                 tui_label=label,
                 webui_section="保存 / 审计" if action_id == "registry_v2_save_plan" else "真源状态",
                 webui_section_id="save" if action_id == "registry_v2_save_plan" else "source",
-                webui_control="保存页生成保存预览" if action_id == "registry_v2_save_plan" else "真源状态模块 action 按钮",
+                webui_control="保存页生成保存预览" if action_id == "registry_v2_save_plan" else "真源状态模块动作按钮",
                 api_action=api_action,
                 status=status,
                 write_policy=write_policy,
@@ -1805,8 +1805,8 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
         ("rescue.create_demo", "Settings / Rescue", "create_demo", "生成测试 rescue packet", "rescue_create_demo_gate", "human_gate", "local_artifact_human_gate"),
         ("rescue.handover", "Settings / Rescue", "handover/manual_handover", "生成 fallback handover", "rescue_handover_gate", "human_gate", "local_artifact_human_gate"),
         ("rescue.view_md_paths", "Settings / Rescue", "view_md/show_paths", "查看 rescue.md / 显示文件路径", "rescue_events", "report", "read_only_report"),
-        ("about.refresh", "Settings / About", "refresh_versions", "刷新版本检查", "about_refresh_gate", "human_gate", "network_human_gate"),
-        ("about.upgrade", "Settings / About", "upgrade_mms/upgrade_codex_cli/upgrade_claude_cli", "升级 MMS / CLI", "about_upgrade_gate", "human_gate", "manual_cli_human_gate"),
+        ("about.refresh", "Settings / 关于", "refresh_versions", "刷新版本检查", "about_refresh_gate", "human_gate", "network_human_gate"),
+        ("about.upgrade", "Settings / 关于", "upgrade_mms/upgrade_codex_cli/upgrade_claude_cli", "升级 MMS / CLI", "about_upgrade_gate", "human_gate", "manual_cli_human_gate"),
     ]
     for row_id, area, action_id, label, api_action, status, write_policy in extra_rows:
         is_rescue = area.endswith("Rescue")
@@ -1818,9 +1818,9 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
                 tui_area=area,
                 tui_action_id=action_id,
                 tui_label=label,
-                webui_section="Fallback" if is_rescue else "Settings / Snapshot Guard" if is_guard else "Settings / About" if is_about else "Settings",
+                webui_section="Fallback" if is_rescue else "Settings / Snapshot Guard" if is_guard else "Settings / 关于" if is_about else "Settings",
                 webui_section_id="fallback" if is_rescue else "settings",
-                webui_control="Fallback form / rescue action 按钮" if is_rescue else "Snapshot Guard 独立卡片" if is_guard else "About 独立卡片",
+                webui_control="Fallback 表单 / rescue 动作按钮" if is_rescue else "Snapshot Guard 独立卡片" if is_guard else "关于独立卡片",
                 api_action=api_action,
                 status=status,
                 write_policy=write_policy,
@@ -1854,14 +1854,14 @@ def _tui_webui_mapping_summary(rows: list[dict[str, str]] | None = None) -> dict
         "clickable_rows": clickable,
         "rows_with_report_or_gate": with_report,
         "rows_with_open_target": with_open,
-        "user_check_policy": "每行都可在 WebUI 点击：Open 跳到页面落点，Report/Gate 验证 API 或 Human Gate 卡，native/draft 行再用保存预览核对写入。",
+        "user_check_policy": "每行都可在 WebUI 点击：打开跳到页面落点，报告/人工确认验证 API 或人工确认卡，原生/草稿行再用保存预览核对写入。",
         "source_files": [
             "mms_tui.py:_connect_actions",
             "mms_tui.py:select_submodel_tui",
             "mms_tui.py:_settings_menu",
             "mms_core.py settings/provider/account/rescue action handlers",
         ],
-        "policy": "native/report rows are WebUI-owned inside their modules; human_gate/missing rows keep CLI as manual path. load_balance is intentionally out of this migration.",
+        "policy": "原生/报告行由对应 WebUI 模块承接；human_gate/missing 行保留 CLI 人工路径。load_balance 已明确不进入本轮迁移。",
     }
 
 
@@ -2260,7 +2260,7 @@ def build_setup_flow() -> list[dict[str, Any]]:
         {
             "id": "runtime",
             "title": "6. 运行默认值",
-            "summary": "设置 preferred CLI、coding preset 和 OpenCode Multi-Agent profile。",
+            "summary": "设置 首选 CLI、coding preset 和 OpenCode Multi-Agent profile。",
             "fields": ["preferred_cli", "opencode_profile", "executor", "reviewer", "explore", "vision_agents"],
             "actions": ["preview_launch", "save_audited"],
         },
@@ -2306,7 +2306,7 @@ def build_reference_cards() -> list[dict[str, str]]:
         {
             "title": "用户偏好 allowlist",
             "path": "docs/MMS_USER_PREFERENCES.md",
-            "summary": "哪些日常偏好适合 preferences.toml，哪些真实配置必须 human gate。",
+            "summary": "哪些日常偏好适合 preferences.toml，哪些真实配置必须 人工确认。",
         },
         {
             "title": "OpenCode Lite Pro",
@@ -2364,7 +2364,7 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
     lines.extend(["", "## Vision Sidecar", "", "```toml", snippets.get("vision_sidecar", ""), "```"])
     lines.extend(["", "## Rescue Fallback", "", "```toml", snippets.get("rescue", ""), "```"])
     lines.extend(["", "## Model Visibility And Capability Policy", "", "```json", snippets.get("model_policy", ""), "```"])
-    lines.extend(["", "## Preferred CLI", "", "```toml", snippets.get("preferred_cli", ""), "```"])
+    lines.extend(["", "## 首选 CLI", "", "```toml", snippets.get("preferred_cli", ""), "```"])
     lines.extend(["", "## OpenCode", "", "```bash", snippets.get("opencode", ""), "```"])
     recommendations = snapshot.get("recommendations") or []
     if recommendations:
@@ -3129,7 +3129,7 @@ def build_config_plan(
     preferred_cli = _safe_text(runtime_payload.get("preferred_cli"))
     if preferred_cli:
         if preferred_cli not in _ALLOWED_CLIS:
-            errors.append(f"preferred CLI 不支持: {preferred_cli}")
+            errors.append(f"首选 CLI 不支持: {preferred_cli}")
         else:
             presets = dict(next_cfg.get("presets") if isinstance(next_cfg.get("presets"), dict) else {})
             coding = dict(presets.get("coding") if isinstance(presets.get("coding"), dict) else {})
@@ -4036,7 +4036,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
     ]
     return {
         "guard_status": {
-            "title": "Snapshot Guard status / accept",
+            "title": "Snapshot 快照状态 / accept",
             "risk_level": "medium",
             "commands": [f"{command} guard status", f"{command} guard accept"],
             "manual_steps": [
@@ -4065,18 +4065,18 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "commands": [f"{command} config account.add codex", f"{command} config account.add agy", f"{command} config account.login <account-id>", f"{command} config account.list"],
             "manual_steps": [
                 "只对 Codex/AGY 账号执行；Claude OAuth 独立入口已下线，Claude config 仍 human-only。",
-                "添加或 login 前先确认要写入的 account id、CLI、HOME/proxy 边界。",
-                "完成后回到 WebUI 点击 accounts/report 或生成保存预览核对 diff。",
+                "添加或登录前先确认要写入的 account id、CLI、HOME/proxy 边界。",
+                "完成后回到 WebUI 点击账号状态或生成保存预览核对 diff。",
             ],
             "writes": account_writes,
             "safe_alternative": "网关 API Key 通道使用 WebUI Add provider + 保存预览，不走 OAuth。",
         },
         "migrate_config_gate": {
-            "title": "迁移旧配置 / v2 promotion human gate",
+            "title": "迁移旧配置 / v2 promotion 人工确认",
             "risk_level": "high",
             "commands": [f"{command} migrate config-v2 --json", f"{command} config migrate", f"{command} config root --json"],
             "manual_steps": [
-                "先用 read-only migration/promotion plan 看 preview root 与 stable root 的差异。",
+                "先用只读 migration/promotion plan 看 preview root 与 stable root 的差异。",
                 "确认 backup、目标 root、secret 处理和 human-only config 边界。",
                 "只有人工确认后才运行实际迁移命令。",
             ],
@@ -4084,7 +4084,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "在 WebUI 保存页生成 preview plan，不直接迁移 stable。",
         },
         "family_autosort_gate": {
-            "title": "按 speed stats 批量排序 family priority",
+            "title": "按速度统计批量排序 family priority",
             "risk_level": "medium",
             "commands": [webui, interactive],
             "manual_steps": [
@@ -4096,7 +4096,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "WebUI 已提供手工 family priority 草稿 + diff review，替代自动批量排序。",
         },
         "account_login_gate": {
-            "title": "Account login",
+            "title": "账号登录",
             "risk_level": "high",
             "commands": [f"{command} config account.list", f"{command} config account.login <account-id>", f"{command} config account.status <account-id>"],
             "manual_steps": [
@@ -4108,7 +4108,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "非 OAuth API Key 通道使用 WebUI provider credentials draft。",
         },
         "account_remove_gate": {
-            "title": "Remove account",
+            "title": "删除账号",
             "risk_level": "high",
             "commands": [f"{command} config account.list", f"{command} config account.status <account-id>", f"{command} config account.remove <account-id>"],
             "manual_steps": [
@@ -4120,7 +4120,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "先在 WebUI 将非 Claude account disabled/default 草稿调整并 review。",
         },
         "account_rename_gate": {
-            "title": "Rename account / move account home",
+            "title": "重命名账号 / 移动账号 home",
             "risk_level": "high",
             "commands": [f"{command} config account.list", f"{command} config account.rename <old-account-id> <new-account-id>"],
             "manual_steps": [
@@ -4129,10 +4129,10 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "完成后回 WebUI accounts report，核对 id/default/usage 是否一致。",
             ],
             "writes": ["~/.config/mms/config.toml accounts/account.defaults", "~/.config/mms/accounts/<old-id>/** -> <new-id>/**", "~/.config/mms/usage.json account usage keys"],
-            "safe_alternative": "WebUI 已支持非 Claude account 显示名、enabled、priority、family、timezone、note 的 draft/save review。",
+            "safe_alternative": "WebUI 已支持非 Claude account 显示名、启用状态、priority、family、timezone、note 的草稿/保存预览。",
         },
         "account_network_gate": {
-            "title": "Edit account proxy / no_proxy / home_dir",
+            "title": "编辑账号 proxy / no_proxy / home_dir",
             "risk_level": "high",
             "commands": [f"{command} config account.list", f"{command} config account.edit <account-id>"],
             "manual_steps": [
@@ -4144,7 +4144,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "WebUI 只显示 proxy/no_proxy 是否已配置；非敏感 timezone/note 可在账号表中走保存预览。",
         },
         "provider_network_gate": {
-            "title": "Edit provider proxy / no_proxy",
+            "title": "编辑通道 proxy / no_proxy",
             "risk_level": "high",
             "commands": [f"{command} config provider.edit <provider-id>"],
             "manual_steps": [
@@ -4153,10 +4153,10 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "人工执行 provider.edit 后回到 WebUI 生成保存预览或 provider_usage_summary 核对非敏感字段。",
             ],
             "writes": ["~/.config/mms/config.toml providers[*].proxy/no_proxy", "provider network policy for future launches"],
-            "safe_alternative": "WebUI 支持 provider URL/key/protocol/CLI/timezone/note/Claude 1M 的 draft/save review；只把 proxy/no_proxy 留给 human gate。",
+            "safe_alternative": "WebUI 支持通道 URL/API Key/protocol/CLI/timezone/note/Claude 1M 的草稿/保存预览；只把 proxy/no_proxy 留给人工确认。",
         },
         "refresh_due_sources_gate": {
-            "title": "刷新到期 registry sources",
+            "title": "刷新到期 registry source",
             "risk_level": "medium",
             "commands": [f"{registry} check-staleness", f"{registry} refresh-sources --if-due"],
             "manual_steps": [
@@ -4165,10 +4165,10 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "刷新后运行 source-status/preview-doctor 核对。",
             ],
             "writes": registry_writes[:1],
-            "safe_alternative": "WebUI 点击 check_staleness report 只读查看。",
+            "safe_alternative": "WebUI 点击过期检查报告只读查看。",
         },
         "scheduled_refresh_gate": {
-            "title": "Scheduled registry refresh",
+            "title": "定时 registry 刷新",
             "risk_level": "medium",
             "commands": [f"{registry} scheduled-refresh --dry-run --no-network", f"{registry} scheduled-refresh --no-network", f"{registry} scheduled-refresh"],
             "manual_steps": [
@@ -4177,10 +4177,10 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "执行后查看 scheduled output、source-status 和 preview doctor。",
             ],
             "writes": registry_writes,
-            "safe_alternative": "保留 WebUI read-only report；不要执行 network/write refresh。",
+            "safe_alternative": "保留 WebUI 只读报告；不要执行联网/写入刷新。",
         },
         "refresh_sources_gate": {
-            "title": "刷新全部 registry sources",
+            "title": "刷新全部 registry source",
             "risk_level": "high",
             "commands": [f"{registry} refresh-sources", f"{registry} source-status --json"],
             "manual_steps": [
@@ -4192,7 +4192,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "只运行 check-staleness 或 source-status。",
         },
         "fetch_openrouter_gate": {
-            "title": "Fetch OpenRouter catalog",
+            "title": "拉取 OpenRouter catalog",
             "risk_level": "medium",
             "commands": [f"{registry} fetch-openrouter-catalog", f"{registry} fetch-openrouter-catalog --from-file <models.json>"],
             "manual_steps": [
@@ -4204,7 +4204,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "用 --from-file 导入人工下载的 catalog，避免 WebUI 自动联网。",
         },
         "diff_openrouter_gate": {
-            "title": "Diff OpenRouter candidate changes",
+            "title": "对比 OpenRouter candidate 变化",
             "risk_level": "medium",
             "commands": [f"{registry} diff-openrouter-catalog --limit 50", f"{registry} diff-openrouter-catalog --no-store --limit 50"],
             "manual_steps": [
@@ -4216,7 +4216,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "只运行 --no-store diff。",
         },
         "publish_approved_gate": {
-            "title": "Publish approved bundle",
+            "title": "发布已批准 Bundle",
             "risk_level": "high",
             "commands": [f"{registry} publish-approved", f"{registry} verify --json"],
             "manual_steps": [
@@ -4228,7 +4228,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "WebUI 保存页 preview apply 会在明确 confirm 后 publish/verify preview bundle。",
         },
         "verify_approved_gate": {
-            "title": "Verify approved bundle",
+            "title": "验证已批准 Bundle",
             "risk_level": "low",
             "commands": [f"{registry} verify --json", f"{registry} consumer-bundle --json --no-strict-exit"],
             "manual_steps": [
@@ -4237,7 +4237,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "此 gate 保留 CLI/manual path，WebUI 不替你执行外部命令。",
             ],
             "writes": [],
-            "safe_alternative": "WebUI 点击 Consumer Bundle report 读取当前状态。",
+            "safe_alternative": "WebUI 点击消费端 Bundle 报告读取当前状态。",
         },
         "rescue_create_demo_gate": {
             "title": "生成 demo rescue packet",
@@ -4252,7 +4252,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "WebUI 只读 rescue_events；不生成 demo artifact。",
         },
         "rescue_handover_gate": {
-            "title": "生成 fallback handover",
+            "title": "生成 fallback 交接",
             "risk_level": "medium",
             "commands": [interactive, webui],
             "manual_steps": [
@@ -4273,7 +4273,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
                 "WebUI about report 默认只读 cached 状态，不自动联网刷新。",
             ],
             "writes": ["~/.config/mms/version.json update cache"],
-            "safe_alternative": "WebUI 点击 about report 读取 cached about status。",
+            "safe_alternative": "WebUI 点击关于状态读取缓存版本状态。",
         },
         "about_upgrade_gate": {
             "title": "升级 MMS / Codex / Claude CLI",
@@ -4288,7 +4288,7 @@ def _settings_gate_catalog(command_name: str = "mms") -> dict[str, dict[str, Any
             "safe_alternative": "只查看 about cached status，不执行升级。",
         },
         "provider_remove_gate": {
-            "title": "Provider remove legacy gate",
+            "title": "删除通道 legacy 人工确认",
             "risk_level": "medium",
             "commands": [webui, f"{command} config provider.remove <provider-id>"],
             "manual_steps": [
@@ -4359,7 +4359,7 @@ def _snapshot_guard_status_report(cfg: dict[str, Any], *, config_path: str = "",
             "commands": [f"{_safe_text(command_name) or 'mms'} guard status"],
             "report": _sanitize_for_output(report),
             "mapping": mapping_rows,
-            "note": "只读 Snapshot Guard status；accept baseline 仍在 guard_accept_gate human gate。",
+            "note": "只读 Snapshot 快照状态；accept baseline 仍在 guard_accept_gate 人工确认。",
         }
     except Exception as exc:
         return {
@@ -4370,7 +4370,7 @@ def _snapshot_guard_status_report(cfg: dict[str, Any], *, config_path: str = "",
             "write_policy": "read_only_report",
             "error": f"{type(exc).__name__}: {exc}",
             "mapping": mapping_rows,
-            "note": "读取 Snapshot Guard status 失败；未执行 accept 或任何写入。",
+            "note": "读取 Snapshot 快照状态 失败；未执行 accept 或任何写入。",
         }
 
 
@@ -4382,7 +4382,7 @@ def build_settings_report(
     preferences_path: str = "",
     command_name: str = "mms",
 ) -> dict[str, Any]:
-    """Return one bounded settings report for the WebUI; mutating TUI actions stay human-gated."""
+    """Return one bounded settings report for the WebUI; mutating TUI actions stay 需要人工确认."""
     payload = payload if isinstance(payload, dict) else {}
     action = _safe_text(payload.get("action") or "coverage")
     snapshot = build_config_snapshot(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
@@ -4415,7 +4415,7 @@ def build_settings_report(
             "accounts": snapshot.get("accounts") or [],
             "account_defaults": snapshot.get("account_defaults") or {},
             "account_write_policy": snapshot.get("account_write_policy") or {},
-            "note": "WebUI 支持非 Claude account 的 name/enabled/priority/family/timezone/Claude 1M/note/default 草稿预览；login/remove/rename/home_dir/proxy 与 Claude account 仍 human-gated。",
+            "note": "WebUI 支持非 Claude account 的 name/enabled/priority/family/timezone/Claude 1M/note/default 草稿预览；login/remove/rename/home_dir/proxy 与 Claude account 仍 需要人工确认。",
         }
     if action in {"model_source_status", "source"}:
         return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "report": snapshot.get("model_source_status") or {}}
@@ -4584,16 +4584,16 @@ def build_settings_report(
         "provider_network_gate": ("network_policy_human_gate", "proxy/no_proxy 可能包含凭据并影响网络隔离；WebUI 不回显或自动写入。"),
         "connect_official_gate": ("manual_login_only", "添加官方通道会创建/刷新 OAuth account state；WebUI 不自动执行登录。"),
         "migrate_config_gate": ("manual_cli_human_gate", "配置迁移会读写真实配置树；必须人工确认迁移源、目标和备份。"),
-        "family_autosort_gate": ("speed_stats_write_human_gate", "按 speed stats 自动排序会批量改 provider priority/family overrides；当前保持 human gate。"),
+        "family_autosort_gate": ("speed_stats_write_human_gate", "按 speed stats 自动排序会批量改 provider priority/family overrides；当前保持 人工确认。"),
         "account_login_gate": ("manual_login_only", "OAuth login 会写外部账号状态；WebUI 当前不触发。"),
         "account_remove_gate": ("manual_remove_only", "删除 account 可能删除账号目录/登录状态；WebUI 当前不触发。"),
         "account_rename_gate": ("account_home_human_gate", "账号重命名可能移动 home_dir 并改 usage/defaults；WebUI 当前不自动执行。"),
         "account_network_gate": ("account_network_human_gate", "账号 proxy/no_proxy/home_dir 可能涉及 OAuth/Claude protected state；WebUI 不回显或自动写入。"),
-        "refresh_due_sources_gate": ("network_write_human_gate", "刷新 registry source 可能触发 network/write；当前保持 human gate。"),
-        "scheduled_refresh_gate": ("network_human_gate", "scheduled refresh 需要单独确认执行模式；当前保持 human gate。"),
-        "refresh_sources_gate": ("network_write_human_gate", "刷新全部 sources 是 network/write 动作；当前保持 human gate。"),
-        "fetch_openrouter_gate": ("network_human_gate", "Fetch OpenRouter Catalog 需要联网；当前保持 human gate。"),
-        "diff_openrouter_gate": ("network_human_gate", "OpenRouter diff 可能依赖外部 catalog；当前保持 human gate。"),
+        "refresh_due_sources_gate": ("network_write_human_gate", "刷新 registry source 可能触发 network/write；当前保持 人工确认。"),
+        "scheduled_refresh_gate": ("network_human_gate", "scheduled refresh 需要单独确认执行模式；当前保持 人工确认。"),
+        "refresh_sources_gate": ("network_write_human_gate", "刷新全部 sources 是 network/write 动作；当前保持 人工确认。"),
+        "fetch_openrouter_gate": ("network_human_gate", "Fetch OpenRouter Catalog 需要联网；当前保持 人工确认。"),
+        "diff_openrouter_gate": ("network_human_gate", "OpenRouter diff 可能依赖外部 catalog；当前保持 人工确认。"),
         "publish_approved_gate": ("write_human_gate", "发布 approved bundle 是写入动作；WebUI 只允许通过保存/发布审计流执行。"),
         "rescue_create_demo_gate": ("local_artifact_human_gate", "生成 demo rescue packet 会写本地 artifact；当前不自动执行。"),
         "rescue_handover_gate": ("planned_human_confirm", "fallback handover 写 artifact；后续需要 WebUI confirm flow。"),
@@ -5786,18 +5786,18 @@ _HTML_PAGE = r"""<!doctype html>
   <main class="content">
     <section class="panel" data-section="source">
       <h2>真源状态</h2>
-      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；registry 的 report / gate 操作也在这里，不再藏到 Settings 总表。</p>
+      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；registry 的 报告 / 人工确认操作也在这里，不再藏到 设置总表。</p>
       <div class="module-actions">
-        <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">Model source status</button>
-        <button class="ghost" data-settings-action="consumer_bundle_status" data-report-target="sourceReport">Consumer bundle</button>
-        <button class="ghost" data-settings-action="verify_approved" data-report-target="sourceReport">Verify approved</button>
-        <button class="ghost" data-settings-action="preview_doctor" data-report-target="sourceReport">Preview doctor</button>
-        <button class="ghost" data-settings-action="check_staleness" data-report-target="sourceReport">Check staleness</button>
-        <button class="ghost" data-settings-action="refresh_due_sources_gate" data-report-target="sourceReport">Refresh due gate</button>
-        <button class="ghost" data-settings-action="publish_approved_gate" data-report-target="sourceReport">Publish gate</button>
+        <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">模型真源状态</button>
+        <button class="ghost" data-settings-action="consumer_bundle_status" data-report-target="sourceReport">消费端 Bundle</button>
+        <button class="ghost" data-settings-action="verify_approved" data-report-target="sourceReport">验证已批准 Bundle</button>
+        <button class="ghost" data-settings-action="preview_doctor" data-report-target="sourceReport">预览诊断</button>
+        <button class="ghost" data-settings-action="check_staleness" data-report-target="sourceReport">检查过期源</button>
+        <button class="ghost" data-settings-action="refresh_due_sources_gate" data-report-target="sourceReport">刷新到期源确认</button>
+        <button class="ghost" data-settings-action="publish_approved_gate" data-report-target="sourceReport">发布确认</button>
       </div>
       <div class="grid" id="sourceStatus"></div>
-      <div class="result module-report" id="sourceReport">选择真源动作查看 read-only report 或 Human Gate。</div>
+      <div class="result module-report" id="sourceReport">选择真源动作查看只读报告或人工确认。</div>
     </section>
 
 
@@ -5820,7 +5820,7 @@ _HTML_PAGE = r"""<!doctype html>
           </div>
           <div class="tab-panel active" data-tab-panel="config">
             <div class="card provider-editor" id="providerForm"></div>
-            <div class="result module-report" id="channelReport">选择通道动作查看 report / Human Gate。</div>
+            <div class="result module-report" id="channelReport">选择通道动作查看报告或人工确认。</div>
           </div>
           <div class="tab-panel" data-tab-panel="models">
             <div class="model-section">
@@ -5867,13 +5867,13 @@ _HTML_PAGE = r"""<!doctype html>
             <option value="anthropic_messages">anthropic_messages</option>
             <option value="openai_chat_completions">openai_chat_completions</option>
           </select>
-          <label>Prompt</label>
+          <label>提示词 Prompt</label>
           <textarea id="testPrompt">只回复 pong</textarea>
           <div class="chips" id="testState"></div>
           <div class="btns">
             <button id="testListBtn" class="ghost">测试 /models</button>
             <button id="testModelBtn">Ping 模型</button>
-            <button id="chatTestBtn" class="secondary">Simple chat</button>
+            <button id="chatTestBtn" class="secondary">简单对话</button>
           </div>
         </div>
         <div class="card span7">
@@ -5903,9 +5903,9 @@ _HTML_PAGE = r"""<!doctype html>
             <input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span>
           </div>
           <div class="btns">
-            <button class="ghost" data-settings-action="rescue_events" data-report-target="fallbackReport">查看 rescue events</button>
-            <button class="ghost" data-settings-action="rescue_handover_gate" data-report-target="fallbackReport">Handover gate</button>
-            <button class="ghost" data-settings-action="rescue_create_demo_gate" data-report-target="fallbackReport">Demo packet gate</button>
+            <button class="ghost" data-settings-action="rescue_events" data-report-target="fallbackReport">查看 rescue 事件</button>
+            <button class="ghost" data-settings-action="rescue_handover_gate" data-report-target="fallbackReport">交接确认</button>
+            <button class="ghost" data-settings-action="rescue_create_demo_gate" data-report-target="fallbackReport">Demo packet 确认</button>
           </div>
         </div>
         <div class="card span6">
@@ -5925,7 +5925,7 @@ _HTML_PAGE = r"""<!doctype html>
           </div>
         </div>
         <div class="card span12">
-          <h3>Fallback report / gate</h3>
+          <h3>Fallback 报告 / 人工确认</h3>
           <div class="result" id="fallbackReport">选择 fallback 动作查看结果。</div>
         </div>
       </div>
@@ -5934,10 +5934,10 @@ _HTML_PAGE = r"""<!doctype html>
     <!-- 运行默认值 -->
     <section class="panel" data-section="runtime">
       <h2>运行默认值</h2>
-      <p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p>
+      <p>首选 CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p>
       <div class="grid">
         <div class="card span5">
-          <label>preferred CLI</label>
+          <label>首选 CLI</label>
           <select id="preferredCli">
             <option>opencode</option>
             <option>codex</option>
@@ -5948,7 +5948,7 @@ _HTML_PAGE = r"""<!doctype html>
           <input id="codingModel" placeholder="gpt-5.5">
         </div>
         <div class="card span7">
-          <label>OpenCode default profile</label>
+          <label>OpenCode 默认 profile</label>
           <select id="opencodeProfile">
             <option>agent</option>
             <option>omo</option>
@@ -5957,14 +5957,14 @@ _HTML_PAGE = r"""<!doctype html>
           <p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p>
         </div>
         <div class="card span12">
-          <h3>OpenCode Agent Roster</h3>
-          <p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p>
+          <h3>OpenCode Agent 名单</h3>
+          <p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。顺序表示 priority/fallback 顺序，不是 round-robin。</p>
           <div class="oc-summary" id="opencodeOverrideSummary"></div>
           <div class="oc-order-note">
             Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。
           </div>
           <details class="oc-advanced" id="opencodeAdvanced">
-            <summary>Advanced: OpenCode per-agent roster</summary>
+            <summary>高级：OpenCode 逐 Agent 名单</summary>
             <div class="filterbar" id="opencodeAgentFilters"></div>
             <div class="table-wrap"><table id="opencodeAgents"></table></div>
           </details>
@@ -5975,7 +5975,7 @@ _HTML_PAGE = r"""<!doctype html>
     <!-- Settings -->
     <section class="panel" data-section="settings">
       <h2>设置</h2>
-      <p>设置页只处理真正属于 Settings 的能力：界面语言、账号/OAuth 状态、Snapshot Guard、About 和人工 gate。通道、模型和真源动作已经放回各自模块。</p>
+      <p>设置页只处理真正属于设置的能力：界面语言、账号/OAuth 状态、Snapshot Guard、关于和人工确认。通道、模型和真源动作已经放回各自模块。</p>
       <div class="grid">
         <div class="card span4">
           <h3>界面语言</h3>
@@ -5987,45 +5987,45 @@ _HTML_PAGE = r"""<!doctype html>
           </select>
           <div class="btns">
             <button id="saveUiLanguage" class="ghost">暂存语言修改</button>
-            <button class="ghost" data-settings-action="language_status" data-report-target="settingsReport">Language report</button>
+            <button class="ghost" data-settings-action="language_status" data-report-target="settingsReport">语言状态</button>
           </div>
         </div>
         <div class="card span8">
-          <h3>Snapshot Guard</h3>
-          <p class="muted">status 是只读 report；accept baseline 是 human gate，不在 WebUI 自动执行。</p>
+          <h3>启动快照守卫（Snapshot Guard）</h3>
+          <p class="muted">状态是只读报告；接受 baseline 需要人工确认，不在 WebUI 自动执行。</p>
           <div id="settingsGapSummary" class="chips"></div>
           <div class="btns">
-            <button class="ghost" data-settings-action="guard_status" data-report-target="settingsReport">Guard status</button>
-            <button class="ghost" data-settings-action="guard_accept_gate" data-report-target="settingsReport">Accept gate</button>
-            <button class="ghost" data-settings-action="migrate_config_gate" data-report-target="settingsReport">Migration gate</button>
+            <button class="ghost" data-settings-action="guard_status" data-report-target="settingsReport">快照状态</button>
+            <button class="ghost" data-settings-action="guard_accept_gate" data-report-target="settingsReport">接受基线确认</button>
+            <button class="ghost" data-settings-action="migrate_config_gate" data-report-target="settingsReport">迁移确认</button>
           </div>
         </div>
         <div class="card span12">
           <h3>账号 / OAuth 通道</h3>
-          <p class="muted">支持非 Claude account 的 name/enabled/priority/default 草稿预览；Claude account、login/remove/rename、home_dir/proxy/no_proxy 仍是 human-gated，不会静默写入。</p>
+          <p class="muted">支持非 Claude account 的 name/enabled/priority/default 草稿预览；Claude account、login/remove/rename、home_dir/proxy/no_proxy 仍是 需要人工确认，不会静默写入。</p>
           <div class="btns" id="accountModuleActions">
-            <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">Accounts report</button>
-            <button class="ghost" data-settings-action="connect_official_gate" data-report-target="settingsReport">Official login gate</button>
-            <button class="ghost" data-settings-action="account_network_gate" data-report-target="settingsReport">Account network gate</button>
+            <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">账号状态</button>
+            <button class="ghost" data-settings-action="connect_official_gate" data-report-target="settingsReport">官方登录确认</button>
+            <button class="ghost" data-settings-action="account_network_gate" data-report-target="settingsReport">账号网络确认</button>
           </div>
           <div class="table-wrap"><table id="accountTable"></table></div>
         </div>
         <div class="card span6">
-          <h3>About / 版本</h3>
-          <p class="muted">About 默认只读 cached status；刷新版本检查和升级命令都需要人工 gate。</p>
+          <h3>关于 / 版本</h3>
+          <p class="muted">关于页默认只读缓存状态；刷新版本检查和升级命令都需要人工确认。</p>
           <div class="btns">
-            <button class="ghost" data-settings-action="about" data-report-target="settingsReport">About report</button>
-            <button class="ghost" data-settings-action="about_refresh_gate" data-report-target="settingsReport">Refresh gate</button>
-            <button class="ghost" data-settings-action="about_upgrade_gate" data-report-target="settingsReport">Upgrade gate</button>
+            <button class="ghost" data-settings-action="about" data-report-target="settingsReport">关于状态</button>
+            <button class="ghost" data-settings-action="about_refresh_gate" data-report-target="settingsReport">刷新版本确认</button>
+            <button class="ghost" data-settings-action="about_upgrade_gate" data-report-target="settingsReport">升级确认</button>
           </div>
         </div>
         <div class="card span6">
-          <h3>Settings coverage</h3>
+          <h3>设置覆盖摘要</h3>
           <p class="muted">这里只保留模块级覆盖摘要；完整逐项表折叠在验收辅助里，避免把它当成功能入口。</p>
           <div class="table-wrap"><table id="settingsCoverage"></table></div>
         </div>
         <div class="card span12">
-          <h3>Report / Human Gate</h3>
+          <h3>报告 / 人工确认</h3>
           <div class="result" id="settingsReport">选择一个设置动作查看结果</div>
         </div>
         <details class="card span12 mapping-card" id="mappingAuditDetails">
@@ -6033,7 +6033,7 @@ _HTML_PAGE = r"""<!doctype html>
           <div class="mapping-head">
             <div>
               <h3>TUI ↔ WebUI 对照表</h3>
-              <p class="muted">这是辅助验收视图，不是功能整合页；功能入口应在通道、模型测试、真源、Fallback 或 Settings 对应模块里。</p>
+              <p class="muted">这是辅助验收视图，不是功能整合页；功能入口应在通道、模型测试、真源、Fallback 或设置对应模块里。</p>
             </div>
             <div id="mappingFilters" class="filterbar compact"></div>
           </div>
@@ -6056,7 +6056,7 @@ _HTML_PAGE = r"""<!doctype html>
             <button id="saveBtn" class="danger legacy-save-action">确认保存</button>
           </div>
           <details class="oc-advanced" id="advancedPlanTools" style="margin-top:14px">
-            <summary>Advanced / Recovery：plan JSON 与 CLI fallback</summary>
+            <summary>高级 / 恢复：plan JSON 与 CLI fallback</summary>
             <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；下载 JSON 不含明文 key。CLI apply 是无 WebUI 时的 fallback，不是日常主流程。</p>
             <div class="btns">
               <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
@@ -6082,7 +6082,7 @@ _HTML_PAGE = r"""<!doctype html>
           </div>
         </div>
         <div class="span12">
-          <h3 style="margin-bottom:8px">Raw diff / 审计详情</h3>
+          <h3 style="margin-bottom:8px">原始 diff / 审计详情</h3>
           <div class="diff" id="diffBox">点击“生成保存预览”</div>
         </div>
       </div>
@@ -6103,10 +6103,10 @@ const sections=[
   ['channel','通道配置','URL / Key / 协议 / 模型'],
   ['test','模型测试','ping / chat smoke'],
   ['fallback','Fallback','rescue / vision'],
-  ['runtime','运行默认值','preferred CLI / OpenCode'],
-  ['settings','设置','accounts / guard / about'],
+  ['runtime','运行默认值','首选 CLI / OpenCode'],
+  ['settings','设置','账号 / Guard / 关于'],
   ['save','保存审计','diff / backup / audit'],
-  ['refs','本地参考','配置契约 / docs']
+  ['refs','本地参考','配置契约 / 文档']
 ];
 let state=null; let activeProvider=0; let activeProviderTab='config'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let lastGateCommands=[]; let checkedMappingRows=new Set();
 const $=id=>document.getElementById(id);
@@ -6117,8 +6117,13 @@ function touchProvider(id){if(id)touchedProviders.add(id)}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
 function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
 function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
-function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
+function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">配置：${escapeHtml(state.paths.config||'-')}</span><span class="pill">策略模型：${state.policy_summary.model_count}</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function yn(value){return value?'是':'否'}
+function enumLabel(value){const key=String(value??'');const map={ok:'正常',missing:'缺失',unknown:'未知',ready:'就绪','not ready':'未就绪',not_ready:'未就绪',auto:'自动',enable:'启用',disable:'禁用',enabled:'已启用',disabled:'已禁用',configured:'已配置',none:'未配置',imported:'已导入',not_imported:'未导入',blocked:'已拦截',high:'高风险',medium:'中风险',low:'低风险',critical:'严重',required:'必需',redacted:'已脱敏',included:'包含明文'};return map[key]||key||'-'}
+function writePolicyLabel(policy){const key=String(policy||'');const map={native:'原生',report:'报告',draft_review:'草稿预览',human_gate:'人工确认',missing:'缺失',report_only:'只读报告',native_test_panel:'原生测试面板',planned:'待补齐',existing_save_flow:'现有保存流程',manual_cli_only:'仅人工 CLI',draft_review_confirmed_save:'草稿预览后确认保存',manual_login_only:'仅人工登录',mixed_draft_review_human_gate:'草稿预览 + 人工确认',manual_cli_human_gate:'人工 CLI 确认',read_only_report:'只读报告',draft_review_human_gate:'草稿预览 + 人工确认',save_flow_or_preview_publish:'保存流程 / preview 发布',audited_secret_write:'审计凭据写入',network_policy_human_gate:'网络策略人工确认',account_home_human_gate:'账号 home 人工确认',account_network_human_gate:'账号网络人工确认',manual_remove_only:'仅人工删除',read_only:'只读',mixed:'混合',save_preview:'保存预览',network_write_human_gate:'联网写入人工确认',network_human_gate:'联网人工确认',write_human_gate:'写入人工确认',local_artifact_human_gate:'本地产物人工确认',speed_stats_write_human_gate:'速度统计写入人工确认',deprecated_read_only_compat:'已下线，只读兼容',deprecated_no_webui_iteration:'已下线，不再迭代',claude_human_only_locked:'Claude 人工锁定',can_degrade_after_save_flow_verified:'保存链路验证后可弱化',can_degrade_after_route_guard_verified:'route guard 验证后可弱化',can_degrade_after_report_smoke:'报告 smoke 后可弱化',keep_emergency_only_for_login_remove_and_claude_human_gate:'仅保留登录/删除/Claude 人工确认应急',read_only_reports_plus_existing_apply:'只读报告 + 现有 apply',can_degrade_report_display_after_webui_smoke:'WebUI smoke 后可弱化报告展示',keep_until_webui_double_confirm_flow_exists:'保留到 WebUI 双确认流程补齐',can_degrade_config_display_after_save_flow_verified:'保存链路验证后可弱化配置展示',keep_emergency_only_until_handover_write_flow_exists:'保留应急直到 handover 写入流程补齐',report_or_planned:'报告或待补齐',keep_small:'保留最小入口',module_native_controls_plus_reports:'模块原生控件 + 报告',keep_as_keyboard_launcher_until_webui_launch_surface_exists:'保留键盘 launcher，直到 WebUI 启动面补齐'};return map[key]||key||'-'}
+function clickTargetsLabel(text){const map={open_section:'打开模块',settings_report:'查看报告',save_preview:'保存预览',human_gate_card:'人工确认卡片',missing_gap:'缺口'};return String(text||'-').split(' + ').map(x=>map[x]||x).join(' + ')}
+function riskLabel(level){return enumLabel(level||'high')}
 function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;const modeName=preview?'MMF preview / DB truth':'MMS stable / legacy compatibility';if($('saveModeHint')){$('saveModeHint').innerHTML=preview?'当前是 <strong>mmf + ~/.config/mms-next</strong>：日常只需要“生成保存预览” → “写入预览 DB + 发布”。':'当前是 <strong>mms stable</strong>：使用 legacy audited save，仍会 backup + audit。'}if($('saveModeLead')){$('saveModeLead').textContent=preview?'保存前先生成 diff。写入只落到当前 preview root 的 DB candidate，并发布 latest-approved bundle；API Key 不会出现在 diff 或响应里。':'保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；API Key 不会出现在 diff 或响应里。'}if($('confirmPhraseLabel')){$('confirmPhraseLabel').textContent=preview?'输入确认文字：写入预览DB':'输入确认文字：保存配置'}if($('confirmPhrase')){$('confirmPhrase').placeholder=preview?'写入预览DB':'保存配置'}if($('saveCompatibilityNote')){$('saveCompatibilityNote').textContent=preview?'旧版“确认保存”在 mmf 中已隐藏；下载 JSON / CLI apply 只在 Advanced / Recovery 里作为 fallback。':'stable legacy 保存写入 config.toml / credentials.sh / model-policy，并保留 backup + audit；preview DB 发布请用 mmf。'}document.querySelectorAll('.legacy-save-action').forEach(el=>el.classList.toggle('hide',preview));if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'MMF preview 已隐藏 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').classList.toggle('hide',!preview);$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?modeName:'Stable root 不能写 preview DB，请用 mmf preview root'}if($('advancedPlanTools')){$('advancedPlanTools').open=false}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
 function renderSourceStatus(){
   const box=$('sourceStatus');if(!box)return;
@@ -6147,23 +6152,24 @@ function renderSourceStatus(){
   const okBundle=bundle.verified?'ok':'warn';
   const okConsumer=consumer.verified?'ok':'warn';
   const okPromotion=promotion.ready_for_human_review?'ok':'warn';
-  const ready=bundle.runtime_ready===true?'ready':bundle.runtime_ready===false?'not ready':'unknown';
+  const ready=bundle.runtime_ready===true?'就绪':bundle.runtime_ready===false?'未就绪':'未知';
   const bundleCommand=(root.command||state.command||'mms')==='mmf'?'mmf config bundle --json':'mms config bundle --json';
-  box.innerHTML=`<div class="card span6"><h3>Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${escapeHtml(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">sources ${counts.source_snapshot||0}</span><span class="tag">facts ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy Import</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">providers ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">conflicts ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">candidates ${escapeHtml(candidates.status||'not_imported')}</span><span class="tag">candidate routes ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>Latest Approved Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${escapeHtml(bundle.status||'missing')}</span><span class="tag">verified ${bundle.verified?'yes':'no'}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">missing keys ${bundle.router_missing_api_key_count||0}</span><span class="tag">files ${bundle.file_count||0}</span></div><div class="card span12"><h3>Consumer Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${escapeHtml(consumer.status||'missing')}</span><span class="tag">verified ${consumer.verified?'yes':'no'}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">files ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>Promotion Plan / Human Gate</h3><p class="muted">stable backup + bundle comparison 是只读审查；apply 仍停在 human gate。</p><span class="tag ${okPromotion==='ok'?'':'off'}">${escapeHtml(promotion.status||'not_ready')}</span><span class="tag">review ${promotion.ready_for_human_review?'ready':'not ready'}</span><span class="tag">apply ${promotion.apply_enabled?'enabled':'disabled'}</span><span class="tag">stable ${escapeHtml(safety.stable_write_policy||'human_only')}</span><span class="tag">backup ${backup.requires_backup_before_apply?'required':'unknown'}</span><span class="tag">would backup ${backup.would_create_backup?'yes':'no'}</span><span class="tag">bundle comparison ${escapeHtml(compare.comparison_status||'-')}</span><p class="muted">preview ${escapeHtml(comparePreview.bundle_revision||comparePreview.status||'-')} → stable ${escapeHtml(compareStable.bundle_revision||compareStable.status||'-')}</p></div><div class="card span12"><h3>4.0 Release Readiness</h3><p class="muted">只读 audit：证明自动检查已到 stable promotion human gate；release_complete 仍为 false。</p><span class="tag ${readinessOk==='ok'?'':'off'}">${escapeHtml(readiness.result||'NOT_READY')}</span><span class="tag">status ${escapeHtml(readiness.status||'not_ready')}</span><span class="tag">release complete ${readiness.release_complete?'yes':'no'}</span><span class="tag">human gate ${readiness.ready_for_human_gate?'ready':'not ready'}</span><span class="tag">blocked ${readinessBlocked.length}</span><span class="tag">requirements ${readinessReqs.filter(r=>r&&r.ok).length}/${readinessReqs.length}</span><span class="tag">blocker ${escapeHtml(readiness.completion_blocker||'-')}</span><p class="muted">blocked requirements: ${escapeHtml(readinessBlocked.length?readinessBlocked.join(', '):'-')}</p><p class="muted">next: <span class="mono">${escapeHtml(readinessNext.command||readinessNext.label||'-')}</span></p></div><div class="card span12"><h3>Raw Status</h3><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer,config_v2_promotion_plan:promotion,config_v2_release_readiness:readiness},null,2))}</div></div>`
+  box.innerHTML=`<div class="card span6"><h3>配置 Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${enumLabel(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">source ${counts.source_snapshot||0}</span><span class="tag">fact ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy 导入</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">通道 ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">冲突 ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">候选 ${enumLabel(candidates.status||'not_imported')}</span><span class="tag">候选 route ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>已批准 Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${enumLabel(bundle.status||'missing')}</span><span class="tag">已验证 ${yn(bundle.verified)}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">缺 API Key ${bundle.router_missing_api_key_count||0}</span><span class="tag">文件 ${bundle.file_count||0}</span></div><div class="card span12"><h3>消费端 Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${enumLabel(consumer.status||'missing')}</span><span class="tag">已验证 ${yn(consumer.verified)}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">文件 ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>晋级计划 / 人工确认</h3><p class="muted">stable backup + bundle comparison 是只读审查；apply 仍停在 人工确认。</p><span class="tag ${okPromotion==='ok'?'':'off'}">${escapeHtml(promotion.status||'not_ready')}</span><span class="tag">人工审查 ${promotion.ready_for_human_review?'就绪':'未就绪'}</span><span class="tag">apply ${promotion.apply_enabled?'已启用':'已禁用'}</span><span class="tag">stable ${escapeHtml(safety.stable_write_policy||'human_only')}</span><span class="tag">backup ${backup.requires_backup_before_apply?'必需':'未知'}</span><span class="tag">将创建 backup ${yn(backup.would_create_backup)}</span><span class="tag">Bundle 对比 ${escapeHtml(compare.comparison_status||'-')}</span><p class="muted">preview ${escapeHtml(comparePreview.bundle_revision||comparePreview.status||'-')} → stable ${escapeHtml(compareStable.bundle_revision||compareStable.status||'-')}</p></div><div class="card span12"><h3>4.0 发布就绪度</h3><p class="muted">只读 audit：证明自动检查已到 stable promotion 人工确认；release_complete 仍为 false。</p><span class="tag ${readinessOk==='ok'?'':'off'}">${escapeHtml(readiness.result||'NOT_READY')}</span><span class="tag">状态 ${enumLabel(readiness.status||'not_ready')}</span><span class="tag">发布完成 ${yn(readiness.release_complete)}</span><span class="tag">人工确认 ${readiness.ready_for_human_gate?'就绪':'未就绪'}</span><span class="tag">阻塞 ${readinessBlocked.length}</span><span class="tag">检查项 ${readinessReqs.filter(r=>r&&r.ok).length}/${readinessReqs.length}</span><span class="tag">阻塞原因 ${escapeHtml(readiness.completion_blocker||'-')}</span><p class="muted">阻塞检查项：${escapeHtml(readinessBlocked.length?readinessBlocked.join(', '):'-')}</p><p class="muted">下一步：<span class="mono">${escapeHtml(readinessNext.command||readinessNext.label||'-')}</span></p></div><div class="card span12"><details><summary>原始状态 JSON</summary><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer,config_v2_promotion_plan:promotion,config_v2_release_readiness:readiness},null,2))}</div></details></div>`
 }
 function providerEntries(){return (state.providers||[]).map((p,i)=>({p,i})).sort((a,b)=>{if(!!a.p.enabled!==!!b.p.enabled)return a.p.enabled?-1:1;return a.i-b.i})}
-function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>{const keyTag=p.api_key?'<span class="tag">pending key</span>':(p.has_api_key?'<span class="tag">key set</span>':'<span class="tag off">no key</span>');const usage=p.usage||{};return `<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">enabled</span>':'<span class="tag off">disabled</span>'}${keyTag}<span class="tag">${p.models?.length||0} models</span><span class="tag">launches ${usage.launches||0}</span></div>`}).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
+function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>{const keyTag=p.api_key?'<span class="tag">待保存 Key</span>':(p.has_api_key?'<span class="tag">已保存 Key</span>':'<span class="tag off">缺少 Key</span>');const usage=p.usage||{};return `<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">已启用</span>':'<span class="tag off">已禁用</span>'}${keyTag}<span class="tag">模型 ${p.models?.length||0}</span><span class="tag">启动 ${usage.launches||0}</span></div>`}).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
 function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}
 function checks(name,values,allowed){values=values||[];return `<div class="checks">${allowed.map(v=>`<label class="check"><input type="checkbox" name="${name}" value="${v}" ${values.includes(v)?'checked':''}><span>${v}</span></label>`).join('')}</div>`}
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
 function modelFamilies(){return (state.model_families&&state.model_families.length?state.model_families:['Claude','GPT','Gemini','DeepSeek','Qwen','Kimi','Mimo','MiniMax','GLM'])}
-function familyPriorityInputs(values={},name='familyPriority'){return `<div class="grid">${modelFamilies().map(f=>`<div class="span4"><label>${escapeHtml(f)}</label><input data-family-priority="${escapeHtml(name)}" data-family="${escapeHtml(f)}" type="number" min="1" value="${escapeHtml(values[f]||'')}" placeholder="inherit"></div>`).join('')}</div>`}
+function familyPriorityInputs(values={},name='familyPriority'){return `<div class="grid">${modelFamilies().map(f=>`<div class="span4"><label>${escapeHtml(f)}</label><input data-family-priority="${escapeHtml(name)}" data-family="${escapeHtml(f)}" type="number" min="1" value="${escapeHtml(values[f]||'')}" placeholder="继承"></div>`).join('')}</div>`}
 function readFamilyPriorityInputs(name='familyPriority'){const result={};document.querySelectorAll(`[data-family-priority="${name}"]`).forEach(input=>{const family=input.dataset.family;const raw=String(input.value||'').trim();if(family&&raw){result[family]=Math.max(1,Number(raw)||100)}});return result}
 function formatFamilyOverrides(values={}){return Object.entries(values||{}).map(([k,v])=>`${k}=${v}`).join(', ')}
 function parseFamilyOverrides(text){const allowed=new Set(modelFamilies());const result={};String(text||'').split(/[\n,]/).map(x=>x.trim()).filter(Boolean).forEach(part=>{const [rawFamily,rawValue]=part.split(/[=:]/);const family=modelFamilies().find(f=>f.toLowerCase()===String(rawFamily||'').trim().toLowerCase());const value=Math.max(1,Number(String(rawValue||'').trim())||0);if(family&&allowed.has(family)&&value>0)result[family]=value});return result}
-function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span12"><label>family_priority_overrides</label><p class="muted">对应 TUI 模型页 +/- 对单个 family 写入的权重覆盖；留空表示继承全局 priority。</p>${familyPriorityInputs(p.family_priority_overrides||{},'providerFamilyPriority')}</div><div class="span4"><label>Claude 1M 策略</label><select id="pClaude1m">${['auto','enable','disable'].map(v=>`<option value="${v}" ${(p.claude_1m_mode||'auto')===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>timezone</label><input id="pTimezone" value="${escapeHtml(p.timezone||'')}" placeholder="Asia/Singapore"></div><div class="span4"><label>network policy</label><p class="muted">proxy ${p.proxy_configured?'configured':'none'} · no_proxy ${p.no_proxy_configured?'configured':'none'} · 明文走 Human Gate</p><button class="ghost" data-settings-action="provider_network_gate" data-report-target="channelReport">Network gate</button></div><div class="span12"><label>备注 note</label><input id="pNote" value="${escapeHtml(p.note||'')}" placeholder="用途、限制或路由说明"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div><div class="span12 delete-zone"><label>删除通道 typed confirm</label><input id="pDeleteConfirm" placeholder="输入 ${escapeHtml(p.id)} 后从草稿移除"><p class="muted">只从 WebUI 草稿移除；真正写入仍需要保存预览和确认。</p><div class="btns"><button id="deleteProvider" class="danger">从草稿移除通道</button></div></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button><button class="ghost" data-settings-action="provider_usage_summary" data-report-target="channelReport">Usage report</button><button class="ghost" data-settings-action="family_autosort_gate" data-report-target="channelReport">Auto-rank gate</button><button class="ghost" data-settings-action="connect_official_gate" data-report-target="channelReport">OAuth gate</button></div>`;bindProviderForm();bindSettingsActionButtons()}
+function modelSourceLabel(source){return {remote:'远端',fallback:'fallback',extra:'手动补充',hidden:'隐藏',derived_alias:'派生 alias',manual:'手动'}[source]||escapeHtml(source||'-')}
+function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} const pendingKey=!!p.api_key;const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');$('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role（角色）</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority（优先级）</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span12"><label>family_priority_overrides（family 权重覆盖）</label><p class="muted">对应 TUI 模型页 +/- 对单个 family 写入的权重覆盖；留空表示继承全局 priority。</p>${familyPriorityInputs(p.family_priority_overrides||{},'providerFamilyPriority')}</div><div class="span4"><label>Claude 1M 策略</label><select id="pClaude1m">${['auto','enable','disable'].map(v=>`<option value="${v}" ${(p.claude_1m_mode||'auto')===v?'selected':''}>${enumLabel(v)}</option>`).join('')}</select></div><div class="span4"><label>timezone（时区）</label><input id="pTimezone" value="${escapeHtml(p.timezone||'')}" placeholder="Asia/Singapore"></div><div class="span4"><label>网络策略</label><p class="muted">proxy ${p.proxy_configured?'已配置':'未配置'} · no_proxy ${p.no_proxy_configured?'已配置':'未配置'} · 明文走人工确认</p><button class="ghost" data-settings-action="provider_network_gate" data-report-target="channelReport">网络配置确认</button></div><div class="span12"><label>备注 note</label><input id="pNote" value="${escapeHtml(p.note||'')}" placeholder="用途、限制或路由说明"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${escapeHtml(keyPlaceholder)}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols（协议）</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs（支持的 CLI）</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox" ${p.update_credentials?'checked':''}><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认通道</span></div><div class="span12 delete-zone"><label>删除通道确认</label><input id="pDeleteConfirm" placeholder="输入 ${escapeHtml(p.id)} 后从草稿移除"><p class="muted">只从 WebUI 草稿移除；真正写入仍需要保存预览和确认。</p><div class="btns"><button id="deleteProvider" class="danger">从草稿移除通道</button></div></div></div><div class="btns"><button id="saveProviderForm">保存通道修改</button><button class="ghost" data-settings-action="provider_usage_summary" data-report-target="channelReport">使用统计</button><button class="ghost" data-settings-action="family_autosort_gate" data-report-target="channelReport">自动排序确认</button><button class="ghost" data-settings-action="connect_official_gate" data-report-target="channelReport">OAuth 确认</button></div>`;bindProviderForm();bindSettingsActionButtons()}
 function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pClaude1m','pTimezone','pNote','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>{const el=$(id);el.oninput=syncProvider;el.onchange=syncProvider});const keyEl=$('pKey');keyEl.oninput=()=>{keyEl.dataset.touched='1';syncProvider()};$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};const del=$('deleteProvider');if(del)del.onclick=deleteCurrentProviderDraft;document.querySelectorAll('input[name="pProtocols"],input[name="pClis"],[data-family-priority="providerFamilyPriority"]').forEach(x=>x.onchange=syncProvider);const save=$('saveProviderForm');if(save)save.onclick=()=>{syncProvider();setSection('save');toast('通道修改已暂存，生成保存预览后再写入')}}
-function deleteCurrentProviderDraft(){const p=current();if(!p)return;const typed=($('pDeleteConfirm')?.value||'').trim();if(typed!==p.id){toast('输入当前 provider ID 后才能从草稿移除');return}if((state.providers||[]).length<=1){toast('至少保留一个 provider；删除最后一个通道请走 CLI/manual gate');return}const removed=p.id;state.providers.splice(activeProvider,1);touchedProviders.add(removed);if(state.provider_default===removed)state.provider_default=(state.providers[0]||{}).id||'';activeProvider=Math.max(0,Math.min(activeProvider,state.providers.length-1));lastPlan=null;renderAll();setSection('save');toast(`${removed} 已从 WebUI 草稿移除，生成保存预览后再写入`)}
+function deleteCurrentProviderDraft(){const p=current();if(!p)return;const typed=($('pDeleteConfirm')?.value||'').trim();if(typed!==p.id){toast('输入当前通道 ID 后才能从草稿移除');return}if((state.providers||[]).length<=1){toast('至少保留一个通道；删除最后一个通道请走 CLI/人工确认');return}const removed=p.id;state.providers.splice(activeProvider,1);touchedProviders.add(removed);if(state.provider_default===removed)state.provider_default=(state.providers[0]||{}).id||'';activeProvider=Math.max(0,Math.min(activeProvider,state.providers.length-1));lastPlan=null;renderAll();setSection('save');toast(`${removed} 已从 WebUI 草稿移除，生成保存预览后再写入`)}
 function syncProvider(){const p=current(); if(!p)return; const old=p.id;touchProvider(old);const keyEl=$('pKey');const updateEl=$('pUpdateCreds');p.id=$('pId').value.trim()||p.id;if(p.id!==old){touchedProviders.delete(old);touchProvider(p.id)}p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.family_priority_overrides=readFamilyPriorityInputs('providerFamilyPriority');p.claude_1m_mode=$('pClaude1m').value;p.timezone=$('pTimezone').value.trim();p.note=$('pNote').value.trim();p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');const keyText=keyEl?keyEl.value.trim():'';const keyTouched=keyEl?.dataset?.touched==='1';if(keyText){p.api_key=keyText;p.pending_api_key=true;p.has_api_key=true;if(updateEl)updateEl.checked=true}else if(keyTouched){p.api_key='';p.pending_api_key=false}p.update_credentials=!!(updateEl&&updateEl.checked);if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
 function derivedAliases(base,p){const ids=(base||[]).map(x=>String(x||''));const tails=ids.map(id=>id.toLowerCase().split('/').pop());const aliases=[];if(tails.some(id=>id.startsWith('claude-sonnet-4-')||id.startsWith('claude-sonnet-4.')))aliases.push('claude-sonnet-4-6');if(tails.some(id=>id.startsWith('claude-opus-4-')||id.startsWith('claude-opus-4.')))aliases.push('claude-opus-4-6');const ident=String([p?.id,p?.name,p?.label,p?.provider_profile].filter(Boolean).join(' ')).toLowerCase();const anthropic=String(p?.anthropic_base_url||p?.default_anthropic_base_url||'').toLowerCase();if((anthropic.includes('xiaomimimo.com')||ident.includes('mimo')||ident.includes('xiaomi'))&&!ident.includes('openrouter')){['mimo-v2.5-pro','mimo-v2.5'].forEach(id=>{if(ids.includes(id)&&!ids.includes(`${id}[1m]`))aliases.push(`${id}[1m]`)})}return aliases}
 function providerModels(p){p=p||{};const map=new Map();const hiddenLower=new Set((p.hidden_models||[]).map(x=>String(x||'').toLowerCase()));const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,visible:r.visible!==false&&!hiddenLower.has(String(r.id).toLowerCase()),capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})})}const baseIds=[...map.keys()];derivedAliases(baseIds.filter(id=>!hiddenLower.has(String(id).toLowerCase())),p).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'derived_alias',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!hiddenLower.has(String(id).toLowerCase()),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{[...map.keys()].forEach(key=>{if(String(key).toLowerCase()===String(id).toLowerCase())map.get(key).visible=false})});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
@@ -6175,15 +6181,15 @@ function cleanupAllStaleHidden(){let total=0;(state.providers||[]).forEach(p=>{c
 function staleRouteModels(p){const approved=(p.approved_route_models&&p.approved_route_models.length?p.approved_route_models:(p.fallback_models||[]));const remote=new Set((p.models||[]).filter(r=>r&&r.id).map(r=>String(r.id)));const extras=new Set((p.extra_models||[]).map(x=>String(x)));return [...new Set(approved.filter(id=>id&&!remote.has(String(id))&&!extras.has(String(id))))]}
 function renderStaleRouteBox(p){const box=$('staleRouteBox');if(!box)return;const stale=staleRouteModels(p);if(!stale.length){box.innerHTML='<strong>缺失旧 route</strong><p class="muted">当前没有“本地已批准但本次拉取未返回”的旧 route。</p>';return}const armed=staleCleanupProviders.has(p.id);box.innerHTML=`<strong>缺失旧 route（默认保留）</strong><p class="muted">这些模型在本地已批准 routes 里，但不在当前拉取到的模型列表里。默认不会删除；如果勾选“拉取后自动标记”，本页后续拉取会自动标记清理。避免上游 /models 抖动或 New API 临时关闭导致下游模型被清空。</p><div class="chips">${stale.slice(0,24).map(m=>`<span class="chip">${escapeHtml(m)}</span>`).join('')}${stale.length>24?`<span class="chip">+${stale.length-24}</span>`:''}</div><div class="btns"><button id="armStaleRouteCleanup" class="ghost">${armed?'已标记：保存时清理这些旧 route':'显式标记保存时清理这些旧 route'}</button></div>`;$('armStaleRouteCleanup').onclick=()=>{staleCleanupProviders.add(p.id);touchProvider(p.id);renderStaleRouteBox(p);toast(`已标记 ${p.id}：下次写入预览 DB 会清理 ${stale.length} 条缺失旧 route`)}}
 function visibleModelsForProvider(providerId,{visionFirst=false,includeHidden=false,enabledOnly=false}={}){let rows=[];(state.providers||[]).forEach(p=>{if(providerId&&p.id!==providerId)return;if(enabledOnly&&p.enabled===false)return;providerModels(p).forEach(r=>{if(!includeHidden&&r.visible===false)return;rows.push({...r,provider_id:p.id,provider_name:p.name||p.id,capabilities:{...(r.capabilities||defaultCaps(r.id))}})})});const seen=new Set();rows=rows.filter(r=>{const key=(providerId?'':r.provider_id+'::')+r.id;if(seen.has(key))return false;seen.add(key);return true});rows.sort((a,b)=>{const av=!!(a.capabilities||{}).vision,bv=!!(b.capabilities||{}).vision;if(visionFirst&&av!==bv)return av?-1:1;return (a.provider_id+' '+a.id).localeCompare(b.provider_id+' '+b.id)});return rows}
-function providerOptions(selected,{blankLabel='请选择通道',auto=false,enabledOnly=false}={}){const opts=[];const providers=providerEntries().filter(({p})=>!enabledOnly||p.enabled||p.id===selected);if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动选择 provider</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>${escapeHtml(blankLabel)}</option>`);opts.push(...providers.map(({p})=>{const disabled=p.enabled?'':' [disabled 当前配置值]';return `<option value="${escapeHtml(p.id)}" ${p.id===selected?'selected':''}>${escapeHtml(p.name||p.id)} / ${escapeHtml(p.id)}${disabled}</option>`}));if(selected&&!state.providers.some(p=>p.id===selected))opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
+function providerOptions(selected,{blankLabel='请选择通道',auto=false,enabledOnly=false}={}){const opts=[];const providers=providerEntries().filter(({p})=>!enabledOnly||p.enabled||p.id===selected);if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动选择通道</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>${escapeHtml(blankLabel)}</option>`);opts.push(...providers.map(({p})=>{const disabled=p.enabled?'':' [已禁用，当前配置值]';return `<option value="${escapeHtml(p.id)}" ${p.id===selected?'selected':''}>${escapeHtml(p.name||p.id)} / ${escapeHtml(p.id)}${disabled}</option>`}));if(selected&&!state.providers.some(p=>p.id===selected))opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
 function modelOptionValue(providerId,row){return providerId?row.id:`${row.provider_id}::${row.id}`}
 function decodeModelSelection(value,currentProvider){const text=String(value||'');if(!text)return{provider_id:currentProvider||'',model:''};const marker='::';if(text.includes(marker)){const [provider_id,...rest]=text.split(marker);return{provider_id,model:rest.join(marker)}}return{provider_id:currentProvider||'',model:text}}
 function modelOptions(providerId,selected,{visionFirst=false,auto=false,defaultModels=[],enabledOnly=false,selectedProvider=''}={}){const rows=visibleModelsForProvider(providerId,{visionFirst,enabledOnly});let opts=[];if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动路线${defaultModels.length?'：'+escapeHtml(defaultModels.join(' / ')):''}</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>请选择模型</option>`);let matched=false;opts.push(...rows.map(r=>{const value=modelOptionValue(providerId,r);const label=providerId?r.id:`${r.provider_id} / ${r.id}`;const tag=(r.capabilities||{}).vision?' [vision]':'';const isSelected=providerId?r.id===selected:((selectedProvider&&r.provider_id===selectedProvider&&r.id===selected)||(!selectedProvider&&r.id===selected));if(isSelected)matched=true;return `<option value="${escapeHtml(value)}" ${isSelected?'selected':''}>${escapeHtml(label)}${tag}</option>`}));if(selected&&!matched)opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
 function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">当前没有“暂时匹配不到模型行”的隐藏规则。</p>';return}box.innerHTML=`<strong>未匹配隐藏规则（hidden_models）</strong><p class="muted">这些只是当前通道 hidden_models 里的隐藏规则，暂时没有匹配到当前模型行；不等于远端不存在，也不等于 route 待删除。移除后如果模型仍在远端或 approved routes 里，会重新显示出来。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">移除记录</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">移除当前通道未匹配隐藏规则</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);touchProvider(p.id);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);if(count)touchProvider(p.id);renderModelTable();toast(count?`已移除 ${count} 条当前通道未匹配隐藏规则`:'没有需要移除的未匹配隐藏规则')}}
-function renderModelInventorySummary(p){const box=$('modelInventorySummary');if(!box||!p)return;const rows=providerModels(p);const visible=rows.filter(r=>r.visible!==false).length;const hidden=(p.hidden_models||[]).length;const extra=(p.extra_models||[]).length;const stale=staleRouteModels(p).length+(p.stale_hidden_models||[]).length;box.innerHTML=[['visible',visible,'当前显示模型'],['extra',extra,'extra_models 补充'],['hidden',hidden,'hidden_models 隐藏'],['stale',stale,'待清理 route/hidden']].map(([label,count,desc])=>`<div class="inventory-tile"><span>${escapeHtml(label)}</span><strong>${count}</strong><p class="muted">${escapeHtml(desc)}</p></div>`).join('')}
-function renderModelTable(){const p=current(); if(!p)return;renderModelInventorySummary(p);const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));const extras=p.extra_models||[];$('modelChips').innerHTML=`<strong>当前通道补充模型库（extra_models）</strong><p class="muted">这些模型是手动补充到当前 provider 的可用模型，会参与当前通道路由；不是待删除列表，也不是全局模型池。</p><div class="chips">${extras.length?extras.map(m=>`<span class="chip">${escapeHtml(m)}${editingExtraModels?` <button data-rm-extra="${escapeHtml(m)}">从补充库移除</button>`:''}</span>`).join(''):'<span class="muted">当前通道暂无手动补充模型。</span>'}</div><div class="btns"><button id="toggleExtraEdit" class="ghost">${editingExtraModels?'完成编辑':'编辑补充模型库'}</button></div><div id="staleRouteBox"></div>`;$('toggleExtraEdit').onclick=()=>{editingExtraModels=!editingExtraModels;renderModelTable()};document.querySelectorAll('[data-rm-extra]').forEach(b=>b.onclick=()=>{p.extra_models=extras.filter(x=>x!==b.dataset.rmExtra);touchProvider(p.id);toast(`已从当前通道补充模型库移除 ${b.dataset.rmExtra}`);renderModelTable()});renderStaleRouteBox(p);renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
+function renderModelInventorySummary(p){const box=$('modelInventorySummary');if(!box||!p)return;const rows=providerModels(p);const visible=rows.filter(r=>r.visible!==false).length;const hidden=(p.hidden_models||[]).length;const extra=(p.extra_models||[]).length;const stale=staleRouteModels(p).length+(p.stale_hidden_models||[]).length;box.innerHTML=[['显示',visible,'当前显示模型'],['补充',extra,'extra_models 补充'],['隐藏',hidden,'hidden_models 隐藏'],['待清理',stale,'待清理 route/hidden']].map(([label,count,desc])=>`<div class="inventory-tile"><span>${escapeHtml(label)}</span><strong>${count}</strong><p class="muted">${escapeHtml(desc)}</p></div>`).join('')}
+function renderModelTable(){const p=current(); if(!p)return;renderModelInventorySummary(p);const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));const extras=p.extra_models||[];$('modelChips').innerHTML=`<strong>当前通道补充模型库（extra_models）</strong><p class="muted">这些模型是手动补充到当前 provider 的可用模型，会参与当前通道路由；不是待删除列表，也不是全局模型池。</p><div class="chips">${extras.length?extras.map(m=>`<span class="chip">${escapeHtml(m)}${editingExtraModels?` <button data-rm-extra="${escapeHtml(m)}">从补充库移除</button>`:''}</span>`).join(''):'<span class="muted">当前通道暂无手动补充模型。</span>'}</div><div class="btns"><button id="toggleExtraEdit" class="ghost">${editingExtraModels?'完成编辑':'编辑补充模型库'}</button></div><div id="staleRouteBox"></div>`;$('toggleExtraEdit').onclick=()=>{editingExtraModels=!editingExtraModels;renderModelTable()};document.querySelectorAll('[data-rm-extra]').forEach(b=>b.onclick=()=>{p.extra_models=extras.filter(x=>x!==b.dataset.rmExtra);touchProvider(p.id);toast(`已从当前通道补充模型库移除 ${b.dataset.rmExtra}`);renderModelTable()});renderStaleRouteBox(p);renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${modelSourceLabel(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
 function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,source:'hidden',visible:!(p.hidden_models||[]).includes(model),favorite:false,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);touchProvider(p.id);renderTestSelectors();renderFallback();renderRuntime()}
-function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [disabled]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
+function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [已禁用]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
 function syncFallback(){state.rescue=state.rescue||{};state.rescue.fallback_model=$('rescueModel').value.trim();state.rescue.fallback_cli=$('rescueCli').value;state.rescue.hot_fallback_enabled=$('rescueHot').checked;state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.enabled=$('visionEnabled').checked;state.vision_sidecar.provider_id=$('visionProvider').value.trim();state.vision_sidecar.model=$('visionModel').value.trim();state.vision_sidecar.candidates=[...document.querySelectorAll('[data-vision-candidate]')].map(row=>({provider_id:row.querySelector('[data-vc-provider]').value.trim(),model:row.querySelector('[data-vc-model]').value.trim()})).filter(x=>x.provider_id&&x.model)}
 function bindVisionCandidateRow(row){const provider=row.querySelector('[data-vc-provider]');const model=row.querySelector('[data-vc-model]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{visionFirst:true});syncFallback()};model.onchange=syncFallback;row.querySelector('[data-vc-remove]').onclick=()=>{row.remove();syncFallback()}}
 function renderVisionCandidates(candidates){const wrap=$('visionCandidates');wrap.innerHTML=(candidates||[]).map((item,i)=>{const provider=item.provider_id||item.provider||'';const model=item.model||item.vision_model||'';return `<div class="grid span12" data-vision-candidate="1"><div class="span5"><label>候选 ${i+1} provider</label><select data-vc-provider>${providerOptions(provider,{blankLabel:'请选择通道'})}</select></div><div class="span5"><label>候选 ${i+1} model</label><select data-vc-model>${modelOptions(provider,model,{visionFirst:true})}</select></div><div class="span2"><label>&nbsp;</label><button class="ghost" data-vc-remove>移除</button></div></div>`}).join('');document.querySelectorAll('[data-vision-candidate]').forEach(bindVisionCandidateRow)}
@@ -6198,46 +6204,46 @@ function setOpencodeOverride(agent,provider,model){const overrides=opencodeOverr
 function persistRosterEntry(agent,row,patch={}){const roster=opencodeRoster();const defaults=opencodeDefaults();const base=rosterEntry(agent,row);const next={...base,...patch};const def=defaults[agent]||{};const providerMeaningful=!!next.provider_id&&(!!next.model||!!next.custom);const keep=!!next.custom||next.enabled===false||next.preset!==def.preset||Number(next.priority||0)!==Number(def.priority||0)||providerMeaningful||!!next.model||!!next.description||!!next.prompt;if(!keep){delete roster[agent];return}const payload={preset:next.preset||row.preset||categoryPreset(row.category),enabled:next.enabled!==false,priority:Number(next.priority||def.priority||999)};if(next.custom)payload.custom=true;if(providerMeaningful)payload.provider_id=next.provider_id;if(next.model)payload.model=next.model;if(next.description)payload.description=next.description;if(next.prompt)payload.prompt=next.prompt;roster[agent]=payload}
 function setRosterEnabled(agent,row,enabled){persistRosterEntry(agent,row,{enabled})}
 function opencodeAllRows(){const base=(state.opencode.agent_catalog||[]).map(row=>({...row,custom:false}));const seen=new Set(base.map(row=>row.agent));Object.entries(opencodeRoster()).forEach(([agent,entry])=>{if(seen.has(agent))return;base.push({agent,route_key:agent,category:presetLabel(entry.preset),preset:entry.preset||'explore',priority:entry.priority||999,default_models:[],custom:true})});return base.sort((a,b)=>Number(rosterEntry(a.agent,a).priority||999)-Number(rosterEntry(b.agent,b).priority||999)||a.agent.localeCompare(b.agent))}
-function presetLabel(preset){return {builder:'执行/协调',executor:'执行',explore:'探索',bughunt:'找茬',vision:'Vision',reviewer:'审查',spec:'Spec',fixer:'执行'}[preset]||preset||'custom'}
+function presetLabel(preset){return {builder:'执行/协调',executor:'执行',explore:'探索',bughunt:'找茬',vision:'Vision',reviewer:'审查',spec:'Spec',fixer:'执行'}[preset]||preset||'自定义'}
 function customAgentId(preset){const existing=new Set(opencodeAllRows().map(row=>row.agent));let i=1;let id='';do{id=`mobius-${preset}-custom-${i++}`}while(existing.has(id));return id}
 function addCustomAgent(preset){const agent=customAgentId(preset);opencodeRoster()[agent]={enabled:true,custom:true,preset,priority:900+Object.keys(opencodeRoster()).length};renderOpencodeAgents();toast(`已添加 ${agent}`)}
 function syncRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};state.runtime.preferred_cli=$('preferredCli').value;state.runtime.coding_preset_model=$('codingModel').value.trim();state.opencode.default_profile=$('opencodeProfile').value;state.opencode.agent_models=Object.fromEntries(opencodeOverrideEntries());state.opencode.agent_roster={...opencodeRoster()}}
-function renderOpencodeSummary(){const box=$('opencodeOverrideSummary');if(!box)return;const rows=opencodeAllRows();const enabled=rows.filter(row=>rosterEntry(row.agent,row).enabled!==false).length;const count=opencodeOverrideEntries().length;const custom=rows.filter(row=>rosterEntry(row.agent,row).custom).length;const profile=state.opencode.default_profile||'agent';box.innerHTML=`<div class="oc-metric"><span class="muted">Profile</span><strong>${escapeHtml(profile)}</strong><span class="mono">Lite Pro Roster</span></div><div class="oc-metric"><span class="muted">Enabled agents</span><strong>${enabled}/${rows.length}</strong><span class="mono">进入 session-local opencode.json</span></div><div class="oc-metric"><span class="muted">Agent overrides</span><strong>${count}/${rows.length}</strong><span class="mono">Auto 不写 agent_models</span></div><div class="oc-metric"><span class="muted">Custom agents</span><strong>${custom}</strong><span class="mono">按 preset 继承 prompt/permission</span></div>`}
+function renderOpencodeSummary(){const box=$('opencodeOverrideSummary');if(!box)return;const rows=opencodeAllRows();const enabled=rows.filter(row=>rosterEntry(row.agent,row).enabled!==false).length;const count=opencodeOverrideEntries().length;const custom=rows.filter(row=>rosterEntry(row.agent,row).custom).length;const profile=state.opencode.default_profile||'agent';box.innerHTML=`<div class="oc-metric"><span class="muted">Profile</span><strong>${escapeHtml(profile)}</strong><span class="mono">Lite Pro Roster</span></div><div class="oc-metric"><span class="muted">已启用 Agent</span><strong>${enabled}/${rows.length}</strong><span class="mono">进入 session-local opencode.json</span></div><div class="oc-metric"><span class="muted">Agent 覆盖</span><strong>${count}/${rows.length}</strong><span class="mono">自动模式不写 agent_models</span></div><div class="oc-metric"><span class="muted">自定义 Agent</span><strong>${custom}</strong><span class="mono">按 preset 继承 prompt/permission</span></div>`}
 function opencodeFilterMatches(row,overridden){const entry=rosterEntry(row.agent,row);if(opencodeOnlyOverridden&&!overridden&&entry.enabled!==false&&!entry.custom)return false;if(opencodeAgentFilter==='all')return true;if(opencodeAgentFilter==='enabled')return entry.enabled!==false;if(opencodeAgentFilter==='custom')return !!entry.custom;if(opencodeAgentFilter==='execute')return ['builder','executor','fixer','spec'].includes(entry.preset)||String(row.category||'').startsWith('执行');if(opencodeAgentFilter==='explore')return entry.preset==='explore'||row.category==='探索';if(opencodeAgentFilter==='bughunt')return entry.preset==='bughunt'||row.category==='找茬';if(opencodeAgentFilter==='vision')return entry.preset==='vision'||row.category==='Vision';if(opencodeAgentFilter==='review')return entry.preset==='reviewer'||row.category==='审查';return true}
-function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)return;const filters=[['all','全部'],['enabled','已启用'],['custom','自定义'],['execute','执行/协调'],['explore','探索'],['bughunt','找茬'],['vision','Vision'],['review','审查']];wrap.innerHTML=`${filters.map(([id,label])=>`<button class="ghost ${opencodeAgentFilter===id?'active':''}" data-oc-filter="${id}">${label}</button>`).join('')}<label class="check"><input id="ocOnlyOverridden" type="checkbox" ${opencodeOnlyOverridden?'checked':''}><span>只看改动项</span></label><button class="ghost" data-oc-add="vision">+ Add Vision Agent</button><button class="ghost" data-oc-add="executor">+ Add Executor Agent</button><button class="ghost" data-oc-add="explore">+ Add Explore Agent</button><button class="ghost" id="ocClearAll">全部自动</button>`;document.querySelectorAll('[data-oc-filter]').forEach(btn=>btn.onclick=()=>{opencodeAgentFilter=btn.dataset.ocFilter;renderOpencodeAgents()});document.querySelectorAll('[data-oc-add]').forEach(btn=>btn.onclick=()=>addCustomAgent(btn.dataset.ocAdd));$('ocOnlyOverridden').onchange=()=>{opencodeOnlyOverridden=$('ocOnlyOverridden').checked;renderOpencodeAgents()};$('ocClearAll').onclick=()=>{state.opencode.agent_models={};state.opencode.agent_roster={};syncRuntime();renderOpencodeAgents();toast('OpenCode roster 已恢复默认自动路线')}}
-function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的 agent</td></tr>';table.innerHTML=`<thead><tr><th>启用</th><th>Agent</th><th>Preset</th><th>Priority</th><th>Provider</th><th>Model</th><th>Default</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(tr=>{const agent=tr.dataset.ocAgent;const row=visible.find(r=>r.agent===agent);const entry=rosterEntry(agent,row);tr.querySelector('[data-oc-enabled]').onchange=(e)=>{setRosterEnabled(agent,row,e.target.checked);renderOpencodeSummary()};tr.querySelector('[data-oc-preset]').onchange=(e)=>{persistRosterEntry(agent,row,{preset:e.target.value});renderOpencodeAgents()};tr.querySelector('[data-oc-priority]').oninput=(e)=>{persistRosterEntry(agent,row,{priority:Number(e.target.value)});renderOpencodeSummary()};tr.querySelector('[data-oc-provider]').onchange=(e)=>{const sel=e.target;const modelSel=tr.querySelector('[data-oc-model]');modelSel.innerHTML=modelOptions(sel.value,modelSel.value,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:sel.value});setOpencodeOverride(agent,sel.value,tr.querySelector('[data-oc-model]').value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-model]').onchange=(e)=>{setOpencodeOverride(agent,tr.querySelector('[data-oc-provider]').value,e.target.value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-reset]').onclick=()=>{const roster=opencodeRoster();delete roster[agent];const overrides=opencodeOverrides();delete overrides[agent];syncRuntime();renderOpencodeAgents();toast(`${agent} 已恢复默认`)}})}
+function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)return;const filters=[['all','全部'],['enabled','已启用'],['custom','自定义'],['execute','执行/协调'],['explore','探索'],['bughunt','找茬'],['vision','Vision'],['review','审查']];wrap.innerHTML=`${filters.map(([id,label])=>`<button class="ghost ${opencodeAgentFilter===id?'active':''}" data-oc-filter="${id}">${label}</button>`).join('')}<label class="check"><input id="ocOnlyOverridden" type="checkbox" ${opencodeOnlyOverridden?'checked':''}><span>只看改动项</span></label><button class="ghost" data-oc-add="vision">+ 添加 Vision Agent</button><button class="ghost" data-oc-add="executor">+ 添加执行 Agent</button><button class="ghost" data-oc-add="explore">+ 添加探索 Agent</button><button class="ghost" id="ocClearAll">全部自动</button>`;document.querySelectorAll('[data-oc-filter]').forEach(btn=>btn.onclick=()=>{opencodeAgentFilter=btn.dataset.ocFilter;renderOpencodeAgents()});document.querySelectorAll('[data-oc-add]').forEach(btn=>btn.onclick=()=>addCustomAgent(btn.dataset.ocAdd));$('ocOnlyOverridden').onchange=()=>{opencodeOnlyOverridden=$('ocOnlyOverridden').checked;renderOpencodeAgents()};$('ocClearAll').onclick=()=>{state.opencode.agent_models={};state.opencode.agent_roster={};syncRuntime();renderOpencodeAgents();toast('OpenCode roster 已恢复默认自动路线')}}
+function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">自定义</span>':''}${changed?'<span class="tag">已改动</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true,enabledOnly:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:provider})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):'<tr><td colspan="8" class="empty-row">没有匹配的 agent</td></tr>';table.innerHTML=`<thead><tr><th>启用</th><th>Agent</th><th>Preset</th><th>优先级</th><th>Provider</th><th>Model</th><th>默认模型</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(tr=>{const agent=tr.dataset.ocAgent;const row=visible.find(r=>r.agent===agent);const entry=rosterEntry(agent,row);tr.querySelector('[data-oc-enabled]').onchange=(e)=>{setRosterEnabled(agent,row,e.target.checked);renderOpencodeSummary()};tr.querySelector('[data-oc-preset]').onchange=(e)=>{persistRosterEntry(agent,row,{preset:e.target.value});renderOpencodeAgents()};tr.querySelector('[data-oc-priority]').oninput=(e)=>{persistRosterEntry(agent,row,{priority:Number(e.target.value)});renderOpencodeSummary()};tr.querySelector('[data-oc-provider]').onchange=(e)=>{const sel=e.target;const modelSel=tr.querySelector('[data-oc-model]');modelSel.innerHTML=modelOptions(sel.value,modelSel.value,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true,selectedProvider:sel.value});setOpencodeOverride(agent,sel.value,tr.querySelector('[data-oc-model]').value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-model]').onchange=(e)=>{setOpencodeOverride(agent,tr.querySelector('[data-oc-provider]').value,e.target.value);syncRuntime();renderOpencodeSummary()};tr.querySelector('[data-oc-reset]').onclick=()=>{const roster=opencodeRoster();delete roster[agent];const overrides=opencodeOverrides();delete overrides[agent];syncRuntime();renderOpencodeAgents();toast(`${agent} 已恢复默认`)}})}
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function accountLocked(a){return !!a.is_claude_human_only}
 function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');const familyEl=tr.querySelector('[data-account-family]');const claude1mEl=tr.querySelector('[data-account-claude-1m]');const timezoneEl=tr.querySelector('[data-account-timezone]');const noteEl=tr.querySelector('[data-account-note]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100);if(familyEl)acc.family_priority_overrides=parseFamilyOverrides(familyEl.value);if(claude1mEl)acc.claude_1m_mode=claude1mEl.value;if(timezoneEl)acc.timezone=timezoneEl.value.trim();if(noteEl)acc.note=noteEl.value.trim()});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
-function mappingStatusLabel(status){return {native:'Native',report:'Report',draft_review:'Draft review',human_gate:'Human gate',missing:'Missing'}[status]||status||'-'}
+function mappingStatusLabel(status){return {native:'原生',report:'报告',draft_review:'草稿预览',human_gate:'人工确认',missing:'缺失'}[status]||status||'-'}
 function mappingStatusClass(status){return 'status-'+String(status||'missing').replace(/[^a-z0-9_ -]/gi,'').replace(/\s+/g,'_')}
-function mappingActionButton(row){const parts=[];if(row.webui_section_id){parts.push(`<button class="ghost mapping-action" data-section-jump="${escapeHtml(row.webui_section_id)}">打开</button>`)}if(row.api_action){const label=row.status==='human_gate'?'Gate':(row.status==='missing'?'Gap':'Report');parts.push(`<button class="ghost mapping-action" data-settings-action="${escapeHtml(row.api_action)}">${label}</button>`)}return parts.join(' ')}
-function renderMappingFilters(mapping){const box=$('mappingFilters');if(!box)return;const count=s=>mapping.filter(row=>s==='all'||row.status===s).length;const filters=[['all','全部'],['native','Native'],['report','Report'],['draft_review','Draft'],['human_gate','Gate'],['missing','Missing']];box.innerHTML=filters.map(([id,label])=>`<button class="${settingsMappingFilter===id?'active':''}" data-map-filter="${id}">${label} ${count(id)}</button>`).join('');document.querySelectorAll('[data-map-filter]').forEach(btn=>{btn.onclick=()=>{settingsMappingFilter=btn.dataset.mapFilter;renderSettings()}})}
+function mappingActionButton(row){const parts=[];if(row.webui_section_id){parts.push(`<button class="ghost mapping-action" data-section-jump="${escapeHtml(row.webui_section_id)}">打开</button>`)}if(row.api_action){const label=row.status==='human_gate'?'人工确认':(row.status==='missing'?'缺口':'报告');parts.push(`<button class="ghost mapping-action" data-settings-action="${escapeHtml(row.api_action)}">${label}</button>`)}return parts.join(' ')}
+function renderMappingFilters(mapping){const box=$('mappingFilters');if(!box)return;const count=s=>mapping.filter(row=>s==='all'||row.status===s).length;const filters=[['all','全部'],['native','原生'],['report','报告'],['draft_review','草稿'],['human_gate','人工确认'],['missing','缺失']];box.innerHTML=filters.map(([id,label])=>`<button class="${settingsMappingFilter===id?'active':''}" data-map-filter="${id}">${label} ${count(id)}</button>`).join('');document.querySelectorAll('[data-map-filter]').forEach(btn=>{btn.onclick=()=>{settingsMappingFilter=btn.dataset.mapFilter;renderSettings()}})}
 function acceptanceStorageKey(){return `mms-webui-tui-acceptance:${state?.command||'mms'}:${state?.schema||'snapshot'}`}
 function loadAcceptanceState(mapping){try{const allowed=new Set((mapping||[]).map(row=>row.id));const raw=JSON.parse(localStorage.getItem(acceptanceStorageKey())||'[]');checkedMappingRows=new Set((Array.isArray(raw)?raw:[]).filter(id=>allowed.has(id)))}catch(_err){checkedMappingRows=new Set()}}
 function saveAcceptanceState(){try{localStorage.setItem(acceptanceStorageKey(),JSON.stringify([...checkedMappingRows].sort()))}catch(_err){}}
 function currentMappingRows(mapping){return settingsMappingFilter==='all'?mapping:mapping.filter(row=>row.status===settingsMappingFilter)}
-function acceptanceReportText(mapping){const rows=mapping||[];const unchecked=rows.filter(row=>!checkedMappingRows.has(row.id));const counts=(state.tui_webui_mapping_summary||{}).counts||{};return [`MMS WebUI Settings/Channel acceptance`,`command: ${state.command||'mms'}`,`total: ${rows.length}`,`checked: ${rows.length-unchecked.length}`,`unchecked: ${unchecked.length}`,`status: native ${counts.native||0} / report ${counts.report||0} / draft ${counts.draft_review||0} / gate ${counts.human_gate||0} / missing ${counts.missing||0}`,`clickable: ${(state.tui_webui_mapping_summary||{}).clickable_rows||0}/${rows.length}`,`unchecked rows: ${unchecked.map(row=>row.id).join(', ')||'-'}`].join('\\n')}
-async function copyAcceptanceReport(mapping){const text=acceptanceReportText(mapping);try{await navigator.clipboard.writeText(text);toast('已复制验收摘要')}catch(_err){$('settingsReport').textContent=text;toast('无法访问剪贴板，验收摘要已显示在 Report')}}
-function renderAcceptancePanel(mapping){const box=$('acceptancePanel');if(!box)return;const rows=mapping||[];const visible=currentMappingRows(rows);const checked=rows.filter(row=>checkedMappingRows.has(row.id)).length;const clickable=(state.tui_webui_mapping_summary||{}).clickable_rows??rows.filter(row=>row.clickable==='yes').length;const missing=(state.tui_webui_mapping_summary||{}).counts?.missing||0;box.innerHTML=`<div class="acceptance-head"><div><h4>逐项验收 checklist</h4><p class="muted">你可以按行点击 Open / Report / Gate / 保存预览验证，再勾选左侧 Checked；状态保存在本浏览器 localStorage，不写真实 MMS config。</p></div><div class="acceptance-progress" id="mapCheckProgress">${checked}/${rows.length}</div></div><div class="chips"><span class="chip">clickable ${clickable}/${rows.length}</span><span class="chip">visible ${visible.length}</span><span class="chip">missing ${missing}</span><span class="chip">${checked===rows.length?'all checked':'unchecked '+(rows.length-checked)}</span></div><div class="btns"><button class="ghost" id="markVisibleChecked">标记当前筛选已检查</button><button class="ghost" id="copyAcceptanceReport">复制验收摘要</button><button class="ghost" id="clearAcceptanceChecks">清空本地勾选</button></div>`;$('markVisibleChecked').onclick=()=>{visible.forEach(row=>checkedMappingRows.add(row.id));saveAcceptanceState();renderTuiMapping(rows);toast(`已标记 ${visible.length} 行为 checked`)};$('clearAcceptanceChecks').onclick=()=>{checkedMappingRows.clear();saveAcceptanceState();renderTuiMapping(rows);toast('已清空本地验收勾选')};$('copyAcceptanceReport').onclick=()=>copyAcceptanceReport(rows)}
+function acceptanceReportText(mapping){const rows=mapping||[];const unchecked=rows.filter(row=>!checkedMappingRows.has(row.id));const counts=(state.tui_webui_mapping_summary||{}).counts||{};return [`MMS WebUI 设置/通道验收`,`命令: ${state.command||'mms'}`,`总数: ${rows.length}`,`已检查: ${rows.length-unchecked.length}`,`未检查: ${unchecked.length}`,`状态: 原生 ${counts.native||0} / 报告 ${counts.report||0} / 草稿 ${counts.draft_review||0} / 人工确认 ${counts.human_gate||0} / 缺失 ${counts.missing||0}`,`可点击: ${(state.tui_webui_mapping_summary||{}).clickable_rows||0}/${rows.length}`,`未检查行: ${unchecked.map(row=>row.id).join(', ')||'-'}`].join('\\n')}
+async function copyAcceptanceReport(mapping){const text=acceptanceReportText(mapping);try{await navigator.clipboard.writeText(text);toast('已复制验收摘要')}catch(_err){$('settingsReport').textContent=text;toast('无法访问剪贴板，验收摘要已显示在报告区')}}
+function renderAcceptancePanel(mapping){const box=$('acceptancePanel');if(!box)return;const rows=mapping||[];const visible=currentMappingRows(rows);const checked=rows.filter(row=>checkedMappingRows.has(row.id)).length;const clickable=(state.tui_webui_mapping_summary||{}).clickable_rows??rows.filter(row=>row.clickable==='yes').length;const missing=(state.tui_webui_mapping_summary||{}).counts?.missing||0;box.innerHTML=`<div class="acceptance-head"><div><h4>逐项验收清单</h4><p class="muted">你可以按行点击打开 / 报告 / 人工确认 / 保存预览验证，再勾选左侧已检查；状态保存在本浏览器 localStorage，不写真实 MMS config。</p></div><div class="acceptance-progress" id="mapCheckProgress">${checked}/${rows.length}</div></div><div class="chips"><span class="chip">可点击 ${clickable}/${rows.length}</span><span class="chip">当前可见 ${visible.length}</span><span class="chip">缺失 ${missing}</span><span class="chip">${checked===rows.length?'全部已检查':'未检查 '+(rows.length-checked)}</span></div><div class="btns"><button class="ghost" id="markVisibleChecked">标记当前筛选已检查</button><button class="ghost" id="copyAcceptanceReport">复制验收摘要</button><button class="ghost" id="clearAcceptanceChecks">清空本地勾选</button></div>`;$('markVisibleChecked').onclick=()=>{visible.forEach(row=>checkedMappingRows.add(row.id));saveAcceptanceState();renderTuiMapping(rows);toast(`已标记 ${visible.length} 行为已检查`)};$('clearAcceptanceChecks').onclick=()=>{checkedMappingRows.clear();saveAcceptanceState();renderTuiMapping(rows);toast('已清空本地验收勾选')};$('copyAcceptanceReport').onclick=()=>copyAcceptanceReport(rows)}
 function bindMappingChecks(mapping){document.querySelectorAll('[data-map-check]').forEach(input=>{input.onchange=()=>{const id=input.dataset.mapCheck;if(input.checked)checkedMappingRows.add(id);else checkedMappingRows.delete(id);saveAcceptanceState();renderAcceptancePanel(mapping)}})}
-function renderTuiMapping(mapping){renderMappingFilters(mapping);renderAcceptancePanel(mapping);const rows=currentMappingRows(mapping);const body=rows.length?rows.map(row=>`<tr><td><label class="mapping-check"><input data-map-check="${escapeHtml(row.id)}" type="checkbox" ${checkedMappingRows.has(row.id)?'checked':''}>Checked</label></td><td class="mono">${escapeHtml(row.tui_area)}<br><span class="muted">${escapeHtml(row.tui_action_id)}</span></td><td>${escapeHtml(row.tui_label)}</td><td>${escapeHtml(row.webui_section)}<br><span class="muted">${escapeHtml(row.webui_control)}</span></td><td><span class="tag ${mappingStatusClass(row.status)}">${mappingStatusLabel(row.status)}</span><br><span class="muted">${escapeHtml(row.write_policy)}</span></td><td class="default-route">${escapeHtml(row.verification||'-')}<br><span class="check-evidence">${escapeHtml(row.click_targets||'-')}</span><br><span class="muted">${escapeHtml(row.acceptance_check||row.manual_check||'')}</span></td><td>${mappingActionButton(row)}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">当前筛选没有条目</td></tr>';$('tuiMappingTable').innerHTML=`<thead><tr><th>Check</th><th>TUI area/action</th><th>TUI label</th><th>WebUI 落点</th><th>Status</th><th>验证 / click evidence</th><th>操作</th></tr></thead><tbody>${body}</tbody>`;bindMappingChecks(mapping)}
+function renderTuiMapping(mapping){renderMappingFilters(mapping);renderAcceptancePanel(mapping);const rows=currentMappingRows(mapping);const body=rows.length?rows.map(row=>`<tr><td><label class="mapping-check"><input data-map-check="${escapeHtml(row.id)}" type="checkbox" ${checkedMappingRows.has(row.id)?'checked':''}>已检查</label></td><td class="mono">${escapeHtml(row.tui_area)}<br><span class="muted">${escapeHtml(row.tui_action_id)}</span></td><td>${escapeHtml(row.tui_label)}</td><td>${escapeHtml(row.webui_section)}<br><span class="muted">${escapeHtml(row.webui_control)}</span></td><td><span class="tag ${mappingStatusClass(row.status)}">${mappingStatusLabel(row.status)}</span><br><span class="muted">${writePolicyLabel(row.write_policy)}</span></td><td class="default-route">${escapeHtml(row.verification||'-')}<br><span class="check-evidence">${clickTargetsLabel(row.click_targets||'-')}</span><br><span class="muted">${escapeHtml(row.acceptance_check||row.manual_check||'')}</span></td><td>${mappingActionButton(row)}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">当前筛选没有条目</td></tr>';$('tuiMappingTable').innerHTML=`<thead><tr><th>检查</th><th>TUI 区域/动作</th><th>TUI 文案</th><th>WebUI 落点</th><th>状态</th><th>验证 / 点击证据</th><th>操作</th></tr></thead><tbody>${body}</tbody>`;bindMappingChecks(mapping)}
 function gateArray(items){return Array.isArray(items)?items.filter(x=>String(x??'').trim()).map(x=>String(x)) : []}
 function gateList(items,empty='-'){const rows=gateArray(items);return rows.length?`<ol class="gate-list">${rows.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ol>`:`<p class="muted">${escapeHtml(empty)}</p>`}
-function gateCommands(commands){lastGateCommands=gateArray(commands);if(!lastGateCommands.length)return '<p class="muted">没有安全 one-shot CLI；按人工步骤处理。</p>';return lastGateCommands.map((cmd,i)=>`<div class="gate-command-row"><code>${escapeHtml(cmd)}</code><button class="ghost copy-gate-command" data-copy-gate-command="${i}">Copy</button></div>`).join('')}
-async function copyGateCommand(i){const cmd=lastGateCommands[Number(i)]||'';if(!cmd){toast('没有可复制命令');return}try{await navigator.clipboard.writeText(cmd);toast('已复制 Human Gate 命令')}catch(_err){$('settingsReport').insertAdjacentHTML('afterbegin',`<div class="gate-box"><h5>Clipboard fallback</h5><p class="mono">${escapeHtml(cmd)}</p></div>`);toast('无法访问剪贴板，命令已显示')}}
+function gateCommands(commands){lastGateCommands=gateArray(commands);if(!lastGateCommands.length)return '<p class="muted">没有安全 one-shot CLI；按人工步骤处理。</p>';return lastGateCommands.map((cmd,i)=>`<div class="gate-command-row"><code>${escapeHtml(cmd)}</code><button class="ghost copy-gate-command" data-copy-gate-command="${i}">复制</button></div>`).join('')}
+async function copyGateCommand(i){const cmd=lastGateCommands[Number(i)]||'';if(!cmd){toast('没有可复制命令');return}try{await navigator.clipboard.writeText(cmd);toast('已复制 人工确认 命令')}catch(_err){$('settingsReport').insertAdjacentHTML('afterbegin',`<div class="gate-box"><h5>剪贴板备用显示</h5><p class="mono">${escapeHtml(cmd)}</p></div>`);toast('无法访问剪贴板，命令已显示')}}
 function bindGateCopyButtons(){document.querySelectorAll('[data-copy-gate-command]').forEach(btn=>{btn.onclick=()=>copyGateCommand(btn.dataset.copyGateCommand)})}
-function renderGateReport(data,targetId='settingsReport'){const mapping=data.mapping||[];const mappingHtml=mapping.length?mapping.map(row=>`<span class="chip">${escapeHtml(row.tui_area||'-')} / ${escapeHtml(row.tui_label||row.tui_action_id||'-')}</span>`).join(''):'<span class="chip">无 mapping row</span>';const writes=gateArray(data.writes);const writeText=writes.length?writes:['无直接写入；仍保留人工确认。'];const target=$(targetId)||$('settingsReport');if(!target)return;target.innerHTML=`<div class="gate-report"><div class="gate-plate"><div class="gate-head"><div><h4>${escapeHtml(data.title||data.action||'Human Gate')}</h4><p>${escapeHtml(data.note||'该动作需要人工确认，WebUI 不自动执行。')}</p></div><div class="gate-risk">${escapeHtml(data.risk_level||'high')} / blocked</div></div><div class="chips"><span class="chip">${escapeHtml(data.write_policy||'human_gate')}</span><span class="chip">${data.requires_human_confirmation?'requires human':'read-only'}</span><span class="chip">${data.blocked_auto_execute?'auto execute blocked':'auto allowed'}</span><span class="chip">${data.copyable?'copyable command':'manual only'}</span></div></div><div class="gate-grid"><div class="gate-box"><h5>Copyable commands</h5>${gateCommands(data.commands)}</div><div class="gate-box"><h5>Manual steps</h5>${gateList(data.manual_steps,'按项目 human gate 规则人工处理。')}</div><div class="gate-box"><h5>Write scope</h5>${gateList(writeText)}</div><div class="gate-box"><h5>Safer WebUI path</h5><p>${escapeHtml(data.safe_alternative||'使用 read-only report 或保存页 diff preview。')}</p><div class="chips">${mappingHtml}</div></div></div><details class="gate-raw"><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`;bindGateCopyButtons()}
+function renderGateReport(data,targetId='settingsReport'){const mapping=data.mapping||[];const mappingHtml=mapping.length?mapping.map(row=>`<span class="chip">${escapeHtml(row.tui_area||'-')} / ${escapeHtml(row.tui_label||row.tui_action_id||'-')}</span>`).join(''):'<span class="chip">无 mapping 行</span>';const writes=gateArray(data.writes);const writeText=writes.length?writes:['无直接写入；仍保留人工确认。'];const target=$(targetId)||$('settingsReport');if(!target)return;target.innerHTML=`<div class="gate-report"><div class="gate-plate"><div class="gate-head"><div><h4>${escapeHtml(data.title||data.action||'人工确认')}</h4><p>${escapeHtml(data.note||'该动作需要人工确认，WebUI 不自动执行。')}</p></div><div class="gate-risk">${riskLabel(data.risk_level||'high')} / 已拦截</div></div><div class="chips"><span class="chip">${writePolicyLabel(data.write_policy||'human_gate')}</span><span class="chip">${data.requires_human_confirmation?'需要人工确认':'只读'}</span><span class="chip">${data.blocked_auto_execute?'禁止自动执行':'允许自动执行'}</span><span class="chip">${data.copyable?'可复制命令':'仅人工'}</span></div></div><div class="gate-grid"><div class="gate-box"><h5>可复制命令</h5>${gateCommands(data.commands)}</div><div class="gate-box"><h5>人工步骤</h5>${gateList(data.manual_steps,'按项目 人工确认 规则人工处理。')}</div><div class="gate-box"><h5>写入范围</h5>${gateList(writeText)}</div><div class="gate-box"><h5>更安全的 WebUI 路径</h5><p>${escapeHtml(data.safe_alternative||'使用只读报告或保存页 diff 预览。')}</p><div class="chips">${mappingHtml}</div></div></div><details class="gate-raw"><summary>原始 JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`;bindGateCopyButtons()}
 function renderSettingsReport(data,targetId='settingsReport'){const target=$(targetId)||$('settingsReport');if(!target)return;if(data&&(data.blocked_auto_execute||data.requires_human_confirmation||data.status==='human_gate')){renderGateReport(data,targetId);return}target.textContent=JSON.stringify(data,null,2)}
-function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;const targetId=btn.dataset.reportTarget||'settingsReport';const target=$(targetId)||$('settingsReport');if(target)target.textContent='读取中...';const payload={action};if(btn.dataset.accountId)payload.account_id=btn.dataset.accountId;if(btn.dataset.providerId)payload.provider_id=btn.dataset.providerId;const data=await api('/api/settings/report',payload);renderSettingsReport(data,targetId);toast(data.ok?`${btn.textContent} report 已刷新`:`${btn.textContent} report 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
+function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;const targetId=btn.dataset.reportTarget||'settingsReport';const target=$(targetId)||$('settingsReport');if(target)target.textContent='读取中...';const payload={action};if(btn.dataset.accountId)payload.account_id=btn.dataset.accountId;if(btn.dataset.providerId)payload.provider_id=btn.dataset.providerId;const data=await api('/api/settings/report',payload);renderSettingsReport(data,targetId);toast(data.ok?`${btn.textContent} 已刷新`:`${btn.textContent} 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
 function syncUiSettings(){state.ui=state.ui||{};state.ui.language=$('uiLanguage')?.value||'zh'}
-function renderUiSettings(mapping){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')};const counts=(state.tui_webui_mapping_summary||{}).counts||{};const missingRows=(mapping||[]).filter(row=>row.status==='missing').map(row=>row.tui_label);if($('settingsGapSummary')){$('settingsGapSummary').innerHTML=`<span class="chip">native ${counts.native||0}</span><span class="chip">report ${counts.report||0}</span><span class="chip">draft ${counts.draft_review||0}</span><span class="chip">gate ${counts.human_gate||0}</span><span class="chip">missing ${counts.missing||0}</span>${missingRows.length?`<span class="chip">仍缺：${escapeHtml(missingRows.join(' / '))}</span>`:'<span class="chip">无 missing 行</span>'}`}}
-function accountActionButtons(a){const id=escapeHtml(a.id||'');return `<div class="btns"><button class="ghost mapping-action" data-settings-action="account_login_gate" data-report-target="settingsReport" data-account-id="${id}">login</button><button class="ghost mapping-action" data-settings-action="account_rename_gate" data-report-target="settingsReport" data-account-id="${id}">rename</button><button class="ghost mapping-action" data-settings-action="account_network_gate" data-report-target="settingsReport" data-account-id="${id}">network</button><button class="ghost mapping-action" data-settings-action="account_remove_gate" data-report-target="settingsReport" data-account-id="${id}">remove</button></div>`}
-function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderUiSettings(mapping);const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude human-only</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td><input data-account-family value="${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{}))}" ${locked?'disabled':''} placeholder="GPT=120, Qwen=90" style="min-width:160px"></td><td>${locked?escapeHtml(a.claude_1m_mode||'auto'):`<select data-account-claude-1m><option value="auto" ${(a.claude_1m_mode||'auto')==='auto'?'selected':''}>auto</option><option value="enable" ${a.claude_1m_mode==='enable'?'selected':''}>enable</option><option value="disable" ${a.claude_1m_mode==='disable'?'selected':''}>disable</option></select>`}</td><td>${locked?escapeHtml(a.timezone||'-'):`<input data-account-timezone value="${escapeHtml(a.timezone||'')}" placeholder="Asia/Singapore" style="min-width:140px">`}</td><td>${locked?escapeHtml(a.note||''):`<input data-account-note value="${escapeHtml(a.note||'')}" placeholder="note" style="min-width:130px">`}</td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${a.home_dir_configured?'yes':'no'}</td><td>${a.proxy_configured?'yes':'no'}</td><td>${a.no_proxy_configured?'yes':'no'}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${escapeHtml(a.webui_write_policy||'read_only')}</span></td><td>${accountActionButtons(a)}</td></tr>`}).join(''):'<tr><td colspan="18" class="empty-row">没有配置 OAuth/account 通道；可使用上方 Official login gate 查看人工登录边界。</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>Priority</th><th>Family</th><th>Claude 1M</th><th>timezone</th><th>note</th><th>auth</th><th>home</th><th>proxy</th><th>no_proxy</th><th>启动</th><th>最近</th><th>WebUI 写入</th><th>动作</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority],[data-account-family],[data-account-claude-1m],[data-account-timezone],[data-account-note]').forEach(el=>{const handler=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')};el.oninput=handler;el.onchange=handler});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>Area</th><th>Capability</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')?'off':''}">${escapeHtml(row.webui)}</span></td><td>${escapeHtml(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);bindSettingsActionButtons()}
+function renderUiSettings(mapping){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')};const counts=(state.tui_webui_mapping_summary||{}).counts||{};const missingRows=(mapping||[]).filter(row=>row.status==='missing').map(row=>row.tui_label);if($('settingsGapSummary')){$('settingsGapSummary').innerHTML=`<span class="chip">原生 ${counts.native||0}</span><span class="chip">报告 ${counts.report||0}</span><span class="chip">草稿 ${counts.draft_review||0}</span><span class="chip">人工确认 ${counts.human_gate||0}</span><span class="chip">缺失 ${counts.missing||0}</span>${missingRows.length?`<span class="chip">仍缺：${escapeHtml(missingRows.join(' / '))}</span>`:'<span class="chip">无缺失行</span>'}`}}
+function accountActionButtons(a){const id=escapeHtml(a.id||'');return `<div class="btns"><button class="ghost mapping-action" data-settings-action="account_login_gate" data-report-target="settingsReport" data-account-id="${id}">重新登录</button><button class="ghost mapping-action" data-settings-action="account_rename_gate" data-report-target="settingsReport" data-account-id="${id}">重命名</button><button class="ghost mapping-action" data-settings-action="account_network_gate" data-report-target="settingsReport" data-account-id="${id}">网络</button><button class="ghost mapping-action" data-settings-action="account_remove_gate" data-report-target="settingsReport" data-account-id="${id}">删除</button></div>`}
+function renderSettings(){state.account_defaults=state.account_defaults||{};const accounts=state.accounts||[];const coverage=state.webui_capability_coverage||[];const mapping=state.tui_webui_mapping||[];renderUiSettings(mapping);const accountRows=accounts.length?accounts.map(a=>{const locked=accountLocked(a);const cli=String(a.cli||'').toLowerCase();const isDefault=(state.account_defaults||{})[cli]===a.id;return `<tr data-account-id="${escapeHtml(a.id)}"><td>${locked?'<span class="tag off">Claude 人工锁定</span>':`<input data-account-enabled type="checkbox" ${a.enabled?'checked':''}>`}</td><td class="mono">${escapeHtml(a.id)}</td><td>${locked?escapeHtml(a.name):`<input data-account-name value="${escapeHtml(a.name)}" style="min-width:150px">`}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td><input data-account-default data-account-cli="${escapeHtml(cli)}" name="account-default-${escapeHtml(cli)}" type="radio" value="${escapeHtml(a.id)}" ${isDefault?'checked':''} ${locked?'disabled':''}></td><td><input data-account-priority type="number" value="${escapeHtml(a.priority||100)}" ${locked?'disabled':''} style="max-width:82px"></td><td><input data-account-family value="${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{}))}" ${locked?'disabled':''} placeholder="GPT=120, Qwen=90" style="min-width:160px"></td><td>${locked?escapeHtml(a.claude_1m_mode||'auto'):`<select data-account-claude-1m><option value="auto" ${(a.claude_1m_mode||'auto')==='auto'?'selected':''}>自动</option><option value="enable" ${a.claude_1m_mode==='enable'?'selected':''}>启用</option><option value="disable" ${a.claude_1m_mode==='disable'?'selected':''}>禁用</option></select>`}</td><td>${locked?escapeHtml(a.timezone||'-'):`<input data-account-timezone value="${escapeHtml(a.timezone||'')}" placeholder="Asia/Singapore" style="min-width:140px">`}</td><td>${locked?escapeHtml(a.note||''):`<input data-account-note value="${escapeHtml(a.note||'')}" placeholder="note" style="min-width:130px">`}</td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${yn(a.home_dir_configured)}</td><td>${yn(a.proxy_configured)}</td><td>${yn(a.no_proxy_configured)}</td><td>${a.usage?.launches||0}</td><td>${escapeHtml(a.usage?.last_used_at||'-')}</td><td><span class="tag ${locked?'off':''}">${writePolicyLabel(a.webui_write_policy||'read_only')}</span></td><td>${accountActionButtons(a)}</td></tr>`}).join(''):'<tr><td colspan="18" class="empty-row">没有配置 OAuth/account 通道；可使用上方 官方登录确认 查看人工登录边界。</td></tr>';$('accountTable').innerHTML=`<thead><tr><th>状态</th><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>priority</th><th>Family</th><th>Claude 1M</th><th>timezone</th><th>note</th><th>auth</th><th>home</th><th>proxy</th><th>no_proxy</th><th>启动</th><th>最近</th><th>WebUI 写入</th><th>动作</th></tr></thead><tbody>${accountRows}</tbody>`;document.querySelectorAll('[data-account-name],[data-account-enabled],[data-account-priority],[data-account-family],[data-account-claude-1m],[data-account-timezone],[data-account-note]').forEach(el=>{const handler=()=>{syncAccounts();toast('account 草稿已暂存，生成保存预览后再写入')};el.oninput=handler;el.onchange=handler});document.querySelectorAll('[data-account-default]').forEach(el=>{el.onchange=()=>{syncAccounts();renderSettings();toast('account 默认已暂存，生成保存预览后再写入')}});$('settingsCoverage').innerHTML=`<thead><tr><th>区域</th><th>能力</th><th>WebUI</th><th>TUI 后续</th></tr></thead><tbody>${coverage.map(row=>`<tr><td>${escapeHtml(row.area)}</td><td>${escapeHtml(row.capability)}</td><td><span class="tag ${String(row.webui||'').includes('planned')||String(row.webui||'').includes('human_gate')||String(row.webui||'').includes('待补齐')||String(row.webui||'').includes('人工确认')?'off':''}">${writePolicyLabel(row.webui)}</span></td><td>${writePolicyLabel(row.tui)}</td></tr>`).join('')}</tbody>`;renderTuiMapping(mapping);bindSettingsActionButtons()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
-function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
-function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'verified':'not verified'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'ready':notReady?'not ready':'unknown'}</span><span class="tag">missing keys ${blockers.missing_api_key_count||0}</span><span class="tag">missing base URL ${blockers.missing_base_url_count||0}</span><span class="tag">provider routes ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>Raw JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
+function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的审查产物。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'已脱敏':'含明文'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
+function renderApplyResult(data){const blockers=data.runtime_blockers||{};const next=data.next_action||{};const publish=data.publish||{};const verify=data.verify||{};const ready=data.runtime_ready===true;const notReady=data.runtime_ready===false;const errs=Array.isArray(data.errors)?data.errors:[data.error||'unknown error'];const title=!data.ok?'写入被阻止':(ready?'已发布，可直接给 mmf 使用':'已发布，但 runtime 未就绪');const detail=!data.ok?errs.join('；'):(ready?'latest-approved bundle 已验证，mmf 会读到这次保存后的最新 bundle。':'latest-approved bundle 已发布且已验证；mmf 会读到最新 bundle，但缺 key/base URL/模型 route 的条目不能正常启动。');$('saveResult').innerHTML=`<div><p><span class="tag ${data.ok&&!notReady?'':'off'}">${escapeHtml(title)}</span> <span class="tag">${escapeHtml(data.status||'-')}</span></p><p class="muted">${escapeHtml(detail)}</p><p><span class="tag">manifest ${verify.verified?'已验证':'未验证'}</span><span class="tag ${ready?'':'off'}">runtime ${ready?'就绪':notReady?'未就绪':'未知'}</span><span class="tag">缺 API Key ${blockers.missing_api_key_count||0}</span><span class="tag">缺 Base URL ${blockers.missing_base_url_count||0}</span><span class="tag">通道 route ${blockers.provider_route_count||publish.provider_route_count||0}</span></p>${next.label?`<p><strong>下一步</strong>：${escapeHtml(next.label)}</p>`:''}<details><summary>原始 JSON</summary><pre class="mono">${escapeHtml(JSON.stringify(data,null,2))}</pre></details></div>`}
 function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">移除隐藏记录 ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
 function currentBundleRevision(){return state?.consumer_bundle_status?.component_revisions?.bundle||state?.consumer_bundle_status?.manifest?.bundle_revision||state?.model_source_status?.generated_bundle?.component_revisions?.bundle||state?.model_source_status?.generated_bundle?.manifest?.bundle_revision||''}
 function draft(){syncProvider();syncFallback();syncRuntime();syncAccounts();syncUiSettings();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,accounts:state.accounts,account_defaults:state.account_defaults,rescue:state.rescue,vision_sidecar:state.vision_sidecar,ui:state.ui,runtime:state.runtime,opencode:state.opencode,expected_bundle_revision:currentBundleRevision(),route_scope_provider_ids:[...touchedProviders],route_refresh_provider_ids:[...staleCleanupProviders]}))}
@@ -6252,17 +6258,17 @@ $('restoreModelPatch').onclick=()=>{const p=current();const extra=(p.extra_model
 $('clearAllStaleHidden').onclick=cleanupAllStaleHidden
 function setTestState(label,ok=null){const box=$('testState');if(!box)return;const cls=ok===false?'off':'';box.innerHTML=`<span class="chip ${cls}">${escapeHtml(label)}</span>`}
 function showJson(targetId,data){const target=$(targetId);if(target)target.textContent=JSON.stringify(data,null,2)}
-async function runProviderModelsTest({targetId='testResult',switchToTest=false,applyToCurrent=false}={}){syncProvider();const target=$(targetId);if(target)target.textContent='测试 /models 中...';setTestState('models endpoint testing');const data=await api('/api/provider/test',{provider:current(),force_refresh:true});showJson(targetId,data);setTestState(data.ok?'models endpoint ok':'models endpoint failed',data.ok);if(switchToTest)setSection('test');if(applyToCurrent&&data.ok&&Array.isArray(data.models)){const p=current();if(!p.approved_route_models||!p.approved_route_models.length){p.approved_route_models=(p.models||[]).filter(r=>r&&r.id&&r.source!=='derived_alias').map(r=>r.id)}p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);if($('autoStaleCleanupOnFetch')?.checked&&staleRouteModels(p).length){staleCleanupProviders.add(p.id)}renderModelTable()}return data}
+async function runProviderModelsTest({targetId='testResult',switchToTest=false,applyToCurrent=false}={}){syncProvider();const target=$(targetId);if(target)target.textContent='测试 /models 中...';setTestState('models endpoint 测试中');const data=await api('/api/provider/test',{provider:current(),force_refresh:true});showJson(targetId,data);setTestState(data.ok?'models endpoint 正常':'models endpoint 失败',data.ok);if(switchToTest)setSection('test');if(applyToCurrent&&data.ok&&Array.isArray(data.models)){const p=current();if(!p.approved_route_models||!p.approved_route_models.length){p.approved_route_models=(p.models||[]).filter(r=>r&&r.id&&r.source!=='derived_alias').map(r=>r.id)}p.models=data.models.map(id=>({id,source:data.base_source||'remote',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)}));touchProvider(p.id);if($('autoStaleCleanupOnFetch')?.checked&&staleRouteModels(p).length){staleCleanupProviders.add(p.id)}renderModelTable()}return data}
 $('fetchModels').onclick=async()=>{const data=await runProviderModelsTest({targetId:'modelConfigResult',applyToCurrent:true});if(data.ok&&Array.isArray(data.models)){toast(staleCleanupProviders.has(current()?.id)?`拉取到 ${data.models.length} 个模型；已自动标记缺失旧 route 清理`:`拉取到 ${data.models.length} 个模型；不会自动写入 fallback_models；缺失旧 route 默认保留`)}else{toast(data.error||'模型拉取失败，请看模型配置结果')}}
 $('testList').onclick=async()=>{await runProviderModelsTest({targetId:'modelConfigResult',switchToTest:true})}
 $('openModelTest').onclick=()=>{renderTestSelectors();setSection('test')}
 $('testListBtn').onclick=async()=>{await runProviderModelsTest({targetId:'testResult'})}
-async function runSelectedModelTest(path,label){$('testResult').textContent=`${label} 测试中...`;setTestState(`${label} testing`);const data=await api(path,{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2);setTestState(data.ok?`${label} ok`:`${label} failed`,data.ok)}
+async function runSelectedModelTest(path,label){$('testResult').textContent=`${label} 测试中...`;setTestState(`${label} 测试中`);const data=await api(path,{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2);setTestState(data.ok?`${label} 成功`:`${label} 失败`,data.ok)}
 $('testModelBtn').onclick=async()=>runSelectedModelTest('/api/model/test','ping')
 $('chatTestBtn').onclick=async()=>runSelectedModelTest('/api/chat/test','chat')
 $('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderSaveControls();renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,registry_v2_save_plan:data.registry_v2_save_plan,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
 function currentApplyCommand(){return lastPlan?.registry_v2_save_plan?.apply_plan?.cli_apply_command||'./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json'}
-$('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载 redacted plan JSON')}
+$('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载脱敏 plan JSON')}
 $('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
 $('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});renderApplyResult(data);toast(data.ok?(data.runtime_ready===false?'已发布但 runtime 未就绪：请看 missing key/base URL':'预览 DB 已写入并发布，mmf 会读最新 bundle'):'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}
 $('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();touchedProviders=new Set();staleCleanupProviders=new Set();renderAll();}}

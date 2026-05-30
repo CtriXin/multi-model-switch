@@ -712,26 +712,26 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function renderSourceStatus()" in html
     assert "status.headline" in html
     assert "consumer_bundle_status" in html
-    assert "Consumer Bundle" in html
-    assert "Promotion Plan / Human Gate" in html
+    assert "消费端 Bundle" in html
+    assert "晋级计划 / 人工确认" in html
     assert "config_v2_promotion_plan" in html
-    assert "4.0 Release Readiness" in html
+    assert "4.0 发布就绪度" in html
     assert "config_v2_release_readiness" in html
     assert "release_complete 仍为 false" in html
-    assert "stable promotion human gate" in html
-    assert "blocked requirements" in html
+    assert "stable promotion 人工确认" in html
+    assert "阻塞检查项" in html
     assert "stable backup + bundle comparison" in html
-    assert "apply 仍停在 human gate" in html
+    assert "apply 仍停在 人工确认" in html
     assert "不读 SQLite" in html
     assert "mmf config bundle --json" in html
-    assert "candidate routes" in html
-    assert "missing keys" in html
+    assert "候选 route" in html
+    assert "缺 API Key" in html
     assert "registry_v2_save_plan" in html
     assert "applyV2Preview" in html
     assert "downloadPlanJson" in html
     assert "copyApplyCommand" in html
     assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
-    assert "Advanced / Recovery：plan JSON 与 CLI fallback" in html
+    assert "高级 / 恢复：plan JSON 与 CLI fallback" in html
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
@@ -753,7 +753,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
-    assert "['settings','设置','accounts / guard / about']" in html
+    assert "['settings','设置','账号 / Guard / 关于']" in html
     assert 'data-section="settings"' in html
     assert "<h2>设置</h2>" in html
     assert "通道、模型和真源动作已经放回各自模块" in html
@@ -772,7 +772,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "accountTable" in html
     assert "function syncAccounts()" in html
     assert "data-account-default" in html
-    assert "Claude human-only" in html
+    assert "Claude 人工锁定" in html
     assert "account_defaults:state.account_defaults" in html
     assert "uiLanguage" in html
     assert "saveUiLanguage" in html
@@ -793,7 +793,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "pClaude1m" in html
     assert "pTimezone" in html
     assert "pNote" in html
-    assert "network policy" in html
+    assert "网络策略" in html
     assert "data-account-family" in html
     assert "data-account-claude-1m" in html
     assert "data-account-timezone" in html
@@ -802,13 +802,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "tuiMappingTable" in html
     assert "mappingFilters" in html
     assert "acceptancePanel" in html
-    assert "逐项验收 checklist" in html
+    assert "逐项验收清单" in html
     assert "mapCheckProgress" in html
     assert "data-map-check" in html
     assert "function renderAcceptancePanel" in html
     assert "function copyAcceptanceReport" in html
     assert "function acceptanceReportText" in html
-    assert "Click evidence" in html or "click evidence" in html
+    assert "点击证据" in html
     assert "function renderTuiMapping" in html
     assert "data-map-filter" in html
     assert "data-section-jump" in html
@@ -817,18 +817,18 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function deleteCurrentProviderDraft()" in html
     assert "maintenanceActions" not in html
     assert "/api/settings/report" in html
-    assert "human-gated" in html
-    assert "Report / Human Gate" in html
+    assert "人工确认" in html
+    assert "报告 / 人工确认" in html
     assert "function renderGateReport" in html
     assert "function copyGateCommand" in html
     assert "data-copy-gate-command" in html
     assert "blocked_auto_execute" in html
     assert "requires_human_confirmation" in html
-    assert "Copyable commands" in html
-    assert "Manual steps" in html
+    assert "可复制命令" in html
+    assert "人工步骤" in html
     assert "function renderSettings()" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
-    assert "pending key" in html
+    assert "待保存 Key" in html
     assert "已输入新 key，保存前会保留（不回显）" in html
     assert "keyEl.dataset.touched='1'" in html
     assert "p.pending_api_key=true" in html
@@ -904,18 +904,18 @@ def test_config_web_plan_does_not_materialize_empty_fallback_models(tmp_path):
 def test_config_web_opencode_agent_overrides_are_advanced_ui():
     html = mms_config_web._HTML_PAGE
 
-    assert "OpenCode default profile" in html
-    assert "OpenCode Agent Roster" in html
-    assert "Order 是 priority/fallback order, not round-robin" in html
-    assert "Agent overrides" in html
-    assert "Enabled agents" in html
+    assert "OpenCode 默认 profile" in html
+    assert "OpenCode Agent 名单" in html
+    assert "顺序表示 priority/fallback 顺序，不是 round-robin" in html
+    assert "Agent 覆盖" in html
+    assert "已启用 Agent" in html
     assert 'id="opencodeOverrideSummary"' in html
     assert 'id="opencodeAdvanced"' in html
     assert "<details" in html
-    assert "Advanced: OpenCode per-agent roster" in html
+    assert "高级：OpenCode 逐 Agent 名单" in html
     assert "只看改动项" in html
-    assert "+ Add Vision Agent" in html
-    assert "+ Add Executor Agent" in html
+    assert "+ 添加 Vision Agent" in html
+    assert "+ 添加执行 Agent" in html
     assert "全部自动" in html
     assert "['execute','执行/协调']" in html
     assert "enabledOnly=false" in html
