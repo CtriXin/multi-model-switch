@@ -88,9 +88,9 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Channel behavior:
 
 - `stable` follows the newest human-stabilized GitHub Release / stable line.
-- `dev` follows the active development ref; it maps to the `dev` branch unless `MMS_INSTALL_DEV_REF` is overridden.
-- `canary` follows the `canary` branch and may break temporarily.
-- `mms` and `mmf` are two config roots from the same install, not two code installations: `mms -> ~/.config/mms`, `mmf -> ~/.config/mms-next`.
+- `dev` follows the active development ref and makes the primary `mms` entrypoint read the preview DB root `~/.config/mms-next`.
+- `canary` follows the `canary` branch, may break temporarily, and also reads `~/.config/mms-next` by default.
+- `stable` and explicit `--ref main` keep the primary `mms` entrypoint on `~/.config/mms`; `mmf` is always the explicit preview-root entrypoint.
 
 Fresh-machine install with optional CLI bootstrap:
 
@@ -106,18 +106,19 @@ mms models
 mmf config web
 ```
 
-Note: Dev channel selects the code branch. The preview DB save button is controlled by the config root. Use `mmf config web` for `Write preview DB + publish`; `mms config web` intentionally shows the stable legacy save path.
+Note: Dev / Canary now select both the code branch and the preview DB root for the primary `mms` entrypoint. Stable / explicit `--ref main` keep `mms` on the stable legacy root. Use `mmf config web` whenever you want to force the preview root regardless of channel.
 
 See also: [Release channels](docs/RELEASE_CHANNELS.md) and [Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
 
 ## Config V2 Preview Root
 
 Config v2 is available as a preview path before it becomes the stable default.
-Use `mms` for the current stable root and `mmf` for the isolated preview root:
+Root mapping:
 
 ```text
-mms -> ~/.config/mms
-mmf -> ~/.config/mms-next
+mms --channel stable / --ref main -> ~/.config/mms
+mms --channel dev/canary         -> ~/.config/mms-next
+mmf                              -> ~/.config/mms-next
 ```
 
 Recommended preview flow:

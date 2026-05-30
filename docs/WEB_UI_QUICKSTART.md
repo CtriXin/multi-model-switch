@@ -4,7 +4,7 @@ Web UI 是 MMS 当前最适合做教程的配置入口。它比 TUI 更适合截
 
 ## 启动
 
-Preview root 推荐用 `mmf`。如果保存页显示的是 `保存配置`，说明你打开的是 `mms config web` stable root；要写 `预览 DB + latest-approved bundle` 必须用 `mmf`：
+Dev / Canary 安装后的 primary `mms` 默认就是 preview DB root；Stable / pinned `main` 的 `mms` 仍是 stable root。无论当前 channel 是什么，显式 preview root 都可以用 `mmf`：
 
 ```bash
 mmf config web
@@ -20,7 +20,7 @@ mmf config web --no-open
 
 首页先看四块状态：
 
-1. **Root**：当前是 `mms` stable root 还是 `mmf` preview root。
+1. **Root**：当前是 stable root `~/.config/mms`，还是 preview DB root `~/.config/mms-next`。
 2. **Registry DB**：preview DB 是否存在、route/model fact 是否已写入。
 3. **Latest Approved Bundle**：下游实际读取的 generated bundle 是否 verified。
 4. **Promotion Plan / Human Gate**：当前是否只停在人工晋级门口，不会静默写 stable。

@@ -106,9 +106,38 @@ MMS_UV_BIN="$MMS_UV_BIN_DIR/uv"
 MMS_UV_PYTHON_DIR="$MMS_HOME/uv-python/install"
 MMS_UV_PYTHON_BIN_DIR="$MMS_HOME/uv-python/bin"
 MMS_UV_CACHE_DIR="$MMS_HOME/uv-cache"
-CREDENTIALS_PATH="$REAL_HOME/.config/mms/credentials.sh"
-CONFIG_PATH="$REAL_HOME/.config/mms/config.toml"
-VERSION_META_PATH="$REAL_HOME/.config/mms/version.json"
+STABLE_CONFIG_DIR="$REAL_HOME/.config/mms"
+PREVIEW_CONFIG_DIR="$REAL_HOME/.config/mms-next"
+CREDENTIALS_PATH="$STABLE_CONFIG_DIR/credentials.sh"
+CONFIG_PATH="$STABLE_CONFIG_DIR/config.toml"
+VERSION_META_PATH="$STABLE_CONFIG_DIR/version.json"
+
+install_channel_uses_preview_root() {
+    case "$INSTALL_CHANNEL" in
+        dev|canary) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+active_config_dir() {
+    if install_channel_uses_preview_root; then
+        printf "%s" "$PREVIEW_CONFIG_DIR"
+    else
+        printf "%s" "$STABLE_CONFIG_DIR"
+    fi
+}
+
+active_config_path() {
+    printf "%s/config.toml" "$(active_config_dir)"
+}
+
+active_credentials_path() {
+    printf "%s/credentials.sh" "$(active_config_dir)"
+}
+
+active_version_meta_path() {
+    printf "%s/version.json" "$(active_config_dir)"
+}
 
 cleanup() {
     if [ -n "$SOURCE_TMP_DIR" ] && [ -d "$SOURCE_TMP_DIR" ]; then
@@ -1050,8 +1079,10 @@ download_remote_source() {
 
 write_version_metadata() {
     ensure_install_ref_resolved
-    mkdir -p "$(dirname "$VERSION_META_PATH")"
-    "$(_python_bin)" - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" <<'PY'
+    local version_meta_path
+    version_meta_path="$(active_version_meta_path)"
+    mkdir -p "$(dirname "$version_meta_path")"
+    "$(_python_bin)" - "$version_meta_path" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" <<'PY'
 import json
 import re
 import sys
@@ -1075,15 +1106,17 @@ with open(path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, ensure_ascii=False, indent=2)
     handle.write("\n")
 PY
-    chmod 600 "$VERSION_META_PATH"
+    chmod 600 "$version_meta_path"
     if [ -n "$RESOLVED_INSTALL_REF" ]; then
         echo "✓ $(t "已记录安装版本" "Recorded installed version"): $RESOLVED_INSTALL_REF"
     fi
 }
 
 write_language_config() {
-    mkdir -p "$(dirname "$CONFIG_PATH")"
-    "$(_python_bin)" - "$CONFIG_PATH" "$INSTALL_LANG" <<'PY'
+    local config_path
+    config_path="$(active_config_path)"
+    mkdir -p "$(dirname "$config_path")"
+    "$(_python_bin)" - "$config_path" "$INSTALL_LANG" <<'PY'
 import os
 import sys
 
@@ -2235,15 +2268,36 @@ path.write_text("".join(lines), encoding="utf-8")
 PY
 }
 
+install_primary_mms_entrypoint() {
+    local target="$BIN_DIR/mms"
+    rm -f "$target"
+    if install_channel_uses_preview_root; then
+        cat > "$target" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export MMS_CONFIG_ROOT="\${MMS_CONFIG_ROOT:-$PREVIEW_CONFIG_DIR}"
+export MMS_PREVIEW_MODE="\${MMS_PREVIEW_MODE:-mms-$INSTALL_CHANNEL}"
+export MMS_INSTALL_CHANNEL="\${MMS_INSTALL_CHANNEL:-$INSTALL_CHANNEL}"
+exec "$MMS_HOME/mms" "\$@"
+EOF
+        chmod +x "$target"
+        echo "✓ $(t "已创建 mms 预览 DB 入口" "Created mms preview DB entrypoint"): $target -> $PREVIEW_CONFIG_DIR"
+    else
+        ln -sf "$MMS_HOME/mms" "$target"
+    fi
+}
+
 current_installed_ref() {
     local installed_ref=""
+    local version_meta_path
+    version_meta_path="$(active_version_meta_path)"
 
-    if [ ! -f "$VERSION_META_PATH" ]; then
+    if [ ! -f "$version_meta_path" ]; then
         return 0
     fi
 
     if command -v python3 >/dev/null 2>&1; then
-        installed_ref="$(python3 - "$VERSION_META_PATH" <<'PY'
+        installed_ref="$(python3 - "$version_meta_path" <<'PY'
 import json
 import sys
 
@@ -2261,7 +2315,7 @@ PY
         return 0
     fi
 
-    sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_META_PATH" | head -n 1
+    sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$version_meta_path" | head -n 1
 }
 
 print_planned_version() {
@@ -3931,7 +3985,12 @@ print_dry_run_plan() {
     echo "• $(t "MMS 安装目录" "MMS install dir"): $MMS_HOME"
     echo "• $(t "命令目录" "command dir"): $BIN_DIR"
     echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
-    echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
+    echo "• $(t "配置目录" "config dir"): $(active_config_dir)"
+    if install_channel_uses_preview_root; then
+        echo "• $(t "通道入口" "channel entrypoint"): mms -> preview DB root ($(active_config_dir))"
+    else
+        echo "• $(t "通道入口" "channel entrypoint"): mms -> stable root ($(active_config_dir))"
+    fi
     echo "• $(t "会复制 session assets" "would copy session assets"): Caveman / TOON / token-saver / xmem / Web automation bundle"
 
     if [ -n "$INSTALL_CLI_LIST" ]; then
@@ -4529,8 +4588,8 @@ fi
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 primary symlink；legacy ccs / mmc 已下线，仅保留 mms / mmf / mmslogs 入口。
-ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
+# 创建 primary 入口；Dev/Canary 指向 preview DB root，Stable/Main 保持 stable root。
+install_primary_mms_entrypoint
 [ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"
 # Remove stale MMS-owned legacy ccs/mmc artifacts from previous installs without touching unrelated user commands.
 rm -f "$MMS_HOME/mmc"
@@ -4675,12 +4734,14 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo ""
     fi
 
-    if [ "$RUN_SETUP" -eq 1 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
+    active_config_path_value="$(active_config_path)"
+    active_credentials_path_value="$(active_credentials_path)"
+    if [ "$RUN_SETUP" -eq 1 ] && { [ ! -f "$active_config_path_value" ] || [ ! -f "$active_credentials_path_value" ]; }; then
         echo "$(t "检测到首次使用，启动配置向导..." "First-time setup detected, launching setup wizard...")"
         echo ""
         "$BIN_DIR/mms" || true
         DID_LAUNCH=1
-    elif [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
+    elif [ ! -f "$active_config_path_value" ] || [ ! -f "$active_credentials_path_value" ]; then
         echo "  $(t "首次配置请运行（二选一）:" "Run one of these for first-time setup:")"
         echo "    $BIN_DIR/mms"
         echo "    $BIN_DIR/mms config web"
@@ -4690,7 +4751,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
 
     echo ""
-    if [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
+    if [ ! -f "$active_config_path_value" ] || [ ! -f "$active_credentials_path_value" ]; then
         echo "  $(t "完成配置后，建议先做预检，再正式启动 CLI:" "After setup, run these preflight checks before launching the real CLI:")"
     else
         echo "  $(t "正式启动 CLI 前，建议先做这组预检:" "Before launching the real CLI, run this preflight sequence:")"

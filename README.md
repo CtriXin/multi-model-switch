@@ -30,8 +30,8 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 | 通道 | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
 |---|---|---|---|---|
 | Stable | `--channel stable` | 普通用户、主力生产环境 | 慢，跟随 GitHub Release / stable 分支 | 完整 smoke 后推进 |
-| Dev | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支；当前 `main` 会同步一段时间 | targeted tests 通过 |
-| Canary | `--channel canary` | 专门试新功能/回归验证的机器 | 最快，可每日同步 | 允许短期破，但必须可回滚 |
+| Dev | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支，并默认读取 preview DB root | targeted tests 通过 |
+| Canary | `--channel canary` | 专门试新功能/回归验证的机器 | 最快，可每日同步，并默认读取 preview DB root | 允许短期破，但必须可回滚 |
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。当前过渡期建议：`main` 暂不停止迭代；`dev` 和 `canary` 已从当前 `main` 切出并推送；之后日常新功能优先进入 `dev` / `canary`，Stable 单独 review 后推进。
 
@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 创建 `~/.mms/.venv`；系统 Python 不够新时，用 MMS-managed Python 兜底。
 - 发现 PATH、Homebrew、NVM 下的 `claude` / `codex` / `opencode` / `agy`。
 - 安装内建 session assets，但不会静默改写真实 provider/account 配置。
-- 写入 `~/.config/mms/version.json`，记录安装 ref、channel 和语言。
+- Stable / pinned `main` 写入 `~/.config/mms/version.json`；Dev / Canary 写入 `~/.config/mms-next/version.json`，记录安装 ref、channel 和语言。
 
 安装后检查：
 
@@ -93,15 +93,16 @@ mms test --provider <provider-id> --cli codex
 默认安装只有一套代码在 `~/.mms`，但会暴露两个入口：
 
 ```text
-mms -> ~/.config/mms       # stable/current root，日常启动
-mmf -> ~/.config/mms-next  # preview root，适合试 Config v2 / Web UI / registry DB
+mms --channel stable / --ref main -> ~/.config/mms       # stable/current root
+mms --channel dev/canary   -> ~/.config/mms-next  # preview DB root
+mmf                        -> ~/.config/mms-next  # 显式 preview root 入口
 ```
 
-所以你现在看到的“本地两套”主要是 **MMS + MMF 两个 config root**，不是 Stable/Dev 两个安装目录。另一台家里工作机如果要和白天电脑保持一致，建议安装同一个 `Dev` channel / pinned commit，然后同步必要的 provider 配置；如果想同时试 Stable 和 Canary，当前建议通过 `mms` / `mmf` 的 root 隔离来做，不要让两个安装器互相覆盖 `~/.mms`。
+所以现在的语义是：**Stable / pinned `main` 继续保护 `~/.config/mms`，Dev / Canary 默认追 `~/.config/mms-next` 的 preview DB / latest-approved bundle**。另一台家里工作机如果要和白天电脑保持一致，建议安装同一个 `Dev` channel / pinned commit，并同步 preview DB 所需 bundle / secrets；不要让多个 channel 同时覆盖同一个 `~/.mms` 后还假装是两套代码安装。
 
 ## Web UI 教程：从通道到模型可见性
 
-Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：**写入预览 DB 不是 Dev channel 决定的，而是 `mmf` preview root 决定的**。如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
+Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：**Dev / Canary 安装后的 `mms config web` 默认就是 preview DB root；Stable 或 pinned `main` 的 `mms config web` 仍是 stable legacy audited save。** 如果你想不看 channel、强制进入 preview root，也可以启动：
 
 ```bash
 mmf config web
@@ -115,7 +116,7 @@ mmf config web
 4. **设置模型能力**：隐藏噪音模型，标记 vision / reasoning / cache-sensitive 等能力。注意 Web UI 的 `reason` 是能力 metadata，不是 launch-time Thinking 开关。
 5. **生成保存预览**：先看 diff、risk、route publish guard 和 redacted plan JSON。
 6. **保存/发布 preview bundle**：preview root 会写 DB candidate、secret backend 和 `generated/model-registry.latest-approved.json`。
-7. **回到启动器验证**：用 `mmf config check --json`、`mmf config bundle --json`、`mmf doctor` 和一次真实 `mms test` 确认。
+7. **回到启动器验证**：Dev / Canary 用 `mms config check --json`、`mms config bundle --json`、`mms doctor` 和一次真实 `mms test` 确认；Stable / Main 可用 `mmf ...` 显式检查 preview root。
 
 更完整的 Web UI 图文脚本见 [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md)。后续要做截图时，用 Playwright 打开本地 Web UI 会比截 TUI 更稳定。
 

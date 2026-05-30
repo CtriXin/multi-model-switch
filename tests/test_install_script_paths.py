@@ -384,6 +384,70 @@ def test_dev_channel_defaults_to_dev_branch():
     assert 'DEV_CHANNEL_REF="${MMS_INSTALL_DEV_REF:-dev}"' in text
 
 
+def test_dev_and_canary_channels_use_preview_db_root_for_primary_entrypoint():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "install_channel_uses_preview_root()" in text
+    assert "dev|canary) return 0" in text
+    assert 'export MMS_CONFIG_ROOT="\\${MMS_CONFIG_ROOT:-$PREVIEW_CONFIG_DIR}"' in text
+    assert 'export MMS_PREVIEW_MODE="\\${MMS_PREVIEW_MODE:-mms-$INSTALL_CHANNEL}"' in text
+    assert "install_primary_mms_entrypoint" in text
+    assert 'ln -sf "$MMS_HOME/mms" "$target"' in text
+
+
+def test_dev_channel_dry_run_reports_preview_config_root(tmp_path):
+    home = tmp_path / "home"
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref="v1.16.5", latest_tag_ref="v1.16.6"))
+
+    completed = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--dev", "--dry-run"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert f"config dir: {home}/.config/mms-next" in completed.stdout
+    assert f"mms -> preview DB root ({home}/.config/mms-next)" in completed.stdout
+
+    canary = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--canary", "--dry-run"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert f"config dir: {home}/.config/mms-next" in canary.stdout
+    assert f"mms -> preview DB root ({home}/.config/mms-next)" in canary.stdout
+
+
+def test_stable_channel_dry_run_reports_stable_config_root(tmp_path):
+    home = tmp_path / "home"
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.update(_version_env_overrides(stable_ref="v1.16.5", latest_tag_ref="v1.16.6"))
+
+    completed = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--channel", "stable", "--dry-run"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert f"config dir: {home}/.config/mms" in completed.stdout
+    assert f"mms -> stable root ({home}/.config/mms)" in completed.stdout
+
+
 def test_install_script_uses_npm_first_cli_installs():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
