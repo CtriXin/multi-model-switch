@@ -1,206 +1,136 @@
-# Multi-Model Switch (MMS)
+# Multi-Model Switch（MMS）
 
-[简体中文 README](./README.zh-CN.md)
+[English README](./README.en.md) · [中文镜像](./README.zh-CN.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-> A launcher-first runtime manager for local AI coding CLIs. Use one entrypoint to choose models, providers, session packs, and isolated Claude/Codex homes without turning your real global account state into a fallback pool.
+> MMS 是一个 launcher-first 的本地 AI Coding CLI 运行时管理器。它把 `claude`、`codex`、`opencode`、`agy` 放到同一个入口里，让你选择模型、通道、账号、session 能力包和隔离 HOME，而不是让失败路径偷偷掉回真实全局账号。
 
-![MMS launcher tree](docs/images/mms-launcher-tree-en.svg)
+![MMS 启动器树结构](docs/images/mms-launcher-tree-cn.svg)
 
-## What MMS Does
+## 先说人话：它解决什么问题？
 
-MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `agy`; Qwen/Kimi/Gemini remain provider models, not standalone CLI launchers.
+如果你同时使用 Claude Code、Codex、OpenCode、New API / OpenAI-compatible 平台、国产模型和多个 provider，MMS 负责把“启动前应该想清楚的事”集中起来：
 
-Scope note: MMS is intentionally launcher-first. The old native `chat` / `discuss` client is removed; `review-launch` remains only as a narrow multi-review adapter handshake. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
+- **一个入口启动多个 CLI**：`mms` 进入 TUI，或直接 `mms claude` / `mms codex` / `mms opencode`。
+- **一个地方管理模型来源**：provider、account、route、fallback、thinking、vision、cache-sensitive transport 都在启动前可见。
+- **隔离但可恢复**：Claude/Codex session 使用 MMS 管理的 HOME / config seed，减少污染真实全局配置，同时保留 resume。
+- **Web UI 配配置**：不想手写 TOML 时，用 `mmf config web` 添加通道、拉模型、隐藏噪音模型、预览保存计划。
+- **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、xmem、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
+- **诊断优先**：在怀疑模型之前，先看 route、协议、cache、API Key、请求路径和 runtime exposure。
 
-It helps you:
+> Scope note: MMS 保持 launcher-first。旧的内置 `chat` / `discuss` 客户端已删除；`review-launch` 只保留为窄口径 multi-review adapter handshake。长期规划、执行、压缩策略和 run authority 应放在 Moebius、Pilot、Ant 或 addons，而不是继续扩张 MMS。
 
-- start the right CLI from one TUI or command line
-- choose providers and OAuth/account profiles explicitly
-- keep Claude/Codex session state isolated and resumable
-- bridge compatible model providers while preserving protocol semantics
-- inject session-scoped skills and hooks without editing global config
-- diagnose provider, route, cache, and exposed runtime state before blaming a model
+MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
 
-## Current Version
+## 版本通道：Stable / Dev / Canary
 
-Current stable release: `v3.3.1`
+我们采用类似 Chrome 的三通道策略，避免 `main` 同时承担“稳定版”和“日常开发版”的语义。
 
-Feature branch: `main` (tracks the newest iteration before the next stable cut)
+| 通道 | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
+|---|---|---|---|---|
+| Stable | `--channel stable` | 普通用户、主力生产环境 | 慢，跟随 GitHub Release / stable 分支 | 完整 smoke 后推进 |
+| Dev | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，当前过渡期跟随 `main`；分支切好后跟随 `dev` | targeted tests 通过 |
+| Canary | `--channel canary` | 专门试新功能/回归验证的机器 | 最快，可每日同步 | 允许短期破，但必须可回滚 |
 
-Key changes in this generation:
+分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。当前过渡期建议：`main` 暂不停止迭代；`dev` 和 `canary` 先从当前 `main` 切出；等 `release/stable-*` 追上后，再把稳定发布节奏固定下来。
 
-- Codex primary/rescue fallback now retries prompt-cache-sensitive GLM/DeepSeek/Qwen-compatible routes over Anthropic `/v1/messages` when a gateway rejects `/v1/chat/completions`
-- provider profiles for OpenAI, Qwen/DashScope, MiMo, MiniMax, DeepSeek, Kimi Code, and GLM/Z.ai
-- profile-driven auth/body/thinking/effort patching across launcher, bridge, router, and dispatch paths
-- Claude resume persistence through `.claude/projects`
-- Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
-- Codex resume write-back across isolated MMS-managed launches
-- OpenCode modes: `Agent`, `OMO`, and `Raw` with repo-local health feedback
-- OpenCode Agent contract lane: `mobius-spec-writer` writes an OpenSpec/SpecBridge-style task contract, and `mobius-spec-compliance-reviewer` checks diff + validation against it before release-gate review
-- OpenCode Agent work split: GPT handles coordination, specs, implementation/fix work, and final review; DeepSeek/MiMo/Qwen/GLM/Kimi default to lightweight read-only exploration, bug-hunt, vision, and context checks
-- OpenCode Agent mixed routes: GPT via OpenAI-compatible Responses/Chat, direct MiMo via OpenAI-compatible `/v1`, other domestic models via Anthropic `/v1/messages`
-- OpenCode bypass is enabled by default through permission `allow`; subagent `ask` permissions are auto-approved while explicit `deny` boundaries stay intact, and optional `opencode run` preflight uses `--dangerously-skip-permissions`
-- model fallback order: same-model second channel, same-role peer, then stable GPT fallback
-- runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
-- real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
-- installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
-- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `xmem`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
-- Caveman now defaults to `lite`, keeping full sentences while still removing filler; `/caveman full` remains available for stronger compression
-- quiet hook policy: MMS-managed Claude/Codex sessions avoid default SessionStart/UserPrompt probes; remaining hooks are guard, closeout, or explicitly enabled pack hooks
-- session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones, and also surfaces URL-based MCP servers from installed Claude plugins (for example Figma); for Codex, app-backed integrations already enabled in real `~/.codex/config.toml` win over duplicate inherited URL MCP entries so MMS does not create a second broken OAuth path; Codex Caveman preserves trusted hook order where possible
-- optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
-- optional xmem installer pack: `--install-xmem` installs the generic xmem CLI/skill, `--xmem-ref` can pin the source ref, and `--dry-run` previews the install/setup plan without writing files
-- optional MMS-managed ECC/OMC Claude agent-pack installer flow
+## 安装 / 升级
 
-MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It no longer adds default `xmem` SessionStart sync or UserPrompt gateway probes; agents can call the `xmem` skill/CLI explicitly when a task needs recall. The closeout hook only runs when an `xmem` CLI is configured; if the CLI is absent it fails open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
+> 默认 UI 语言是中文；如果要英文，加 `--lang en`。
 
-## Install Or Upgrade
-
-Recommended stable install (tracks the newest published stable release):
+### Stable：推荐给普通用户
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --latest-release
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
 ```
 
-New feature install (tracks `main` before the next stable cut):
+### Dev：推荐给你的两台工作机保持同状态
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --main
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
 ```
 
-Current stable exact pin (`v3.3.1`):
+### Canary：只给测试机或专门试新功能的 session
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary --write-shell-rc
 ```
 
-Channel behavior:
-
-- `--latest-release` follows the newest human-stabilized GitHub Release
-- `--main` follows the newest feature iteration on the default branch
-- no flag still installs the latest semver tag, which may be newer than the curated stable release line
-
-Default behavior after ref/channel selection:
-
-- installs the requested ref into an isolated MMS runtime under `~/.mms`
-- links `mms`, preview-root `mmf`, and `mmslogs` into `~/.local/bin`
-- creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
-- if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
-- discovers installed `claude` / `codex` / `opencode` / `agy` across PATH, Homebrew, and NVM versions
-- retires the legacy `ccs` and `mmc` shims; new installs expose `mms` / `mmf` / `mmslogs`, not `ccs` / `mmc`
-- asks before installing optional packs or missing frontend CLIs
-- does not silently rewrite your real provider/account configuration
-
-Fresh-machine install with optional CLI bootstrap:
+### 固定到某个 release 或分支
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex,opencode --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.3.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 ```
 
-Shell support:
-
-- Bash/Zsh: `--write-shell-rc` writes `~/.local/bin` into the active shell rc.
-- Fish: `--write-shell-rc` writes `~/.config/fish/conf.d/mms.fish`.
-- Ghostty/iTerm/Terminal: reopen the tab after install, or run `exec $SHELL -l`.
-- If you do not write shell rc, run `~/.local/bin/mms` or `~/.local/bin/mmf` immediately; direct `mms` / `mmf` works after PATH is loaded.
-
-Set the UI language during install:
+### 全新电脑顺手安装 CLI
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --lang en
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --lang zh
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc
 ```
 
-Pin a release when you need an exact version:
+安装器默认会：
+
+- 安装到 `~/.mms`，并把 `mms`、`mmf`、`mmslogs` 链接到 `~/.local/bin`。
+- 创建 `~/.mms/.venv`；系统 Python 不够新时，用 MMS-managed Python 兜底。
+- 发现 PATH、Homebrew、NVM 下的 `claude` / `codex` / `opencode` / `agy`。
+- 安装内建 session assets，但不会静默改写真实 provider/account 配置。
+- 写入 `~/.config/mms/version.json`，记录安装 ref、channel 和语言。
+
+安装后检查：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.1/install.sh | bash -s --
-```
-
-Verify the install:
-
-```bash
-bash install.sh --check
 mms doctor
-mms test --provider <id> --cli claude
-mms test --provider <id> --cli codex
+mms models
+mms routes
+mms test --provider <provider-id> --cli claude
+mms test --provider <provider-id> --cli codex
 ```
 
-Model families are provider models, not direct `qwen`/`kimi` CLI installs. On a
-fresh machine, MMS shows configured `fallback_models` / `extra_models`
-immediately while refreshing `/models` in the background; if a family is still
-missing on the same key, compare provider config/credentials and run
-`mms models` or `mms doctor full`.
+## MMS 和 MMF：不是两套程序，是两套配置 root
 
-## Config V2 Preview Root
-
-Config v2 is available as a preview path before it becomes the stable default.
-Use `mms` for the current stable root and `mmf` for the isolated preview root:
+默认安装只有一套代码在 `~/.mms`，但会暴露两个入口：
 
 ```text
-mms -> ~/.config/mms
-mmf -> ~/.config/mms-next
+mms -> ~/.config/mms       # stable/current root，日常启动
+mmf -> ~/.config/mms-next  # preview root，适合试 Config v2 / Web UI / registry DB
 ```
 
-Recommended preview flow:
+所以你现在看到的“本地两套”主要是 **MMS + MMF 两个 config root**，不是 Stable/Dev 两个安装目录。另一台家里工作机如果要和白天电脑保持一致，建议安装同一个 `Dev` channel / pinned commit，然后同步必要的 provider 配置；如果想同时试 Stable 和 Canary，当前建议通过 `mms` / `mmf` 的 root 隔离来做，不要让两个安装器互相覆盖 `~/.mms`。
+
+## Web UI 教程：从通道到模型可见性
+
+Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。启动：
 
 ```bash
-mmf config root --json
-mmf preview doctor --json
-mmf preview prepare --from ~/.config/mms --json
-mmf preview prepare --from ~/.config/mms --include-secrets --json
-mmf config check --json
-mmf config bundle --json
 mmf config web
 ```
 
-In preview mode, the human-facing entrypoints are TUI / `mms config` / WebUI.
-Those surfaces write DB candidates, the preview secret backend, and a verified
-`generated/model-registry.latest-approved.json` bundle; they do not make
-`config.toml`, `credentials.sh`, route, policy, profile, or lineup files compete
-as separate truth sources.
+常见流程：
 
-Stable promotion is still human-gated and read-only:
+1. **打开 Web UI**：先看首页的 Root / Registry DB / Latest Approved Bundle 状态。
+2. **添加或选择通道**：填写内部 ID、显示名、OpenAI / Anthropic base URL、API Key、models endpoint、protocols、supported CLIs。
+3. **拉取模型列表**：查看远端返回模型；如果远端不返回但你确认可用，用 extra/manual 模型补到当前通道。
+4. **设置模型能力**：隐藏噪音模型，标记 vision / reasoning / cache-sensitive 等能力。注意 Web UI 的 `reason` 是能力 metadata，不是 launch-time Thinking 开关。
+5. **生成保存预览**：先看 diff、risk、route publish guard 和 redacted plan JSON。
+6. **保存/发布 preview bundle**：preview root 会写 DB candidate、secret backend 和 `generated/model-registry.latest-approved.json`。
+7. **回到启动器验证**：用 `mmf config check --json`、`mmf config bundle --json`、`mmf doctor` 和一次真实 `mms test` 确认。
 
-```bash
-mmf promote --json
-mms migrate config-v2 --json
-mms config release-readiness --json
-```
+更完整的 Web UI 图文脚本见 [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md)。后续要做截图时，用 Playwright 打开本地 Web UI 会比截 TUI 更稳定。
 
-Even with `--apply`, `mms migrate config-v2` currently reports
-`apply_enabled=false` and stops at `stable_root_human_only` /
-`promotion_apply_not_implemented`. There is no silent fallback from the preview
-root into stable credentials, OAuth state, or Claude config. The release
-readiness audit can return `READY_FOR_4_0_HUMAN_GATE`, but it still reports
-`release_complete=false` until the human-gated stable promotion and post-promotion
-smoke are done.
-
-## Quick Start
-
-Interactive launch:
+## 快速使用
 
 ```bash
-mms
-```
-
-Direct CLI launch:
-
-```bash
-mms claude
-mms codex
-mms opencode
+mms                         # 交互式启动器
+mms claude                  # 启动 Claude
+mms codex                   # 启动 Codex
 mms opencode --profile agent
-mms opencode --profile omo
-mms opencode --profile raw
-mms --provider <provider-id> codex
-mms --provider <provider-id> opencode
-mms --account <account-id> claude
+mms --provider <id> codex
+mms --account <id> claude
 ```
 
-Export environment variables instead of launching:
+只导出环境变量，不立即启动：
 
 ```bash
 mms --export codex
@@ -208,211 +138,89 @@ mms --export opencode
 mms --export claude --apply
 ```
 
-Inspect routes and health:
+配置与诊断：
 
 ```bash
-mms models
-mms routes
-mms doctor
-mms test --provider <id> --cli claude
+mms config preferences.help
 mms exposure
 mms logs
+mms doctor full
+mmf config web
 ```
 
-## Mental Model
+## 常见问题
 
-```text
-MMS
-├── Entry
-│   ├── mms TUI
-│   ├── mms claude / mms codex / mms opencode / mms agy
-│   └── export / presets
-├── Decision
-│   ├── provider profiles
-│   ├── role + priority routing
-│   └── doctor / test / trace diagnostics
-├── Runtime Isolation
-│   ├── Claude: session HOME + .claude/projects resume
-│   ├── Codex: bounded .codex seed + write-back
-│   ├── OpenCode: real HOME + session-local XDG/config
-│   └── bridge: local protocol adapters when needed
-└── Session Packs
-    ├── token-saver / TOON
-    ├── Web automation bundle
-    └── Caveman / OMC / ECC / Pilot
+### 我只有一个 New API 平台，模型很多，MMS 能用吗？
+
+能。把 New API 当成 provider：填 base URL / key / models endpoint，然后让 Web UI 拉模型；拉不到但真实可用的模型放到 extra/manual 模型。隐藏、能力标记和 fallback 属于本地 policy，不应因为一次远端拉取缺失就盲删。
+
+### Thinking 是 Web UI 里的哪个勾？
+
+Web UI 模型表里的 `reason` / reasoning 是模型能力 metadata。真正启动时是否开 Thinking，取决于 provider/model compatibility profile 的 `thinking.supported/default_enabled`、effort 配置，以及 runtime 的 `thinking_mode`。
+
+### Caveman 现在怎么选？
+
+启动确认页按 `C` 在 Off / Light / Standard / Full 之间循环。默认 Light。写偏好时用：
+
+```toml
+[launch.defaults]
+caveman_mode = "enable"
+caveman_level = "light" # light | standard | full
 ```
 
-The diagram source lives in:
+### 另一台电脑应该装什么？
 
-- `docs/images/mms-launcher-tree.mmd`
-- `docs/images/mms-launcher-tree-outline.md`
-- `docs/images/mms-launcher-tree.html`
+如果那台是你的家里工作机，建议和白天机器一样安装 `Dev`，并尽量 pin 到同一个 commit / channel。Stable 更适合给别人或生产环境；Canary 更适合专门测试。
 
-## Runtime Safety Rules
+## 内建能力包
 
-MMS tries to fail closed inside the selected runtime.
+| Pack | 状态 | 用途 |
+|---|---|---|
+| Caveman | 内建 | 低 token 沟通模式；确认页选择 Off/Light/Standard/Full |
+| CodeGraph | 内建 passive skill | 优先用 symbol graph 做代码定位、callers/callees、impact 分析 |
+| token-saver | 内建 | 长日志/测试输出/diff 存 ref + snippet；`token-gain` / `mms-gain` 看节省估算 |
+| TOON | 内建 | 压缩 agent-facing JSON / status / handoff |
+| xmem | 内建 skill；可选全局 CLI | 跨项目 truth card / recall |
+| Web automation bundle | 内建 | `weber` router + `web-access` 登录态 Chrome + `agent-browser` headless |
+| NSR | 内建，默认开启 | MMS-managed Claude/Codex hook guard / closeout |
+| ECC / OMC | 可选安装 | Claude agent pack；启动确认页显式选择 |
 
-- Real `HOME` and global OAuth state are protected surfaces, not fallback pools.
-- A failed provider/account should not silently become another global account.
-- Claude semantics prefer `Anthropic /v1/messages` when a route supports it.
-- `OpenAI /v1/chat/completions` is fallback transport, not an invisible equivalent.
-- GUI/Keychain/browser launches from isolated sessions go through real-home wrappers; OpenCode keeps config/state session-local with real `HOME`.
-- Background helpers do not read macOS Keychain unless `MMS_STATUSLINE_KEYCHAIN_USAGE=1`, `MMS_ALLOW_KEYCHAIN_READ=1`, or `mms usage --keychain` is explicitly used.
-- Session packs are injected into the isolated session; they are not global default hooks.
-- Resume data is bounded and scoped so startup stays usable and account state stays isolated.
-
-Operational details:
-
-- [Provider profiles](./docs/PROVIDER_PROFILES.md)
-- [User preferences](./docs/MMS_USER_PREFERENCES.md)
-- [Claude cache / protocol runbook](./docs/SERVER_CLAUDE_CACHE_RUNBOOK.md)
-- [Agent guardrails](./docs/AGENT_GUARDRAILS.md)
-- [CLI/provider compatibility QA](./docs/CLI_PROVIDER_COMPAT_QA.md)
-
-## Provider Profiles
-
-Provider-specific behavior belongs in data, not in one-off launcher branches.
-
-`config/provider-profiles.json` records:
-
-- OpenAI-compatible and Anthropic-compatible endpoints
-- auth header expectations
-- Thinking / Effort request fields
-- provider-specific body patches
-- provider-specific parameter aliases
-- context window metadata
-- reference URLs for future verification
-
-Registry v2 is the preferred path for local changes: TUI / `mms config` / WebUI
-creates DB candidates, then publishes a verified
-`generated/model-registry.latest-approved.json` bundle. When that manifest is
-present, the generated Profile it references is the runtime boundary.
-
-Legacy user overlays can still live in the MMS config directory as manual
-import/export compatibility inputs. MMS should not mutate your real
-`config.toml` just because a model was probed.
-
-## User Preferences
-
-Use `~/.config/mms/preferences.toml` for install-safe daily launch preferences:
-
-- `thinking_mode` / `reasoning_effort`
-- `bypass`, `caveman_mode`, `nsr_mode`, `agent_pack`
-- disabled session `skills` / `mcp` / `hooks`
-- custom bundled asset roots such as `web_access`, `token_saver`, `xmem`, `nsr`, `ecc`, `omc`
-
-LLMs can discover the safe schema with `mms config preferences.help` or `mms config preferences.example`. This file is still real MMS config: agents may inspect and propose edits, but must not auto-write `~/.config/mms/**` without human confirmation.
-
-## Session Packs
-
-MMS can expose capabilities per session without writing global hooks/config.
-
-| Pack | Install state | Purpose |
-| --- | --- | --- |
-| `token-saver` / `TOON` | bundled in `~/.mms/vendor` | compact long outputs and structured handoffs |
-| `xmem` | bundled in `~/.mms/vendor` | generic cross-project memory / truth-index skill; only active when an `xmem` CLI/source is configured |
-| Web automation bundle | bundled in `~/.mms/vendor` | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
-| `Caveman` | bundled in `~/.mms/vendor` | compact communication mode; only active when enabled by preference or launch confirmation |
-| `NSR` | built-in hooks, default on | session-local continuation hooks for active NSR goals; no default startup or prompt hook |
-| `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
-| `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
-| `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
-
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`CodeGraph`, `token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is enabled by default for MMS-managed Claude/Codex sessions, but its default hook surface is limited to tool/compact/closeout events and can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / CodeGraph / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists.
-
-## Optional Installer Packs
-
-Install global optional packs only when you want them available outside MMS-managed sessions:
+可选全局安装示例：
 
 ```bash
-bash install.sh --install-rtk
-bash install.sh --install-brainkeeper-context
-bash install.sh --install-map
 bash install.sh --install-codegraph
-bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-toon
 bash install.sh --install-xmem
-bash install.sh --install-ops-env-safe
 ```
 
-Add `--dry-run` to preview the install plan without writing files, for example `bash install.sh --install-xmem --dry-run`.
+CodeGraph 初始化提示：
 
-`--install-brainkeeper-context` installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. The installed runtime lives at `~/.local/share/brainkeeper`; when a sibling BrainKeeper repo exists, the installer reuses its `install.sh`, but the active install still syncs into that directory. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
-
-`--install-map` installs the project-structure Map and enables the Claude SessionStart auto-index hook. It helps Claude orient in a repo faster by refreshing a lightweight directory/file map. This is a global Claude hook; use `--map-ref` to pin the version.
-
-`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS also injects a passive CodeGraph-first skill so agents prefer graph discovery before broad file reads. MMS no longer adds a default SessionStart auto-register hook for CodeGraph; run indexing explicitly when a repo needs it. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
-
-`--install-read-once` installs Claude Read token-saving hooks. Within one session it warns on repeated reads of unchanged files and prefers diffs after edits. It works automatically; users do not need to remember a command.
-
-`--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. `token-gain` / `mms-gain` / `token-saver gain` show estimated saved chars and gain percentage for stored refs, and a normal shell falls back to the most recent non-empty MMS session store when the current repo store is empty. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
-
-`--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for structured JSON/status/handoff compression in export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default. Do not use TOON for prose, code, raw logs, secrets, or exact CLI/API JSON.
-
-`--install-xmem` installs the generic xmem CLI plus the shared Codex/Claude xmem skill for export-only sessions outside MMS, then runs a lightweight `xmem setup`: it creates `~/.xmem` and registers shallow git roots under HOME without writing repo-local `.xmem` files. Use `--xmem-ref` to pin a tag or branch. MMS-launched sessions still bundle the xmem session asset by default.
-
-`--install-ops-env-safe` is an advanced-only path hint pack: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so export-only or special isolated sessions can inspect known host paths. Normal MMS sessions already receive real-HOME path hints and session host context, so most users do not need it. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
-
-Legacy `--install-mindkeeper-context` and `--mindkeeper-ref` still work as deprecated aliases for BrainKeeper installs.
-
-Install MMS-managed Claude agent packs without touching global Claude config:
-
-```bash
-bash install.sh --install-ecc
-bash install.sh --install-omc
-bash install.sh --install-agent-packs
+```text
+找出当前工作区下所有 git repo；没有 .codegraph 就执行 codegraph init -i，已有 .codegraph 就执行 codegraph sync；跳过 node_modules/vendor/build；最后汇总失败列表。
 ```
 
-Most day-to-day MMS sessions do not need global hook installation; the launcher can inject bundled or MMS-managed session assets directly.
+## 安全原则
 
-## Cleanup And Reset
+- 真实 `HOME` 和全局 OAuth 状态是保护面，不是 fallback 池。
+- provider/account 失败时，应在当前 runtime 内 fail closed，不静默切到另一个全局账号。
+- Claude 语义在 route 支持时优先走 `Anthropic /v1/messages`。
+- `OpenAI /v1/chat/completions` 是 fallback transport，不是等价默认值。
+- Web UI / TUI 写配置前应先生成 preview / diff / backup / audit evidence。
+- 真实 `~/.config/mms/**`，尤其 Claude 相关字段，仍然是 human-gated 配置。
 
-Dry-run dirty-install cleanup:
+## 更多文档
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash
-```
+- [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md)
+- [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)
+- [`docs/MMS_USER_PREFERENCES.md`](docs/MMS_USER_PREFERENCES.md)
+- [`docs/MODEL_CONFIG_CONTRACT.md`](docs/MODEL_CONFIG_CONTRACT.md)
+- [`docs/AGENT_GUARDRAILS.md`](docs/AGENT_GUARDRAILS.md)
 
-Apply only after checking the printed paths:
+## Release checklist
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash -s -- --apply
-```
-
-Full MMS-owned reset, dry-run first:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash
-```
-
-Then apply:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply
-```
-
-Reset targets MMS-owned install/config surfaces. It intentionally avoids shared `~/.claude`, shared `~/.codex`, and global OAuth state unless an explicit flag says otherwise.
-
-## Developer Notes
-
-Run focused checks before publishing launcher/session changes:
-
-```bash
-python3 -m py_compile mms_core.py mms_launchers.py mms_tui.py
-PYTHONPATH=. python3 -m pytest -q tests/test_codex_history_growth.py
-PYTHONPATH=. python3 -m pytest -q tests/test_claude_hardening_regressions.py -k 'resume or routing or bridge'
-git diff --check
-```
-
-Release checklist:
-
-1. keep the working tree clean
-2. choose the next semver tag
-3. create an annotated tag
-4. push branch and tag
-5. create a GitHub Release with install/upgrade notes
-
-## License
-
-Apache-2.0
+1. 从 `dev` / `main` 挑选已验证变更进入 Stable 候选。
+2. 运行 installer check、config check、关键 launcher smoke、Web UI save-plan smoke。
+3. 更新 README / release notes，明确 Stable / Dev / Canary 安装命令。
+4. 打 tag，推送 GitHub Release。
+5. 对家里工作机这类同步使用场景，记录推荐 pinned commit。

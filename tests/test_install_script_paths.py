@@ -334,6 +334,50 @@ def test_version_output_shows_current_stable_and_latest(tmp_path):
     assert "Planned install ref: v1.16.6" in completed.stdout
 
 
+def test_piped_channel_flags_resolve_stable_dev_and_canary_refs():
+    env = os.environ.copy()
+    env.update(_version_env_overrides(stable_ref="v1.16.5", latest_tag_ref="v1.16.6"))
+    env["MMS_INSTALL_DEV_REF"] = "dev"
+    env["MMS_INSTALL_CANARY_REF"] = "canary"
+
+    stable = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--channel", "stable", "--version"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    dev = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--dev", "--version"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    canary = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--canary", "--version"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "Planned install ref: v1.16.5" in stable.stdout
+    assert "Install channel: stable" in stable.stdout
+    assert "Dev ref: dev" in dev.stdout
+    assert "Planned install ref: dev" in dev.stdout
+    assert "Install channel: dev" in dev.stdout
+    assert "Canary ref: canary" in canary.stdout
+    assert "Planned install ref: canary" in canary.stdout
+    assert "Install channel: canary" in canary.stdout
+
+
 def test_install_script_uses_npm_first_cli_installs():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
