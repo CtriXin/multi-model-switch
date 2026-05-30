@@ -817,7 +817,21 @@ _HTML_PAGE = r"""<!doctype html>
     }
     .asset-source-strip {
       display: block;
+      margin: 4px 0 16px;
       min-width: 0;
+    }
+    #assetCliDetails {
+      margin: 16px 0;
+    }
+    .asset-ops-grid {
+      align-items: start;
+      margin-top: 16px;
+    }
+    .asset-ops-card {
+      align-self: start;
+    }
+    .asset-ops-card .btns {
+      margin-top: 14px;
     }
     .asset-source-diagnostic {
       border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
@@ -1552,10 +1566,10 @@ _HTML_PAGE = r"""<!doctype html>
         <div class="card asset-confirm-map" id="assetConfirmMap"></div>
         <div class="asset-cli-grid" id="assetCliOverview"></div>
       </details>
-      <div class="grid">
-        <div class="card span6 asset-config-card">
-          <h3>默认关闭草稿</h3>
-          <p class="muted" id="assetConfigContract">WebUI 当前只读展示能力目录；勾选“默认关闭”只会更新下方 snippet，不会自动写真实配置。</p>
+      <div class="grid asset-ops-grid">
+        <div class="card span6 asset-config-card asset-ops-card">
+          <h3>应用默认关闭</h3>
+          <p class="muted" id="assetConfigContract">勾选卡片后，在这里复制 preferences.toml 片段；应用后下一次 MMS 启动生效。</p>
           <div class="btns">
             <button id="copyAssetPrefs" class="secondary">复制偏好片段</button>
             <button id="resetAssetPrefs" class="ghost">恢复当前偏好</button>
@@ -1565,10 +1579,15 @@ _HTML_PAGE = r"""<!doctype html>
             <pre class="result" id="assetPreferenceSnippet"></pre>
           </details>
         </div>
-        <div class="card span6">
+        <div class="card span6 asset-ops-card">
           <h3>Global 添加位置</h3>
-          <p class="muted">想让原生 Claude / Codex 也加载，就放到这些目录；MMS 这里只管理会话内是否默认关闭，不自动写全局配置。</p>
-          <div class="asset-roots" id="assetGlobalRoots"></div>
+          <p class="muted">要让原生 CLI 也能加载，就把 Skill 放到对应目录；MMS 本页只管理 MMS 启动时是否默认关闭。</p>
+          <p class="mono">Claude: ~/.claude/skills/&lt;skill-name&gt;</p>
+          <p class="mono">Codex: ~/.codex/skills/&lt;skill-name&gt;</p>
+          <details>
+            <summary>查看已检测到的 Global / plugin 位置</summary>
+            <div class="asset-roots" id="assetGlobalRoots"></div>
+          </details>
         </div>
       </div>
     </section>
