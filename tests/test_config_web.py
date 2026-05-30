@@ -349,6 +349,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
+    assert "function assetDraftDiff()" in html
+    assert "能力草稿" in html
     assert 'data-section="sessionAssets"' in html
     assert "Skill / MCP 管理" in html
     assert "这里就是会话能力的配置入口" in html
