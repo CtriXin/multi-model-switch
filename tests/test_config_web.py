@@ -1885,6 +1885,37 @@ def test_config_web_preferences_apply_uses_backup_and_audit(tmp_path):
     assert saved["session_surfaces"]["disabled"]["mcp"] == ["pilot"]
 
 
+def test_config_web_preferences_apply_has_toml_fallback_without_tomli_w(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    payload = {
+        "disabled": {"skills": ["web-access"], "mcp": ["hive"], "hooks": []},
+        "assets": {"managed_enabled": True, "managed_root": str(tmp_path / "assets")},
+        "confirm_preferences": True,
+        "confirm_phrase": "保存偏好",
+    }
+
+    monkeypatch.setattr(mms_core, "tomli_w", None)
+    monkeypatch.setattr(
+        mms_core,
+        "_atomic_write_toml",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AttributeError("'NoneType' object has no attribute 'dump'")),
+    )
+
+    result = mms_config_web.apply_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    saved = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert result["ok"] is True
+    assert result["status"] == "saved"
+    assert saved["session_surfaces"]["disabled"]["skills"] == ["web-access"]
+    assert saved["session_surfaces"]["disabled"]["mcp"] == ["hive"]
+    assert saved["assets"]["managed_root"] == str(tmp_path / "assets")
+
+
 def test_config_web_preferences_apply_requires_confirmation(tmp_path):
     result = mms_config_web.apply_preferences_plan(
         {"disabled": {"skills": ["web-access"]}},

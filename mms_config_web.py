@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 import traceback
@@ -571,19 +572,88 @@ def _pretty_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
 
 
-def _toml_text(payload: dict[str, Any]) -> str:
+def _toml_key(key: Any) -> str:
+    text = str(key)
+    if re.fullmatch(r"[A-Za-z0-9_-]+", text):
+        return text
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _toml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
+    if value is None:
+        return '""'
+    if isinstance(value, datetime):
+        return json.dumps(value.isoformat(), ensure_ascii=False)
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _fallback_toml_dumps(payload: dict[str, Any]) -> str:
+    lines: list[str] = []
+
+    def emit_table(mapping: dict[str, Any], prefix: list[str]) -> None:
+        scalars: list[tuple[str, Any]] = []
+        nested: list[tuple[str, dict[str, Any]]] = []
+        for key, value in mapping.items():
+            if isinstance(value, dict):
+                nested.append((str(key), value))
+            else:
+                scalars.append((str(key), value))
+
+        if prefix and scalars:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append("[" + ".".join(_toml_key(part) for part in prefix) + "]")
+        for key, value in scalars:
+            lines.append(f"{_toml_key(key)} = {_toml_scalar(value)}")
+        for key, value in nested:
+            emit_table(value, [*prefix, key])
+
+    emit_table(payload if isinstance(payload, dict) else {}, [])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _toml_dumps(payload: dict[str, Any]) -> str:
     try:
         import tomli_w
 
         return tomli_w.dumps(payload)
     except Exception:
-        try:
-            mms_core = _load_mms_core()
-            if getattr(mms_core, "tomli_w", None) is not None:
-                return mms_core.tomli_w.dumps(payload)
-        except Exception:
-            pass
-    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        pass
+    try:
+        mms_core = _load_mms_core()
+        writer = getattr(mms_core, "tomli_w", None)
+        if writer is not None:
+            return writer.dumps(payload)
+    except Exception:
+        pass
+    return _fallback_toml_dumps(payload)
+
+
+def _toml_text(payload: dict[str, Any]) -> str:
+    return _toml_dumps(payload)
+
+
+def _atomic_write_preferences_toml(path: str, payload: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(_toml_dumps(payload))
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 def _diff_text(before: str, after: str, *, before_name: str, after_name: str) -> str:
@@ -2454,7 +2524,7 @@ def apply_preferences_plan(
     with mms_core._locked_config_write(lock_path):  # noqa: SLF001
         before_sha1 = mms_core._sha1_file(target_path)  # noqa: SLF001
         backup_path = _copy_preferences_backup(target_path, lock_path=lock_path)
-        mms_core._atomic_write_toml(target_path, plan["preferences"])  # noqa: SLF001
+        _atomic_write_preferences_toml(target_path, plan["preferences"])
         try:
             os.chmod(target_path, 0o600)
         except OSError:
