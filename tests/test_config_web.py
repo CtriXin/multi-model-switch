@@ -351,9 +351,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function renderApplyResult(data)" in html
     assert 'data-section="sessionAssets"' in html
     assert "Skill / MCP 管理" in html
+    assert "这里就是会话能力的配置入口" in html
     assert "function renderSessionAssets()" in html
     assert "assetPreferenceSnippet" in html
     assert "assetCards" in html
+    assert "assetControlHelp" in html
+    assert "添加到 MMS 动态" in html
+    assert "在这里开 / 关" in html
     assert "asset-search" in html
     assert "asset-list" in html
     assert "assetManagedRoots" in html
