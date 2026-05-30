@@ -179,3 +179,10 @@ Stop before any real config mutation gate:
 - This is close to a human-gate merge point: latest `main` is included, full isolated pytest is green, and the worktree is clean.
 - Larger root-module folder migration is intentionally deferred. Moving flat `mms_*.py` modules into packages would reduce visual clutter but has higher import/install/test blast radius than is appropriate immediately before merge.
 - The next safe cleanup after merge should be a dedicated package-layout migration plan with compatibility/import audit, not an opportunistic pre-gate move.
+
+### Human Launch Smoke Result
+
+- Timestamp: 2026-05-30T09:18:02+0800
+- Result: human reported the suggested `mmg` launch entries can open without crashing.
+- Scope: launch-only smoke; no real conversation required or recorded.
+- Human gate status: passed for merge-readiness purposes.
