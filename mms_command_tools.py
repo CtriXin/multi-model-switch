@@ -111,7 +111,7 @@ def current_command(*, primary_command, environ=None, argv0=None):
     environ = {} if environ is None else environ
     explicit = str(environ.get("MMS_COMMAND_NAME") or "").strip()
     invoked = os.path.basename(str(argv0 if argv0 is not None else (sys.argv[0] if sys.argv else ""))).strip()
-    known_entrypoints = {"mms", "mmd", "mmf", "mmg"}
+    known_entrypoints = {"mms", "mmd", "mmf", "mmg", "mmm"}
     if explicit and (explicit in known_entrypoints or invoked == explicit):
         return explicit
     if invoked in known_entrypoints:

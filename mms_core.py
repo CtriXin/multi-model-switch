@@ -502,8 +502,7 @@ CLI_MODEL_FAMILY_HINTS = {}
 def current_command():
     from mms_command_tools import current_command as current_command_helper
 
-    environ = os.environ if PRIMARY_COMMAND == "mms" else {}
-    return current_command_helper(primary_command=PRIMARY_COMMAND, environ=environ, argv0=sys.argv[0] if sys.argv else "")
+    return current_command_helper(primary_command=PRIMARY_COMMAND, environ=os.environ, argv0=sys.argv[0] if sys.argv else "")
 
 
 def display_title():

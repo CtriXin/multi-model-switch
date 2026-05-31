@@ -104,6 +104,8 @@ mmm -> Main worktree          # 当前 main 的 mms，root ~/.config/mms
 
 当前本机用 `scripts/link_local_channel_commands.sh` 把 5 个命令写到 `~/.local/bin`。另一台家里工作机如果要和白天电脑保持一致，建议同样准备 dev/canary/stable/main worktree 后运行这个脚本；如果只是普通用户安装，仍使用公开 `mms` 安装命令。
 
+启动更新提醒默认只提醒、手动确认更新：`mmg` 每次启动检查，`mmf` / `mmm` 每日检查，`mmd` 每周检查，`mms` 每日只提示 public installed copy。手动运行 `mmf update` / `mmg update` / `mmd update` / `mmm update` 时只允许 clean worktree fast-forward；dirty 或分叉会拒绝。
+
 ## Web UI 教程：从通道到模型可见性
 
 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动:

@@ -55,6 +55,20 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 - 重新生成本机命令时运行：`scripts/link_local_channel_commands.sh`。
 - 不要把 `mms` 当本地开发入口；`mms` 后续只代表 public installed copy。
 
+### 启动更新提醒策略
+
+本机 wrapper 会先调用 `scripts/local_channel_update.py` 做轻量提醒；默认只提醒/手动更新，不自动 pull：
+
+| Command | 检查频率 | 默认动作 | 手动更新 |
+|---|---|---|---|
+| `mms` | daily | 只提示 public installed copy，不自动更新 | `mms update` 只说明走 installer/release 更新 |
+| `mmd` | weekly | fetch 后提示；stable 不自动更新 | `mmd update` 仅允许 clean worktree fast-forward |
+| `mmf` | daily | fetch 后提示 dev 更新 | `mmf update` 仅允许 clean worktree fast-forward |
+| `mmg` | every launch | 每次 fetch 并提示 canary ahead/behind/diverged | `mmg update` 仅允许 clean worktree fast-forward |
+| `mmm` | daily | fetch 后提示 main 更新 | `mmm update` 仅允许 clean worktree fast-forward |
+
+安全规则：dirty worktree 拒绝更新；只允许 `git merge --ff-only`；分叉时只提示，不自动 merge/reset；检查状态写到 `~/.local/state/mms/channel-updates.json`，不写 `~/.config/mms/**`。
+
 ## 安装命令
 
 Stable：

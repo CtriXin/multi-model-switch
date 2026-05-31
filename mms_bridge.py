@@ -4140,21 +4140,88 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 ########################################################################
 
 
-def _responses_input_to_messages(instructions, input_items):
+def _responses_reasoning_item_text(item):
+    if not isinstance(item, dict):
+        return ""
+
+    parts = []
+
+    def _append_text(value):
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                parts.append(text)
+
+    def _append_part_list(values):
+        if isinstance(values, str):
+            _append_text(values)
+            return
+        if not isinstance(values, list):
+            return
+        for value in values:
+            if isinstance(value, str):
+                _append_text(value)
+                continue
+            if not isinstance(value, dict):
+                continue
+            _append_text(value.get("text"))
+            summary_text = value.get("summary_text")
+            if isinstance(summary_text, dict):
+                _append_text(summary_text.get("text"))
+            else:
+                _append_text(summary_text)
+
+    _append_text(item.get("text"))
+    _append_text(item.get("summary_text"))
+    _append_part_list(item.get("summary"))
+    _append_part_list(item.get("content"))
+    return "\n\n".join(parts).strip()
+
+
+def _responses_input_to_messages(instructions, input_items, model_name=""):
     """Convert Responses API 'input' array to Chat Completions 'messages'."""
     messages = []
     if instructions:
         messages.append({"role": "system", "content": instructions})
 
     pending_tool_calls = []
+    pending_reasoning_content = ""
+    requires_roundtrip = _domestic_model_requires_reasoning_content_roundtrip(model_name)
+
+    def _assistant_message(message):
+        if (
+            requires_roundtrip
+            and pending_reasoning_content
+            and isinstance(message, dict)
+            and str(message.get("role") or "") == "assistant"
+        ):
+            message["reasoning_content"] = pending_reasoning_content
+        return message
 
     for item in input_items or []:
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
         role = item.get("role")
+        item_reasoning_content = ""
+        if requires_roundtrip:
+            value = item.get("reasoning_content")
+            if isinstance(value, str) and value.strip():
+                item_reasoning_content = value.strip()
+
+        if item_type == "reasoning":
+            reasoning_text = _responses_reasoning_item_text(item)
+            if reasoning_text:
+                pending_reasoning_content = (
+                    f"{pending_reasoning_content}\n\n{reasoning_text}".strip()
+                    if pending_reasoning_content
+                    else reasoning_text
+                )
+            continue
 
         if item_type == "function_call":
+            if item_reasoning_content:
+                pending_reasoning_content = item_reasoning_content
             pending_tool_calls.append({
                 "id": item.get("call_id", item.get("id", "")),
                 "type": "function",
@@ -4168,19 +4235,20 @@ def _responses_input_to_messages(instructions, input_items):
         if item_type == "function_call_output":
             # Flush any pending tool_calls first
             if pending_tool_calls:
-                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
                 pending_tool_calls = []
             messages.append({
                 "role": "tool",
                 "tool_call_id": item.get("call_id", ""),
                 "content": str(item.get("output", "")),
             })
+            pending_reasoning_content = ""
             continue
 
         if role in ("user", "assistant", "system"):
             # Flush pending tool_calls before a new message
             if pending_tool_calls:
-                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
                 pending_tool_calls = []
 
             content_parts = item.get("content")
@@ -4204,15 +4272,36 @@ def _responses_input_to_messages(instructions, input_items):
                 content = ""
 
             if role == "assistant" and item_type == "message":
+                if item_reasoning_content:
+                    pending_reasoning_content = item_reasoning_content
                 # Check if this message also has tool_calls embedded
-                messages.append({"role": "assistant", "content": content})
+                messages.append(_assistant_message({"role": "assistant", "content": content}))
             else:
                 messages.append({"role": role, "content": content})
+                if role != "assistant":
+                    pending_reasoning_content = ""
             continue
 
     # Flush remaining pending tool_calls
     if pending_tool_calls:
-        messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+        messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
+
+    if requires_roundtrip:
+        last_reasoning_content = ""
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "")
+            reasoning_content = str(message.get("reasoning_content") or "").strip()
+            if role == "assistant":
+                if reasoning_content:
+                    last_reasoning_content = reasoning_content
+                    continue
+                if last_reasoning_content and isinstance(message.get("tool_calls"), list) and message["tool_calls"]:
+                    message["reasoning_content"] = last_reasoning_content
+                    continue
+            if role == "user":
+                last_reasoning_content = ""
 
     return messages
 
@@ -4258,6 +4347,11 @@ def _chat_messages_to_anthropic_payload(chat_messages, model_name, *, stream=Tru
             })
             continue
         blocks = []
+        reasoning_content = ""
+        if role == "assistant":
+            reasoning_content = str(message.get("reasoning_content") or "").strip()
+        if reasoning_content:
+            blocks.append({"type": "thinking", "thinking": reasoning_content})
         if content:
             blocks.append({"type": "text", "text": str(content)})
         for tool_call in message.get("tool_calls") or []:
@@ -4305,7 +4399,11 @@ def _responses_tools_to_anthropic(tools):
 
 
 def _responses_payload_to_anthropic_messages_payload(payload, model_name):
-    chat_messages = _responses_input_to_messages(payload.get("instructions", ""), payload.get("input", []))
+    chat_messages = _responses_input_to_messages(
+        payload.get("instructions", ""),
+        payload.get("input", []),
+        model_name,
+    )
     anthropic_payload = _chat_messages_to_anthropic_payload(
         chat_messages,
         model_name,
@@ -4318,6 +4416,30 @@ def _responses_payload_to_anthropic_messages_payload(payload, model_name):
     return anthropic_payload
 
 
+def _chat_delta_reasoning_content(delta):
+    if not isinstance(delta, dict):
+        return ""
+    value = delta.get("reasoning_content")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        text = value.get("text")
+        return text if isinstance(text, str) else ""
+    if not isinstance(value, list):
+        return ""
+    parts = []
+    for item in value:
+        if isinstance(item, str):
+            parts.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts)
+
+
 class _ChatCompletionsToResponsesTranslator:
     """Translate Chat Completions streaming chunks to Responses API SSE events.
     Matches the real OpenAI Responses API format that Codex expects."""
@@ -4326,7 +4448,9 @@ class _ChatCompletionsToResponsesTranslator:
         self.model_name = model_name
         self.response_id = response_id or f"resp_{uuid.uuid4().hex[:24]}"
         self.msg_item_id = f"msg_{uuid.uuid4().hex[:24]}"
+        self.reasoning_item_id = f"rs_{uuid.uuid4().hex[:24]}"
         self.text_content = ""
+        self.reasoning_content = ""
         self.tool_calls = {}  # index -> {id, name, arguments}
         self.started = False
         self.text_part_added = False
@@ -4350,6 +4474,47 @@ class _ChatCompletionsToResponsesTranslator:
                 "total_tokens": max(1, len(self.text_content) // 4),
             },
         }
+
+    def _normalized_reasoning_content(self):
+        return self.reasoning_content.strip()
+
+    def _reasoning_output_item(self):
+        reasoning_content = self._normalized_reasoning_content()
+        if not reasoning_content:
+            return None
+        return {
+            "type": "reasoning",
+            "id": self.reasoning_item_id,
+            "summary": [{"type": "summary_text", "text": reasoning_content}],
+            "status": "completed",
+        }
+
+    def _message_output_item(self, *, status="completed"):
+        item = {
+            "type": "message",
+            "id": self.msg_item_id,
+            "role": "assistant",
+            "status": status,
+            "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
+        }
+        reasoning_content = self._normalized_reasoning_content()
+        if reasoning_content:
+            item["reasoning_content"] = reasoning_content
+        return item
+
+    def _tool_call_output_item(self, tc_info, *, status="completed"):
+        item = {
+            "type": "function_call",
+            "id": tc_info["item_id"],
+            "call_id": tc_info["id"],
+            "name": tc_info["name"],
+            "arguments": tc_info["arguments"],
+            "status": status,
+        }
+        reasoning_content = self._normalized_reasoning_content()
+        if reasoning_content:
+            item["reasoning_content"] = reasoning_content
+        return item
 
     def process_chunk(self, chunk):
         """Process a single Chat Completions chunk and yield Responses SSE events."""
@@ -4385,6 +4550,9 @@ class _ChatCompletionsToResponsesTranslator:
         choice = choices[0]
         delta = choice.get("delta", {})
         finish_reason = choice.get("finish_reason")
+        reasoning_delta = _chat_delta_reasoning_content(delta)
+        if reasoning_delta:
+            self.reasoning_content += reasoning_delta
 
         # Text content delta
         content = delta.get("content")
@@ -4471,36 +4639,19 @@ class _ChatCompletionsToResponsesTranslator:
                 outgoing.append(("response.output_item.done", {
                     "type": "response.output_item.done",
                     "output_index": self.output_index + idx,
-                    "item": {
-                        "type": "function_call",
-                        "id": tc_info["item_id"],
-                        "call_id": tc_info["id"],
-                        "name": tc_info["name"],
-                        "arguments": tc_info["arguments"],
-                        "status": "completed",
-                    },
+                    "item": self._tool_call_output_item(tc_info),
                     "sequence_number": self._seq_num(),
                 }))
 
             # Build output for completed response
             output_items = []
+            reasoning_item = self._reasoning_output_item()
+            if reasoning_item:
+                output_items.append(reasoning_item)
             if self.text_content or not self.tool_calls:
-                output_items.append({
-                    "type": "message",
-                    "id": self.msg_item_id,
-                    "role": "assistant",
-                    "status": "completed",
-                    "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
-                })
+                output_items.append(self._message_output_item())
             for idx, tc_info in sorted(self.tool_calls.items()):
-                output_items.append({
-                    "type": "function_call",
-                    "id": tc_info["item_id"],
-                    "call_id": tc_info["id"],
-                    "name": tc_info["name"],
-                    "arguments": tc_info["arguments"],
-                    "status": "completed",
-                })
+                output_items.append(self._tool_call_output_item(tc_info))
 
             outgoing.append(("response.completed", {
                 "type": "response.completed",
@@ -4531,13 +4682,7 @@ class _ChatCompletionsToResponsesTranslator:
         events.append(("response.output_item.done", {
             "type": "response.output_item.done",
             "output_index": self.output_index,
-            "item": {
-                "type": "message",
-                "id": self.msg_item_id,
-                "role": "assistant",
-                "status": "completed",
-                "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
-            },
+            "item": self._message_output_item(),
             "sequence_number": self._seq_num(),
         }))
         return events
@@ -5185,6 +5330,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
+            model_name,
         )
         chat_payload = {
             "model": model_name,
@@ -5590,6 +5736,7 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
+            model_name,
         )
         chat_payload = {
             "model": model_name,
