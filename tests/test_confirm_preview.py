@@ -82,6 +82,41 @@ def test_confirm_launch_wrapper_renders_opencode_profile(monkeypatch):
     assert "一次性命令" in panel["text"]
 
 
+def test_confirm_launch_wrapper_initializes_rich_when_model_picker_was_skipped(monkeypatch):
+    printed = []
+
+    class FakeConsole:
+        def print(self, value):
+            printed.append(value)
+
+    class FakePrompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            return ""
+
+    def fake_panel(text, **kwargs):
+        return {"text": text, "kwargs": kwargs}
+
+    def fake_ensure_rich():
+        mms_core.Panel = fake_panel
+        mms_core.Prompt = FakePrompt
+
+    monkeypatch.setattr(mms_core, "console", FakeConsole())
+    monkeypatch.setattr(mms_core, "Panel", None)
+    monkeypatch.setattr(mms_core, "Prompt", None)
+    monkeypatch.setattr(mms_core, "_ensure_rich", fake_ensure_rich)
+
+    choice = mms_core.confirm_launch(
+        "claude",
+        {"model": "deepseek-v4-pro"},
+        runtime={"id": "direct-deepseek", "name": "Direct DeepSeek", "auth_mode": "api_key"},
+    )
+
+    assert choice == ""
+    assert printed[0]["kwargs"] == {"title": "确认启动", "border_style": "green"}
+    assert "deepseek-v4-pro" in printed[0]["text"]
+
+
 def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tmp_path):
     base_hook = tmp_path / "rtk-rewrite.sh"
     base_hook.write_text("#!/bin/sh\n", encoding="utf-8")

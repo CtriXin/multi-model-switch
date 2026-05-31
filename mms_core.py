@@ -4380,6 +4380,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
 
 
 def confirm_launch(cli, model_info, once=False, runtime=None):
+    _ensure_rich()
     from mms_confirm_preview import confirm_launch as confirm_launch_panel
 
     return confirm_launch_panel(
