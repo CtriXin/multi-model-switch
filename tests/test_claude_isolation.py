@@ -1017,6 +1017,149 @@ def test_load_project_scoped_claude_resume_session_id_requires_matching_model(mo
     assert result is None
 
 
+def test_claude_resume_scope_shares_api_key_channels_by_model(monkeypatch, tmp_path):
+    import mms_launchers
+
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+
+    shared_scope = mms_launchers._claude_resume_scope_id(
+        "mimo-direct",
+        runtime_kind="api_key",
+        resume_model="mimo-v2.5-pro",
+    )
+    assert shared_scope == "api-key-model-mimo-v2-5-pro"
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "mimo-direct",
+                "runtime_kind": "api_key",
+                "resume_model": "mimo-v2.5-pro",
+                "session_id": "session-direct",
+                "last_active_at": "2026-04-16T12:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "newapi-tokyo",
+                "runtime_kind": "api_key",
+                "resume_model": "mimo-v2.5-pro",
+                "session_id": "session-tokyo",
+                "last_active_at": "2026-04-16T13:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "newapi-tencent",
+                "runtime_kind": "api_key",
+                "resume_model": "glm-4.6",
+                "session_id": "session-other-model",
+                "last_active_at": "2026-04-16T14:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "oauth-main",
+                "runtime_kind": "oauth",
+                "resume_model": "mimo-v2.5-pro",
+                "session_id": "session-oauth",
+                "last_active_at": "2026-04-16T15:00:00+00:00",
+            },
+        ],
+    )
+
+    result = mms_launchers._load_project_scoped_claude_resume_session_id(
+        str(project_dir),
+        account_id=shared_scope,
+        runtime_kind="api_key",
+        resume_model="mimo-v2.5-pro",
+    )
+
+    assert result == "session-tokyo"
+
+
+def test_model_shared_resume_backfill_copies_same_model_api_key_project_store(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_project_store
+
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+    projects_root = tmp_path / "projects"
+    monkeypatch.setattr(mms_project_store, "PROJECTS_DIR", projects_root)
+
+    direct_root = projects_root / "direct-key"
+    direct_raw = direct_root / "claude" / "raw" / "projects" / "-tmp-repo"
+    direct_raw.mkdir(parents=True)
+    (direct_raw / "session-direct.jsonl").write_text('{"sessionId":"session-direct"}\n', encoding="utf-8")
+    (direct_root / "claude" / "state").mkdir(parents=True)
+    (direct_root / "claude" / "state" / "metadata.json").write_text(
+        json.dumps(
+            {
+                "canonical_path": str(project_dir.resolve()),
+                "account_id": "mimo-direct",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    oauth_root = projects_root / "oauth-key"
+    oauth_raw = oauth_root / "claude" / "raw" / "projects" / "-tmp-repo"
+    oauth_raw.mkdir(parents=True)
+    (oauth_raw / "session-oauth.jsonl").write_text('{"sessionId":"session-oauth"}\n', encoding="utf-8")
+    (oauth_root / "claude" / "state").mkdir(parents=True)
+    (oauth_root / "claude" / "state" / "metadata.json").write_text(
+        json.dumps(
+            {
+                "canonical_path": str(project_dir.resolve()),
+                "account_id": "oauth-main",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mms_launchers, "_backfill_real_claude_project_resume_files", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_claude_slot_roots_for_resume_backfill", lambda _account_id: [])
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "mimo-direct",
+                "runtime_kind": "api_key",
+                "resume_model": "mimo-v2.5-pro",
+                "session_id": "session-direct",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "oauth-main",
+                "runtime_kind": "oauth",
+                "resume_model": "mimo-v2.5-pro",
+                "session_id": "session-oauth",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "newapi-tencent",
+                "runtime_kind": "api_key",
+                "resume_model": "glm-4.6",
+                "session_id": "session-other-model",
+            },
+        ],
+    )
+
+    target = tmp_path / "target-projects"
+    mms_launchers._backfill_claude_project_resume_files(
+        str(target),
+        str(project_dir),
+        "api-key-model-mimo-v2-5-pro",
+        resume_model="mimo-v2.5-pro",
+    )
+
+    assert (target / "-tmp-repo" / "session-direct.jsonl").exists()
+    assert not (target / "-tmp-repo" / "session-oauth.jsonl").exists()
+
+
 def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):
     from mms_launchers import _sync_claude_session_state_to_account_home
 

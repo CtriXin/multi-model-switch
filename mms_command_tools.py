@@ -10488,9 +10488,10 @@ def resolve_resume_runtime_and_model(
     provider_id = str(args.provider or "").strip()
     if cli == "claude" and not account_id and not provider_id and isinstance(session_record, dict):
         source_id = str(session_record.get("account_id") or "").strip()
+        runtime_source_id = str(session_record.get("runtime_account_id") or "").strip()
         runtime_kind = str(session_record.get("runtime_kind") or "").strip()
-        if source_id and runtime_kind == "api_key":
-            provider_id = source_id
+        if runtime_kind == "api_key":
+            provider_id = runtime_source_id or source_id
         elif source_id and runtime_kind == "oauth":
             account_id = source_id
 

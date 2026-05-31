@@ -44,6 +44,7 @@ def build_claude_gateway_env(
         _apply_claude_visible_model_overrides,
         _apply_runtime_network_profile,
         _claude_resume_model_name,
+        _claude_resume_scope_id,
         _claude_route_status_paths,
         _configure_agent_pack_session_env,
         _ensure_bridge_helpers,
@@ -137,6 +138,14 @@ def build_claude_gateway_env(
     current_project = os.path.realpath(_safe_getcwd())
     current_project_state = _load_real_claude_project_state(current_project)
     resume_model = _claude_resume_model_name(display_model, selected_model, heavy_model)
+    runtime_id = str(runtime.get("id", ""))
+    runtime_kind_value = runtime_kind or str(runtime.get("auth_mode", "api_key"))
+    resume_scope_id = _claude_resume_scope_id(
+        runtime_id,
+        runtime_kind=runtime_kind_value,
+        resume_model=resume_model,
+    )
+    legacy_resume_scope_ids = [runtime_id] if runtime_id and runtime_id != resume_scope_id else []
     gw_existing = {}
     persistent_gateway_json = os.path.join(gateway_base, ".claude.json")
     persistent_gateway_claude_dir = os.path.join(gateway_base, ".claude")
@@ -182,8 +191,8 @@ def build_claude_gateway_env(
     data = _overlay_project_scoped_claude_resume_state(
         data,
         current_project,
-        account_id=str(runtime.get("id", "")),
-        runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+        account_id=resume_scope_id,
+        runtime_kind=runtime_kind_value,
         resume_model=resume_model,
     )
     with locked_state_file(gw_json):
@@ -206,10 +215,12 @@ def build_claude_gateway_env(
         _prepare_claude_session_tree(
             gateway_home,
             gw_claude_dir,
-            account_id=str(runtime.get("id", "")),
+            account_id=runtime_id,
             account_home=gateway_base,
-            runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+            runtime_kind=runtime_kind_value,
             resume_model=resume_model,
+            resume_scope_id=resume_scope_id,
+            legacy_resume_scope_ids=legacy_resume_scope_ids,
             skip_real_entries={"settings.json"},
         )
     report = runtime.get("_account_guard_report")

@@ -61,6 +61,23 @@ def normalized_claude_slot_account(value):
     return str(value or "").strip().lower()
 
 
+def claude_resume_scope_id(runtime_id="", *, runtime_kind="api_key", resume_model=""):
+    """Return the storage scope used for Claude project resume files."""
+    runtime_id = str(runtime_id or "").strip()
+    normalized_kind = str(runtime_kind or "").strip()
+    model = str(resume_model or "").strip().lower()
+    if normalized_kind == "api_key" and model:
+        slug = "".join(ch if ch.isalnum() else "-" for ch in model)
+        slug = "-".join(part for part in slug.split("-") if part)
+        if slug:
+            return f"api-key-model-{slug}"
+    return runtime_id
+
+
+def claude_resume_scope_is_model_shared(scope_id):
+    return str(scope_id or "").strip().lower().startswith("api-key-model-")
+
+
 def claude_project_resume_dir_names(project_path):
     paths = {
         os.path.abspath(os.path.expanduser(str(project_path or ""))),
@@ -102,7 +119,14 @@ def backfill_real_claude_project_resume_files(target_projects_dir, current_cwd):
         _launchers._copy_tree_files_if_missing(source_project_dir, target_project_dir)
 
 
-def backfill_claude_project_resume_files(target_projects_dir, current_cwd, account_id, current_session_home=""):
+def backfill_claude_project_resume_files(
+    target_projects_dir,
+    current_cwd,
+    account_id,
+    current_session_home="",
+    legacy_account_ids=None,
+    resume_model="",
+):
     """Recover Claude Code /resume files from older MMS isolated slots."""
     import mms_launchers as _launchers
 
@@ -113,8 +137,67 @@ def backfill_claude_project_resume_files(target_projects_dir, current_cwd, accou
     current_cwd = os.path.realpath(current_cwd or _launchers._safe_getcwd())
     current_session_home = os.path.realpath(current_session_home) if current_session_home else ""
     expected_account = normalized_claude_slot_account(account_id)
+    accepted_accounts = {expected_account}
+    for value in legacy_account_ids or []:
+        normalized = normalized_claude_slot_account(value)
+        if normalized:
+            accepted_accounts.add(normalized)
 
     _launchers._backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
+    for legacy_account in accepted_accounts - {expected_account}:
+        legacy_projects_dir = str(
+            _launchers.claude_raw_entry_path("projects", current_cwd, account_id=legacy_account)
+        )
+        if os.path.realpath(legacy_projects_dir) == os.path.realpath(target_projects_dir):
+            continue
+        _launchers._copy_tree_files_if_missing(legacy_projects_dir, target_projects_dir)
+    if _launchers._claude_resume_scope_is_model_shared(expected_account):
+        normalized_resume_model = _launchers._claude_resume_model_name(resume_model)
+        indexed_accounts = set()
+        if normalized_resume_model:
+            try:
+                sessions = _launchers.list_indexed_sessions("claude")
+            except Exception:
+                sessions = []
+            for session in sessions:
+                session_project = os.path.realpath(str(session.get("project_path") or session.get("cwd") or ""))
+                if session_project != current_cwd:
+                    continue
+                if str(session.get("runtime_kind") or "").strip() != "api_key":
+                    continue
+                session_resume_model = _launchers._claude_resume_model_name(
+                    session.get("resume_model"),
+                    session.get("display_model"),
+                    session.get("selected_model"),
+                )
+                if session_resume_model != normalized_resume_model:
+                    continue
+                session_account = normalized_claude_slot_account(session.get("account_id"))
+                if session_account and session_account != expected_account:
+                    indexed_accounts.add(session_account)
+        if indexed_accounts:
+            try:
+                from mms_project_store import get_projects_dir
+
+                project_roots = list(Path(get_projects_dir()).glob("*"))
+            except Exception:
+                project_roots = []
+            for project_root in project_roots:
+                metadata_path = project_root / "claude" / "state" / "metadata.json"
+                try:
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                metadata_account = normalized_claude_slot_account(metadata.get("account_id"))
+                if metadata_account not in indexed_accounts:
+                    continue
+                metadata_project = os.path.realpath(str(metadata.get("canonical_path") or ""))
+                if metadata_project != current_cwd:
+                    continue
+                source_projects_dir = str(project_root / "claude" / "raw" / "projects")
+                if os.path.realpath(source_projects_dir) == os.path.realpath(target_projects_dir):
+                    continue
+                _launchers._copy_tree_files_if_missing(source_projects_dir, target_projects_dir)
 
     for slots_root in _launchers._claude_slot_roots_for_resume_backfill(expected_account):
         if not os.path.isdir(slots_root):
@@ -131,7 +214,8 @@ def backfill_claude_project_resume_files(target_projects_dir, current_cwd, accou
             if os.path.realpath(str(marker.get("cwd") or "")) != current_cwd:
                 continue
             marker_account = normalized_claude_slot_account(marker.get("account_id"))
-            if expected_account and marker_account != expected_account:
+            marker_resume_scope = normalized_claude_slot_account(marker.get("resume_scope_id"))
+            if expected_account and marker_account not in accepted_accounts and marker_resume_scope not in accepted_accounts:
                 continue
             source_projects_dir = os.path.join(slot_home, ".claude", "projects")
             if os.path.realpath(source_projects_dir) == os.path.realpath(target_projects_dir):
@@ -154,6 +238,7 @@ def load_project_scoped_claude_resume_session_id(
     normalized_resume_model = _launchers._claude_resume_model_name(resume_model)
     if not normalized_project or not normalized_account_id:
         return None
+    model_shared_scope = _launchers._claude_resume_scope_is_model_shared(normalized_account_id)
     try:
         sessions = _launchers.list_indexed_sessions("claude")
     except Exception:
@@ -161,14 +246,18 @@ def load_project_scoped_claude_resume_session_id(
 
     candidates: list[tuple[str, str]] = []
     for session in sessions:
-        if str(session.get("account_id") or "").strip() != normalized_account_id:
-            continue
+        session_account_id = str(session.get("account_id") or "").strip()
+        session_runtime_kind = str(session.get("runtime_kind") or "").strip()
+        if session_account_id != normalized_account_id:
+            if not model_shared_scope:
+                continue
+            if normalized_runtime_kind != "api_key" or session_runtime_kind != "api_key":
+                continue
         session_project = os.path.realpath(
             str(session.get("project_path") or session.get("cwd") or "").strip()
         )
         if session_project != normalized_project:
             continue
-        session_runtime_kind = str(session.get("runtime_kind") or "").strip()
         if normalized_runtime_kind and session_runtime_kind and session_runtime_kind != normalized_runtime_kind:
             continue
         if normalized_resume_model:
@@ -335,6 +424,8 @@ def prepare_claude_session_tree(
     account_home="",
     runtime_kind="api_key",
     resume_model="",
+    resume_scope_id="",
+    legacy_resume_scope_ids=None,
     skip_real_entries=None,
     source_claude_dir=None,
     allowed_source_entries=None,
@@ -343,7 +434,8 @@ def prepare_claude_session_tree(
 
     current_cwd = os.path.realpath(_launchers._safe_getcwd())
     normalized_account_id = str(account_id or "").strip()
-    store = _launchers.ensure_claude_project_store(current_cwd, account_id=normalized_account_id)
+    normalized_resume_scope_id = str(resume_scope_id or normalized_account_id).strip()
+    store = _launchers.ensure_claude_project_store(current_cwd, account_id=normalized_resume_scope_id)
     skip_real_entries = set(skip_real_entries or ())
     allowed_source_entries = [
         str(entry).strip()
@@ -382,20 +474,23 @@ def prepare_claude_session_tree(
             _launchers.claude_raw_entry_path(
                 entry,
                 current_cwd,
-                account_id=normalized_account_id,
+                account_id=normalized_resume_scope_id,
             )
         )
         if entry == "projects":
             _launchers._backfill_claude_project_resume_files(
                 target,
                 current_cwd,
-                normalized_account_id,
+                normalized_resume_scope_id,
                 current_session_home=session_home,
+                legacy_account_ids=legacy_resume_scope_ids,
+                resume_model=resume_model,
             )
         _launchers._link_claude_persistent_entry(session_claude_dir, entry, target)
     _launchers.record_claude_session_start(
         cwd=current_cwd,
-        account_id=normalized_account_id,
+        account_id=normalized_resume_scope_id,
+        runtime_account_id=normalized_account_id,
         pid=os.getpid(),
         runtime_kind=runtime_kind,
         slot_home=session_home,
@@ -406,6 +501,8 @@ def prepare_claude_session_tree(
         cwd=current_cwd,
         project_key_value=store["project_key"],
         account_id=normalized_account_id,
+        resume_scope_id=normalized_resume_scope_id,
+        resume_model=resume_model,
         runtime_kind=runtime_kind,
         account_home=account_home,
     )
@@ -476,6 +573,7 @@ def finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
         return
     cwd = marker.get("cwd") or _launchers._safe_getcwd()
     account_id = str(marker.get("account_id") or "").strip()
+    resume_scope_id = str(marker.get("resume_scope_id") or account_id).strip()
     runtime_kind = str(marker.get("runtime_kind") or "").strip()
     account_home = str(marker.get("account_home") or "").strip()
     if not stale_cleanup:
@@ -487,7 +585,7 @@ def finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
     session_payload = _launchers.finalize_claude_session(
         cwd=cwd,
         pid=pid,
-        account_id=account_id,
+        account_id=resume_scope_id,
         exit_code=exit_code,
         stale_cleanup=stale_cleanup,
     )

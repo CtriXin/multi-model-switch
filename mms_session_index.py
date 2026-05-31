@@ -250,6 +250,7 @@ def record_claude_session_start(
     runtime_kind: str,
     slot_home: str,
     resume_model: str = "",
+    runtime_account_id: str = "",
 ) -> dict:
     store = ensure_claude_project_store(cwd, account_id=account_id)
     payload = {
@@ -257,6 +258,7 @@ def record_claude_session_start(
         "project_key": store["project_key"],
         "project_path": store["canonical_path"],
         "account_id": account_id or "",
+        "runtime_account_id": runtime_account_id or "",
         "started_at": _utc_now(),
         "last_active_at": None,
         "cwd": os.path.realpath(cwd),

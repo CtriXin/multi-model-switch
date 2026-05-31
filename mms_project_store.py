@@ -140,12 +140,16 @@ def write_slot_marker(
     account_id: str,
     runtime_kind: str,
     account_home: str | None = None,
+    resume_scope_id: str | None = None,
+    resume_model: str | None = None,
 ) -> Path:
     path = slot_marker_path(session_home)
     payload = {
         "cwd": os.path.realpath(cwd),
         "project_key": project_key_value,
         "account_id": account_id or "",
+        "resume_scope_id": resume_scope_id or account_id or "",
+        "resume_model": resume_model or "",
         "runtime_kind": runtime_kind,
         "account_home": os.path.realpath(account_home) if account_home else "",
         "written_at": _utc_now(),

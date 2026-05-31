@@ -221,6 +221,45 @@ def test_command_tools_resolve_resume_runtime_preserves_last_used_and_session_so
         )
     ]
 
+    calls.clear()
+    runtime, cli_models, launch_cli, model_info = mms_command_tools.resolve_resume_runtime_and_model(
+        cfg,
+        "claude",
+        SimpleNamespace(model="", account="", provider=""),
+        default_provider,
+        default_models,
+        {
+            "session_id": "claude-session",
+            "account_id": "api-key-model-gpt-5-4",
+            "runtime_account_id": "relay-a",
+            "runtime_kind": "api_key",
+            "resume_model": "gpt-5.4",
+        },
+        get_scene_usage=lambda: ({}, {}),
+        resolve_last_used_runtime=resolve_last_used_runtime,
+        trace_runtime_choice=lambda *args, **kwargs: calls.append(("unexpected-trace", args, kwargs)),
+        choose_runtime_source=choose_runtime_source,
+        uses_managed_entry=lambda runtime, cli: True,
+        runtime_with_launch_preferences=lambda current_cfg, runtime, cli: {**runtime, "prefs_for": cli},
+    )
+
+    assert runtime == {"id": "chosen", "prefs_for": "claude"}
+    assert cli_models == ["chosen-model"]
+    assert launch_cli == "claude"
+    assert model_info == {"model": "gpt-5.4"}
+    assert calls == [
+        (
+            "choose",
+            (cfg, "claude", default_provider, default_models),
+            {
+                "account_id": None,
+                "provider_id": "relay-a",
+                "model_info": {"model": "gpt-5.4"},
+                "allow_selected_model_accounts": True,
+            },
+        )
+    ]
+
 
 def test_resolve_codex_resume_ref_from_bounded_index(monkeypatch, tmp_path):
     import mms_core
@@ -491,10 +530,20 @@ def test_finalize_claude_slot_prints_mms_resume_hint(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mms_launchers,
         "read_slot_marker",
-        lambda _home: {"cwd": str(tmp_path), "account_id": "acct", "account_home": str(tmp_path / "acct")},
+        lambda _home: {
+            "cwd": str(tmp_path),
+            "account_id": "acct",
+            "resume_scope_id": "api-key-model-gpt-5-4",
+            "account_home": str(tmp_path / "acct"),
+        },
     )
     monkeypatch.setattr(mms_launchers, "_sync_claude_session_state_to_account_home", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mms_launchers, "_record_account_guard_finalize", lambda *_args, **_kwargs: None)
+    guard_calls = []
+    monkeypatch.setattr(
+        mms_launchers,
+        "_record_account_guard_finalize",
+        lambda *args, **kwargs: guard_calls.append((args, kwargs)),
+    )
 
     def fake_finalize(**kwargs):
         calls.update(kwargs)
@@ -505,6 +554,8 @@ def test_finalize_claude_slot_prints_mms_resume_hint(monkeypatch, tmp_path):
     mms_launchers._finalize_claude_slot(str(session_home), exit_code=0)
 
     assert calls["pid"] == 12345
+    assert calls["account_id"] == "api-key-model-gpt-5-4"
+    assert guard_calls[0][0][0] == "acct"
     assert any("mms resume claude:2ea6c1bc-8632-4d5c-94ba-672b4a744871" in item for item in console.items)
 
 

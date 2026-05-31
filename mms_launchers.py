@@ -3829,6 +3829,24 @@ def _claude_project_resume_dir_names(project_path):
     return claude_project_resume_dir_names(project_path)
 
 
+def _claude_resume_scope_id(runtime_id="", *, runtime_kind="api_key", resume_model=""):
+    """Compatibility wrapper for Claude resume storage scope."""
+    from mms_claude_session import claude_resume_scope_id
+
+    return claude_resume_scope_id(
+        runtime_id,
+        runtime_kind=runtime_kind,
+        resume_model=resume_model,
+    )
+
+
+def _claude_resume_scope_is_model_shared(scope_id):
+    """Compatibility wrapper for Claude model-shared resume scopes."""
+    from mms_claude_session import claude_resume_scope_is_model_shared
+
+    return claude_resume_scope_is_model_shared(scope_id)
+
+
 def _claude_slot_roots_for_resume_backfill(account_id):
     """Compatibility wrapper for Claude resume backfill roots."""
     from mms_claude_session import claude_slot_roots_for_resume_backfill
@@ -3843,7 +3861,14 @@ def _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
     return backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
 
 
-def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, account_id, current_session_home=""):
+def _backfill_claude_project_resume_files(
+    target_projects_dir,
+    current_cwd,
+    account_id,
+    current_session_home="",
+    legacy_account_ids=None,
+    resume_model="",
+):
     """Compatibility wrapper for Claude project resume backfill."""
     from mms_claude_session import backfill_claude_project_resume_files
 
@@ -3852,6 +3877,8 @@ def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, acco
         current_cwd,
         account_id,
         current_session_home=current_session_home,
+        legacy_account_ids=legacy_account_ids,
+        resume_model=resume_model,
     )
 
 
@@ -3870,6 +3897,8 @@ def _prepare_claude_session_tree(
     account_home="",
     runtime_kind="api_key",
     resume_model="",
+    resume_scope_id="",
+    legacy_resume_scope_ids=None,
     skip_real_entries=None,
     source_claude_dir=None,
     allowed_source_entries=None,
@@ -3884,6 +3913,8 @@ def _prepare_claude_session_tree(
         account_home=account_home,
         runtime_kind=runtime_kind,
         resume_model=resume_model,
+        resume_scope_id=resume_scope_id,
+        legacy_resume_scope_ids=legacy_resume_scope_ids,
         skip_real_entries=skip_real_entries,
         source_claude_dir=source_claude_dir,
         allowed_source_entries=allowed_source_entries,
