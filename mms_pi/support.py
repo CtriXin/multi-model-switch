@@ -14,6 +14,7 @@ from mms_opencode.config import opencode_config_slug as _opencode_config_slug
 from mms_provider_profiles import resolve_provider_profile
 from mms_state_io import atomic_write_text
 
+_MMS_ROOT = Path(__file__).resolve().parent.parent
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
     "mimo-v2.5-pro": 262_144,
@@ -126,31 +127,21 @@ def _exec_or_run(cmd, env, once):
     return _launchers_module()._exec_or_run(cmd, env, once)
 
 def _pi_wrapper_path():
-    wrapper_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "scripts",
-        "pi",
-        "cli-wrapper.sh",
-    )
+    wrapper_path = str(_MMS_ROOT / "scripts" / "pi" / "cli-wrapper.sh")
     if os.path.isfile(wrapper_path) and os.access(wrapper_path, os.X_OK):
         return wrapper_path
     return ""
 
 
 def _pi_retry_extension_path():
-    extension_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "scripts",
-        "pi",
-        "retry-extension.mjs",
-    )
+    extension_path = str(_MMS_ROOT / "scripts" / "pi" / "retry-extension.mjs")
     if os.path.isfile(extension_path):
         return extension_path
     return ""
 
 
 def _pi_npx_cache_dir():
-    return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
+    return str(_MMS_ROOT / ".ai" / "cache" / "pi-npx")
 
 
 def _pi_settings_payload():
@@ -216,7 +207,7 @@ _PI_OPENAI_PROFILE_COMPAT = {
 }
 
 _PI_CAPABILITY_REFERENCE_PATH = (
-    Path(__file__).resolve().parent
+    _MMS_ROOT
     / "docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json"
 )
 

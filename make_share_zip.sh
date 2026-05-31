@@ -29,6 +29,7 @@ DIRS=(
     "mms_codex"
     "mms_claude"
     "mms_agy"
+    "mms_pi"
 )
 
 for file in "${FILES[@]}"; do
