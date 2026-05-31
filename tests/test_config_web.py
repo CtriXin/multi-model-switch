@@ -721,6 +721,15 @@ def test_config_web_print_summary_exits_without_server(capsys):
     assert payload["recommendations"]
 
 
+def test_config_web_reexports_split_backend_modules():
+    import mms_config_web_server
+    import mms_config_web_settings
+
+    assert mms_config_web.ConfigWebApp is mms_config_web_server.ConfigWebApp
+    assert mms_config_web.run_config_web is mms_config_web_server.run_config_web
+    assert mms_config_web.build_settings_report is mms_config_web_settings.build_settings_report
+
+
 def test_config_web_markdown_contains_manual_snippets(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
