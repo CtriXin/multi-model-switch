@@ -524,6 +524,7 @@ def test_local_channel_worktree_update_reminder_is_non_blocking():
     text = (ROOT_DIR / "scripts" / "link_local_channel_commands.sh").read_text(encoding="utf-8")
 
     assert 'MMS_LOCAL_UPDATE_FOREGROUND:-0' in text
+    assert 'cached-remind --command "$MMS_COMMAND_NAME" --kind worktree' in text
     assert 'remind --command "$MMS_COMMAND_NAME" --kind worktree' in text
     assert '>/dev/null 2>&1 &' in text
 

@@ -72,9 +72,16 @@ def due(args: argparse.Namespace, state: dict) -> bool:
 
 def mark_checked(args: argparse.Namespace, state: dict, payload: dict | None = None) -> None:
     key = state_key(args)
+    previous = state.get(key) if isinstance(state.get(key), dict) else {}
+    preserved = {
+        name: previous[name]
+        for name in ("last_notice_signature", "last_notice_at")
+        if name in previous
+    }
     state[key] = {
         "last_check_ts": now_ts(),
         "last_check_at": datetime.now(timezone.utc).isoformat(),
+        **preserved,
         **(payload or {}),
     }
     save_state(state)
@@ -168,6 +175,44 @@ def remind(args: argparse.Namespace) -> int:
     return 0
 
 
+def cached_notice(args: argparse.Namespace, info: dict) -> tuple[str, str]:
+    ahead = int(info.get("ahead") or 0)
+    behind = int(info.get("behind") or 0)
+    head = str(info.get("head") or "")
+    remote = str(info.get("remote") or "")
+    if behind and not ahead:
+        message = f"· {args.command}/{args.branch} 有 {behind} 个远端更新；运行 `{args.command} update` fast-forward。"
+    elif ahead and behind:
+        message = f"· {args.command}/{args.branch} 与 {args.remote}/{args.branch} 已分叉：ahead {ahead}, behind {behind}；不会自动更新。"
+    elif ahead and os.environ.get("MMS_LOCAL_UPDATE_NOTIFY_AHEAD") == "1":
+        message = f"· {args.command}/{args.branch} 本地领先 {ahead} 个 commit；需要同步时先 push 或手动整理。"
+    else:
+        return "", ""
+    signature = f"{args.command}:{args.branch}:{head}:{remote}:{ahead}:{behind}"
+    return message, signature
+
+
+def cached_remind(args: argparse.Namespace) -> int:
+    if os.environ.get("MMS_LOCAL_UPDATE_SKIP") == "1":
+        return 0
+    state = load_state()
+    key = state_key(args)
+    info = state.get(key)
+    if not isinstance(info, dict):
+        return 0
+    message, signature = cached_notice(args, info)
+    if not message or not signature:
+        return 0
+    if info.get("last_notice_signature") == signature:
+        return 0
+    print(message)
+    info["last_notice_signature"] = signature
+    info["last_notice_at"] = datetime.now(timezone.utc).isoformat()
+    state[key] = info
+    save_state(state)
+    return 0
+
+
 def update(args: argparse.Namespace) -> int:
     if args.kind == "public":
         print(f"{args.command}/public 不做启动时自动 pull；请用安装脚本或 release 流程更新 public copy。")
@@ -221,7 +266,7 @@ def status(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MMS local channel update helper")
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("remind", "update", "status"):
+    for name in ("remind", "cached-remind", "update", "status"):
         p = sub.add_parser(name)
         p.add_argument("--command", required=True)
         p.add_argument("--kind", choices=["worktree", "public"], default="worktree")
@@ -238,6 +283,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.action == "remind":
         return remind(args)
+    if args.action == "cached-remind":
+        return cached_remind(args)
     if args.action == "update":
         return update(args)
     if args.action == "status":

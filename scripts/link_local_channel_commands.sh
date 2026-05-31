@@ -101,6 +101,7 @@ run_update_hook() {
   [ -t 1 ] || return 0
   case "${1:-}" in -h|--help|help) return 0 ;; esac
   case " $* " in *" --json "*) return 0 ;; esac
+  "$UPDATE_PYTHON" "$UPDATER" cached-remind --command "$MMS_COMMAND_NAME" --kind worktree --root "$ROOT" --branch "$UPDATE_BRANCH" --cadence "$UPDATE_CADENCE" 2>/dev/null || true
   if [ "${MMS_LOCAL_UPDATE_FOREGROUND:-0}" = "1" ]; then
     "$UPDATE_PYTHON" "$UPDATER" remind --command "$MMS_COMMAND_NAME" --kind worktree --root "$ROOT" --branch "$UPDATE_BRANCH" --cadence "$UPDATE_CADENCE" || true
   else
