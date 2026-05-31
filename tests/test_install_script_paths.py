@@ -454,6 +454,13 @@ def test_install_script_copies_config_web_static_assets():
     assert 'copy_dir_safely "$SOURCE_DIR/mms_config_web_static" "$MMS_HOME/mms_config_web_static"' in text
 
 
+def test_install_script_copies_bundled_session_assets():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'copy_dir_safely "$SOURCE_DIR/assets" "$MMS_HOME/assets"' in text
+    assert "$MMS_HOME/assets/session-assets" in text
+
+
 def test_install_script_retires_mmc_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
@@ -491,32 +498,32 @@ def test_install_script_mentions_bundled_session_assets():
 def test_install_check_reports_all_bundled_session_assets(tmp_path):
     home = tmp_path / "home"
     mms_home = home / ".mms"
-    vendor = mms_home / "vendor"
+    session_assets = mms_home / "assets" / "session-assets"
     hooks = mms_home / "hooks"
     for path in (
-        vendor / "caveman" / "skills" / "caveman",
-        vendor / "caveman" / "hooks",
-        vendor / "token-saver",
-        vendor / "toon",
-        vendor / "xmem",
-        vendor / "web-access",
-        vendor / "weber",
-        vendor / "agent-browser",
+        session_assets / "packs" / "caveman" / "skills" / "caveman",
+        session_assets / "packs" / "caveman" / "hooks",
+        session_assets / "skills" / "token-saver",
+        session_assets / "skills" / "toon",
+        session_assets / "skills" / "xmem",
+        session_assets / "skills" / "web-access",
+        session_assets / "skills" / "weber",
+        session_assets / "skills" / "agent-browser",
         hooks,
     ):
         path.mkdir(parents=True, exist_ok=True)
     for path in (
-        vendor / "caveman" / "skills" / "caveman" / "SKILL.md",
-        vendor / "token-saver" / "SKILL.md",
-        vendor / "toon" / "SKILL.md",
-        vendor / "xmem" / "SKILL.md",
-        vendor / "web-access" / "SKILL.md",
-        vendor / "weber" / "SKILL.md",
-        vendor / "agent-browser" / "SKILL.md",
+        session_assets / "packs" / "caveman" / "skills" / "caveman" / "SKILL.md",
+        session_assets / "skills" / "token-saver" / "SKILL.md",
+        session_assets / "skills" / "toon" / "SKILL.md",
+        session_assets / "skills" / "xmem" / "SKILL.md",
+        session_assets / "skills" / "web-access" / "SKILL.md",
+        session_assets / "skills" / "weber" / "SKILL.md",
+        session_assets / "skills" / "agent-browser" / "SKILL.md",
     ):
         path.write_text("# asset\n", encoding="utf-8")
-    (vendor / "caveman" / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
-    (vendor / "caveman" / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+    (session_assets / "packs" / "caveman" / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+    (session_assets / "packs" / "caveman" / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
     for name in ("nsr-builtin-hook.py", "nsr-claude-hook.sh", "nsr-codex-hook.sh"):
         (hooks / name).write_text("#!/bin/sh\n", encoding="utf-8")
 

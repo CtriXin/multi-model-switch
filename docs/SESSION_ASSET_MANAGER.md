@@ -28,7 +28,7 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 - 顶部先显示当前管理范围、本次未保存变化，以及三个操作入口：在这里开/关、添加到 MMS 动态、添加到 Global；
 - 然后进入来源/CLI/类型筛选和能力卡片，**当前加载来源 / 路径诊断** 放在卡片区之后并默认折叠；
-- **当前加载来源 / 路径诊断** 只做 resolver 诊断，展开后显示全部 vendor / agent-pack / MCP 根，不再截断前几个；
+- **当前加载来源 / 路径诊断** 只做 resolver 诊断，展开后显示全部 managed / bundled / legacy 根，不再截断前几个；
 - `全局继承` 会展开 Claude / Codex 的真实全局 Skill 清单，而不是只显示 TUI preview 抽样；
 - Claude 和 Codex 分开统计：Claude 看 `~/.claude/skills`，Codex 看 `~/.codex/skills` + Codex plugin cache；`~/.agents/skills` 作为宿主级共享候选展示，不等于两者 launcher 都强制继承；
 - **TUI 确认页对照** 和 Claude / Codex / OpenCode / Antigravity 的 CLI 总览卡放在可展开区域，避免一进页面像介绍文档；
@@ -47,28 +47,36 @@ WebUI 按三层解释，不把技术字段一口气摊开：
 
 ## 安装版 / 开发版位置
 
-MMS 动态 skill/MCP/hook 现在有一个固定的用户级安装根：
+MMS 动态 skill/MCP/hook 现在有两个明确位置：包内默认根和用户覆盖根。包内默认根随 dev/canary/安装版各自复制，用户覆盖根用于你手动添加或替换：
 
 ```text
-~/.local/share/mms/assets/
+assets/session-assets/                  # 当前 worktree / 安装包自带
   skills/<skill-name>/SKILL.md
   mcp/<mcp-name>/...
   packs/<pack-name>/...
   hooks/<hook-name>/...
   packages/<asset-name>/...   # 兼容兜底
+
+~/.local/share/mms/assets/              # 用户覆盖根，优先级更高
+  skills/<skill-name>/SKILL.md
+  mcp/<mcp-name>/...
+  packs/<pack-name>/...
+  hooks/<hook-name>/...
+  packages/<asset-name>/...
 ```
 
-推荐把真实包软链到这个目录，而不是复制完整目录。launcher 的读取顺序是：
+launcher 的读取顺序是：
 
 1. 显式 env，例如 `MMS_WEB_ACCESS_ROOT`；
 2. `preferences.toml` 的 `[assets.roots]` 单项覆盖；
-3. 固定 managed assets root：`~/.local/share/mms/assets` 或 `[assets].managed_root`；
-4. 开发版 / 安装版内置的 `vendor/`、`agent-packs/` 和历史兼容路径。
+3. 用户 managed assets root：`~/.local/share/mms/assets` 或 `[assets].managed_root`；
+4. 当前 MMS 包内 `assets/session-assets`（mmz/mmg/mmf 各读自己的 worktree/安装包副本）；
+5. legacy `vendor/`、`agent-packs/` 和历史兼容路径。
 
 运行时仍然会把最终解析到的来源软链到本次 session 的隔离 HOME，不会把包复制进每个隔离环境：
 
-- 开发版通常来自当前 worktree 的 `vendor/` 或 `agent-packs/`；
-- 安装版通常来自 MMS 安装包内部的 `vendor/` / `agent-packs/`；
+- 开发版通常来自当前 worktree 的 `assets/session-assets`；
+- 安装版通常来自 `~/.mms/assets/session-assets`；
 - 用户显式覆盖或历史安装可能来自 `~/auto-skills/installed-skills`、`~/auto-skills/shared-skills`、`~/auto-skills/vendor`、`~/.agents/skills`、`~/.codex/skills` 等；
 - WebUI 的 **当前加载来源 / 路径诊断** 按实际 resolver 结果全量展示，所以本地和安装版可能路径不同，但管理入口是同一个。
 
@@ -95,7 +103,7 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 当前读写边界：
 
 - `preferences.toml` 才是 `bypass`、`caveman_mode`、`nsr_mode`、`agent_pack` 和 disabled session surfaces 的持久偏好位置。
-- `[assets].managed_root` 是固定 managed assets 安装根；默认是 `~/.local/share/mms/assets`。
+- `[assets].managed_root` 是用户 managed assets 覆盖根；默认是 `~/.local/share/mms/assets`，优先级高于包内 `assets/session-assets`。
 - `[assets].managed_enabled = false` 可以关闭固定根读取；env 显式 root 仍可用于调试。
 - `config.toml` / registry DB 继续作为 model/provider/routing 真源，不承载 per-session 能力开关。
 - 全局 Claude/Codex/OpenCode 配置保持只读，除非用户明确进入全局安装或配置流程。
@@ -107,7 +115,7 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 
 当前已完成的是 WebUI 固定管理入口：`Skill / MCP 管理`。首屏用于筛选、开关和保存偏好；**当前加载来源 / 路径诊断** 会按实际 resolver 展示安装版/开发版当前选中的根，但默认折叠，避免抢占主要管理区。
 
-当前也已经有固定安装根：`~/.local/share/mms/assets`。现有持久配置入口包括 `[assets].managed_root` 和 `[assets.roots]`；前者是统一根，后者是单个能力的覆盖。任何写入 `~/.config/mms/preferences.toml` 仍必须走 human gate。
+当前也已经有固定包内根：`assets/session-assets`，安装后对应 `~/.mms/assets/session-assets`；另有用户覆盖根 `~/.local/share/mms/assets`。现有持久配置入口包括 `[assets].managed_root` 和 `[assets.roots]`；前者是用户覆盖根，后者是单个能力的覆盖。任何写入 `~/.config/mms/preferences.toml` 仍必须走 human gate。
 
 ## 交互参考
 

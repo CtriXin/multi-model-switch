@@ -239,6 +239,21 @@ def test_asset_root_preference_is_below_env_and_above_defaults(monkeypatch, tmp_
     assert mms_launchers._resolve_web_access_root() == str(env_root)
 
 
+def test_bundled_session_assets_root_is_above_vendor(monkeypatch, tmp_path):
+    import mms_launchers
+
+    bundled_root = tmp_path / "assets" / "session-assets" / "skills" / "web-access"
+    bundled_root.mkdir(parents=True)
+    (bundled_root / "SKILL.md").write_text("# bundled skill\n", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_WEB_ACCESS_ROOT", raising=False)
+    monkeypatch.setattr(mms_launchers, "preference_asset_root", lambda _asset_name: "")
+    monkeypatch.setattr(mms_launchers, "managed_assets_enabled", lambda: False)
+    monkeypatch.setattr(mms_launchers, "_bundled_assets_root", lambda: str(tmp_path / "assets" / "session-assets"))
+
+    assert mms_launchers._resolve_web_access_root() == str(bundled_root)
+
+
 def test_managed_assets_root_can_provide_session_hooks(monkeypatch, tmp_path):
     import json
     import mms_launchers

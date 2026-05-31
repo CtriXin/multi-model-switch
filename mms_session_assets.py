@@ -387,6 +387,7 @@ def _asset_root_kind(path: str, *, home: str) -> str:
     expanded = _expand_path(path, home=home)
     package_root = _repo_root()
     checks = [
+        (os.path.join(package_root, "assets", "session-assets"), "MMS bundled session assets"),
         (package_root, "MMS 当前包内"),
         (os.path.join(home, "auto-skills", "installed-skills"), "安装/管理镜像"),
         (os.path.join(home, "auto-skills", "shared-skills"), "共享 skill"),
@@ -475,7 +476,7 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
                 "install_real_path": install_dir_real,
                 "install_exists": bool(install_dir_real and os.path.exists(install_dir_real)),
                 "skill_count": _asset_root_skill_count(path),
-                "note": "实际加载位置；固定安装版优先读取 MMS managed assets root，找不到才回退到开发版/vendor/历史路径。",
+                "note": "实际加载位置；优先读取用户 managed assets root，其次读取当前 MMS 包内 assets/session-assets，最后才回退 vendor/历史路径。",
             }
         )
     return rows
@@ -519,7 +520,36 @@ def _managed_install_contract(home: str, mms_core: Any | None = None) -> dict[st
             "hooks": "hooks/<hook-name>/...",
             "packages": "packages/<asset-name>/... 作为兼容兜底",
         },
-        "note": "这是 MMS 固定 managed assets 安装根；建议用 symlink 指向真实包，launcher 会优先读取这里。",
+        "note": "这是用户可修改的 MMS managed assets 根；launcher 会优先读取这里，再读当前 MMS 包内 assets/session-assets。",
+    }
+
+
+def _bundled_install_contract(home: str) -> dict[str, Any]:
+    root = os.path.join(_repo_root(), "assets", "session-assets")
+    real_root = os.path.abspath(os.path.expanduser(root))
+
+    def child(name: str) -> dict[str, Any]:
+        real = os.path.join(real_root, name)
+        return {
+            "name": name,
+            "path": _abbrev_path(real, home=home),
+            "real_path": real,
+            "exists": os.path.isdir(real),
+        }
+
+    return {
+        "root": _abbrev_path(real_root, home=home),
+        "real_root": real_root,
+        "exists": os.path.isdir(real_root),
+        "children": [child(name) for name in ("skills", "mcp", "packs", "hooks", "packages")],
+        "layout": {
+            "skills": "skills/<skill-name>/SKILL.md",
+            "mcp": "mcp/<mcp-name>/...",
+            "packs": "packs/<pack-name>/...",
+            "hooks": "hooks/<hook-name>/...",
+            "packages": "packages/<asset-name>/... 作为兼容兜底",
+        },
+        "note": "这是随当前 MMS 包/分支发布的动态 import asset 根；mmg/mmz 等 worktree 启动会读各自包内这一份，而不是直接读 vendor。",
     }
 
 
@@ -1155,6 +1185,7 @@ def build_session_assets_snapshot(
         "rows": rows,
         "managed_roots": _managed_roots(home),
         "managed_install": _managed_install_contract(home, mms_core),
+        "bundled_install": _bundled_install_contract(home),
         "global_roots": _global_roots(home),
         "launch_defaults": {
             "caveman_mode": _safe_text(defaults.get("caveman_mode") or "enable"),
@@ -1167,6 +1198,7 @@ def build_session_assets_snapshot(
         "configuration_contract": {
             "persistent_path": preferences_path or "~/.config/mms/preferences.toml",
             "managed_assets_root": _managed_install_contract(home, mms_core).get("root"),
+            "bundled_assets_root": _bundled_install_contract(home).get("root"),
             "launch_override": "TUI 启动确认页本次切换优先级最高，但不写回真实配置。",
             "webui_write_scope": "本页可单独写 preferences.toml；不混入模型/provider 保存。",
         },

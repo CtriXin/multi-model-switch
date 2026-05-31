@@ -233,19 +233,19 @@ mcp = []                      # e.g. ["pilot", "hive"]
 hooks = []                    # hook names or paths shown on confirm screen
 
 [assets]
-managed_enabled = true        # true = read fixed MMS managed assets root
+managed_enabled = true        # true = read user managed assets root before bundled assets
 managed_root = "~/.local/share/mms/assets"
 
 [assets.roots]
 # Optional custom roots; env vars like MMS_WEB_ACCESS_ROOT still win.
 # web_access = "~/my-skills/web-access"
 # weber = "~/my-skills/weber"
-# codegraph = "~/vendor/codegraph"
-# token_saver = "~/vendor/token-saver"
-# toon = "~/vendor/toon"
+# codegraph = "~/my-skills/codegraph"
+# token_saver = "~/my-skills/token-saver"
+# toon = "~/my-skills/toon"
 # xmem = "~/auto-skills/shared-skills/xmem"
-# caveman = "~/vendor/caveman"
-# nsr = "~/vendor/non-stop-run"
+# caveman = "~/my-packs/caveman"
+# nsr = "~/my-packs/non-stop-run"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
 """

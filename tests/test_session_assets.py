@@ -85,6 +85,8 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert "managed_root" in snapshot["preference_snippet"]
     assert snapshot["managed_install"]["root"].endswith(".local/share/mms/assets")
     assert snapshot["configuration_contract"]["managed_assets_root"].endswith(".local/share/mms/assets")
+    assert snapshot["bundled_install"]["root"].endswith("assets/session-assets")
+    assert snapshot["configuration_contract"]["bundled_assets_root"].endswith("assets/session-assets")
     assert snapshot["launch_defaults"]["bypass"] is True
     assert snapshot["disabled_defaults"]["skills"] == ["agent-browser"]
     assert snapshot["disabled_defaults"]["mcp"] == ["pilot"]

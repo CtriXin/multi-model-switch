@@ -3157,6 +3157,7 @@ def _resolve_nsr_root():
     if nsr_home:
         candidates.append(os.path.abspath(os.path.expanduser(nsr_home)))
     candidates.extend(_managed_asset_root_candidates("packs", "nsr", "non-stop-run"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "nsr", "non-stop-run"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
         _real_user_path("auto-skills", "shared-skills", "nsr"),
@@ -3323,13 +3324,8 @@ def _asset_root_preference(asset_name):
         return ""
 
 
-def _managed_asset_root_candidates(surface, *names):
-    try:
-        if not managed_assets_enabled():
-            return []
-        root = str(managed_assets_root() or "").strip()
-    except Exception:
-        return []
+def _asset_root_candidates_from_root(root, surface, *names):
+    root = str(root or "").strip()
     if not root:
         return []
     root = os.path.abspath(os.path.expanduser(root))
@@ -3360,6 +3356,25 @@ def _managed_asset_root_candidates(surface, *names):
     return deduped
 
 
+def _managed_asset_root_candidates(surface, *names):
+    try:
+        if not managed_assets_enabled():
+            return []
+        root = str(managed_assets_root() or "").strip()
+    except Exception:
+        return []
+    return _asset_root_candidates_from_root(root, surface, *names)
+
+
+def _bundled_assets_root():
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "session-assets")
+    return root if os.path.isdir(root) else ""
+
+
+def _bundled_asset_root_candidates(surface, *names):
+    return _asset_root_candidates_from_root(_bundled_assets_root(), surface, *names)
+
+
 def _resolve_caveman_root():
     candidates = []
     explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
@@ -3369,6 +3384,7 @@ def _resolve_caveman_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("packs", "caveman"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "caveman"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
         _real_user_path("auto-skills", "vendor", "caveman"),
@@ -3449,6 +3465,7 @@ def _resolve_ecc_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("packs", "ecc", "everything-claude-code"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "ecc", "everything-claude-code"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "everything-claude-code"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "everything-claude-code"),
@@ -3479,6 +3496,7 @@ def _resolve_omc_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("packs", "omc", "oh-my-claudecode"))
+    candidates.extend(_bundled_asset_root_candidates("packs", "omc", "oh-my-claudecode"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "oh-my-claudecode"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "oh-my-claudecode"),
@@ -3510,6 +3528,7 @@ def _resolve_web_access_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "web-access", "web_access"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "web-access", "web_access"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
         _real_user_path("auto-skills", "vendor", "web-access"),
@@ -3535,6 +3554,7 @@ def _resolve_weber_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "weber"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "weber"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber"),
         _real_user_path("auto-skills", "shared-skills", "weber"),
@@ -3561,6 +3581,7 @@ def _resolve_agent_browser_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "agent-browser", "agent_browser"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "agent-browser", "agent_browser"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
         _real_user_path("auto-skills", "installed-skills", "agent-browser"),
@@ -3586,6 +3607,8 @@ def _resolve_codegraph_root():
     pref = _asset_root_preference("codegraph")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend(_managed_asset_root_candidates("skills", "codegraph"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "codegraph"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "codegraph"),
         _real_user_path("auto-skills", "shared-skills", "codegraph"),
@@ -3612,6 +3635,7 @@ def _resolve_toon_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "toon"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "toon"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toon"),
         _real_user_path("auto-skills", "vendor", "toon"),
@@ -3637,6 +3661,7 @@ def _resolve_token_saver_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "token-saver", "token_saver"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "token-saver", "token_saver"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
         _real_user_path("auto-skills", "shared-skills", "token-saver"),
@@ -3663,6 +3688,7 @@ def _resolve_xmem_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "xmem"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "xmem"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "xmem"),
         _real_user_path("auto-skills", "shared-skills", "xmem"),
@@ -3713,6 +3739,7 @@ def _resolve_auto_github_contributor_root():
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend(_managed_asset_root_candidates("skills", "auto-github-contributor", "auto_github_contributor"))
+    candidates.extend(_bundled_asset_root_candidates("skills", "auto-github-contributor", "auto_github_contributor"))
     candidates.extend([
         _real_user_path("auto-skills", "installed-skills", "auto-github-contributor"),
         _real_user_path("auto-skills", "vendor", "auto-github-contributor", "skills", "auto-github-contributor"),

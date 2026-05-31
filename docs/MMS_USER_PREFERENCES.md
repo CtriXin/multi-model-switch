@@ -69,12 +69,12 @@ managed_root = "~/.local/share/mms/assets"
 web_access = "~/my-skills/web-access"
 weber = "~/my-skills/weber"
 agent_browser = "~/my-skills/agent-browser"
-codegraph = "~/vendor/codegraph"
-token_saver = "~/vendor/token-saver"
-toon = "~/vendor/toon"
-xmem = "~/vendor/xmem"
-caveman = "~/vendor/caveman"
-nsr = "~/vendor/non-stop-run"
+codegraph = "~/my-skills/codegraph"
+token_saver = "~/my-skills/token-saver"
+toon = "~/my-skills/toon"
+xmem = "~/my-skills/xmem"
+caveman = "~/my-packs/caveman"
+nsr = "~/my-packs/non-stop-run"
 ecc = "~/.mms/agent-packs/everything-claude-code"
 omc = "~/.mms/agent-packs/oh-my-claudecode"
 ```
@@ -122,8 +122,8 @@ claude, codex, opencode, pi, agy
 
 | Key | Values | Effect |
 | --- | --- | --- |
-| `managed_enabled` | `true` / `false` | Whether launcher reads the fixed MMS managed assets root |
-| `managed_root` | path | Fixed install root for MMS-only optional skills, MCP servers, packs, and hooks; default `~/.local/share/mms/assets` |
+| `managed_enabled` | `true` / `false` | Whether launcher reads the user managed assets root before bundled assets |
+| `managed_root` | path | User override root for MMS-only optional skills, MCP servers, packs, and hooks; default `~/.local/share/mms/assets` |
 
 Managed assets root layout:
 
@@ -136,7 +136,7 @@ Managed assets root layout:
   packages/<asset-name>/...
 ```
 
-Put symlinks here when possible. Launcher resolves this fixed root before built-in `vendor/` fallback, then symlinks the selected assets into each isolated session.
+Put symlinks here when possible. Launcher resolves this user override root first, then the current MMS package `assets/session-assets`, and only falls back to legacy `vendor/` paths when bundled assets are missing.
 
 `[assets.roots]` accepts:
 
@@ -194,18 +194,18 @@ When a user asks "MMS 该改哪个配置":
 
 ## Lazy Session Assets
 
-MMS-managed assets live under `~/.local/share/mms/assets` by default. Launchers then symlink them into each isolated session only when that session starts.
+MMS 自带动态 assets 随当前包放在 `assets/session-assets`；安装版会复制到 `~/.mms/assets/session-assets`。`~/.local/share/mms/assets` 是用户覆盖根，优先级高于包内 assets。Launchers 只在 session 启动时把最终解析到的来源 symlink 到隔离 HOME。
 
 Common roots:
 
 ```text
-~/.mms/vendor/caveman
-~/.mms/vendor/web-access
-~/.mms/vendor/weber
-~/.mms/vendor/agent-browser
-~/.mms/vendor/token-saver
-~/.mms/vendor/toon
-~/.mms/vendor/xmem
+~/.mms/assets/session-assets/packs/caveman
+~/.mms/assets/session-assets/skills/web-access
+~/.mms/assets/session-assets/skills/weber
+~/.mms/assets/session-assets/skills/agent-browser
+~/.mms/assets/session-assets/skills/token-saver
+~/.mms/assets/session-assets/skills/toon
+~/.mms/assets/session-assets/skills/xmem
 ~/.mms/hooks/nsr-builtin-hook.py
 ~/.mms/agent-packs/everything-claude-code
 ~/.mms/agent-packs/oh-my-claudecode

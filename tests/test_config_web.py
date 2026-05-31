@@ -859,7 +859,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "assetManagedRoots" in html
     assert "function renderAssetManagedRoots()" in html
     assert "当前加载来源 / 路径诊断" in html
-    assert "launcher 优先读固定根" in html
+    assert "MMS 自带动态能力读当前包内 assets/session-assets" in html
     assert "asset-source-diagnostic" in html
     assert "roots.filter(Boolean)" in html
     assert "roots.slice(0,6)" not in html
