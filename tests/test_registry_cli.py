@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import mms_registry
-import mms_registry_cli
+import mms_registry.cli as mms_registry_cli
 
 
 ROOT = Path(__file__).resolve().parents[1]

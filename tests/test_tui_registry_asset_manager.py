@@ -11,7 +11,7 @@ from mms_display.model import (
     search_model_assets,
     sort_models_for_family,
 )
-from mms_registry_tui_adapter import InMemoryRegistryTuiAdapter, build_registry_display_state
+from mms_registry.tui_adapter import InMemoryRegistryTuiAdapter, build_registry_display_state
 
 
 def test_recency_beats_high_historical_use_count_inside_family() -> None:

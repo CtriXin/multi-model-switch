@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from mms_registry_schema import (
+from mms_registry.schema import (
     PRIVACY_BOUNDARIES,
     REVISION_CLASSES,
     REVISION_STATUSES,

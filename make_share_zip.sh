@@ -34,6 +34,7 @@ DIRS=(
     "mms_launcher"
     "mms_runtime"
     "mms_display"
+    "mms_registry"
 )
 
 for file in "${FILES[@]}"; do

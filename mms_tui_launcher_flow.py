@@ -1335,7 +1335,7 @@ def select_tui_settings_action(*, select_settings_tui):
 
 
 def load_registry_cli_tools():
-    from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
+    from mms_registry.cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
 
     return {
         "diff_openrouter_catalog": diff_openrouter_catalog,

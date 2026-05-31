@@ -5366,7 +5366,7 @@ def _display_config_root(json_output=False):
 
 
 def _display_model_source_status(json_output=False):
-    from mms_registry_cli import _print_model_source_status, model_source_status
+    from mms_registry.cli import _print_model_source_status, model_source_status
 
     status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
     if json_output:
@@ -5376,7 +5376,7 @@ def _display_model_source_status(json_output=False):
 
 
 def _display_consumer_bundle_status(json_output=False, strict_exit=True):
-    from mms_registry_cli import _print_consumer_bundle_status, consumer_bundle_status
+    from mms_registry.cli import _print_consumer_bundle_status, consumer_bundle_status
 
     summary = consumer_bundle_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config bundle")
     if json_output:
@@ -5387,7 +5387,7 @@ def _display_consumer_bundle_status(json_output=False, strict_exit=True):
 
 
 def _display_registry_v2_save_plan(json_output=False):
-    from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
+    from mms_registry.cli import _print_registry_v2_save_plan, registry_v2_save_plan
 
     plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
     if json_output:
@@ -5397,7 +5397,7 @@ def _display_registry_v2_save_plan(json_output=False):
 
 
 def _display_preview_doctor(json_output=False, strict_exit=False):
-    from mms_registry_cli import _print_preview_doctor, preview_doctor
+    from mms_registry.cli import _print_preview_doctor, preview_doctor
 
     summary = preview_doctor(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config doctor")
     if json_output:
@@ -5408,7 +5408,7 @@ def _display_preview_doctor(json_output=False, strict_exit=False):
 
 
 def _display_preview_check(json_output=False, strict_exit=True):
-    from mms_registry_cli import _print_preview_check, preview_check
+    from mms_registry.cli import _print_preview_check, preview_check
 
     summary = preview_check(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config check")
     if json_output:
@@ -5426,7 +5426,7 @@ def _display_config_v2_promotion_plan(
     stable_config_dir=None,
     command_name=None,
 ):
-    from mms_registry_cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
+    from mms_registry.cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
 
     summary = config_v2_promotion_plan(
         preview_config_dir=preview_config_dir or PRIMARY_CONFIG_DIR,
@@ -5489,7 +5489,7 @@ def _display_config_v2_release_readiness(args_rest):
     parser.add_argument("--strict-exit", action="store_true")
     args = parser.parse_args(args_rest)
 
-    from mms_registry_cli import _print_config_v2_release_readiness, config_v2_release_readiness
+    from mms_registry.cli import _print_config_v2_release_readiness, config_v2_release_readiness
 
     summary = config_v2_release_readiness(
         preview_config_dir=args.preview_config_dir,
@@ -6374,7 +6374,7 @@ def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
     if len(argv) >= 1 and argv[0] == "registry":
         set_language(_resolve_ui_language(None, lang_override))
-        from mms_registry_cli import handle_registry_command
+        from mms_registry.cli import handle_registry_command
 
         raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
     if _is_config_root_status_request(argv):
@@ -6412,7 +6412,7 @@ def main():
             raise SystemExit(code)
         return
     if _is_config_registry_v2_apply_plan_request(argv):
-        from mms_registry_cli import handle_registry_command
+        from mms_registry.cli import handle_registry_command
 
         registry_args = ["apply-plan", "--config-dir", PRIMARY_CONFIG_DIR] + list(argv[2:])
         raise SystemExit(handle_registry_command(registry_args, command_name=f"{current_command()} config"))

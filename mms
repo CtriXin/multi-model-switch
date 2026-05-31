@@ -42,7 +42,7 @@ argv = sys.argv[1:]
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}:
     import json
 
-    from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
+    from mms_registry.cli import _print_registry_v2_save_plan, registry_v2_save_plan
 
     plan = registry_v2_save_plan(command_name="mms config save-plan")
     if "--json" in argv[2:]:

@@ -84,13 +84,13 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
     raise SystemExit(0)
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "init":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     forwarded = ["init-root", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "import-legacy":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     source_default = os.path.join(resolve_real_user_home(os.environ), ".config", "mms")
     translated = []
@@ -122,7 +122,7 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "import-legacy":
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "prepare":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     source_default = os.path.join(resolve_real_user_home(os.environ), ".config", "mms")
     translated = []
@@ -154,43 +154,43 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "prepare":
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "publish":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     forwarded = ["publish-preview", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "verify":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     forwarded = ["verify", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"status", "source"}:
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     forwarded = ["source-status", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"bundle", "consumer-bundle", "manifest"}:
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     forwarded = ["consumer-bundle", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"check", "ready", "smoke"}:
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     forwarded = ["preview-check", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "doctor":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     forwarded = ["preview-doctor", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
 if argv and argv[0] == "promote":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     translated = argv[1:]
     if translated and translated[0] in {"plan", "check", "status"}:
@@ -199,7 +199,7 @@ if argv and argv[0] == "promote":
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf promote"))
 
 if argv and argv[0] == "registry":
-    from mms_registry_cli import handle_registry_command
+    from mms_registry.cli import handle_registry_command
 
     raise SystemExit(handle_registry_command(argv[1:], command_name="mmf registry"))
 
@@ -216,7 +216,7 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"root", "root.status",
     raise SystemExit(0)
 
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"source", "sources", "model-source", "model-sources"}:
-    from mms_registry_cli import _print_model_source_status, model_source_status
+    from mms_registry.cli import _print_model_source_status, model_source_status
 
     status = model_source_status(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config source")
     if "--json" in argv[2:]:
@@ -226,7 +226,7 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"source", "sources", "
     raise SystemExit(0)
 
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"bundle", "consumer-bundle", "manifest"}:
-    from mms_registry_cli import _print_consumer_bundle_status, consumer_bundle_status
+    from mms_registry.cli import _print_consumer_bundle_status, consumer_bundle_status
 
     summary = consumer_bundle_status(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config bundle")
     if "--json" in argv[2:]:
@@ -236,7 +236,7 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"bundle", "consumer-bu
     raise SystemExit(0 if "--no-strict-exit" in argv[2:] or summary.get("verified") is True else 2)
 
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}:
-    from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
+    from mms_registry.cli import _print_registry_v2_save_plan, registry_v2_save_plan
 
     plan = registry_v2_save_plan(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config save-plan")
     if "--json" in argv[2:]:
@@ -246,7 +246,7 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"save-plan", "save.pla
     raise SystemExit(0)
 
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"}:
-    from mms_registry_cli import _print_preview_doctor, preview_doctor
+    from mms_registry.cli import _print_preview_doctor, preview_doctor
 
     summary = preview_doctor(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config doctor")
     if "--json" in argv[2:]:
@@ -256,7 +256,7 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"doctor", "preview-doc
     raise SystemExit(0 if "--strict-exit" not in argv[2:] or summary.get("ready") is True else 2)
 
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"check", "preview-check", "preview.check", "v2-check"}:
-    from mms_registry_cli import _print_preview_check, preview_check
+    from mms_registry.cli import _print_preview_check, preview_check
 
     summary = preview_check(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config check")
     if "--json" in argv[2:]:
@@ -266,7 +266,7 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"check", "preview-chec
     raise SystemExit(0 if "--no-strict-exit" in argv[2:] or summary.get("ready") is True else 2)
 
 if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"promote-plan", "promotion-plan", "promote.check", "promote"}:
-    from mms_registry_cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
+    from mms_registry.cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
 
     summary = config_v2_promotion_plan(preview_config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config promote-plan")
     if "--json" in argv[2:]:

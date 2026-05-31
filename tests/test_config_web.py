@@ -419,7 +419,7 @@ def test_config_web_usage_reports_include_tui_detail_rows(monkeypatch, tmp_path)
 
 
 def test_config_web_verify_approved_report_is_read_only(monkeypatch, tmp_path):
-    import mms_registry_cli
+    import mms_registry.cli as mms_registry_cli
 
     calls = {}
 
@@ -2436,7 +2436,7 @@ def test_config_web_registry_v2_apply_updates_in_memory_snapshot(tmp_path):
 
 
 def test_config_web_registry_v2_apply_rolls_back_on_verify_failure(monkeypatch, tmp_path):
-    import mms_registry_cli
+    import mms_registry.cli as mms_registry_cli
 
     config_root = tmp_path / "mms-next"
     config_path = config_root / "config.toml"

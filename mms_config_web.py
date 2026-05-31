@@ -246,7 +246,7 @@ def _config_root_for_snapshot(config_path: str = "") -> str:
 def _model_source_status_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
     config_root = _config_root_for_snapshot(config_path)
     try:
-        from mms_registry_cli import model_source_status
+        from mms_registry.cli import model_source_status
 
         return model_source_status(
             config_dir=config_root or None,
@@ -265,7 +265,7 @@ def _model_source_status_for_snapshot(config_path: str = "", *, command_name: st
 def _consumer_bundle_status_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
     config_root = _config_root_for_snapshot(config_path)
     try:
-        from mms_registry_cli import consumer_bundle_status
+        from mms_registry.cli import consumer_bundle_status
 
         return consumer_bundle_status(
             config_dir=config_root or None,
@@ -532,7 +532,7 @@ def _hydrate_preview_config_from_latest_bundle(
         return cfg
     config_root = _config_root_for_snapshot(config_path)
     try:
-        from mms_registry_cli import verify_approved_bundle
+        from mms_registry.cli import verify_approved_bundle
 
         verified = verify_approved_bundle(config_dir=config_root or None)
     except Exception:
@@ -571,7 +571,7 @@ def _hydrate_preview_config_from_latest_bundle(
 def _config_v2_promotion_plan_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
     config_root = _config_root_for_snapshot(config_path)
     try:
-        from mms_registry_cli import config_v2_promotion_plan
+        from mms_registry.cli import config_v2_promotion_plan
 
         return config_v2_promotion_plan(
             preview_config_dir=config_root or None,
@@ -592,7 +592,7 @@ def _config_v2_promotion_plan_for_snapshot(config_path: str = "", *, command_nam
 def _config_v2_release_readiness_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
     config_root = _config_root_for_snapshot(config_path)
     try:
-        from mms_registry_cli import config_v2_release_readiness
+        from mms_registry.cli import config_v2_release_readiness
 
         return config_v2_release_readiness(
             preview_config_dir=config_root or None,
@@ -2970,7 +2970,7 @@ def _build_registry_v2_save_plan(
     route_refresh_provider_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Describe the future DB-truth save path without writing anything."""
-    from mms_registry_cli import registry_v2_route_publish_guard, registry_v2_save_plan
+    from mms_registry.cli import registry_v2_route_publish_guard, registry_v2_save_plan
 
     route_publish_guard: dict[str, Any] = {}
     try:
@@ -3474,7 +3474,7 @@ def _registry_v2_restore_db_candidate(candidate: dict[str, Any] | None, *, confi
     backup_path = str(backup.get("backup_path") or "")
     db_path = str(candidate.get("db_path") or backup.get("source_db_path") or "")
     if backup_path:
-        from mms_registry_cli import restore_registry_db
+        from mms_registry.cli import restore_registry_db
 
         restore = restore_registry_db(
             backup_path,
@@ -3693,7 +3693,7 @@ def apply_registry_v2_preview_plan(
     config_root = _config_root_for_snapshot(config_path)
     route_publish_guard: dict[str, Any] = {}
     try:
-        from mms_registry_cli import registry_v2_route_publish_guard
+        from mms_registry.cli import registry_v2_route_publish_guard
 
         route_publish_guard = registry_v2_route_publish_guard(
             config_dir=config_root or None,
@@ -3723,7 +3723,7 @@ def apply_registry_v2_preview_plan(
     secret_backend: dict[str, Any] | None = None
     generated_snapshot: dict[str, Any] | None = None
     try:
-        from mms_registry_cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle, write_registry_v2_webui_secret_backend
+        from mms_registry.cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle, write_registry_v2_webui_secret_backend
 
         credential_updates = [item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)]
         generated_snapshot = _registry_v2_snapshot_generated_bundle(config_root)
@@ -4461,7 +4461,7 @@ def build_settings_report(
         }
     if action == "check_staleness":
         try:
-            from mms_registry_cli import source_freshness
+            from mms_registry.cli import source_freshness
 
             report = source_freshness()
             return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "write_policy": "read_only", "report": _sanitize_for_output(report)}
@@ -4470,7 +4470,7 @@ def build_settings_report(
     if action == "preview_doctor":
         config_root = _config_root_for_snapshot(config_path)
         try:
-            from mms_registry_cli import preview_doctor
+            from mms_registry.cli import preview_doctor
 
             report = preview_doctor(config_dir=config_root or None, command_name=f"{command_name} config doctor")
             return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "report": _sanitize_for_output(report)}
@@ -4488,7 +4488,7 @@ def build_settings_report(
     if action == "verify_approved":
         config_root = _config_root_for_snapshot(config_path)
         try:
-            from mms_registry_cli import verify_approved_bundle
+            from mms_registry.cli import verify_approved_bundle
 
             report = verify_approved_bundle(config_dir=config_root or None)
             return {
