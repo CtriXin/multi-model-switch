@@ -2490,7 +2490,7 @@ def _overlay_agy_session_assets(
     disabled_session_surfaces=None,
 ):
     """Compatibility wrapper for AGY session plugin overlays."""
-    from mms_agy_assets import overlay_agy_session_assets
+    from mms_agy.assets import overlay_agy_session_assets
 
     return overlay_agy_session_assets(
         account_home,
@@ -3499,28 +3499,28 @@ def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRAR
 
 def _macos_security_bin():
     """Compatibility wrapper for macOS security binary discovery."""
-    from mms_agy_security import macos_security_bin
+    from mms_agy.security import macos_security_bin
 
     return macos_security_bin()
 
 
 def _agy_keychain_path(account_home):
     """Compatibility wrapper for AGY account keychain path."""
-    from mms_agy_security import agy_keychain_path
+    from mms_agy.security import agy_keychain_path
 
     return agy_keychain_path(account_home)
 
 
 def _agy_security_home_env(security_home):
     """Compatibility wrapper for AGY security command env."""
-    from mms_agy_security import agy_security_home_env
+    from mms_agy.security import agy_security_home_env
 
     return agy_security_home_env(security_home)
 
 
 def _run_agy_security_command(security_bin, args, *, security_home, check=False):
     """Compatibility wrapper for AGY security command execution."""
-    from mms_agy_security import run_agy_security_command
+    from mms_agy.security import run_agy_security_command
 
     return run_agy_security_command(
         security_bin,
@@ -3532,14 +3532,14 @@ def _run_agy_security_command(security_bin, args, *, security_home, check=False)
 
 def _ensure_agy_account_keychain(account_home, session_home=None):
     """Compatibility wrapper for AGY account keychain preparation."""
-    from mms_agy_security import ensure_agy_account_keychain
+    from mms_agy.security import ensure_agy_account_keychain
 
     return ensure_agy_account_keychain(account_home, session_home=session_home)
 
 
 def _install_agy_security_wrapper(session_home, account_home, env):
     """Compatibility wrapper for AGY session security wrapper install."""
-    from mms_agy_security import install_agy_security_wrapper
+    from mms_agy.security import install_agy_security_wrapper
 
     return install_agy_security_wrapper(session_home, account_home, env)
 
