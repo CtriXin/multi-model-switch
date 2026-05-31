@@ -126,12 +126,12 @@ from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, 
 from mms_provider_profiles import profile_context_window, resolve_provider_profile
 from mms_pi import support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
-from mms_runtime_env import (
+from mms_runtime.env import (
     apply_runtime_locale_profile as _apply_runtime_locale_profile_impl,
     runtime_locale_env as _runtime_locale_env_impl,
     validate_timezone_or_exit as _validate_timezone_or_exit_impl,
 )
-from mms_runtime_context import (
+from mms_runtime.context import (
     DEFAULT_CONTEXT_WINDOW as _DEFAULT_CONTEXT_WINDOW,
     MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS as _MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS,
     MODEL_CONTEXT_WINDOWS as _MODEL_CONTEXT_WINDOWS,
@@ -141,7 +141,7 @@ from mms_runtime_context import (
     load_model_context_overrides as _load_model_context_overrides_impl,
     lookup_context_window as _lookup_context_window_impl,
 )
-from mms_runtime_home import (
+from mms_runtime.home import (
     build_home_context as _build_home_context_impl,
     home_context_lines as _home_context_lines_impl,
     normalize_path as _normalize_path_impl,
@@ -151,7 +151,7 @@ from mms_runtime_home import (
     runtime_net_mode as _runtime_net_mode_impl,
     validate_home_context_or_exit as _validate_home_context_or_exit_impl,
 )
-from mms_runtime_network import (
+from mms_runtime.network import (
     CLAUDE_NO_PROXY_TOKENS as _CLAUDE_NO_PROXY_TOKENS,
     CLAUDE_PROXY_GUARD_TARGETS as _CLAUDE_PROXY_GUARD_TARGETS,
     apply_proxy_env as _apply_proxy_env_impl,
@@ -2993,14 +2993,14 @@ def _merge_oauth_claude_state_payload(existing_data, incoming_data):
 
 def _masked_exposure_env_value(key, value):
     """Compatibility wrapper for exposure env masking."""
-    from mms_runtime_exposure import masked_exposure_env_value
+    from mms_runtime.exposure import masked_exposure_env_value
 
     return masked_exposure_env_value(key, value)
 
 
 def inspect_runtime_exposure(cli, runtime):
     """Compatibility wrapper for runtime exposure audits."""
-    from mms_runtime_exposure import inspect_runtime_exposure as inspect_runtime_exposure_impl
+    from mms_runtime.exposure import inspect_runtime_exposure as inspect_runtime_exposure_impl
 
     return inspect_runtime_exposure_impl(cli, runtime)
 
@@ -3142,35 +3142,35 @@ def gateway_health_check(provider):
 
 def _provider_protocols(provider):
     """Compatibility wrapper for provider protocol normalization."""
-    from mms_runtime_urls import provider_protocols
+    from mms_runtime.urls import provider_protocols
 
     return provider_protocols(provider)
 
 
 def _provider_supports_cli(provider, cli):
     """Compatibility wrapper for provider CLI support validation."""
-    from mms_runtime_validation import provider_supports_cli
+    from mms_runtime.validation import provider_supports_cli
 
     return provider_supports_cli(provider, cli)
 
 
 def validate_provider_for_cli(cli, provider):
     """Compatibility wrapper for provider launch validation."""
-    from mms_runtime_validation import validate_provider_for_cli as validate_provider_for_cli_impl
+    from mms_runtime.validation import validate_provider_for_cli as validate_provider_for_cli_impl
 
     return validate_provider_for_cli_impl(cli, provider)
 
 
 def _scrub_claude_oauth_env(env):
     """Compatibility wrapper for Claude OAuth env scrubbing."""
-    from mms_runtime_env import scrub_claude_oauth_env
+    from mms_runtime.env import scrub_claude_oauth_env
 
     return scrub_claude_oauth_env(env)
 
 
 def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
     """Compatibility wrapper for inherited runtime env scrubbing."""
-    from mms_runtime_env import scrub_inherited_runtime_env
+    from mms_runtime.env import scrub_inherited_runtime_env
 
     return scrub_inherited_runtime_env(
         env,
@@ -3694,42 +3694,42 @@ def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_
 
 def validate_account_for_cli(cli, account):
     """Compatibility wrapper for account launch validation."""
-    from mms_runtime_validation import validate_account_for_cli as validate_account_for_cli_impl
+    from mms_runtime.validation import validate_account_for_cli as validate_account_for_cli_impl
 
     return validate_account_for_cli_impl(cli, account)
 
 
 def _openai_base_url(provider):
     """Compatibility wrapper for effective OpenAI base URL."""
-    from mms_runtime_urls import openai_base_url
+    from mms_runtime.urls import openai_base_url
 
     return openai_base_url(provider)
 
 
 def _anthropic_base_url(provider):
     """Compatibility wrapper for effective Anthropic base URL."""
-    from mms_runtime_urls import anthropic_base_url
+    from mms_runtime.urls import anthropic_base_url
 
     return anthropic_base_url(provider)
 
 
 def _anthropic_probe_target(runtime):
     """Compatibility wrapper for Anthropic probe target derivation."""
-    from mms_runtime_urls import anthropic_probe_target
+    from mms_runtime.urls import anthropic_probe_target
 
     return anthropic_probe_target(runtime)
 
 
 def _resolve_model(model_info):
     """Compatibility wrapper for runtime model extraction."""
-    from mms_runtime_models import resolve_model
+    from mms_runtime.models import resolve_model
 
     return resolve_model(model_info)
 
 
 def _normalized_model_name(model_name):
     """Compatibility wrapper for model-name normalization."""
-    from mms_runtime_models import normalized_model_name
+    from mms_runtime.models import normalized_model_name
 
     return normalized_model_name(model_name)
 

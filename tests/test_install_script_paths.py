@@ -515,9 +515,9 @@ def test_install_script_copies_session_tool_scripts_directory():
 def test_install_script_copies_launcher_package_directories():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "for package_dir in mms_opencode mms_codex mms_claude mms_agy mms_pi mms_session mms_launcher; do" in text
+    assert "for package_dir in mms_opencode mms_codex mms_claude mms_agy mms_pi mms_session mms_launcher mms_runtime; do" in text
     assert 'copy_dir_safely "$SOURCE_DIR/$package_dir" "$MMS_HOME/$package_dir"' in text
-    assert 'for stale_module in "$MMS_HOME"/mms_opencode_*.py "$MMS_HOME"/mms_codex_*.py "$MMS_HOME"/mms_claude_*.py "$MMS_HOME"/mms_agy_*.py "$MMS_HOME"/mms_pi_*.py "$MMS_HOME"/mms_session_*.py "$MMS_HOME"/mms_launcher_*.py; do' in text
+    assert 'for stale_module in "$MMS_HOME"/mms_opencode_*.py "$MMS_HOME"/mms_codex_*.py "$MMS_HOME"/mms_claude_*.py "$MMS_HOME"/mms_agy_*.py "$MMS_HOME"/mms_pi_*.py "$MMS_HOME"/mms_session_*.py "$MMS_HOME"/mms_launcher_*.py "$MMS_HOME"/mms_runtime.py "$MMS_HOME"/mms_runtime_*.py; do' in text
 
 
 def test_local_channel_worktree_update_reminder_is_non_blocking():

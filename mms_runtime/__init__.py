@@ -12,12 +12,19 @@ MIN_PYTHON = (3, 11)
 NODE_CLI_NAMES = {"claude", "agy"}
 
 
+def _repo_root():
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.basename(module_dir) == "mms_runtime":
+        return os.path.dirname(module_dir)
+    return module_dir
+
+
 def _repo_cli_wrapper(command_name):
     name = str(command_name or "").strip().lower()
     if name != "pi":
         return ""
     wrapper_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
+        _repo_root(),
         "scripts",
         "pi",
         "cli-wrapper.sh",

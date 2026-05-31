@@ -4515,10 +4515,10 @@ cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
 copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor" "vendor 目录" "vendor directory"
 copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scripts directory"
-for package_dir in mms_opencode mms_codex mms_claude mms_agy mms_pi mms_session mms_launcher; do
+for package_dir in mms_opencode mms_codex mms_claude mms_agy mms_pi mms_session mms_launcher mms_runtime; do
     copy_dir_safely "$SOURCE_DIR/$package_dir" "$MMS_HOME/$package_dir" "$package_dir package" "$package_dir package"
 done
-for stale_module in "$MMS_HOME"/mms_opencode_*.py "$MMS_HOME"/mms_codex_*.py "$MMS_HOME"/mms_claude_*.py "$MMS_HOME"/mms_agy_*.py "$MMS_HOME"/mms_pi_*.py "$MMS_HOME"/mms_session_*.py "$MMS_HOME"/mms_launcher_*.py; do
+for stale_module in "$MMS_HOME"/mms_opencode_*.py "$MMS_HOME"/mms_codex_*.py "$MMS_HOME"/mms_claude_*.py "$MMS_HOME"/mms_agy_*.py "$MMS_HOME"/mms_pi_*.py "$MMS_HOME"/mms_session_*.py "$MMS_HOME"/mms_launcher_*.py "$MMS_HOME"/mms_runtime.py "$MMS_HOME"/mms_runtime_*.py; do
     [ -e "$stale_module" ] && rm -f "$stale_module"
 done
 if [ -f "$SOURCE_DIR/docs/LLM_OPERATION_GUIDE.md" ]; then

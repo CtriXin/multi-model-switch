@@ -30,7 +30,7 @@ def test_runtime_resolver_uses_repo_pi_wrapper(monkeypatch, tmp_path):
     wrapper = pi_dir / "cli-wrapper.sh"
     wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     wrapper.chmod(0o755)
-    monkeypatch.setattr(mms_runtime, "__file__", str(tmp_path / "mms_runtime.py"))
+    monkeypatch.setattr(mms_runtime, "__file__", str(tmp_path / "mms_runtime/__init__.py"))
 
     resolved = mms_runtime.resolve_cli_binary("pi", env={"PATH": "/usr/bin"})
 
