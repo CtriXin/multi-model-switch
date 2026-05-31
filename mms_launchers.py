@@ -384,13 +384,13 @@ def _runtime_is_sensitive_claude_provider(runtime):
 
 def _launch_status(message, *, spinner="dots"):
     """为启动慢步骤提供可见 spinner，避免用户干等。"""
-    from mms_launch_display import launch_status
+    from mms_display.launch import launch_status
 
     return launch_status(message, spinner=spinner, console=console)
 
 
 def _print_launch_step_done(label, started_at, detail=None, *, style="dim"):
-    from mms_launch_display import print_launch_step_done
+    from mms_display.launch import print_launch_step_done
 
     return print_launch_step_done(
         label,
@@ -403,13 +403,13 @@ def _print_launch_step_done(label, started_at, detail=None, *, style="dim"):
 
 
 def _timed_launch_step(timings, label):
-    from mms_launch_display import timed_launch_step
+    from mms_display.launch import timed_launch_step
 
     return timed_launch_step(timings, label, perf_counter_fn=perf_counter)
 
 
 def _prepare_claude_env_with_status(runtime, **kwargs):
-    from mms_launch_display import (
+    from mms_display.launch import (
         launch_timing_enabled,
         launch_timing_threshold_sec,
         prepare_claude_env_with_status,
@@ -1001,7 +1001,7 @@ def _claude_bypass_requires_proxy(runtime):
 
 def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
     """Compatibility wrapper for DNS guard hint display."""
-    from mms_launch_display import emit_dns_guard_hint
+    from mms_display.launch import emit_dns_guard_hint
 
     return emit_dns_guard_hint(
         runtime,
@@ -3357,7 +3357,7 @@ def _mms_resume_command_name():
 
 def _print_mms_resume_hint(cli_name, session_id):
     """Compatibility wrapper for MMS resume hint display."""
-    from mms_launch_display import print_mms_resume_hint
+    from mms_display.launch import print_mms_resume_hint
 
     return print_mms_resume_hint(
         cli_name,
@@ -4440,7 +4440,7 @@ def get_export_env(cli, runtime, model_info=None):
 
 def _show_launch_info(cli, runtime, auth_mode):
     """Compatibility wrapper for launch-time display."""
-    from mms_launch_display import show_launch_info
+    from mms_display.launch import show_launch_info
 
     return show_launch_info(cli, runtime, auth_mode)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from mms_model_display import (
+from mms_display.model import (
     ModelAsset,
     ModelDisplayState,
     TuiRegistryAction,

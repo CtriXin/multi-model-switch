@@ -4338,19 +4338,19 @@ def select_model_interactive(models_list):
 # ── Confirmation ────────────────────────────────────────
 
 def _mask_identity_value(value, *, keep=4):
-    from mms_confirm_preview import mask_identity_value
+    from mms_display.confirm import mask_identity_value
 
     return mask_identity_value(value, keep=keep)
 
 
 def _mask_email_value(value):
-    from mms_confirm_preview import mask_email_value
+    from mms_display.confirm import mask_email_value
 
     return mask_email_value(value)
 
 
 def _confirm_context_lines(cli, runtime):
-    from mms_confirm_preview import confirm_context_lines
+    from mms_display.confirm import confirm_context_lines
 
     return confirm_context_lines(
         cli,
@@ -4363,7 +4363,7 @@ def _confirm_context_lines(cli, runtime):
 
 
 def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=False, has_ecc=False, has_omc=False):
-    from mms_confirm_preview import build_confirm_preview_catalog
+    from mms_display.confirm import build_confirm_preview_catalog
 
     return build_confirm_preview_catalog(
         cli,
@@ -4380,7 +4380,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
 
 def confirm_launch(cli, model_info, once=False, runtime=None):
     _ensure_rich()
-    from mms_confirm_preview import confirm_launch as confirm_launch_panel
+    from mms_display.confirm import confirm_launch as confirm_launch_panel
 
     return confirm_launch_panel(
         cli,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Protocol, Sequence, Tuple
 
-from mms_model_display import (
+from mms_display.model import (
     REGISTRY_TUI_ACTIONS,
     ModelAsset,
     RegistryDisplayState,
