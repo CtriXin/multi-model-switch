@@ -520,6 +520,14 @@ def test_install_script_copies_launcher_package_directories():
     assert 'for stale_module in "$MMS_HOME"/mms_opencode_*.py "$MMS_HOME"/mms_codex_*.py "$MMS_HOME"/mms_claude_*.py; do' in text
 
 
+def test_local_channel_worktree_update_reminder_is_non_blocking():
+    text = (ROOT_DIR / "scripts" / "link_local_channel_commands.sh").read_text(encoding="utf-8")
+
+    assert 'MMS_LOCAL_UPDATE_FOREGROUND:-0' in text
+    assert 'remind --command "$MMS_COMMAND_NAME" --kind worktree' in text
+    assert '>/dev/null 2>&1 &' in text
+
+
 def test_install_script_retires_mmc_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
