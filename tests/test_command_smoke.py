@@ -2043,6 +2043,70 @@ def test_launch_trace_formatter_preserves_sources_and_override_chain():
     assert "empty           -> (none)" in report
 
 
+def test_launch_trace_formatter_shows_model_family_launch_hints():
+    import mms_command_tools
+
+    report = mms_command_tools.format_launch_trace(
+        "claude",
+        {"model": "deepseek-v4-pro"},
+        {"auth_mode": "api_key", "id": "deepseek-relay"},
+        [],
+        runtime_provider_id=lambda runtime: runtime.get("id", ""),
+        runtime_account_id=lambda runtime: "",
+        runtime_bridge=lambda runtime: "",
+    )
+
+    assert "Launch hints:" in report
+    assert "default: claude" in report
+    assert "model family: deepseek" in report
+    assert "pi:      candidate <- model family: deepseek" in report
+
+
+def test_launch_trace_formatter_shows_crs_gpt_and_pro_runtime_hints():
+    import mms_command_tools
+
+    crs_report = mms_command_tools.format_launch_trace(
+        "codex",
+        {"model": "gpt-5.4"},
+        {"auth_mode": "api_key", "id": "crs-oracle-gpt"},
+        [],
+        runtime_provider_id=lambda runtime: runtime.get("id", ""),
+        runtime_account_id=lambda runtime: "",
+        runtime_bridge=lambda runtime: "",
+    )
+    pro_report = mms_command_tools.format_launch_trace(
+        "opencode",
+        {"model": "qwen-code"},
+        {"auth_mode": "api_key", "id": "team-pro", "profile": "pro"},
+        [],
+        runtime_provider_id=lambda runtime: runtime.get("id", ""),
+        runtime_account_id=lambda runtime: "",
+        runtime_bridge=lambda runtime: "",
+    )
+
+    assert "default: codex" in crs_report
+    assert "crs gpt route" in crs_report
+    assert "default: opencode" in pro_report
+    assert "opencode/pro runtime" in pro_report
+
+
+def test_launch_trace_formatter_marks_pi_candidate_families():
+    import mms_command_tools
+
+    report = mms_command_tools.format_launch_trace(
+        "pi",
+        {"model": "mimo-v2.5"},
+        {"auth_mode": "api_key", "id": "mimo-direct-anthropic"},
+        [],
+        runtime_provider_id=lambda runtime: runtime.get("id", ""),
+        runtime_account_id=lambda runtime: "",
+        runtime_bridge=lambda runtime: "",
+    )
+
+    assert "default: claude" in report
+    assert "pi:      candidate <- model family: mimo" in report
+
+
 def test_launch_with_tracking_helper_preserves_preferences_trace_and_broker_flow():
     import pytest
 

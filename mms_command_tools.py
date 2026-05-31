@@ -1207,6 +1207,70 @@ def trace_source_for(field, value, trace_overrides):
     return fallback_source or generic_match or "runtime result"
 
 
+def _trace_text_and_tokens(*values):
+    text = " ".join(str(value or "").strip().lower() for value in values if value is not None)
+    tokens = {item for item in re.split(r"[^a-z0-9]+", text) if item}
+    return text, tokens
+
+
+def _trace_model_family(model_text, model_tokens):
+    family_checks = [
+        ("deepseek", ("deepseek",)),
+        ("mimo", ("mimo", "minimax")),
+        ("glm", ("glm",)),
+    ]
+    matches = []
+    for label, hints in family_checks:
+        if any(hint in model_tokens or hint in model_text for hint in hints):
+            matches.append(label)
+    return matches
+
+
+def launch_trace_hints(cli_name, model, runtime, *, provider_id="", account_id=""):
+    """Return display-only launch hints; never feed back into runtime selection."""
+    runtime_values = [provider_id, account_id]
+    if isinstance(runtime, dict):
+        runtime_values.extend(
+            runtime.get(key)
+            for key in (
+                "id",
+                "name",
+                "provider_id",
+                "provider_profile",
+                "profile",
+                "opencode_profile",
+                "runtime_kind",
+                "auth_mode",
+            )
+        )
+    runtime_text, runtime_tokens = _trace_text_and_tokens(*runtime_values)
+    model_text, model_tokens = _trace_text_and_tokens(model)
+    families = _trace_model_family(model_text, model_tokens)
+
+    default_cli = ""
+    reason = ""
+    if (
+        "opencode" in runtime_text
+        or (isinstance(runtime, dict) and runtime.get("runtime_kind") == "opencode_profile")
+        or "pro" in runtime_tokens
+    ):
+        default_cli = "opencode"
+        reason = "opencode/pro runtime"
+    elif "crs" in runtime_tokens and ("gpt" in model_tokens or "gpt" in runtime_tokens):
+        default_cli = "codex"
+        reason = "crs gpt route"
+    elif families:
+        default_cli = "claude"
+        reason = f"model family: {'/'.join(families)}"
+
+    lines = []
+    if default_cli:
+        lines.append(f"  default: {default_cli:<8s} <- {reason}")
+    if families:
+        lines.append(f"  pi:      candidate <- model family: {'/'.join(families)}")
+    return lines
+
+
 def format_launch_trace(
     cli_name,
     model_info,
@@ -1238,8 +1302,11 @@ def format_launch_trace(
         f"  bridge:   {bridge or '-'} <- {trace_source_for('bridge', bridge, trace_overrides)}",
         f"  runtime:  {auth_mode or '-'} <- {trace_source_for('runtime', auth_mode, trace_overrides)}",
         "",
-        "Override chain:",
     ]
+    hints = launch_trace_hints(cli_name, model, runtime, provider_id=provider_id, account_id=account_id)
+    if hints:
+        lines.extend(["Launch hints:", *hints, ""])
+    lines.append("Override chain:")
     if trace_overrides:
         for source, kv in trace_overrides:
             if kv:
