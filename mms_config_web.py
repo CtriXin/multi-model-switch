@@ -9,6 +9,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 import traceback
@@ -2998,6 +3000,10 @@ def _normalize_asset_preferences_payload(payload: dict[str, Any] | None) -> dict
     disabled = payload.get("disabled")
     if not isinstance(disabled, dict):
         disabled = ((payload.get("session_surfaces") or {}).get("disabled") if isinstance(payload.get("session_surfaces"), dict) else {})
+    launch_payload = payload.get("launch") if isinstance(payload.get("launch"), dict) else {}
+    disabled_clis_raw = payload.get("disabled_clis")
+    if disabled_clis_raw is None:
+        disabled_clis_raw = launch_payload.get("disabled_clis")
     assets = payload.get("assets") if isinstance(payload.get("assets"), dict) else {}
     mms_core = _load_mms_core()
     sanitize_disabled = getattr(mms_core, "_sanitize_disabled_session_surfaces", None)
@@ -3005,7 +3011,14 @@ def _normalize_asset_preferences_payload(payload: dict[str, Any] | None) -> dict
         disabled_clean = sanitize_disabled(disabled)
     else:
         disabled_clean = {}
-    normalized: dict[str, Any] = {"session_surfaces": {"disabled": disabled_clean}, "assets": {}}
+    sanitize_disabled_clis = getattr(mms_core, "_sanitize_disabled_clis", None)
+    if callable(sanitize_disabled_clis):
+        disabled_clis = sanitize_disabled_clis(disabled_clis_raw)
+    else:
+        disabled_clis = []
+    normalized: dict[str, Any] = {"session_surfaces": {"disabled": disabled_clean}, "assets": {}, "launch": {}}
+    if disabled_clis_raw is not None:
+        normalized["launch"]["disabled_clis"] = disabled_clis
     if "managed_enabled" in assets:
         normalized["assets"]["managed_enabled"] = _truthy(assets.get("managed_enabled"), default=True)
     managed_root = _safe_text(assets.get("managed_root"))
@@ -3016,6 +3029,12 @@ def _normalize_asset_preferences_payload(payload: dict[str, Any] | None) -> dict
 
 def _merge_asset_preferences(current: dict[str, Any], asset_preferences: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(current) if isinstance(current, dict) else {}
+    incoming_launch = asset_preferences.get("launch") if isinstance(asset_preferences.get("launch"), dict) else {}
+    if "disabled_clis" in incoming_launch:
+        launch = result.get("launch") if isinstance(result.get("launch"), dict) else {}
+        launch["disabled_clis"] = copy.deepcopy(incoming_launch.get("disabled_clis") or [])
+        result["launch"] = launch
+
     session_surfaces = result.get("session_surfaces") if isinstance(result.get("session_surfaces"), dict) else {}
     disabled = ((asset_preferences.get("session_surfaces") or {}).get("disabled") if isinstance(asset_preferences.get("session_surfaces"), dict) else {})
     session_surfaces["disabled"] = copy.deepcopy(disabled) if isinstance(disabled, dict) else {}
@@ -3045,6 +3064,7 @@ def build_preferences_plan(
     after_text = _toml_text(next_prefs)
     diff_text = _diff_text(before_text, after_text, before_name="preferences.toml(before)", after_name="preferences.toml(after)")
     disabled = ((asset_preferences.get("session_surfaces") or {}).get("disabled") or {}) if isinstance(asset_preferences.get("session_surfaces"), dict) else {}
+    disabled_clis = ((asset_preferences.get("launch") or {}).get("disabled_clis") or []) if isinstance(asset_preferences.get("launch"), dict) else []
     return {
         "ok": True,
         "schema": "mms.setup_web.preferences_plan.v1",
@@ -3055,6 +3075,7 @@ def build_preferences_plan(
         "diff": diff_text,
         "preferences": next_prefs,
         "summary": {
+            "disabled_clis": len(disabled_clis),
             "skills": len(disabled.get("skills") or []),
             "mcp": len(disabled.get("mcp") or []),
             "hooks": len(disabled.get("hooks") or []),
@@ -3134,6 +3155,99 @@ def apply_preferences_plan(
         "summary": plan.get("summary") or {},
         "diff": plan.get("diff") or "",
         "audit_tail": _latest_audit_rows(lock_path),
+    }
+
+
+def _expand_reveal_path(raw_path: Any) -> str:
+    path = _safe_text(raw_path)
+    if not path or "\x00" in path or "\n" in path or "\r" in path or "://" in path:
+        return ""
+    if path.startswith("~"):
+        try:
+            mms_core = _load_mms_core()
+            real_home = mms_core.resolve_real_user_home()
+        except Exception:
+            real_home = os.path.expanduser("~")
+        if path == "~":
+            path = real_home
+        elif path.startswith("~/"):
+            path = os.path.join(real_home, path[2:])
+        else:
+            path = os.path.expanduser(path)
+    else:
+        path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        path = os.path.abspath(path)
+    return path
+
+
+def reveal_local_path(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Reveal a local file/folder from the local WebUI without shell execution."""
+    payload = payload if isinstance(payload, dict) else {}
+    target_path = _expand_reveal_path(payload.get("path"))
+    if not target_path:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "blocked",
+            "errors": ["只能打开本地文件或目录路径。"],
+        }
+
+    exists = os.path.exists(target_path)
+    reveal_path = target_path if exists else os.path.dirname(target_path)
+    if not reveal_path or not os.path.exists(reveal_path):
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "missing",
+            "path": target_path,
+            "errors": ["路径和父目录都不存在，无法打开。"],
+        }
+
+    if sys.platform == "darwin":
+        command = ["open", reveal_path] if os.path.isdir(target_path) else ["open", "-R", reveal_path]
+    elif sys.platform.startswith("win"):
+        command = ["explorer", reveal_path if os.path.isdir(target_path) else f"/select,{reveal_path}"]
+    else:
+        folder = reveal_path if os.path.isdir(reveal_path) else os.path.dirname(reveal_path)
+        opener = shutil.which("xdg-open")
+        if not opener:
+            return {
+                "ok": False,
+                "schema": "mms.setup_web.reveal_path_result.v1",
+                "status": "blocked",
+                "path": target_path,
+                "errors": ["当前系统未找到 xdg-open，无法自动打开文件夹。"],
+            }
+        command = [opener, folder]
+
+    try:
+        result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "error",
+            "path": target_path,
+            "errors": [str(exc)],
+        }
+
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.reveal_path_result.v1",
+            "status": "error",
+            "path": target_path,
+            "errors": [f"打开路径失败，退出码 {result.returncode}。"],
+        }
+    return {
+        "ok": True,
+        "schema": "mms.setup_web.reveal_path_result.v1",
+        "status": "opened",
+        "path": target_path,
+        "opened_path": reveal_path,
+        "exists": exists,
+        "kind": "directory" if os.path.isdir(target_path) else ("file" if exists else "parent"),
     }
 
 

@@ -349,7 +349,14 @@
     <!-- Session 能力面板 -->
     <section class="panel" data-section="sessionAssets">
       <h2>Skill / MCP 管理</h2>
-      <p>这里就是会话能力的配置入口：筛选 Skill / MCP / Hook，勾选默认关闭；只有产生未保存变化时，底部才会出现保存栏。</p>
+      <p>这里就是会话能力的配置入口：控制可用 CLI，筛选 Skill / MCP / Hook，勾选默认关闭；只有产生未保存变化时，底部才会出现保存栏。</p>
+      <div class="card cli-usage-card">
+        <div>
+          <h3>CLI 可用性</h3>
+          <p class="muted">不想在 MMS 里使用的 CLI 可以直接关闭；关闭后启动选择和直接 target 都不会使用它。</p>
+        </div>
+        <div class="cli-toggle-grid" id="cliUsageControls"></div>
+      </div>
       <div class="asset-hero" id="assetSummary"></div>
       <div class="asset-control-help" id="assetControlHelp"></div>
       <div class="asset-manager">

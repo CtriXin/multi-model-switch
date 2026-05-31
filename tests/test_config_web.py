@@ -901,6 +901,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "asset-ops-grid" in html
     assert "copyAssetPrefs" in html
     assert "启动确认页仍可临时打开" in html
+    assert "打开位置" in html
+    assert "data-asset-reveal-path" in html
+    assert "/api/path/reveal" in html
+    assert "function assetPathButtons" in html
     assert "全局继承" in html
     assert "MMS 动态注入" in html
     assert "高级信息：路径、触发和 key" in html
@@ -2626,6 +2630,7 @@ def test_config_web_preferences_apply_uses_backup_and_audit(tmp_path):
         encoding="utf-8",
     )
     payload = {
+        "disabled_clis": ["pi", "agy"],
         "disabled": {"skills": ["web-access", "claude:lark-doc"], "mcp": ["pilot"], "hooks": ["echo hi"]},
         "assets": {"managed_enabled": True, "managed_root": str(tmp_path / "assets")},
         "confirm_preferences": True,
@@ -2651,6 +2656,7 @@ def test_config_web_preferences_apply_uses_backup_and_audit(tmp_path):
     assert result["backup_path"]
     assert (tmp_path / "config-audit.jsonl").exists()
     assert saved["launch"]["defaults"]["bypass"] is False
+    assert saved["launch"]["disabled_clis"] == ["pi", "agy"]
     assert saved["assets"]["roots"]["web_access"] == "/tmp/web"
     assert saved["assets"]["managed_root"] == str(tmp_path / "assets")
     assert saved["session_surfaces"]["disabled"]["skills"] == ["web-access", "claude:lark-doc"]
@@ -2698,6 +2704,32 @@ def test_config_web_preferences_apply_requires_confirmation(tmp_path):
     assert result["ok"] is False
     assert result["status"] == "blocked"
     assert not (tmp_path / "preferences.toml").exists()
+
+
+def test_config_web_reveal_local_path_opens_finder_without_shell(monkeypatch, tmp_path):
+    target = tmp_path / "skills" / "demo" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# demo\n", encoding="utf-8")
+    calls = []
+
+    class Completed:
+        returncode = 0
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Completed()
+
+    monkeypatch.setattr(mms_config_web.sys, "platform", "darwin")
+    monkeypatch.setattr(mms_config_web.subprocess, "run", fake_run)
+
+    result = mms_config_web.reveal_local_path({"path": str(target)})
+    blocked = mms_config_web.reveal_local_path({"path": "https://example.com/skill"})
+
+    assert result["ok"] is True
+    assert result["status"] == "opened"
+    assert calls == [(["open", "-R", str(target)], {"stdout": mms_config_web.subprocess.DEVNULL, "stderr": mms_config_web.subprocess.DEVNULL, "timeout": 5, "check": False})]
+    assert blocked["ok"] is False
+    assert blocked["status"] == "blocked"
 
 
 def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):

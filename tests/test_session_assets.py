@@ -78,7 +78,7 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert snapshot["schema"] == "mms.session_assets.snapshot.v1"
     assert snapshot["mode"] == "read_only_inventory"
     assert {tab["id"] for tab in snapshot["tabs"]} == {"mms_dynamic", "global", "other"}
-    assert {cli["id"] for cli in snapshot["clis"]} == {"claude", "codex", "opencode", "agy"}
+    assert {cli["id"] for cli in snapshot["clis"]} == {"claude", "codex", "opencode", "pi", "agy"}
     assert "preferences.toml" in snapshot["configuration_contract"]["persistent_path"]
     assert "[session_surfaces.disabled]" in snapshot["preference_snippet"]
     assert "[assets]" in snapshot["preference_snippet"]
@@ -100,7 +100,7 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert snapshot["confirm_reference"]["title"] == "TUI 确认页对照"
     assert {panel["id"] for panel in snapshot["confirm_reference"]["panels"]} == {"summary", "mcp", "skills", "hooks"}
     assert any(action["key"] == "D / Space" for action in snapshot["confirm_reference"]["actions"])
-    assert {view["id"] for view in snapshot["cli_views"]} == {"claude", "codex", "opencode", "agy"}
+    assert {view["id"] for view in snapshot["cli_views"]} == {"claude", "codex", "opencode", "pi", "agy"}
     assert all(isinstance(view["controls"], list) for view in snapshot["cli_views"])
     assert all(isinstance(view["global_sources"], list) for view in snapshot["cli_views"])
     global_skill_rows = [row for row in snapshot["rows"] if row.get("inventory_only") and row.get("group") == "global"]
@@ -115,8 +115,12 @@ def test_session_assets_snapshot_is_read_only_inventory(monkeypatch, tmp_path):
     assert shared_global["disable_supported"] is False
     claude = next(view for view in snapshot["cli_views"] if view["id"] == "claude")
     codex = next(view for view in snapshot["cli_views"] if view["id"] == "codex")
+    pi = next(view for view in snapshot["cli_views"] if view["id"] == "pi")
     assert any(src["label"] == "Claude 全局技能" and src["count"] == 1 for src in claude["global_sources"])
     assert any(src["label"] == "Codex bundled plugin 技能" and src["count"] == 1 for src in codex["global_sources"])
+    assert pi["allow_execution_surfaces"] is False
+    assert any("Pi 当前" in constraint for constraint in pi["constraints"])
+    assert snapshot["cli_visibility"]["preference_key"] == "launch.disabled_clis"
 
 
 def test_session_asset_rows_have_user_facing_fields(monkeypatch, tmp_path):

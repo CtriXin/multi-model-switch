@@ -16,7 +16,7 @@ import tomllib
 from typing import Any
 
 
-CLI_ORDER = ("claude", "codex", "opencode", "agy")
+CLI_ORDER = ("claude", "codex", "opencode", "pi", "agy")
 SURFACE_KINDS = ("skills", "mcp", "hooks")
 PACK_SCOPES = ("always", "caveman", "nsr", "ecc", "omc")
 
@@ -24,6 +24,7 @@ _CLI_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
     "opencode": "OpenCode",
+    "pi": "Pi",
     "agy": "Antigravity",
 }
 
@@ -322,6 +323,9 @@ def _preview_for_cli(mms_core: Any | None, cli: str, runtime: dict[str, Any]) ->
     has_ecc = cli == "claude" and _call_bool(mms_core, "_ecc_available_for_claude")
     has_omc = cli == "claude" and _call_bool(mms_core, "_omc_available_for_claude")
     flags = {"caveman": has_caveman, "nsr": has_nsr, "ecc": has_ecc, "omc": has_omc}
+    if cli == "pi":
+        flags = {"caveman": False, "nsr": False, "ecc": False, "omc": False}
+        return {"allow_execution_surfaces": False, "mcp": {}, "skills": {}, "hooks": {}}, flags
     if mms_core is None or not hasattr(mms_core, "_build_confirm_preview_catalog"):
         return {"allow_execution_surfaces": True, "mcp": {}, "skills": {}, "hooks": {}}, flags
     try:
@@ -540,8 +544,28 @@ def _disabled_defaults(prefs: dict[str, Any]) -> dict[str, list[str]]:
     return result
 
 
+def _disabled_clis(prefs: dict[str, Any]) -> list[str]:
+    launch = (prefs.get("launch") or {}) if isinstance(prefs, dict) else {}
+    raw = launch.get("disabled_clis") if isinstance(launch, dict) else []
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple, set)):
+        raw = []
+    result = []
+    seen = set()
+    allowed = set(CLI_ORDER)
+    for item in raw:
+        cli = _safe_text(item).lower()
+        if not cli or cli not in allowed or cli in seen:
+            continue
+        seen.add(cli)
+        result.append(cli)
+    return result
+
+
 def _preference_snippet(prefs: dict[str, Any]) -> str:
     disabled = _disabled_defaults(prefs)
+    disabled_clis = _disabled_clis(prefs)
 
     def _list(name: str) -> str:
         values = disabled.get(name) or []
@@ -561,6 +585,9 @@ def _preference_snippet(prefs: dict[str, Any]) -> str:
     managed_root = _safe_text(assets.get("managed_root") or install.get("real_root") or "~/.local/share/mms/assets")
     return "\n".join(
         [
+            "[launch]",
+            f"disabled_clis = [" + ", ".join(f'"{_safe_text(item)}"' for item in disabled_clis) + "]",
+            "",
             "[launch.defaults]",
             f'caveman_mode = "{caveman}"',
             f'nsr_mode = "{nsr}"',
@@ -626,6 +653,7 @@ def _global_skill_root_specs(cli: str) -> list[dict[str, Any]]:
 
 def _global_skill_inventory_rows(cli: str, *, home: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
     for spec in _global_skill_root_specs(cli):
         raw_path = str(spec.get("path") or "")
         root_label = str(spec.get("label") or "全局技能")
@@ -635,6 +663,10 @@ def _global_skill_inventory_rows(cli: str, *, home: str) -> list[dict[str, Any]]
             path = _safe_text(entry.get("path"))
             if not name or not path:
                 continue
+            name_key = os.path.basename(name).lower()
+            if name_key in seen_names and not spec.get("disable_supported"):
+                continue
+            seen_names.add(name_key)
             rows.append(
                 {
                     "cli": cli,
@@ -807,6 +839,17 @@ def _global_sources_for_cli(cli: str, cli_rows: list[dict[str, Any]], *, home: s
         count, items = _skill_dir_items("~/.agents/skills", home=home)
         _append_global_source(sources, surface="skills", label="共享 agent 技能", path="~/.agents/skills", count=count, items=items, home=home)
         _append_global_source(sources, surface="mcp", label="OpenCode 配置目录", path="~/.config/opencode", count=0, items=[], note="OpenCode 全局配置只读展示；session-local opencode.json 由 launcher 生成。", home=home)
+    elif cli == "pi":
+        _append_global_source(
+            sources,
+            surface="hooks",
+            label="Pi session settings",
+            path="~/.config/mms/pi-gateway",
+            count=0,
+            items=[],
+            note="Pi 目前由 MMS 生成 models/settings/retry extension；不继承 Skill/MCP/Hook 目录。",
+            home=home,
+        )
     elif cli == "agy":
         count, items = _skill_dir_items("~/.agents/skills", home=home)
         _append_global_source(sources, surface="skills", label="共享 agent 技能", path="~/.agents/skills", count=count, items=items, home=home)
@@ -984,6 +1027,16 @@ def _cli_view(
     disabled_by_preference = [row for row in cli_rows if _row_disabled_by_preference(row, disabled)]
     agent_pack_options = [name for name in ("ecc", "omc") if flags.get(name)]
     optional_scopes = [name for name, enabled in flags.items() if enabled]
+    constraints = [
+        "TUI 启动确认页本次切换优先级最高，不写回真实配置。",
+        "全局 CLI 配置只读展示；WebUI 不自动修改 Claude/Codex/OpenCode/Antigravity 全局文件。",
+        "Claude OAuth / 受限启动路径不会注入托管 MCP、技能或钩子。" if not catalog.get("allow_execution_surfaces", True) else "当前启动预览允许注入托管 MCP、技能和钩子。",
+    ]
+    if cli == "pi":
+        constraints = [
+            "Pi 当前由 MMS 生成 provider/models/settings/retry extension；不注入 Skill/MCP/Hook 目录。",
+            "如果需要 Skill 能力，请优先使用 Claude/Codex/OpenCode/Antigravity。",
+        ]
     return {
         "id": cli,
         "label": _CLI_LABELS.get(cli, cli),
@@ -1000,11 +1053,7 @@ def _cli_view(
         "panels": _cli_panel_cards(catalog),
         "controls": _cli_control_cards(cli, flags, defaults, catalog),
         "global_sources": _global_sources_for_cli(cli, cli_rows, home=home),
-        "constraints": [
-            "TUI 启动确认页本次切换优先级最高，不写回真实配置。",
-            "全局 CLI 配置只读展示；WebUI 不自动修改 Claude/Codex/OpenCode/Antigravity 全局文件。",
-            "Claude OAuth / 受限启动路径不会注入托管 MCP、技能或钩子。" if not catalog.get("allow_execution_surfaces", True) else "当前启动预览允许注入托管 MCP、技能和钩子。",
-        ],
+        "constraints": constraints,
         "inactive_by_default": len(inactive),
         "disabled_by_preference": len(disabled_by_preference),
         "disabled_by_default": len(disabled_by_preference),
@@ -1027,6 +1076,8 @@ def build_session_assets_snapshot(
     cli_cards = []
     defaults = ((prefs.get("launch") or {}).get("defaults") or {}) if isinstance(prefs, dict) else {}
     disabled = ((prefs.get("session_surfaces") or {}).get("disabled") or {}) if isinstance(prefs, dict) else {}
+    disabled_clis = _disabled_clis(prefs)
+    disabled_cli_set = set(disabled_clis)
     cli_views = []
     for cli in CLI_ORDER:
         runtime = {
@@ -1045,6 +1096,8 @@ def build_session_assets_snapshot(
                 "row_count": len(cli_rows),
                 "available_packs": [name for name, enabled in flags.items() if enabled],
                 "allow_execution_surfaces": bool(catalog.get("allow_execution_surfaces", True)),
+                "enabled": cli not in disabled_cli_set,
+                "disabled_by_preference": cli in disabled_cli_set,
             }
         )
 
@@ -1083,6 +1136,20 @@ def build_session_assets_snapshot(
             },
         ],
         "clis": cli_cards,
+        "cli_visibility": {
+            "preference_key": "launch.disabled_clis",
+            "disabled": disabled_clis,
+            "items": [
+                {
+                    "id": cli,
+                    "label": _CLI_LABELS.get(cli, cli),
+                    "enabled": cli not in disabled_cli_set,
+                    "row_count": next((card["row_count"] for card in cli_cards if card["id"] == cli), 0),
+                    "note": "关闭后 MMS 启动选择和直接 target 都不会使用这个 CLI。",
+                }
+                for cli in CLI_ORDER
+            ],
+        },
         "cli_views": cli_views,
         "confirm_reference": _confirm_reference(),
         "rows": rows,

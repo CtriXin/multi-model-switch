@@ -205,6 +205,9 @@ PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
 # User-owned preference overlay. Install/update never overwrites this file.
 
+[launch]
+disabled_clis = []            # e.g. ["pi", "agy"] hides/disables these MMS launch targets
+
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
@@ -3332,6 +3335,23 @@ def _sanitize_managed_assets_root(value):
     return os.path.abspath(os.path.expanduser(path))
 
 
+def _sanitize_disabled_clis(value):
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    allowed = set(CLI_NAMES)
+    result = []
+    seen = set()
+    for item in value:
+        cli_name = str(item or "").strip().lower()
+        if not cli_name or cli_name not in allowed or cli_name in seen:
+            continue
+        seen.add(cli_name)
+        result.append(cli_name)
+    return result
+
+
 def _sanitize_user_preferences(raw):
     raw = raw if isinstance(raw, dict) else {}
     launch = raw.get("launch") if isinstance(raw.get("launch"), dict) else {}
@@ -3339,11 +3359,14 @@ def _sanitize_user_preferences(raw):
     assets = raw.get("assets") if isinstance(raw.get("assets"), dict) else {}
 
     result = {
-        "launch": {"defaults": {}, "cli": {}},
+        "launch": {"defaults": {}, "cli": {}, "disabled_clis": []},
         "session_surfaces": {"disabled": {}},
         "assets": {"roots": {}, "managed_enabled": True, "managed_root": ""},
     }
     result["launch"]["defaults"] = _sanitize_launch_preferences(launch.get("defaults"))
+    disabled_clis = _sanitize_disabled_clis(launch.get("disabled_clis", launch.get("disabled")))
+    if disabled_clis:
+        result["launch"]["disabled_clis"] = disabled_clis
     cli_tables = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
     for cli_name, table in cli_tables.items():
         normalized_cli = str(cli_name or "").strip().lower()
@@ -3417,6 +3440,24 @@ def managed_assets_root():
     if configured:
         return os.path.abspath(os.path.expanduser(configured))
     return os.path.join(resolve_real_user_home(), ".local", "share", "mms", "assets")
+
+
+def _preference_disabled_clis(prefs):
+    prefs = prefs if isinstance(prefs, dict) else {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    return set(_sanitize_disabled_clis(launch.get("disabled_clis", launch.get("disabled"))))
+
+
+def _disabled_clis_for_cfg(cfg):
+    prefs = (cfg or {}).get("_mms_preferences") if isinstance(cfg, dict) else None
+    if not isinstance(prefs, dict):
+        prefs = load_user_preferences()
+    return _preference_disabled_clis(prefs)
+
+
+def _cli_disabled_by_preferences(cfg, cli_name):
+    cli_name = str(cli_name or "").strip().lower()
+    return bool(cli_name and cli_name in _disabled_clis_for_cfg(cfg))
 
 
 def _merge_disabled_session_surfaces(*payloads):
@@ -8605,8 +8646,11 @@ def _choose_runtime_source(
 
 def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
+    disabled_clis = _disabled_clis_for_cfg(cfg)
 
     for cli_name in CLI_NAMES:
+        if cli_name in disabled_clis:
+            continue
         if cli_name in MMS_MANAGED_OAUTH_CLIS:
             if _accounts_for_cli(cfg, cli_name):
                 visible.append(cli_name)
@@ -8764,7 +8808,10 @@ def _confirm_context_lines(cli, runtime):
 
 def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=False, has_ecc=False, has_omc=False):
     runtime = runtime if isinstance(runtime, dict) else {}
-    allow_execution_surfaces = not (cli == "claude" and runtime.get("auth_mode") == "oauth")
+    allow_execution_surfaces = not (
+        (cli == "claude" and runtime.get("auth_mode") == "oauth")
+        or cli == "pi"
+    )
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
         "mcp": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
@@ -12569,8 +12616,9 @@ def _display_preferences_help():
     console.print(f"  {command} config preferences.doc")
     console.print(f"  {command} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
+    console.print("  launch.disabled_clis: hide/disable MMS launch targets such as pi or agy")
     console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
-    console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
+    console.print("  launch.cli.<claude|codex|opencode|pi|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
     console.print("  assets: managed_enabled, managed_root")
     console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
@@ -14595,6 +14643,7 @@ def main():
         visible_presets = {
             name: p for name, p in presets.items()
             if _preset_has_visible_model_options(p)
+            and not _cli_disabled_by_preferences(cfg, p.get("cli"))
         }
         if visible_presets:
             table = Table(title="已保存预设")
@@ -14633,6 +14682,9 @@ def main():
         if p is None:
             return
         cli = p["cli"]
+        if _cli_disabled_by_preferences(cfg, cli):
+            console.print(f"[yellow]预设 {args.preset} 使用的 CLI `{cli}` 已在 preferences.toml 中关闭。[/yellow]")
+            return
         model_info = _preset_model_info(p)
         _trace_record(f'preset "{args.preset}"', cli=cli, model=p.get("model"), provider=p.get("provider"), account=p.get("account"), bridge=p.get("bridge"))
         if args.account or args.provider:
@@ -14668,6 +14720,10 @@ def main():
             target = "opencode"
         elif target != "opencode":
             parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile agent")
+    if target in CLI_NAMES and _cli_disabled_by_preferences(cfg, target):
+        console.print(f"[yellow]{target} 已在 preferences.toml 的 launch.disabled_clis 中关闭。[/yellow]")
+        console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
+        return
 
     if target:
         profile_to_launch = requested_opencode_profile
@@ -14747,7 +14803,7 @@ def main():
                 save_preset_interactive(user_cfg, cli, model_info)
             _launch_with_tracking(cli, {} if _uses_managed_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
-        if target in MMS_MANAGED_OAUTH_CLIS and _accounts_for_cli(cfg, target):
+        if target in MMS_MANAGED_OAUTH_CLIS and _accounts_for_cli(cfg, target) and not _cli_disabled_by_preferences(cfg, target):
             cli = target
             _trace_record("CLI target", cli=cli)
             if args.account or args.provider:
@@ -14788,6 +14844,10 @@ def main():
             _launch_with_tracking(cli, {} if _uses_managed_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
         if target in CLI_NAMES:
+            if _cli_disabled_by_preferences(cfg, target):
+                console.print(f"[yellow]{target} 已在 preferences.toml 的 launch.disabled_clis 中关闭。[/yellow]")
+                console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
+                return
             console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
             console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
             return

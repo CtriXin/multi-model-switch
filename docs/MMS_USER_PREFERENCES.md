@@ -34,6 +34,9 @@ config.toml -> override.toml -> preferences.toml allowlist -> confirm screen cha
 ## Example
 
 ```toml
+[launch]
+disabled_clis = []            # e.g. ["pi", "agy"]
+
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
@@ -94,7 +97,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 Supported CLI names:
 
 ```text
-claude, codex, opencode, agy
+claude, codex, opencode, pi, agy
 ```
 
 `[session_surfaces.disabled]` accepts:
@@ -106,6 +109,14 @@ hooks = []
 ```
 
 `skills` accepts MMS dynamic skill names such as `web-access`, and CLI-scoped Global Skill filters such as `claude:frontend-design` or `codex:bugfix`. Scoped Global Skill filters only affect MMS-launched sessions; they do not delete or edit `~/.claude/skills` or `~/.codex/skills`.
+
+`[launch] disabled_clis` accepts MMS launch targets such as:
+
+```text
+claude, codex, opencode, pi, agy
+```
+
+关闭后，该 CLI 会从 MMS 启动选择里隐藏；直接执行 `mms <cli>` / preset 指向该 CLI 时也会被阻止。它只影响 MMS，不会卸载或修改原生 CLI。
 
 `[assets]` accepts:
 
@@ -208,7 +219,7 @@ This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giv
 
 `mms config web` 提供 **Skill / MCP 管理**。它复用 TUI 启动确认页的 launch preview catalog，但按普通用户更容易理解的方式分组：
 
-- `MMS 动态注入`：MMS 在 session 启动时临时注入的技能、MCP 服务、hooks 和 OpenCode 插件；
+- `MMS 动态注入`：MMS 在 session 启动时临时注入的技能、MCP 服务、hooks 和 OpenCode 插件；Pi 目前只生成 provider/models/settings/retry extension，不注入 Skill/MCP/Hook；
 - `全局继承`：用户自己已有的 Claude/Codex/OpenCode 配置或插件，MMS 可以看到，但 WebUI 不会静默编辑；
 - `其它检测项`：启动预览能看到、但需要保守检查路径的条目。
 

@@ -13,6 +13,9 @@ def test_load_user_preferences_sanitizes_allowlist(monkeypatch, tmp_path):
     pref_path = tmp_path / "preferences.toml"
     pref_path.write_text(
         f"""
+[launch]
+disabled_clis = ["pi", "agy", "unknown", "pi"]
+
 [launch.defaults]
 thinking_mode = "disable"
 reasoning_effort = "xhigh"
@@ -61,6 +64,7 @@ base_url = "https://should-not-load.example"
         "skills": ["agent-browser"],
         "mcp": ["pilot"],
     }
+    assert prefs["launch"]["disabled_clis"] == ["pi", "agy"]
     assert prefs["session_surfaces"]["disabled"] == {
         "skills": ["web-access", "claude:frontend-design"],
         "hooks": ["/tmp/drop.sh"],
@@ -71,6 +75,30 @@ base_url = "https://should-not-load.example"
     assert "provider" not in prefs
     assert "api_key" not in prefs["launch"]["defaults"]
     assert "credentials" not in prefs["assets"]["roots"]
+
+
+def test_resolve_visible_clis_respects_disabled_cli_preferences(monkeypatch):
+    import mms_core
+
+    cfg = {"_mms_preferences": {"launch": {"disabled_clis": ["codex", "pi"]}}}
+    provider = {
+        "id": "provider-a",
+        "enabled": True,
+        "api_key": "sk-test",
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "openai_base_url": "https://relay.example.com/v1",
+        "protocols": ["anthropic_messages", "openai_chat_completions"],
+        "supported_clis": ["claude", "codex", "opencode", "pi"],
+    }
+
+    monkeypatch.setattr(mms_core, "_accounts_for_cli", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_core, "check_cli_installed", lambda _cli: False)
+    visible = mms_core._resolve_visible_clis(cfg, provider, ["claude-sonnet-4-6", "gpt-5.5"])
+
+    assert "claude" in visible
+    assert "opencode" in visible
+    assert "codex" not in visible
+    assert "pi" not in visible
 
 
 def test_runtime_preferences_merge_defaults_cli_and_disabled_surfaces():

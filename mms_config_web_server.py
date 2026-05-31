@@ -53,6 +53,10 @@ def apply_preferences_plan(payload: dict[str, Any] | None, *, config_path: str =
     return _backend().apply_preferences_plan(payload, config_path=config_path, preferences_path=preferences_path)
 
 
+def reveal_local_path(payload: dict[str, Any] | None) -> dict[str, Any]:
+    return _backend().reveal_local_path(payload)
+
+
 def test_provider_models(cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, config_path: str = "", command_name: str = "mms") -> dict[str, Any]:
     return _backend().test_provider_models(cfg, payload, config_path=config_path, command_name=command_name)
 
@@ -116,6 +120,10 @@ class ConfigWebApp:
     def preferences_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             return apply_preferences_plan(payload, config_path=self.config_path, preferences_path=self.preferences_path)
+
+    def reveal_path(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return reveal_local_path(payload)
 
     def provider_test(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -225,6 +233,10 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/preferences/apply":
                 result = app.preferences_apply(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/path/reveal":
+                result = app.reveal_path(payload)
                 self._send(*_json_response(result, status=200 if result.get("ok") else 400))
                 return
             self._send(404, b"not found\n", "text/plain; charset=utf-8")
