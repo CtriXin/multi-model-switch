@@ -4,20 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mms_opencode_profiles import (
+from mms_opencode.profiles import (
     OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES,
     opencode_lite_pro_specs,
     opencode_profile_label,
     opencode_profile_selection,
 )
-from mms_opencode_roster import (
+from mms_opencode.roster import (
     opencode_agent_model_overrides,
     opencode_agent_roster_overrides,
     opencode_custom_route_key,
     opencode_roster_preset_models,
 )
-from mms_opencode_routes import (
+from mms_opencode.routes import (
     append_unique_opencode_route,
     opencode_default_model_rank,
     opencode_is_mimo_direct_route,

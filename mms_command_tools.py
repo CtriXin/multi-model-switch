@@ -7986,7 +7986,7 @@ def launch_broker_experiment_interactive(
     return True
 
 
-def opencode_default_profile_from_config(cfg, *, opencode_profile_selection, default_profile=""):
+def opencode_default_profile_from_config(cfg, *, opencode_profile_selection, default_profile=None):
     opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
     return opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile") or default_profile)
 

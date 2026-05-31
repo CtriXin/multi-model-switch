@@ -32,13 +32,13 @@ from mms_launcher_health import (
     load_gateway_health_cache as _load_gateway_health_cache_impl,
     save_gateway_health_cache as _save_gateway_health_cache_impl,
 )
-from mms_opencode_agents import (
+from mms_opencode.agents import (
     opencode_apply_agent_bypass_permissions,
     opencode_lite_agent_configs,
     opencode_lite_pro_agent_configs,
     opencode_permission_bypass_value,
 )
-from mms_opencode_config import (
+from mms_opencode.config import (
     OPENCODE_API_KEY_ENV,
     OPENCODE_BYPASS_FLAG,
     OPENCODE_BYPASS_PERMISSION_ENV,
@@ -75,7 +75,7 @@ from mms_opencode_config import (
     opencode_runtime_bool as _opencode_runtime_bool,
     opencode_runtime_routes as _opencode_runtime_routes,
 )
-from mms_opencode_env import (
+from mms_opencode.env import (
     opencode_export_config_path as _opencode_export_config_path_impl,
     opencode_gateway_env as _opencode_gateway_env_impl,
     opencode_global_export_env as _opencode_global_export_env_impl,
@@ -84,18 +84,18 @@ from mms_opencode_env import (
     opencode_set_soft_home as _opencode_set_soft_home_impl,
     opencode_write_config as _opencode_write_config_impl,
 )
-from mms_opencode_launch import (
+from mms_opencode.launch import (
     launch_opencode as _opencode_launch_impl,
     opencode_gateway_health_check as _opencode_gateway_health_check_impl,
     opencode_global_command as _opencode_global_command_impl,
     opencode_is_global_profile_runtime as _opencode_is_global_profile_runtime_impl,
     opencode_session_command as _opencode_session_command_impl,
 )
-from mms_opencode_preflight import (
+from mms_opencode.preflight import (
     opencode_run_preflight as _opencode_run_preflight_impl,
     opencode_select_launch_candidate as _opencode_select_launch_candidate_impl,
 )
-from mms_opencode_session import (
+from mms_opencode.session import (
     clear_opencode_config_env as _clear_opencode_config_env,
     overlay_opencode_session_assets as _overlay_opencode_session_assets_impl,
     opencode_rtk_plugin_path as _opencode_rtk_plugin_path_impl,
@@ -282,7 +282,7 @@ def _ensure_speed_stats():
 
 console = LauncherLazyConsole()
 
-# Keep the former private helper names importable while the implementation lives in mms_opencode_agents.
+# Keep the former private helper names importable while the implementation lives in mms_opencode.agents.
 _opencode_lite_agent_configs = opencode_lite_agent_configs
 _opencode_lite_pro_agent_configs = opencode_lite_pro_agent_configs
 _opencode_permission_bypass_value = opencode_permission_bypass_value
@@ -1127,7 +1127,7 @@ CLI_PROTOCOL_REQUIREMENTS = {
     "opencode": "openai_chat_completions",
 }
 OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini", "agy"}
-# OpenCode constants and pure config helpers live in mms_opencode_config.
+# OpenCode constants and pure config helpers live in mms_opencode.config.
 _LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
 def _resolve_local_hooks_dir(module_file=None):
     """Compatibility wrapper for local hook directory resolution."""

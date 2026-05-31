@@ -634,7 +634,7 @@ def test_core_provider_supports_opencode_cli():
 
 def test_core_opencode_profiles_are_fixed_launch_shapes():
     import mms_core
-    import mms_opencode_profiles
+    from mms_opencode import profiles as mms_opencode_profiles
 
     assert mms_core._normalize_opencode_profile_id("lite-pro") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("agent") == "lite_pro_orchestrated"

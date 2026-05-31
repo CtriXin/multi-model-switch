@@ -6,7 +6,7 @@ import json
 import os
 from urllib.parse import urlsplit
 
-from mms_opencode_agents import (
+from mms_opencode.agents import (
     opencode_apply_agent_bypass_permissions,
     opencode_lite_agent_configs,
     opencode_lite_pro_agent_configs,

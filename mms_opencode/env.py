@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from mms_opencode_config import opencode_config_slug
+from mms_opencode.config import opencode_config_slug
 
 
 def opencode_write_config(path, runtime, model, *, build_config_content, atomic_write_text):

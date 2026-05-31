@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from time import perf_counter
 
-from mms_opencode_config import (
+from mms_opencode.config import (
     OPENCODE_BYPASS_FLAG,
     OPENCODE_LAUNCH_PREFLIGHT_PROMPT,
     opencode_preflight_timeout,

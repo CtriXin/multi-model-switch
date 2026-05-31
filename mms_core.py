@@ -101,7 +101,7 @@ from mms_fake_upstream import (
     tail_log as _fake_upstream_tail_log,
 )
 from mms_i18n import normalize_language, set_language, pick as _L
-from mms_opencode_health import (
+from mms_opencode.health import (
     OPENCODE_HEALTH_REL_PATH as _OPENCODE_HEALTH_REL_PATH,
     OPENCODE_HEALTH_STATUS_RANK as _OPENCODE_HEALTH_STATUS_RANK,
     OPENCODE_HEALTH_UNHEALTHY_TTL_SEC as _OPENCODE_HEALTH_UNHEALTHY_TTL_SEC,
@@ -115,7 +115,7 @@ from mms_opencode_health import (
     opencode_route_health_key as _opencode_route_health_key,
     opencode_route_health_sort_key as _opencode_route_health_sort_key,
 )
-from mms_opencode_profiles import (
+from mms_opencode.profiles import (
     OPENCODE_AGENT_PROFILE_ID as _OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
     OPENCODE_DEFAULT_PROFILE_ID as _OPENCODE_DEFAULT_PROFILE_ID,
@@ -131,12 +131,12 @@ from mms_opencode_profiles import (
     opencode_profile_selection as _opencode_profile_selection,
     opencode_profile_selection_ids as _opencode_profile_selection_ids,
 )
-from mms_opencode_routes import (
+from mms_opencode.routes import (
     opencode_mimo_openai_base_from_anthropic as _opencode_mimo_openai_base_from_anthropic,
     opencode_provider_protocols as _opencode_provider_protocols,
     opencode_route_transport_candidates as _opencode_route_transport_candidates_impl,
 )
-from mms_opencode_resolver import (
+from mms_opencode.resolver import (
     OpenCodeResolverDeps as _OpenCodeResolverDeps,
     find_opencode_model_route as _find_opencode_model_route_impl,
     resolve_opencode_profile_runtime as _resolve_opencode_profile_runtime_impl,
@@ -4541,7 +4541,7 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
 
 
 def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
-    from mms_opencode_profiles import select_and_apply_opencode_profile
+    from mms_opencode.profiles import select_and_apply_opencode_profile
 
     return select_and_apply_opencode_profile(
         runtime,

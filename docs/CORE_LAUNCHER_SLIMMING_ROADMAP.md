@@ -61,19 +61,19 @@ Conclusion: OpenCode is now structurally healthier; Core, Claude, Codex, and TUI
 
 OpenCode launch logic has been pulled out of the largest files into focused modules:
 
-- `mms_opencode_agents.py`
-- `mms_opencode_config.py`
-- `mms_opencode_env.py`
-- `mms_opencode_health.py`
-- `mms_opencode_launch.py`
-- `mms_opencode_preflight.py`
-- `mms_opencode_profiles.py`
-- `mms_opencode_resolver.py`
-- `mms_opencode_roster.py`
-- `mms_opencode_routes.py`
-- `mms_opencode_session.py`
+- `mms_opencode/agents.py`
+- `mms_opencode/config.py`
+- `mms_opencode/env.py`
+- `mms_opencode/health.py`
+- `mms_opencode/launch.py`
+- `mms_opencode/preflight.py`
+- `mms_opencode/profiles.py`
+- `mms_opencode/resolver.py`
+- `mms_opencode/roster.py`
+- `mms_opencode/routes.py`
+- `mms_opencode/session.py`
 
-The remaining `mms_launchers.launch_opencode` wrapper delegates to `mms_opencode_launch.launch_opencode`.
+The remaining `mms_launchers.launch_opencode` wrapper delegates to `mms_opencode.launch.launch_opencode`.
 
 ### OpenCode Product Surface
 

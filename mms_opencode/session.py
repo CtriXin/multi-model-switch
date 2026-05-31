@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from mms_opencode_config import opencode_env_bool, opencode_runtime_bool
+from mms_opencode.config import opencode_env_bool, opencode_runtime_bool
 
 OPENCODE_CONFIG_ENV_KEYS = (
     "OPENCODE_CONFIG",

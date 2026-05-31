@@ -1,0 +1,1 @@
+"""OpenCode launcher package."""
