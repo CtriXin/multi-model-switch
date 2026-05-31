@@ -216,8 +216,8 @@ Rules:
 
 Suggested modules:
 
-- `mms_codex_env.py`: Codex gateway/session env, config/trust state materialization.
-- `mms_codex_launch.py`: launch flow orchestration and bridge selection wrapper.
+- `mms_codex/env.py`: Codex gateway/session env, config/trust state materialization.
+- `mms_codex/launch.py`: launch flow orchestration and bridge selection wrapper.
 
 Rules:
 

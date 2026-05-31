@@ -47,7 +47,7 @@ OpenCode 瘦身阶段已经完成并合并：
    - 保留 `mms_launchers.launch_claude` wrapper，避免破坏调用方和 tests monkeypatch。
 
 2. Codex env / launch 拆分
-   - 目标模块：`mms_codex_env.py`、`mms_codex_launch.py`
+   - 目标模块：`mms_codex/env.py`、`mms_codex/launch.py`
    - 从 `mms_launchers.py` 移出 `_codex_gateway_env` 和 `launch_codex` 的大块实现。
    - 保留 `mms_launchers.launch_codex` wrapper。
 

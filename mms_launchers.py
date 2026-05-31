@@ -2104,35 +2104,35 @@ def _caveman_claude_tracker_command(caveman_root):
 
 def _caveman_codex_activate_command(caveman_root, caveman_level="light"):
     """Compatibility wrapper for Codex caveman activation command."""
-    from mms_codex_hooks import caveman_codex_activate_command
+    from mms_codex.hooks import caveman_codex_activate_command
 
     return caveman_codex_activate_command(caveman_root, caveman_level=caveman_level)
 
 
 def _caveman_codex_hook_payload(caveman_root, caveman_level="light"):
     """Compatibility wrapper for Codex caveman hook payload."""
-    from mms_codex_hooks import caveman_codex_hook_payload
+    from mms_codex.hooks import caveman_codex_hook_payload
 
     return caveman_codex_hook_payload(caveman_root, caveman_level=caveman_level)
 
 
 def _codex_shell_hook_payload(command_text, *, timeout=None, status_message=None):
     """Compatibility wrapper for Codex shell hook payload rendering."""
-    from mms_codex_hooks import codex_shell_hook_payload
+    from mms_codex.hooks import codex_shell_hook_payload
 
     return codex_shell_hook_payload(command_text, timeout=timeout, status_message=status_message)
 
 
 def _codex_caveman_session_hook(caveman_root, caveman_level="light"):
     """Compatibility wrapper for Codex caveman session hook rendering."""
-    from mms_codex_hooks import codex_caveman_session_hook
+    from mms_codex.hooks import codex_caveman_session_hook
 
     return codex_caveman_session_hook(caveman_root, caveman_level=caveman_level)
 
 
 def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     """Compatibility wrapper for Codex caveman hook configuration."""
-    from mms_codex_hooks import configure_codex_caveman_hooks
+    from mms_codex.hooks import configure_codex_caveman_hooks
 
     return configure_codex_caveman_hooks(
         hooks_data,
@@ -2150,7 +2150,7 @@ def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
 
 def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
     """Compatibility wrapper for Codex NSR hook configuration."""
-    from mms_codex_hooks import configure_codex_nsr_hooks
+    from mms_codex.hooks import configure_codex_nsr_hooks
 
     return configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
 
@@ -2203,7 +2203,7 @@ def _build_codex_session_hooks(
     disabled_session_surfaces=None,
 ):
     """Compatibility wrapper for Codex session hook payload construction."""
-    from mms_codex_hooks import build_codex_session_hooks
+    from mms_codex.hooks import build_codex_session_hooks
 
     return build_codex_session_hooks(
         base_hooks,
@@ -2216,70 +2216,70 @@ def _build_codex_session_hooks(
 
 def _codex_hook_event_state_key(event_name):
     """Compatibility wrapper for Codex hook event state keys."""
-    from mms_codex_hook_trust import _codex_hook_event_state_key as codex_hook_event_state_key
+    from mms_codex.hook_trust import _codex_hook_event_state_key as codex_hook_event_state_key
 
     return codex_hook_event_state_key(event_name)
 
 
 def _codex_hook_fingerprint(hook):
     """Compatibility wrapper for Codex hook fingerprinting."""
-    from mms_codex_hook_trust import _codex_hook_fingerprint as codex_hook_fingerprint
+    from mms_codex.hook_trust import _codex_hook_fingerprint as codex_hook_fingerprint
 
     return codex_hook_fingerprint(hook)
 
 
 def _codex_hook_index(hooks_payload):
     """Compatibility wrapper for Codex hook indexing."""
-    from mms_codex_hook_trust import _codex_hook_index as codex_hook_index
+    from mms_codex.hook_trust import _codex_hook_index as codex_hook_index
 
     return codex_hook_index(hooks_payload)
 
 
 def _decode_toml_basic_key(value):
     """Compatibility wrapper for TOML basic key decoding."""
-    from mms_codex_hook_trust import _decode_toml_basic_key as decode_toml_basic_key
+    from mms_codex.hook_trust import _decode_toml_basic_key as decode_toml_basic_key
 
     return decode_toml_basic_key(value)
 
 
 def _codex_hook_trust_records_from_config(config_text):
     """Compatibility wrapper for Codex hook trust record parsing."""
-    from mms_codex_hook_trust import _codex_hook_trust_records_from_config as records_from_config
+    from mms_codex.hook_trust import _codex_hook_trust_records_from_config as records_from_config
 
     return records_from_config(config_text)
 
 
 def _normalize_codex_hook_trust_toml_layout(config_text):
     """Compatibility wrapper for Codex hook trust TOML layout cleanup."""
-    from mms_codex_hook_trust import _normalize_codex_hook_trust_toml_layout as normalize_layout
+    from mms_codex.hook_trust import _normalize_codex_hook_trust_toml_layout as normalize_layout
 
     return normalize_layout(config_text)
 
 
 def _replace_codex_hook_trust_hashes(config_text, trusted_hashes_by_key):
     """Compatibility wrapper for replacing Codex hook trust hashes."""
-    from mms_codex_hook_trust import _replace_codex_hook_trust_hashes as replace_hashes
+    from mms_codex.hook_trust import _replace_codex_hook_trust_hashes as replace_hashes
 
     return replace_hashes(config_text, trusted_hashes_by_key)
 
 
 def _append_codex_exact_hook_trust_hashes(config_text, trusted_hashes_by_key):
     """Compatibility wrapper for appending exact Codex hook trust hashes."""
-    from mms_codex_hook_trust import _append_codex_exact_hook_trust_hashes as append_hashes
+    from mms_codex.hook_trust import _append_codex_exact_hook_trust_hashes as append_hashes
 
     return append_hashes(config_text, trusted_hashes_by_key)
 
 
 def _codex_hook_trust_refresh_enabled():
     """Compatibility wrapper for Codex hook trust refresh flag parsing."""
-    from mms_codex_hook_trust import _codex_hook_trust_refresh_enabled as refresh_enabled
+    from mms_codex.hook_trust import _codex_hook_trust_refresh_enabled as refresh_enabled
 
     return refresh_enabled()
 
 
 def _codex_app_server_hooks_list(codex_home, *, cwds=None, timeout=4.0):
     """Compatibility wrapper for reading current Codex app-server hook hashes."""
-    from mms_codex_hook_trust import _codex_app_server_hooks_list as app_server_hooks_list
+    from mms_codex.hook_trust import _codex_app_server_hooks_list as app_server_hooks_list
 
     return app_server_hooks_list(codex_home, cwds=cwds, timeout=timeout)
 
@@ -2293,7 +2293,7 @@ def _refresh_codex_current_hook_trust_cache(
     allow_non_real_home=False,
 ):
     """Compatibility wrapper for refreshing Codex hook trust cache."""
-    from mms_codex_hook_trust import _refresh_codex_current_hook_trust_cache as refresh_cache
+    from mms_codex.hook_trust import _refresh_codex_current_hook_trust_cache as refresh_cache
 
     return refresh_cache(
         target_codex_dir,
@@ -2306,7 +2306,7 @@ def _refresh_codex_current_hook_trust_cache(
 
 def _collect_codex_hook_trust_seed_sources(codex_roots):
     """Compatibility wrapper for collecting Codex hook trust seed sources."""
-    from mms_codex_hook_trust import _collect_codex_hook_trust_seed_sources as collect_seed_sources
+    from mms_codex.hook_trust import _collect_codex_hook_trust_seed_sources as collect_seed_sources
 
     return collect_seed_sources(codex_roots)
 
@@ -2320,7 +2320,7 @@ def _append_codex_session_hook_trust_states(
     source_hook_payloads_by_path=None,
 ):
     """Compatibility wrapper for Codex session hook trust state rendering."""
-    from mms_codex_hook_trust import _append_codex_session_hook_trust_states as append_trust_states
+    from mms_codex.hook_trust import _append_codex_session_hook_trust_states as append_trust_states
 
     return append_trust_states(
         config_text,
@@ -3192,7 +3192,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
 
 def _overlay_codex_shared_resume(home_dir, session_home):
     """Compatibility wrapper for account Codex shared-resume overlay."""
-    from mms_codex_assets import overlay_codex_shared_resume
+    from mms_codex.assets import overlay_codex_shared_resume
 
     return overlay_codex_shared_resume(home_dir, session_home)
 
@@ -3238,77 +3238,77 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 
 def _materialize_codex_session_entry(entry, src, dst):
     """Compatibility wrapper for Codex session entry materialization."""
-    from mms_codex_assets import materialize_codex_session_entry
+    from mms_codex.assets import materialize_codex_session_entry
 
     return materialize_codex_session_entry(entry, src, dst)
 
 
 def _overlay_codex_plugin_marketplace_cache(session_codex_dir, source_codex_dirs):
     """Compatibility wrapper for Codex marketplace cache overlay."""
-    from mms_codex_assets import overlay_codex_plugin_marketplace_cache
+    from mms_codex.assets import overlay_codex_plugin_marketplace_cache
 
     return overlay_codex_plugin_marketplace_cache(session_codex_dir, source_codex_dirs)
 
 
 def _codex_entry_is_session_local(entry):
     """Compatibility wrapper for Codex session-local entry filtering."""
-    from mms_codex_assets import codex_entry_is_session_local
+    from mms_codex.assets import codex_entry_is_session_local
 
     return codex_entry_is_session_local(entry)
 
 
 def _bounded_env_int(name, default):
     """Compatibility wrapper for bounded integer env parsing."""
-    from mms_codex_resume import _bounded_env_int as bounded_env_int
+    from mms_codex.resume import _bounded_env_int as bounded_env_int
 
     return bounded_env_int(name, default)
 
 
 def _first_existing_child(source_roots, entry_name, *, want_dir=False):
     """Compatibility wrapper for first bounded-resume child lookup."""
-    from mms_codex_resume import _first_existing_child as first_existing_child
+    from mms_codex.resume import _first_existing_child as first_existing_child
 
     return first_existing_child(source_roots, entry_name, want_dir=want_dir)
 
 
 def _existing_children(source_roots, entry_name, *, want_dir=False):
     """Compatibility wrapper for bounded-resume child lookup."""
-    from mms_codex_resume import _existing_children as existing_children
+    from mms_codex.resume import _existing_children as existing_children
 
     return existing_children(source_roots, entry_name, want_dir=want_dir)
 
 
 def _copy_tail_lines(src, dst, max_lines):
     """Compatibility wrapper for bounded resume tail copy."""
-    from mms_codex_resume import _copy_tail_lines as copy_tail_lines
+    from mms_codex.resume import _copy_tail_lines as copy_tail_lines
 
     return copy_tail_lines(src, dst, max_lines)
 
 
 def _safe_relative_path(root, path):
     """Compatibility wrapper for bounded resume relative paths."""
-    from mms_codex_resume import _safe_relative_path as safe_relative_path
+    from mms_codex.resume import _safe_relative_path as safe_relative_path
 
     return safe_relative_path(root, path)
 
 
 def _codex_session_file_cwd(path):
     """Compatibility wrapper for Codex session-file cwd extraction."""
-    from mms_codex_resume import _codex_session_file_cwd as codex_session_file_cwd
+    from mms_codex.resume import _codex_session_file_cwd as codex_session_file_cwd
 
     return codex_session_file_cwd(path)
 
 
 def _path_is_same_or_child(path, root):
     """Compatibility wrapper for same-or-child path checks."""
-    from mms_codex_resume import _path_is_same_or_child as path_is_same_or_child
+    from mms_codex.resume import _path_is_same_or_child as path_is_same_or_child
 
     return path_is_same_or_child(path, root)
 
 
 def _copy_latest_files_from_roots(src_roots, dst_root, max_files, *, max_file_bytes, project_path=""):
     """Compatibility wrapper for bounded resume latest-file copy."""
-    from mms_codex_resume import _copy_latest_files_from_roots as copy_latest_files_from_roots
+    from mms_codex.resume import _copy_latest_files_from_roots as copy_latest_files_from_roots
 
     return copy_latest_files_from_roots(
         src_roots,
@@ -3321,14 +3321,14 @@ def _copy_latest_files_from_roots(src_roots, dst_root, max_files, *, max_file_by
 
 def _copy_latest_files(src_root, dst_root, max_files, *, max_file_bytes):
     """Compatibility wrapper for bounded resume latest-file copy."""
-    from mms_codex_resume import _copy_latest_files as copy_latest_files
+    from mms_codex.resume import _copy_latest_files as copy_latest_files
 
     return copy_latest_files(src_root, dst_root, max_files, max_file_bytes=max_file_bytes)
 
 
 def _codex_sibling_session_roots(sessions_dir, *, exclude_session_home="", max_roots=None):
     """Compatibility wrapper for Codex sibling session roots."""
-    from mms_codex_resume import _codex_sibling_session_roots as codex_sibling_session_roots
+    from mms_codex.resume import _codex_sibling_session_roots as codex_sibling_session_roots
 
     return codex_sibling_session_roots(
         sessions_dir,
@@ -3339,14 +3339,14 @@ def _codex_sibling_session_roots(sessions_dir, *, exclude_session_home="", max_r
 
 def _seed_codex_bounded_resume(source_roots, session_codex_dir):
     """Compatibility wrapper for Codex bounded resume seeding."""
-    from mms_codex_resume import _seed_codex_bounded_resume as seed_codex_bounded_resume
+    from mms_codex.resume import _seed_codex_bounded_resume as seed_codex_bounded_resume
 
     return seed_codex_bounded_resume(source_roots, session_codex_dir)
 
 
 def _set_codex_resume_writeback_root(env, target_codex_dir):
     """Compatibility wrapper for Codex resume write-back env injection."""
-    from mms_codex_resume import _set_codex_resume_writeback_root as set_writeback_root
+    from mms_codex.resume import _set_codex_resume_writeback_root as set_writeback_root
 
     return set_writeback_root(env, target_codex_dir)
 
@@ -3369,56 +3369,56 @@ def _print_mms_resume_hint(cli_name, session_id):
 
 def _codex_index_records(codex_dir):
     """Compatibility wrapper for Codex bounded index records."""
-    from mms_codex_resume import _codex_index_records as codex_index_records
+    from mms_codex.resume import _codex_index_records as codex_index_records
 
     return codex_index_records(codex_dir)
 
 
 def _codex_resume_record_fingerprint(record):
     """Compatibility wrapper for Codex resume record fingerprints."""
-    from mms_codex_resume import _codex_resume_record_fingerprint as resume_record_fingerprint
+    from mms_codex.resume import _codex_resume_record_fingerprint as resume_record_fingerprint
 
     return resume_record_fingerprint(record)
 
 
 def _codex_resume_index_snapshot(codex_dir):
     """Compatibility wrapper for Codex resume index snapshots."""
-    from mms_codex_resume import _codex_resume_index_snapshot as resume_index_snapshot
+    from mms_codex.resume import _codex_resume_index_snapshot as resume_index_snapshot
 
     return resume_index_snapshot(codex_dir)
 
 
 def _codex_resume_sort_key(record):
     """Compatibility wrapper for Codex resume sort keys."""
-    from mms_codex_resume import _codex_resume_sort_key as resume_sort_key
+    from mms_codex.resume import _codex_resume_sort_key as resume_sort_key
 
     return resume_sort_key(record)
 
 
 def _codex_resume_hint_session_id(codex_dir, baseline_snapshot):
     """Compatibility wrapper for Codex resume hint session selection."""
-    from mms_codex_resume import _codex_resume_hint_session_id as resume_hint_session_id
+    from mms_codex.resume import _codex_resume_hint_session_id as resume_hint_session_id
 
     return resume_hint_session_id(codex_dir, baseline_snapshot)
 
 
 def _merge_tail_lines(src, dst, max_lines):
     """Compatibility wrapper for Codex bounded resume tail merge."""
-    from mms_codex_resume import _merge_tail_lines as merge_tail_lines
+    from mms_codex.resume import _merge_tail_lines as merge_tail_lines
 
     return merge_tail_lines(src, dst, max_lines)
 
 
 def _copy_resume_dir_back(src_root, dst_root, max_files, *, max_file_bytes):
     """Compatibility wrapper for Codex bounded resume dir write-back."""
-    from mms_codex_resume import _copy_resume_dir_back as copy_resume_dir_back
+    from mms_codex.resume import _copy_resume_dir_back as copy_resume_dir_back
 
     return copy_resume_dir_back(src_root, dst_root, max_files, max_file_bytes=max_file_bytes)
 
 
 def _sync_codex_bounded_resume_back(session_codex_dir, target_codex_dir):
     """Compatibility wrapper for Codex bounded resume write-back."""
-    from mms_codex_resume import _sync_codex_bounded_resume_back as sync_bounded_resume_back
+    from mms_codex.resume import _sync_codex_bounded_resume_back as sync_bounded_resume_back
 
     return sync_bounded_resume_back(session_codex_dir, target_codex_dir)
 
@@ -3431,7 +3431,7 @@ def _write_codex_hook_trust_cache(
     source_hook_payloads_by_path=None,
 ):
     """Compatibility wrapper for writing Codex hook trust cache."""
-    from mms_codex_hook_trust import _write_codex_hook_trust_cache as write_hook_trust_cache
+    from mms_codex.hook_trust import _write_codex_hook_trust_cache as write_hook_trust_cache
 
     return write_hook_trust_cache(
         target_codex_dir,
@@ -3443,28 +3443,28 @@ def _write_codex_hook_trust_cache(
 
 def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
     """Compatibility wrapper for syncing Codex hook trust back to durable cache."""
-    from mms_codex_hook_trust import _sync_codex_hook_trust_back as sync_hook_trust_back
+    from mms_codex.hook_trust import _sync_codex_hook_trust_back as sync_hook_trust_back
 
     return sync_hook_trust_back(session_codex_dir, target_codex_dir)
 
 
 def _sync_codex_bounded_resume_back_from_env(env):
     """Compatibility wrapper for env-driven Codex bounded resume write-back."""
-    from mms_codex_resume import _sync_codex_bounded_resume_back_from_env as sync_from_env
+    from mms_codex.resume import _sync_codex_bounded_resume_back_from_env as sync_from_env
 
     return sync_from_env(env)
 
 
 def _codex_resume_writeback_callback(env):
     """Compatibility wrapper for Codex resume write-back callback."""
-    from mms_codex_resume import _codex_resume_writeback_callback as resume_writeback_callback
+    from mms_codex.resume import _codex_resume_writeback_callback as resume_writeback_callback
 
     return resume_writeback_callback(env)
 
 
 def _codex_bounded_resume_entries():
     """Compatibility wrapper for Codex bounded resume entry names."""
-    from mms_codex_resume import _codex_bounded_resume_entries as bounded_resume_entries
+    from mms_codex.resume import _codex_bounded_resume_entries as bounded_resume_entries
 
     return bounded_resume_entries()
 
@@ -3647,7 +3647,7 @@ def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS
 
 def _sync_codex_session_claude_json(session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for Codex session Claude-state seeding."""
-    from mms_codex_claude_state import sync_codex_session_claude_json
+    from mms_codex.claude_state import sync_codex_session_claude_json
 
     return sync_codex_session_claude_json(
         session_home,
@@ -3677,14 +3677,14 @@ def _toml_bare_key(key):
 
 def _strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces=None):
     """Compatibility wrapper for disabled Codex MCP block stripping."""
-    from mms_codex_claude_state import strip_codex_mcp_server_blocks
+    from mms_codex.claude_state import strip_codex_mcp_server_blocks
 
     return strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces)
 
 
 def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_surfaces=None):
     """Compatibility wrapper for Claude MCP -> Codex config rendering."""
-    from mms_codex_claude_state import append_codex_mcp_servers_from_claude_json
+    from mms_codex.claude_state import append_codex_mcp_servers_from_claude_json
 
     return append_codex_mcp_servers_from_claude_json(
         config_text,
@@ -3940,7 +3940,7 @@ def _claude_gateway_env(
 
 def _codex_gateway_env(runtime, base_url, model_info=None):
     """Compatibility wrapper for Codex gateway env materialization."""
-    from mms_codex_env import build_codex_gateway_env
+    from mms_codex.env import build_codex_gateway_env
 
     return build_codex_gateway_env(runtime, base_url, model_info=model_info)
 
@@ -3974,7 +3974,7 @@ def _append_codex_bypass_flags(cmd, runtime):
 
 def launch_codex(model_info, runtime, once=False, extra_args=None):
     """Compatibility wrapper for the Codex launch flow."""
-    from mms_codex_launch import launch_codex_runtime
+    from mms_codex.launch import launch_codex_runtime
 
     return launch_codex_runtime(
         model_info,
