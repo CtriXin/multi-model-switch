@@ -197,6 +197,28 @@ def _load_mms_core():
     return mms_core
 
 
+def _version_info_for_snapshot(command_name: str = "mms") -> dict[str, Any]:
+    try:
+        mms_core = _load_mms_core()
+        raw = mms_core._release_version_info()  # noqa: SLF001 - read-only version metadata for WebUI chrome
+        info = dict(raw) if isinstance(raw, dict) else {}
+    except Exception as exc:
+        info = {"release": "dev", "error": f"{type(exc).__name__}: {exc}"}
+    release = _safe_text(info.get("release") or info.get("installed_version") or info.get("git_describe") or info.get("git_commit") or "dev")
+    branch = _safe_text(info.get("git_branch"))
+    commit = _safe_text(info.get("git_commit"))
+    channel = _safe_text(info.get("install_channel"))
+    if branch and commit:
+        display = f"{branch}@{commit}"
+    elif channel and release:
+        display = f"{channel} {release}"
+    else:
+        display = release
+    info["command"] = command_name
+    info["display"] = display
+    return info
+
+
 def _policy_path_for_config(config_path: str = "") -> str:
     config_path = os.path.abspath(os.path.expanduser(str(config_path or ""))) if config_path else ""
     if config_path:
@@ -1134,7 +1156,7 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
         },
         {
             "area": "设置",
-            "capability": "Registry 真源、preview doctor、Bundle、就绪度和状态",
+            "capability": "Registry 源状态、preview doctor、Bundle、就绪度和状态",
             "webui": "read_only_reports_plus_existing_apply",
             "tui": "can_degrade_report_display_after_webui_smoke",
         },
@@ -1457,10 +1479,10 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             "settings.registry",
             tui_area="Settings",
             tui_action_id="registry",
-            tui_label="模型真源",
-            webui_section="真源状态",
+            tui_label="模型源状态",
+            webui_section="配置源状态",
             webui_section_id="source",
-            webui_control="真源状态 卡片 + 报告按钮 + 保存 / 应用流程",
+            webui_control="配置源状态卡片 + 报告按钮 + 保存 / 应用流程",
             api_action="model_source_status",
             status="report",
             write_policy="read_only_report",
@@ -1757,7 +1779,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
     ]
 
     registry_rows = [
-        ("registry.model_source_status", "model_source_status", "查看模型真源状态", "model_source_status", "report", "read_only_report"),
+        ("registry.model_source_status", "model_source_status", "查看配置源状态", "model_source_status", "report", "read_only_report"),
         ("registry.consumer_bundle_status", "consumer_bundle_status", "查看消费端 Bundle", "consumer_bundle_status", "report", "read_only_report"),
         ("registry.v2_save_plan", "registry_v2_save_plan", "查看 v2 保存计划", "", "native", "save_preview"),
         ("registry.config_v2_promotion_plan", "config_v2_promotion_plan", "查看晋级计划", "config_v2_promotion_plan", "report", "read_only_report"),
@@ -1786,9 +1808,9 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
                 tui_area="Settings / Registry",
                 tui_action_id=action_id,
                 tui_label=label,
-                webui_section="保存 / 审计" if action_id == "registry_v2_save_plan" else "真源状态",
+                webui_section="保存 / 审计" if action_id == "registry_v2_save_plan" else "配置源状态",
                 webui_section_id="save" if action_id == "registry_v2_save_plan" else "source",
-                webui_control="保存页生成保存预览" if action_id == "registry_v2_save_plan" else "真源状态模块动作按钮",
+                webui_control="保存页生成保存预览" if action_id == "registry_v2_save_plan" else "配置源状态模块动作按钮",
                 api_action=api_action,
                 status=status,
                 write_policy=write_policy,
@@ -2079,6 +2101,7 @@ def build_config_snapshot(
         "schema": "mms.setup_web.snapshot.v2",
         "mode": "interactive_audited_save",
         "command": command_name,
+        "version_info": _version_info_for_snapshot(command_name),
         "setup_flow": build_setup_flow(),
         "test_contracts": build_test_contracts(),
         "paths": {
@@ -6181,10 +6204,10 @@ _HTML_PAGE = r"""<!doctype html>
   <aside class="side" id="nav"></aside>
   <main class="content">
     <section class="panel" data-section="source">
-      <h2>真源状态</h2>
-      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；registry 的 报告 / 人工确认操作也在这里，不再藏到 设置总表。</p>
+      <h2>配置源状态</h2>
+      <p>这是只读体检区：先确认当前 WebUI 正在读写哪个 config root，再看 registry DB、legacy import 和 latest-approved bundle。想写预览 DB 时，这里必须显示 mms-next；如果显示 mms，就是 stable 配置。</p>
       <div class="module-actions">
-        <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">模型真源状态</button>
+        <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">配置源状态</button>
         <button class="ghost" data-settings-action="consumer_bundle_status" data-report-target="sourceReport">消费端 Bundle</button>
         <button class="ghost" data-settings-action="verify_approved" data-report-target="sourceReport">验证已批准 Bundle</button>
         <button class="ghost" data-settings-action="preview_doctor" data-report-target="sourceReport">预览诊断</button>
@@ -6193,7 +6216,7 @@ _HTML_PAGE = r"""<!doctype html>
         <button class="ghost" data-settings-action="publish_approved_gate" data-report-target="sourceReport">发布确认</button>
       </div>
       <div class="grid" id="sourceStatus"></div>
-      <div class="result module-report" id="sourceReport">选择真源动作查看只读报告或人工确认。</div>
+      <div class="result module-report" id="sourceReport">选择配置源动作查看只读报告或人工确认。</div>
     </section>
 
 
@@ -6492,7 +6515,7 @@ _HTML_PAGE = r"""<!doctype html>
             <div class="mapping-head">
               <div>
                 <h3>TUI ↔ WebUI 对照表</h3>
-                <p class="muted">功能入口应在通道、模型测试、真源、Fallback、Runtime 或设置对应 tab 里；这里仅做验收证据。</p>
+                <p class="muted">功能入口应在通道、模型测试、配置源、Fallback、Runtime 或设置对应 tab 里；这里仅做验收证据。</p>
               </div>
               <div id="mappingFilters" class="filterbar compact"></div>
             </div>
@@ -6564,7 +6587,7 @@ _HTML_PAGE = r"""<!doctype html>
 <div class="toast" id="toast"></div>
 <script>
 const sections=[
-  ['source','真源状态','DB / legacy / bundle'],
+  ['source','配置源','root / DB / bundle'],
   ['channel','通道配置','URL / Key / 协议 / 模型'],
   ['test','模型测试','ping / chat smoke'],
   ['fallback','Fallback','rescue / vision'],
@@ -6583,7 +6606,9 @@ function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>
 function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
 function switchProviderFormTab(tab){activeProviderFormTab=tab||'basic';document.querySelectorAll('[data-provider-form-tab]').forEach(b=>b.classList.toggle('active',b.dataset.providerFormTab===activeProviderFormTab));document.querySelectorAll('[data-provider-form-panel]').forEach(p=>p.classList.toggle('active',p.dataset.providerFormPanel===activeProviderFormTab))}
 function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
-function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">配置：${escapeHtml(state.paths.config||'-')}</span><span class="pill">策略模型：${state.policy_summary.model_count}</span>`}
+function versionBadge(){const v=state.version_info||{};return v.display||v.release||v.git_describe||v.git_commit||'dev'}
+function rootAlias(root){return (root?.mode==='preview')?'mms-next':'mms'}
+function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">版本：${escapeHtml(versionBadge())}</span><span class="pill">${state.mode}</span><span class="pill">root：${escapeHtml(rootAlias(root))} / ${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">配置：${escapeHtml(state.paths.config||'-')}</span><span class="pill">策略模型：${state.policy_summary.model_count}</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function yn(value){return value?'是':'否'}
 function enumLabel(value){const key=String(value??'');const map={ok:'正常',missing:'缺失',unknown:'未知',ready:'就绪','not ready':'未就绪',not_ready:'未就绪',auto:'自动',enable:'启用',disable:'禁用',enabled:'已启用',disabled:'已禁用',configured:'已配置',none:'未配置',imported:'已导入',not_imported:'未导入',blocked:'已拦截',high:'高风险',medium:'中风险',low:'低风险',critical:'严重',required:'必需',redacted:'已脱敏',included:'包含明文'};return map[key]||key||'-'}
@@ -6620,7 +6645,9 @@ function renderSourceStatus(){
   const okPromotion=promotion.ready_for_human_review?'ok':'warn';
   const ready=bundle.runtime_ready===true?'就绪':bundle.runtime_ready===false?'未就绪':'未知';
   const bundleCommand=(root.command||state.command||'mms')==='mmf'?'mmf config bundle --json':'mms config bundle --json';
-  box.innerHTML=`<div class="card span6"><h3>配置 Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${enumLabel(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">source ${counts.source_snapshot||0}</span><span class="tag">fact ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy 导入</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">通道 ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">冲突 ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">候选 ${enumLabel(candidates.status||'not_imported')}</span><span class="tag">候选 route ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>已批准 Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${enumLabel(bundle.status||'missing')}</span><span class="tag">已验证 ${yn(bundle.verified)}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">缺 API Key ${bundle.router_missing_api_key_count||0}</span><span class="tag">文件 ${bundle.file_count||0}</span></div><div class="card span12"><h3>消费端 Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${enumLabel(consumer.status||'missing')}</span><span class="tag">已验证 ${yn(consumer.verified)}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">文件 ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>晋级计划 / 人工确认</h3><p class="muted">stable backup + bundle comparison 是只读审查；apply 仍停在 人工确认。</p><span class="tag ${okPromotion==='ok'?'':'off'}">${escapeHtml(promotion.status||'not_ready')}</span><span class="tag">人工审查 ${promotion.ready_for_human_review?'就绪':'未就绪'}</span><span class="tag">apply ${promotion.apply_enabled?'已启用':'已禁用'}</span><span class="tag">stable ${escapeHtml(safety.stable_write_policy||'human_only')}</span><span class="tag">backup ${backup.requires_backup_before_apply?'必需':'未知'}</span><span class="tag">将创建 backup ${yn(backup.would_create_backup)}</span><span class="tag">Bundle 对比 ${escapeHtml(compare.comparison_status||'-')}</span><p class="muted">preview ${escapeHtml(comparePreview.bundle_revision||comparePreview.status||'-')} → stable ${escapeHtml(compareStable.bundle_revision||compareStable.status||'-')}</p></div><div class="card span12"><h3>4.0 发布就绪度</h3><p class="muted">只读 audit：证明自动检查已到 stable promotion 人工确认；release_complete 仍为 false。</p><span class="tag ${readinessOk==='ok'?'':'off'}">${escapeHtml(readiness.result||'NOT_READY')}</span><span class="tag">状态 ${enumLabel(readiness.status||'not_ready')}</span><span class="tag">发布完成 ${yn(readiness.release_complete)}</span><span class="tag">人工确认 ${readiness.ready_for_human_gate?'就绪':'未就绪'}</span><span class="tag">阻塞 ${readinessBlocked.length}</span><span class="tag">检查项 ${readinessReqs.filter(r=>r&&r.ok).length}/${readinessReqs.length}</span><span class="tag">阻塞原因 ${escapeHtml(readiness.completion_blocker||'-')}</span><p class="muted">阻塞检查项：${escapeHtml(readinessBlocked.length?readinessBlocked.join(', '):'-')}</p><p class="muted">下一步：<span class="mono">${escapeHtml(readinessNext.command||readinessNext.label||'-')}</span></p></div><div class="card span12"><details><summary>原始状态 JSON</summary><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer,config_v2_promotion_plan:promotion,config_v2_release_readiness:readiness},null,2))}</div></details></div>`
+  const sourceRootAlias=rootAlias(root);
+  const rootHint=root.mode==='preview'?'当前写入目标是 mms-next：保存页会走“写入预览 DB + 发布”。':'当前写入目标是 mms stable：不会写 mms-next；要试预览 DB 请用 mmf config web。';
+  box.innerHTML=`<div class="card span6"><h3>当前配置 Root：${escapeHtml(sourceRootAlias)}</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(rootHint)}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${enumLabel(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">source ${counts.source_snapshot||0}</span><span class="tag">fact ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy 导入</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">通道 ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">冲突 ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">候选 ${enumLabel(candidates.status||'not_imported')}</span><span class="tag">候选 route ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>已批准 Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${enumLabel(bundle.status||'missing')}</span><span class="tag">已验证 ${yn(bundle.verified)}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">缺 API Key ${bundle.router_missing_api_key_count||0}</span><span class="tag">文件 ${bundle.file_count||0}</span></div><div class="card span12"><h3>消费端 Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${enumLabel(consumer.status||'missing')}</span><span class="tag">已验证 ${yn(consumer.verified)}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">文件 ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>晋级计划 / 人工确认</h3><p class="muted">stable backup + bundle comparison 是只读审查；apply 仍停在 人工确认。</p><span class="tag ${okPromotion==='ok'?'':'off'}">${escapeHtml(promotion.status||'not_ready')}</span><span class="tag">人工审查 ${promotion.ready_for_human_review?'就绪':'未就绪'}</span><span class="tag">apply ${promotion.apply_enabled?'已启用':'已禁用'}</span><span class="tag">stable ${escapeHtml(safety.stable_write_policy||'human_only')}</span><span class="tag">backup ${backup.requires_backup_before_apply?'必需':'未知'}</span><span class="tag">将创建 backup ${yn(backup.would_create_backup)}</span><span class="tag">Bundle 对比 ${escapeHtml(compare.comparison_status||'-')}</span><p class="muted">preview ${escapeHtml(comparePreview.bundle_revision||comparePreview.status||'-')} → stable ${escapeHtml(compareStable.bundle_revision||compareStable.status||'-')}</p></div><div class="card span12"><h3>4.0 发布就绪度</h3><p class="muted">只读 audit：证明自动检查已到 stable promotion 人工确认；release_complete 仍为 false。</p><span class="tag ${readinessOk==='ok'?'':'off'}">${escapeHtml(readiness.result||'NOT_READY')}</span><span class="tag">状态 ${enumLabel(readiness.status||'not_ready')}</span><span class="tag">发布完成 ${yn(readiness.release_complete)}</span><span class="tag">人工确认 ${readiness.ready_for_human_gate?'就绪':'未就绪'}</span><span class="tag">阻塞 ${readinessBlocked.length}</span><span class="tag">检查项 ${readinessReqs.filter(r=>r&&r.ok).length}/${readinessReqs.length}</span><span class="tag">阻塞原因 ${escapeHtml(readiness.completion_blocker||'-')}</span><p class="muted">阻塞检查项：${escapeHtml(readinessBlocked.length?readinessBlocked.join(', '):'-')}</p><p class="muted">下一步：<span class="mono">${escapeHtml(readinessNext.command||readinessNext.label||'-')}</span></p></div><div class="card span12"><details><summary>原始状态 JSON</summary><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer,config_v2_promotion_plan:promotion,config_v2_release_readiness:readiness},null,2))}</div></details></div>`
 }
 function providerEntries(){return (state.providers||[]).map((p,i)=>({p,i})).sort((a,b)=>{if(!!a.p.enabled!==!!b.p.enabled)return a.p.enabled?-1:1;return a.i-b.i})}
 function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>{const keyTag=p.api_key?'<span class="tag">待保存 Key</span>':(p.has_api_key?'<span class="tag">已保存 Key</span>':'<span class="tag off">缺少 Key</span>');const usage=p.usage||{};return `<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">已启用</span>':'<span class="tag off">已禁用</span>'}${keyTag}<span class="tag">模型 ${p.models?.length||0}</span><span class="tag">启动 ${usage.launches||0}</span></div>`}).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
