@@ -24,7 +24,7 @@ def scoped_store(tmp_path):
     with patch("mms_project_store.PRIMARY_CONFIG_DIR", config_root), patch(
         "mms_project_store.PROJECTS_DIR",
         projects_root,
-    ), patch("mms_session_index.get_projects_dir", lambda: projects_root):
+    ), patch("mms_session.index.get_projects_dir", lambda: projects_root):
         yield config_root, projects_root
 
 
@@ -75,7 +75,7 @@ def test_seed_claude_state_does_not_copy_global_user_identity(tmp_path):
 
 def test_session_index_isolated_by_account(tmp_path, scoped_store):
     _config_root, _projects_root = scoped_store
-    from mms_session_index import list_indexed_sessions, record_claude_session_start
+    from mms_session.index import list_indexed_sessions, record_claude_session_start
 
     project_dir = tmp_path / "repo"
     project_dir.mkdir()
@@ -110,7 +110,7 @@ def test_session_index_isolated_by_account(tmp_path, scoped_store):
 def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monkeypatch, tmp_path):
     import mms_launchers
     from mms_project_store import claude_raw_entry_path
-    from mms_session_index import record_claude_session_start
+    from mms_session.index import record_claude_session_start
 
     real_home = tmp_path / "real-home"
     gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "16593"

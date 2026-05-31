@@ -30,6 +30,7 @@ DIRS=(
     "mms_claude"
     "mms_agy"
     "mms_pi"
+    "mms_session"
 )
 
 for file in "${FILES[@]}"; do

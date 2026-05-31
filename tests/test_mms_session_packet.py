@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_write_session_packet_uses_toon_without_secrets(monkeypatch, tmp_path):
-    from mms_session_packet import write_session_packet
+    from mms_session.packet import write_session_packet
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()

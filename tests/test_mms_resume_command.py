@@ -283,7 +283,7 @@ def test_resolve_codex_resume_ref_from_bounded_index(monkeypatch, tmp_path):
 
 def test_resolve_claude_resume_ref_from_index(monkeypatch):
     import mms_core
-    import mms_session_index
+    import mms_session.index as mms_session_index
 
     monkeypatch.setattr(
         mms_session_index,
@@ -560,7 +560,7 @@ def test_finalize_claude_slot_prints_mms_resume_hint(monkeypatch, tmp_path):
 
 
 def test_finalize_claude_session_recovers_missing_slot_state_from_project_jsonl(monkeypatch, tmp_path):
-    import mms_session_index
+    import mms_session.index as mms_session_index
     from mms_project_store import claude_raw_entry_path
 
     real_home = tmp_path / "real-home"

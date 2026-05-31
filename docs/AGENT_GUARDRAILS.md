@@ -30,7 +30,7 @@
 - `mms_tui.py`
 - `mms_bridge.py`
 - `mms_account_state.py`
-- `mms_session_index.py`
+- `mms_session/index.py`
 - `mms_adapter_registry.py`
 - `mms`
 - retired `ccs` 入口和 deleted legacy `mms_session.py` 相关清理逻辑

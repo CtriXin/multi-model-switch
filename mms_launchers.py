@@ -175,7 +175,7 @@ from mms_runtime_network import (
     runtime_network_summary as _runtime_network_summary_impl,
     split_no_proxy_values as _split_no_proxy_values_impl,
 )
-from mms_session_features import (
+from mms_session.features import (
     asset_root_preference as _asset_root_preference_impl,
     default_gpt_reasoning_effort as _default_gpt_reasoning_effort_impl,
     is_installed_mms_layout as _is_installed_mms_layout_impl,
@@ -208,7 +208,7 @@ from mms_session_features import (
     runtime_thinking_enabled as _runtime_thinking_enabled_impl,
     runtime_vision_sidecar as _runtime_vision_sidecar_impl,
 )
-from mms_session_guard import (
+from mms_session.guard import (
     bounded_env_float as _bounded_env_float_impl,
     read_session_guard_marker as _read_session_guard_marker_impl,
     reserve_session_home as _reserve_session_home_impl,
@@ -219,9 +219,9 @@ from mms_session_guard import (
     session_home_is_active as _session_home_is_active_impl,
     write_session_guard_marker as _write_session_guard_marker_impl,
 )
-from mms_session_assets import resolve_local_hooks_dir as _resolve_local_hooks_dir_impl
-from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
-from mms_session_packet import write_session_packet
+from mms_session.assets import resolve_local_hooks_dir as _resolve_local_hooks_dir_impl
+from mms_session.index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
+from mms_session.packet import write_session_packet
 from mms_state_io import (
     atomic_write_json,
     atomic_write_text,
@@ -2333,7 +2333,7 @@ def _append_codex_session_hook_trust_states(
 
 def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root, *, exclude_names=None):
     """Compatibility wrapper for session entry overlays."""
-    from mms_session_overlays import _overlay_session_entry_dir as overlay_session_entry_dir
+    from mms_session.overlays import _overlay_session_entry_dir as overlay_session_entry_dir
 
     return overlay_session_entry_dir(
         parent_dir,
@@ -2346,7 +2346,7 @@ def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_sourc
 
 def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root, *, disabled_session_surfaces=None):
     """Compatibility wrapper for session skill overlays."""
-    from mms_session_overlays import _overlay_session_skill_dir as overlay_session_skill_dir
+    from mms_session.overlays import _overlay_session_skill_dir as overlay_session_skill_dir
 
     return overlay_session_skill_dir(
         parent_dir,
@@ -2359,7 +2359,7 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root,
 
 def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
     """Compatibility wrapper for Caveman session overlays."""
-    from mms_session_overlays import _overlay_caveman_session_entries as overlay_caveman_session_entries
+    from mms_session.overlays import _overlay_caveman_session_entries as overlay_caveman_session_entries
 
     return overlay_caveman_session_entries(
         parent_dir,
@@ -2371,7 +2371,7 @@ def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman
 
 def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False, disabled_session_surfaces=None):
     """Compatibility wrapper for ECC session overlays."""
-    from mms_session_overlays import _overlay_ecc_session_entries as overlay_ecc_session_entries
+    from mms_session.overlays import _overlay_ecc_session_entries as overlay_ecc_session_entries
 
     return overlay_ecc_session_entries(
         parent_dir,
@@ -2383,7 +2383,7 @@ def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False, 
 
 def _overlay_omc_session_entries(parent_dir, session_home, *, enable_omc=False, disabled_session_surfaces=None):
     """Compatibility wrapper for OMC session overlays."""
-    from mms_session_overlays import _overlay_omc_session_entries as overlay_omc_session_entries
+    from mms_session.overlays import _overlay_omc_session_entries as overlay_omc_session_entries
 
     return overlay_omc_session_entries(
         parent_dir,
@@ -2395,7 +2395,7 @@ def _overlay_omc_session_entries(parent_dir, session_home, *, enable_omc=False, 
 
 def _overlay_web_access_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for web-access session overlays."""
-    from mms_session_overlays import _overlay_web_access_session_entries as overlay_web_access_session_entries
+    from mms_session.overlays import _overlay_web_access_session_entries as overlay_web_access_session_entries
 
     return overlay_web_access_session_entries(
         parent_dir,
@@ -2406,7 +2406,7 @@ def _overlay_web_access_session_entries(parent_dir, session_home, *, disabled_se
 
 def _overlay_weber_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for weber session overlays."""
-    from mms_session_overlays import _overlay_weber_session_entries as overlay_weber_session_entries
+    from mms_session.overlays import _overlay_weber_session_entries as overlay_weber_session_entries
 
     return overlay_weber_session_entries(
         parent_dir,
@@ -2417,7 +2417,7 @@ def _overlay_weber_session_entries(parent_dir, session_home, *, disabled_session
 
 def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for agent-browser session overlays."""
-    from mms_session_overlays import _overlay_agent_browser_session_entries as overlay_agent_browser_session_entries
+    from mms_session.overlays import _overlay_agent_browser_session_entries as overlay_agent_browser_session_entries
 
     return overlay_agent_browser_session_entries(
         parent_dir,
@@ -2428,7 +2428,7 @@ def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled
 
 def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for CodeGraph session overlays."""
-    from mms_session_overlays import _overlay_codegraph_session_entries as overlay_codegraph_session_entries
+    from mms_session.overlays import _overlay_codegraph_session_entries as overlay_codegraph_session_entries
 
     return overlay_codegraph_session_entries(
         parent_dir,
@@ -2439,7 +2439,7 @@ def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_ses
 
 def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for TOON session overlays."""
-    from mms_session_overlays import _overlay_toon_session_entries as overlay_toon_session_entries
+    from mms_session.overlays import _overlay_toon_session_entries as overlay_toon_session_entries
 
     return overlay_toon_session_entries(
         parent_dir,
@@ -2450,7 +2450,7 @@ def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_
 
 def _overlay_xmem_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for xmem session overlays."""
-    from mms_session_overlays import _overlay_xmem_session_entries as overlay_xmem_session_entries
+    from mms_session.overlays import _overlay_xmem_session_entries as overlay_xmem_session_entries
 
     return overlay_xmem_session_entries(
         parent_dir,
@@ -2461,7 +2461,7 @@ def _overlay_xmem_session_entries(parent_dir, session_home, *, disabled_session_
 
 def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for token-saver session overlays."""
-    from mms_session_overlays import _overlay_token_saver_session_entries as overlay_token_saver_session_entries
+    from mms_session.overlays import _overlay_token_saver_session_entries as overlay_token_saver_session_entries
 
     return overlay_token_saver_session_entries(
         parent_dir,
@@ -2472,7 +2472,7 @@ def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_s
 
 def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     """Compatibility wrapper for auto-github-contributor session overlays."""
-    from mms_session_overlays import _overlay_auto_github_contributor_session_entries as overlay_auto_gh_session_entries
+    from mms_session.overlays import _overlay_auto_github_contributor_session_entries as overlay_auto_gh_session_entries
 
     return overlay_auto_gh_session_entries(
         parent_dir,
@@ -2522,21 +2522,21 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
     """Compatibility wrapper for ECC session env configuration."""
-    from mms_session_env import configure_ecc_session_env
+    from mms_session.env import configure_ecc_session_env
 
     return configure_ecc_session_env(env_data, enable_ecc=enable_ecc)
 
 
 def _configure_agent_pack_session_env(env_data, *, agent_pack="none"):
     """Compatibility wrapper for agent-pack session env configuration."""
-    from mms_session_env import configure_agent_pack_session_env
+    from mms_session.env import configure_agent_pack_session_env
 
     return configure_agent_pack_session_env(env_data, agent_pack=agent_pack)
 
 
 def _session_required_env_from_runtime_env(env):
     """Compatibility wrapper for session-required runtime env extraction."""
-    from mms_session_env import session_required_env_from_runtime_env
+    from mms_session.env import session_required_env_from_runtime_env
 
     return session_required_env_from_runtime_env(env)
 
@@ -2680,42 +2680,42 @@ def _enabled_real_codex_plugin_names():
 
 def _resolve_hive_root(module_path=None):
     """Compatibility wrapper for Hive MCP root discovery."""
-    from mms_session_mcp import resolve_hive_root
+    from mms_session.mcp import resolve_hive_root
 
     return resolve_hive_root(module_path=module_path)
 
 
 def _default_hive_session_mcp_server():
     """Compatibility wrapper for default Hive session MCP server discovery."""
-    from mms_session_mcp import default_hive_session_mcp_server
+    from mms_session.mcp import default_hive_session_mcp_server
 
     return default_hive_session_mcp_server()
 
 
 def _resolve_pilot_root(module_path=None):
     """Compatibility wrapper for Pilot MCP root discovery."""
-    from mms_session_mcp import resolve_pilot_root
+    from mms_session.mcp import resolve_pilot_root
 
     return resolve_pilot_root(module_path=module_path)
 
 
 def _default_pilot_session_mcp_server():
     """Compatibility wrapper for default Pilot session MCP server discovery."""
-    from mms_session_mcp import default_pilot_session_mcp_server
+    from mms_session.mcp import default_pilot_session_mcp_server
 
     return default_pilot_session_mcp_server()
 
 
 def _replace_plugin_root_tokens(value, plugin_root):
     """Compatibility wrapper for plugin MCP root token replacement."""
-    from mms_session_mcp import replace_plugin_root_tokens
+    from mms_session.mcp import replace_plugin_root_tokens
 
     return replace_plugin_root_tokens(value, plugin_root)
 
 
 def _load_plugin_mcp_servers(plugin_root):
     """Compatibility wrapper for plugin MCP server loading."""
-    from mms_session_mcp import load_plugin_mcp_servers
+    from mms_session.mcp import load_plugin_mcp_servers
 
     return load_plugin_mcp_servers(plugin_root)
 
@@ -3471,7 +3471,7 @@ def _codex_bounded_resume_entries():
 
 def _link_shared_dotfiles(session_home):
     """Compatibility wrapper for shared dotfile links in session homes."""
-    from mms_session_assets import link_shared_dotfiles
+    from mms_session.assets import link_shared_dotfiles
 
     return link_shared_dotfiles(session_home)
 

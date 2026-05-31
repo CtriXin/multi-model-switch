@@ -233,7 +233,7 @@ hooks = []                    # hook names or paths shown on confirm screen
 
 
 def _runtime_caveman_enabled_default(runtime, default=True):
-    from mms_session_features import normalize_caveman_mode
+    from mms_session.features import normalize_caveman_mode
 
     fallback = "enable" if default else "disable"
     return normalize_caveman_mode((runtime or {}).get("caveman_mode", fallback), default=fallback) == "enable"
@@ -5853,7 +5853,7 @@ def _load_command_config():
 
 
 def _handle_session_ls(cli_name):
-    from mms_session_index import list_indexed_sessions
+    from mms_session.index import list_indexed_sessions
     from mms_command_tools import handle_session_ls
 
     return handle_session_ls(
@@ -5865,7 +5865,7 @@ def _handle_session_ls(cli_name):
 
 
 def _handle_session_info(session_id, cli_name):
-    from mms_session_index import get_indexed_session
+    from mms_session.index import get_indexed_session
     from mms_command_tools import handle_session_info
 
     return handle_session_info(
@@ -5966,7 +5966,7 @@ def _resolve_codex_resume_ref(session_ref, *, allow_passthrough=False):
 
 
 def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
-    from mms_session_index import list_indexed_sessions
+    from mms_session.index import list_indexed_sessions
     from mms_command_tools import resolve_claude_resume_ref
 
     return resolve_claude_resume_ref(

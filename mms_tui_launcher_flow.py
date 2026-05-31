@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mms_session_features import normalize_caveman_level, normalize_caveman_mode
+from mms_session.features import normalize_caveman_level, normalize_caveman_mode
 
 
 @dataclass(frozen=True)

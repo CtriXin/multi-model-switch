@@ -1413,7 +1413,7 @@ def test_usage_main_initializes_rich_before_render(monkeypatch):
 
 def test_handle_session_command_initializes_rich_before_listing(monkeypatch):
     import mms_core
-    import mms_session_index
+    import mms_session.index as mms_session_index
 
     def _fake_ensure_rich():
         mms_core.Table = _FakeTable
