@@ -27,6 +27,11 @@ from mms_account_guard import (
 )
 from mms_i18n import normalize_language
 from mms_launcher_console import LauncherLazyConsole
+from mms_launcher_health import (
+    health_check_due as _health_check_due_impl,
+    load_gateway_health_cache as _load_gateway_health_cache_impl,
+    save_gateway_health_cache as _save_gateway_health_cache_impl,
+)
 from mms_opencode_agents import (
     opencode_apply_agent_bypass_permissions,
     opencode_lite_agent_configs,
@@ -3100,52 +3105,15 @@ def _gateway_ping(base_url, api_key, runtime=None):
 
 
 def _load_gateway_health_cache():
-    try:
-        with open(HEALTH_CHECK_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    providers = data.get("providers")
-    if isinstance(providers, dict):
-        return providers
-    provider_id = str(data.get("provider_id") or "").strip()
-    timestamp = str(data.get("timestamp") or "").strip()
-    if provider_id and timestamp:
-        return {
-            provider_id: {
-                "timestamp": timestamp,
-                "ok": bool(data.get("ok")),
-            }
-        }
-    return {}
+    return _load_gateway_health_cache_impl(HEALTH_CHECK_PATH)
 
 
 def _save_gateway_health_cache(providers):
-    if not isinstance(providers, dict):
-        return
-    try:
-        os.makedirs(os.path.dirname(HEALTH_CHECK_PATH), exist_ok=True)
-        tmp_path = HEALTH_CHECK_PATH + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump({"providers": providers}, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-        os.replace(tmp_path, HEALTH_CHECK_PATH)
-    except OSError:
-        pass
+    return _save_gateway_health_cache_impl(HEALTH_CHECK_PATH, providers)
 
 
 def _health_check_due(provider_id):
-    try:
-        providers = _load_gateway_health_cache()
-        entry = providers.get(str(provider_id or "").strip())
-        if not isinstance(entry, dict):
-            return True
-        last = datetime.fromisoformat(str(entry.get("timestamp") or ""))
-        return (datetime.now() - last).total_seconds() > 86400
-    except Exception:
-        return True
+    return _health_check_due_impl(_load_gateway_health_cache(), provider_id)
 
 
 def gateway_health_check(provider):
