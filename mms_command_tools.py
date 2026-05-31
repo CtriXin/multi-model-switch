@@ -1207,70 +1207,6 @@ def trace_source_for(field, value, trace_overrides):
     return fallback_source or generic_match or "runtime result"
 
 
-def _trace_text_and_tokens(*values):
-    text = " ".join(str(value or "").strip().lower() for value in values if value is not None)
-    tokens = {item for item in re.split(r"[^a-z0-9]+", text) if item}
-    return text, tokens
-
-
-def _trace_model_family(model_text, model_tokens):
-    family_checks = [
-        ("deepseek", ("deepseek",)),
-        ("mimo", ("mimo", "minimax")),
-        ("glm", ("glm",)),
-    ]
-    matches = []
-    for label, hints in family_checks:
-        if any(hint in model_tokens or hint in model_text for hint in hints):
-            matches.append(label)
-    return matches
-
-
-def launch_trace_hints(cli_name, model, runtime, *, provider_id="", account_id=""):
-    """Return display-only launch hints; never feed back into runtime selection."""
-    runtime_values = [provider_id, account_id]
-    if isinstance(runtime, dict):
-        runtime_values.extend(
-            runtime.get(key)
-            for key in (
-                "id",
-                "name",
-                "provider_id",
-                "provider_profile",
-                "profile",
-                "opencode_profile",
-                "runtime_kind",
-                "auth_mode",
-            )
-        )
-    runtime_text, runtime_tokens = _trace_text_and_tokens(*runtime_values)
-    model_text, model_tokens = _trace_text_and_tokens(model)
-    families = _trace_model_family(model_text, model_tokens)
-
-    default_cli = ""
-    reason = ""
-    if (
-        "opencode" in runtime_text
-        or (isinstance(runtime, dict) and runtime.get("runtime_kind") == "opencode_profile")
-        or "pro" in runtime_tokens
-    ):
-        default_cli = "opencode"
-        reason = "opencode/pro runtime"
-    elif "crs" in runtime_tokens and ("gpt" in model_tokens or "gpt" in runtime_tokens):
-        default_cli = "codex"
-        reason = "crs gpt route"
-    elif families:
-        default_cli = "claude"
-        reason = f"model family: {'/'.join(families)}"
-
-    lines = []
-    if default_cli:
-        lines.append(f"  default: {default_cli:<8s} <- {reason}")
-    if families:
-        lines.append(f"  pi:      candidate <- model family: {'/'.join(families)}")
-    return lines
-
-
 def format_launch_trace(
     cli_name,
     model_info,
@@ -1302,11 +1238,8 @@ def format_launch_trace(
         f"  bridge:   {bridge or '-'} <- {trace_source_for('bridge', bridge, trace_overrides)}",
         f"  runtime:  {auth_mode or '-'} <- {trace_source_for('runtime', auth_mode, trace_overrides)}",
         "",
+        "Override chain:",
     ]
-    hints = launch_trace_hints(cli_name, model, runtime, provider_id=provider_id, account_id=account_id)
-    if hints:
-        lines.extend(["Launch hints:", *hints, ""])
-    lines.append("Override chain:")
     if trace_overrides:
         for source, kv in trace_overrides:
             if kv:
@@ -7835,6 +7768,77 @@ def uses_managed_entry(runtime, cli, *, oauth_capable_clis):
     return uses_native_account_entry(runtime, cli, oauth_capable_clis=oauth_capable_clis)
 
 
+DIRECT_CLI_LAUNCH_DEFAULTS = {
+    "claude": (
+        ("direct-deepseek", "deepseek-v4-pro"),
+        ("direct-deepseek", "deepseek-v4-flash"),
+        ("mimo-direct", "mimo-v2.5"),
+    ),
+    "codex": (
+        ("uscrsopenai", "gpt-5.4"),
+        ("uscrsopenai", "gpt-5.5"),
+        ("uscrsopenai", "gpt-5.3-codex"),
+    ),
+    "pi": (
+        ("mimo-direct", "mimo-v2.5"),
+        ("direct-deepseek", "deepseek-v4-pro"),
+        ("direct-zai", "glm-5.1"),
+        ("direct-zai", "glm-5-turbo"),
+    ),
+}
+
+
+def resolve_direct_cli_launch_default(
+    cli_name,
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    provider_candidates,
+    provider_effective_models,
+    provider_supports_model_for_cli,
+):
+    cli_name = str(cli_name or "").strip().lower()
+    if cli_name == "opencode":
+        return {"profile": "pro", "source": "launch default"}
+
+    wanted = DIRECT_CLI_LAUNCH_DEFAULTS.get(cli_name)
+    if not wanted:
+        return {}
+
+    provider_map = {}
+    for provider, cached_models in provider_candidates(cfg, default_provider, default_models):
+        provider_id = str((provider or {}).get("id") or "").strip()
+        if provider_id and provider_id not in provider_map:
+            provider_map[provider_id] = (provider, cached_models)
+
+    for provider_id, model_name in wanted:
+        provider_entry = provider_map.get(provider_id)
+        if not provider_entry:
+            continue
+        provider, cached_models = provider_entry
+        if not provider.get("enabled", True) or not provider.get("api_key"):
+            continue
+        models = provider_effective_models(provider, cached_models, cfg)
+        models_by_lower = {
+            str(item or "").strip().lower(): str(item or "").strip()
+            for item in models or []
+            if str(item or "").strip()
+        }
+        actual_model = models_by_lower.get(str(model_name or "").strip().lower())
+        if not actual_model:
+            continue
+        if not provider_supports_model_for_cli(provider, cli_name, actual_model):
+            continue
+        return {
+            "provider": provider_id,
+            "model": actual_model,
+            "model_info": {"model": actual_model},
+            "source": "launch default",
+        }
+    return {}
+
+
 def resolve_interactive_launch_model(
     cli,
     runtime,
@@ -7979,9 +7983,9 @@ def launch_broker_experiment_interactive(
     return True
 
 
-def opencode_default_profile_from_config(cfg, *, opencode_profile_selection):
+def opencode_default_profile_from_config(cfg, *, opencode_profile_selection, default_profile=""):
     opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
-    return opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile"))
+    return opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile") or default_profile)
 
 
 def build_opencode_resolver_deps(

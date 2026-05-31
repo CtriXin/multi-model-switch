@@ -1521,6 +1521,61 @@ def test_main_uses_configured_opencode_default_profile_for_direct_target(monkeyp
     assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
 
 
+def test_main_uses_canary_opencode_pro_default_for_direct_target(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(id="default-provider", name="Default Provider")
+    captured = {}
+
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "opencode"])
+    monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "set_language", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda *_args, **_kwargs: "zh")
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda current_cfg: current_cfg)
+    monkeypatch.setattr(mms_core, "ensure_provider_credentials", lambda _cfg, provider_id=None: provider)
+    monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, ["gpt-5.5"]))
+    monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["opencode"])
+    monkeypatch.setattr(mms_core, "check_cli_installed", lambda _cli: True)
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_interactive_launch_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("default profile launch must not ask for a model")),
+    )
+
+    def fake_profile_runtime(_cfg, profile_provider, profile_models, profile_id):
+        captured["profile_provider"] = profile_provider["id"]
+        captured["profile_models"] = profile_models
+        captured["profile_id"] = profile_id
+        runtime = mms_core._apply_opencode_profile(_runtime(id="profile-runtime", model="gpt-5.5"), profile_id)
+        return {"model": "gpt-5.5", "profile": profile_id}, runtime
+
+    monkeypatch.setattr(mms_core, "_resolve_opencode_profile_runtime", fake_profile_runtime)
+    monkeypatch.setattr(mms_core, "confirm_launch", lambda cli, model_info, once, runtime=None: "")
+    monkeypatch.setattr(
+        mms_core,
+        "_launch_with_tracking",
+        lambda cli, model_info, runtime, once=False: captured.update(
+            {"cli": cli, "model_info": model_info, "runtime": runtime, "once": once}
+        ),
+    )
+
+    mms_core.main()
+
+    assert captured["profile_id"] == "lite_pro_orchestrated"
+    assert captured["profile_provider"] == "default-provider"
+    assert captured["profile_models"] == ["gpt-5.5"]
+    assert captured["cli"] == "opencode"
+    assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
+
+
 def test_existing_openai_provider_lists_show_opencode_without_config_migration(monkeypatch):
     import mms_core
 

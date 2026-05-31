@@ -4290,6 +4290,20 @@ def _choose_runtime_source(
     )
 
 
+def _resolve_direct_cli_launch_default(cli_name, cfg, default_provider, default_models):
+    from mms_command_tools import resolve_direct_cli_launch_default
+
+    return resolve_direct_cli_launch_default(
+        cli_name,
+        cfg,
+        default_provider,
+        default_models,
+        provider_candidates=_provider_candidates,
+        provider_effective_models=_provider_effective_models,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+    )
+
+
 def _resolve_visible_clis(cfg, default_provider, default_models):
     from mms_command_tools import resolve_visible_clis
 
@@ -4441,6 +4455,7 @@ def _opencode_default_profile_from_config(cfg):
     return opencode_default_profile_from_config(
         cfg,
         opencode_profile_selection=_opencode_profile_selection,
+        default_profile="pro",
     )
 
 
@@ -6738,12 +6753,17 @@ def main():
             parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile agent")
 
     if target:
+        launch_default = {}
+        if not args.account and not args.provider:
+            launch_default = _resolve_direct_cli_launch_default(target, cfg, default_provider, models_cache)
         profile_to_launch = requested_opencode_profile
         entrypoint_to_launch = requested_opencode_entrypoint
         if target == "opencode" and not profile_to_launch:
             profile_to_launch, configured_entrypoint = _opencode_default_profile_from_config(cfg)
             if not entrypoint_to_launch:
                 entrypoint_to_launch = configured_entrypoint
+            if launch_default.get("profile"):
+                _trace_record("launch default", profile=launch_default.get("profile"))
 
         if target == "opencode" and profile_to_launch:
             cli = "opencode"
@@ -6781,8 +6801,22 @@ def main():
             _trace_record("CLI target", cli=cli)
             if args.account or args.provider:
                 _trace_record("CLI flags", account=args.account, provider=args.provider)
+            launch_default_model_info = launch_default.get("model_info") if isinstance(launch_default, dict) else None
+            launch_default_provider = launch_default.get("provider") if isinstance(launch_default, dict) else None
+            if launch_default_model_info:
+                _trace_record(
+                    "launch default",
+                    provider=launch_default_provider,
+                    model=launch_default_model_info.get("model"),
+                )
             runtime, cli_models, cli = _choose_runtime_source(
-                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+                cfg,
+                cli,
+                default_provider,
+                models_cache,
+                account_id=args.account,
+                provider_id=args.provider or launch_default_provider,
+                model_info=launch_default_model_info,
             )
             if runtime is None:
                 console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
@@ -6790,18 +6824,21 @@ def main():
             if not check_cli_installed(cli):
                 from mms_installer import check_and_offer_install
                 check_and_offer_install(cli)
-            ok, model = _resolve_interactive_launch_model(
-                cli,
-                runtime,
-                cli_models,
-                models_cache,
-                role,
-                recommend,
-            )
-            if not ok:
-                return
-            if model:
-                _trace_record("manual select", model=model)
+            if launch_default_model_info and not _uses_managed_entry(runtime, cli):
+                ok, model = True, launch_default_model_info.get("model")
+            else:
+                ok, model = _resolve_interactive_launch_model(
+                    cli,
+                    runtime,
+                    cli_models,
+                    models_cache,
+                    role,
+                    recommend,
+                )
+                if not ok:
+                    return
+                if model:
+                    _trace_record("manual select", model=model)
             model_info = {} if _uses_managed_entry(runtime, cli) else model
             if cli == "opencode":
                 runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)

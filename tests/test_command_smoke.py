@@ -2043,68 +2043,149 @@ def test_launch_trace_formatter_preserves_sources_and_override_chain():
     assert "empty           -> (none)" in report
 
 
-def test_launch_trace_formatter_shows_model_family_launch_hints():
+def test_direct_cli_launch_default_resolves_real_start_models():
     import mms_command_tools
 
-    report = mms_command_tools.format_launch_trace(
-        "claude",
-        {"model": "deepseek-v4-pro"},
-        {"auth_mode": "api_key", "id": "deepseek-relay"},
-        [],
-        runtime_provider_id=lambda runtime: runtime.get("id", ""),
-        runtime_account_id=lambda runtime: "",
-        runtime_bridge=lambda runtime: "",
+    cfg = {
+        "providers": [
+            {
+                "id": "direct-deepseek",
+                "enabled": True,
+                "api_key": "sk-test",
+                "supported_clis": ["claude", "codex", "opencode"],
+                "fallback_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+            },
+            {
+                "id": "us-cpa-local-codex",
+                "enabled": True,
+                "api_key": "sk-test",
+                "supported_clis": ["codex", "opencode"],
+                "fallback_models": ["gpt-5.4"],
+            },
+            {
+                "id": "uscrsopenai",
+                "enabled": True,
+                "api_key": "sk-test",
+                "supported_clis": ["codex", "opencode"],
+                "fallback_models": ["gpt-5.4", "gpt-5.5"],
+            },
+            {
+                "id": "mimo-direct",
+                "enabled": True,
+                "api_key": "sk-test",
+                "supported_clis": ["claude"],
+                "fallback_models": ["mimo-v2.5"],
+            },
+            {
+                "id": "direct-zai",
+                "enabled": True,
+                "api_key": "sk-test",
+                "supported_clis": ["claude"],
+                "fallback_models": ["glm-5.1"],
+            },
+        ]
+    }
+
+    def provider_candidates(cfg, _default_provider, _default_models):
+        return [(provider, None) for provider in cfg["providers"]]
+
+    def provider_effective_models(provider, _cached_models, _cfg):
+        return list(provider.get("fallback_models") or [])
+
+    def provider_supports_model_for_cli(provider, cli_name, _model):
+        supported = set(provider.get("supported_clis") or [])
+        return cli_name in supported or (cli_name == "pi" and "claude" in supported)
+
+    def default_for(cli_name):
+        return mms_command_tools.resolve_direct_cli_launch_default(
+            cli_name,
+            cfg,
+            cfg["providers"][0],
+            [],
+            provider_candidates=provider_candidates,
+            provider_effective_models=provider_effective_models,
+            provider_supports_model_for_cli=provider_supports_model_for_cli,
+        )
+
+    assert default_for("claude") == {
+        "provider": "direct-deepseek",
+        "model": "deepseek-v4-pro",
+        "model_info": {"model": "deepseek-v4-pro"},
+        "source": "launch default",
+    }
+    assert default_for("codex")["provider"] == "uscrsopenai"
+    assert default_for("codex")["model"] == "gpt-5.4"
+    assert default_for("pi")["provider"] == "mimo-direct"
+    assert default_for("pi")["model"] == "mimo-v2.5"
+    assert default_for("opencode") == {"profile": "pro", "source": "launch default"}
+
+
+def test_main_uses_direct_cli_launch_default_without_model_prompt(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = {
+        "id": "direct-deepseek",
+        "name": "Direct DeepSeek",
+        "auth_mode": "api_key",
+        "api_key": "sk-test",
+        "supported_clis": ["claude"],
+    }
+    captured = {}
+
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "claude"])
+    monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "set_language", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda *_args, **_kwargs: "zh")
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda current_cfg: current_cfg)
+    monkeypatch.setattr(mms_core, "ensure_provider_credentials", lambda _cfg, provider_id=None: provider)
+    monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, ["deepseek-v4-pro"]))
+    monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["claude"])
+    monkeypatch.setattr(mms_core, "check_cli_installed", lambda _cli: True)
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_direct_cli_launch_default",
+        lambda *_args, **_kwargs: {
+            "provider": "direct-deepseek",
+            "model": "deepseek-v4-pro",
+            "model_info": {"model": "deepseek-v4-pro"},
+            "source": "launch default",
+        },
     )
 
-    assert "Launch hints:" in report
-    assert "default: claude" in report
-    assert "model family: deepseek" in report
-    assert "pi:      candidate <- model family: deepseek" in report
+    def fake_choose_runtime_source(*_args, **kwargs):
+        captured["choose_kwargs"] = kwargs
+        return provider, ["deepseek-v4-pro"], "claude"
 
-
-def test_launch_trace_formatter_shows_crs_gpt_and_pro_runtime_hints():
-    import mms_command_tools
-
-    crs_report = mms_command_tools.format_launch_trace(
-        "codex",
-        {"model": "gpt-5.4"},
-        {"auth_mode": "api_key", "id": "crs-oracle-gpt"},
-        [],
-        runtime_provider_id=lambda runtime: runtime.get("id", ""),
-        runtime_account_id=lambda runtime: "",
-        runtime_bridge=lambda runtime: "",
+    monkeypatch.setattr(mms_core, "_choose_runtime_source", fake_choose_runtime_source)
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_interactive_launch_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("launch default must not ask for model")),
     )
-    pro_report = mms_command_tools.format_launch_trace(
-        "opencode",
-        {"model": "qwen-code"},
-        {"auth_mode": "api_key", "id": "team-pro", "profile": "pro"},
-        [],
-        runtime_provider_id=lambda runtime: runtime.get("id", ""),
-        runtime_account_id=lambda runtime: "",
-        runtime_bridge=lambda runtime: "",
+    monkeypatch.setattr(mms_core, "confirm_launch", lambda cli, model_info, once, runtime=None: "")
+    monkeypatch.setattr(
+        mms_core,
+        "_launch_with_tracking",
+        lambda cli, model_info, runtime, once=False: captured.update(
+            {"cli": cli, "model_info": model_info, "runtime": runtime, "once": once}
+        ),
     )
 
-    assert "default: codex" in crs_report
-    assert "crs gpt route" in crs_report
-    assert "default: opencode" in pro_report
-    assert "opencode/pro runtime" in pro_report
+    mms_core.main()
 
-
-def test_launch_trace_formatter_marks_pi_candidate_families():
-    import mms_command_tools
-
-    report = mms_command_tools.format_launch_trace(
-        "pi",
-        {"model": "mimo-v2.5"},
-        {"auth_mode": "api_key", "id": "mimo-direct-anthropic"},
-        [],
-        runtime_provider_id=lambda runtime: runtime.get("id", ""),
-        runtime_account_id=lambda runtime: "",
-        runtime_bridge=lambda runtime: "",
-    )
-
-    assert "default: claude" in report
-    assert "pi:      candidate <- model family: mimo" in report
+    assert captured["choose_kwargs"]["provider_id"] == "direct-deepseek"
+    assert captured["choose_kwargs"]["model_info"] == {"model": "deepseek-v4-pro"}
+    assert captured["cli"] == "claude"
+    assert captured["model_info"] == {"model": "deepseek-v4-pro"}
+    assert captured["runtime"]["id"] == "direct-deepseek"
 
 
 def test_launch_with_tracking_helper_preserves_preferences_trace_and_broker_flow():
