@@ -26,8 +26,8 @@ from mms_account_guard import (
     record_account_guard_finalize as _record_account_guard_finalize_impl,
 )
 from mms_i18n import normalize_language
-from mms_launcher_console import LauncherLazyConsole
-from mms_launcher_health import (
+from mms_launcher.console import LauncherLazyConsole
+from mms_launcher.health import (
     health_check_due as _health_check_due_impl,
     load_gateway_health_cache as _load_gateway_health_cache_impl,
     save_gateway_health_cache as _save_gateway_health_cache_impl,
@@ -253,7 +253,7 @@ def _ensure_bridge_helpers():
     global gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
     if _build_gateway_url is not None:
         return
-    from mms_launcher_bridge import load_bridge_helpers
+    from mms_launcher.bridge import load_bridge_helpers
 
     helpers = load_bridge_helpers()
     _build_gateway_url = helpers["_build_gateway_url"]
@@ -267,7 +267,7 @@ def _ensure_bridge_helpers():
 
 def _gateway_claude_bridge_context(*args, **kwargs):
     """Compatibility wrapper for gateway Claude bridge signature downgrade."""
-    from mms_launcher_bridge import gateway_claude_bridge_context
+    from mms_launcher.bridge import gateway_claude_bridge_context
 
     return gateway_claude_bridge_context(gateway_claude_bridge, *args, console=console, **kwargs)
 
@@ -276,7 +276,7 @@ def _ensure_speed_stats():
     global build_provider_speed_scope
     if build_provider_speed_scope is not None:
         return
-    from mms_launcher_bridge import load_speed_stats_helper
+    from mms_launcher.bridge import load_speed_stats_helper
 
     build_provider_speed_scope = load_speed_stats_helper()
 
@@ -565,7 +565,7 @@ def _model_context_overrides_path():
 
 
 def _inject_real_home_hints(env, *, include_xdg=False):
-    from mms_launcher_export import inject_real_home_hints
+    from mms_launcher.export import inject_real_home_hints
 
     return inject_real_home_hints(
         env,
@@ -577,13 +577,13 @@ def _inject_real_home_hints(env, *, include_xdg=False):
 
 
 def _truthy(value):
-    from mms_launcher_export import truthy
+    from mms_launcher.export import truthy
 
     return truthy(value)
 
 
 def _rescue_default_fallback_config(env=None):
-    from mms_launcher_export import rescue_default_fallback_config
+    from mms_launcher.export import rescue_default_fallback_config
 
     environ = env if isinstance(env, dict) else os.environ
     return rescue_default_fallback_config(
@@ -595,7 +595,7 @@ def _rescue_default_fallback_config(env=None):
 
 
 def _rescue_bridge_kwargs():
-    from mms_launcher_export import rescue_bridge_kwargs
+    from mms_launcher.export import rescue_bridge_kwargs
 
     return rescue_bridge_kwargs(
         rescue_default_fallback_config=_rescue_default_fallback_config,
@@ -629,7 +629,7 @@ def _selected_config_path(*parts):
 
 
 def _inject_rescue_launch_env(env):
-    from mms_launcher_export import inject_rescue_launch_env
+    from mms_launcher.export import inject_rescue_launch_env
 
     return inject_rescue_launch_env(
         env,
@@ -641,7 +641,7 @@ def _inject_rescue_launch_env(env):
 
 
 def _host_context_real_home():
-    from mms_launcher_export import host_context_real_home
+    from mms_launcher.export import host_context_real_home
 
     return host_context_real_home(
         real_user_path=_real_user_path,
@@ -650,7 +650,7 @@ def _host_context_real_home():
 
 
 def _host_tool_context(session_home, env=None):
-    from mms_launcher_export import host_tool_context
+    from mms_launcher.export import host_tool_context
 
     return host_tool_context(
         session_home,
@@ -662,7 +662,7 @@ def _host_tool_context(session_home, env=None):
 
 
 def _inject_host_capability_hints(env):
-    from mms_launcher_export import inject_host_capability_hints
+    from mms_launcher.export import inject_host_capability_hints
 
     return inject_host_capability_hints(
         env,
@@ -672,7 +672,7 @@ def _inject_host_capability_hints(env):
 
 
 def _install_host_context_env(env, *, cli, runtime=None, model_info=None, session_home=""):
-    from mms_launcher_export import install_host_context_env
+    from mms_launcher.export import install_host_context_env
 
     return install_host_context_env(
         env,
@@ -689,14 +689,14 @@ def _install_host_context_env(env, *, cli, runtime=None, model_info=None, sessio
 
 
 def _set_session_home_hint(env, session_home):
-    from mms_launcher_export import set_session_home_hint
+    from mms_launcher.export import set_session_home_hint
 
     return set_session_home_hint(env, session_home)
 
 
 def _set_codex_soft_home(env, session_home):
     """Keep real HOME for tools; isolate Codex config/auth in CODEX_HOME."""
-    from mms_launcher_export import set_codex_home_hint, set_codex_soft_home
+    from mms_launcher.export import set_codex_home_hint, set_codex_soft_home
 
     return set_codex_soft_home(
         env,
@@ -717,13 +717,13 @@ def _set_opencode_soft_home(env, session_home):
 
 
 def _selected_model_name(*candidates, model_info=None):
-    from mms_launcher_export import selected_model_name
+    from mms_launcher.export import selected_model_name
 
     return selected_model_name(*candidates, model_info=model_info)
 
 
 def _inject_selected_model_name(env, *candidates, model_info=None):
-    from mms_launcher_export import inject_selected_model_name
+    from mms_launcher.export import inject_selected_model_name
 
     return inject_selected_model_name(env, *candidates, model_info=model_info)
 
@@ -738,7 +738,7 @@ def _install_session_packet_env(
     features=None,
     extra_paths=None,
 ):
-    from mms_launcher_export import install_session_packet_env
+    from mms_launcher.export import install_session_packet_env
 
     return install_session_packet_env(
         env,
@@ -857,7 +857,7 @@ def _reserve_session_home(
 
 
 def _real_home_wrapper_scrub_lines():
-    from mms_launcher_export import real_home_wrapper_scrub_lines
+    from mms_launcher.export import real_home_wrapper_scrub_lines
 
     return real_home_wrapper_scrub_lines()
 
@@ -1896,7 +1896,7 @@ def _resolve_xmem_root():
 
 
 def _xmem_cli_path():
-    from mms_launcher_export import xmem_cli_path
+    from mms_launcher.export import xmem_cli_path
 
     return xmem_cli_path(
         environ=os.environ,
@@ -1911,31 +1911,31 @@ def _resolve_auto_github_contributor_root():
 
 
 def _mms_toon_script_path():
-    from mms_launcher_export import launcher_script_path
+    from mms_launcher.export import launcher_script_path
 
     return launcher_script_path(__file__, "mms-toon")
 
 
 def _mms_context_script_path():
-    from mms_launcher_export import launcher_script_path
+    from mms_launcher.export import launcher_script_path
 
     return launcher_script_path(__file__, "mms-context")
 
 
 def _mms_gain_script_path():
-    from mms_launcher_export import launcher_script_path
+    from mms_launcher.export import launcher_script_path
 
     return launcher_script_path(__file__, "mms-gain")
 
 
 def _token_saver_script_path():
-    from mms_launcher_export import launcher_script_path
+    from mms_launcher.export import launcher_script_path
 
     return launcher_script_path(__file__, "token-saver")
 
 
 def _token_gain_script_path():
-    from mms_launcher_export import launcher_script_path
+    from mms_launcher.export import launcher_script_path
 
     return launcher_script_path(__file__, "token-gain")
 
@@ -3552,7 +3552,7 @@ def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SE
 
 
 def _filter_real_home_wrapper_path(path_value, *, session_home=None):
-    from mms_launcher_export import filter_real_home_wrapper_path
+    from mms_launcher.export import filter_real_home_wrapper_path
 
     return filter_real_home_wrapper_path(
         path_value,
@@ -3563,13 +3563,13 @@ def _filter_real_home_wrapper_path(path_value, *, session_home=None):
 
 
 def _dedupe_path_parts(parts):
-    from mms_launcher_export import dedupe_path_parts
+    from mms_launcher.export import dedupe_path_parts
 
     return dedupe_path_parts(parts)
 
 
 def _real_home_wrapper_search_path(session_home, env=None):
-    from mms_launcher_export import real_home_wrapper_search_path
+    from mms_launcher.export import real_home_wrapper_search_path
 
     return real_home_wrapper_search_path(
         session_home,
@@ -3583,13 +3583,13 @@ def _real_home_wrapper_search_path(session_home, env=None):
 
 
 def _write_real_home_script(path, lines):
-    from mms_launcher_export import write_real_home_script
+    from mms_launcher.export import write_real_home_script
 
     return write_real_home_script(path, lines)
 
 
 def _install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env):
-    from mms_launcher_export import install_chrome_host_wrapper
+    from mms_launcher.export import install_chrome_host_wrapper
 
     return install_chrome_host_wrapper(
         wrapper_dir,
@@ -3603,7 +3603,7 @@ def _install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env):
 
 
 def _install_session_command_wrappers(session_home, env):
-    from mms_launcher_export import install_session_command_wrappers
+    from mms_launcher.export import install_session_command_wrappers
 
     return install_session_command_wrappers(
         session_home,
@@ -3626,7 +3626,7 @@ def _install_session_command_wrappers(session_home, env):
 
 def _resolve_real_home_command_path(command_name, env=None):
     """Compatibility wrapper for real-home command lookup."""
-    from mms_launcher_export import resolve_real_home_command_path
+    from mms_launcher.export import resolve_real_home_command_path
 
     return resolve_real_home_command_path(
         command_name,
@@ -4411,7 +4411,7 @@ def _runtime_with_export_model(runtime, model_info=None):
 
 def get_export_env(cli, runtime, model_info=None):
     """返回指定 CLI 需要的 export 环境变量字典。"""
-    from mms_launcher_export import build_export_env
+    from mms_launcher.export import build_export_env
 
     return build_export_env(
         cli,
@@ -4447,7 +4447,7 @@ def _show_launch_info(cli, runtime, auth_mode):
 
 def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
     """Compatibility wrapper for the unified launcher dispatch entrypoint."""
-    from mms_launcher_dispatch import launch_cli as launch_cli_dispatch
+    from mms_launcher.dispatch import launch_cli as launch_cli_dispatch
 
     return launch_cli_dispatch(
         cli,
@@ -4474,7 +4474,7 @@ def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
 
 def _print_session_summary(bridge_info):
     """Compatibility wrapper for local bridge session summaries."""
-    from mms_launcher_exec import print_session_summary
+    from mms_launcher.exec import print_session_summary
 
     return print_session_summary(bridge_info)
 
@@ -4491,7 +4491,7 @@ def _exec_or_run(
     bridge_info=None,
 ):
     """Compatibility wrapper for launcher process execution."""
-    from mms_launcher_exec import exec_or_run
+    from mms_launcher.exec import exec_or_run
 
     return exec_or_run(
         cmd,

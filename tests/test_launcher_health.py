@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 
 def test_gateway_health_cache_preserves_legacy_single_provider_shape(tmp_path):
-    from mms_launcher_health import load_gateway_health_cache
+    from mms_launcher.health import load_gateway_health_cache
 
     cache_path = tmp_path / "health.json"
     cache_path.write_text(
@@ -17,7 +17,7 @@ def test_gateway_health_cache_preserves_legacy_single_provider_shape(tmp_path):
 
 
 def test_gateway_health_cache_saves_provider_map(tmp_path):
-    from mms_launcher_health import load_gateway_health_cache, save_gateway_health_cache
+    from mms_launcher.health import load_gateway_health_cache, save_gateway_health_cache
 
     cache_path = tmp_path / "state" / "health.json"
     providers = {"relay-a": {"timestamp": "2026-05-31T00:00:00", "ok": False}}
@@ -29,7 +29,7 @@ def test_gateway_health_cache_saves_provider_map(tmp_path):
 
 
 def test_health_check_due_uses_per_provider_timestamp():
-    from mms_launcher_health import health_check_due
+    from mms_launcher.health import health_check_due
 
     now = datetime(2026, 5, 31, 12, 0, 0)
     providers = {

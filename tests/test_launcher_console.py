@@ -2,7 +2,7 @@ import builtins
 
 
 def test_plain_console_strips_rich_markup(capsys):
-    from mms_launcher_console import PlainConsole
+    from mms_launcher.console import PlainConsole
 
     console = PlainConsole()
     console.print("[green]ready[/green]", "[dim]now[/dim]")
@@ -11,7 +11,7 @@ def test_plain_console_strips_rich_markup(capsys):
 
 
 def test_launcher_lazy_console_falls_back_when_rich_is_missing(monkeypatch, capsys):
-    import mms_launcher_console
+    import mms_launcher.console as mms_launcher_console
 
     original_import = builtins.__import__
 

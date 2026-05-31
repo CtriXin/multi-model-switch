@@ -229,7 +229,7 @@ Rules:
 
 Suggested module:
 
-- `mms_launcher_export.py`
+- `mms_launcher/export.py`
 
 Move generic host-tool and export-env logic that is not specific to OpenCode, Claude, or Codex.
 

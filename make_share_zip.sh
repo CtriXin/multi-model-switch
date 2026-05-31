@@ -31,6 +31,7 @@ DIRS=(
     "mms_agy"
     "mms_pi"
     "mms_session"
+    "mms_launcher"
 )
 
 for file in "${FILES[@]}"; do
