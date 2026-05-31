@@ -1942,63 +1942,63 @@ def _token_gain_script_path():
 
 def _is_caveman_hook_command(command_text):
     """Compatibility wrapper for caveman hook command detection."""
-    from mms_hook_commands import is_caveman_hook_command
+    from mms_session.hook_commands import is_caveman_hook_command
 
     return is_caveman_hook_command(command_text)
 
 
 def _is_codex_rtk_hook_command(command_text):
     """Compatibility wrapper for Codex RTK hook command detection."""
-    from mms_hook_commands import is_codex_rtk_hook_command
+    from mms_session.hook_commands import is_codex_rtk_hook_command
 
     return is_codex_rtk_hook_command(command_text)
 
 
 def _is_ecc_hook_command(command_text):
     """Compatibility wrapper for ECC hook command detection."""
-    from mms_hook_commands import is_ecc_hook_command
+    from mms_session.hook_commands import is_ecc_hook_command
 
     return is_ecc_hook_command(command_text)
 
 
 def _is_omc_hook_command(command_text):
     """Compatibility wrapper for OMC hook command detection."""
-    from mms_hook_commands import is_omc_hook_command
+    from mms_session.hook_commands import is_omc_hook_command
 
     return is_omc_hook_command(command_text)
 
 
 def _is_mms_managed_hook_command(command_text):
     """Compatibility wrapper for MMS-managed hook command detection."""
-    from mms_hook_commands import is_mms_managed_hook_command
+    from mms_session.hook_commands import is_mms_managed_hook_command
 
     return is_mms_managed_hook_command(command_text)
 
 
 def _is_legacy_loop_hook_command(command_text):
     """Compatibility wrapper for legacy loop hook command detection."""
-    from mms_hook_commands import is_legacy_loop_hook_command
+    from mms_session.hook_commands import is_legacy_loop_hook_command
 
     return is_legacy_loop_hook_command(command_text)
 
 
 def _is_nsr_hook_command(command_text):
     """Compatibility wrapper for NSR hook command detection."""
-    from mms_hook_commands import is_nsr_hook_command
+    from mms_session.hook_commands import is_nsr_hook_command
 
     return is_nsr_hook_command(command_text)
 
 
 def _is_loop_family_hook_command(command_text):
     """Compatibility wrapper for loop-family hook command detection."""
-    from mms_hook_commands import is_loop_family_hook_command
+    from mms_session.hook_commands import is_loop_family_hook_command
 
     return is_loop_family_hook_command(command_text)
 
 
 def _hook_command_targets_exist(command_text):
     """Compatibility wrapper for hook command executable target checks."""
-    from mms_hook_commands import hook_command_targets_exist
+    from mms_session.hook_commands import hook_command_targets_exist
 
     return hook_command_targets_exist(command_text)
 
@@ -2040,7 +2040,7 @@ def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None)
 
 def _mcp_command_has_path(command):
     """Compatibility wrapper for MCP command path detection."""
-    from mms_hook_commands import mcp_command_has_path
+    from mms_session.hook_commands import mcp_command_has_path
 
     return mcp_command_has_path(command)
 
