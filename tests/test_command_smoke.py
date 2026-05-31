@@ -2118,6 +2118,15 @@ def test_direct_cli_launch_default_resolves_real_start_models():
     assert default_for("pi")["provider"] == "mimo-direct"
     assert default_for("pi")["model"] == "mimo-v2.5"
     assert default_for("opencode") == {"profile": "pro", "source": "launch default"}
+    assert mms_command_tools.resolve_direct_cli_launch_default(
+        "opencode",
+        {**cfg, "opencode": {"default_profile": "raw"}},
+        cfg["providers"][0],
+        [],
+        provider_candidates=provider_candidates,
+        provider_effective_models=provider_effective_models,
+        provider_supports_model_for_cli=provider_supports_model_for_cli,
+    ) == {}
 
 
 def test_main_uses_direct_cli_launch_default_without_model_prompt(monkeypatch):

@@ -7800,6 +7800,9 @@ def resolve_direct_cli_launch_default(
 ):
     cli_name = str(cli_name or "").strip().lower()
     if cli_name == "opencode":
+        opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+        if opencode.get("default_profile") or opencode.get("profile"):
+            return {}
         return {"profile": "pro", "source": "launch default"}
 
     wanted = DIRECT_CLI_LAUNCH_DEFAULTS.get(cli_name)
