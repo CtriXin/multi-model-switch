@@ -1,8 +1,13 @@
 import json
+import threading
+from http.server import ThreadingHTTPServer
+from urllib.request import urlopen
 
 import pytest
 
 import mms_config_web
+import mms_config_web_assets
+import mms_config_web_server
 import mms_core
 
 
@@ -11,6 +16,16 @@ def _isolate_mms_root_env(monkeypatch):
     # These tests pass explicit config_path values; ambient MMS session env should not reclassify temp roots.
     for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "MMS_COMMAND_NAME", "MMS_PREVIEW_MODE"):
         monkeypatch.delenv(key, raising=False)
+
+
+def _frontend_source() -> str:
+    return "\n".join(
+        [
+            mms_config_web._HTML_PAGE,
+            mms_config_web_assets.read_static_asset("config-web.css")[0].decode("utf-8"),
+            mms_config_web_assets.read_static_asset("config-web.js")[0].decode("utf-8"),
+        ]
+    )
 
 
 def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
@@ -730,6 +745,49 @@ def test_config_web_reexports_split_backend_modules():
     assert mms_config_web.build_settings_report is mms_config_web_settings.build_settings_report
 
 
+def test_config_web_frontend_assets_are_external_files():
+    html = mms_config_web._HTML_PAGE
+    css_body, css_type = mms_config_web_assets.read_static_asset("config-web.css")
+    js_body, js_type = mms_config_web_assets.read_static_asset("config-web.js")
+
+    assert '<link rel="stylesheet" href="/static/config-web.css">' in html
+    assert '<script src="/static/config-web.js"></script>' in html
+    assert "<style>" not in html
+    assert css_type.startswith("text/css")
+    assert js_type.startswith("application/javascript")
+    assert b".panel" in css_body
+    assert b"function renderAll" in js_body
+
+
+def test_config_web_server_serves_external_static_assets(tmp_path):
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
+            css_body = response.read()
+            css_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web.js", timeout=3) as response:
+            js_body = response.read()
+            js_type = response.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert css_type.startswith("text/css")
+    assert js_type.startswith("application/javascript")
+    assert b".panel" in css_body
+    assert b"function renderAll" in js_body
+
+
 def test_config_web_markdown_contains_manual_snippets(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
@@ -750,7 +808,7 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 
 
 def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
     assert "['source','真源状态','DB / legacy / bundle']" in html
     assert 'data-section="source"' in html
@@ -1014,7 +1072,7 @@ def test_config_web_allows_pi_in_supported_clis():
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
     assert "不会自动写入 fallback_models" in html
     assert "p.fallback_models=[...new Set(data.models)]" not in html
@@ -1049,7 +1107,7 @@ def test_config_web_plan_does_not_materialize_empty_fallback_models(tmp_path):
 
 
 def test_config_web_opencode_agent_overrides_are_advanced_ui():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
     assert "OpenCode 默认 profile" in html
     assert "OpenCode Agent 名单" in html

@@ -16,7 +16,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from mms_config_web_assets import _HTML_PAGE
+from mms_config_web_assets import read_index_html, read_static_asset
 
 
 def _backend():
@@ -74,7 +74,7 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
 
 
 def _html_page(_snapshot: dict[str, Any]) -> bytes:
-    return _HTML_PAGE.encode("utf-8")
+    return read_index_html().encode("utf-8")
 
 
 class ConfigWebApp:
@@ -168,6 +168,15 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
         snapshot = app.snapshot()
         if path in {"/", "/index.html"}:
             self._send(200, _html_page(snapshot), "text/html; charset=utf-8")
+            return
+        if path.startswith("/static/"):
+            asset_name = path.rsplit("/", 1)[-1]
+            try:
+                body, content_type = read_static_asset(asset_name)
+            except (FileNotFoundError, KeyError):
+                self._send(404, b"not found\n", "text/plain; charset=utf-8")
+                return
+            self._send(200, body, content_type)
             return
         if path in {"/api/state", "/api/snapshot"}:
             self._send(*_json_response(snapshot))

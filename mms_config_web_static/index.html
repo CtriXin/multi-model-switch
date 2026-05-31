@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MMS 配置中心</title>
+  <link rel="stylesheet" href="/static/config-web.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>MMS 配置中心</h1>
+    <p class="lead">这里按模块直接配置和测试：通道里改 provider 与模型清单，模型测试里跑 smoke，设置里管账号、语言和 Guard。保存前先预览；stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
+  </div>
+  <div class="statusbar" id="statusbar"><span class="pill warn">加载中</span></div>
+</header>
+<div class="shell">
+  <aside class="side" id="nav"></aside>
+  <main class="content">
+    <section class="panel" data-section="source">
+      <h2>真源状态</h2>
+      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；registry 的 报告 / 人工确认操作也在这里，不再藏到 设置总表。</p>
+      <div class="module-actions">
+        <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">模型真源状态</button>
+        <button class="ghost" data-settings-action="consumer_bundle_status" data-report-target="sourceReport">消费端 Bundle</button>
+        <button class="ghost" data-settings-action="verify_approved" data-report-target="sourceReport">验证已批准 Bundle</button>
+        <button class="ghost" data-settings-action="preview_doctor" data-report-target="sourceReport">预览诊断</button>
+        <button class="ghost" data-settings-action="check_staleness" data-report-target="sourceReport">检查过期源</button>
+        <button class="ghost" data-settings-action="refresh_due_sources_gate" data-report-target="sourceReport">刷新到期源确认</button>
+        <button class="ghost" data-settings-action="publish_approved_gate" data-report-target="sourceReport">发布确认</button>
+      </div>
+      <div class="grid" id="sourceStatus"></div>
+      <div class="result module-report" id="sourceReport">选择真源动作查看只读报告或人工确认。</div>
+    </section>
+
+
+    <!-- 通道配置 -->
+    <section class="panel" data-section="channel">
+      <h2>通道配置</h2>
+      <p>先建通道：基础信息、连接凭据、策略高级项和报告确认分在编辑器 Tab 中；Key 只会通过 POST 发送，不会回显。</p>
+      <div class="channel-layout">
+        <div class="channel-sidebar">
+          <div class="provider-list" id="providerList"></div>
+          <div class="btns">
+            <button id="addProvider" class="secondary">+ 添加通道</button>
+            <button id="duplicateProvider" class="ghost">复制当前</button>
+          </div>
+        </div>
+        <div class="channel-main">
+          <div class="provider-tabs">
+            <button class="tab-btn active" data-tab="config" onclick="switchProviderTab('config')">通道配置</button>
+            <button class="tab-btn" data-tab="models" onclick="switchProviderTab('models')">模型配置</button>
+          </div>
+          <div class="tab-panel active" data-tab-panel="config">
+            <div class="card provider-editor" id="providerForm"></div>
+          </div>
+          <div class="tab-panel" data-tab-panel="models">
+            <div class="model-section">
+              <p class="muted">这是当前通道的模型清单，不是全局模型池。手动补充会写入当前通道的 extra_models；取消勾选「显示」会写入当前通道的 hidden_models。</p>
+              <div class="model-inventory-summary" id="modelInventorySummary"></div>
+              <div class="card">
+                <div class="btns">
+                  <button id="fetchModels">拉取当前通道模型</button>
+                  <button id="testList" class="secondary">测试 /models</button>
+                  <button id="openModelTest" class="ghost">打开模型测试</button>
+                  <label class="check"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>拉取后自动标记缺失旧 route 为待清理（本页临时）</span></label>
+                  <input id="modelSearch" placeholder="搜索模型" style="max-width:260px">
+                </div>
+                <label style="margin-top:14px">手动补充当前通道模型（extra_models，逗号或换行分隔）</label>
+                <textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea>
+                <div class="btns">
+                  <button id="addManualModels" class="secondary">添加到补充模型库</button>
+                  <button id="clearHidden" class="ghost">取消当前通道全部隐藏</button>
+                  <button id="restoreModelPatch" class="ghost">恢复默认模型补丁</button>
+                  <button id="clearAllStaleHidden" class="ghost">移除全部通道未匹配隐藏规则</button>
+                </div>
+              </div>
+              <div id="modelChips" class="card"></div>
+              <div class="card" id="staleHiddenBox"></div>
+              <div class="table-wrap"><table id="modelTable"></table></div>
+              <div class="result module-report" id="modelConfigResult">模型配置动作结果会显示在这里。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 模型测试 -->
+    <section class="panel" data-section="test">
+      <h2>模型测试</h2>
+      <p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p>
+      <div class="grid">
+        <div class="card span5">
+          <label>测试通道</label><select id="testProvider"></select>
+          <label>测试模型</label><select id="testModel"></select>
+          <label>协议</label>
+          <select id="testProtocol">
+            <option value="auto">auto</option>
+            <option value="anthropic_messages">anthropic_messages</option>
+            <option value="openai_chat_completions">openai_chat_completions</option>
+          </select>
+          <label>提示词 Prompt</label>
+          <textarea id="testPrompt">只回复 pong</textarea>
+          <div class="chips" id="testState"></div>
+          <div class="btns">
+            <button id="testListBtn" class="ghost">测试 /models</button>
+            <button id="testModelBtn">Ping 模型</button>
+            <button id="chatTestBtn" class="secondary">简单对话</button>
+          </div>
+        </div>
+        <div class="card span7">
+          <div class="result" id="testResult">暂无测试结果</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fallback -->
+    <section class="panel" data-section="fallback">
+      <h2>Fallback 设置</h2>
+      <p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。已下线的负载均衡不在本轮 WebUI 迭代范围。</p>
+      <div class="grid">
+        <div class="card span6">
+          <h3>Rescue fallback</h3>
+          <label>fallback_model</label>
+          <input id="rescueModel" placeholder="deepseek-v4-flash">
+          <label>fallback_cli</label>
+          <select id="rescueCli">
+            <option value="">不指定</option>
+            <option>codex</option>
+            <option>claude</option>
+            <option>opencode</option>
+            <option>agy</option>
+          </select>
+          <div class="check" style="margin-top:10px">
+            <input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span>
+          </div>
+          <div class="btns">
+            <button class="ghost" data-settings-action="rescue_events" data-report-target="fallbackReport">查看 rescue 事件</button>
+            <button class="ghost" data-settings-action="rescue_handover_gate" data-report-target="fallbackReport">交接确认</button>
+            <button class="ghost" data-settings-action="rescue_create_demo_gate" data-report-target="fallbackReport">Demo packet 确认</button>
+          </div>
+        </div>
+        <div class="card span6">
+          <h3>Vision sidecar</h3>
+          <div class="check">
+            <input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span>
+          </div>
+          <label>provider_id</label>
+          <select id="visionProvider"></select>
+          <label>model</label>
+          <select id="visionModel"></select>
+          <p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为「当前配置值」。</p>
+          <label>候选列表</label>
+          <div id="visionCandidates" class="grid"></div>
+          <div class="btns">
+            <button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button>
+          </div>
+        </div>
+        <div class="card span12">
+          <h3>Fallback 报告 / 人工确认</h3>
+          <div class="result" id="fallbackReport">选择 fallback 动作查看结果。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 运行默认值 -->
+    <section class="panel" data-section="runtime">
+      <h2>运行默认值</h2>
+      <p>首选 CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p>
+      <div class="grid">
+        <div class="card span5">
+          <label>首选 CLI</label>
+          <select id="preferredCli">
+            <option>opencode</option>
+            <option>codex</option>
+            <option>claude</option>
+            <option>agy</option>
+          </select>
+          <label>coding preset model（可选）</label>
+          <input id="codingModel" placeholder="gpt-5.5">
+        </div>
+        <div class="card span7">
+          <label>OpenCode 默认 profile</label>
+          <select id="opencodeProfile">
+            <option>agent</option>
+            <option>omo</option>
+            <option>raw</option>
+          </select>
+          <p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p>
+        </div>
+        <div class="card span12">
+          <h3>OpenCode Agent 名单</h3>
+          <p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。顺序表示 priority/fallback 顺序，不是 round-robin。</p>
+          <div class="oc-summary" id="opencodeOverrideSummary"></div>
+          <div class="oc-order-note">
+            Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。
+          </div>
+          <details class="oc-advanced" id="opencodeAdvanced">
+            <summary>高级：OpenCode 逐 Agent 名单</summary>
+            <div class="filterbar" id="opencodeAgentFilters"></div>
+            <div class="table-wrap"><table id="opencodeAgents"></table></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="panel" data-section="settings">
+      <h2>设置</h2>
+      <p>这里是 WebUI 配置台：日常配置在当前页面改草稿，统一去保存页生成 diff / 审计摘要；TUI 后续只保留启动、应急和人工确认兜底。</p>
+      <div class="settings-console">
+        <div class="settings-hero">
+          <div>
+            <h3>把设置从 TUI 迁到可保存的 WebUI 表单</h3>
+            <p>用户只需要记住启动命令；通道、模型、Fallback、Runtime 和账号默认值都在 WebUI 里完成配置，再通过保存预览写入。</p>
+            <div id="settingsGapSummary" class="chips"></div>
+          </div>
+          <div class="settings-hero-actions">
+            <button class="secondary" data-section-jump="save">生成保存预览</button>
+            <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
+          </div>
+        </div>
+
+        <div class="settings-tabs" id="settingsTabs">
+          <button class="settings-tab" data-settings-tab="basics"><strong>常用设置</strong><span>语言 / 保存入口</span></button>
+          <button class="settings-tab" data-settings-tab="accounts"><strong>账号默认值</strong><span>default / priority / note</span></button>
+          <button class="settings-tab" data-settings-tab="guard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
+          <button class="settings-tab" data-settings-tab="about"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
+          <button class="settings-tab" data-settings-tab="audit"><strong>验收辅助</strong><span>折叠的 TUI 对照</span></button>
+        </div>
+
+        <div class="settings-tab-panel" data-settings-panel="basics">
+          <div class="settings-panel-grid">
+            <div class="setting-edit-card span5">
+              <h3>界面语言 <span class="tag">可配置</span></h3>
+              <p class="muted">进入 WebUI 草稿，写入仍走保存 / 审计。</p>
+              <label>ui.language</label>
+              <select id="uiLanguage">
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+              <div class="btns">
+                <button id="saveUiLanguage" class="ghost">暂存语言修改</button>
+                <button class="ghost" data-settings-action="language_status" data-report-target="settingsReport">语言状态</button>
+              </div>
+            </div>
+            <div class="setting-edit-card span4">
+              <h3>配置入口 <span class="tag">主路径</span></h3>
+              <p class="muted">通道 URL/API Key、模型补丁、Fallback、Runtime 默认值都在各自模块配置，不再回到 TUI 里点散落菜单。</p>
+              <div class="btns">
+                <button class="ghost" data-section-jump="channel">通道配置</button>
+                <button class="ghost" data-section-jump="fallback">Fallback 设置</button>
+                <button class="ghost" data-section-jump="runtime">运行默认值</button>
+              </div>
+            </div>
+            <div class="settings-next-step span3">
+              <h3>保存规则</h3>
+              <p class="muted">修改后先生成保存预览；preview root 写 DB candidate + latest-approved bundle，stable root 走 backup + audit。</p>
+              <button class="secondary" data-section-jump="save">去保存审计</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-tab-panel" data-settings-panel="accounts">
+          <div class="setting-edit-card">
+            <h3>CLI 账号默认值 <span class="tag">草稿预览</span></h3>
+            <p class="muted">这里配置已有 account 的默认选择、启用状态、priority、timezone 和 note；Claude account 仍是 human-only。OAuth / AGY 官方登录不再作为 WebUI 主流程。</p>
+            <div class="btns" id="accountModuleActions">
+              <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
+              <button class="ghost" data-section-jump="save">保存账号草稿</button>
+            </div>
+            <div id="accountTable" class="account-config-grid"></div>
+          </div>
+        </div>
+
+        <div class="settings-tab-panel" data-settings-panel="guard">
+          <div class="settings-panel-grid">
+            <div class="setting-edit-card span6">
+              <h3>启动快照守卫（Snapshot Guard）</h3>
+              <p class="muted">状态是只读报告；接受 baseline 需要人工确认，不在 WebUI 自动执行。</p>
+              <div class="btns">
+                <button class="ghost" data-settings-action="guard_status" data-report-target="settingsReport">快照状态</button>
+                <button class="ghost" data-settings-action="guard_accept_gate" data-report-target="settingsReport">接受基线确认</button>
+              </div>
+            </div>
+            <div class="setting-edit-card span6">
+              <h3>迁移 / 网络边界</h3>
+              <p class="muted">会触发真实配置、账号目录、proxy/no_proxy 或迁移写入的动作保持人工确认；WebUI 只显示影响面。</p>
+              <div class="btns">
+                <button class="ghost" data-settings-action="migrate_config_gate" data-report-target="settingsReport">迁移确认</button>
+                <button class="ghost" data-settings-action="account_network_gate" data-report-target="settingsReport">账号网络确认</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-tab-panel" data-settings-panel="about">
+          <div class="settings-panel-grid">
+            <div class="setting-edit-card span6">
+              <h3>关于 / 版本</h3>
+              <p class="muted">默认读取缓存状态；刷新版本检查和升级命令都需要人工确认。</p>
+              <div class="btns">
+                <button class="ghost" data-settings-action="about" data-report-target="settingsReport">关于状态</button>
+                <button class="ghost" data-settings-action="about_refresh_gate" data-report-target="settingsReport">刷新版本确认</button>
+                <button class="ghost" data-settings-action="about_upgrade_gate" data-report-target="settingsReport">升级确认</button>
+              </div>
+            </div>
+            <div class="settings-compat-note span6">
+              <strong>OAuth 主流程已下线</strong>
+              <p>AGY / OAuth 仅作为旧 account 兼容状态查看；新增可用通道请走 API Key provider。</p>
+              <details class="account-advanced">
+                <summary>查看已下线兼容说明</summary>
+                <div class="btns">
+                  <button class="ghost" data-settings-action="connect_official_gate" data-report-target="settingsReport">查看下线说明</button>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-tab-panel" data-settings-panel="audit">
+          <details class="setting-edit-card" open>
+            <summary>开发验收辅助，不作为用户设置入口</summary>
+            <p class="muted">这些表只用于核对 TUI 功能迁移，不再占据设置主页面。</p>
+            <div class="table-wrap"><table id="settingsCoverage"></table></div>
+          </details>
+          <details class="setting-edit-card mapping-card" id="mappingAuditDetails">
+            <summary>验收辅助：TUI ↔ WebUI 对照表</summary>
+            <div class="mapping-head">
+              <div>
+                <h3>TUI ↔ WebUI 对照表</h3>
+                <p class="muted">功能入口应在通道、模型测试、真源、Fallback、Runtime 或设置对应 tab 里；这里仅做验收证据。</p>
+              </div>
+              <div id="mappingFilters" class="filterbar compact"></div>
+            </div>
+            <div id="acceptancePanel" class="acceptance-panel"></div>
+            <div class="table-wrap"><table id="tuiMappingTable"></table></div>
+          </details>
+        </div>
+
+        <div class="setting-edit-card">
+          <h3>报告 / 人工确认</h3>
+          <div class="result" id="settingsReport">选择一个设置动作查看结果</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 保存 / 审计 -->
+    <!-- Session 能力面板 -->
+    <section class="panel" data-section="sessionAssets">
+      <h2>Skill / MCP 管理</h2>
+      <p>这里就是会话能力的配置入口：筛选 Skill / MCP / Hook，勾选默认关闭；只有产生未保存变化时，底部才会出现保存栏。</p>
+      <div class="asset-hero" id="assetSummary"></div>
+      <div class="asset-control-help" id="assetControlHelp"></div>
+      <div class="asset-manager">
+        <div class="asset-toolbar">
+          <div class="asset-toolbar-row">
+            <strong>来源</strong>
+            <div class="filterbar" id="assetTabs"></div>
+          </div>
+          <div class="asset-toolbar-row">
+            <strong>CLI</strong>
+            <div class="filterbar" id="assetCliFilters"></div>
+          </div>
+          <div class="asset-toolbar-row">
+            <strong>类型</strong>
+            <div class="filterbar" id="assetKindFilters"></div>
+            <input class="asset-search" id="assetSearch" placeholder="搜索能力名称、用途、路径">
+          </div>
+        </div>
+        <div class="asset-list" id="assetCards"></div>
+        <div class="asset-source-strip" id="assetManagedRoots"></div>
+      </div>
+      <details class="oc-advanced" id="assetCliDetails">
+        <summary>展开查看各 CLI 的 TUI 确认页能力和来源</summary>
+        <div class="card asset-confirm-map" id="assetConfirmMap"></div>
+        <div class="asset-cli-grid" id="assetCliOverview"></div>
+      </details>
+      <div class="grid asset-ops-grid">
+        <div class="card span6 asset-config-card asset-ops-card">
+          <h3>备份：复制 TOML 片段</h3>
+          <p class="muted" id="assetConfigContract">这里保留可复制片段；正常保存请使用底部出现的未保存变化栏。</p>
+          <div class="btns">
+            <button id="copyAssetPrefs" class="ghost">复制偏好片段</button>
+            <button id="resetAssetPrefs" class="ghost">恢复当前偏好</button>
+          </div>
+          <details>
+            <summary>查看要写入 preferences.toml 的片段</summary>
+            <pre class="result" id="assetPreferenceSnippet"></pre>
+          </details>
+        </div>
+        <div class="card span6 asset-ops-card">
+          <h3>Global 添加位置</h3>
+          <p class="muted">要让原生 CLI 也能加载，就把 Skill 放到对应目录；MMS 本页只管理 MMS 启动时是否默认关闭。</p>
+          <p class="mono">Claude: ~/.claude/skills/&lt;skill-name&gt;</p>
+          <p class="mono">Codex: ~/.codex/skills/&lt;skill-name&gt;</p>
+          <details>
+            <summary>查看已检测到的 Global / plugin 位置</summary>
+            <div class="asset-roots" id="assetGlobalRoots"></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 保存 / 审计 -->
+    <section class="panel" data-section="save">
+      <h2>保存 / 审计</h2>
+      <p id="saveModeLead">保存前先生成 diff。preview root 走 DB candidate + latest-approved publish；stable legacy 使用 audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p>
+      <div class="grid">
+        <div class="card span5">
+          <p class="muted" id="saveModeHint"></p>
+          <div class="btns">
+            <button id="previewPlan">生成保存预览</button>
+            <button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button>
+            <button id="saveBtn" class="danger legacy-save-action">确认保存</button>
+          </div>
+          <details class="oc-advanced" id="advancedPlanTools" style="margin-top:14px">
+            <summary>高级 / 恢复：plan JSON 与 CLI fallback</summary>
+            <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；下载 JSON 不含明文 key。CLI apply 是无 WebUI 时的 fallback，不是日常主流程。</p>
+            <div class="btns">
+              <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
+              <button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button>
+            </div>
+          </details>
+          <div class="check" style="margin-top:12px">
+            <input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span>
+          </div>
+          <label id="confirmPhraseLabel" style="margin-top:12px">输入确认文字</label>
+          <input id="confirmPhrase" placeholder="保存配置 或 写入预览DB">
+          <label>保存原因 / audit reason</label>
+          <input id="saveReason" value="setup-web-ui:interactive-save">
+          <p class="muted" id="saveCompatibilityNote">stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
+        </div>
+        <div class="card span7">
+          <div class="result" id="saveResult">尚未生成预览</div>
+        </div>
+        <div class="card span12">
+          <h3>保存摘要</h3>
+          <div id="reviewSummary">
+            <p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p>
+          </div>
+        </div>
+        <div class="span12">
+          <h3 style="margin-bottom:8px">原始 diff / 审计详情</h3>
+          <div class="diff" id="diffBox">点击“生成保存预览”</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 本地参考 -->
+    <section class="panel" data-section="refs">
+      <h2>本地参考</h2>
+      <p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p>
+      <div class="grid" id="refsGrid"></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<div class="asset-pending-bar" id="assetPendingBar"></div>
+<div class="toast" id="toast"></div>
+<script src="/static/config-web.js"></script>
+</body>
+</html>
