@@ -28,6 +28,7 @@ def test_confirm_tui_thinking_and_effort_defaults():
     assert confirm_tui.__kwdefaults__["ecc_enabled_default"] is False
     assert confirm_tui.__kwdefaults__["agent_pack_default"] == "none"
     assert confirm_tui.__kwdefaults__["nsr_enabled_default"] is True
+    assert confirm_tui.__kwdefaults__["caveman_level_default"] == "light"
 
 
 def test_confirm_profile_capabilities_read_mimo_thinking(monkeypatch, tmp_path):
@@ -94,6 +95,8 @@ def test_core_confirm_tui_keeps_ecc_default_off():
         assert ecc_default.value is False
         pack_default = keyword_values.get("agent_pack_default")
         assert isinstance(pack_default, ast.Call)
+        caveman_level_default = keyword_values.get("caveman_level_default")
+        assert isinstance(caveman_level_default, ast.Name)
         assert "runtime" in keyword_values
         return
 

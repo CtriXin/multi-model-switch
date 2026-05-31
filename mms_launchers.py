@@ -94,6 +94,7 @@ from mms_opencode_session import (
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
+    _model_supports_vision,
     _probe_models,
     _runtime_force_ipv4,
     _runtime_httpx_request,
@@ -103,6 +104,7 @@ from mms_core import (
     managed_assets_root,
     preference_asset_root,
 )
+from mms_capability_resolver import resolve_model_capabilities
 from mms_fake_upstream import (
     ensure_local_proxy as _ensure_fake_upstream_proxy,
     fake_proxy_probe as _fake_proxy_probe,
@@ -111,7 +113,8 @@ from mms_fake_upstream import (
 )
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
-from mms_provider_profiles import profile_context_window
+from mms_provider_profiles import profile_context_window, resolve_provider_profile
+import mms_pi_support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
@@ -3205,11 +3208,46 @@ def _normalize_caveman_mode(value, default="disable"):
         return "enable"
     if raw in {"0", "false", "no", "off", "disable", "disabled"}:
         return "disable"
+    if _normalize_caveman_level(raw, default=""):
+        return "enable"
     return default if default in {"auto", "enable", "disable"} else "disable"
 
 
 def _runtime_caveman_enabled(runtime):
     return _normalize_caveman_mode((runtime or {}).get("caveman_mode", "disable")) == "enable"
+
+
+def _normalize_caveman_level(value, default="light"):
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if raw in {"", "inherit", "default", "auto", "enable", "enabled", "on", "true", "1"}:
+        return default if default in {"", "light", "standard", "full"} else "light"
+    if raw in {"light", "lite", "low"}:
+        return "light"
+    if raw in {"standard", "normal", "medium"}:
+        return "standard"
+    if raw in {"full", "ultra", "high"}:
+        return "full"
+    return default if default in {"", "light", "standard", "full"} else "light"
+
+
+def _runtime_caveman_level(runtime):
+    runtime = runtime or {}
+    level = runtime.get("caveman_level")
+    if level is None:
+        level = runtime.get("caveman_mode")
+    return _normalize_caveman_level(level, default="light")
+
+
+def _caveman_hook_mode(caveman_level):
+    return {
+        "light": "lite",
+        "standard": "full",
+        "full": "ultra",
+    }.get(_normalize_caveman_level(caveman_level), "lite")
+
+
+def _caveman_hook_env_prefix(caveman_level):
+    return f"CAVEMAN_DEFAULT_MODE={shlex.quote(_caveman_hook_mode(caveman_level))} "
 
 
 def _normalize_thinking_mode(value, default="enable"):
@@ -3540,6 +3578,31 @@ def _resolve_agent_browser_root():
     return ""
 
 
+def _resolve_codegraph_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_CODEGRAPH_ROOT") or os.environ.get("MMS_CODEGRAPH_SKILL_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("codegraph")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "codegraph"),
+        _real_user_path("auto-skills", "shared-skills", "codegraph"),
+        _real_user_path("auto-skills", "vendor", "codegraph"),
+        _real_user_path("vendor", "codegraph"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
 def _resolve_toon_root():
     candidates = []
     explicit = str(os.environ.get("MMS_TOON_ROOT") or "").strip()
@@ -3676,8 +3739,18 @@ def _mms_context_script_path():
     return script_path if os.path.isfile(script_path) else ""
 
 
+def _mms_gain_script_path():
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-gain")
+    return script_path if os.path.isfile(script_path) else ""
+
+
 def _token_saver_script_path():
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-saver")
+    return script_path if os.path.isfile(script_path) else ""
+
+
+def _token_gain_script_path():
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-gain")
     return script_path if os.path.isfile(script_path) else ""
 
 
@@ -4056,9 +4129,10 @@ def _disabled_skill_names_for_cli(disabled_session_surfaces, cli_name=""):
     return names
 
 
-def _caveman_claude_activate_command(caveman_root):
+def _caveman_claude_activate_command(caveman_root, caveman_level="light"):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     return (
+        _caveman_hook_env_prefix(caveman_level) +
         "CAVEMAN_HOOK_COMPACT=1 "
         "CAVEMAN_HOOK_EVENT=SessionStart "
         f"node {json.dumps(script_path)}"
@@ -4070,11 +4144,12 @@ def _caveman_claude_tracker_command(caveman_root):
     return f"node {json.dumps(script_path)}"
 
 
-def _caveman_codex_activate_command(caveman_root):
+def _caveman_codex_activate_command(caveman_root, caveman_level="light"):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     if not os.path.isfile(script_path):
         return ""
     return (
+        _caveman_hook_env_prefix(caveman_level) +
         "CAVEMAN_HOOK_COMPACT=1 "
         "CAVEMAN_HOOK_EVENT=SessionStart "
         'CLAUDE_CONFIG_DIR="$HOME/.codex" '
@@ -4082,8 +4157,8 @@ def _caveman_codex_activate_command(caveman_root):
     )
 
 
-def _caveman_codex_hook_payload(caveman_root):
-    command = _caveman_codex_activate_command(caveman_root)
+def _caveman_codex_hook_payload(caveman_root, caveman_level="light"):
+    command = _caveman_codex_activate_command(caveman_root, caveman_level=caveman_level)
     if command:
         return {
             "type": "command",
@@ -4140,8 +4215,8 @@ def _codex_shell_hook_payload(command_text, *, timeout=None, status_message=None
     return payload
 
 
-def _codex_caveman_session_hook(caveman_root):
-    hook_payload = _caveman_codex_hook_payload(caveman_root)
+def _codex_caveman_session_hook(caveman_root, caveman_level="light"):
+    hook_payload = _caveman_codex_hook_payload(caveman_root, caveman_level=caveman_level)
     return _codex_shell_hook_payload(
         hook_payload.get("command"),
         timeout=hook_payload.get("timeout"),
@@ -4149,14 +4224,14 @@ def _codex_caveman_session_hook(caveman_root):
     )
 
 
-def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
+def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
     hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
     if not enable_caveman:
         return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
 
     caveman_root = _resolve_caveman_root()
-    replacement = _codex_caveman_session_hook(caveman_root) if caveman_root else {}
+    replacement = _codex_caveman_session_hook(caveman_root, caveman_level=caveman_level) if caveman_root else {}
     replaced = False
     configured = {}
 
@@ -4253,7 +4328,7 @@ def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
     return hooks_data
 
 
-def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
+def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     hooks_data = _filter_hook_commands(hooks_data, _is_caveman_hook_command)
     if not enable_caveman:
         return hooks_data
@@ -4263,7 +4338,7 @@ def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
     hooks_data = _append_shell_command_hook(
         hooks_data,
         "SessionStart",
-        _caveman_claude_activate_command(caveman_root),
+        _caveman_claude_activate_command(caveman_root, caveman_level=caveman_level),
         timeout=5,
         status_message="Loading caveman mode...",
     )
@@ -4318,9 +4393,20 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
     return _merge_claude_hooks(hooks_data, omc_hooks)
 
 
-def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_nsr=False, disabled_session_surfaces=None):
+def _build_codex_session_hooks(
+    base_hooks=None,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    enable_nsr=False,
+    disabled_session_surfaces=None,
+):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
-    hooks_data = _configure_codex_caveman_hooks(payload.get("hooks"), enable_caveman=enable_caveman)
+    hooks_data = _configure_codex_caveman_hooks(
+        payload.get("hooks"),
+        enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
+    )
     hooks_data = _configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
     hooks_data = _merge_claude_hooks(hooks_data, _load_managed_session_hooks())
     hooks_data = _append_shell_command_hook(
@@ -5102,6 +5188,15 @@ def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled
     _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
+def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    codegraph_root = _resolve_codegraph_root()
+    if not codegraph_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-codegraph-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "codegraph", codegraph_root, disabled_session_surfaces=disabled_session_surfaces)
+
+
 def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     toon_root = _resolve_toon_root()
     if not toon_root:
@@ -5237,11 +5332,15 @@ def _write_agy_mcp_config(plugin_dir, *, disabled_session_surfaces=None):
         _remove_file_if_exists(path)
 
 
-def _write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfaces=None):
+def _write_agy_hooks(plugin_dir, *, enable_caveman=False, caveman_level="light", disabled_session_surfaces=None):
     _remove_file_if_exists(os.path.join(plugin_dir, "hooks.json"))
     hooks_data = _merge_mms_session_hooks({})
     if enable_caveman:
-        hooks_data = _configure_claude_caveman_hooks(hooks_data, enable_caveman=True)
+        hooks_data = _configure_claude_caveman_hooks(
+            hooks_data,
+            enable_caveman=True,
+            caveman_level=caveman_level,
+        )
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _filter_missing_managed_hook_commands(hooks_data)
     hooks_dir = os.path.join(plugin_dir, "hooks")
@@ -5253,7 +5352,14 @@ def _write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfa
         _remove_file_if_exists(path)
 
 
-def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
+def _overlay_agy_session_assets(
+    account_home,
+    session_home,
+    *,
+    enable_caveman=False,
+    caveman_level="light",
+    disabled_session_surfaces=None,
+):
     if not account_home or not session_home:
         return
     plugin_dir = _ensure_agy_plugin_dir(account_home)
@@ -5262,6 +5368,7 @@ def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=Fa
     _write_agy_hooks(
         plugin_dir,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         disabled_session_surfaces=disabled_session_surfaces,
     )
     if enable_caveman:
@@ -5274,6 +5381,7 @@ def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=Fa
     _overlay_web_access_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_weber_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_agent_browser_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_codegraph_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_xmem_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -5291,6 +5399,7 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_caveman_session_entries=_overlay_caveman_session_entries,
         overlay_web_access_session_entries=_overlay_web_access_session_entries,
         overlay_weber_session_entries=_overlay_weber_session_entries,
+        overlay_codegraph_session_entries=_overlay_codegraph_session_entries,
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
         overlay_xmem_session_entries=_overlay_xmem_session_entries,
@@ -6452,6 +6561,7 @@ def _build_claude_session_settings(
     default_env=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -6492,6 +6602,7 @@ def _build_claude_session_settings(
     hooks = _configure_claude_caveman_hooks(
         hooks,
         enable_caveman=bool(enable_caveman and allow_execution_surfaces),
+        caveman_level=caveman_level,
     )
     hooks = _configure_claude_nsr_hooks(
         hooks,
@@ -6587,6 +6698,7 @@ def _write_claude_session_settings(
     base_settings=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    caveman_level="light",
     enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
@@ -6604,6 +6716,7 @@ def _write_claude_session_settings(
         default_env=default_env,
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
+        caveman_level=caveman_level,
         enable_nsr=enable_nsr,
         enable_ecc=enable_ecc,
         enable_omc=enable_omc,
@@ -6756,6 +6869,13 @@ def _provider_supports_cli(provider, cli):
             continue
         normalized.add(name)
     supported_clis = normalized
+    if cli == "pi" and "pi" not in supported_clis:
+        if "openai_chat_completions" in protocols and any(
+            item in supported_clis for item in ("codex", "opencode", "claude")
+        ):
+            return True
+        if "anthropic_messages" in protocols and "claude" in supported_clis:
+            return True
     if cli == "opencode" and "opencode" not in supported_clis:
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "claude")
@@ -6805,6 +6925,9 @@ def validate_provider_for_cli(cli, provider):
         sys.exit(1)
     if cli in {"codex", "opencode"} and not _openai_base_url(provider):
         console.print(f"[red]provider '{provider_id}' 未配置 OpenAI 地址[/red]")
+        sys.exit(1)
+    if cli == "pi" and not _anthropic_base_url(provider) and not _openai_base_url(provider):
+        console.print(f"[red]provider '{provider_id}' 未配置任何可供 Pi 使用的 API 地址[/red]")
         sys.exit(1)
 
 
@@ -6925,6 +7048,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             session_home,
             disabled_session_surfaces=disabled_session_surfaces,
         )
+        _overlay_codegraph_session_entries(
+            session_claude_dir,
+            session_home,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
         _overlay_xmem_session_entries(
             session_claude_dir,
             session_home,
@@ -6973,6 +7101,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             home_dir,
             session_home,
             enable_caveman=_runtime_caveman_enabled(account),
+            caveman_level=_runtime_caveman_level(account),
             disabled_session_surfaces=disabled_session_surfaces,
         )
         host_context_env = _install_host_context_env(
@@ -7025,6 +7154,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
+            _overlay_codegraph_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             _overlay_toon_session_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
@@ -7072,6 +7206,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
                 "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+                "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
                 "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
@@ -8222,6 +8357,23 @@ def _install_session_command_wrappers(session_home, env):
             env["MMS_CONTEXT_BIN"] = context_wrapper_path
             env["MMS_CONTEXT_DIR"] = os.path.join(session_home, ".mms", "context-store")
 
+    mms_gain_script = _mms_gain_script_path()
+    if mms_gain_script:
+        mms_gain_wrapper_path = os.path.join(wrapper_dir, "mms-gain")
+        mms_gain_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(mms_gain_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(mms_gain_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(mms_gain_wrapper)
+        os.chmod(mms_gain_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["MMS_GAIN_BIN"] = mms_gain_wrapper_path
+            env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
+
     token_saver_script = _token_saver_script_path()
     if token_saver_script:
         token_saver_wrapper_path = os.path.join(wrapper_dir, "token-saver")
@@ -8238,6 +8390,24 @@ def _install_session_command_wrappers(session_home, env):
         if isinstance(env, dict):
             env["TOKEN_SAVER_BIN"] = token_saver_wrapper_path
             env["MMS_TOKEN_SAVER_BIN"] = token_saver_wrapper_path
+            env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
+
+    token_gain_script = _token_gain_script_path()
+    if token_gain_script:
+        token_gain_wrapper_path = os.path.join(wrapper_dir, "token-gain")
+        token_gain_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(token_gain_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(token_gain_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(token_gain_wrapper)
+        os.chmod(token_gain_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["TOKEN_GAIN_BIN"] = token_gain_wrapper_path
+            env["MMS_TOKEN_GAIN_BIN"] = token_gain_wrapper_path
             env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
 
     xmem_script = _xmem_cli_path()
@@ -9904,6 +10074,7 @@ def _claude_gateway_env(
     provider_id = runtime.get("id", "")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    caveman_level = _runtime_caveman_level(runtime)
     enable_nsr = _runtime_nsr_enabled(runtime)
     enable_ecc = agent_pack == "ecc"
     enable_omc = agent_pack == "omc"
@@ -9984,6 +10155,7 @@ def _claude_gateway_env(
                 "agent_pack": agent_pack,
                 "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+                "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
                 "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
@@ -10006,6 +10178,7 @@ def _claude_gateway_env(
             default_env=default_settings_env,
             base_settings=session_base_settings,
             enable_caveman=enable_caveman,
+            caveman_level=caveman_level,
             enable_nsr=enable_nsr,
             enable_ecc=enable_ecc,
             enable_omc=enable_omc,
@@ -10032,6 +10205,7 @@ def _claude_gateway_env(
         )
         _overlay_web_access_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_codegraph_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_xmem_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -10160,6 +10334,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     with open(auth_path, "w") as f:
         _json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": openai_key}, f)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    caveman_level = _runtime_caveman_level(runtime)
     enable_nsr = _runtime_nsr_enabled(runtime)
     real_codex_dir = _real_user_path(".codex")
     real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
@@ -10190,6 +10365,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         session_hooks = _build_codex_session_hooks(
             base_hooks,
             enable_caveman=enable_caveman,
+            caveman_level=caveman_level,
             enable_nsr=enable_nsr,
             disabled_session_surfaces=disabled_session_surfaces,
         )
@@ -10458,6 +10634,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_web_access_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_weber_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_agent_browser_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_codegraph_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_xmem_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -10495,6 +10672,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
             "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
             "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+            "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
             "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
@@ -10817,6 +10995,7 @@ def _opencode_gateway_env(runtime, model_info=None):
         runtime_caveman_enabled=_runtime_caveman_enabled,
         resolve_web_access_root=_resolve_web_access_root,
         resolve_weber_root=_resolve_weber_root,
+        resolve_codegraph_root=_resolve_codegraph_root,
         resolve_toon_root=_resolve_toon_root,
         resolve_token_saver_root=_resolve_token_saver_root,
         resolve_xmem_root=_resolve_xmem_root,
@@ -10852,6 +11031,117 @@ def _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agen
         default_agent=OPENCODE_LITE_DEFAULT_AGENT,
     )
 
+
+def _pi_wrapper_path(*args, **kwargs):
+    return _pi_support._pi_wrapper_path(*args, **kwargs)
+
+def _pi_retry_extension_path(*args, **kwargs):
+    return _pi_support._pi_retry_extension_path(*args, **kwargs)
+
+def _pi_npx_cache_dir(*args, **kwargs):
+    return _pi_support._pi_npx_cache_dir(*args, **kwargs)
+
+def _pi_settings_payload(*args, **kwargs):
+    return _pi_support._pi_settings_payload(*args, **kwargs)
+
+def _pi_provider_ref(*args, **kwargs):
+    return _pi_support._pi_provider_ref(*args, **kwargs)
+
+def _pi_normalize_model_key(*args, **kwargs):
+    return _pi_support._pi_normalize_model_key(*args, **kwargs)
+
+def _pi_reference_payload(*args, **kwargs):
+    return _pi_support._pi_reference_payload(*args, **kwargs)
+
+def _pi_reference_model_row(*args, **kwargs):
+    return _pi_support._pi_reference_model_row(*args, **kwargs)
+
+def _pi_first_positive_int(*args, **kwargs):
+    return _pi_support._pi_first_positive_int(*args, **kwargs)
+
+def _pi_hint_max_tokens(*args, **kwargs):
+    return _pi_support._pi_hint_max_tokens(*args, **kwargs)
+
+def _pi_hint_context_window(*args, **kwargs):
+    return _pi_support._pi_hint_context_window(*args, **kwargs)
+
+def _pi_reference_supports_vision(*args, **kwargs):
+    return _pi_support._pi_reference_supports_vision(*args, **kwargs)
+
+def _pi_model_supported(*args, **kwargs):
+    return _pi_support._pi_model_supported(*args, **kwargs)
+
+def _pi_model_replacement(*args, **kwargs):
+    return _pi_support._pi_model_replacement(*args, **kwargs)
+
+def _pi_model_block_reason(*args, **kwargs):
+    return _pi_support._pi_model_block_reason(*args, **kwargs)
+
+def _pi_model_available_for_runtime(*args, **kwargs):
+    return _pi_support._pi_model_available_for_runtime(*args, **kwargs)
+
+def _pi_exposed_model_names(*args, **kwargs):
+    return _pi_support._pi_exposed_model_names(*args, **kwargs)
+
+def _pi_model_input_types(*args, **kwargs):
+    return _pi_support._pi_model_input_types(*args, **kwargs)
+
+def _pi_model_capabilities(*args, **kwargs):
+    return _pi_support._pi_model_capabilities(*args, **kwargs)
+
+def _pi_anthropic_base_root(*args, **kwargs):
+    return _pi_support._pi_anthropic_base_root(*args, **kwargs)
+
+def _pi_openai_base_url(*args, **kwargs):
+    return _pi_support._pi_openai_base_url(*args, **kwargs)
+
+def _pi_protocol_variant(*args, **kwargs):
+    return _pi_support._pi_protocol_variant(*args, **kwargs)
+
+def _pi_protocol_variants(*args, **kwargs):
+    return _pi_support._pi_protocol_variants(*args, **kwargs)
+
+def _pi_runtime_model_names(*args, **kwargs):
+    return _pi_support._pi_runtime_model_names(*args, **kwargs)
+
+def _pi_profile_id(*args, **kwargs):
+    return _pi_support._pi_profile_id(*args, **kwargs)
+
+def _pi_pick_protocol(*args, **kwargs):
+    return _pi_support._pi_pick_protocol(*args, **kwargs)
+
+def _pi_provider_compat(*args, **kwargs):
+    return _pi_support._pi_provider_compat(*args, **kwargs)
+
+def _pi_model_compat(*args, **kwargs):
+    return _pi_support._pi_model_compat(*args, **kwargs)
+
+def _pi_model_thinking_level_map(*args, **kwargs):
+    return _pi_support._pi_model_thinking_level_map(*args, **kwargs)
+
+def _pi_effective_selected_model(*args, **kwargs):
+    return _pi_support._pi_effective_selected_model(*args, **kwargs)
+
+def _pi_wire_model_name(*args, **kwargs):
+    return _pi_support._pi_wire_model_name(*args, **kwargs)
+
+def _pi_model_entry(*args, **kwargs):
+    return _pi_support._pi_model_entry(*args, **kwargs)
+
+def _pi_group_provider_ref(*args, **kwargs):
+    return _pi_support._pi_group_provider_ref(*args, **kwargs)
+
+def _pi_build_models_payload(*args, **kwargs):
+    return _pi_support._pi_build_models_payload(*args, **kwargs)
+
+def _pi_gateway_env(*args, **kwargs):
+    return _pi_support._pi_gateway_env(*args, **kwargs)
+
+def _pi_provider_export_env(*args, **kwargs):
+    return _pi_support._pi_provider_export_env(*args, **kwargs)
+
+def launch_pi(*args, **kwargs):
+    return _pi_support.launch_pi(*args, **kwargs)
 
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
@@ -10913,6 +11203,7 @@ LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
     "opencode": launch_opencode,
+    "pi": launch_pi,
     "gemini": launch_gemini,
     "agy": launch_agy,
 }
@@ -10940,9 +11231,17 @@ def _opencode_provider_export_env(runtime, model):
     )
 
 
-def get_export_env(cli, runtime):
+def _runtime_with_export_model(runtime, model_info=None):
+    runtime = dict(runtime) if isinstance(runtime, dict) else {}
+    resolved_model = _resolve_model(model_info or runtime)
+    if resolved_model and not _resolve_model(runtime):
+        runtime["model"] = resolved_model
+    return runtime
+
+
+def get_export_env(cli, runtime, model_info=None):
     """返回指定 CLI 需要的 export 环境变量字典。"""
-    runtime = runtime if isinstance(runtime, dict) else {}
+    runtime = _runtime_with_export_model(runtime, model_info=model_info)
     if _is_opencode_global_profile_runtime(cli, runtime):
         return _opencode_global_export_env(runtime)
 
@@ -10966,28 +11265,40 @@ def get_export_env(cli, runtime):
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     elif cli == "opencode":
-        model = _resolve_model(runtime)
+        model = _resolve_model(model_info or runtime)
         exports.update(_opencode_provider_export_env(runtime, model))
+    elif cli == "pi":
+        model = _resolve_model(model_info or runtime)
+        exports.update(_pi_provider_export_env(runtime, model))
     if cli in {"claude", "codex"}:
         _inject_host_capability_hints(exports)
     toon_script = _mms_toon_script_path()
     context_script = _mms_context_script_path()
+    mms_gain_script = _mms_gain_script_path()
     token_saver_script = _token_saver_script_path()
+    token_gain_script = _token_gain_script_path()
     xmem_script = _xmem_cli_path()
-    if cli in {"claude", "codex", "opencode"}:
+    if cli in {"claude", "codex", "opencode", "pi"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
             exports["MMS_CONTEXT_BIN"] = context_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
+        if mms_gain_script:
+            exports["MMS_GAIN_BIN"] = mms_gain_script
+            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
         if token_saver_script:
             exports["TOKEN_SAVER_BIN"] = token_saver_script
             exports["MMS_TOKEN_SAVER_BIN"] = token_saver_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
+        if token_gain_script:
+            exports["TOKEN_GAIN_BIN"] = token_gain_script
+            exports["MMS_TOKEN_GAIN_BIN"] = token_gain_script
+            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
         if xmem_script:
             exports["XMEM_BIN"] = xmem_script
             exports["MMS_XMEM_BIN"] = xmem_script
-        first_script = toon_script or context_script or token_saver_script or xmem_script
+        first_script = toon_script or context_script or mms_gain_script or token_saver_script or token_gain_script or xmem_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
     return exports

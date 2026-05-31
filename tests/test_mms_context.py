@@ -45,6 +45,30 @@ def test_mms_context_put_search_show_roundtrip(monkeypatch, tmp_path, capsys):
     assert shown["truncated"] is True
 
 
+def test_mms_context_stats_reports_estimated_gain(monkeypatch, tmp_path, capsys):
+    from mms_context import main
+
+    monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("A" * 1000))
+
+    assert main(["put", "--title", "large log", "--kind", "tool-output", "--tag", "pytest", "--json"]) == 0
+    capsys.readouterr()
+
+    assert main(["stats", "--kind", "tool-output", "--tag", "pytest", "--json"]) == 0
+    stats = json.loads(capsys.readouterr().out)
+
+    assert stats["records"] == 1
+    assert stats["stored_chars"] == 1000
+    assert stats["visible_chars"] < stats["stored_chars"]
+    assert stats["saved_chars"] == stats["stored_chars"] - stats["visible_chars"]
+    assert stats["gain_pct"] > 0
+    assert stats["top_records"][0]["title"] == "large log"
+
+    assert main(["gain", "--json"]) == 0
+    gain = json.loads(capsys.readouterr().out)
+    assert gain["saved_chars"] == stats["saved_chars"]
+
+
 def test_mms_context_defaults_to_session_home(monkeypatch, tmp_path):
     import mms_context
 
@@ -54,6 +78,36 @@ def test_mms_context_defaults_to_session_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path / "real-home"))
 
     assert mms_context._store_dir() == session_home / ".mms" / "context-store"
+
+
+def test_mms_context_gain_discovers_recent_session_store_when_cwd_store_empty(monkeypatch, tmp_path, capsys):
+    import mms_context
+
+    home = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    session_store = home / ".config" / "mms" / "codex-gateway" / "s" / "123" / ".mms" / "context-store"
+    for key in ("MMS_CONTEXT_DIR", "MMS_SESSION_HOME", "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(repo_dir)
+
+    mms_context.put_context(
+        "A" * 900,
+        title="session log",
+        kind="tool-output",
+        store_dir=str(session_store),
+        visible_chars=90,
+    )
+
+    assert mms_context.main(["gain", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["scope"] == "auto-discovered"
+    assert payload["store_dir"] == str(session_store)
+    assert payload["records"] == 1
+    assert payload["saved_chars"] == 810
+    assert payload["top_records"][0]["store_dir"] == str(session_store)
 
 
 def test_token_saver_run_prints_short_output(monkeypatch, tmp_path, capsys):
@@ -102,7 +156,36 @@ def test_token_saver_run_stores_long_output(monkeypatch, tmp_path, capsys):
     assert "token-saver: stored command output" in output
     assert "ref: mmsctx://ctx_" in output
     assert "exit_code: 0" in output
+    assert "approx_saved_chars:" in output
+    assert "approx_gain:" in output
     assert (tmp_path / "store" / "index.json").exists()
+
+
+def test_token_saver_stats_aliases_mms_context(monkeypatch, tmp_path, capsys):
+    import token_saver
+
+    monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
+
+    assert token_saver.main(
+        [
+            "run",
+            "--threshold-chars",
+            "20",
+            "--title",
+            "stats alias demo",
+            "--",
+            sys.executable,
+            "-c",
+            "print('x' * 80)",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    assert token_saver.main(["gain", "--json"]) == 0
+    stats = json.loads(capsys.readouterr().out)
+    assert stats["records"] == 1
+    assert stats["stored_chars"] > 0
+    assert stats["saved_chars"] >= 0
 
 
 def test_token_saver_run_preserves_nonzero_exit_code_when_stored(monkeypatch, tmp_path, capsys):
@@ -322,6 +405,48 @@ def test_resolve_token_saver_root_prefers_bundled_vendor(monkeypatch, tmp_path):
     assert Path(mms_launchers._resolve_token_saver_root()) == bundled_root
 
 
+def test_resolve_codegraph_root_prefers_bundled_vendor(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    install_root = tmp_path / "mms-install"
+    bundled_root = install_root / "vendor" / "codegraph"
+    shared_root = home / "auto-skills" / "shared-skills" / "codegraph"
+    bundled_root.mkdir(parents=True)
+    shared_root.mkdir(parents=True)
+    (bundled_root / "SKILL.md").write_text("# bundled codegraph\n", encoding="utf-8")
+    (shared_root / "SKILL.md").write_text("# shared codegraph\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(home))
+    monkeypatch.delenv("MMS_CODEGRAPH_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CODEGRAPH_SKILL_ROOT", raising=False)
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
+
+    assert Path(mms_launchers._resolve_codegraph_root()) == bundled_root
+
+
+def test_overlay_codegraph_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    session_home = tmp_path / "session-home"
+    parent_dir = session_home / ".codex"
+    existing_skills = tmp_path / "existing-skills"
+    codegraph_root = tmp_path / "codegraph"
+    parent_dir.mkdir(parents=True)
+    (existing_skills / "keep-skill").mkdir(parents=True)
+    codegraph_root.mkdir()
+    (codegraph_root / "SKILL.md").write_text("# codegraph\n", encoding="utf-8")
+    os.symlink(existing_skills, parent_dir / "skills")
+
+    monkeypatch.setenv("MMS_CODEGRAPH_ROOT", str(codegraph_root))
+
+    mms_launchers._overlay_codegraph_session_entries(str(parent_dir), str(session_home))
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "codegraph")
+    assert (parent_dir / "skills" / "codegraph" / "SKILL.md").read_text(encoding="utf-8") == "# codegraph\n"
+
+
 def test_overlay_weber_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 
@@ -391,24 +516,39 @@ def test_install_session_command_wrappers_exposes_context_bin(monkeypatch, tmp_p
     token_saver_script = tmp_path / "token-saver"
     token_saver_script.write_text("#!/bin/sh\nprintf 'token-saver\\n'\n", encoding="utf-8")
     token_saver_script.chmod(0o755)
+    mms_gain_script = tmp_path / "mms-gain"
+    mms_gain_script.write_text("#!/bin/sh\nprintf 'mms-gain\\n'\n", encoding="utf-8")
+    mms_gain_script.chmod(0o755)
+    token_gain_script = tmp_path / "token-gain"
+    token_gain_script.write_text("#!/bin/sh\nprintf 'token-gain\\n'\n", encoding="utf-8")
+    token_gain_script.chmod(0o755)
     env = {"HOME": str(session_home), "PATH": "/usr/bin"}
 
     monkeypatch.setenv("HOME", str(session_home))
     monkeypatch.setattr(mms_launchers, "_SESSION_REAL_HOME_WRAPPER_COMMANDS", ())
     monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: "")
     monkeypatch.setattr(mms_launchers, "_mms_context_script_path", lambda: str(context_script))
+    monkeypatch.setattr(mms_launchers, "_mms_gain_script_path", lambda: str(mms_gain_script))
     monkeypatch.setattr(mms_launchers, "_token_saver_script_path", lambda: str(token_saver_script))
+    monkeypatch.setattr(mms_launchers, "_token_gain_script_path", lambda: str(token_gain_script))
 
     mms_launchers._install_session_command_wrappers(str(session_home), env)
 
     wrapper = Path(env["MMS_CONTEXT_BIN"])
     token_saver_wrapper = Path(env["TOKEN_SAVER_BIN"])
+    mms_gain_wrapper = Path(env["MMS_GAIN_BIN"])
+    token_gain_wrapper = Path(env["TOKEN_GAIN_BIN"])
     assert wrapper == session_home / ".mms" / "bin" / "mms-context"
     assert wrapper.exists()
     assert f'exec "{context_script}" "$@"' in wrapper.read_text(encoding="utf-8")
     assert token_saver_wrapper == session_home / ".mms" / "bin" / "token-saver"
     assert env["MMS_TOKEN_SAVER_BIN"] == str(token_saver_wrapper)
     assert f'exec "{token_saver_script}" "$@"' in token_saver_wrapper.read_text(encoding="utf-8")
+    assert mms_gain_wrapper == session_home / ".mms" / "bin" / "mms-gain"
+    assert f'exec "{mms_gain_script}" "$@"' in mms_gain_wrapper.read_text(encoding="utf-8")
+    assert token_gain_wrapper == session_home / ".mms" / "bin" / "token-gain"
+    assert env["MMS_TOKEN_GAIN_BIN"] == str(token_gain_wrapper)
+    assert f'exec "{token_gain_script}" "$@"' in token_gain_wrapper.read_text(encoding="utf-8")
     assert env["MMS_CONTEXT_DIR"] == str(session_home / ".mms" / "context-store")
     assert env["PATH"].startswith(str(wrapper.parent) + os.pathsep)
 
@@ -424,11 +564,19 @@ def test_get_export_env_exposes_context_bin_for_export_only_launch(monkeypatch, 
     token_saver_script = tmp_path / "token-saver"
     token_saver_script.write_text("#!/bin/sh\nprintf 'token-saver\\n'\n", encoding="utf-8")
     token_saver_script.chmod(0o755)
+    mms_gain_script = tmp_path / "mms-gain"
+    mms_gain_script.write_text("#!/bin/sh\nprintf 'mms-gain\\n'\n", encoding="utf-8")
+    mms_gain_script.chmod(0o755)
+    token_gain_script = tmp_path / "token-gain"
+    token_gain_script.write_text("#!/bin/sh\nprintf 'token-gain\\n'\n", encoding="utf-8")
+    token_gain_script.chmod(0o755)
 
     monkeypatch.chdir(repo_dir)
     monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: "")
     monkeypatch.setattr(mms_launchers, "_mms_context_script_path", lambda: str(context_script))
+    monkeypatch.setattr(mms_launchers, "_mms_gain_script_path", lambda: str(mms_gain_script))
     monkeypatch.setattr(mms_launchers, "_token_saver_script_path", lambda: str(token_saver_script))
+    monkeypatch.setattr(mms_launchers, "_token_gain_script_path", lambda: str(token_gain_script))
     monkeypatch.setattr(mms_launchers, "validate_provider_for_cli", lambda *_args, **_kwargs: None)
 
     runtime = {
@@ -444,10 +592,16 @@ def test_get_export_env_exposes_context_bin_for_export_only_launch(monkeypatch, 
 
     assert claude_exports["MMS_CONTEXT_BIN"] == str(context_script)
     assert codex_exports["MMS_CONTEXT_BIN"] == str(context_script)
+    assert claude_exports["MMS_GAIN_BIN"] == str(mms_gain_script)
+    assert codex_exports["MMS_GAIN_BIN"] == str(mms_gain_script)
     assert claude_exports["TOKEN_SAVER_BIN"] == str(token_saver_script)
     assert codex_exports["TOKEN_SAVER_BIN"] == str(token_saver_script)
     assert claude_exports["MMS_TOKEN_SAVER_BIN"] == str(token_saver_script)
     assert codex_exports["MMS_TOKEN_SAVER_BIN"] == str(token_saver_script)
+    assert claude_exports["TOKEN_GAIN_BIN"] == str(token_gain_script)
+    assert codex_exports["TOKEN_GAIN_BIN"] == str(token_gain_script)
+    assert claude_exports["MMS_TOKEN_GAIN_BIN"] == str(token_gain_script)
+    assert codex_exports["MMS_TOKEN_GAIN_BIN"] == str(token_gain_script)
     assert claude_exports["MMS_CONTEXT_DIR"] == str(repo_dir / ".mms" / "context-store")
     assert codex_exports["MMS_CONTEXT_DIR"] == str(repo_dir / ".mms" / "context-store")
     assert claude_exports["PATH"] == f"{context_script.parent}:$PATH"

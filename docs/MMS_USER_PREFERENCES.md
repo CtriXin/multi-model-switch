@@ -38,6 +38,7 @@ config.toml -> override.toml -> preferences.toml allowlist -> confirm screen cha
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
 caveman_mode = "enable"       # enable | disable
+caveman_level = "light"       # light | standard | full
 nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
@@ -50,6 +51,7 @@ agent_pack = "ecc"
 
 [launch.cli.agy]
 caveman_mode = "enable"
+caveman_level = "light"
 
 [session_surfaces.disabled]
 skills = ["agent-browser"]
@@ -64,6 +66,7 @@ managed_root = "~/.local/share/mms/assets"
 web_access = "~/my-skills/web-access"
 weber = "~/my-skills/weber"
 agent_browser = "~/my-skills/agent-browser"
+codegraph = "~/vendor/codegraph"
 token_saver = "~/vendor/token-saver"
 toon = "~/vendor/toon"
 xmem = "~/vendor/xmem"
@@ -82,6 +85,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | `thinking_mode` | `enable` / `disable` | Default Thinking toggle for supported `Claude` / `Codex` routes |
 | `reasoning_effort` | `low` / `medium` / `high` / `xhigh` | Default effort when the selected model profile supports it |
 | `caveman_mode` | `enable` / `disable` | Default session-local Caveman overlay |
+| `caveman_level` | `light` / `standard` / `full` | Default Caveman intensity when enabled |
 | `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `enable`, without startup/prompt hooks |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
@@ -126,7 +130,7 @@ Put symlinks here when possible. Launcher resolves this fixed root before built-
 `[assets.roots]` accepts:
 
 ```text
-web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor
+web_access, weber, agent_browser, codegraph, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor
 ```
 
 Env vars like `MMS_WEB_ACCESS_ROOT`, `MMS_ECC_ROOT`, and `MMS_MANAGED_ASSETS_ROOT` still take priority over `preferences.toml`.

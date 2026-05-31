@@ -1,14 +1,23 @@
 import json
 
+import pytest
+
 import mms_config_web
 import mms_core
+
+
+@pytest.fixture(autouse=True)
+def _isolate_mms_root_env(monkeypatch):
+    # These tests pass explicit config_path values; ambient MMS session env should not reclassify temp roots.
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "MMS_COMMAND_NAME", "MMS_PREVIEW_MODE"):
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     cfg = {
         "providers": [
             {
-                "id": "direct-qwen",
+                "id": "webui-test-direct-qwen",
                 "name": "Qwen Direct",
                 "enabled": True,
                 "api_key": "sk-super-secret-value",
@@ -16,15 +25,43 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
                 "protocols": ["anthropic_messages"],
                 "supported_clis": ["claude", "opencode"],
                 "fallback_models": ["qwen3.6-plus"],
+                "claude_1m_mode": "enable",
+                "proxy": "http://provider-proxy.example",
+                "no_proxy": "provider.internal",
+                "timezone": "Asia/Tokyo",
+                "note": "primary qwen route",
             }
         ],
+        "accounts": [
+            {
+                "id": "claude-main",
+                "name": "Claude Main",
+                "cli": "claude",
+                "home_dir": "/Users/example/.config/mms/accounts/claude-main",
+                "proxy": "http://proxy.example",
+                "no_proxy": "localhost",
+                "timezone": "Asia/Singapore",
+                "note": "human owned claude account",
+            }
+        ],
+        "account": {"defaults": {"claude": "claude-main"}},
         "vision_sidecar": {
             "enabled": True,
-            "provider_id": "direct-qwen",
+            "provider_id": "webui-test-direct-qwen",
             "model": "qwen3.6-plus",
             "api_key": "sk-vision-secret",
         },
         "rescue": {"fallback_model": "deepseek-v4-flash", "hot_fallback_enabled": False},
+        "load_balance": {
+            "default": "daily",
+            "profiles": {
+                "daily": {
+                    "heavy": {"model": "gpt-5.5", "provider_id": "webui-test-direct-qwen"},
+                    "medium": "qwen3.6-plus",
+                    "light": "deepseek-v4-flash",
+                }
+            },
+        },
     }
 
     snapshot = mms_config_web.build_config_snapshot(
@@ -34,16 +71,112 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         command_name="mms",
     )
     encoded = json.dumps(snapshot, ensure_ascii=False)
+    encoded_config_scope = json.dumps(
+        {
+            "providers": snapshot["providers"],
+            "accounts": snapshot["accounts"],
+            "account_defaults": snapshot["account_defaults"],
+            "vision_sidecar": snapshot["vision_sidecar"],
+        },
+        ensure_ascii=False,
+    )
 
     assert snapshot["mode"] == "interactive_audited_save"
     assert snapshot["schema"] == "mms.setup_web.snapshot.v2"
-    assert snapshot["providers"][0]["id"] == "direct-qwen"
+    assert snapshot["providers"][0]["id"] == "webui-test-direct-qwen"
     assert snapshot["providers"][0]["has_api_key"] is True
     assert snapshot["providers"][0]["model_count"] == 1
     assert snapshot["providers"][0]["api_key"] == ""
+    assert snapshot["providers"][0]["claude_1m_mode"] == "enable"
+    assert snapshot["providers"][0]["proxy_configured"] is True
+    assert snapshot["providers"][0]["no_proxy_configured"] is True
+    assert snapshot["providers"][0]["timezone"] == "Asia/Tokyo"
+    assert snapshot["providers"][0]["note"] == "primary qwen route"
+    assert snapshot["providers"][0]["usage"]["launches"] == 0
+    assert snapshot["accounts"][0]["id"] == "claude-main"
+    assert snapshot["accounts"][0]["is_default"] is True
+    assert snapshot["accounts"][0]["home_dir_configured"] is True
+    assert snapshot["accounts"][0]["proxy_configured"] is True
+    assert snapshot["accounts"][0]["no_proxy_configured"] is True
+    assert snapshot["accounts"][0]["note"] == "human owned claude account"
+    assert snapshot["accounts"][0]["is_claude_human_only"] is True
+    assert snapshot["accounts"][0]["webui_write_policy"] == "claude_human_only_locked"
+    assert snapshot["account_defaults"] == {"claude": "claude-main"}
+    assert snapshot["account_write_policy"]["claude"] == "human_only_locked"
+    assert "http://proxy.example" not in encoded_config_scope
+    assert "http://provider-proxy.example" not in encoded_config_scope
+    assert "provider.internal" not in encoded_config_scope
+    assert "localhost" not in encoded_config_scope
+    assert "/Users/example/.config/mms/accounts/claude-main" not in encoded_config_scope
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
+    assert {item["area"] for item in snapshot["webui_capability_coverage"]} >= {"通道", "账号", "设置", "主屏入口"}
+    assert "负载" not in {item["area"] for item in snapshot["webui_capability_coverage"]}
+    assert {item["action_id"] for item in snapshot["settings_actions"]} >= {"refresh-sources", "registry-doctor"}
+    mapping = snapshot["tui_webui_mapping"]
+    assert snapshot["tui_webui_mapping_summary"]["total"] == len(mapping)
+    assert snapshot["tui_webui_mapping_summary"]["counts"] == {
+        "native": 19,
+        "report": 17,
+        "draft_review": 3,
+        "human_gate": 20,
+        "missing": 0,
+    }
+    assert snapshot["tui_webui_mapping_summary"]["counts"]["missing"] == 0
+    assert snapshot["tui_webui_mapping_summary"]["clickable_rows"] == len(mapping)
+    assert snapshot["tui_webui_mapping_summary"]["rows_with_open_target"] == len(mapping)
+    assert "每行都可在 WebUI 点击" in snapshot["tui_webui_mapping_summary"]["user_check_policy"]
+    assert all(item["clickable"] == "yes" for item in mapping)
+    assert all(item["click_targets"] for item in mapping)
+    assert all(item["acceptance_check"] for item in mapping)
+    assert {item["tui_action_id"] for item in mapping} >= {
+        "provider_mgmt",
+        "account_mgmt",
+        "registry",
+        "guard",
+        "rescue",
+        "language",
+        "routes_export",
+        "about",
+    }
+    assert {item["id"] for item in mapping} >= {
+        "connect.add_gateway",
+        "connect.add_official",
+        "channel.provider_browse",
+        "channel.family_autosort",
+        "provider.credentials",
+        "provider.model_patch_reset",
+        "provider.advanced_metadata",
+        "provider.network_policy",
+        "account.login",
+        "account.rename",
+        "account.edit_metadata",
+        "account.network_policy",
+        "registry.publish_approved",
+        "guard.accept",
+    }
+    assert next(item for item in mapping if item["id"] == "guard.accept")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "provider.remove")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "settings.language")["status"] == "native"
+    official_row = next(item for item in mapping if item["id"] == "connect.add_official")
+    assert official_row["status"] == "report"
+    assert official_row["write_policy"] == "deprecated_read_only_compat"
+    assert next(item for item in mapping if item["id"] == "provider.model_patch_reset")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "provider.advanced_metadata")["status"] == "native"
+    assert next(item for item in mapping if item["id"] == "provider.network_policy")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "account.rename")["status"] == "human_gate"
+    assert next(item for item in mapping if item["id"] == "account.edit_metadata")["status"] == "draft_review"
+    assert next(item for item in mapping if item["id"] == "account.network_policy")["status"] == "human_gate"
+    verify_approved = next(item for item in mapping if item["id"] == "registry.verify_approved")
+    assert verify_approved["status"] == "report"
+    assert verify_approved["api_action"] == "verify_approved"
+    assert verify_approved["write_policy"] == "read_only_report"
+    assert not any(str(item["id"]).startswith("load_balance.") for item in mapping)
+    assert snapshot["ui"]["language"] == "zh"
+    assert "Qwen" in snapshot["model_families"]
+    assert snapshot["load_balance"]["default_profile"] == "daily"
+    assert snapshot["load_balance"]["profiles"][0]["slots"]["heavy"]["provider_id"] == "webui-test-direct-qwen"
     assert "vision_sidecar" in snapshot["snippets"]
     assert [step["id"] for step in snapshot["setup_flow"]] == [
         "channel",
@@ -58,6 +191,295 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["save_contract"]["requires_confirm_save"] is True
     assert snapshot["session_assets"]["schema"] == "mms.session_assets.snapshot.v1"
     assert "preference_snippet" in snapshot["session_assets"]
+
+
+def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
+    cfg = {
+        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["gpt-5.5"]}],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "proxy": "http://proxy.example"}],
+        "account": {"defaults": {"codex": "codex-main"}},
+        "load_balance": {
+            "default": "fast",
+            "profiles": {
+                "fast": {
+                    "heavy": {"model": "gpt-5.5", "provider_id": "demo"},
+                    "light": "qwen3.6-flash",
+                }
+            },
+        },
+    }
+    report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "coverage"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    accounts = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "accounts"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    registry = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "registry_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    mapping = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "tui_mapping"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    guard = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "guard_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    guard_accept = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "guard_accept_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    language = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "language_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    channel_status = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_channel_status"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    official_gate = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "connect_official_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    autosort_gate = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "family_autosort_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    encoded = json.dumps(accounts, ensure_ascii=False)
+
+    assert report["ok"] is True
+    assert report["write_policy"] == "read_only"
+    assert any(item["webui"] == "draft_review_human_gate" for item in report["coverage"])
+    assert accounts["write_policy"] == "draft_review_human_gate"
+    assert accounts["accounts"][0]["id"] == "codex-main"
+    assert accounts["accounts"][0]["is_default"] is True
+    assert accounts["account_defaults"] == {"codex": "codex-main"}
+    assert accounts["account_write_policy"]["blocked_fields"]
+    assert "http://proxy.example" not in encoded
+    assert registry["ok"] is True
+    assert registry["write_policy"] == "read_only"
+    assert "can initialize SQLite" in registry["note"]
+    assert mapping["ok"] is True
+    assert mapping["summary"]["counts"]["human_gate"] > 0
+    assert mapping["summary"]["counts"]["missing"] == 0
+    assert mapping["summary"]["clickable_rows"] == mapping["summary"]["total"]
+    assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
+    assert guard["write_policy"] == "read_only_report"
+    assert guard["status"] == "report"
+    assert "mmf guard status" in guard["commands"]
+    assert guard["report"]["providers"] >= 1
+    assert "accept baseline" in guard["note"]
+    assert guard_accept["status"] == "human_gate"
+    assert guard_accept["requires_human_confirmation"] is True
+    assert "mmf guard accept" in guard_accept["commands"]
+    assert language["status"] == "native"
+    assert channel_status["status"] == "native"
+    assert channel_status["provider_default"] == "demo"
+    assert official_gate["status"] == "deprecated"
+    assert official_gate["write_policy"] == "deprecated_read_only_compat"
+    assert official_gate["blocked_auto_execute"] is True
+    assert official_gate["commands"] == []
+    assert "OAuth / AGY 官方登录入口" in " ".join(official_gate["manual_steps"])
+    assert autosort_gate["write_policy"] == "speed_stats_write_human_gate"
+    assert "WebUI 已提供手工 family priority 草稿" in autosort_gate["safe_alternative"]
+    assert any(item["id"] == "provider.network_policy" for item in mapping["mapping"])
+    assert any(item["id"] == "account.rename" for item in mapping["mapping"])
+    assert any(item["id"] == "account.network_policy" for item in mapping["mapping"])
+    assert not (tmp_path / "mms-next" / "registry").exists()
+
+
+def test_config_web_human_gate_reports_are_actionable(tmp_path):
+    cfg = {
+        "providers": [{"id": "demo", "name": "Demo", "fallback_models": ["gpt-5.5"]}],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex"}],
+    }
+    mapping = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "tui_mapping"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )["mapping"]
+    gate_actions = sorted({row["api_action"] for row in mapping if row["status"] == "human_gate" and row.get("api_action")})
+
+    assert gate_actions
+    assert "about_upgrade_gate" in gate_actions
+    assert "refresh_due_sources_gate" in gate_actions
+    assert "provider_network_gate" in gate_actions
+    assert "account_rename_gate" in gate_actions
+    assert "account_network_gate" in gate_actions
+    assert "verify_approved_gate" not in gate_actions
+    for action in gate_actions:
+        report = mms_config_web.build_settings_report(
+            cfg,
+            {"action": action},
+            config_path=str(tmp_path / "mms-next" / "config.toml"),
+            command_name="mmf",
+        )
+        assert report["ok"] is True
+        assert report["status"] == "human_gate"
+        assert report["blocked_auto_execute"] is True
+        assert report["requires_human_confirmation"] is True
+        assert report["manual_steps"], action
+        assert report["commands"], action
+        assert "risk_level" in report
+
+    scheduled = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "scheduled_refresh_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    publish = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "publish_approved_gate"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert "mmf registry scheduled-refresh --dry-run --no-network" in scheduled["commands"]
+    assert "mmf registry publish-approved" in publish["commands"]
+    assert any("model-registry.latest-approved.json" in item for item in publish["writes"])
+
+
+def test_config_web_usage_reports_include_tui_detail_rows(monkeypatch, tmp_path):
+    def fake_usage_rows(runtime_kind, runtime_id):
+        return [
+            {
+                "cli": "codex",
+                "runtime_kind": runtime_kind,
+                "id": runtime_id,
+                "name": f"{runtime_kind}:{runtime_id}",
+                "launches": 7,
+                "last_model": "qwen3.6-plus",
+                "last_used_at": "2026-05-30T10:00:00+08:00",
+                "models": {"qwen3.6-plus": 5, "gpt-5.5": 2},
+            }
+        ]
+
+    monkeypatch.setattr(mms_core, "_usage_rows_for_runtime", fake_usage_rows)
+    cfg = {
+        "providers": [
+            {"id": "demo", "name": "Demo", "fallback_models": ["qwen3.6-plus", "gpt-5.5", "unused-model"]},
+            {"id": "other", "name": "Other", "fallback_models": ["other-model"]},
+        ],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex"}],
+        "account": {"defaults": {"codex": "codex-main"}},
+    }
+
+    provider_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_usage_summary"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    account_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "accounts"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+    scoped_provider_report = mms_config_web.build_settings_report(
+        cfg,
+        {"action": "provider_usage_summary", "provider_id": "demo"},
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    provider_rows = provider_report["providers"][0]["usage_rows"]
+    account_rows = account_report["accounts"][0]["usage_rows"]
+    assert provider_rows[0]["runtime_kind"] == "provider"
+    assert provider_rows[0]["launches"] == 7
+    assert provider_rows[0]["top_models"][0] == {"model": "qwen3.6-plus", "launches": 5}
+    assert provider_rows[0]["model_usage"] == [
+        {"model": "qwen3.6-plus", "launches": 5},
+        {"model": "gpt-5.5", "launches": 2},
+    ]
+    assert len(provider_report["providers"]) == 2
+    assert scoped_provider_report["scope"] == "provider"
+    assert [item["id"] for item in scoped_provider_report["providers"]] == ["demo"]
+    assert [item["id"] for item in scoped_provider_report["providers"][0]["models"]] == [
+        "gpt-5.5",
+        "qwen3.6-plus",
+        "unused-model",
+    ]
+    assert account_rows[0]["runtime_kind"] == "account"
+    assert account_rows[0]["id"] == "codex-main"
+
+
+def test_config_web_verify_approved_report_is_read_only(monkeypatch, tmp_path):
+    import mms_registry_cli
+
+    calls = {}
+
+    def fake_verify_approved_bundle(**kwargs):
+        calls.update(kwargs)
+        return {"verified": True, "manifest_path": "generated/model-registry.latest-approved.json"}
+
+    monkeypatch.setattr(mms_registry_cli, "verify_approved_bundle", fake_verify_approved_bundle)
+
+    config_root = tmp_path / "mms-next"
+    report = mms_config_web.build_settings_report(
+        {},
+        {"action": "verify_approved"},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert report["ok"] is True
+    assert report["status"] == "report"
+    assert report["write_policy"] == "read_only_report"
+    assert report["report"]["verified"] is True
+    assert calls["config_dir"] == str(config_root)
+    assert "不会 publish" in report["note"]
+    assert not config_root.exists()
+
+
+def test_config_web_json_response_redacts_account_protected_paths():
+    _status, body, _content_type = mms_config_web._json_response(
+        {
+            "config": {
+                "accounts": [
+                    {
+                        "id": "codex-main",
+                        "home_dir": "/Users/example/.config/mms/accounts/codex-main",
+                        "proxy": "http://proxy.example",
+                        "no_proxy": "localhost",
+                    }
+                ]
+            }
+        }
+    )
+    encoded = body.decode("utf-8")
+
+    assert "/Users/example/.config/mms/accounts/codex-main" not in encoded
+    assert "http://proxy.example" not in encoded
+    assert "localhost" not in encoded
+    assert '"home_dir": true' in encoded
+    assert '"proxy": true' in encoded
+    assert '"no_proxy": true' in encoded
 
 
 def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
@@ -326,26 +748,26 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function renderSourceStatus()" in html
     assert "status.headline" in html
     assert "consumer_bundle_status" in html
-    assert "Consumer Bundle" in html
-    assert "Promotion Plan / Human Gate" in html
+    assert "消费端 Bundle" in html
+    assert "晋级计划 / 人工确认" in html
     assert "config_v2_promotion_plan" in html
-    assert "4.0 Release Readiness" in html
+    assert "4.0 发布就绪度" in html
     assert "config_v2_release_readiness" in html
     assert "release_complete 仍为 false" in html
-    assert "stable promotion human gate" in html
-    assert "blocked requirements" in html
+    assert "stable promotion 人工确认" in html
+    assert "阻塞检查项" in html
     assert "stable backup + bundle comparison" in html
-    assert "apply 仍停在 human gate" in html
+    assert "apply 仍停在 人工确认" in html
     assert "不读 SQLite" in html
     assert "mmf config bundle --json" in html
-    assert "candidate routes" in html
-    assert "missing keys" in html
+    assert "候选 route" in html
+    assert "缺 API Key" in html
     assert "registry_v2_save_plan" in html
     assert "applyV2Preview" in html
     assert "downloadPlanJson" in html
     assert "copyApplyCommand" in html
     assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
-    assert "Advanced / Recovery：plan JSON 与 CLI fallback" in html
+    assert "高级 / 恢复：plan JSON 与 CLI fallback" in html
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
@@ -424,6 +846,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
     assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
+    assert "已下线的负载均衡不在本轮 WebUI 迭代范围" in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
     assert "stable 写 credentials.sh；preview 写 secret backend" in html
     assert "这里会写入 config.toml 的 [rescue]" not in html
@@ -432,15 +855,120 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
+    assert "['settings','设置','配置台 / 账号 / 安全']" in html
+    assert 'data-section="settings"' in html
+    assert "<h2>设置</h2>" in html
+    assert "这里是 WebUI 配置台" in html
+    assert "把设置从 TUI 迁到可保存的 WebUI 表单" in html
+    assert "data-settings-tab" in html
+    assert "function switchSettingsTab" in html
+    assert "Snapshot Guard" in html
+    assert "accountModuleActions" in html
+    assert "accountActionButtons" in html
+    assert "account-config-grid" in html
+    assert "sourceReport" in html
+    assert "channelReport" in html
+    assert "data-provider-form-tab" in html
+    assert "function switchProviderFormTab" in html
+    assert "基础信息" in html
+    assert "连接与协议" in html
+    assert "策略与高级" in html
+    assert "报告与确认" in html
+    assert "Family 权重覆盖（不常用）" in html
+    assert "默认继承 priority" in html
+    assert "provider-advanced" in html
+    assert "保存审计入口" in html
+    assert "自动排序用途说明" not in html
+    assert "官方账号登录说明（OAuth）" not in html
+    assert "OAuth 主流程已下线" in html
+    assert "查看已下线兼容说明" in html
+    assert "OAuth 确认" not in html
+    assert "自动排序确认" not in html
+    assert "modelInventorySummary" in html
+    assert "modelConfigResult" in html
+    assert "testListBtn" in html
+    assert "fallbackReport" in html
+    assert "settingsCommand" not in html
+    assert "MMX / WEBUI TAKEOVER MAP" not in html
+    assert "Settings moved out of TUI" not in html
+    assert "accountTable" in html
+    assert "function syncAccounts()" in html
+    assert "data-account-default" in html
+    assert "Claude 人工锁定" in html
+    assert "account_defaults:state.account_defaults" in html
+    assert "uiLanguage" in html
+    assert "saveUiLanguage" in html
+    assert "settingsGapSummary" in html
+    assert "ui:state.ui" in html
+    assert "settingsCoverage" in html
+    assert "主屏 O/P/L/S 入口覆盖" not in html
+    assert "entryAudit" not in html
+    assert "function renderEntryAudit" not in html
+    assert "Load Balance profiles" not in html
+    assert "loadBalanceTable" not in html
+    assert "function renderLoadBalance" not in html
+    assert "lbUpsert" not in html
+    assert "load_balance_status" not in html
+    assert "family_priority_overrides" in html
+    assert "function familyPriorityInputs" in html
+    assert "providerFamilyPriority" in html
+    assert "pClaude1m" in html
+    assert "pTimezone" in html
+    assert "pNote" in html
+    assert "网络策略" in html
+    assert "data-account-family" in html
+    assert "data-account-claude-1m" in html
+    assert "data-account-timezone" in html
+    assert "data-account-note" in html
+    assert "TUI ↔ WebUI 对照表" in html
+    assert "tuiMappingTable" in html
+    assert "mappingFilters" in html
+    assert "acceptancePanel" in html
+    assert "逐项验收清单" in html
+    assert "mapCheckProgress" in html
+    assert "data-map-check" in html
+    assert "function renderAcceptancePanel" in html
+    assert "function copyAcceptanceReport" in html
+    assert "function acceptanceReportText" in html
+    assert "点击证据" in html
+    assert "function renderTuiMapping" in html
+    assert "data-map-filter" in html
+    assert "data-section-jump" in html
+    assert "pDeleteConfirm" in html
+    assert "deleteProvider" in html
+    assert "function deleteCurrentProviderDraft()" in html
+    assert "maintenanceActions" not in html
+    assert "/api/settings/report" in html
+    assert "人工确认" in html
+    assert "报告 / 人工确认" in html
+    assert "function renderGateReport" in html
+    assert "function renderProviderUsageReport" in html
+    assert "function providerModelUsageRows" in html
+    assert "当前通道使用统计" in html
+    assert "查看当前通道使用统计" in html
+    assert "payload.provider_id=current().id" in html
+    assert "不会把其他通道混进来" in html
+    assert "暂无通道使用统计" in html
+    assert "usage-model-table" in html
+    assert "usage-detail" in html
+    assert "CLI 明细（按需展开）" in html
+    assert "模型</th><th>来源</th><th>显示状态</th><th>启动次数" in html
+    assert "function copyGateCommand" in html
+    assert "data-copy-gate-command" in html
+    assert "blocked_auto_execute" in html
+    assert "requires_human_confirmation" in html
+    assert "可复制命令" in html
+    assert "人工步骤" in html
+    assert "function renderSettings()" in html
     assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
-    assert "pending key" in html
+    assert "待保存 Key" in html
     assert "已输入新 key，保存前会保留（不回显）" in html
     assert "keyEl.dataset.touched='1'" in html
     assert "p.pending_api_key=true" in html
     assert "p.update_credentials=!!(updateEl&&updateEl.checked)" in html
     assert "p.api_key=$('pKey').value" not in html
     assert "data.ok&&Array.isArray(data.models)" in html
-    assert "模型拉取失败，请看测试结果" in html
+    assert "模型拉取失败，请看模型配置结果" in html
     assert "card provider-editor" in html
     assert ".provider-editor {" in html
     assert "position: sticky;" in html
@@ -449,10 +977,14 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
     assert "这是当前通道的模型清单，不是全局模型池" in html
     assert "手动补充当前通道模型（extra_models" in html
     assert "添加到补充模型库" in html
+    assert "restoreModelPatch" in html
+    assert "恢复默认模型补丁" in html
+    assert "已恢复默认模型补丁" in html
     assert "当前通道补充模型库（extra_models）" in html
     assert "不是待删除列表，也不是全局模型池" in html
     assert "编辑补充模型库" in html
@@ -466,6 +998,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
+
+
+def test_config_web_allows_pi_in_supported_clis():
+    assert "pi" in mms_config_web._ALLOWED_CLIS
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
@@ -506,18 +1042,18 @@ def test_config_web_plan_does_not_materialize_empty_fallback_models(tmp_path):
 def test_config_web_opencode_agent_overrides_are_advanced_ui():
     html = mms_config_web._HTML_PAGE
 
-    assert "OpenCode default profile" in html
-    assert "OpenCode Agent Roster" in html
-    assert "Order 是 priority/fallback order, not round-robin" in html
-    assert "Agent overrides" in html
-    assert "Enabled agents" in html
+    assert "OpenCode 默认 profile" in html
+    assert "OpenCode Agent 名单" in html
+    assert "顺序表示 priority/fallback 顺序，不是 round-robin" in html
+    assert "Agent 覆盖" in html
+    assert "已启用 Agent" in html
     assert 'id="opencodeOverrideSummary"' in html
     assert 'id="opencodeAdvanced"' in html
     assert "<details" in html
-    assert "Advanced: OpenCode per-agent roster" in html
+    assert "高级：OpenCode 逐 Agent 名单" in html
     assert "只看改动项" in html
-    assert "+ Add Vision Agent" in html
-    assert "+ Add Executor Agent" in html
+    assert "+ 添加 Vision Agent" in html
+    assert "+ 添加执行 Agent" in html
     assert "全部自动" in html
     assert "['execute','执行/协调']" in html
     assert "enabledOnly=false" in html
@@ -594,6 +1130,175 @@ def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path)
     assert plan["summary"]["will_write_policy"] is False
     assert plan["review_summary"]["risks"] == []
     assert plan["review_summary"]["items"][0]["kind"] == "no_change"
+
+
+def test_config_web_plan_account_default_draft_reviews_safe_non_claude_changes(tmp_path):
+    cfg = {
+        "accounts": [
+            {"id": "claude-main", "name": "Claude Main", "cli": "claude", "priority": 100},
+            {"id": "codex-a", "name": "Codex A", "cli": "codex", "priority": 50},
+            {"id": "codex-b", "name": "Codex B", "cli": "codex", "priority": 40},
+        ],
+        "account": {"defaults": {"claude": "claude-main", "codex": "codex-a"}},
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+    codex_b = next(account for account in draft["accounts"] if account["id"] == "codex-b")
+    codex_b["name"] = "Codex B Edited"
+    codex_b["enabled"] = False
+    codex_b["priority"] = 120
+    codex_b["family_priority_overrides"] = {"GPT": 125}
+    codex_b["claude_1m_mode"] = "disable"
+    codex_b["timezone"] = "Asia/Tokyo"
+    codex_b["note"] = "non-claude metadata ok"
+    draft["account_defaults"]["codex"] = "codex-b"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    assert plan["config"]["account"]["defaults"] == {"claude": "claude-main", "codex": "codex-b"}
+    after_codex_b = next(account for account in plan["config"]["accounts"] if account["id"] == "codex-b")
+    assert after_codex_b["name"] == "Codex B Edited"
+    assert after_codex_b["enabled"] is False
+    assert after_codex_b["priority"] == 120
+    assert after_codex_b["family_priority_overrides"] == {"GPT": 125}
+    assert after_codex_b["claude_1m_mode"] == "disable"
+    assert after_codex_b["timezone"] == "Asia/Tokyo"
+    assert after_codex_b["note"] == "non-claude metadata ok"
+    assert any(item["kind"] == "account_default" and item["meta"]["cli"] == "codex" for item in review["items"])
+    assert any(item["kind"] == "account_metadata" and item["meta"]["account_id"] == "codex-b" for item in review["items"])
+    assert any(risk["id"] == "account_default_changed" for risk in review["risks"])
+    assert review["counts"]["account_changes"] == 2
+
+
+def test_config_web_plan_family_priority_drafts_are_reviewed(tmp_path):
+    cfg = {
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "models_endpoint": "/models",
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "accounts": [{"id": "codex-main", "name": "Codex Main", "cli": "codex", "priority": 100}],
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "accounts", "account_defaults")}
+    draft["providers"][0]["family_priority_overrides"] = {"GPT": 145, "Qwen": 90}
+    draft["accounts"][0]["family_priority_overrides"] = {"GPT": 130}
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    provider = plan["config"]["providers"][0]
+    assert provider["family_priority_overrides"] == {"GPT": 145, "Qwen": 90}
+    assert plan["config"]["accounts"][0]["family_priority_overrides"] == {"GPT": 130}
+    assert any(item["kind"] == "provider_family_priority" for item in review["items"])
+    assert any(item["kind"] == "account_metadata" for item in review["items"])
+    assert "family_priority_overrides" in plan["diffs"]["config_toml"]
+    assert "[load_balance]" not in plan["diffs"]["config_toml"]
+
+
+def test_config_web_plan_ui_language_draft_is_reviewed(tmp_path):
+    cfg = {"ui": {"language": "zh"}}
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        {"draft": {"ui": {"language": "en"}}},
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert plan["ok"] is True
+    assert plan["config"]["ui"]["language"] == "en"
+    assert any(item["kind"] == "ui_language" for item in plan["review_summary"]["items"])
+    assert 'language = "en"' in plan["diffs"]["config_toml"]
+
+
+def test_config_web_plan_provider_delete_draft_is_reviewed(tmp_path):
+    cfg = {
+        "provider": {"default": "first"},
+        "providers": [
+            {"id": "first", "name": "First", "models_endpoint": "/models"},
+            {"id": "second", "name": "Second", "models_endpoint": "/models"},
+        ],
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "provider_default")}
+    draft["providers"] = [provider for provider in draft["providers"] if provider["id"] == "second"]
+    draft["provider_default"] = "second"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert plan["ok"] is True
+    assert [provider["id"] for provider in plan["config"]["providers"]] == ["second"]
+    assert plan["config"]["provider"]["default"] == "second"
+    assert any(item["kind"] == "provider_removed" and item["provider_id"] == "first" for item in review["items"])
+    assert any(risk["id"] == "provider_removed" and risk["provider_id"] == "first" for risk in review["risks"])
+
+
+def test_config_web_plan_account_snapshot_noops_without_materializing_defaults(tmp_path):
+    cfg, _ = mms_core._ensure_provider_config({
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "manual",
+            }
+        ],
+    })
+    cfg.update({
+        "accounts": [
+            {"id": "codex-a", "name": "Codex A", "cli": "codex"},
+        ],
+        "account": {"defaults": {"codex": "codex-a"}},
+    })
+    cfg["providers"][0].pop("fallback_models", None)
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+
+    assert plan["ok"] is True
+    assert plan["summary"]["will_write_config"] is False
+    assert "priority" not in plan["config"]["accounts"][0]
+    assert "enabled" not in plan["config"]["accounts"][0]
+    assert plan["review_summary"]["items"][0]["kind"] == "no_change"
+
+
+def test_config_web_plan_blocks_claude_account_default_and_metadata_changes(tmp_path):
+    cfg = {
+        "accounts": [
+            {"id": "claude-main", "name": "Claude Main", "cli": "claude", "priority": 100},
+            {"id": "claude-alt", "name": "Claude Alt", "cli": "claude", "priority": 90},
+        ],
+        "account": {"defaults": {"claude": "claude-main"}},
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("accounts", "account_defaults")}
+    draft["accounts"][0]["name"] = "Claude Edited"
+    draft["account_defaults"]["claude"] = "claude-alt"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+
+    assert plan["ok"] is False
+    assert any("Claude account" in error or "Claude 默认账号" in error for error in plan["errors"])
+    assert plan["config"]["account"]["defaults"] == {"claude": "claude-main"}
+    assert next(account for account in plan["config"]["accounts"] if account["id"] == "claude-main")["name"] == "Claude Main"
 
 
 def test_config_web_review_summary_ignores_unchanged_http_config(tmp_path):

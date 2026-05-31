@@ -327,6 +327,51 @@ def test_glm_capabilities_are_profile_driven(monkeypatch, tmp_path):
     assert payload["thinking"] == {"type": "disabled"}
 
 
+def test_empty_generated_provider_profile_does_not_shadow_gpt_capabilities(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "openai": {
+                    "match": {"model_prefixes": ["gpt-"]},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "effort": {
+                        "responses": {
+                            "path": "reasoning.effort",
+                            "default": "medium",
+                            "allowed": ["low", "medium", "high", "xhigh"],
+                        }
+                    },
+                },
+                "uscrsopenai": {
+                    "name": "uscrsopenai",
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude", "codex", "opencode"],
+                },
+            }
+        },
+    )
+
+    profile_id, _profile = profiles.resolve_provider_profile(
+        provider_id="uscrsopenai",
+        base_url="http://relay.example/openai",
+        model_name="gpt-5.5",
+    )
+    caps = profiles.profile_thinking_capabilities(
+        "gpt-5.5",
+        provider_id="uscrsopenai",
+        base_url="http://relay.example/openai",
+    )
+
+    assert profile_id == "openai"
+    assert caps["profile"] == "openai"
+    assert caps["thinking_supported"] is True
+    assert caps["effort_supported"] is True
+
+
 def test_gemini_profile_keeps_3_level_and_25_numeric_budget(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 

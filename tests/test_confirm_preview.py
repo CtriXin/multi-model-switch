@@ -178,6 +178,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     )
     monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: "/tmp/web-access")
     monkeypatch.setattr(mms_launchers, "_resolve_agent_browser_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_codegraph_root", lambda: "/tmp/codegraph")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "/tmp/toon")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "/tmp/token-saver")
     monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: str(xmem_root))
@@ -204,7 +205,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     ecc_hook_titles = {item["title"] for item in preview["hooks"]["ecc"]}
 
     assert "brainkeeper" in mcp_titles
-    assert skill_titles >= {"web-access", "toon", "token-saver", "xmem", "auto-github-contributor"}
+    assert skill_titles >= {"web-access", "codegraph", "toon", "token-saver", "xmem", "auto-github-contributor"}
     assert caveman_skill_titles >= {"caveman", "caveman-review"}
     assert len(preview["skills"]["ecc"]) == 1
     assert next(iter(ecc_skill_titles)).startswith("ECC")
@@ -270,6 +271,7 @@ def test_build_confirm_preview_catalog_collects_omc_bundle(monkeypatch, tmp_path
     monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_agent_browser_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_codegraph_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
@@ -297,6 +299,7 @@ def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp
     _write_skill(caveman_root, "caveman")
     web_access = _write_skill(tmp_path / "web-access-root", "web-access")
     weber = _write_skill(tmp_path / "weber-root", "weber")
+    codegraph = _write_skill(tmp_path / "codegraph-root", "codegraph")
     toon = _write_skill(tmp_path / "toon-root", "toon")
     token_saver = _write_skill(tmp_path / "token-root", "token-saver")
     xmem = _write_skill(tmp_path / "xmem-root", "xmem")
@@ -305,6 +308,7 @@ def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp
     monkeypatch.setattr(mms_launchers, "_opencode_xmem_plugin_path", lambda _runtime=None: "/tmp/opencode-xmem.ts")
     monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: str(web_access))
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: str(weber))
+    monkeypatch.setattr(mms_launchers, "_resolve_codegraph_root", lambda: str(codegraph))
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: str(toon))
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: str(token_saver))
     monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: str(xmem))
@@ -320,6 +324,7 @@ def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp
     assert {item["title"] for item in preview["skills"]["always"]} >= {
         "web-access",
         "weber",
+        "codegraph",
         "toon",
         "token-saver",
         "xmem",
