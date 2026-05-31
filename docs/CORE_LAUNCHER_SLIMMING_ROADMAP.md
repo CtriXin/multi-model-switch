@@ -202,8 +202,8 @@ Create a new branch from updated `main`.
 
 Suggested modules:
 
-- `mms_claude_env.py`: gateway/session env construction, Claude settings, hook materialization helpers.
-- `mms_claude_launch.py`: launch flow orchestration and guarded wrapper around existing launcher entrypoint.
+- `mms_claude/env.py`: gateway/session env construction, Claude settings, hook materialization helpers.
+- `mms_claude/launch.py`: launch flow orchestration and guarded wrapper around existing launcher entrypoint.
 
 Rules:
 

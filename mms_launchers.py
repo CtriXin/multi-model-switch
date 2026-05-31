@@ -355,14 +355,14 @@ def _lookup_context_window(model_name, provider_id=None):
 
 def _runtime_supports_claude_1m(runtime):
     """Compatibility wrapper for Claude 1M support policy."""
-    from mms_claude_model import runtime_supports_claude_1m
+    from mms_claude.model import runtime_supports_claude_1m
 
     return runtime_supports_claude_1m(runtime)
 
 
 def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
     """Compatibility wrapper for Claude-routed context window resolution."""
-    from mms_claude_model import effective_context_window
+    from mms_claude.model import effective_context_window
 
     return effective_context_window(
         *models,
@@ -1417,119 +1417,119 @@ def _remember_anthropic_url(provider_id, configured_url, resolved_url):
 
 def _load_real_claude_settings():
     """Compatibility wrapper for reading real Claude settings."""
-    from mms_claude_settings import load_real_claude_settings
+    from mms_claude.settings import load_real_claude_settings
 
     return load_real_claude_settings()
 
 
 def _load_claude_settings_from_dir(claude_dir):
     """Compatibility wrapper for reading Claude settings from a directory."""
-    from mms_claude_settings import load_claude_settings_from_dir
+    from mms_claude.settings import load_claude_settings_from_dir
 
     return load_claude_settings_from_dir(claude_dir)
 
 
 def _load_claude_settings_template(filename):
     """Compatibility wrapper for Claude settings template loading."""
-    from mms_claude_settings import load_claude_settings_template
+    from mms_claude.settings import load_claude_settings_template
 
     return load_claude_settings_template(filename)
 
 
 def _load_mms_claude_settings_template():
     """Compatibility wrapper for the MMS Claude session settings template."""
-    from mms_claude_settings import load_mms_claude_settings_template
+    from mms_claude.settings import load_mms_claude_settings_template
 
     return load_mms_claude_settings_template()
 
 
 def _load_global_claude_settings_template():
     """Compatibility wrapper for the global Claude managed settings template."""
-    from mms_claude_settings import load_global_claude_settings_template
+    from mms_claude.settings import load_global_claude_settings_template
 
     return load_global_claude_settings_template()
 
 
 def _global_claude_snapshot_path():
     """Compatibility wrapper for global Claude managed snapshot path."""
-    from mms_claude_settings import global_claude_snapshot_path
+    from mms_claude.settings import global_claude_snapshot_path
 
     return global_claude_snapshot_path()
 
 
 def _normalize_hook_command(command):
     """Compatibility wrapper for hook command normalization."""
-    from mms_claude_settings import normalize_hook_command
+    from mms_claude.settings import normalize_hook_command
 
     return normalize_hook_command(command)
 
 
 def _extract_managed_claude_snapshot(settings_data, template_settings):
     """Compatibility wrapper for Claude managed settings snapshot extraction."""
-    from mms_claude_settings import extract_managed_claude_snapshot
+    from mms_claude.settings import extract_managed_claude_snapshot
 
     return extract_managed_claude_snapshot(settings_data, template_settings)
 
 
 def _snapshot_to_template(snapshot_data, seed_template):
     """Compatibility wrapper for snapshot-to-template conversion."""
-    from mms_claude_settings import snapshot_to_template
+    from mms_claude.settings import snapshot_to_template
 
     return snapshot_to_template(snapshot_data, seed_template)
 
 
 def _merge_snapshot_with_current(snapshot_data, current_settings):
     """Compatibility wrapper for managed snapshot/current merge."""
-    from mms_claude_settings import merge_snapshot_with_current
+    from mms_claude.settings import merge_snapshot_with_current
 
     return merge_snapshot_with_current(snapshot_data, current_settings)
 
 
 def _prune_session_only_snapshot_entries(snapshot_data):
     """Compatibility wrapper for pruning session-only snapshot entries."""
-    from mms_claude_settings import prune_session_only_snapshot_entries
+    from mms_claude.settings import prune_session_only_snapshot_entries
 
     return prune_session_only_snapshot_entries(snapshot_data)
 
 
 def _sanitize_global_snapshot(snapshot_data):
     """Compatibility wrapper for global Claude snapshot sanitization."""
-    from mms_claude_settings import sanitize_global_snapshot
+    from mms_claude.settings import sanitize_global_snapshot
 
     return sanitize_global_snapshot(snapshot_data)
 
 
 def _managed_snapshot_differs(previous_snapshot, current_settings, seed_template):
     """Compatibility wrapper for managed Claude snapshot diffing."""
-    from mms_claude_settings import managed_snapshot_differs
+    from mms_claude.settings import managed_snapshot_differs
 
     return managed_snapshot_differs(previous_snapshot, current_settings, seed_template)
 
 
 def _managed_snapshot_template(previous_snapshot, seed_template, current_settings):
     """Compatibility wrapper for managed Claude snapshot template building."""
-    from mms_claude_settings import managed_snapshot_template
+    from mms_claude.settings import managed_snapshot_template
 
     return managed_snapshot_template(previous_snapshot, seed_template, current_settings)
 
 
 def _load_global_claude_snapshot():
     """Compatibility wrapper for reading the global Claude managed snapshot."""
-    from mms_claude_settings import load_global_claude_snapshot
+    from mms_claude.settings import load_global_claude_snapshot
 
     return load_global_claude_snapshot()
 
 
 def _write_global_claude_snapshot(snapshot_data):
     """Compatibility wrapper for writing the global Claude managed snapshot."""
-    from mms_claude_settings import write_global_claude_snapshot
+    from mms_claude.settings import write_global_claude_snapshot
 
     return write_global_claude_snapshot(snapshot_data)
 
 
 def _merge_claude_settings(base_settings, template_settings):
     """Compatibility wrapper for Claude settings template merging."""
-    from mms_claude_settings import merge_claude_settings
+    from mms_claude.settings import merge_claude_settings
 
     return merge_claude_settings(base_settings, template_settings)
 
@@ -1572,56 +1572,56 @@ def repair_real_claude_settings_for_startup():
 
 def repair_current_session_claude_settings(session_claude_dir):
     """Compatibility wrapper for session-local Claude settings repair."""
-    from mms_claude_settings import repair_current_session_claude_settings as _repair_current
+    from mms_claude.settings import repair_current_session_claude_settings as _repair_current
 
     return _repair_current(session_claude_dir)
 
 
 def _strip_agent_im_hooks(hooks_data):
     """Compatibility wrapper for inherited Claude hook filtering."""
-    from mms_claude_settings import strip_agent_im_hooks
+    from mms_claude.settings import strip_agent_im_hooks
 
     return strip_agent_im_hooks(hooks_data)
 
 
 def _merge_claude_hook_groups(existing_groups, template_groups):
     """Compatibility wrapper for Claude hook-group merging."""
-    from mms_claude_settings import merge_claude_hook_groups
+    from mms_claude.settings import merge_claude_hook_groups
 
     return merge_claude_hook_groups(existing_groups, template_groups)
 
 
 def _merge_claude_hooks(existing_hooks, template_hooks):
     """Compatibility wrapper for Claude hook merging."""
-    from mms_claude_settings import merge_claude_hooks
+    from mms_claude.settings import merge_claude_hooks
 
     return merge_claude_hooks(existing_hooks, template_hooks)
 
 
 def _merge_claude_statusline(existing):
     """Compatibility wrapper for Claude statusline defaults."""
-    from mms_claude_settings import merge_claude_statusline
+    from mms_claude.settings import merge_claude_statusline
 
     return merge_claude_statusline(existing)
 
 
 def _merge_claude_permissions(existing):
     """Compatibility wrapper for Claude permissions defaults."""
-    from mms_claude_settings import merge_claude_permissions
+    from mms_claude.settings import merge_claude_permissions
 
     return merge_claude_permissions(existing)
 
 
 def _hook_command_exists(hook_items, command_path):
     """Compatibility wrapper for hook command lookup."""
-    from mms_claude_settings import hook_command_exists
+    from mms_claude.settings import hook_command_exists
 
     return hook_command_exists(hook_items, command_path)
 
 
 def _append_command_hook(hooks_data, event_name, command_path, matcher=None, timeout=None, status_message=None):
     """Compatibility wrapper for appending file-backed command hooks."""
-    from mms_claude_settings import append_command_hook
+    from mms_claude.settings import append_command_hook
 
     return append_command_hook(
         hooks_data,
@@ -1643,7 +1643,7 @@ def _append_shell_command_hook(
     status_message=None,
 ):
     """Compatibility wrapper for appending shell command hooks."""
-    from mms_claude_settings import append_shell_command_hook
+    from mms_claude.settings import append_shell_command_hook
 
     return append_shell_command_hook(
         hooks_data,
@@ -1657,14 +1657,14 @@ def _append_shell_command_hook(
 
 def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     """Compatibility wrapper for MMS-managed Claude session hooks."""
-    from mms_claude_settings import merge_mms_session_hooks
+    from mms_claude.settings import merge_mms_session_hooks
 
     return merge_mms_session_hooks(existing_hooks, template_hooks=template_hooks)
 
 
 def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
     """Compatibility wrapper for Claude session hook filtering."""
-    from mms_claude_settings import filter_claude_session_hooks
+    from mms_claude.settings import filter_claude_session_hooks
 
     return filter_claude_session_hooks(
         hooks_data,
@@ -2005,35 +2005,35 @@ def _hook_command_targets_exist(command_text):
 
 def _filter_missing_managed_hook_commands(hooks_data):
     """Compatibility wrapper for dropping missing managed hook commands."""
-    from mms_claude_settings import filter_missing_managed_hook_commands
+    from mms_claude.settings import filter_missing_managed_hook_commands
 
     return filter_missing_managed_hook_commands(hooks_data)
 
 
 def _filter_hook_commands(hooks_data, predicate):
     """Compatibility wrapper for filtering hook commands."""
-    from mms_claude_settings import filter_hook_commands
+    from mms_claude.settings import filter_hook_commands
 
     return filter_hook_commands(hooks_data, predicate)
 
 
 def _normalize_session_surface_disabled(disabled_session_surfaces):
     """Compatibility wrapper for disabled session-surface normalization."""
-    from mms_claude_settings import normalize_session_surface_disabled
+    from mms_claude.settings import normalize_session_surface_disabled
 
     return normalize_session_surface_disabled(disabled_session_surfaces)
 
 
 def _session_surface_disabled(disabled_session_surfaces, surface, value):
     """Compatibility wrapper for disabled session-surface lookup."""
-    from mms_claude_settings import session_surface_disabled
+    from mms_claude.settings import session_surface_disabled
 
     return session_surface_disabled(disabled_session_surfaces, surface, value)
 
 
 def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None):
     """Compatibility wrapper for disabled MCP filtering."""
-    from mms_claude_settings import filter_mcp_servers_by_disabled
+    from mms_claude.settings import filter_mcp_servers_by_disabled
 
     return filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces)
 
@@ -2047,7 +2047,7 @@ def _mcp_command_has_path(command):
 
 def _normalize_session_mcp_server_spec(name, spec, *, env=None):
     """Make inherited MCP commands session-safe; drop missing local CLIs."""
-    from mms_claude_settings import normalize_session_mcp_server_spec
+    from mms_claude.settings import normalize_session_mcp_server_spec
 
     return normalize_session_mcp_server_spec(name, spec, env=env)
 
@@ -2064,7 +2064,7 @@ def _mcp_server_spec_has_entrypoint(spec):
 
 def _normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=None, env=None):
     """Compatibility wrapper for session MCP normalization."""
-    from mms_claude_settings import normalize_session_mcp_servers
+    from mms_claude.settings import normalize_session_mcp_servers
 
     return normalize_session_mcp_servers(
         mcp_servers,
@@ -2075,14 +2075,14 @@ def _normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=Non
 
 def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
     """Compatibility wrapper for disabled hook filtering."""
-    from mms_claude_settings import filter_hooks_by_disabled
+    from mms_claude.settings import filter_hooks_by_disabled
 
     return filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
 
 
 def _session_skill_disabled(disabled_session_surfaces, skill_name):
     """Compatibility wrapper for disabled skill lookup."""
-    from mms_claude_settings import session_skill_disabled
+    from mms_claude.settings import session_skill_disabled
 
     return session_skill_disabled(disabled_session_surfaces, skill_name)
 
@@ -2143,7 +2143,7 @@ def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_
 
 def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     """Compatibility wrapper for Claude NSR hook configuration."""
-    from mms_claude_settings import configure_claude_nsr_hooks
+    from mms_claude.settings import configure_claude_nsr_hooks
 
     return configure_claude_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
 
@@ -2157,7 +2157,7 @@ def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
 
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
     """Compatibility wrapper for Claude caveman hook configuration."""
-    from mms_claude_settings import configure_claude_caveman_hooks
+    from mms_claude.settings import configure_claude_caveman_hooks
 
     return configure_claude_caveman_hooks(
         hooks_data,
@@ -2168,28 +2168,28 @@ def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman
 
 def _load_ecc_claude_hooks():
     """Compatibility wrapper for ECC Claude hook loading."""
-    from mms_claude_settings import load_claude_agent_pack_hooks
+    from mms_claude.settings import load_claude_agent_pack_hooks
 
     return load_claude_agent_pack_hooks(_resolve_ecc_root())
 
 
 def _load_omc_claude_hooks():
     """Compatibility wrapper for OMC Claude hook loading."""
-    from mms_claude_settings import load_claude_agent_pack_hooks
+    from mms_claude.settings import load_claude_agent_pack_hooks
 
     return load_claude_agent_pack_hooks(_resolve_omc_root())
 
 
 def _configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
     """Compatibility wrapper for Claude ECC hook configuration."""
-    from mms_claude_settings import configure_claude_ecc_hooks
+    from mms_claude.settings import configure_claude_ecc_hooks
 
     return configure_claude_ecc_hooks(hooks_data, enable_ecc=enable_ecc)
 
 
 def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
     """Compatibility wrapper for Claude OMC hook configuration."""
-    from mms_claude_settings import configure_claude_omc_hooks
+    from mms_claude.settings import configure_claude_omc_hooks
 
     return configure_claude_omc_hooks(hooks_data, enable_omc=enable_omc)
 
@@ -2543,7 +2543,7 @@ def _session_required_env_from_runtime_env(env):
 
 def _sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
     """Compatibility wrapper for Claude settings inheritance allowlist."""
-    from mms_claude_settings import sanitize_claude_inherited_settings_payload
+    from mms_claude.settings import sanitize_claude_inherited_settings_payload
 
     return sanitize_claude_inherited_settings_payload(
         settings_data,
@@ -2553,14 +2553,14 @@ def _sanitize_claude_inherited_settings_payload(settings_data, *, allow_executio
 
 def _sanitize_account_claude_settings_payload(settings_data):
     """Compatibility wrapper for account-scoped Claude settings sanitization."""
-    from mms_claude_settings import sanitize_account_claude_settings_payload
+    from mms_claude.settings import sanitize_account_claude_settings_payload
 
     return sanitize_account_claude_settings_payload(settings_data)
 
 
 def _default_session_mcp_servers():
     """Compatibility wrapper for default session MCP discovery."""
-    from mms_claude_settings import default_session_mcp_servers
+    from mms_claude.settings import default_session_mcp_servers
 
     return default_session_mcp_servers()
 
@@ -2722,14 +2722,14 @@ def _load_plugin_mcp_servers(plugin_root):
 
 def _agent_pack_mcp_servers(agent_pack):
     """Compatibility wrapper for agent-pack MCP discovery."""
-    from mms_claude_settings import agent_pack_mcp_servers
+    from mms_claude.settings import agent_pack_mcp_servers
 
     return agent_pack_mcp_servers(agent_pack)
 
 
 def _merge_agent_pack_mcp_servers(mcp_servers, *, agent_pack="none", disabled_session_surfaces=None):
     """Compatibility wrapper for agent-pack MCP merging."""
-    from mms_claude_settings import merge_agent_pack_mcp_servers
+    from mms_claude.settings import merge_agent_pack_mcp_servers
 
     return merge_agent_pack_mcp_servers(
         mcp_servers,
@@ -2740,7 +2740,7 @@ def _merge_agent_pack_mcp_servers(mcp_servers, *, agent_pack="none", disabled_se
 
 def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_surfaces=None):
     """Compatibility wrapper for session-only Claude MCP injection."""
-    from mms_claude_settings import ensure_session_only_claude_mcp_servers
+    from mms_claude.settings import ensure_session_only_claude_mcp_servers
 
     return ensure_session_only_claude_mcp_servers(
         settings_data,
@@ -2750,7 +2750,7 @@ def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_s
 
 def _session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
     """Compatibility wrapper for session-managed MCP allowlist."""
-    from mms_claude_settings import session_managed_mcp_server_allowlist
+    from mms_claude.settings import session_managed_mcp_server_allowlist
 
     return session_managed_mcp_server_allowlist(
         allow_execution_surfaces=allow_execution_surfaces
@@ -2759,7 +2759,7 @@ def _session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
 
 def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True, disabled_session_surfaces=None):
     """Compatibility wrapper for session-managed Claude MCP collection."""
-    from mms_claude_settings import session_managed_mcp_servers
+    from mms_claude.settings import session_managed_mcp_servers
 
     return session_managed_mcp_servers(
         settings_data,
@@ -2777,7 +2777,7 @@ def _inject_managed_mcp_servers_into_claude_state(
     agent_pack="none",
 ):
     """Compatibility wrapper for Claude state managed MCP injection."""
-    from mms_claude_settings import inject_managed_mcp_servers_into_claude_state
+    from mms_claude.settings import inject_managed_mcp_servers_into_claude_state
 
     return inject_managed_mcp_servers_into_claude_state(
         payload,
@@ -2790,28 +2790,28 @@ def _inject_managed_mcp_servers_into_claude_state(
 
 def _copy_allowed_scalar_fields(payload, allowed_keys):
     """Compatibility wrapper for scalar allowlist copies."""
-    from mms_claude_state import copy_allowed_scalar_fields
+    from mms_claude.state import copy_allowed_scalar_fields
 
     return copy_allowed_scalar_fields(payload, allowed_keys)
 
 
 def _copy_allowed_scalar_dict_fields(payload, allowed_keys):
     """Compatibility wrapper for scalar dict allowlist copies."""
-    from mms_claude_state import copy_allowed_scalar_dict_fields
+    from mms_claude.state import copy_allowed_scalar_dict_fields
 
     return copy_allowed_scalar_dict_fields(payload, allowed_keys)
 
 
 def _sanitize_claude_ui_state_seed_payload(payload):
     """Compatibility wrapper for Claude UI state seed sanitization."""
-    from mms_claude_state import sanitize_claude_ui_state_seed_payload
+    from mms_claude.state import sanitize_claude_ui_state_seed_payload
 
     return sanitize_claude_ui_state_seed_payload(payload)
 
 
 def _merge_scalar_dict_entries(existing_payload, incoming_payload, *, prefer_max_numeric=False):
     """Compatibility wrapper for scalar dict merging."""
-    from mms_claude_state import merge_scalar_dict_entries
+    from mms_claude.state import merge_scalar_dict_entries
 
     return merge_scalar_dict_entries(
         existing_payload,
@@ -2822,63 +2822,63 @@ def _merge_scalar_dict_entries(existing_payload, incoming_payload, *, prefer_max
 
 def _merge_claude_ui_state_seed(target_payload, seed_payload):
     """Compatibility wrapper for Claude UI state seed merging."""
-    from mms_claude_state import merge_claude_ui_state_seed
+    from mms_claude.state import merge_claude_ui_state_seed
 
     return merge_claude_ui_state_seed(target_payload, seed_payload)
 
 
 def _merge_claude_gateway_ui_state_payload(existing_payload, incoming_payload):
     """Compatibility wrapper for Claude gateway UI state merging."""
-    from mms_claude_state import merge_claude_gateway_ui_state_payload
+    from mms_claude.state import merge_claude_gateway_ui_state_payload
 
     return merge_claude_gateway_ui_state_payload(existing_payload, incoming_payload)
 
 
 def _strip_claude_state_execution_surfaces(payload):
     """Compatibility wrapper for stripping execution surfaces from Claude state."""
-    from mms_claude_state import strip_claude_state_execution_surfaces
+    from mms_claude.state import strip_claude_state_execution_surfaces
 
     return strip_claude_state_execution_surfaces(payload)
 
 
 def _sanitize_claude_project_state_entry(entry):
     """Compatibility wrapper for Claude project state entry sanitization."""
-    from mms_claude_state import sanitize_claude_project_state_entry
+    from mms_claude.state import sanitize_claude_project_state_entry
 
     return sanitize_claude_project_state_entry(entry)
 
 
 def _sanitize_claude_project_state_map(projects_data):
     """Compatibility wrapper for Claude project state map sanitization."""
-    from mms_claude_state import sanitize_claude_project_state_map
+    from mms_claude.state import sanitize_claude_project_state_map
 
     return sanitize_claude_project_state_map(projects_data)
 
 
 def _load_real_claude_ui_state_seed():
     """Compatibility wrapper for reading real Claude UI state seed."""
-    from mms_claude_state import load_real_claude_ui_state_seed
+    from mms_claude.state import load_real_claude_ui_state_seed
 
     return load_real_claude_ui_state_seed()
 
 
 def _load_real_claude_project_state(project_path):
     """Compatibility wrapper for reading real Claude project state."""
-    from mms_claude_state import load_real_claude_project_state
+    from mms_claude.state import load_real_claude_project_state
 
     return load_real_claude_project_state(project_path)
 
 
 def _sanitize_oauth_claude_state_payload(data):
     """Compatibility wrapper for OAuth Claude state sanitization."""
-    from mms_claude_state import sanitize_oauth_claude_state_payload
+    from mms_claude.state import sanitize_oauth_claude_state_payload
 
     return sanitize_oauth_claude_state_payload(data)
 
 
 def _sanitize_codex_claude_state_payload(data):
     """Compatibility wrapper for Codex-seeded Claude state sanitization."""
-    from mms_claude_state import sanitize_codex_claude_state_payload
+    from mms_claude.state import sanitize_codex_claude_state_payload
 
     return sanitize_codex_claude_state_payload(data)
 
@@ -2900,7 +2900,7 @@ _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
 
 def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
     """Compatibility wrapper for Claude restore-state stripping."""
-    from mms_claude_state import strip_claude_restore_state
+    from mms_claude.state import strip_claude_restore_state
 
     return strip_claude_restore_state(data, strip_sensitive_auth=strip_sensitive_auth)
 
@@ -2913,7 +2913,7 @@ def _load_project_scoped_claude_resume_session_id(
     resume_model="",
 ):
     """Compatibility wrapper for project-scoped Claude resume lookup."""
-    from mms_claude_session import load_project_scoped_claude_resume_session_id
+    from mms_claude.session import load_project_scoped_claude_resume_session_id
 
     return load_project_scoped_claude_resume_session_id(
         project_path,
@@ -2932,7 +2932,7 @@ def _overlay_project_scoped_claude_resume_state(
     resume_model="",
 ):
     """Compatibility wrapper for project-scoped Claude resume state overlay."""
-    from mms_claude_session import overlay_project_scoped_claude_resume_state
+    from mms_claude.session import overlay_project_scoped_claude_resume_state
 
     return overlay_project_scoped_claude_resume_state(
         data,
@@ -2952,7 +2952,7 @@ def _ensure_claude_project_trust(
     disabled_session_surfaces=None,
 ):
     """Compatibility wrapper for Claude project trust state materialization."""
-    from mms_claude_state import ensure_claude_project_trust
+    from mms_claude.state import ensure_claude_project_trust
 
     return ensure_claude_project_trust(
         data,
@@ -2965,28 +2965,28 @@ def _ensure_claude_project_trust(
 
 def _copy_claude_state_json(src, dst, *, mode="restore"):
     """Compatibility wrapper for Claude state JSON copy/sanitization."""
-    from mms_claude_state import copy_claude_state_json
+    from mms_claude.state import copy_claude_state_json
 
     return copy_claude_state_json(src, dst, mode=mode)
 
 
 def _parse_iso8601_utc(value):
     """Compatibility wrapper for OAuth token timestamp parsing."""
-    from mms_claude_state import parse_iso8601_utc
+    from mms_claude.state import parse_iso8601_utc
 
     return parse_iso8601_utc(value)
 
 
 def _merge_oauth_token_state(existing_payload, incoming_payload):
     """Compatibility wrapper for OAuth token state merging."""
-    from mms_claude_state import merge_oauth_token_state
+    from mms_claude.state import merge_oauth_token_state
 
     return merge_oauth_token_state(existing_payload, incoming_payload)
 
 
 def _merge_oauth_claude_state_payload(existing_data, incoming_data):
     """Compatibility wrapper for OAuth Claude state merging."""
-    from mms_claude_state import merge_oauth_claude_state_payload
+    from mms_claude.state import merge_oauth_claude_state_payload
 
     return merge_oauth_claude_state_payload(existing_data, incoming_data)
 
@@ -3019,7 +3019,7 @@ def _build_claude_session_settings(
     disabled_session_surfaces=None,
 ):
     """Compatibility wrapper for Claude session settings materialization."""
-    from mms_claude_settings import build_claude_session_settings
+    from mms_claude.settings import build_claude_session_settings
 
     return build_claude_session_settings(
         base_settings,
@@ -3050,7 +3050,7 @@ def _write_claude_session_settings(
     disabled_session_surfaces=None,
 ):
     """Compatibility wrapper for writing session-local Claude settings."""
-    from mms_claude_settings import write_claude_session_settings
+    from mms_claude.settings import write_claude_session_settings
 
     return write_claude_session_settings(
         session_claude_dir,
@@ -3069,7 +3069,7 @@ def _write_claude_session_settings(
 
 def _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir):
     """Compatibility wrapper for OAuth session settings seeding."""
-    from mms_claude_settings import seed_oauth_claude_session_settings
+    from mms_claude.settings import seed_oauth_claude_session_settings
 
     return seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir)
 
@@ -3478,21 +3478,21 @@ def _link_shared_dotfiles(session_home):
 
 def _link_real_local_bin(session_home):
     """Compatibility wrapper for exposing real ~/.local/bin in Claude sessions."""
-    from mms_claude_session import link_real_local_bin
+    from mms_claude.session import link_real_local_bin
 
     return link_real_local_bin(session_home)
 
 
 def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
     """Compatibility wrapper for Claude session Library allowlist links."""
-    from mms_claude_session import link_claude_library_entries
+    from mms_claude.session import link_claude_library_entries
 
     return link_claude_library_entries(session_home, entries=entries)
 
 
 def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
     """Compatibility wrapper for account Library allowlist preparation."""
-    from mms_claude_session import ensure_account_library_entries
+    from mms_claude.session import ensure_account_library_entries
 
     return ensure_account_library_entries(account_home, entries=entries)
 
@@ -3546,7 +3546,7 @@ def _install_agy_security_wrapper(session_home, account_home, env):
 
 def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
     """Compatibility wrapper for account Library links into session homes."""
-    from mms_claude_session import link_account_library_entries
+    from mms_claude.session import link_account_library_entries
 
     return link_account_library_entries(session_home, account_home, entries=entries)
 
@@ -3736,49 +3736,49 @@ def _normalized_model_name(model_name):
 
 def _is_claude_family_model_name(model_name):
     """Compatibility wrapper for Claude family model detection."""
-    from mms_claude_model import is_claude_family_model_name
+    from mms_claude.model import is_claude_family_model_name
 
     return is_claude_family_model_name(model_name)
 
 
 def _claude_visible_model_name(model_name, *, fallback_model=""):
     """Compatibility wrapper for Claude-visible model slot names."""
-    from mms_claude_model import claude_visible_model_name
+    from mms_claude.model import claude_visible_model_name
 
     return claude_visible_model_name(model_name, fallback_model=fallback_model)
 
 
 def _apply_claude_visible_model_overrides(target, model_name, *, fallback_model=""):
     """Compatibility wrapper for Claude-visible model overrides."""
-    from mms_claude_model import apply_claude_visible_model_overrides
+    from mms_claude.model import apply_claude_visible_model_overrides
 
     return apply_claude_visible_model_overrides(target, model_name, fallback_model=fallback_model)
 
 
 def _claude_resume_model_name(*candidates):
     """Compatibility wrapper for Claude resume model normalization."""
-    from mms_claude_model import claude_resume_model_name
+    from mms_claude.model import claude_resume_model_name
 
     return claude_resume_model_name(*candidates)
 
 
 def _with_1m_suffix(model_name, *, enable_1m=True):
     """Compatibility wrapper for Claude 1M model suffixing."""
-    from mms_claude_model import with_1m_suffix
+    from mms_claude.model import with_1m_suffix
 
     return with_1m_suffix(model_name, enable_1m=enable_1m)
 
 
 def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
     """Compatibility wrapper for Claude model env overrides."""
-    from mms_claude_model import apply_claude_model_overrides
+    from mms_claude.model import apply_claude_model_overrides
 
     return apply_claude_model_overrides(target, model_info, enable_1m=enable_1m)
 
 
 def launch_claude(model_info, runtime, once=False, extra_args=None):
     """Compatibility wrapper for the Claude launch flow."""
-    from mms_claude_launch import launch_claude_runtime
+    from mms_claude.launch import launch_claude_runtime
 
     return launch_claude_runtime(
         model_info,
@@ -3791,21 +3791,21 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
 
 def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     """Compatibility wrapper for Claude Anthropic endpoint resolution."""
-    from mms_claude_endpoint import resolve_anthropic_base_url
+    from mms_claude.endpoint import resolve_anthropic_base_url
 
     return resolve_anthropic_base_url(runtime, probe_model=probe_model)
 
 
 def _pick_gateway_model(runtime, base_url):
     """Compatibility wrapper for Claude gateway model selection."""
-    from mms_claude_endpoint import pick_gateway_model
+    from mms_claude.endpoint import pick_gateway_model
 
     return pick_gateway_model(runtime, base_url)
 
 
 def _cleanup_stale_sessions(sessions_dir, stale_callback=None, *, max_entries=None, max_seconds=None):
     """Compatibility wrapper for Claude stale session cleanup."""
-    from mms_claude_session import cleanup_stale_sessions
+    from mms_claude.session import cleanup_stale_sessions
 
     return cleanup_stale_sessions(
         sessions_dir,
@@ -3817,21 +3817,21 @@ def _cleanup_stale_sessions(sessions_dir, stale_callback=None, *, max_entries=No
 
 def _copy_tree_files_if_missing(src, dst):
     """Compatibility wrapper for Claude session tree backfill copies."""
-    from mms_claude_session import copy_tree_files_if_missing
+    from mms_claude.session import copy_tree_files_if_missing
 
     return copy_tree_files_if_missing(src, dst)
 
 
 def _claude_project_resume_dir_names(project_path):
     """Compatibility wrapper for Claude project resume dir names."""
-    from mms_claude_session import claude_project_resume_dir_names
+    from mms_claude.session import claude_project_resume_dir_names
 
     return claude_project_resume_dir_names(project_path)
 
 
 def _claude_resume_scope_id(runtime_id="", *, runtime_kind="api_key", resume_model=""):
     """Compatibility wrapper for Claude resume storage scope."""
-    from mms_claude_session import claude_resume_scope_id
+    from mms_claude.session import claude_resume_scope_id
 
     return claude_resume_scope_id(
         runtime_id,
@@ -3842,21 +3842,21 @@ def _claude_resume_scope_id(runtime_id="", *, runtime_kind="api_key", resume_mod
 
 def _claude_resume_scope_is_model_shared(scope_id):
     """Compatibility wrapper for Claude model-shared resume scopes."""
-    from mms_claude_session import claude_resume_scope_is_model_shared
+    from mms_claude.session import claude_resume_scope_is_model_shared
 
     return claude_resume_scope_is_model_shared(scope_id)
 
 
 def _claude_slot_roots_for_resume_backfill(account_id):
     """Compatibility wrapper for Claude resume backfill roots."""
-    from mms_claude_session import claude_slot_roots_for_resume_backfill
+    from mms_claude.session import claude_slot_roots_for_resume_backfill
 
     return claude_slot_roots_for_resume_backfill(account_id)
 
 
 def _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd):
     """Compatibility wrapper for real Claude project resume backfill."""
-    from mms_claude_session import backfill_real_claude_project_resume_files
+    from mms_claude.session import backfill_real_claude_project_resume_files
 
     return backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
 
@@ -3870,7 +3870,7 @@ def _backfill_claude_project_resume_files(
     resume_model="",
 ):
     """Compatibility wrapper for Claude project resume backfill."""
-    from mms_claude_session import backfill_claude_project_resume_files
+    from mms_claude.session import backfill_claude_project_resume_files
 
     return backfill_claude_project_resume_files(
         target_projects_dir,
@@ -3884,7 +3884,7 @@ def _backfill_claude_project_resume_files(
 
 def _link_claude_persistent_entry(session_claude_dir, entry, target):
     """Compatibility wrapper for Claude persistent entry links."""
-    from mms_claude_session import link_claude_persistent_entry
+    from mms_claude.session import link_claude_persistent_entry
 
     return link_claude_persistent_entry(session_claude_dir, entry, target)
 
@@ -3904,7 +3904,7 @@ def _prepare_claude_session_tree(
     allowed_source_entries=None,
 ):
     """Compatibility wrapper for Claude session tree materialization."""
-    from mms_claude_session import prepare_claude_session_tree
+    from mms_claude.session import prepare_claude_session_tree
 
     return prepare_claude_session_tree(
         session_home,
@@ -3923,7 +3923,7 @@ def _prepare_claude_session_tree(
 
 def _sync_claude_session_state_to_account_home(session_home, account_home, *, state_mode="oauth"):
     """Compatibility wrapper for Claude session state sync."""
-    from mms_claude_session import sync_claude_session_state_to_account_home
+    from mms_claude.session import sync_claude_session_state_to_account_home
 
     return sync_claude_session_state_to_account_home(
         session_home,
@@ -3934,7 +3934,7 @@ def _sync_claude_session_state_to_account_home(session_home, account_home, *, st
 
 def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
     """Compatibility wrapper for Claude slot finalization."""
-    from mms_claude_session import finalize_claude_slot
+    from mms_claude.session import finalize_claude_slot
 
     return finalize_claude_slot(session_home, exit_code=exit_code, stale_cleanup=stale_cleanup)
 
@@ -3952,7 +3952,7 @@ def _claude_gateway_env(
     _timings=None,
 ):
     """Compatibility wrapper for Claude gateway env materialization."""
-    from mms_claude_env import build_claude_gateway_env
+    from mms_claude.env import build_claude_gateway_env
 
     return build_claude_gateway_env(
         runtime,

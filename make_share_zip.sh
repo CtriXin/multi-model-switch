@@ -25,6 +25,9 @@ FILES=(
 
 DIRS=(
     "hooks"
+    "mms_opencode"
+    "mms_codex"
+    "mms_claude"
 )
 
 for file in "${FILES[@]}"; do

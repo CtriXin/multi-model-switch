@@ -512,6 +512,14 @@ def test_install_script_copies_session_tool_scripts_directory():
     assert '[ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +' in text
 
 
+def test_install_script_copies_launcher_package_directories():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "for package_dir in mms_opencode mms_codex mms_claude; do" in text
+    assert 'copy_dir_safely "$SOURCE_DIR/$package_dir" "$MMS_HOME/$package_dir"' in text
+    assert 'for stale_module in "$MMS_HOME"/mms_opencode_*.py "$MMS_HOME"/mms_codex_*.py "$MMS_HOME"/mms_claude_*.py; do' in text
+
+
 def test_install_script_retires_mmc_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 

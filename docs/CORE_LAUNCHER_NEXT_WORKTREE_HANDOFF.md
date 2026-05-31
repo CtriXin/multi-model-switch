@@ -42,7 +42,7 @@ OpenCode 瘦身阶段已经完成并合并：
 优先顺序：
 
 1. Claude env / launch 拆分
-   - 目标模块：`mms_claude_env.py`、`mms_claude_launch.py`
+   - 目标模块：`mms_claude/env.py`、`mms_claude/launch.py`
    - 从 `mms_launchers.py` 移出 `_claude_gateway_env` 和 `launch_claude` 的大块实现。
    - 保留 `mms_launchers.launch_claude` wrapper，避免破坏调用方和 tests monkeypatch。
 
@@ -67,14 +67,14 @@ OpenCode 瘦身阶段已经完成并合并：
 执行边界：
 
 - 先定位 `launch_claude`、`_claude_gateway_env`、Claude settings/hooks materialization 的调用关系。
-- 新增 `mms_claude_env.py`，把纯 env/settings/helper 代码搬进去。
-- 新增 `mms_claude_launch.py`，把 launch flow 主体搬进去。
+- 新增 `mms_claude/env.py`，把纯 env/settings/helper 代码搬进去。
+- 新增 `mms_claude/launch.py`，把 launch flow 主体搬进去。
 - `mms_launchers.py` 只保留兼容 wrapper 和必要 re-export。
 - 每次搬一块就跑 targeted tests，不把 Claude/Codex/TUI 同时混在一个 commit。
 
 最低验证：
 
-- `rtk python3.13 -m py_compile mms_launchers.py mms_claude_env.py mms_claude_launch.py`
+- `rtk python3.13 -m py_compile mms_launchers.py mms_claude/env.py mms_claude/launch.py`
 - Claude 相关 focused tests，至少覆盖 hardening / visibility / launcher path。
 - `git diff --check`
 - 如果启动 smoke 触发 MMS Snapshot Guard，不执行 `guard accept`，只记录被阻止。
