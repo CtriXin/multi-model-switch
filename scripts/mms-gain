@@ -2,4 +2,4 @@
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-exec python3 "$ROOT_DIR/mms_context.py" gain "$@"
+PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m mms_session.context_store gain "$@"

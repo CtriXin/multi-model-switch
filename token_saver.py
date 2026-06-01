@@ -10,7 +10,7 @@ import subprocess
 import sys
 from typing import Sequence
 
-import mms_context
+import mms_session.context_store as mms_context
 import mms_session.toon as mms_toon
 
 

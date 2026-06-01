@@ -17,7 +17,7 @@ def _import_mms_launchers(monkeypatch, tmp_path):
 
 
 def test_mms_context_put_search_show_roundtrip(monkeypatch, tmp_path, capsys):
-    from mms_context import main
+    from mms_session.context_store import main
 
     monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
     monkeypatch.setattr(
@@ -46,7 +46,7 @@ def test_mms_context_put_search_show_roundtrip(monkeypatch, tmp_path, capsys):
 
 
 def test_mms_context_stats_reports_estimated_gain(monkeypatch, tmp_path, capsys):
-    from mms_context import main
+    from mms_session.context_store import main
 
     monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
     monkeypatch.setattr("sys.stdin", io.StringIO("A" * 1000))
@@ -70,7 +70,7 @@ def test_mms_context_stats_reports_estimated_gain(monkeypatch, tmp_path, capsys)
 
 
 def test_mms_context_defaults_to_session_home(monkeypatch, tmp_path):
-    import mms_context
+    import mms_session.context_store as mms_context
 
     session_home = tmp_path / "session-home"
     monkeypatch.delenv("MMS_CONTEXT_DIR", raising=False)
@@ -81,7 +81,7 @@ def test_mms_context_defaults_to_session_home(monkeypatch, tmp_path):
 
 
 def test_mms_context_gain_discovers_recent_session_store_when_cwd_store_empty(monkeypatch, tmp_path, capsys):
-    import mms_context
+    import mms_session.context_store as mms_context
 
     home = tmp_path / "home"
     repo_dir = tmp_path / "repo"
