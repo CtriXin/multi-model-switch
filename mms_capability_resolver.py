@@ -73,6 +73,8 @@ _MAX_OUTPUT_KEYS = (
 _THINKING_KEYS = (
     "supports_thinking",
     "thinking_supported",
+    "thinking",
+    "think",
 )
 
 _PROTOCOL_KEYS = (
@@ -295,6 +297,8 @@ def _normalize_capability_payload(payload: Mapping[str, Any], *, model_name: str
     normalized: dict[str, Any] = {}
 
     context_tokens = _first_int(payload, _CONTEXT_KEYS)
+    if context_tokens is None and payload.get("one_m_context") is True:
+        context_tokens = 1_000_000
     if context_tokens is not None:
         normalized["context_window_tokens"] = context_tokens
 
@@ -549,7 +553,7 @@ def _lookup_approved_fact(model_name: str, payload: Mapping[str, Any]) -> dict[s
 
 
 def _looks_like_capability_fact(payload: Mapping[str, Any]) -> bool:
-    known = set(_CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _PROTOCOL_KEYS)
+    known = set(_CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _PROTOCOL_KEYS + ("one_m_context",))
     return bool(known.intersection(payload.keys()))
 
 

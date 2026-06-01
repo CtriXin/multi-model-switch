@@ -134,6 +134,28 @@ def test_model_policy_context_wins_over_approved_facts() -> None:
     assert caps["sources"]["context_window_tokens"] == "model_policy"
 
 
+def test_model_policy_one_m_and_thinking_aliases_drive_capabilities() -> None:
+    caps = resolve_model_capabilities(
+        "mimo-v2.5",
+        approved_facts={},
+        model_policy={
+            "models": {
+                "mimo-v2.5": {
+                    "capabilities": {
+                        "one_m_context": True,
+                        "thinking": True,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["sources"]["context_window_tokens"] == "model_policy"
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["supports_thinking"] == "model_policy"
+
+
 def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_alias(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     import mms_provider_profiles
@@ -256,6 +278,7 @@ def test_cache_sensitive_dual_protocol_routes_keep_anthropic_first() -> None:
 
 
 def test_selected_root_missing_latest_approved_capabilities_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
         resolve_model_capabilities("missing-approved-model")
@@ -265,6 +288,8 @@ def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monk
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
 
     caps = resolve_model_capabilities("legacy-unknown-model")
 

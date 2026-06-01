@@ -56,12 +56,12 @@
           </div>
           <div class="tab-panel" data-tab-panel="models">
             <div class="model-section">
-              <p class="muted">这里配置当前通道会给 MMS 看到哪些模型，以及这些模型能不能做文本、看图、工具调用、思考、上下文 tokens 和缓存敏感路由。取消「显示」会写入 hidden_models；取消「文本」会同步隐藏，避免普通启动页继续展示。</p>
+              <p class="muted">这里直接配置模型在 MMS 里的真实能力：是否进入文本模型列表、是否能看图、是否支持工具调用、Reasoning Effort、Think 开关、1M/context tokens 和缓存友好路由。取消「文本显示」会同步隐藏，避免普通启动页继续展示。</p>
               <div class="model-inventory-summary" id="modelInventorySummary"></div>
               <div class="card capability-guide" id="modelCapabilityGuide">
                 <div>
                   <strong>能力开关怎么影响启动</strong>
-                  <p class="muted">「显示/文本」决定普通模型选择是否出现；「看图」决定 vision sidecar 候选；「上下文 tokens」决定 statusline、auto compact 和 MiMo 1M bridge 能力。旧的 [1m] selector 仍兼容，但不再需要手写模型名后缀。</p>
+                  <p class="muted">「文本显示」对应 TUI 普通模型列表；「视觉输入」对应 vision sidecar / Vision Agent；「Reason」对应 TUI Reasoning Effort；「Think」对应 TUI Think on/off；「1M 上下文」会写入 context_window_tokens=1000000，statusline、auto compact 和 bridge 都按这个值生效。旧的 [1m] selector 仍兼容，但不再作为主入口。</p>
                 </div>
                 <div class="btns">
                   <button id="refreshCapabilitySources" class="ghost">刷新能力证据入口</button>
@@ -70,7 +70,8 @@
               </div>
               <div class="card">
                 <div class="btns">
-                  <button id="fetchModels">刷新远端模型列表</button>
+                  <button id="fetchModels">刷新当前通道模型</button>
+                  <button id="fetchAllModels" class="secondary">一键刷新全部通道模型</button>
                   <button id="testList" class="secondary">只测试 /models</button>
                   <button id="openModelTest" class="ghost">打开模型测试</button>
                   <label class="check"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>拉取后自动标记缺失旧 route 为待清理（本页临时）</span></label>

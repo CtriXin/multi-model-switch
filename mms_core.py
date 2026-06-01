@@ -2254,6 +2254,14 @@ def _model_capability_tags(model_name):
         tags.append("tool_use")
     if any(hint in normalized for hint in _REASONING_MODEL_HINTS):
         tags.append("reasoning")
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        caps = resolve_model_capabilities(model_name)
+        if caps.get("supports_thinking") is True and caps.get("sources", {}).get("supports_thinking") != "conservative_fallback":
+            tags.append("thinking")
+    except Exception:
+        pass
     context_window = _model_context_window(model_name)
     if context_window and context_window >= 200_000:
         tags.append("long_context")
@@ -6170,6 +6178,87 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
     return load_config()
 
 
+def _model_default_rows_from_probe(provider, probe):
+    models = _normalize_model_id_list((probe or {}).get("models") or [])
+    if not models:
+        return []
+    existing_caps = {}
+    for row in provider.get("models") or []:
+        if not isinstance(row, dict):
+            continue
+        model_id = str(row.get("id") or row.get("model") or "").strip()
+        caps = row.get("capabilities")
+        if model_id and isinstance(caps, dict):
+            existing_caps[model_id] = dict(caps)
+    hidden = {item.lower() for item in _normalize_model_id_list(provider.get("hidden_models") or [])}
+    source = str((probe or {}).get("base_source") or "remote").strip() or "remote"
+    rows = []
+    for model_id in models:
+        row = {
+            "id": model_id,
+            "source": source,
+            "visible": model_id.lower() not in hidden,
+        }
+        if model_id in existing_caps:
+            row["capabilities"] = existing_caps[model_id]
+        rows.append(row)
+    return rows
+
+
+def _update_provider_model_default_rows(cfg, provider_id, probe):
+    updated_cfg = dict(cfg)
+    providers = []
+    changed = False
+    for item in cfg.get("providers", []):
+        if item.get("id") != provider_id:
+            providers.append(item)
+            continue
+        updated = dict(item)
+        rows = _model_default_rows_from_probe(updated, probe)
+        if rows:
+            if updated.get("models") != rows:
+                updated["models"] = rows
+                changed = True
+        providers.append(_normalize_provider(updated))
+    updated_cfg["providers"] = providers
+    return updated_cfg, changed
+
+
+def _refresh_all_provider_model_defaults(cfg, *, emit_output=True):
+    current_cfg = dict(cfg)
+    refreshed = 0
+    failed = 0
+    total_models = 0
+    details = []
+    for provider_def in cfg.get("providers", []):
+        provider_id = str(provider_def.get("id") or "").strip()
+        if not provider_id:
+            continue
+        provider = resolve_provider_context(current_cfg, provider_id)
+        if provider.get("enabled") is False:
+            details.append({"provider_id": provider_id, "status": "skipped_disabled", "models": 0})
+            continue
+        probe = _probe_models(provider, emit_output=emit_output, force_refresh=True)
+        models = probe.get("models") or []
+        if probe.get("error") or not models:
+            failed += 1
+            details.append({"provider_id": provider_id, "status": "failed", "models": 0, "error": probe.get("error") or probe.get("error_kind") or "empty_models"})
+            continue
+        current_cfg, changed = _update_provider_model_default_rows(current_cfg, provider_id, probe)
+        if changed:
+            refreshed += 1
+            total_models += len(models)
+            details.append({"provider_id": provider_id, "status": "updated_defaults", "models": len(models), "source": probe.get("base_source") or "remote"})
+        else:
+            details.append({"provider_id": provider_id, "status": "unchanged", "models": len(models), "source": probe.get("base_source") or "remote"})
+    if refreshed:
+        save_config(current_cfg)
+        for detail in details:
+            if detail.get("status") == "updated_defaults":
+                _invalidate_probe_cache(detail.get("provider_id"))
+    return {"ok": failed == 0, "refreshed_providers": refreshed, "failed_providers": failed, "total_models": total_models, "details": details, "config": current_cfg}
+
+
 def _display_provider_model_table(provider, probe):
     from mms_speed_stats import get_speed_entry
 
@@ -6268,7 +6357,8 @@ def _manage_provider_models(cfg, provider_id):
             ("5", "移除补充/取消隐藏"),
             ("6", "恢复默认模型补丁"),
             ("7", "编辑模型列表接口"),
-            ("8", "返回"),
+            ("8", "一键刷新全部通道模型默认清单"),
+            ("9", "返回"),
         ]
 
         choice = None
@@ -6286,8 +6376,10 @@ def _manage_provider_models(cfg, provider_id):
             ))
             for aid, alabel in actions:
                 console.print(f"  {aid}. {alabel}")
-            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="8")
+            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="9")
         if choice is None:
+            return current_cfg, changed
+        if choice == "9":
             return current_cfg, changed
         if choice == "1":
             if _use_tui():
@@ -6376,6 +6468,15 @@ def _manage_provider_models(cfg, provider_id):
             )
             console.print(f"[green]✓ 已更新模型列表接口: {new_endpoint}[/green]")
             changed = True
+            continue
+        if choice == "8":
+            result = _refresh_all_provider_model_defaults(current_cfg, emit_output=True)
+            current_cfg = result.get("config") if isinstance(result.get("config"), dict) else current_cfg
+            console.print(
+                f"[green]✓ 已刷新 {result.get('refreshed_providers', 0)} 个通道默认模型清单，"
+                f"失败 {result.get('failed_providers', 0)} 个；人工 extra/hidden/model-policy 不会被覆盖[/green]"
+            )
+            changed = changed or bool(result.get("refreshed_providers"))
             continue
         return current_cfg, changed
 

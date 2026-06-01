@@ -793,6 +793,7 @@ def _model_capability_defaults(
         "vision": lower in _KNOWN_VISION_MODELS or lower.startswith(("claude-", "sonnet-", "opus-", "haiku-", "gemini-")),
         "tool_use": lower.startswith(("claude-", "gpt-", "o", "qwen", "kimi", "glm", "minimax", "mimo", "gemini-")),
         "reasoning": any(hint in lower for hint in _REASONING_HINTS),
+        "thinking": lower.startswith(("claude-", "sonnet-", "opus-", "haiku-", "gemini-", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max", "kimi", "k2.", "glm", "deepseek", "minimax")),
         "long_context": "1m" in lower or "long" in lower or lower.startswith(("qwen3", "kimi-k2", "gpt-5", "claude-", "mimo-v2.5", "minimax-m3")),
         "cache_sensitive": lower.startswith(_CACHE_SENSITIVE_PREFIXES),
     }
@@ -801,6 +802,7 @@ def _model_capability_defaults(
 
         resolved = resolve_model_capabilities(model, provider_id=provider_id)
         if resolved.get("supports_thinking") is True:
+            caps["thinking"] = True
             caps["reasoning"] = True
         context_window = int(resolved.get("context_window_tokens") or 0)
         if context_window > 0 and resolved.get("sources", {}).get("context_window_tokens") != "conservative_fallback":
@@ -817,6 +819,8 @@ def _model_capability_defaults(
         for key in caps:
             if key in policy_caps and isinstance(policy_caps[key], bool):
                 caps[key] = policy_caps[key]
+            if key == "thinking" and isinstance(policy_caps.get("supports_thinking"), bool):
+                caps[key] = policy_caps["supports_thinking"]
             if key == "cache_sensitive" and isinstance(policy_caps.get("cache_sensitive_transport"), bool):
                 caps[key] = policy_caps["cache_sensitive_transport"]
         policy_context = _normalize_context_tokens(
@@ -825,6 +829,8 @@ def _model_capability_defaults(
             or policy_entry.get("context_window_tokens")
             or policy_entry.get("max_context_tokens")
         )
+        if not policy_context and policy_caps.get("one_m_context") is True:
+            policy_context = 1_000_000
         if policy_context:
             caps["context_window_tokens"] = policy_context
             caps["long_context"] = policy_context >= 200_000
@@ -1655,6 +1661,10 @@ mms opencode-smoke --profile agent --health-summary
         "text": true,
         "vision": true,
         "tool_use": true,
+        "reasoning": true,
+        "thinking": true,
+        "supports_thinking": true,
+        "one_m_context": true,
         "context_window_tokens": 1000000,
         "cache_sensitive_transport": true
       }
@@ -2042,16 +2052,20 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if not isinstance(cap_payload, dict):
                 cap_payload = {}
                 entry["capabilities"] = cap_payload
-            for key in ("text", "vision", "tool_use", "reasoning", "long_context"):
+            for key in ("text", "vision", "tool_use", "reasoning", "thinking", "long_context"):
                 if isinstance(caps.get(key), bool):
                     cap_payload[key] = bool(caps[key])
+            if isinstance(caps.get("one_m_context"), bool):
+                cap_payload["one_m_context"] = bool(caps["one_m_context"])
+            if isinstance(caps.get("thinking"), bool):
+                cap_payload["supports_thinking"] = bool(caps["thinking"])
             if caps.get("text") is False:
                 entry["visible"] = False
             if isinstance(caps.get("cache_sensitive"), bool):
                 cap_payload["cache_sensitive_transport"] = bool(caps["cache_sensitive"])
-            if "context_window_tokens" in caps or "max_context_tokens" in caps:
+            if "context_window_tokens" in caps or "max_context_tokens" in caps or caps.get("one_m_context") is True:
                 context_tokens = _normalize_context_tokens(
-                    caps.get("context_window_tokens") or caps.get("max_context_tokens")
+                    caps.get("context_window_tokens") or caps.get("max_context_tokens") or (1_000_000 if caps.get("one_m_context") is True else None)
                 )
                 if context_tokens:
                     cap_payload["context_window_tokens"] = context_tokens
@@ -3651,10 +3665,21 @@ def test_provider_models(
         probe = probe_provider_models(provider, force_refresh=_truthy(payload.get("force_refresh"), True))
         latency_ms = int((time.time() - started) * 1000)
         models = _normalize_model_list(probe.get("models") or [])
+        policy_payload = _load_json_file(_policy_path_for_config(config_path))
+        policy_models = policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}
+        model_capabilities = {
+            model_id: _model_capability_defaults(
+                model_id,
+                policy_models.get(model_id) if isinstance(policy_models.get(model_id), dict) else {},
+                provider_id=_safe_text(provider.get("id")),
+            )
+            for model_id in models
+        }
         return {
             "ok": not bool(probe.get("error")),
             "provider_id": provider.get("id"),
             "models": models,
+            "model_capabilities": model_capabilities,
             "raw_models": _normalize_model_list(probe.get("raw_models") or models),
             "model_count": len(models),
             "base_source": probe.get("base_source") or "remote",

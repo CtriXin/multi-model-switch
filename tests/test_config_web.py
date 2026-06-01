@@ -681,6 +681,38 @@ def test_config_web_context_tokens_are_saved_to_model_policy(tmp_path):
     assert caps["long_context"] is True
 
 
+def test_config_web_one_m_and_think_capabilities_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "tool_use": True,
+        "reasoning": True,
+        "thinking": True,
+        "one_m_context": True,
+        "cache_sensitive": True,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["long_context"] is True
+    assert caps["one_m_context"] is True
+    assert caps["thinking"] is True
+    assert caps["supports_thinking"] is True
+    assert caps["reasoning"] is True
+    assert caps["cache_sensitive_transport"] is True
+
+
 def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
@@ -1139,9 +1171,15 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "renderProviderList();renderTestSelectors();" in html
     assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
-    assert "这里配置当前通道会给 MMS 看到哪些模型" in html
+    assert "这里直接配置模型在 MMS 里的真实能力" in html
+    assert "Reasoning Effort" in html
+    assert "Think on/off" in html
+    assert "1M 上下文" in html
+    assert "一键刷新全部通道模型" in html
+    assert "refreshAllProviderModels" in html
+    assert "保存后不需要 [1m] 后缀" in html
     assert "刷新能力证据入口" in html
-    assert "取消「文本」会同步隐藏" in html
+    assert "取消「文本显示」会同步隐藏" in html
     assert "手动补充当前通道模型（extra_models" in html
     assert "添加到补充模型库" in html
     assert "restoreModelPatch" in html
@@ -2841,8 +2879,48 @@ def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):
 
     assert result["ok"] is True
     assert result["models"] == ["m-a", "m-b"]
+    assert result["model_capabilities"]["m-a"]["text"] is True
+    assert isinstance(result["model_capabilities"]["m-b"], dict)
     assert result["cache_transport_evidence"]["request_path"] == "/models"
     assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch, tmp_path):
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mimo-v2.5": {
+                        "capabilities": {
+                            "one_m_context": True,
+                            "thinking": True,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mms_config_web,
+        "probe_provider_models",
+        lambda provider, force_refresh=False: {
+            "models": ["mimo-v2.5"],
+            "raw_models": ["mimo-v2.5"],
+            "base_source": "remote",
+        },
+    )
+
+    result = mms_config_web.test_provider_models(
+        {"providers": []},
+        {"provider": {"id": "demo", "openai_base_url": "https://demo.example/v1", "api_key": "sk-secret"}},
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = result["model_capabilities"]["mimo-v2.5"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["thinking"] is True
+    assert caps["reasoning"] is True
 
 
 def test_setup_web_requests_are_guard_exempt():

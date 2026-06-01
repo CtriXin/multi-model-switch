@@ -233,6 +233,13 @@ Provider profiles are MMS-owned declarative source data. They are used for:
       "favorite": false,
       "tier": "secondary",
       "capabilities": {
+        "text": true,
+        "vision": true,
+        "tool_use": true,
+        "reasoning": true,
+        "thinking": true,
+        "supports_thinking": true,
+        "one_m_context": true,
         "context_window_tokens": 1000000
       },
       "hide_in": ["hive"],
@@ -264,6 +271,13 @@ and `disabled_models` are explicit deny overlays.
 Per-model `capabilities.context_window_tokens` is the user-owned override for
 runtime/statusline context size; it should be preferred over model-name suffixes
 such as `[1m]` while preserving those suffixes as legacy compatibility aliases.
+`capabilities.one_m_context=true` is a UI shortcut that materializes as
+`context_window_tokens=1000000`. `capabilities.text`, `vision`, `tool_use`,
+`reasoning`, and `thinking` are user-owned capability hints: `text=false` hides
+the model from normal launch lists, `vision=true` makes it eligible for vision
+surfaces, `reasoning=true` maps to the TUI Reasoning Effort affordance, and
+`thinking=true` / `supports_thinking=true` maps to the TUI Think on/off affordance
+and bridge thinking controls when the route supports them.
 
 Validation treats stale `hidden_models` / `disabled_models` entries as benign:
 they can intentionally suppress retired aliases if those aliases return later.

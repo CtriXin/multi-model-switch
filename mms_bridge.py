@@ -833,7 +833,31 @@ def _apply_vision_sidecar(payload, sidecar_config, handler):
     return rewritten, ""
 
 
+def _model_policy_capability_bool(model_name, *capability_keys):
+    try:
+        from mms_capability_resolver import load_default_model_policy
+
+        policy = load_default_model_policy()
+    except Exception:
+        return None
+    models = policy.get("models") if isinstance(policy, dict) else {}
+    if not isinstance(models, dict):
+        return None
+    normalized = _normalize_model_name(model_name)
+    for key, entry in models.items():
+        if _normalize_model_name(key) != normalized or not isinstance(entry, dict):
+            continue
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        for cap_key in capability_keys:
+            if isinstance(caps.get(cap_key), bool):
+                return bool(caps[cap_key])
+    return None
+
+
 def _domestic_model_supports_thinking(model_name):
+    policy_override = _model_policy_capability_bool(model_name, "thinking", "supports_thinking")
+    if policy_override is not None:
+        return policy_override
     normalized = _normalize_model_name(model_name)
     if not normalized.startswith(_DOMESTIC_MODEL_PREFIXES):
         return False

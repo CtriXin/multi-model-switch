@@ -71,9 +71,40 @@ def test_mimo_without_1m_suffix_keeps_safe_context_on_anthropic(monkeypatch):
     )
 
 
+def test_mimo_one_m_policy_shortcut_enables_plain_model_1m(monkeypatch, tmp_path):
+    import mms_launchers
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mimo-v2.5": {
+                        "capabilities": {
+                            "one_m_context": True,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        mms_launchers._lookup_context_window(
+            "mimo-v2.5",
+            provider_id="mimo-direct-anthropic",
+        )
+        == 1_000_000
+    )
+
+
 def test_mimo_context_policy_enables_plain_model_1m(monkeypatch, tmp_path):
     import mms_launchers
 
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
     (tmp_path / "model-policy.json").write_text(
@@ -364,3 +395,16 @@ def test_mimo_base_gateway_env_keeps_status_and_claude_shell_slots(monkeypatch, 
     ):
         assert env[key] == "claude-sonnet-4-6[1m]"
         assert settings["env"][key] == "claude-sonnet-4-6[1m]"
+
+
+def test_bridge_thinking_support_reads_model_policy(monkeypatch, tmp_path):
+    import mms_bridge
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps({"models": {"mimo-v2.5": {"capabilities": {"thinking": True}}}}),
+        encoding="utf-8",
+    )
+
+    assert mms_bridge._domestic_model_supports_thinking("mimo-v2.5") is True
