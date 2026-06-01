@@ -50,7 +50,7 @@ def _write_latest_approved_router_manifest(
 
 
 def test_tui_settings_action_descriptors_have_stable_labels() -> None:
-    from mms_tui_settings_actions import get_tui_settings_action, list_tui_settings_actions
+    from mms_display.settings_actions import get_tui_settings_action, list_tui_settings_actions
 
     labels = {descriptor.action_id: descriptor.label for descriptor in list_tui_settings_actions()}
 
@@ -1426,7 +1426,7 @@ def test_mms_numeric_target_no_longer_launches_builtin_scene(monkeypatch, capsys
 
 
 def test_review_launch_is_not_legacy_cleanup_target() -> None:
-    from mms_tui_settings_actions import list_tui_settings_actions
+    from mms_display.settings_actions import list_tui_settings_actions
 
     text = (ROOT / "docs" / "LEGACY_SURFACE_CLEANUP.md").read_text(encoding="utf-8")
     replacements = {

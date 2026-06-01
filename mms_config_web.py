@@ -1108,7 +1108,7 @@ def _apply_account_draft(
 def _settings_action_cards() -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     try:
-        from mms_tui_settings_actions import list_tui_settings_actions
+        from mms_display.settings_actions import list_tui_settings_actions
 
         for descriptor in list_tui_settings_actions():
             item = descriptor.as_dict()

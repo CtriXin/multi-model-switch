@@ -37,5 +37,5 @@ Do not rebuild a native MMS chat client or multi-model discuss UI in core. Futur
 
 ```bash
 PYTHONPATH=. pytest -q tests/test_legacy_surface_cleanup.py tests/test_mms_toon.py tests/test_tui_launcher_flow.py
-python3 -m py_compile mms_core.py mms_tui_settings_actions.py mmc_core.py apps/runtime-api/main.py apps/runtime-api/models/schemas.py apps/runtime-api/routers/bootstrap.py
+python3 -m py_compile mms_core.py mms_display/settings_actions.py mmc_core.py apps/runtime-api/main.py apps/runtime-api/models/schemas.py apps/runtime-api/routers/bootstrap.py
 ```
