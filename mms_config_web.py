@@ -164,6 +164,14 @@ def _normalize_priority(value: Any, default: int = 100) -> int:
     return max(1, parsed)
 
 
+def _normalize_context_tokens(value: Any) -> int | None:
+    try:
+        parsed = int(str(value).replace("_", "").replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _known_model_families() -> list[str]:
     try:
         mms_core = _load_mms_core()
@@ -750,7 +758,12 @@ def _provider_credentials_status(provider_id: str) -> dict[str, Any]:
     }
 
 
-def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | None = None) -> dict[str, Any]:
+def _model_capability_defaults(
+    model_id: str,
+    policy_entry: dict[str, Any] | None = None,
+    *,
+    provider_id: str = "",
+) -> dict[str, Any]:
     model = _safe_text(model_id)
     lower = model.lower().rsplit("/", 1)[-1]
     caps = {
@@ -764,10 +777,12 @@ def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | Non
     try:
         from mms_capability_resolver import resolve_model_capabilities
 
-        resolved = resolve_model_capabilities(model)
+        resolved = resolve_model_capabilities(model, provider_id=provider_id)
         if resolved.get("supports_thinking") is True:
             caps["reasoning"] = True
         context_window = int(resolved.get("context_window_tokens") or 0)
+        if context_window > 0 and resolved.get("sources", {}).get("context_window_tokens") != "conservative_fallback":
+            caps["context_window_tokens"] = context_window
         if context_window >= 200_000:
             caps["long_context"] = True
         protocol_hints = resolved.get("protocol_hints") if isinstance(resolved.get("protocol_hints"), dict) else {}
@@ -782,6 +797,15 @@ def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | Non
                 caps[key] = policy_caps[key]
             if key == "cache_sensitive" and isinstance(policy_caps.get("cache_sensitive_transport"), bool):
                 caps[key] = policy_caps["cache_sensitive_transport"]
+        policy_context = _normalize_context_tokens(
+            policy_caps.get("context_window_tokens")
+            or policy_caps.get("max_context_tokens")
+            or policy_entry.get("context_window_tokens")
+            or policy_entry.get("max_context_tokens")
+        )
+        if policy_context:
+            caps["context_window_tokens"] = policy_context
+            caps["long_context"] = policy_context >= 200_000
     return caps
 
 
@@ -842,7 +866,11 @@ def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dic
                 "source": model_sources.get(model_id) or "manual",
                 "visible": visible,
                 "favorite": bool(entry.get("favorite")) if isinstance(entry, dict) else False,
-                "capabilities": _model_capability_defaults(model_id, entry if isinstance(entry, dict) else {}),
+                "capabilities": _model_capability_defaults(
+                    model_id,
+                    entry if isinstance(entry, dict) else {},
+                    provider_id=provider_id,
+                ),
                 "policy_touched": False,
             }
         )
@@ -1604,6 +1632,7 @@ mms opencode-smoke --profile agent --health-summary
         "text": true,
         "vision": true,
         "tool_use": true,
+        "context_window_tokens": 1000000,
         "cache_sensitive_transport": true
       }
     },
@@ -1997,6 +2026,15 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                 entry["visible"] = False
             if isinstance(caps.get("cache_sensitive"), bool):
                 cap_payload["cache_sensitive_transport"] = bool(caps["cache_sensitive"])
+            if "context_window_tokens" in caps or "max_context_tokens" in caps:
+                context_tokens = _normalize_context_tokens(
+                    caps.get("context_window_tokens") or caps.get("max_context_tokens")
+                )
+                if context_tokens:
+                    cap_payload["context_window_tokens"] = context_tokens
+                    cap_payload["long_context"] = context_tokens >= 200_000
+                else:
+                    cap_payload.pop("context_window_tokens", None)
     def comparable(payload: dict[str, Any]) -> dict[str, Any]:
         copy_payload = copy.deepcopy(payload) if isinstance(payload, dict) else {}
         copy_payload.pop("updated_at", None)

@@ -2147,7 +2147,7 @@ def _model_context_window(model_name):
         from mms_capability_resolver import resolve_model_capabilities
 
         caps = resolve_model_capabilities(clean)
-        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
+        if caps.get("sources", {}).get("context_window_tokens") in {"approved_facts", "model_policy", "manual_override"}:
             window = int(caps.get("context_window_tokens"))
             if window > 0:
                 return window
@@ -7219,12 +7219,8 @@ def _derived_model_aliases(base_models, provider=None):
         aliases.append("claude-sonnet-4-6")
     if any(model_id.startswith("claude-opus-4-") or model_id.startswith("claude-opus-4.") for model_id in claude_tails):
         aliases.append("claude-opus-4-6")
-    if _provider_supports_mimo_anthropic_selectors(provider):
-        model_set = set(base_models)
-        for model_id in ("mimo-v2.5-pro", "mimo-v2.5"):
-            selector = f"{model_id}[1m]"
-            if model_id in model_set and selector not in model_set:
-                aliases.append(selector)
+    # MiMo 1M is now controlled by model-policy context_window_tokens. Keep
+    # explicit legacy [1m] selectors, but do not invent duplicate model names.
     return aliases
 
 

@@ -120,6 +120,28 @@ def load_default_approved_facts() -> dict[str, Any]:
     return {}
 
 
+def load_default_model_policy() -> dict[str, Any]:
+    """Read non-secret model policy overlays from the selected config root."""
+    try:
+        from mms_state_io import resolve_mms_config_dir
+
+        config_root = Path(resolve_mms_config_dir())
+    except Exception:
+        return {}
+
+    merged: dict[str, Any] = {}
+    # Generated effective policy is what preview/DB publishes; the root policy is
+    # the human source overlay and should win if it was edited after generation.
+    for path in (
+        config_root / "generated" / "model-policy.effective.json",
+        config_root / "model-policy.json",
+    ):
+        payload = load_approved_facts(path)
+        if payload:
+            merged = _deep_merge(merged, payload)
+    return merged
+
+
 def resolve_model_capabilities(
     model_name: str,
     *,
@@ -130,14 +152,16 @@ def resolve_model_capabilities(
     manual_override: Mapping[str, Any] | None = None,
     approved_facts: Mapping[str, Any] | None = None,
     approved_facts_path: str | Path | None = None,
+    model_policy: Mapping[str, Any] | None = None,
+    model_policy_path: str | Path | None = None,
     provider_profiles: Mapping[str, Any] | None = None,
     conservative_fallback: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve effective model capabilities.
 
     Source order is per-field:
-    manual override > approved registry/export facts > provider profile >
-    conservative fallback.
+    manual override > model policy > approved registry/export facts >
+    provider profile > conservative fallback.
     """
     model = _clean(model_name)
     runtime_dict = dict(runtime or {})
@@ -164,6 +188,14 @@ def resolve_model_capabilities(
         approved_payload = _deep_merge(approved_payload, dict(approved_facts))
     approved_caps = _approved_capabilities(model, approved_payload)
     _apply_source(result, approved_caps, "approved_facts")
+
+    policy_payload = load_approved_facts(model_policy_path)
+    if model_policy_path is None and model_policy is None and approved_facts is None and approved_facts_path is None:
+        policy_payload = load_default_model_policy()
+    if model_policy:
+        policy_payload = _deep_merge(policy_payload, dict(model_policy))
+    policy_caps = _policy_capabilities(model, policy_payload)
+    _apply_source(result, policy_caps, "model_policy")
 
     manual_caps = _normalize_capability_payload(dict(manual_override or {}), model_name=model)
     _apply_source(result, manual_caps, "manual_override")
@@ -453,6 +485,32 @@ def _approved_capabilities(model_name: str, approved_facts: Mapping[str, Any]) -
     if not fact:
         return {}
     return _normalize_capability_payload(fact, model_name=model_name)
+
+
+def _policy_capabilities(model_name: str, model_policy: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(model_policy, Mapping) or not model_policy:
+        return {}
+    models = model_policy.get("models")
+    if not isinstance(models, Mapping):
+        return {}
+    model_key = _normalize_model(model_name)
+    entry = None
+    for key, value in models.items():
+        if _normalize_model(key) == model_key and isinstance(value, Mapping):
+            entry = dict(value)
+            break
+    if not entry:
+        return {}
+    payload: dict[str, Any] = {}
+    capabilities = entry.get("capabilities")
+    if isinstance(capabilities, Mapping):
+        payload.update(dict(capabilities))
+    for key in _CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _PROTOCOL_KEYS:
+        if key in entry:
+            payload[key] = entry[key]
+    if isinstance(entry.get("protocol_hints"), Mapping):
+        payload["protocol_hints"] = dict(entry["protocol_hints"])
+    return _normalize_capability_payload(payload, model_name=model_name)
 
 
 def _lookup_approved_fact(model_name: str, payload: Mapping[str, Any]) -> dict[str, Any]:

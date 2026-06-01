@@ -1260,7 +1260,7 @@
 	      font-size: 14px;
 	    }
 	    .model-capability-table {
-	      min-width: 1060px;
+	      min-width: 1190px;
 	    }
 	    .model-capability-table th {
 	      text-transform: none;
@@ -1320,6 +1320,28 @@
 	    .cap-summary {
 	      min-width: 150px;
 	      white-space: nowrap;
+	    }
+	    .context-cell {
+	      min-width: 132px;
+	      padding-left: 8px;
+	      padding-right: 8px;
+	    }
+	    .context-editor {
+	      display: grid;
+	      gap: 3px;
+	      justify-items: start;
+	    }
+	    .context-editor input {
+	      width: 112px;
+	      font-family: var(--font-mono);
+	      font-size: 12px;
+	      padding: 7px 8px;
+	      border-radius: 10px;
+	    }
+	    .context-editor small {
+	      color: var(--muted);
+	      font-family: var(--font-mono);
+	      font-size: 10px;
 	    }
 
     /* ===== Chips ===== */

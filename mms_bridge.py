@@ -155,8 +155,26 @@ _MIMO_1M_CONTEXT_SELECTORS = {
 }
 
 
+def _coerce_context_window(value):
+    try:
+        window = int(value)
+    except Exception:
+        return None
+    return window if window > 0 else None
+
+
 def _requests_mimo_1m_context(model_name):
     return _normalize_model_name(model_name) in _MIMO_1M_CONTEXT_SELECTORS
+
+
+def _model_requests_mimo_1m_context(model_name, context_window=None):
+    if _requests_mimo_1m_context(model_name):
+        return True
+    normalized = _selector_base_model_name(model_name)
+    if normalized not in {"mimo-v2.5-pro", "mimo-v2.5"}:
+        return False
+    window = _coerce_context_window(context_window)
+    return bool(window and window >= 1_000_000)
 
 
 def _merge_header_token(headers, header_name, token):
@@ -2103,10 +2121,14 @@ def _dedupe_status_paths(paths):
     return normalized
 
 
-def _write_route_status(tier, model, reason, *, status_paths=None):
+def _write_route_status(tier, model, reason, *, status_paths=None, context_window_tokens=None):
     """写路由状态供 statusline 读取，非阻塞，失败静默。"""
     try:
-        data = json.dumps({"tier": tier, "model": model, "reason": reason, "ts": time.time()})
+        payload = {"tier": tier, "model": model, "reason": reason, "ts": time.time()}
+        context_window = _coerce_context_window(context_window_tokens)
+        if context_window:
+            payload["context_window_tokens"] = context_window
+        data = json.dumps(payload)
         targets = _dedupe_status_paths(status_paths or [_current_route_status_path()])
         for path in targets:
             try:
@@ -2119,6 +2141,34 @@ def _write_route_status(tier, model, reason, *, status_paths=None):
                 pass
     except Exception:
         pass
+
+
+def _server_model_context_window(server, model_name, *, prefer_session=True):
+    if prefer_session:
+        session_window = _coerce_context_window(getattr(server, "session_context_window", None))
+        if session_window:
+            return session_window
+    windows = getattr(server, "context_windows", {}) or {}
+    if not isinstance(windows, dict):
+        return None
+    candidates = []
+    normalized = _normalize_model_name(model_name)
+    base = _selector_base_model_name(model_name)
+    raw = str(model_name or "").strip()
+    candidates.extend([raw, normalized, base])
+    for key, value in windows.items():
+        key_text = str(key or "").strip()
+        key_norm = _normalize_model_name(key_text)
+        if key_text in candidates or key_norm in candidates or _selector_base_model_name(key_text) in candidates:
+            window = _coerce_context_window(value)
+            if window:
+                return window
+    return None
+
+
+def _route_status_context_kwargs(server, model_name):
+    window = _server_model_context_window(server, model_name, prefer_session=True)
+    return {"context_window_tokens": window} if window else {}
 
 
 def _wait_local_server_ready(port, attempts=50, delay=0.1):
@@ -3338,7 +3388,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             if _is_claude_shell_model(incoming_model):
                 payload["model"] = heavy_model
             elif (
-                _requests_mimo_1m_context(heavy_model)
+                _model_requests_mimo_1m_context(
+                    heavy_model,
+                    _server_model_context_window(self.server, heavy_model, prefer_session=False),
+                )
                 and _normalize_model_name(incoming_model) == _normalize_model_name(heavy_base_model)
             ):
                 payload["model"] = heavy_model
@@ -3421,6 +3474,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     payload.get("model", ""),
                     reason,
                     status_paths=getattr(self.server, "route_status_paths", None),
+                    **_route_status_context_kwargs(self.server, payload.get("model", "")),
                 )
                 _emit_event("started", payload.get("model", ""), note=f"tier={level} reason={reason}")
                 # 保存 level 供后续使用
@@ -3437,6 +3491,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     payload.get("model", ""),
                     "tool_continue",
                     status_paths=getattr(self.server, "route_status_paths", None),
+                    **_route_status_context_kwargs(self.server, payload.get("model", "")),
                 )
                 _emit_event("streaming", payload.get("model", ""), note="tool_continue")
                 from mms_router import log_route
@@ -3449,6 +3504,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     payload.get("model", ""),
                     "no_user_msg",
                     status_paths=getattr(self.server, "route_status_paths", None),
+                    **_route_status_context_kwargs(self.server, payload.get("model", "")),
                 )
                 _emit_event("streaming", payload.get("model", ""), note="no_user_msg")
                 self.server._last_level = prev_level
@@ -3460,6 +3516,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 payload.get("model", ""),
                 "direct",
                 status_paths=getattr(self.server, "route_status_paths", None),
+                **_route_status_context_kwargs(self.server, payload.get("model", "")),
             )
             _emit_event("started", payload.get("model", ""), note="direct")
 
@@ -3546,7 +3603,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 route_provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
                 route_provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
                 resolved_model = str(route_payload.get("model") or "")
-                enable_mimo_1m_context = _requests_mimo_1m_context(resolved_model)
+                enable_mimo_1m_context = _model_requests_mimo_1m_context(
+                    resolved_model,
+                    _server_model_context_window(self.server, resolved_model, prefer_session=False),
+                )
                 wire_model = profile_model_alias(
                     resolved_model,
                     protocol="anthropic_messages",
@@ -3668,6 +3728,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                     metrics_model,
                                     reason,
                                     status_paths=getattr(self.server, "route_status_paths", None),
+                                    **_route_status_context_kwargs(self.server, metrics_model),
                                 )
                                 continue
                             if response.status_code in (401, 403):
@@ -3777,6 +3838,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             metrics_model,
                             reason,
                             status_paths=getattr(self.server, "route_status_paths", None),
+                            **_route_status_context_kwargs(self.server, metrics_model),
                         )
                         continue
                     if response.status_code in (401, 403):
@@ -3830,6 +3892,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 metrics_model,
                                 failure,
                                 status_paths=getattr(self.server, "route_status_paths", None),
+                                **_route_status_context_kwargs(self.server, metrics_model),
                             )
                             continue
                     if response.status_code == 200:
@@ -3884,6 +3947,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             str(route_payload.get("model") or ""),
                             token,
                             status_paths=getattr(self.server, "route_status_paths", None),
+                            **_route_status_context_kwargs(self.server, str(route_payload.get("model") or "")),
                         )
                         continue
                     if response_started:
@@ -5024,6 +5088,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 model_name,
                                 reason,
                                 status_paths=getattr(self.server, "route_status_paths", None),
+                                **_route_status_context_kwargs(self.server, model_name),
                             )
                             continue
                         if _should_try_chatcompletions_fallback(response.status_code, body_text):
@@ -5886,6 +5951,8 @@ def gateway_claude_bridge(
     rescue_fallback_model="",
     rescue_fallback_cli="",
     rescue_hot_fallback_enabled=None,
+    context_windows=None,
+    session_context_window=None,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -5913,6 +5980,8 @@ def gateway_claude_bridge(
     server.advertised_models = list(advertised_models or [])
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
+    server.context_windows = dict(context_windows or {})
+    server.session_context_window = _coerce_context_window(session_context_window)
     # 止血：暂时禁用 bridge 层跨 provider slot 切换，避免实际 provider/account 漂移。
     server.slot_configs = {}
     server.provider_id = str(provider_id or "")

@@ -56,12 +56,12 @@
           </div>
           <div class="tab-panel" data-tab-panel="models">
             <div class="model-section">
-              <p class="muted">这里配置当前通道会给 MMS 看到哪些模型，以及这些模型能不能做文本、看图、工具调用、思考、长上下文和缓存敏感路由。取消「显示」会写入 hidden_models；取消「文本」会同步隐藏，避免普通启动页继续展示。</p>
+              <p class="muted">这里配置当前通道会给 MMS 看到哪些模型，以及这些模型能不能做文本、看图、工具调用、思考、上下文 tokens 和缓存敏感路由。取消「显示」会写入 hidden_models；取消「文本」会同步隐藏，避免普通启动页继续展示。</p>
               <div class="model-inventory-summary" id="modelInventorySummary"></div>
               <div class="card capability-guide" id="modelCapabilityGuide">
                 <div>
                   <strong>能力开关怎么影响启动</strong>
-                  <p class="muted">「显示/文本」决定普通模型选择是否出现；「看图」决定 vision sidecar 候选；「缓存敏感」会让双协议模型优先走更安全的 messages 路径。长上下文是能力标记，Claude 1M 还要看通道里的 Claude 1M / [1m] selector。</p>
+                  <p class="muted">「显示/文本」决定普通模型选择是否出现；「看图」决定 vision sidecar 候选；「上下文 tokens」决定 statusline、auto compact 和 MiMo 1M bridge 能力。旧的 [1m] selector 仍兼容，但不再需要手写模型名后缀。</p>
                 </div>
                 <div class="btns">
                   <button id="refreshCapabilitySources" class="ghost">刷新能力证据入口</button>

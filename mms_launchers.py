@@ -437,6 +437,29 @@ def _provider_advertises_plain_mimo_1m(provider_id):
     return bool(provider and any(token in provider for token in _MIMO_PLAIN_ONE_M_PROVIDER_HINTS))
 
 
+def _capability_context_window(model_name, *, provider_id=None, accepted_sources=None):
+    try:
+        caps = resolve_model_capabilities(str(model_name or "").strip(), provider_id=provider_id or "")
+    except Exception:
+        if accepted_sources is None or "model_policy" not in set(accepted_sources):
+            return None
+        try:
+            from mms_capability_resolver import load_default_model_policy
+
+            caps = resolve_model_capabilities(
+                str(model_name or "").strip(),
+                provider_id=provider_id or "",
+                approved_facts={},
+                model_policy=load_default_model_policy(),
+            )
+        except Exception:
+            return None
+    source = caps.get("sources", {}).get("context_window_tokens")
+    if accepted_sources is not None and source not in set(accepted_sources):
+        return None
+    return _coerce_context_window(caps.get("context_window_tokens"))
+
+
 def _model_context_overrides_path():
     try:
         config_root = _resolve_mms_config_dir()
@@ -547,6 +570,16 @@ def _lookup_context_window(model_name, provider_id=None):
     if model_exact is not None:
         return model_exact
 
+    # User policy is the preferred surface for context size. It must win before
+    # the legacy MiMo safe-base guard that otherwise caps plain model names.
+    policy_window = _capability_context_window(
+        clean,
+        provider_id=provider_id,
+        accepted_sources={"model_policy", "manual_override"},
+    )
+    if policy_window is not None:
+        return policy_window
+
     if has_1m_suffix:
         suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
         if suffixed_window is not None:
@@ -570,16 +603,13 @@ def _lookup_context_window(model_name, provider_id=None):
     if model_clean is not None:
         return model_clean
 
-    try:
-        from mms_capability_resolver import resolve_model_capabilities
-
-        caps = resolve_model_capabilities(clean, provider_id=provider_id or "")
-        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
-            approved_window = _coerce_context_window(caps.get("context_window_tokens"))
-            if approved_window is not None:
-                return approved_window
-    except Exception:
-        pass
+    approved_window = _capability_context_window(
+        clean,
+        provider_id=provider_id,
+        accepted_sources={"approved_facts", "model_policy", "manual_override"},
+    )
+    if approved_window is not None:
+        return approved_window
 
     profiled = profile_context_window(clean, provider_id=provider_id or "")
     if profiled is not None:
@@ -630,6 +660,25 @@ def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
                 w = 200_000
         windows.append(w or _DEFAULT_CONTEXT_WINDOW)
     return min(windows) if windows else _DEFAULT_CONTEXT_WINDOW
+
+
+def _context_windows_for_models(*models, enable_claude_1m=True, provider_id=None):
+    result = {}
+    for model in models:
+        if not model:
+            continue
+        raw_model = str(model).strip()
+        if not raw_model:
+            continue
+        clean = raw_model.replace(_ONE_M_CONTEXT_SUFFIX, "").strip()
+        window = _effective_context_window(
+            raw_model,
+            enable_claude_1m=enable_claude_1m,
+            provider_id=provider_id,
+        )
+        result[raw_model] = window
+        result[clean] = window
+    return result
 
 
 @contextmanager
@@ -8532,7 +8581,12 @@ def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     }
     _inject_selected_model_name(env, resolved_model)
-    _apply_claude_model_overrides(env, model_info or resolved_model, enable_1m=enable_claude_1m)
+    _apply_claude_model_overrides(
+        env,
+        model_info or resolved_model,
+        enable_1m=enable_claude_1m,
+        provider_id=(runtime or {}).get("id"),
+    )
     if isinstance(model_info, dict):
         env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
         env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
@@ -8943,7 +8997,7 @@ def _primary_claude_model(model_info):
     return _normalized_model_name(model_info)
 
 
-def _with_1m_suffix(model_name, *, enable_1m=True):
+def _with_1m_suffix(model_name, *, enable_1m=True, provider_id=None):
     """对 opus/sonnet Claude 模型追加 [1m] 后缀以启用 1M context。
     Haiku 不支持 1M。非 Claude 模型不能把 [1m] 暴露给 Claude Code model slot。
     Claude Code 会在 API 请求前自动剥离 Claude-family 的 [1m]。
@@ -8963,11 +9017,14 @@ def _with_1m_suffix(model_name, *, enable_1m=True):
         return normalized
     # opus 和 sonnet 支持 1M context
     if any(k in lower for k in ("opus", "sonnet")) and "haiku" not in lower:
+        configured_window = _lookup_context_window(normalized, provider_id=provider_id)
+        if configured_window is not None and configured_window < 1_000_000:
+            return normalized
         return normalized + _ONE_M_CONTEXT_SUFFIX
     return normalized
 
 
-def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
+def _apply_claude_model_overrides(target, model_info, *, enable_1m=True, provider_id=None):
     primary_model = _primary_claude_model(model_info)
     if not primary_model:
         return ""
@@ -8976,22 +9033,36 @@ def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
         opus_model = _normalized_model_name(model_info.get("opus")) or primary_model
         sonnet_model = _normalized_model_name(model_info.get("sonnet")) or primary_model
         haiku_model = _normalized_model_name(model_info.get("haiku")) or primary_model
-        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(opus_model, enable_1m=enable_1m)
-        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(sonnet_model, enable_1m=enable_1m)
+        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(
+            opus_model,
+            enable_1m=enable_1m,
+            provider_id=provider_id,
+        )
+        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(
+            sonnet_model,
+            enable_1m=enable_1m,
+            provider_id=provider_id,
+        )
         target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku_model  # haiku 不支持 1M
-        target["ANTHROPIC_MODEL"] = _with_1m_suffix(primary_model, enable_1m=enable_1m)
+        target["ANTHROPIC_MODEL"] = _with_1m_suffix(
+            primary_model,
+            enable_1m=enable_1m,
+            provider_id=provider_id,
+        )
         target["ANTHROPIC_REASONING_MODEL"] = _with_1m_suffix(
             sonnet_model or primary_model,
             enable_1m=enable_1m,
+            provider_id=provider_id,
         )
         subagent_model = _normalized_model_name(model_info.get("subagent")) or sonnet_model or primary_model
         target["CLAUDE_CODE_SUBAGENT_MODEL"] = _with_1m_suffix(
             subagent_model,
             enable_1m=enable_1m,
+            provider_id=provider_id,
         )
         return primary_model
 
-    primary_1m = _with_1m_suffix(primary_model, enable_1m=enable_1m)
+    primary_1m = _with_1m_suffix(primary_model, enable_1m=enable_1m, provider_id=provider_id)
     for key in (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -9120,6 +9191,20 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                 f"[dim]vision sidecar: {_vision_sidecar.get('provider_id', '-')} / {_vision_sidecar.get('model', '-')}[/dim]"
             )
         rescue_bridge_kwargs = _rescue_bridge_kwargs()
+        _context_models = [m for m in (probe_model, lb_medium, lb_light) if m]
+        _session_context_window = _effective_context_window(
+            *(_context_models or [probe_model]),
+            enable_claude_1m=enable_claude_1m,
+            provider_id=provider_id,
+        )
+        _bridge_context_kwargs = {
+            "context_windows": _context_windows_for_models(
+                *(_context_models or [probe_model]),
+                enable_claude_1m=enable_claude_1m,
+                provider_id=provider_id,
+            ),
+            "session_context_window": _session_context_window,
+        }
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -9150,6 +9235,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     reasoning_effort=_reasoning_effort,
                                                     native_fallback_routes=native_fallback_routes,
                                                     vision_sidecar=_vision_sidecar,
+                                                    **_bridge_context_kwargs,
                                                     **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -9190,6 +9276,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    **_bridge_context_kwargs,
                     **rescue_bridge_kwargs,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -9250,6 +9337,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 reasoning_enabled=_thinking_enabled,
                                                 reasoning_effort=_reasoning_effort,
                                                 vision_sidecar=_vision_sidecar,
+                                                **_bridge_context_kwargs,
                                                 **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
@@ -9287,6 +9375,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                 vision_sidecar=_vision_sidecar,
+                                                **_bridge_context_kwargs,
                                                 **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
@@ -9331,6 +9420,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                     vision_sidecar=_vision_sidecar,
+                                                    **_bridge_context_kwargs,
                                                     **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -9386,6 +9476,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    **_bridge_context_kwargs,
                     **rescue_bridge_kwargs,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -9423,12 +9514,22 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
 
     if isinstance(model_info, dict):
         if not _skip_model:
-            _apply_claude_model_overrides(env, model_info, enable_1m=enable_claude_1m)
+            _apply_claude_model_overrides(
+                env,
+                model_info,
+                enable_1m=enable_claude_1m,
+                provider_id=(runtime or {}).get("id"),
+            )
 
         env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
         env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
     elif not _skip_model:
-        _apply_claude_model_overrides(env, model_info, enable_1m=enable_claude_1m)
+        _apply_claude_model_overrides(
+            env,
+            model_info,
+            enable_1m=enable_claude_1m,
+            provider_id=(runtime or {}).get("id"),
+        )
 
     # ── Context window: 用真实模型名（probe_model）计算，非壳名 ──
     _real_models = [m for m in (probe_model, lb_medium, lb_light) if m]
@@ -10142,6 +10243,7 @@ def _claude_gateway_env(
             required_settings_env,
             selected_model,
             enable_1m=enable_claude_1m,
+            provider_id=provider_id,
         )
     # 非 Claude 模型默认仍可用于 status；但 non-Claude [1m] selector 不能进入
     # ANTHROPIC_MODEL，否则 Claude Code compact/resume 会按字面模型名校验失败。
@@ -10253,13 +10355,18 @@ def _claude_gateway_env(
         if sensitive_provider:
             env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
         if best_model:
-            best_1m = _with_1m_suffix(best_model, enable_1m=enable_claude_1m)
+            best_1m = _with_1m_suffix(best_model, enable_1m=enable_claude_1m, provider_id=provider_id)
             for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
                         "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_REASONING_MODEL"):
                 env[key] = best_1m
             env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = best_model  # haiku 不支持 1M
         if selected_model:
-            _apply_claude_model_overrides(env, selected_model, enable_1m=enable_claude_1m)
+            _apply_claude_model_overrides(
+                env,
+                selected_model,
+                enable_1m=enable_claude_1m,
+                provider_id=provider_id,
+            )
         if display_model:
             _apply_claude_visible_model_overrides(
                 env,
@@ -10287,9 +10394,20 @@ def _claude_gateway_env(
         status_model = display_model or selected_model or heavy_model or best_model or "unknown"
         status_tier = "heavy" if auth_token else "-"
         status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
+        status_context_window = _effective_context_window(
+            *[m for m in (status_model, medium_model, light_model) if m],
+            enable_claude_1m=enable_claude_1m,
+            provider_id=provider_id,
+        )
         _ensure_bridge_helpers()
         try:
-            _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
+            _write_route_status(
+                status_tier,
+                status_model,
+                status_reason,
+                status_paths=[route_status_path],
+                context_window_tokens=status_context_window,
+            )
         except Exception:
             pass
 

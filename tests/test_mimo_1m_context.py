@@ -71,6 +71,35 @@ def test_mimo_without_1m_suffix_keeps_safe_context_on_anthropic(monkeypatch):
     )
 
 
+def test_mimo_context_policy_enables_plain_model_1m(monkeypatch, tmp_path):
+    import mms_launchers
+
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mimo-v2.5": {
+                        "capabilities": {
+                            "context_window_tokens": 1_000_000,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        mms_launchers._lookup_context_window(
+            "mimo-v2.5",
+            provider_id="mimo-direct-anthropic",
+        )
+        == 1_000_000
+    )
+
+
 def test_mimo_plain_model_uses_one_m_on_openrouter_and_openai_routes(monkeypatch, tmp_path):
     import mms_launchers
     import mms_provider_profiles
@@ -85,7 +114,7 @@ def test_mimo_plain_model_uses_one_m_on_openrouter_and_openai_routes(monkeypatch
     assert mms_launchers._lookup_context_window("mimo-v2.5-pro", provider_id="mimo-direct-openai") == 1_048_576
 
 
-def test_direct_mimo_anthropic_model_patch_exposes_non_pro_selector():
+def test_direct_mimo_anthropic_model_patch_does_not_invent_1m_selector():
     import mms_core
 
     patched = mms_core._apply_provider_model_patch(
@@ -100,12 +129,11 @@ def test_direct_mimo_anthropic_model_patch_exposes_non_pro_selector():
         },
     )
 
-    assert "mimo-v2.5[1m]" in patched["models"]
-    assert "mimo-v2.5-pro[1m]" in patched["models"]
-    assert patched["model_sources"]["mimo-v2.5[1m]"] == "derived_alias"
+    assert "mimo-v2.5[1m]" not in patched["models"]
+    assert "mimo-v2.5-pro[1m]" not in patched["models"]
 
 
-def test_direct_mimo_base_url_anthropic_model_patch_exposes_non_pro_selector():
+def test_direct_mimo_base_url_anthropic_model_patch_does_not_invent_1m_selector():
     import mms_core
 
     patched = mms_core._apply_provider_model_patch(
@@ -120,8 +148,8 @@ def test_direct_mimo_base_url_anthropic_model_patch_exposes_non_pro_selector():
         },
     )
 
-    assert "mimo-v2.5[1m]" in patched["models"]
-    assert "mimo-v2.5-pro[1m]" in patched["models"]
+    assert "mimo-v2.5[1m]" not in patched["models"]
+    assert "mimo-v2.5-pro[1m]" not in patched["models"]
 
 
 def test_openrouter_mimo_model_patch_does_not_expose_selector_alias():

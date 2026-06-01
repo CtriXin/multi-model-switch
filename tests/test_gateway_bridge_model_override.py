@@ -10,6 +10,8 @@ def _run_gateway_bridge_once(
     incoming_model: str,
     *,
     heavy_model: str = "mimo-v2.5",
+    context_windows: dict[str, int] | None = None,
+    session_context_window: int | None = None,
     messages: list[dict] | None = None,
     system: str | list[dict] | None = None,
     vision_sidecar: dict | None = None,
@@ -75,6 +77,8 @@ def _run_gateway_bridge_once(
         no_proxy="",
         provider_id="mimo-direct-anthropic",
         provider_profile="",
+        context_windows=context_windows or {},
+        session_context_window=session_context_window,
         reasoning_enabled=True,
         reasoning_effort="high",
         minimal_claude_header_passthrough=False,
@@ -153,6 +157,20 @@ def test_gateway_bridge_maps_mimo_non_pro_base_request_to_1m_selector_when_heavy
         monkeypatch,
         "mimo-v2.5",
         heavy_model="mimo-v2.5[1m]",
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "mimo-v2.5"
+    assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]
+
+
+def test_gateway_bridge_uses_configured_mimo_context_for_beta(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5",
+        context_windows={"mimo-v2.5": 1_000_000},
+        session_context_window=1_000_000,
     )
 
     assert captured["status"] == 200

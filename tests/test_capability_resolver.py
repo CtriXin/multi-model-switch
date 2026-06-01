@@ -115,6 +115,25 @@ def test_approved_registry_export_facts_win_over_provider_profile() -> None:
         assert caps["sources"][field] == "approved_facts"
 
 
+def test_model_policy_context_wins_over_approved_facts() -> None:
+    caps = resolve_model_capabilities(
+        "mimo-v2.5",
+        approved_facts={"mimo-v2.5": {"context_window_tokens": 262_144}},
+        model_policy={
+            "models": {
+                "mimo-v2.5": {
+                    "capabilities": {
+                        "context_window_tokens": 1_000_000,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["sources"]["context_window_tokens"] == "model_policy"
+
+
 def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_alias(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     import mms_provider_profiles

@@ -654,6 +654,32 @@ def test_config_web_text_capability_false_hides_model_in_policy(tmp_path):
     assert entry["capabilities"]["text"] is False
 
 
+def test_config_web_context_tokens_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "tool_use": True,
+        "reasoning": True,
+        "long_context": False,
+        "context_window_tokens": 1_000_000,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["long_context"] is True
+
+
 def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
