@@ -4790,7 +4790,7 @@ def _apply_runtime_priority_changes(cfg, pri_changes):
 
 def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=None, provider_id=None):
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
-    from mms_tui_launcher_entry import handle_tui_launcher_selection
+    from mms_display.launcher_entry import handle_tui_launcher_selection
 
     return handle_tui_launcher_selection(
         sys.modules[__name__],
