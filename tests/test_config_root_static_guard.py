@@ -21,7 +21,7 @@ KNOWN_BAD_PATTERNS = {
     "mms_runtime/health_cache.py": [
         'HEALTH_CACHE_DIR = Path(_real_home()) / ".config" / "mms"',
     ],
-    "mms_speed_stats.py": [
+    "mms_runtime/speed_stats.py": [
         'PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms"))',
     ],
 }

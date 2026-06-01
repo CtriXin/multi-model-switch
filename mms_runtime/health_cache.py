@@ -3,7 +3,7 @@
 Aggregates existing speed-stats data into per-model health records
 with status (ok/slow/degraded/blocked) and latency_bucket (fast/medium/slow).
 Uses in-memory cache backed by an optional JSON file under the selected MMS config root.
-No network probes — purely reads data already collected by mms_speed_stats.
+No network probes — purely reads data already collected by mms_runtime.speed_stats.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mms_state_io import resolve_mms_config_dir
-from mms_speed_stats import get_speed_entry
+from mms_runtime.speed_stats import get_speed_entry
 
 
 DEFAULT_HEALTH_CACHE_DIR = Path(resolve_mms_config_dir())

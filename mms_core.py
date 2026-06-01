@@ -3198,7 +3198,7 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
 
 
 def _display_provider_model_table(provider, probe):
-    from mms_speed_stats import get_speed_entry
+    from mms_runtime.speed_stats import get_speed_entry
     from mms_command_tools import display_provider_model_table
 
     _ensure_rich()

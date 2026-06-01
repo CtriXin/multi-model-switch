@@ -373,7 +373,7 @@ def test_usage_local_stats_use_selected_config_root(monkeypatch, tmp_path):
 
 
 def test_speed_stats_use_selected_config_root(monkeypatch, tmp_path):
-    import mms_speed_stats
+    import mms_runtime.speed_stats as mms_speed_stats
 
     real_home = tmp_path / "real-home"
     stable_root = real_home / ".config" / "mms"
@@ -405,7 +405,7 @@ def test_speed_stats_use_selected_config_root(monkeypatch, tmp_path):
 
 def test_health_cache_uses_selected_config_root(monkeypatch, tmp_path):
     import mms_runtime.health_cache as mms_health_cache
-    import mms_speed_stats
+    import mms_runtime.speed_stats as mms_speed_stats
 
     real_home = tmp_path / "real-home"
     stable_root = real_home / ".config" / "mms"

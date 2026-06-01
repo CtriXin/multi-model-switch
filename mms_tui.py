@@ -802,7 +802,7 @@ def select_submodel_tui(
     sorted_models = _sort_model_entries_for_tui(models, family_name)
     provider_options_cache = dict(provider_options or {})
     try:
-        from mms_speed_stats import get_speed_entry as _get_speed_entry
+        from mms_runtime.speed_stats import get_speed_entry as _get_speed_entry
     except Exception:
         _get_speed_entry = None
 

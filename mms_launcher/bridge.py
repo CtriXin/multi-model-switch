@@ -28,7 +28,7 @@ def load_bridge_helpers():
 
 
 def load_speed_stats_helper():
-    from mms_speed_stats import build_provider_speed_scope
+    from mms_runtime.speed_stats import build_provider_speed_scope
 
     return build_provider_speed_scope
 
