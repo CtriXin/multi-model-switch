@@ -448,7 +448,7 @@ def test_health_cache_uses_selected_config_root(monkeypatch, tmp_path):
 
 
 def test_runtime_events_use_selected_config_root(monkeypatch, tmp_path):
-    import mms_events
+    import mms_runtime.events as mms_events
 
     real_home = tmp_path / "real-home"
     stable_root = real_home / ".config" / "mms"

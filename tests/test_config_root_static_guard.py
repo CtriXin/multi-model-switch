@@ -15,7 +15,7 @@ KNOWN_BAD_PATTERNS = {
         'PRIMARY_CREDENTIALS_PATH = os.path.expanduser("~/.config/mms/credentials.sh")',
         'BROKER_CACHE_DIR = os.path.expanduser("~/.config/mms/cache/broker")',
     ],
-    "mms_events.py": [
+    "mms_runtime/events.py": [
         'EVENT_DIR = Path.home() / ".config" / "mms" / "events"',
     ],
     "mms_runtime/health_cache.py": [

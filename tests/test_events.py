@@ -25,8 +25,8 @@ def signal_dir(tmp_path):
 def event_dir(tmp_path):
     d = tmp_path / "events"
     d.mkdir()
-    with patch("mms_events.EVENT_DIR", d), \
-         patch("mms_events.LATEST_PATH", d / "latest.json"):
+    with patch("mms_runtime.events.EVENT_DIR", d), \
+         patch("mms_runtime.events.LATEST_PATH", d / "latest.json"):
         yield d
 
 
@@ -34,7 +34,7 @@ def event_dir(tmp_path):
 
 class TestEmitEvent:
     def test_basic_emit(self, event_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         ev = emit_event("started", "kimi-k2.5")
         assert ev["type"] == "started"
         assert ev["model"] == "kimi-k2.5"
@@ -44,25 +44,25 @@ class TestEmitEvent:
         assert ev["note"] is None
 
     def test_emit_with_optional_fields(self, event_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         ev = emit_event("done", "glm-4", run_id="r1", task_id="t1", note="ok")
         assert ev["run_id"] == "r1"
         assert ev["task_id"] == "t1"
         assert ev["note"] == "ok"
 
     def test_invalid_type_raises(self, event_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         with pytest.raises(ValueError, match="Unknown event type"):
             emit_event("invalid_type", "model")
 
     def test_all_valid_types(self, event_dir):
-        from mms_events import emit_event, EventType
+        from mms_runtime.events import emit_event, EventType
         for t in EventType:
             ev = emit_event(t.value, "test-model")
             assert ev["type"] == t.value
 
     def test_writes_latest_json(self, event_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("queued", "kimi-k2.5")
         latest = event_dir / "latest.json"
         assert latest.exists()
@@ -71,7 +71,7 @@ class TestEmitEvent:
         assert data["model"] == "kimi-k2.5"
 
     def test_appends_to_daily_jsonl(self, event_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("started", "m1")
         emit_event("done", "m1")
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -83,7 +83,7 @@ class TestEmitEvent:
         assert json.loads(lines[1])["type"] == "done"
 
     def test_writes_gbrain_signals_for_relevant_events(self, event_dir, signal_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("done", "glm-4", run_id="r1", task_id="t1", note="ok")
         for _ in range(50):
             signal_path = signal_dir / "mms-signals.json"
@@ -97,14 +97,14 @@ class TestEmitEvent:
         assert data["signals"][0]["model"] == "glm-4"
 
     def test_skips_gbrain_signals_for_irrelevant_events(self, event_dir, signal_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("started", "glm-4")
         import time
         time.sleep(0.02)
         assert not (signal_dir / "mms-signals.json").exists()
 
     def test_writes_user_profile_for_explicit_preference_note(self, event_dir, signal_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("done", "glm-4", run_id="r1", task_id="planner", note="user prefers terse responses and worktree flow")
         for _ in range(50):
             profile_path = signal_dir / "user-profile.json"
@@ -118,7 +118,7 @@ class TestEmitEvent:
         assert "prefers worktree workflow" in summaries
 
     def test_merges_duplicate_profile_evidence(self, event_dir, signal_dir):
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("done", "glm-4", run_id="r1", task_id="planner", note="user prefers terse responses")
         emit_event("done", "glm-4", run_id="r2", task_id="planner", note="user prefers terse responses")
         for _ in range(50):
@@ -137,11 +137,11 @@ class TestEmitEvent:
 
 class TestGetLatestEvent:
     def test_returns_none_when_no_file(self, event_dir):
-        from mms_events import get_latest_event
+        from mms_runtime.events import get_latest_event
         assert get_latest_event() is None
 
     def test_returns_latest(self, event_dir):
-        from mms_events import emit_event, get_latest_event
+        from mms_runtime.events import emit_event, get_latest_event
         emit_event("started", "m1")
         emit_event("done", "m2")
         latest = get_latest_event()
@@ -153,11 +153,11 @@ class TestGetLatestEvent:
 
 class TestGetRecentEvents:
     def test_empty_when_no_file(self, event_dir):
-        from mms_events import get_recent_events
+        from mms_runtime.events import get_recent_events
         assert get_recent_events() == []
 
     def test_returns_in_order(self, event_dir):
-        from mms_events import emit_event, get_recent_events
+        from mms_runtime.events import emit_event, get_recent_events
         emit_event("queued", "m1")
         emit_event("started", "m1")
         emit_event("streaming", "m1")
@@ -167,7 +167,7 @@ class TestGetRecentEvents:
         assert events[2]["type"] == "streaming"
 
     def test_limit(self, event_dir):
-        from mms_events import emit_event, get_recent_events
+        from mms_runtime.events import emit_event, get_recent_events
         for i in range(10):
             emit_event("started", f"m{i}")
         events = get_recent_events(limit=3)
@@ -185,7 +185,7 @@ class TestCleanup:
         old_file = event_dir / f"{old_date}.jsonl"
         old_file.write_text('{"type":"done"}\n')
 
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("started", "m1")  # triggers cleanup
 
         assert not old_file.exists()
@@ -196,7 +196,7 @@ class TestCleanup:
         recent_file = event_dir / f"{recent_date}.jsonl"
         recent_file.write_text('{"type":"done"}\n')
 
-        from mms_events import emit_event
+        from mms_runtime.events import emit_event
         emit_event("started", "m1")
 
         assert recent_file.exists()

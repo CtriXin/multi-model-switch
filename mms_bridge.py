@@ -23,7 +23,7 @@ from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body
 from mms_i18n import get_language as _get_mms_language, normalize_language as _normalize_mms_language
 
 try:
-    from mms_events import emit_event as _emit_event
+    from mms_runtime.events import emit_event as _emit_event
 except ImportError:
     def _emit_event(*_a, **_kw): pass
 

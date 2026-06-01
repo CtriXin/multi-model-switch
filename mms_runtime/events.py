@@ -1,5 +1,5 @@
 """
-mms_events.py — Unified runtime event schema and file-based event emitter.
+mms_runtime.events — Unified runtime event schema and file-based event emitter.
 
 Provides a minimal event bus for tracking model execution lifecycle
 (queued, started, streaming, fallback, retrying, done, failed).

@@ -2687,7 +2687,7 @@ def _set_rescue_hot_fallback_enabled(cfg, enabled=False):
 
 def _latest_rescue_hot_fallback_event():
     try:
-        from mms_events import get_recent_events
+        from mms_runtime.events import get_recent_events
     except Exception:
         return None
     from mms_command_tools import latest_rescue_hot_fallback_event
