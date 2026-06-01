@@ -4,7 +4,7 @@ import types
 
 
 def test_resolve_native_fallback_routes_finds_same_vendor_direct():
-    from mms_native_fallback import resolve_native_fallback_routes
+    from mms_runtime.native_fallback import resolve_native_fallback_routes
 
     runtime = {
         "id": "newapi-personal-tokyo",
@@ -47,7 +47,7 @@ def test_resolve_native_fallback_routes_finds_same_vendor_direct():
 
 def test_native_fallback_skips_legacy_config_for_preview_root(monkeypatch, tmp_path):
     import mms_core
-    from mms_native_fallback import resolve_native_fallback_routes
+    from mms_runtime.native_fallback import resolve_native_fallback_routes
 
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "mms-next"))
     load_called = {"value": False}
@@ -83,7 +83,7 @@ def test_native_fallback_skips_legacy_config_for_preview_root(monkeypatch, tmp_p
 
 
 def test_resolve_native_fallback_routes_uses_anthropic_profile_for_mimo_relays(monkeypatch):
-    import mms_native_fallback
+    import mms_runtime.native_fallback as mms_native_fallback
 
     monkeypatch.setattr(
         mms_native_fallback,
@@ -129,7 +129,7 @@ def test_resolve_native_fallback_routes_uses_anthropic_profile_for_mimo_relays(m
 
 
 def test_resolve_codex_responses_fallback_routes_finds_codex_provider(monkeypatch):
-    import mms_native_fallback
+    import mms_runtime.native_fallback as mms_native_fallback
 
     monkeypatch.setattr(
         mms_native_fallback,

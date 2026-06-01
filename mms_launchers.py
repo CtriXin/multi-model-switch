@@ -1771,7 +1771,7 @@ def _runtime_vision_sidecar(runtime):
 
 def _resolve_native_fallback_routes(runtime, model_name):
     try:
-        from mms_native_fallback import resolve_native_fallback_routes
+        from mms_runtime.native_fallback import resolve_native_fallback_routes
 
         return resolve_native_fallback_routes(runtime, model_name)
     except Exception:
@@ -1780,7 +1780,7 @@ def _resolve_native_fallback_routes(runtime, model_name):
 
 def _resolve_codex_responses_fallback_routes(runtime, model_name):
     try:
-        from mms_native_fallback import resolve_codex_responses_fallback_routes
+        from mms_runtime.native_fallback import resolve_codex_responses_fallback_routes
 
         return resolve_codex_responses_fallback_routes(runtime, model_name)
     except Exception:
