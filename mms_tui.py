@@ -9,7 +9,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from math import pow
-from mms_fake_upstream import status_payload as _fake_upstream_status_payload
+from mms_runtime.fake_upstream import status_payload as _fake_upstream_status_payload
 from mms_runtime.i18n import pick as _L, get_language as _get_language
 from mms_state_io import resolve_mms_config_dir
 

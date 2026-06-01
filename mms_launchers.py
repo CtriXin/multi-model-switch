@@ -115,7 +115,7 @@ from mms_core import (
     preference_asset_root,
 )
 from mms_capability_resolver import resolve_model_capabilities
-from mms_fake_upstream import (
+from mms_runtime.fake_upstream import (
     ensure_local_proxy as _ensure_fake_upstream_proxy,
     fake_proxy_probe as _fake_proxy_probe,
     is_enabled as _fake_upstream_enabled,

@@ -91,7 +91,7 @@ from mms_broker import (
     run_broker_profile_interactive,
     run_broker_profile,
 )
-from mms_fake_upstream import (
+from mms_runtime.fake_upstream import (
     fake_httpx_response as _fake_httpx_response,
     fake_proxy_probe as _fake_proxy_probe,
     is_enabled as _fake_upstream_enabled,

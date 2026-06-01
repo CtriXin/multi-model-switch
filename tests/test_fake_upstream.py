@@ -49,7 +49,7 @@ def test_fake_upstream_runtime_httpx_request_and_log(monkeypatch, tmp_path):
 
 def test_fake_upstream_proxy_probe(monkeypatch, tmp_path):
     import mms_launchers
-    from mms_fake_upstream import tail_log
+    from mms_runtime.fake_upstream import tail_log
 
     monkeypatch.setenv("MMS_FAKE_UPSTREAM", "1")
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
@@ -70,7 +70,7 @@ def test_fake_upstream_proxy_probe(monkeypatch, tmp_path):
 
 def test_fake_upstream_local_proxy_intercepts_https(monkeypatch, tmp_path):
     import httpx
-    from mms_fake_upstream import ensure_local_proxy, status_payload, tail_log
+    from mms_runtime.fake_upstream import ensure_local_proxy, status_payload, tail_log
 
     monkeypatch.setenv("MMS_FAKE_UPSTREAM", "1")
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
@@ -135,7 +135,7 @@ def test_apply_runtime_network_profile_uses_fake_upstream_proxy_under_fake_upstr
 
 def test_fake_upstream_patch_httpx_module(monkeypatch, tmp_path):
     import httpx
-    from mms_fake_upstream import patch_httpx_module
+    from mms_runtime.fake_upstream import patch_httpx_module
 
     monkeypatch.setenv("MMS_FAKE_UPSTREAM", "1")
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
@@ -217,7 +217,7 @@ def test_fake_upstream_command_handler_toggles_and_renders_log():
 
 def test_fake_upstream_form_body_is_redacted(monkeypatch, tmp_path):
     import httpx
-    from mms_fake_upstream import ensure_local_proxy, tail_log
+    from mms_runtime.fake_upstream import ensure_local_proxy, tail_log
 
     monkeypatch.setenv("MMS_FAKE_UPSTREAM", "1")
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
@@ -259,7 +259,7 @@ def test_fake_upstream_guard_still_requires_real_proxy(monkeypatch):
 
 
 def test_handle_connect_swallows_tls_handshake_failure(monkeypatch):
-    import mms_fake_upstream
+    import mms_runtime.fake_upstream as mms_fake_upstream
 
     events = []
 
@@ -299,7 +299,7 @@ def test_handle_connect_swallows_tls_handshake_failure(monkeypatch):
 
 
 def test_ensure_host_tls_cert_rebuilds_stale_mismatched_pair(monkeypatch, tmp_path):
-    import mms_fake_upstream
+    import mms_runtime.fake_upstream as mms_fake_upstream
 
     if not shutil.which("openssl"):
         return
