@@ -135,6 +135,24 @@ def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_ali
     assert caps["sources"]["body_patch_aliases"] == "provider_profile"
 
 
+def test_provider_profile_marks_minimax_m3_as_one_m_context(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    import mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    caps = resolve_model_capabilities(
+        "MiniMax-M3",
+        provider_id="minimax-direct",
+        base_url="https://api.minimax.io/v1",
+        approved_facts={},
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["context_window_tokens"] == "provider_profile"
+    assert caps["sources"]["supports_thinking"] == "provider_profile"
+
+
 def test_missing_or_corrupt_registry_facts_fall_back_safely(tmp_path) -> None:
     corrupt_path = tmp_path / "capabilities.json"
     corrupt_path.write_text("{not json", encoding="utf-8")

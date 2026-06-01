@@ -1242,9 +1242,85 @@
     tbody tr {
       transition: background .1s ease;
     }
-    tbody tr:hover {
-      background: var(--fg-soft);
-    }
+	    tbody tr:hover {
+	      background: var(--fg-soft);
+	    }
+
+	    .capability-guide {
+	      display: flex;
+	      align-items: center;
+	      justify-content: space-between;
+	      gap: 16px;
+	      margin-bottom: 14px;
+	      border-style: dashed;
+	    }
+	    .capability-guide strong {
+	      display: block;
+	      margin-bottom: 6px;
+	      font-size: 14px;
+	    }
+	    .model-capability-table {
+	      min-width: 1060px;
+	    }
+	    .model-capability-table th {
+	      text-transform: none;
+	      letter-spacing: 0.02em;
+	      vertical-align: bottom;
+	    }
+	    .model-capability-table th:first-child,
+	    .model-capability-table td:first-child {
+	      width: 74px;
+	    }
+	    .model-capability-table th:nth-child(n+5),
+	    .model-capability-table td.capability-cell {
+	      text-align: center;
+	      padding-left: 8px;
+	      padding-right: 8px;
+	    }
+	    .model-capability-table tr.is-hidden-model {
+	      opacity: .68;
+	    }
+	    .model-name-cell {
+	      min-width: 220px;
+	      white-space: nowrap;
+	    }
+	    .cap-head {
+	      display: inline-flex;
+	      flex-direction: column;
+	      align-items: center;
+	      gap: 2px;
+	      line-height: 1.15;
+	      cursor: help;
+	    }
+	    .cap-head small {
+	      color: var(--muted);
+	      font-size: 10px;
+	      font-weight: 500;
+	    }
+	    .cap-switch {
+	      display: inline-flex;
+	      align-items: center;
+	      justify-content: center;
+	      gap: 5px;
+	      min-width: 58px;
+	      color: var(--muted);
+	      font-size: 11px;
+	      cursor: pointer;
+	      user-select: none;
+	    }
+	    .cap-switch input {
+	      width: auto;
+	      margin: 0;
+	      accent-color: var(--accent);
+	    }
+	    .visible-switch {
+	      min-width: 64px;
+	      color: var(--fg);
+	    }
+	    .cap-summary {
+	      min-width: 150px;
+	      white-space: nowrap;
+	    }
 
     /* ===== Chips ===== */
     .chips {
@@ -2219,6 +2295,7 @@
       .asset-pending-actions { grid-template-columns: 1fr; align-items: stretch; }
       .asset-confirm-grid { grid-template-columns: 1fr; }
       .asset-cli-grid { grid-template-columns: 1fr 1fr; }
+      .capability-guide { align-items: stretch; flex-direction: column; }
       .panel { padding: 20px; }
     }
     @media (max-width: 560px) {

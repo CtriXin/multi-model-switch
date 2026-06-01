@@ -597,6 +597,63 @@ def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     assert rows[0]["source"] == "approved"
 
 
+def test_config_web_model_capability_defaults_cover_mimo_and_minimax_m3():
+    cfg = {
+        "providers": [
+            {
+                "id": "capability-demo",
+                "name": "Capability Demo",
+                "enabled": True,
+                "models_endpoint": "manual",
+                "fallback_models": ["mimo-v2.5", "mimo-v2.5-pro", "MiniMax-M3"],
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    rows = {row["id"]: row["capabilities"] for row in snapshot["providers"][0]["models"]}
+
+    assert rows["mimo-v2.5"]["vision"] is True
+    assert rows["mimo-v2.5"]["tool_use"] is True
+    assert rows["mimo-v2.5"]["reasoning"] is True
+    assert rows["mimo-v2.5"]["long_context"] is True
+    assert rows["mimo-v2.5-pro"]["vision"] is False
+    assert rows["mimo-v2.5-pro"]["tool_use"] is True
+    assert rows["mimo-v2.5-pro"]["reasoning"] is True
+    assert rows["MiniMax-M3"]["tool_use"] is True
+    assert rows["MiniMax-M3"]["reasoning"] is True
+    assert rows["MiniMax-M3"]["long_context"] is True
+
+
+def test_config_web_text_capability_false_hides_model_in_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "non-text-embedding-model"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": False,
+        "vision": False,
+        "tool_use": False,
+        "reasoning": False,
+        "long_context": False,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    entry = plan["model_policy"]["models"]["non-text-embedding-model"]
+    assert entry["visible"] is False
+    assert entry["capabilities"]["text"] is False
+
+
 def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
@@ -753,9 +810,11 @@ def test_config_web_frontend_assets_are_external_files():
     assert '<link rel="stylesheet" href="/static/config-web.css">' in html
     assert '<script src="/static/config-web.js"></script>' in html
     assert "<style>" not in html
+    assert "刷新能力证据入口" in html
     assert css_type.startswith("text/css")
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
+    assert b"CAPABILITY_META" in js_body
     assert b"function renderAll" in js_body
 
 
@@ -1050,7 +1109,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "renderProviderList();renderTestSelectors();" in html
     assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
-    assert "这是当前通道的模型清单，不是全局模型池" in html
+    assert "这里配置当前通道会给 MMS 看到哪些模型" in html
+    assert "刷新能力证据入口" in html
+    assert "取消「文本」会同步隐藏" in html
     assert "手动补充当前通道模型（extra_models" in html
     assert "添加到补充模型库" in html
     assert "restoreModelPatch" in html

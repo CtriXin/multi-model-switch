@@ -62,6 +62,8 @@ _KNOWN_VISION_MODELS = {
     "kimi-k2.6",
     "mimo-v2.5",
     "mimo-v2-omni",
+    "minimax-m2.7",
+    "minimax-m3",
     "qwen3.5-plus",
     "qwen3.6-flash",
     "qwen3.6-plus",
@@ -70,7 +72,21 @@ _KNOWN_VISION_MODELS = {
     "gemini-3.1-flash-lite-preview",
 }
 _CACHE_SENSITIVE_PREFIXES = ("qwen", "kimi", "k2.", "glm", "deepseek", "minimax", "mimo")
-_REASONING_HINTS = ("gpt-5", "o1-", "o3-", "o4-", "qwen3", "kimi-k2", "glm-5", "deepseek", "claude-opus", "claude-sonnet")
+_REASONING_HINTS = (
+    "gpt-5",
+    "o1-",
+    "o3-",
+    "o4-",
+    "qwen3",
+    "kimi-k2",
+    "glm-5",
+    "deepseek",
+    "claude-opus",
+    "claude-sonnet",
+    "mimo-v2.5",
+    "minimax-m2",
+    "minimax-m3",
+)
 
 
 def _truthy(value: Any, default: bool = False) -> bool:
@@ -740,11 +756,25 @@ def _model_capability_defaults(model_id: str, policy_entry: dict[str, Any] | Non
     caps = {
         "text": True,
         "vision": lower in _KNOWN_VISION_MODELS or lower.startswith(("claude-", "sonnet-", "opus-", "haiku-", "gemini-")),
-        "tool_use": lower.startswith(("claude-", "gpt-", "o", "qwen", "kimi", "glm", "minimax", "gemini-")),
+        "tool_use": lower.startswith(("claude-", "gpt-", "o", "qwen", "kimi", "glm", "minimax", "mimo", "gemini-")),
         "reasoning": any(hint in lower for hint in _REASONING_HINTS),
-        "long_context": "1m" in lower or "long" in lower or lower.startswith(("qwen3", "kimi-k2", "gpt-5", "claude-")),
+        "long_context": "1m" in lower or "long" in lower or lower.startswith(("qwen3", "kimi-k2", "gpt-5", "claude-", "mimo-v2.5", "minimax-m3")),
         "cache_sensitive": lower.startswith(_CACHE_SENSITIVE_PREFIXES),
     }
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        resolved = resolve_model_capabilities(model)
+        if resolved.get("supports_thinking") is True:
+            caps["reasoning"] = True
+        context_window = int(resolved.get("context_window_tokens") or 0)
+        if context_window >= 200_000:
+            caps["long_context"] = True
+        protocol_hints = resolved.get("protocol_hints") if isinstance(resolved.get("protocol_hints"), dict) else {}
+        if protocol_hints.get("cache_sensitive_transport") is True:
+            caps["cache_sensitive"] = True
+    except Exception:
+        pass
     if isinstance(policy_entry, dict):
         policy_caps = policy_entry.get("capabilities") if isinstance(policy_entry.get("capabilities"), dict) else {}
         for key in caps:
@@ -1963,6 +1993,8 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             for key in ("text", "vision", "tool_use", "reasoning", "long_context"):
                 if isinstance(caps.get(key), bool):
                     cap_payload[key] = bool(caps[key])
+            if caps.get("text") is False:
+                entry["visible"] = False
             if isinstance(caps.get("cache_sensitive"), bool):
                 cap_payload["cache_sensitive_transport"] = bool(caps["cache_sensitive"])
     def comparable(payload: dict[str, Any]) -> dict[str, Any]:

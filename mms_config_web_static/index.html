@@ -56,12 +56,22 @@
           </div>
           <div class="tab-panel" data-tab-panel="models">
             <div class="model-section">
-              <p class="muted">这是当前通道的模型清单，不是全局模型池。手动补充会写入当前通道的 extra_models；取消勾选「显示」会写入当前通道的 hidden_models。</p>
+              <p class="muted">这里配置当前通道会给 MMS 看到哪些模型，以及这些模型能不能做文本、看图、工具调用、思考、长上下文和缓存敏感路由。取消「显示」会写入 hidden_models；取消「文本」会同步隐藏，避免普通启动页继续展示。</p>
               <div class="model-inventory-summary" id="modelInventorySummary"></div>
+              <div class="card capability-guide" id="modelCapabilityGuide">
+                <div>
+                  <strong>能力开关怎么影响启动</strong>
+                  <p class="muted">「显示/文本」决定普通模型选择是否出现；「看图」决定 vision sidecar 候选；「缓存敏感」会让双协议模型优先走更安全的 messages 路径。长上下文是能力标记，Claude 1M 还要看通道里的 Claude 1M / [1m] selector。</p>
+                </div>
+                <div class="btns">
+                  <button id="refreshCapabilitySources" class="ghost">刷新能力证据入口</button>
+                  <button id="jumpClaude1mSetting" class="ghost">打开通道 1M 设置</button>
+                </div>
+              </div>
               <div class="card">
                 <div class="btns">
-                  <button id="fetchModels">拉取当前通道模型</button>
-                  <button id="testList" class="secondary">测试 /models</button>
+                  <button id="fetchModels">刷新远端模型列表</button>
+                  <button id="testList" class="secondary">只测试 /models</button>
                   <button id="openModelTest" class="ghost">打开模型测试</button>
                   <label class="check"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>拉取后自动标记缺失旧 route 为待清理（本页临时）</span></label>
                   <input id="modelSearch" placeholder="搜索模型" style="max-width:260px">
