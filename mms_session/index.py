@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mms_project_store import (
+from mms_claude.project_store import (
     claude_raw_entry_path,
     claude_state_sessions_root,
     ensure_claude_project_store,

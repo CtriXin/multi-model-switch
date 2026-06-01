@@ -561,7 +561,7 @@ def test_finalize_claude_slot_prints_mms_resume_hint(monkeypatch, tmp_path):
 
 def test_finalize_claude_session_recovers_missing_slot_state_from_project_jsonl(monkeypatch, tmp_path):
     import mms_session.index as mms_session_index
-    from mms_project_store import claude_raw_entry_path
+    from mms_claude.project_store import claude_raw_entry_path
 
     real_home = tmp_path / "real-home"
     workspace = tmp_path / "repo"

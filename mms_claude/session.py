@@ -177,7 +177,7 @@ def backfill_claude_project_resume_files(
                     indexed_accounts.add(session_account)
         if indexed_accounts:
             try:
-                from mms_project_store import get_projects_dir
+                from mms_claude.project_store import get_projects_dir
 
                 project_roots = list(Path(get_projects_dir()).glob("*"))
             except Exception:

@@ -21,15 +21,15 @@ import pytest
 def scoped_store(tmp_path):
     config_root = tmp_path / "config"
     projects_root = config_root / "projects"
-    with patch("mms_project_store.PRIMARY_CONFIG_DIR", config_root), patch(
-        "mms_project_store.PROJECTS_DIR",
+    with patch("mms_claude.project_store.PRIMARY_CONFIG_DIR", config_root), patch(
+        "mms_claude.project_store.PROJECTS_DIR",
         projects_root,
     ), patch("mms_session.index.get_projects_dir", lambda: projects_root):
         yield config_root, projects_root
 
 
 def test_project_key_is_scoped_by_account(tmp_path):
-    from mms_project_store import project_key
+    from mms_claude.project_store import project_key
 
     project_dir = tmp_path / "repo"
     project_dir.mkdir()
@@ -44,7 +44,7 @@ def test_project_key_is_scoped_by_account(tmp_path):
 
 def test_project_store_starts_empty_without_global_seed(tmp_path, scoped_store):
     _config_root, _projects_root = scoped_store
-    from mms_project_store import claude_project_metadata_path, ensure_claude_project_store
+    from mms_claude.project_store import claude_project_metadata_path, ensure_claude_project_store
 
     project_dir = tmp_path / "repo"
     project_dir.mkdir()
@@ -109,7 +109,7 @@ def test_session_index_isolated_by_account(tmp_path, scoped_store):
 
 def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monkeypatch, tmp_path):
     import mms_launchers
-    from mms_project_store import claude_raw_entry_path
+    from mms_claude.project_store import claude_raw_entry_path
     from mms_session.index import record_claude_session_start
 
     real_home = tmp_path / "real-home"
@@ -307,7 +307,7 @@ def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
 
 
 def test_project_store_uses_selected_config_root(monkeypatch, tmp_path):
-    import mms_project_store
+    import mms_claude.project_store as project_store
 
     real_home = tmp_path / "real-home"
     preview_root = tmp_path / "mms-next"
@@ -316,8 +316,8 @@ def test_project_store_uses_selected_config_root(monkeypatch, tmp_path):
     monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
 
-    assert mms_project_store.get_primary_config_dir() == preview_root
-    assert mms_project_store.get_projects_dir() == preview_root / "projects"
+    assert project_store.get_primary_config_dir() == preview_root
+    assert project_store.get_projects_dir() == preview_root / "projects"
 
 
 def test_launcher_runtime_aux_paths_use_selected_config_root(monkeypatch, tmp_path):
@@ -1081,12 +1081,12 @@ def test_claude_resume_scope_shares_api_key_channels_by_model(monkeypatch, tmp_p
 
 def test_model_shared_resume_backfill_copies_same_model_api_key_project_store(monkeypatch, tmp_path):
     import mms_launchers
-    import mms_project_store
+    import mms_claude.project_store as project_store
 
     project_dir = tmp_path / "repo"
     project_dir.mkdir()
     projects_root = tmp_path / "projects"
-    monkeypatch.setattr(mms_project_store, "PROJECTS_DIR", projects_root)
+    monkeypatch.setattr(project_store, "PROJECTS_DIR", projects_root)
 
     direct_root = projects_root / "direct-key"
     direct_raw = direct_root / "claude" / "raw" / "projects" / "-tmp-repo"
