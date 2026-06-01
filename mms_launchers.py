@@ -243,7 +243,7 @@ _write_route_status = None
 build_provider_speed_scope = None
 
 try:
-    from mms_health_cache import get_model_health as _get_model_health
+    from mms_runtime.health_cache import get_model_health as _get_model_health
 except ImportError:
     def _get_model_health(*_a, **_kw): return None
 

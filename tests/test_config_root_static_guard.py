@@ -18,7 +18,7 @@ KNOWN_BAD_PATTERNS = {
     "mms_events.py": [
         'EVENT_DIR = Path.home() / ".config" / "mms" / "events"',
     ],
-    "mms_health_cache.py": [
+    "mms_runtime/health_cache.py": [
         'HEALTH_CACHE_DIR = Path(_real_home()) / ".config" / "mms"',
     ],
     "mms_speed_stats.py": [
