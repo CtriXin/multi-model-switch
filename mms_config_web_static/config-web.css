@@ -94,7 +94,7 @@
       grid-template-columns: 260px 1fr;
       gap: 28px;
       padding: 24px clamp(18px, 4vw, 56px) 48px;
-      max-width: 1440px;
+      max-width: none;
       margin: 0 auto;
     }
     .side {
