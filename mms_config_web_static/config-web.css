@@ -1246,17 +1246,54 @@
 	      background: var(--fg-soft);
 	    }
 
+	    .model-table-wrap {
+	      max-height: min(68vh, 760px);
+	      position: relative;
+	      overscroll-behavior: contain;
+	    }
 	    .model-capability-table {
-	      min-width: 1280px;
+	      min-width: 1480px;
+	      border-collapse: separate;
+	      border-spacing: 0;
 	    }
 	    .model-capability-table th {
 	      text-transform: none;
 	      letter-spacing: 0.02em;
 	      vertical-align: bottom;
+	      background: var(--surface);
+	      box-shadow: 0 1px 0 var(--border);
+	      z-index: 4;
 	    }
 	    .model-capability-table th:first-child,
 	    .model-capability-table td:first-child {
-	      width: 74px;
+	      width: 86px;
+	      min-width: 86px;
+	    }
+	    .model-capability-table th:first-child,
+	    .model-capability-table td:first-child,
+	    .model-capability-table th:nth-child(2),
+	    .model-capability-table td:nth-child(2) {
+	      position: sticky;
+	      background: var(--surface);
+	    }
+	    .model-capability-table th:first-child,
+	    .model-capability-table td:first-child {
+	      left: 0;
+	      z-index: 5;
+	    }
+	    .model-capability-table th:nth-child(2),
+	    .model-capability-table td:nth-child(2) {
+	      left: 86px;
+	      z-index: 5;
+	      box-shadow: 1px 0 0 var(--border);
+	    }
+	    .model-capability-table thead th:first-child,
+	    .model-capability-table thead th:nth-child(2) {
+	      z-index: 8;
+	    }
+	    .model-capability-table tbody tr:hover td:first-child,
+	    .model-capability-table tbody tr:hover td:nth-child(2) {
+	      background: var(--fg-soft);
 	    }
 	    .model-capability-table th:nth-child(n+5),
 	    .model-capability-table td.capability-cell {
@@ -1268,8 +1305,9 @@
 	      opacity: .68;
 	    }
 	    .model-name-cell {
-	      min-width: 220px;
+	      min-width: 260px;
 	      white-space: nowrap;
+	      font-weight: 650;
 	    }
 	    .cap-head {
 	      display: inline-flex;

@@ -877,8 +877,11 @@ def test_config_web_frontend_assets_are_external_files():
     assert css_type.startswith("text/css")
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
+    assert b"model-table-wrap" in css_body
     assert b"CAPABILITY_META" in js_body
     assert b"function renderAll" in js_body
+    assert "MMS 自动别名".encode("utf-8") in js_body
+    assert "派生 alias".encode("utf-8") not in js_body
 
 
 def test_config_web_server_serves_external_static_assets(tmp_path):
@@ -908,6 +911,34 @@ def test_config_web_server_serves_external_static_assets(tmp_path):
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
     assert b"function renderAll" in js_body
+
+
+def test_config_web_server_skips_snapshot_for_shell_and_static_assets():
+    class NoSnapshotApp:
+        def snapshot(self):
+            raise AssertionError("snapshot should only run for data endpoints")
+
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": NoSnapshotApp()})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        with urlopen(f"{url}/", timeout=3) as response:
+            html_body = response.read()
+            html_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
+            css_body = response.read()
+            css_type = response.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert html_type.startswith("text/html")
+    assert css_type.startswith("text/css")
+    assert b'<script src="/static/config-web.js"></script>' in html_body
+    assert b".panel" in css_body
 
 
 def test_config_web_markdown_contains_manual_snippets(capsys):

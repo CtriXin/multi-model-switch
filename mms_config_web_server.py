@@ -173,9 +173,8 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
             self._send(*_json_response({"error": "app not initialized"}, status=500))
             return
         path = self.path.split("?", 1)[0]
-        snapshot = app.snapshot()
         if path in {"/", "/index.html"}:
-            self._send(200, _html_page(snapshot), "text/html; charset=utf-8")
+            self._send(200, _html_page({}), "text/html; charset=utf-8")
             return
         if path.startswith("/static/"):
             asset_name = path.rsplit("/", 1)[-1]
@@ -187,12 +186,14 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
             self._send(200, body, content_type)
             return
         if path in {"/api/state", "/api/snapshot"}:
+            snapshot = app.snapshot()
             self._send(*_json_response(snapshot))
             return
         if path == "/api/references":
             self._send(*_json_response({"references": build_reference_cards()}))
             return
         if path == "/setup.md":
+            snapshot = app.snapshot()
             self._send(200, build_setup_markdown(snapshot).encode("utf-8"), "text/markdown; charset=utf-8")
             return
         self._send(404, b"not found\n", "text/plain; charset=utf-8")
@@ -288,11 +289,12 @@ def run_config_web(
     parser.add_argument("--print-markdown", action="store_true", help="Print setup markdown and exit")
     args = parser.parse_args(argv or [])
     app = ConfigWebApp(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
-    snapshot = app.snapshot()
     if args.print_summary:
+        snapshot = app.snapshot()
         print(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     if args.print_markdown:
+        snapshot = app.snapshot()
         print(build_setup_markdown(snapshot), end="")
         return 0
     serve_config_web(app, host=args.host, port=args.port, open_browser=not args.no_open)
