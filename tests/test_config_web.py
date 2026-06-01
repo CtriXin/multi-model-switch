@@ -878,9 +878,12 @@ def test_config_web_frontend_assets_are_external_files():
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
     assert b"model-table-wrap" in css_body
+    assert b"cap-toggle-grid" in css_body
     assert b"CAPABILITY_META" in js_body
     assert b"function renderAll" in js_body
     assert "MMS 自动别名".encode("utf-8") in js_body
+    assert "能力配置".encode("utf-8") in js_body
+    assert "缓存优先".encode("utf-8") in js_body
     assert "派生 alias".encode("utf-8") not in js_body
 
 
