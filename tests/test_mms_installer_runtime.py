@@ -1,5 +1,5 @@
 def test_installer_no_longer_supports_qwen_or_kimi_cli():
-    import mms_installer
+    import mms_launcher.installer as mms_installer
 
     assert "qwen" not in mms_installer.INSTALL_COMMANDS
     assert "kimi" not in mms_installer.INSTALL_COMMANDS

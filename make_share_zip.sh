@@ -16,7 +16,6 @@ FILES=(
     "mms"
     "README.md"
     "mms_core.py"
-    "mms_installer.py"
     "mms_launchers.py"
     "mms_tui.py"
     "config.example.toml"

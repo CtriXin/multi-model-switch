@@ -4691,7 +4691,7 @@ def check_cli_installed(cli_name):
 
 def select_cli(cli_names=None):
     from mms_command_tools import select_cli as select_cli_helper
-    from mms_installer import check_and_offer_install
+    from mms_launcher.installer import check_and_offer_install
 
     cli_names = cli_names or CLI_NAMES
     return select_cli_helper(
@@ -6661,7 +6661,7 @@ def main():
 
     # --install
     if args.install:
-        from mms_installer import install_cli
+        from mms_launcher.installer import install_cli
         install_cli(args.install)
         return
 
@@ -6784,7 +6784,7 @@ def main():
             runtime = _apply_opencode_entrypoint(runtime, entrypoint_to_launch)
             _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli, choice="opencode profile")
             if not check_cli_installed(cli):
-                from mms_installer import check_and_offer_install
+                from mms_launcher.installer import check_and_offer_install
                 if not check_and_offer_install(cli):
                     return
             action = confirm_launch(cli, model_info, once, runtime=runtime)
@@ -6822,7 +6822,7 @@ def main():
                 console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                 return
             if not check_cli_installed(cli):
-                from mms_installer import check_and_offer_install
+                from mms_launcher.installer import check_and_offer_install
                 check_and_offer_install(cli)
             if launch_default_model_info and not _uses_managed_entry(runtime, cli):
                 ok, model = True, launch_default_model_info.get("model")
@@ -6864,7 +6864,7 @@ def main():
                 console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                 return
             if not check_cli_installed(cli):
-                from mms_installer import check_and_offer_install
+                from mms_launcher.installer import check_and_offer_install
                 if not check_and_offer_install(cli):
                     return
             ok, model = _resolve_interactive_launch_model(

@@ -945,7 +945,7 @@ def load_model_routes_exporter():
 
 
 def load_check_and_offer_install():
-    return __import__("mms_installer", fromlist=["check_and_offer_install"]).check_and_offer_install
+    return __import__("mms_launcher.installer", fromlist=["check_and_offer_install"]).check_and_offer_install
 
 
 def load_claude_network_guard_preview():
