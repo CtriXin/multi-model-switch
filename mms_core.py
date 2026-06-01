@@ -6429,7 +6429,7 @@ def main():
     if len(argv) >= 1:
         command = argv[0]
         if command == "review-launch":
-            from mms_review_launch import handle_review_launch_command
+            from mms_launcher.review_launch import handle_review_launch_command
 
             raise SystemExit(handle_review_launch_command(argv[1:], command_name=current_command()))
         if command == "guard":

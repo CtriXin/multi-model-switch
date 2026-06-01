@@ -46,7 +46,7 @@ def _write_latest_approved_router_manifest(config_root: Path, *, router_payload:
 
 
 def test_review_launch_help_is_real_subcommand(capsys):
-    from mms_review_launch import handle_review_launch_command
+    from mms_launcher.review_launch import handle_review_launch_command
 
     with pytest.raises(SystemExit) as exc:
         handle_review_launch_command(["--help"], command_name="mms")
@@ -59,7 +59,7 @@ def test_review_launch_help_is_real_subcommand(capsys):
 
 
 def test_review_launch_contract_json_has_required_env(capsys):
-    from mms_review_launch import handle_review_launch_command
+    from mms_launcher.review_launch import handle_review_launch_command
 
     assert handle_review_launch_command(["--contract-json"], command_name="mms") == 0
     payload = json.loads(capsys.readouterr().out)
@@ -78,12 +78,13 @@ def _write_review_launch_fixture(tmp_path: Path, reviewer_id: str = "kimi-for-co
     prompt_path = repo_root / ".ai" / "plan" / "p53-prompt.md"
     pack_path = repo_root / ".ai" / "plan" / "review-packs" / "p53.json"
     expected_output = repo_root / ".ai" / "reviews" / reviewer_id / "p53-review-20260506.md"
-    changed_file = repo_root / "mms_review_launch.py"
+    changed_file = repo_root / "mms_launcher" / "review_launch.py"
     repo_root.mkdir()
     run_dir.mkdir(parents=True)
     gate_path.write_text(json.dumps({"gate_status": "approved"}) + "\n", encoding="utf-8")
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text("# P53 Prompt\n\nReview the MMS launch writer.\n", encoding="utf-8")
+    changed_file.parent.mkdir(parents=True, exist_ok=True)
     changed_file.write_text("print('changed')\n", encoding="utf-8")
     pack_path.parent.mkdir(parents=True, exist_ok=True)
     pack_path.write_text(
@@ -94,7 +95,7 @@ def _write_review_launch_fixture(tmp_path: Path, reviewer_id: str = "kimi-for-co
                 "commit": "abc123",
                 "title": "P53",
                 "prompt_path": ".ai/plan/p53-prompt.md",
-                "changed_files": ["mms_review_launch.py"],
+                "changed_files": ["mms_launcher/review_launch.py"],
                 "read_only_files": [],
                 "paths": {"pack_md": ".ai/plan/review-packs/p53.md"},
             }
@@ -117,7 +118,7 @@ def _write_review_launch_fixture(tmp_path: Path, reviewer_id: str = "kimi-for-co
 
 
 def test_review_launch_validate_env_accepts_moebius_contract(tmp_path, monkeypatch, capsys):
-    from mms_review_launch import handle_review_launch_command
+    from mms_launcher.review_launch import handle_review_launch_command
 
     repo_root = tmp_path / "repo"
     run_dir = tmp_path / "runs" / "p50"
@@ -157,7 +158,7 @@ def test_review_launch_validate_env_accepts_moebius_contract(tmp_path, monkeypat
 
 
 def test_review_launch_validate_env_rejects_wrapper_only_id(tmp_path, monkeypatch, capsys):
-    from mms_review_launch import handle_review_launch_command
+    from mms_launcher.review_launch import handle_review_launch_command
 
     repo_root = tmp_path / "repo"
     run_dir = tmp_path / "runs" / "p50"
@@ -190,7 +191,7 @@ def test_review_launch_validate_env_rejects_wrapper_only_id(tmp_path, monkeypatc
 
 
 def test_review_launch_fake_dispatch_writes_exact_expected_review_file(tmp_path, monkeypatch, capsys):
-    from mms_review_launch import handle_review_launch_command
+    from mms_launcher.review_launch import handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path)
     for key, value in env.items():
@@ -224,8 +225,8 @@ def test_review_launch_high_context_reviewers_get_larger_output_budget(
     capsys,
     reviewer_id,
 ):
-    import mms_review_launch
-    from mms_review_launch import (
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import (
         ANTHROPIC_MESSAGES_PROTOCOL,
         HIGH_CONTEXT_REVIEW_MAX_TOKENS,
         HIGH_CONTEXT_REVIEW_READ_TIMEOUT_SECONDS,
@@ -268,8 +269,8 @@ def test_review_launch_max_tokens_env_override_still_wins_for_high_context_revie
     monkeypatch,
     capsys,
 ):
-    import mms_review_launch
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, MAX_TOKENS_ENV, handle_review_launch_command
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, MAX_TOKENS_ENV, handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path, reviewer_id="kimi-for-coding")
     for key, value in env.items():
@@ -305,8 +306,8 @@ def test_review_launch_uses_route_context_window_for_large_review_context(
     monkeypatch,
     capsys,
 ):
-    import mms_review_launch
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, handle_review_launch_command
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path, reviewer_id="kimi-for-coding")
     repo_root = Path(env["MOEBIUS_REPO_ROOT"])
@@ -346,7 +347,7 @@ def test_review_launch_uses_route_context_window_for_large_review_context(
 
 
 def test_review_launch_requires_explicit_allowed_read_root_for_external_context(tmp_path):
-    from mms_review_launch import ALLOWED_READ_ROOTS_ENV, _render_file_context
+    from mms_launcher.review_launch import ALLOWED_READ_ROOTS_ENV, _render_file_context
 
     repo_root = tmp_path / "repo"
     external_root = tmp_path / "external"
@@ -373,7 +374,7 @@ def test_review_launch_requires_explicit_allowed_read_root_for_external_context(
 
 
 def test_review_launch_high_context_reviewer_reads_larger_file_context_by_default(tmp_path):
-    from mms_review_launch import _render_file_context
+    from mms_launcher.review_launch import _render_file_context
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -396,7 +397,7 @@ def test_review_launch_high_context_reviewer_reads_larger_file_context_by_defaul
 
 def test_review_launch_resolves_anthropic_only_provider(monkeypatch):
     import mms_core
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_provider_for_model
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_provider_for_model
 
     provider = {
         "id": "mimo-direct-anthropic",
@@ -421,7 +422,7 @@ def test_review_launch_resolves_anthropic_only_provider(monkeypatch):
 
 def test_review_launch_uses_default_provider_cache_and_canonical_model_case(monkeypatch):
     import mms_core
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_review_launch_candidates
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_review_launch_candidates
 
     default_provider = {
         "id": "newapi-personal-tokyo",
@@ -475,7 +476,7 @@ def test_review_launch_uses_default_provider_cache_and_canonical_model_case(monk
 
 
 def test_review_launch_uses_verified_latest_approved_router_with_explicit_root(tmp_path):
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_review_launch_candidates
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_review_launch_candidates
 
     config_root = tmp_path / "mms-next"
     _write_latest_approved_router_manifest(
@@ -511,7 +512,7 @@ def test_review_launch_uses_verified_latest_approved_router_with_explicit_root(t
 
 def test_review_launch_latest_approved_router_fails_closed_on_invalid_manifest(monkeypatch, tmp_path):
     import mms_core
-    from mms_review_launch import _resolve_review_launch_candidates
+    from mms_launcher.review_launch import _resolve_review_launch_candidates
 
     config_root = tmp_path / "mms-next"
     _write_latest_approved_router_manifest(
@@ -545,7 +546,7 @@ def test_review_launch_latest_approved_router_fails_closed_on_invalid_manifest(m
 
 def test_review_launch_latest_approved_router_fails_closed_on_missing_manifest(monkeypatch, tmp_path):
     import mms_core
-    from mms_review_launch import _resolve_review_launch_candidates
+    from mms_launcher.review_launch import _resolve_review_launch_candidates
 
     config_root = tmp_path / "mms-next"
     legacy_provider = {
@@ -591,7 +592,7 @@ def test_review_launch_latest_approved_router_fails_closed_on_missing_manifest(m
 
 def test_review_launch_gpt_auto_uses_openai_chat_on_dual_provider(monkeypatch):
     import mms_core
-    from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
+    from mms_launcher.review_launch import OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
 
     provider = {
         "id": "companycrsopenai",
@@ -623,8 +624,8 @@ def test_review_launch_gpt_auto_uses_openai_chat_on_dual_provider(monkeypatch):
 
 def test_review_launch_gpt_dual_provider_never_calls_messages_endpoint(tmp_path, monkeypatch, capsys):
     import mms_core
-    import mms_review_launch
-    from mms_review_launch import OPENAI_CHAT_PROTOCOL, handle_review_launch_command
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import OPENAI_CHAT_PROTOCOL, handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path, reviewer_id="gpt-5.4")
     for key, value in env.items():
@@ -672,8 +673,8 @@ def test_review_launch_gpt_dual_provider_never_calls_messages_endpoint(tmp_path,
 
 
 def test_review_launch_transport_evidence_uses_model_call_usage(tmp_path, monkeypatch, capsys):
-    import mms_review_launch
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, ModelCallResult, handle_review_launch_command
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, ModelCallResult, handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path, reviewer_id="glm-5.1")
     for key, value in env.items():
@@ -714,7 +715,7 @@ def test_review_launch_transport_evidence_uses_model_call_usage(tmp_path, monkey
 
 def test_review_launch_explicit_provider_reports_protocol_specific_base_url(monkeypatch):
     import mms_core
-    from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_provider_for_model
+    from mms_launcher.review_launch import OPENAI_CHAT_PROTOCOL, _resolve_provider_for_model
 
     provider = {
         "id": "mimo-direct-anthropic",
@@ -739,7 +740,7 @@ def test_review_launch_explicit_provider_reports_protocol_specific_base_url(monk
 
 def test_review_launch_explicit_provider_chain_preserves_order(monkeypatch):
     import mms_core
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
 
     tokyo = {
         "id": "newapi-tokyo-test",
@@ -798,8 +799,8 @@ def test_review_launch_explicit_provider_chain_preserves_order(monkeypatch):
 
 
 def test_review_launch_falls_back_to_next_protocol_after_failed_attempt(tmp_path, monkeypatch, capsys):
-    import mms_review_launch
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path, reviewer_id="gemini-3-flash-preview")
     for key, value in env.items():
@@ -838,8 +839,8 @@ def test_review_launch_falls_back_to_next_protocol_after_failed_attempt(tmp_path
 
 
 def test_review_launch_falls_back_to_next_provider_without_chat_fallback(tmp_path, monkeypatch, capsys):
-    import mms_review_launch
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path, reviewer_id="qwen3.5-plus")
     for key, value in env.items():
@@ -904,8 +905,8 @@ def test_review_launch_falls_back_to_next_provider_without_chat_fallback(tmp_pat
 
 
 def test_review_launch_blocks_cache_sensitive_chat_fallback_by_default(tmp_path, monkeypatch, capsys):
-    import mms_review_launch
-    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
+    import mms_launcher.review_launch as mms_review_launch
+    from mms_launcher.review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path, reviewer_id="kimi-for-coding")
     for key, value in env.items():
@@ -964,7 +965,7 @@ def test_review_launch_blocks_cache_sensitive_chat_fallback_by_default(tmp_path,
 
 
 def test_review_launch_compact_error_keeps_blank_exception_class():
-    from mms_review_launch import _compact_error
+    from mms_launcher.review_launch import _compact_error
 
     assert _compact_error(TimeoutError()) == "TimeoutError"
 
@@ -972,7 +973,7 @@ def test_review_launch_compact_error_keeps_blank_exception_class():
 def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
     import asyncio
     import httpx
-    from mms_review_launch import _call_model_anthropic_messages
+    from mms_launcher.review_launch import _call_model_anthropic_messages
 
     captured = {}
 
@@ -1037,7 +1038,7 @@ def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
 def test_review_launch_anthropic_call_does_not_force_unsupported_mimo_1m_alias(monkeypatch):
     import asyncio
     import httpx
-    from mms_review_launch import _call_model_anthropic_messages
+    from mms_launcher.review_launch import _call_model_anthropic_messages
 
     captured = {}
 
@@ -1081,7 +1082,7 @@ def test_review_launch_anthropic_call_does_not_force_unsupported_mimo_1m_alias(m
 def test_review_launch_anthropic_call_does_not_double_append_v1(monkeypatch):
     import asyncio
     import httpx
-    from mms_review_launch import _call_model_anthropic_messages
+    from mms_launcher.review_launch import _call_model_anthropic_messages
 
     captured = {}
 
@@ -1125,7 +1126,7 @@ def test_review_launch_anthropic_call_does_not_double_append_v1(monkeypatch):
 def test_review_launch_anthropic_call_adds_newapi_beta_once(monkeypatch):
     import asyncio
     import httpx
-    from mms_review_launch import _call_model_anthropic_messages
+    from mms_launcher.review_launch import _call_model_anthropic_messages
 
     captured = {}
 
@@ -1189,7 +1190,7 @@ def test_review_launch_anthropic_call_adds_newapi_beta_once(monkeypatch):
 def test_review_launch_anthropic_high_latency_models_use_streaming(monkeypatch, model_name):
     import asyncio
     import httpx
-    from mms_review_launch import _call_model_anthropic_messages
+    from mms_launcher.review_launch import _call_model_anthropic_messages
 
     captured = {}
 
@@ -1248,7 +1249,7 @@ def test_review_launch_anthropic_high_latency_models_use_streaming(monkeypatch, 
 def test_review_launch_openai_call_does_not_double_append_v1_and_stream_fallback(monkeypatch):
     import asyncio
     import httpx
-    from mms_review_launch import _call_model_openai_chat
+    from mms_launcher.review_launch import _call_model_openai_chat
 
     captured_urls = []
     captured_stream_values = []
@@ -1308,7 +1309,7 @@ def test_review_launch_openai_call_does_not_double_append_v1_and_stream_fallback
 
 
 def test_review_launch_rejects_output_path_escape_before_writing(tmp_path, monkeypatch, capsys):
-    from mms_review_launch import handle_review_launch_command
+    from mms_launcher.review_launch import handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path)
     escaped = tmp_path / "outside-review.md"
@@ -1327,7 +1328,7 @@ def test_review_launch_rejects_output_path_escape_before_writing(tmp_path, monke
 
 
 def test_review_launch_rejects_unapproved_gate_before_writing(tmp_path, monkeypatch, capsys):
-    from mms_review_launch import handle_review_launch_command
+    from mms_launcher.review_launch import handle_review_launch_command
 
     env = _write_review_launch_fixture(tmp_path)
     Path(env["MOEBIUS_REVIEW_DISPATCH_GATE"]).write_text(json.dumps({"gate_status": "blocked"}) + "\n", encoding="utf-8")

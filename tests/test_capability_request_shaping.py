@@ -88,7 +88,7 @@ def test_newapi_qwen_relay_uses_qwen_request_shape(monkeypatch, tmp_path):
 
 def test_review_launch_mimo_1m_adds_context_beta(monkeypatch):
     import httpx
-    from mms_review_launch import _call_model_anthropic_messages
+    from mms_launcher.review_launch import _call_model_anthropic_messages
 
     captured = {}
 
@@ -135,7 +135,7 @@ def test_review_launch_mimo_1m_adds_context_beta(monkeypatch):
 
 def test_review_launch_mimo_1m_safe_reviewer_alias_adds_context_beta(monkeypatch):
     import httpx
-    from mms_review_launch import _call_model_anthropic_messages
+    from mms_launcher.review_launch import _call_model_anthropic_messages
 
     captured = {}
 
