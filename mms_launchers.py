@@ -3640,7 +3640,7 @@ def _resolve_real_home_command_path(command_name, env=None):
 
 def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS"):
     """Compatibility wrapper for OAuth Claude manual-only hard cut."""
-    from mms_mmc_launch import exit_oauth_claude_manual_only
+    from mms_launcher.mmc import exit_oauth_claude_manual_only
 
     return exit_oauth_claude_manual_only(runtime, model_info, caller=caller)
 
