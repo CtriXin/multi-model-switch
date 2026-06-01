@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mms_toon import choose_llm_data_format
+from mms_session.toon import choose_llm_data_format
 
 
 PACKET_VERSION = 1

@@ -11,7 +11,7 @@ import sys
 from typing import Sequence
 
 import mms_context
-import mms_toon
+import mms_session.toon as mms_toon
 
 
 DEFAULT_THRESHOLD_CHARS = 4000

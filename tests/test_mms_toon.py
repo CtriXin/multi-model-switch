@@ -4,7 +4,7 @@ import io
 
 
 def test_encode_toon_table_array():
-    from mms_toon import encode_toon
+    from mms_session.toon import encode_toon
 
     payload = {
         "models": [
@@ -21,7 +21,7 @@ def test_encode_toon_table_array():
 
 
 def test_choose_llm_data_format_uses_toon_only_when_smaller():
-    from mms_toon import choose_llm_data_format
+    from mms_session.toon import choose_llm_data_format
 
     repetitive = {
         "summaries": [
@@ -43,7 +43,7 @@ def test_choose_llm_data_format_uses_toon_only_when_smaller():
 
 
 def test_choose_llm_data_format_falls_back_for_unsupported_shape():
-    from mms_toon import choose_llm_data_format
+    from mms_session.toon import choose_llm_data_format
 
     payload = {"rows": [{"a": 1}, {"b": 2}]}
 
@@ -54,7 +54,7 @@ def test_choose_llm_data_format_falls_back_for_unsupported_shape():
 
 
 def test_mms_toon_cli_reads_json_from_stdin(monkeypatch, capsys):
-    from mms_toon import main
+    from mms_session.toon import main
 
     monkeypatch.setattr(
         "sys.stdin",
