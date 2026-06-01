@@ -120,7 +120,7 @@ same fail-closed hash boundary.
 MMS ships a small helper for consumers that can import this repo:
 
 ```python
-from mms_consumer_bundle import load_verified_consumer_bundle
+from mms_registry.consumer_bundle import load_verified_consumer_bundle
 
 bundle = load_verified_consumer_bundle(
     config_root="/path/to/selected/mms-root",

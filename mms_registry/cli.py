@@ -1466,7 +1466,7 @@ def consumer_bundle_status(
         summary["error"] = "latest-approved manifest is missing"
         return summary
     try:
-        from mms_consumer_bundle import load_verified_consumer_bundle
+        from mms_registry.consumer_bundle import load_verified_consumer_bundle
 
         verified = load_verified_consumer_bundle(config_root=root, manifest_path=manifest, include_secret=False)
     except Exception as exc:

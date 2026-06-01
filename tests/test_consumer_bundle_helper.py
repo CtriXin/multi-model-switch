@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import mms_consumer_bundle
+import mms_registry.consumer_bundle as mms_consumer_bundle
 
 
 def _write_json(path: Path, payload: dict) -> None:
