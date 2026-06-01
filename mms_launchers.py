@@ -121,7 +121,7 @@ from mms_fake_upstream import (
     is_enabled as _fake_upstream_enabled,
     status_payload as _fake_upstream_status_payload,
 )
-from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
+from mms_runtime.host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_provider_profiles import profile_context_window, resolve_provider_profile
 from mms_pi import support as _pi_support

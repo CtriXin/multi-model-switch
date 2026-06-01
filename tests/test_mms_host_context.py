@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_write_host_context_uses_path_only_config(monkeypatch, tmp_path):
-    from mms_host_context import write_host_context
+    from mms_runtime.host_context import write_host_context
 
     real_home = tmp_path / "real-home"
     session_home = tmp_path / "session-home"

@@ -44,7 +44,7 @@ Generated per MMS-launched session:
 
 Producer:
 
-- `mms_host_context.py`
+- `mms_runtime/host_context.py`
 - called from `mms_launchers.py`
 
 Use this layer for launch-specific data:
@@ -107,7 +107,7 @@ Use this rule of thumb:
 | Need | Record in |
 | --- | --- |
 | Stable path or localhost capability used by many sessions | `config/ops-env-safe.template.toml` |
-| Per-session runtime metadata | `mms_host_context.py` generated context |
+| Per-session runtime metadata | `mms_runtime/host_context.py` generated context |
 | Agent-facing behavior or read order | this doc and the relevant skill doc |
 | A new isolated-session tool wrapper | `_SESSION_REAL_HOME_WRAPPER_COMMANDS` in `mms_launchers.py` plus this doc |
 | User-specific installed value | human-owned `~/.config/mms/ops-env-safe.toml` |
