@@ -3181,7 +3181,7 @@ def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
 
 def _account_env(account, *, validate_proxy=True, model_info=None):
     """Compatibility wrapper for OAuth/account runtime env materialization."""
-    from mms_account_env import build_account_env
+    from mms_launcher.account_env import build_account_env
 
     return build_account_env(
         account,
