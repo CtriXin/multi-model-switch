@@ -722,6 +722,7 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
             "runtime_blockers": {"missing_api_key_count": 32, "missing_base_url_count": 0},
             "secret_count": 2,
             "secrets": [{"value": "sk-super-secret-value"}],
+            "model": {"capabilities": {"context_window_tokens": 1_000_000, "max_output_tokens": 131_072}},
         }
     )
     payload = json.loads(body)
@@ -733,6 +734,8 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
     assert payload["runtime_blockers"]["missing_base_url_count"] == 0
     assert payload["secret_count"] == 2
     assert payload["secrets"] != [{"value": "sk-super-secret-value"}]
+    assert payload["model"]["capabilities"]["context_window_tokens"] == 1_000_000
+    assert payload["model"]["capabilities"]["max_output_tokens"] == 131_072
     assert "sk-super-secret-value" not in body.decode("utf-8")
 
 
@@ -869,7 +872,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert '<link rel="stylesheet" href="/static/config-web.css">' in html
     assert '<script src="/static/config-web.js"></script>' in html
     assert "<style>" not in html
-    assert "刷新能力证据入口" in html
+    assert "刷新能力证据入口" not in html
+    assert "这里直接改 MMS 启动会读取的模型能力" in html
     assert css_type.startswith("text/css")
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
@@ -1171,15 +1175,16 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "renderProviderList();renderTestSelectors();" in html
     assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
-    assert "这里直接配置模型在 MMS 里的真实能力" in html
+    assert "这里直接改 MMS 启动会读取的模型能力" in html
     assert "Reasoning Effort" in html
     assert "Think on/off" in html
     assert "1M 上下文" in html
     assert "一键刷新全部通道模型" in html
     assert "refreshAllProviderModels" in html
     assert "保存后不需要 [1m] 后缀" in html
-    assert "刷新能力证据入口" in html
-    assert "取消「文本显示」会同步隐藏" in html
+    assert "刷新能力证据入口" not in html
+    assert "打开通道 1M 设置" not in html
+    assert "不要填 `200`" in html
     assert "手动补充当前通道模型（extra_models" in html
     assert "添加到补充模型库" in html
     assert "restoreModelPatch" in html

@@ -37,6 +37,24 @@ from mms_config_web_server import (
 
 _SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key", "token", "secret", "authorization"}
 _SENSITIVE_CONFIG_KEYS = {"home_dir", "proxy", "no_proxy"}
+_SAFE_TOKEN_COUNT_KEYS = {
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "completion_tokens",
+    "context_tokens",
+    "context_window_tokens",
+    "input_tokens",
+    "max_completion_tokens",
+    "max_context_tokens",
+    "max_output_tokens",
+    "official_context_window_tokens",
+    "official_max_output_tokens",
+    "output_tokens",
+    "output_window_tokens",
+    "prompt_tokens",
+    "total_tokens",
+    "tokens",
+}
 _ALLOWED_PROTOCOLS = ("anthropic_messages", "openai_chat_completions")
 _ALLOWED_CLIS = ("claude", "codex", "opencode", "pi", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
@@ -104,6 +122,12 @@ def _redact(value: Any) -> str:
     if len(text) <= 8:
         return "***"
     return f"{text[:3]}***{text[-3:]}"
+
+
+def _is_secret_like_key(key_lower: str) -> bool:
+    if key_lower in _SAFE_TOKEN_COUNT_KEYS or key_lower.endswith("_tokens"):
+        return False
+    return key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key"))
 
 
 def _safe_text(value: Any) -> str:
@@ -217,7 +241,7 @@ def _sanitize_for_output(value: Any) -> Any:
                 result[key_text] = child
             elif key_lower in _SENSITIVE_CONFIG_KEYS:
                 result[key_text] = bool(_safe_text(child))
-            elif key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key")):
+            elif _is_secret_like_key(key_lower):
                 result[key_text] = _redact(child)
             else:
                 result[key_text] = _sanitize_for_output(child)

@@ -1246,19 +1246,6 @@
 	      background: var(--fg-soft);
 	    }
 
-	    .capability-guide {
-	      display: flex;
-	      align-items: center;
-	      justify-content: space-between;
-	      gap: 16px;
-	      margin-bottom: 14px;
-	      border-style: dashed;
-	    }
-	    .capability-guide strong {
-	      display: block;
-	      margin-bottom: 6px;
-	      font-size: 14px;
-	    }
 	    .model-capability-table {
 	      min-width: 1280px;
 	    }
@@ -2317,7 +2304,6 @@
       .asset-pending-actions { grid-template-columns: 1fr; align-items: stretch; }
       .asset-confirm-grid { grid-template-columns: 1fr; }
       .asset-cli-grid { grid-template-columns: 1fr 1fr; }
-      .capability-guide { align-items: stretch; flex-direction: column; }
       .panel { padding: 20px; }
     }
     @media (max-width: 560px) {
