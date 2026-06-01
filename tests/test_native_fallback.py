@@ -464,7 +464,7 @@ def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail(monk
 
 
 def test_fail_closed_auth_error_payload_uses_english_when_mms_lang_en(monkeypatch):
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
     import mms_bridge
 
     monkeypatch.delenv("MMS_LANG", raising=False)

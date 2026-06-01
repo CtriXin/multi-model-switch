@@ -25,7 +25,7 @@ from mms_launcher.account_guard import (
     proxy_fingerprint as _proxy_fingerprint_impl,
     record_account_guard_finalize as _record_account_guard_finalize_impl,
 )
-from mms_i18n import normalize_language
+from mms_runtime.i18n import normalize_language
 from mms_launcher.console import LauncherLazyConsole
 from mms_launcher.health import (
     health_check_due as _health_check_due_impl,

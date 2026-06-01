@@ -449,7 +449,7 @@ def test_rescue_landing_shows_latest_hot_fallback_event() -> None:
 
 def test_rescue_result_payloads_are_compact_and_safe() -> None:
     import mms_core
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
 
     mms_i18n.set_language("zh")
     title, rows, note = mms_core._rescue_default_fallback_report_payload("deepseek-v4-flash")
@@ -517,7 +517,7 @@ def test_settings_result_report_uses_tui_when_available(monkeypatch) -> None:
 
 def test_settings_result_tui_payload_matches_settings_card_contract() -> None:
     import mms_core
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
 
     mms_i18n.set_language("zh")
     title, info_lines, actions = mms_core._settings_result_tui_payload(
@@ -535,7 +535,7 @@ def test_settings_result_tui_payload_matches_settings_card_contract() -> None:
 
 def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
     import mms_core
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
 
     mms_i18n.set_language("zh")
     title, info_lines, actions = mms_core._registry_truth_tui_payload(
@@ -557,7 +557,7 @@ def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
 
 def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     import mms_core
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
 
     mms_i18n.set_language("zh")
     title, info_lines, actions = mms_core._model_source_status_tui_payload(
@@ -830,7 +830,7 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
 
 def test_registry_result_payloads_are_chinese_first_and_compact() -> None:
     import mms_core
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
 
     mms_i18n.set_language("zh")
     title, rows, note = mms_core._registry_scheduled_refresh_report_payload(
@@ -882,7 +882,7 @@ def test_rescue_fallback_report_points_to_latest_approved_router() -> None:
 
 def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     import mms_core
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
 
     mms_i18n.set_language("zh")
     about_title, about_info, about_actions = mms_core._about_tui_payload(
@@ -923,7 +923,7 @@ def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
 
 def test_about_tui_payload_surfaces_upgrade_actions_for_outdated_versions() -> None:
     import mms_core
-    import mms_i18n
+    import mms_runtime.i18n as mms_i18n
 
     mms_i18n.set_language("zh")
     _title, _info, actions = mms_core._about_tui_payload(

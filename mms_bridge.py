@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
 from mms_speed_stats import record_model_speed
 from mms_state_io import atomic_write_json, locked_state_file, mms_config_root_mode, resolve_mms_config_dir
 from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
-from mms_i18n import get_language as _get_mms_language, normalize_language as _normalize_mms_language
+from mms_runtime.i18n import get_language as _get_mms_language, normalize_language as _normalize_mms_language
 
 try:
     from mms_runtime.events import emit_event as _emit_event

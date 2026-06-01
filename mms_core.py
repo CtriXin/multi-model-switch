@@ -100,7 +100,7 @@ from mms_fake_upstream import (
     status_payload as _fake_upstream_status_payload,
     tail_log as _fake_upstream_tail_log,
 )
-from mms_i18n import normalize_language, set_language, pick as _L
+from mms_runtime.i18n import normalize_language, set_language, pick as _L
 from mms_opencode.health import (
     OPENCODE_HEALTH_REL_PATH as _OPENCODE_HEALTH_REL_PATH,
     OPENCODE_HEALTH_STATUS_RANK as _OPENCODE_HEALTH_STATUS_RANK,
