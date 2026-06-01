@@ -1,4 +1,4 @@
-import mms_openrouter_extension as openrouter
+import mms_registry.openrouter_extension as openrouter
 
 
 def _model(model_id, modality="text->text", pricing=None):

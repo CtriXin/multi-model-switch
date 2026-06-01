@@ -5088,7 +5088,7 @@ def _display_openrouter_extension_summary(summary, *, provider_label="", limit=1
 
 
 def _handle_openrouter_extension_config(cfg, args_rest):
-    from mms_openrouter_extension import (
+    from mms_registry.openrouter_extension import (
         openrouter_api_key_from_env,
         probe_openrouter_extension,
     )
