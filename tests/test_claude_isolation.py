@@ -345,7 +345,7 @@ def test_launcher_runtime_aux_paths_use_selected_config_root(monkeypatch, tmp_pa
 
 
 def test_usage_local_stats_use_selected_config_root(monkeypatch, tmp_path):
-    import mms_usage
+    import mms_display.usage as mms_usage
 
     real_home = tmp_path / "real-home"
     stable_root = real_home / ".config" / "mms"

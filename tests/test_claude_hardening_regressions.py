@@ -4616,7 +4616,7 @@ def test_launch_claude_oauth_delegate_blocks_force_ipv4(monkeypatch, tmp_path):
     assert exc.value.code == mms_launchers._CLAUDE_OAUTH_MANUAL_ONLY_EXIT_CODE
 
 def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypatch):
-    import mms_usage
+    import mms_display.usage as mms_usage
 
     captured = {}
 
@@ -4663,7 +4663,7 @@ def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypa
 
 def test_keychain_reads_are_opt_in(monkeypatch):
     import mms_account_state
-    import mms_usage
+    import mms_display.usage as mms_usage
 
     monkeypatch.delenv("MMS_ALLOW_KEYCHAIN_READ", raising=False)
 

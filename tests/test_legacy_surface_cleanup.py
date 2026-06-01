@@ -1442,7 +1442,7 @@ def test_review_launch_is_not_legacy_cleanup_target() -> None:
 
 def test_non_chat_legacy_helpers_remain_importable() -> None:
     import mmc_core
-    import mms_usage
+    import mms_display.usage as mms_usage
 
     assert mms_usage.usage_main
     assert mmc_core.main

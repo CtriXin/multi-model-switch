@@ -6496,7 +6496,7 @@ def main():
                 preferences_path=PREFERENCES_PATHS[0],
             ))
         if command == "usage":
-            from mms_usage import usage_main
+            from mms_display.usage import usage_main
 
             usage_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return

@@ -27,7 +27,7 @@ MMS is now launcher-first. The old built-in `chat` / `discuss` / post-action-bar
 | Registry / OpenRouter truth | Keep as admin surface | Supports model/source truth for launcher routing. |
 | `mms review-launch` | kept as future multi-review adapter | Launcher-owned reviewer dispatch handshake; not part of removed chat/discuss UI. |
 | `mmc_*` internals | Keep | Safety-critical Claude isolation/proxy/session helpers still used by launchers. |
-| `mms_usage.py` | Keep | Usage metadata remains useful for launcher recency/defaults. |
+| `mms_display/usage.py` | Keep | Usage metadata remains useful for launcher recency/defaults. |
 
 ## Product Boundary
 
