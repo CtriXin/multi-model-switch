@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from mms_capability_resolver import CapabilityBundleError
-from mms_capability_resolver import resolve_model_capabilities
+from mms_registry.capability_resolver import CapabilityBundleError
+from mms_registry.capability_resolver import resolve_model_capabilities
 
 
 ROOT = Path(__file__).resolve().parents[1]

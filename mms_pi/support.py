@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from mms_capability_resolver import resolve_model_capabilities
+from mms_registry.capability_resolver import resolve_model_capabilities
 from mms_core import _model_supports_vision, _probe_models
 from mms_opencode.config import opencode_config_slug as _opencode_config_slug
 from mms_provider_profiles import resolve_provider_profile

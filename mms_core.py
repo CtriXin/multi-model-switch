@@ -1134,7 +1134,7 @@ def _model_context_window(model_name):
     from mms_command_tools import model_context_window
 
     def resolve_capabilities(clean):
-        from mms_capability_resolver import resolve_model_capabilities
+        from mms_registry.capability_resolver import resolve_model_capabilities
 
         return resolve_model_capabilities(clean)
 

@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping
 from urllib.request import Request, urlopen
 
 import mms_registry
-from mms_capability_resolver import resolve_model_capabilities
+from mms_registry.capability_resolver import resolve_model_capabilities
 from mms_state_io import mms_config_root_status, resolve_mms_config_dir
 
 

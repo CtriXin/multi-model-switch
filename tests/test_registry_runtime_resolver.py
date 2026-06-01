@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 import mms_registry
-from mms_capability_resolver import CapabilityBundleError
-from mms_capability_resolver import resolve_model_capabilities
+from mms_registry.capability_resolver import CapabilityBundleError
+from mms_registry.capability_resolver import resolve_model_capabilities
 
 
 def _write_bundle(

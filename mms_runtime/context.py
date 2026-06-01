@@ -220,7 +220,7 @@ def lookup_context_window(
 
     try:
         if capability_resolver is None:
-            from mms_capability_resolver import resolve_model_capabilities as capability_resolver
+            from mms_registry.capability_resolver import resolve_model_capabilities as capability_resolver
 
         caps = capability_resolver(clean, provider_id=provider_id or "")
         if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
