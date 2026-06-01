@@ -18,10 +18,10 @@
   <aside class="side" id="nav"></aside>
   <main class="content">
     <section class="panel" data-section="source">
-      <h2>真源状态</h2>
+      <h2>配置源状态</h2>
       <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；registry 的 报告 / 人工确认操作也在这里，不再藏到 设置总表。</p>
       <div class="module-actions">
-        <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">模型真源状态</button>
+        <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">模型配置源状态</button>
         <button class="ghost" data-settings-action="consumer_bundle_status" data-report-target="sourceReport">消费端 Bundle</button>
         <button class="ghost" data-settings-action="verify_approved" data-report-target="sourceReport">验证已批准 Bundle</button>
         <button class="ghost" data-settings-action="preview_doctor" data-report-target="sourceReport">预览诊断</button>
@@ -30,7 +30,7 @@
         <button class="ghost" data-settings-action="publish_approved_gate" data-report-target="sourceReport">发布确认</button>
       </div>
       <div class="grid" id="sourceStatus"></div>
-      <div class="result module-report" id="sourceReport">选择真源动作查看只读报告或人工确认。</div>
+      <div class="result module-report" id="sourceReport">选择配置源动作查看只读报告或人工确认。</div>
     </section>
 
 
@@ -339,7 +339,7 @@
             <div class="mapping-head">
               <div>
                 <h3>TUI ↔ WebUI 对照表</h3>
-                <p class="muted">功能入口应在通道、模型测试、真源、Fallback、Runtime 或设置对应 tab 里；这里仅做验收证据。</p>
+                <p class="muted">功能入口应在通道、模型测试、配置源、Fallback、Runtime 或设置对应 tab 里；这里仅做验收证据。</p>
               </div>
               <div id="mappingFilters" class="filterbar compact"></div>
             </div>

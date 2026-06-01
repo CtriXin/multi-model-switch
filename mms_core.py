@@ -778,8 +778,8 @@ def current_command():
     if explicit:
         return explicit
     invoked = os.path.basename(str(sys.argv[0] or "")).strip()
-    if invoked == "mmf":
-        return "mmf"
+    if invoked:
+        return invoked
     return PRIMARY_COMMAND
 
 

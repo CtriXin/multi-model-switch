@@ -237,6 +237,28 @@ def _load_mms_core():
     return mms_core
 
 
+def _version_info_for_snapshot(command_name: str = "mms") -> dict[str, Any]:
+    try:
+        mms_core = _load_mms_core()
+        raw = mms_core._release_version_info()  # noqa: SLF001 - read-only version metadata for WebUI chrome
+        info = dict(raw) if isinstance(raw, dict) else {}
+    except Exception as exc:
+        info = {"release": "dev", "error": f"{type(exc).__name__}: {exc}"}
+    release = _safe_text(info.get("release") or info.get("installed_version") or info.get("git_describe") or info.get("git_commit") or "dev")
+    branch = _safe_text(info.get("git_branch"))
+    commit = _safe_text(info.get("git_commit"))
+    channel = _safe_text(info.get("install_channel"))
+    if branch and commit:
+        display = f"{branch}@{commit}"
+    elif channel and release:
+        display = f"{channel} {release}"
+    else:
+        display = release
+    info["command"] = command_name
+    info["display"] = display
+    return info
+
+
 def _policy_path_for_config(config_path: str = "") -> str:
     config_path = os.path.abspath(os.path.expanduser(str(config_path or ""))) if config_path else ""
     if config_path:
@@ -1522,6 +1544,7 @@ def build_config_snapshot(
         "schema": "mms.setup_web.snapshot.v2",
         "mode": "interactive_audited_save",
         "command": command_name,
+        "version_info": _version_info_for_snapshot(command_name),
         "setup_flow": build_setup_flow(),
         "test_contracts": build_test_contracts(),
         "paths": {

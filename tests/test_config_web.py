@@ -98,6 +98,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
 
     assert snapshot["mode"] == "interactive_audited_save"
     assert snapshot["schema"] == "mms.setup_web.snapshot.v2"
+    assert snapshot["version_info"]["display"]
     assert snapshot["providers"][0]["id"] == "webui-test-direct-qwen"
     assert snapshot["providers"][0]["has_api_key"] is True
     assert snapshot["providers"][0]["model_count"] == 1
@@ -895,7 +896,7 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     html = _frontend_source()
 
-    assert "['source','真源状态','DB / legacy / bundle']" in html
+    assert "['source','配置源','root / DB / bundle']" in html
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
     assert "status.headline" in html
@@ -1097,6 +1098,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "/api/settings/report" in html
     assert "人工确认" in html
     assert "报告 / 人工确认" in html
+    assert "版本：" in html
+    assert "当前配置 Root" in html
+    assert "要试预览 DB 请用 mmf config web" in html
     assert "function renderGateReport" in html
     assert "function renderProviderUsageReport" in html
     assert "function providerModelUsageRows" in html

@@ -99,7 +99,7 @@ def _webui_capability_coverage() -> list[dict[str, str]]:
         },
         {
             "area": "设置",
-            "capability": "Registry 真源、preview doctor、Bundle、就绪度和状态",
+            "capability": "Registry 源状态、preview doctor、Bundle、就绪度和状态",
             "webui": "read_only_reports_plus_existing_apply",
             "tui": "can_degrade_report_display_after_webui_smoke",
         },
@@ -338,10 +338,10 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
             "settings.registry",
             tui_area="Settings",
             tui_action_id="registry",
-            tui_label="模型真源",
-            webui_section="真源状态",
+            tui_label="模型源状态",
+            webui_section="配置源状态",
             webui_section_id="source",
-            webui_control="真源状态 卡片 + 报告按钮 + 保存 / 应用流程",
+            webui_control="配置源状态 卡片 + 报告按钮 + 保存 / 应用流程",
             api_action="model_source_status",
             status="report",
             write_policy="read_only_report",
@@ -638,7 +638,7 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
     ]
 
     registry_rows = [
-        ("registry.model_source_status", "model_source_status", "查看模型真源状态", "model_source_status", "report", "read_only_report"),
+        ("registry.model_source_status", "model_source_status", "查看模型源状态状态", "model_source_status", "report", "read_only_report"),
         ("registry.consumer_bundle_status", "consumer_bundle_status", "查看消费端 Bundle", "consumer_bundle_status", "report", "read_only_report"),
         ("registry.v2_save_plan", "registry_v2_save_plan", "查看 v2 保存计划", "", "native", "save_preview"),
         ("registry.config_v2_promotion_plan", "config_v2_promotion_plan", "查看晋级计划", "config_v2_promotion_plan", "report", "read_only_report"),
@@ -667,9 +667,9 @@ def _tui_webui_mapping() -> list[dict[str, str]]:
                 tui_area="Settings / Registry",
                 tui_action_id=action_id,
                 tui_label=label,
-                webui_section="保存 / 审计" if action_id == "registry_v2_save_plan" else "真源状态",
+                webui_section="保存 / 审计" if action_id == "registry_v2_save_plan" else "配置源状态",
                 webui_section_id="save" if action_id == "registry_v2_save_plan" else "source",
-                webui_control="保存页生成保存预览" if action_id == "registry_v2_save_plan" else "真源状态模块动作按钮",
+                webui_control="保存页生成保存预览" if action_id == "registry_v2_save_plan" else "配置源状态模块动作按钮",
                 api_action=api_action,
                 status=status,
                 write_policy=write_policy,
