@@ -133,9 +133,14 @@ from mms_claude.project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry
 from mms_registry.provider_profiles import profile_context_window, resolve_provider_profile
 from mms_pi import support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
+from mms_runtime import exposure as _runtime_exposure
+from mms_runtime import urls as _runtime_urls
+from mms_runtime import validation as _runtime_validation
 from mms_runtime.env import (
     apply_runtime_locale_profile as _apply_runtime_locale_profile_impl,
     runtime_locale_env as _runtime_locale_env_impl,
+    scrub_claude_oauth_env as _scrub_claude_oauth_env_impl,
+    scrub_inherited_runtime_env as _scrub_inherited_runtime_env_impl,
     validate_timezone_or_exit as _validate_timezone_or_exit_impl,
 )
 from mms_runtime.context import (
@@ -2317,18 +2322,8 @@ def _merge_oauth_claude_state_payload(existing_data, incoming_data):
     return merge_oauth_claude_state_payload(existing_data, incoming_data)
 
 
-def _masked_exposure_env_value(key, value):
-    """Compatibility wrapper for exposure env masking."""
-    from mms_runtime.exposure import masked_exposure_env_value
-
-    return masked_exposure_env_value(key, value)
-
-
-def inspect_runtime_exposure(cli, runtime):
-    """Compatibility wrapper for runtime exposure audits."""
-    from mms_runtime.exposure import inspect_runtime_exposure as inspect_runtime_exposure_impl
-
-    return inspect_runtime_exposure_impl(cli, runtime)
+_masked_exposure_env_value = _runtime_exposure.masked_exposure_env_value
+inspect_runtime_exposure = _runtime_exposure.inspect_runtime_exposure
 
 
 _build_claude_session_settings = _claude_settings.build_claude_session_settings
@@ -2402,43 +2397,11 @@ def gateway_health_check(provider):
         console.print(f"[yellow]⚠ gateway {base_url} 健康检查未通过，连接可能不稳定[/yellow]")
 
 
-def _provider_protocols(provider):
-    """Compatibility wrapper for provider protocol normalization."""
-    from mms_runtime.urls import provider_protocols
-
-    return provider_protocols(provider)
-
-
-def _provider_supports_cli(provider, cli):
-    """Compatibility wrapper for provider CLI support validation."""
-    from mms_runtime.validation import provider_supports_cli
-
-    return provider_supports_cli(provider, cli)
-
-
-def validate_provider_for_cli(cli, provider):
-    """Compatibility wrapper for provider launch validation."""
-    from mms_runtime.validation import validate_provider_for_cli as validate_provider_for_cli_impl
-
-    return validate_provider_for_cli_impl(cli, provider)
-
-
-def _scrub_claude_oauth_env(env):
-    """Compatibility wrapper for Claude OAuth env scrubbing."""
-    from mms_runtime.env import scrub_claude_oauth_env
-
-    return scrub_claude_oauth_env(env)
-
-
-def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
-    """Compatibility wrapper for inherited runtime env scrubbing."""
-    from mms_runtime.env import scrub_inherited_runtime_env
-
-    return scrub_inherited_runtime_env(
-        env,
-        strip_openai=strip_openai,
-        strip_proxy=strip_proxy,
-    )
+_provider_protocols = _runtime_urls.provider_protocols
+_provider_supports_cli = _runtime_validation.provider_supports_cli
+validate_provider_for_cli = _runtime_validation.validate_provider_for_cli
+_scrub_claude_oauth_env = _scrub_claude_oauth_env_impl
+_scrub_inherited_runtime_env = _scrub_inherited_runtime_env_impl
 
 
 def _account_env(account, *, validate_proxy=True, model_info=None):
