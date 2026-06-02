@@ -104,6 +104,7 @@ from mms_opencode.session import (
     opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
     overlay_opencode_plugin as _overlay_opencode_plugin_impl,
 )
+from mms_codex import hooks as _codex_hooks
 from mms_codex import hook_trust as _codex_hook_trust
 from mms_session import hook_commands as _session_hook_commands
 from mms_core import (
@@ -1764,43 +1765,11 @@ def _caveman_claude_tracker_command(caveman_root):
     return f"node {json.dumps(script_path)}"
 
 
-def _caveman_codex_activate_command(caveman_root, caveman_level="light"):
-    """Compatibility wrapper for Codex caveman activation command."""
-    from mms_codex.hooks import caveman_codex_activate_command
-
-    return caveman_codex_activate_command(caveman_root, caveman_level=caveman_level)
-
-
-def _caveman_codex_hook_payload(caveman_root, caveman_level="light"):
-    """Compatibility wrapper for Codex caveman hook payload."""
-    from mms_codex.hooks import caveman_codex_hook_payload
-
-    return caveman_codex_hook_payload(caveman_root, caveman_level=caveman_level)
-
-
-def _codex_shell_hook_payload(command_text, *, timeout=None, status_message=None):
-    """Compatibility wrapper for Codex shell hook payload rendering."""
-    from mms_codex.hooks import codex_shell_hook_payload
-
-    return codex_shell_hook_payload(command_text, timeout=timeout, status_message=status_message)
-
-
-def _codex_caveman_session_hook(caveman_root, caveman_level="light"):
-    """Compatibility wrapper for Codex caveman session hook rendering."""
-    from mms_codex.hooks import codex_caveman_session_hook
-
-    return codex_caveman_session_hook(caveman_root, caveman_level=caveman_level)
-
-
-def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
-    """Compatibility wrapper for Codex caveman hook configuration."""
-    from mms_codex.hooks import configure_codex_caveman_hooks
-
-    return configure_codex_caveman_hooks(
-        hooks_data,
-        enable_caveman=enable_caveman,
-        caveman_level=caveman_level,
-    )
+_caveman_codex_activate_command = _codex_hooks.caveman_codex_activate_command
+_caveman_codex_hook_payload = _codex_hooks.caveman_codex_hook_payload
+_codex_shell_hook_payload = _codex_hooks.codex_shell_hook_payload
+_codex_caveman_session_hook = _codex_hooks.codex_caveman_session_hook
+_configure_codex_caveman_hooks = _codex_hooks.configure_codex_caveman_hooks
 
 
 def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
@@ -1810,11 +1779,7 @@ def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     return configure_claude_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
 
 
-def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
-    """Compatibility wrapper for Codex NSR hook configuration."""
-    from mms_codex.hooks import configure_codex_nsr_hooks
-
-    return configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
+_configure_codex_nsr_hooks = _codex_hooks.configure_codex_nsr_hooks
 
 
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
@@ -1856,24 +1821,7 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
     return configure_claude_omc_hooks(hooks_data, enable_omc=enable_omc)
 
 
-def _build_codex_session_hooks(
-    base_hooks=None,
-    *,
-    enable_caveman=False,
-    caveman_level="light",
-    enable_nsr=False,
-    disabled_session_surfaces=None,
-):
-    """Compatibility wrapper for Codex session hook payload construction."""
-    from mms_codex.hooks import build_codex_session_hooks
-
-    return build_codex_session_hooks(
-        base_hooks,
-        enable_caveman=enable_caveman,
-        caveman_level=caveman_level,
-        enable_nsr=enable_nsr,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
+_build_codex_session_hooks = _codex_hooks.build_codex_session_hooks
 
 
 _codex_hook_event_state_key = _codex_hook_trust._codex_hook_event_state_key
