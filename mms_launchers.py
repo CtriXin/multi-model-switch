@@ -10,6 +10,7 @@ import sys
 import subprocess
 import tempfile
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from time import perf_counter
 
@@ -742,19 +743,9 @@ def _install_session_packet_env(
     )
 
 
-def _session_guard_marker_path(session_home):
-    """Compatibility wrapper for session guard marker paths."""
-    return _session_guard_marker_path_impl(session_home, _SESSION_GUARD_MARKER_NAME)
-
-
-def _session_guard_lock_path(sessions_dir):
-    """Compatibility wrapper for session guard lock paths."""
-    return _session_guard_lock_path_impl(sessions_dir, _SESSION_GUARD_LOCK_NAME)
-
-
-def _session_guard_process_identity(pid):
-    """Compatibility wrapper for process identity snapshots."""
-    return _session_guard_process_identity_impl(pid)
+_session_guard_marker_path = partial(_session_guard_marker_path_impl, marker_name=_SESSION_GUARD_MARKER_NAME)
+_session_guard_lock_path = partial(_session_guard_lock_path_impl, lock_name=_SESSION_GUARD_LOCK_NAME)
+_session_guard_process_identity = _session_guard_process_identity_impl
 
 
 def _session_guard_pid_alive(pid, *, identity=""):
