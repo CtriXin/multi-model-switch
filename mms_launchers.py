@@ -2502,29 +2502,8 @@ _copy_resume_dir_back = _codex_resume._copy_resume_dir_back
 _sync_codex_bounded_resume_back = _codex_resume._sync_codex_bounded_resume_back
 
 
-def _write_codex_hook_trust_cache(
-    target_codex_dir,
-    hooks_payload,
-    *,
-    trust_config_texts=None,
-    source_hook_payloads_by_path=None,
-):
-    """Compatibility wrapper for writing Codex hook trust cache."""
-    from mms_codex.hook_trust import _write_codex_hook_trust_cache as write_hook_trust_cache
-
-    return write_hook_trust_cache(
-        target_codex_dir,
-        hooks_payload,
-        trust_config_texts=trust_config_texts,
-        source_hook_payloads_by_path=source_hook_payloads_by_path,
-    )
-
-
-def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
-    """Compatibility wrapper for syncing Codex hook trust back to durable cache."""
-    from mms_codex.hook_trust import _sync_codex_hook_trust_back as sync_hook_trust_back
-
-    return sync_hook_trust_back(session_codex_dir, target_codex_dir)
+_write_codex_hook_trust_cache = _codex_hook_trust._write_codex_hook_trust_cache
+_sync_codex_hook_trust_back = _codex_hook_trust._sync_codex_hook_trust_back
 
 
 _sync_codex_bounded_resume_back_from_env = _codex_resume._sync_codex_bounded_resume_back_from_env
