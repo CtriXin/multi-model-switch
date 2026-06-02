@@ -4612,7 +4612,7 @@ def build_settings_report(
             return {"ok": False, "schema": "mms.setup_web.settings_report.v1", "action": action, "error": f"{type(exc).__name__}: {exc}"}
     if action == "rescue_events":
         try:
-            from mms_rescue import list_rescue_events
+            from mms_runtime.rescue import list_rescue_events
 
             events = list_rescue_events(repo_root=os.getcwd(), limit=20)
             return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "write_policy": "read_only", "events": _sanitize_for_output(events)}

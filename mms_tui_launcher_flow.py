@@ -1350,7 +1350,7 @@ def load_registry_cli_tools():
 
 
 def load_rescue_tools():
-    from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
+    from mms_runtime.rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
 
     return {
         "list_rescue_events": list_rescue_events,

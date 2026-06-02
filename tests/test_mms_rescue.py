@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def test_write_file_only_rescue_redacts_and_indexes(tmp_path):
-    from mms_rescue import is_secret_safe, write_file_only_rescue
+    from mms_runtime.rescue import is_secret_safe, write_file_only_rescue
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -57,7 +57,7 @@ def test_write_file_only_rescue_redacts_and_indexes(tmp_path):
 
 
 def test_write_file_only_rescue_skips_auth_bearing_raw_files(tmp_path):
-    from mms_rescue import write_file_only_rescue
+    from mms_runtime.rescue import write_file_only_rescue
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -78,7 +78,7 @@ def test_write_file_only_rescue_skips_auth_bearing_raw_files(tmp_path):
 
 
 def test_list_rescue_events_loads_recent_enriched_payloads(tmp_path):
-    from mms_rescue import list_rescue_events, write_file_only_rescue
+    from mms_runtime.rescue import list_rescue_events, write_file_only_rescue
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -119,7 +119,7 @@ def test_list_rescue_events_loads_recent_enriched_payloads(tmp_path):
 
 
 def test_write_demo_rescue_packet_is_listable_and_marked_demo(tmp_path):
-    from mms_rescue import list_rescue_events, write_demo_rescue_packet
+    from mms_runtime.rescue import list_rescue_events, write_demo_rescue_packet
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -139,7 +139,7 @@ def test_write_demo_rescue_packet_is_listable_and_marked_demo(tmp_path):
 
 
 def test_write_fallback_handover_is_file_only_and_context_aware(tmp_path):
-    from mms_rescue import list_rescue_events, write_fallback_handover, write_file_only_rescue
+    from mms_runtime.rescue import list_rescue_events, write_fallback_handover, write_file_only_rescue
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -186,7 +186,7 @@ def test_write_fallback_handover_is_file_only_and_context_aware(tmp_path):
 
 
 def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_path):
-    from mms_rescue import resolve_real_mms_config_dir
+    from mms_runtime.rescue import resolve_real_mms_config_dir
 
     real_home = tmp_path / "home"
     session_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "12345"
@@ -199,7 +199,7 @@ def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_
 
 
 def test_rescue_config_root_prefers_real_home_env(tmp_path):
-    from mms_rescue import resolve_real_mms_config_dir
+    from mms_runtime.rescue import resolve_real_mms_config_dir
 
     session_home = tmp_path / ".config" / "mms" / "codex-gateway" / "s" / "12345"
     mms_real = tmp_path / "mms-real"
@@ -255,7 +255,7 @@ def test_bridge_rescue_config_root_failure_does_not_fallback_to_stable(monkeypat
 
 
 def test_record_blocking_failure_redacts_secret_upstream_body(tmp_path):
-    from mms_rescue import record_blocking_failure
+    from mms_runtime.rescue import record_blocking_failure
 
     repo = tmp_path / "repo"
     repo.mkdir()

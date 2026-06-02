@@ -1339,7 +1339,7 @@ def _record_bridge_blocking_failure(
     if not bool(getattr(server, "rescue_enabled", False)):
         return None
     try:
-        from mms_rescue import record_blocking_failure, write_fallback_handover
+        from mms_runtime.rescue import record_blocking_failure, write_fallback_handover
 
         payload = record_blocking_failure(
             repo_root=getattr(server, "rescue_repo_root", None),
@@ -1939,7 +1939,7 @@ def _incident_log_path(server=None):
 
 def _redact_incident_value(value):
     try:
-        from mms_rescue import assert_secret_safe, redact_text
+        from mms_runtime.rescue import assert_secret_safe, redact_text
 
         text = redact_text(value)
         assert_secret_safe(text)
@@ -1984,7 +1984,7 @@ def _append_incident_log(
         }
         line = json.dumps(entry, ensure_ascii=False, sort_keys=True)
         try:
-            from mms_rescue import assert_secret_safe
+            from mms_runtime.rescue import assert_secret_safe
 
             assert_secret_safe(line)
         except Exception:
