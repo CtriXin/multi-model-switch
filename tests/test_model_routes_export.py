@@ -107,7 +107,7 @@ def _patch_export_dependencies(monkeypatch, *, contexts):
 
 
 def _patch_export_paths(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
     monkeypatch.setattr(mms_router, "MODEL_ROUTES_LINEUP_PATH", str(tmp_path / "model-routes.lineup.json"))
@@ -118,7 +118,7 @@ def _patch_export_paths(monkeypatch, tmp_path):
 
 
 def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -194,7 +194,7 @@ def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypat
 
 def test_export_model_routes_prefers_verified_latest_approved_bundle(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_paths(monkeypatch, tmp_path)
     approved_routes = {
@@ -219,7 +219,7 @@ def test_export_model_routes_prefers_verified_latest_approved_bundle(monkeypatch
 
 def test_validate_model_config_bundle_uses_verified_latest_approved_or_legacy_fallback(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_paths(monkeypatch, tmp_path)
     bad_root = {
@@ -268,7 +268,7 @@ def test_validate_model_config_bundle_uses_verified_latest_approved_or_legacy_fa
 
 def test_export_model_routes_fails_closed_on_invalid_latest_approved_bundle(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_paths(monkeypatch, tmp_path)
     stale_root = {
@@ -321,7 +321,7 @@ def test_export_model_routes_requires_latest_approved_for_preview_root(monkeypat
     preview_root.mkdir()
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_paths(monkeypatch, preview_root)
     stale_root = {
@@ -363,7 +363,7 @@ def test_export_model_routes_requires_latest_approved_for_config_dir_root(monkey
     selected_root.mkdir()
     monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_paths(monkeypatch, selected_root)
     stale_root = {
@@ -401,7 +401,7 @@ def test_export_model_routes_requires_latest_approved_for_config_dir_root(monkey
 
 
 def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -445,7 +445,7 @@ def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch,
 
 
 def test_export_model_routes_refreshes_profile_lineup_metadata_without_secrets(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -508,7 +508,7 @@ def test_export_model_routes_refreshes_profile_lineup_metadata_without_secrets(m
 
 def test_latest_routes_freshness_tracks_provider_profiles(monkeypatch, tmp_path):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_core, "CONFIG_PATH", str(tmp_path / "missing-config.toml"))
@@ -549,7 +549,7 @@ def test_latest_routes_freshness_tracks_provider_profiles(monkeypatch, tmp_path)
 
 
 def test_validate_model_config_bundle_errors_on_bad_lineup_and_fallback():
-    import mms_router
+    from mms_registry import router as mms_router
 
     routes = {
         "version": 1,
@@ -584,7 +584,7 @@ def test_validate_model_config_bundle_errors_on_bad_lineup_and_fallback():
 
 
 def test_validate_model_config_bundle_allows_stale_hidden_policy_entries():
-    import mms_router
+    from mms_registry import router as mms_router
 
     routes = {
         "version": 1,
@@ -623,7 +623,7 @@ def test_validate_model_config_bundle_allows_stale_hidden_policy_entries():
 
 
 def test_export_model_routes_creates_new_snapshot_when_key_changes(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     contexts = {
         "qwen-openai": {
@@ -665,7 +665,7 @@ def test_export_model_routes_creates_new_snapshot_when_key_changes(monkeypatch, 
 
 
 def test_export_model_routes_keeps_only_minimal_fields_for_hive(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -725,7 +725,7 @@ def test_export_model_routes_keeps_only_minimal_fields_for_hive(monkeypatch, tmp
 
 
 def test_export_model_routes_prefers_higher_priority_before_default_provider(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -782,7 +782,7 @@ def test_export_model_routes_prefers_higher_priority_before_default_provider(mon
 
 
 def test_export_model_routes_keeps_gemini_models_for_gemini_provider(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -821,7 +821,7 @@ def test_export_model_routes_keeps_gemini_models_for_gemini_provider(monkeypatch
 
 
 def test_export_model_routes_keeps_antigravity_bridge_models(monkeypatch, tmp_path):
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -876,7 +876,7 @@ def test_export_model_routes_keeps_antigravity_bridge_models(monkeypatch, tmp_pa
 
 def test_export_model_routes_uses_startup_safe_probe_when_requested(monkeypatch, tmp_path):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     calls = []
     _patch_export_dependencies(
@@ -927,7 +927,7 @@ def test_export_model_routes_uses_startup_safe_probe_when_requested(monkeypatch,
 
 def test_export_model_routes_skips_provider_when_startup_probe_raises(monkeypatch, tmp_path):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     _patch_export_dependencies(
         monkeypatch,
@@ -991,7 +991,7 @@ def test_export_model_routes_skips_provider_when_startup_probe_raises(monkeypatc
 
 def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     calls = []
     monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
@@ -1018,7 +1018,7 @@ def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path)
 
 def test_refresh_routes_export_for_hive_loads_current_config(monkeypatch):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     calls = []
     monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
@@ -1041,7 +1041,7 @@ def test_refresh_routes_export_for_hive_loads_current_config(monkeypatch):
 
 def test_refresh_routes_export_for_hive_supports_startup_safe_probe(monkeypatch):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     calls = []
     monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
@@ -1064,7 +1064,7 @@ def test_refresh_routes_export_for_hive_supports_startup_safe_probe(monkeypatch)
 
 def test_refresh_routes_export_for_hive_skips_startup_safe_probe_for_preview(monkeypatch):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     calls = []
     monkeypatch.setattr(mms_core, "_config_root_status", lambda: {"mode": "preview"})
@@ -1085,7 +1085,7 @@ def test_refresh_routes_export_for_hive_skips_startup_safe_probe_for_preview(mon
 
 def test_refresh_routes_export_for_hive_allows_explicit_preview_legacy_export(monkeypatch):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     calls = []
     monkeypatch.setattr(mms_core, "_config_root_status", lambda: {"mode": "preview"})

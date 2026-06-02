@@ -216,8 +216,8 @@ MMS now uses the latest-approved bundle for the low-risk resolver surfaces:
 - `mms_launchers._lookup_context_window()` and the TUI capability summary only
   accept approved context facts when the resolver marks the field source as
   `approved_facts`.
-- `mms_router.export_model_routes(force=False)` and
-  `mms_router.validate_model_config_bundle()` read the verified generated
+- `mms_registry.router.export_model_routes(force=False)` and
+  `mms_registry.router.validate_model_config_bundle()` read the verified generated
   router/lineup/policy payloads first; explicit `force=True` still regenerates
   legacy root aliases from current config.
 

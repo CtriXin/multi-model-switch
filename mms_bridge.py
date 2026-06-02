@@ -3302,7 +3302,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 for _ct in _check_texts:
                     if _ct.startswith("[SUGGESTION MODE") or _ct.startswith("[SYSTEM"):
                         try:
-                            from mms_router import log_route
+                            from mms_registry.router import log_route
                             log_route("light", "blocked:suggestion", "(blocked)", _ct[:60])
                         except Exception:
                             pass
@@ -3362,7 +3362,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     break
 
             if last_text:
-                from mms_router import classify_task, log_route, STICKY_DECAY_TURNS
+                from mms_registry.router import classify_task, log_route, STICKY_DECAY_TURNS
                 import time as _time_mod
 
                 # 短时去重：同一文本 3 秒内不重复分类
@@ -3439,7 +3439,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     status_paths=getattr(self.server, "route_status_paths", None),
                 )
                 _emit_event("streaming", payload.get("model", ""), note="tool_continue")
-                from mms_router import log_route
+                from mms_registry.router import log_route
                 log_route(prev_level, "tool_continue", payload.get("model", "?"), "(tool_result)")
             else:
                 # 智能路由开启但没有用户消息，沿用上次 tier

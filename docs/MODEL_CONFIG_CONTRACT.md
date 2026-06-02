@@ -130,7 +130,7 @@ Bundle rules:
   files/conservative defaults are used only when the manifest is missing,
   invalid, or hash-mismatched. Candidate/source snapshots are not runtime input.
 - Router read-side adoption is also conservative:
-  `mms_router.export_model_routes(force=False)` and
+  `mms_registry.router.export_model_routes(force=False)` and
   `validate_model_config_bundle()` read verified generated router/lineup/policy
   first; explicit `force=True` still regenerates legacy root aliases from
   current config. Provider/account priority and bridge routing stay on the

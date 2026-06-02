@@ -1972,7 +1972,7 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startu
         return True
 
     def export_model_routes_current(*args, **kwargs):
-        from mms_router import export_model_routes
+        from mms_registry.router import export_model_routes
 
         return export_model_routes(*args, **kwargs)
 
@@ -6521,7 +6521,7 @@ def main():
             handle_cache_command(argv[1:])
             return
         if command == "routes":
-            from mms_router import routes_main
+            from mms_registry.router import routes_main
 
             routes_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return

@@ -158,7 +158,7 @@ def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monk
 
 def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp_path):
     import mms_core
-    import mms_router
+    from mms_registry import router as mms_router
 
     real_home = tmp_path / "real-home"
     gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
@@ -190,7 +190,7 @@ def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp
 def test_mms_config_root_overrides_gateway_real_home(monkeypatch, tmp_path):
     import mms_core
     import mms_registry
-    import mms_router
+    from mms_registry import router as mms_router
 
     real_home = tmp_path / "real-home"
     gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"

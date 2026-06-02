@@ -936,11 +936,11 @@ def load_provider_browse_tui_tools():
 
 
 def load_export_model_routes():
-    return __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes
+    return __import__("mms_registry.router", fromlist=["export_model_routes"]).export_model_routes
 
 
 def load_model_routes_exporter():
-    router = __import__("mms_router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])
+    router = __import__("mms_registry.router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])
     return router.MODEL_ROUTES_PATH, router.export_model_routes
 
 

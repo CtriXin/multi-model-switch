@@ -224,7 +224,7 @@ def _policy_path_for_config(config_path: str = "") -> str:
     if config_path:
         return os.path.join(os.path.dirname(config_path), "model-policy.json")
     try:
-        import mms_router
+        from mms_registry import router as mms_router
 
         return str(getattr(mms_router, "MODEL_POLICY_PATH", ""))
     except Exception:

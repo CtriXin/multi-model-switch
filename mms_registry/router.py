@@ -51,7 +51,7 @@ _LEARN_THRESHOLD = 3
 # ── 内置默认关键词 ──
 
 _BUILTIN_GUARDRAIL_FILES = {
-    "mms_core", "mms_launchers", "mms_bridge", "mms_router", "mms_tui",
+    "mms_core", "mms_launchers", "mms_bridge", "mms_registry/router.py", "mms_registry.router", "mms_tui",
     "mms_registry/adapter_registry.py", "mms_registry.adapter_registry",
     "mms_runtime/account_state.py", "mms_runtime.account_state",
     "auth", "schema", "migration", "security", "config.toml",

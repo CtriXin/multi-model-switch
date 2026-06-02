@@ -7054,7 +7054,7 @@ def test_responses_bridge_models_endpoint_requires_auth_and_supports_query():
 
 
 def test_llm_classify_retries_retry_after_on_429(monkeypatch):
-    import mms_router
+    from mms_registry import router as mms_router
 
     class FakeResponse:
         def __init__(self, status_code, payload=None, text="", headers=None, url="https://relay.example.com/v1/messages"):
