@@ -871,6 +871,8 @@ def test_config_web_frontend_assets_are_external_files():
 
     assert '<link rel="stylesheet" href="/static/config-web.css">' in html
     assert '<script src="/static/config-web.js"></script>' in html
+    assert '<body class="booting">' in html
+    assert "读取本地配置中" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
     assert "这里直接改 MMS 启动会读取的模型能力" in html
@@ -879,8 +881,10 @@ def test_config_web_frontend_assets_are_external_files():
     assert b".panel" in css_body
     assert b"model-table-wrap" in css_body
     assert b"cap-toggle-grid" in css_body
+    assert b"body.booting" in css_body
     assert b"CAPABILITY_META" in js_body
     assert b"function renderAll" in js_body
+    assert b"setBootMessage" in js_body
     assert "MMS 自动别名".encode("utf-8") in js_body
     assert "能力配置".encode("utf-8") in js_body
     assert "缓存优先".encode("utf-8") in js_body

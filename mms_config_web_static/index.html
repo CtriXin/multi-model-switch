@@ -6,16 +6,20 @@
   <title>MMS 配置中心</title>
   <link rel="stylesheet" href="/static/config-web.css">
 </head>
-<body>
+<body class="booting">
 <header>
   <div>
     <h1>MMS 配置中心</h1>
     <p class="lead">这里按模块直接配置和测试：通道里改 provider 与模型清单，模型测试里跑 smoke，设置里管账号、语言和 Guard。保存前先预览；stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
   </div>
-  <div class="statusbar" id="statusbar"><span class="pill warn">加载中</span></div>
+  <div class="statusbar" id="statusbar"><span class="pill warn boot-pulse">读取本地配置中</span></div>
 </header>
 <div class="shell">
-  <aside class="side" id="nav"></aside>
+  <aside class="side boot-nav" id="nav" aria-busy="true">
+    <button class="navbtn active" disabled>配置源<small>正在读取 root / DB / bundle</small></button>
+    <button class="navbtn" disabled>通道配置<small>加载后可编辑</small></button>
+    <button class="navbtn" disabled>模型测试<small>加载后可测试</small></button>
+  </aside>
   <main class="content">
     <section class="panel" data-section="source">
       <h2>配置源状态</h2>
@@ -29,8 +33,14 @@
         <button class="ghost" data-settings-action="refresh_due_sources_gate" data-report-target="sourceReport">刷新到期源确认</button>
         <button class="ghost" data-settings-action="publish_approved_gate" data-report-target="sourceReport">发布确认</button>
       </div>
-      <div class="grid" id="sourceStatus"></div>
-      <div class="result module-report" id="sourceReport">选择配置源动作查看只读报告或人工确认。</div>
+      <div class="grid" id="sourceStatus">
+        <div class="card span12 boot-loading-card">
+          <h3>正在读取本地配置</h3>
+          <p class="muted">只读取本机 config root、registry DB 和已批准 bundle；不会自动刷新远端 /models。</p>
+          <div class="loading-lines" aria-hidden="true"><span></span><span></span><span></span></div>
+        </div>
+      </div>
+      <div class="result module-report" id="sourceReport">本地 snapshot 读取中，完成后这里会显示可执行的只读报告和人工确认入口。</div>
     </section>
 
 
