@@ -110,6 +110,7 @@ from mms_codex import hooks as _codex_hooks
 from mms_codex import hook_trust as _codex_hook_trust
 from mms_codex import resume as _codex_resume
 from mms_session import env as _session_env
+from mms_session import assets as _session_assets
 from mms_session import hook_commands as _session_hook_commands
 from mms_session import mcp as _session_mcp
 from mms_session import overlays as _session_overlays
@@ -133,6 +134,7 @@ from mms_runtime.fake_upstream import (
 )
 from mms_runtime.host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_claude import model as _claude_model
+from mms_claude import session as _claude_session
 from mms_claude.project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_registry.provider_profiles import profile_context_window, resolve_provider_profile
 from mms_pi import support as _pi_support
@@ -2514,32 +2516,10 @@ _codex_resume_writeback_callback = _codex_resume._codex_resume_writeback_callbac
 _codex_bounded_resume_entries = _codex_resume._codex_bounded_resume_entries
 
 
-def _link_shared_dotfiles(session_home):
-    """Compatibility wrapper for shared dotfile links in session homes."""
-    from mms_session.assets import link_shared_dotfiles
-
-    return link_shared_dotfiles(session_home)
-
-
-def _link_real_local_bin(session_home):
-    """Compatibility wrapper for exposing real ~/.local/bin in Claude sessions."""
-    from mms_claude.session import link_real_local_bin
-
-    return link_real_local_bin(session_home)
-
-
-def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
-    """Compatibility wrapper for Claude session Library allowlist links."""
-    from mms_claude.session import link_claude_library_entries
-
-    return link_claude_library_entries(session_home, entries=entries)
-
-
-def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
-    """Compatibility wrapper for account Library allowlist preparation."""
-    from mms_claude.session import ensure_account_library_entries
-
-    return ensure_account_library_entries(account_home, entries=entries)
+_link_shared_dotfiles = _session_assets.link_shared_dotfiles
+_link_real_local_bin = _claude_session.link_real_local_bin
+_link_claude_library_entries = _claude_session.link_claude_library_entries
+_ensure_account_library_entries = _claude_session.ensure_account_library_entries
 
 
 _macos_security_bin = _agy_security.macos_security_bin
@@ -2550,11 +2530,7 @@ _ensure_agy_account_keychain = _agy_security.ensure_agy_account_keychain
 _install_agy_security_wrapper = _agy_security.install_agy_security_wrapper
 
 
-def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
-    """Compatibility wrapper for account Library links into session homes."""
-    from mms_claude.session import link_account_library_entries
-
-    return link_account_library_entries(session_home, account_home, entries=entries)
+_link_account_library_entries = _claude_session.link_account_library_entries
 
 
 def _filter_real_home_wrapper_path(path_value, *, session_home=None):
