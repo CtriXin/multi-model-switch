@@ -2437,35 +2437,25 @@ def _opencode_gateway_health_check(runtime):
         provider_base_url=_opencode_provider_base_url,
         gateway_health_check=gateway_health_check,
     )
-
-
-def _opencode_model_config(runtime, model_name):
-    return _opencode_model_config_impl(
-        runtime,
-        model_name,
-        context_window_resolver=_effective_context_window,
-    )
-
-
-def _opencode_rtk_plugin_path(runtime=None):
-    return _opencode_rtk_plugin_path_impl(
-        runtime,
-        module_file=__file__,
-        normalize_session_surface_disabled=_normalize_session_surface_disabled,
-        runtime_bool=_opencode_runtime_bool,
-        env_bool=_opencode_env_bool,
-    )
-
-
-def _opencode_xmem_plugin_path(runtime=None):
-    return _opencode_xmem_plugin_path_impl(
-        runtime,
-        module_file=__file__,
-        normalize_session_surface_disabled=_normalize_session_surface_disabled,
-        session_skill_disabled=_session_skill_disabled,
-        resolve_xmem_root=_resolve_xmem_root,
-        xmem_cli_path=_xmem_cli_path,
-    )
+_opencode_model_config = partial(
+    _opencode_model_config_impl,
+    context_window_resolver=_effective_context_window,
+)
+_opencode_rtk_plugin_path = partial(
+    _opencode_rtk_plugin_path_impl,
+    module_file=__file__,
+    normalize_session_surface_disabled=_normalize_session_surface_disabled,
+    runtime_bool=_opencode_runtime_bool,
+    env_bool=_opencode_env_bool,
+)
+_opencode_xmem_plugin_path = partial(
+    _opencode_xmem_plugin_path_impl,
+    module_file=__file__,
+    normalize_session_surface_disabled=_normalize_session_surface_disabled,
+    session_skill_disabled=_session_skill_disabled,
+    resolve_xmem_root=_resolve_xmem_root,
+    xmem_cli_path=_xmem_cli_path,
+)
 
 
 def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
@@ -2492,38 +2482,23 @@ def _opencode_xmem_plugin_enabled(runtime=None):
     return bool(_opencode_xmem_plugin_path(runtime))
 
 
-def _build_opencode_config_payload(runtime, model_name=""):
-    return _opencode_build_config_payload_impl(
-        runtime,
-        model_name,
-        context_window_resolver=_effective_context_window,
-    )
-
-
-def _build_opencode_config_content(runtime, model_name=""):
-    return _opencode_build_config_content_impl(
-        runtime,
-        model_name,
-        context_window_resolver=_effective_context_window,
-    )
-
-
-def _write_opencode_config(path, runtime, model):
-    return _opencode_write_config_impl(
-        path,
-        runtime,
-        model,
-        build_config_content=_build_opencode_config_content,
-        atomic_write_text=atomic_write_text,
-    )
-
-
-def _opencode_export_config_path(runtime, model):
-    return _opencode_export_config_path_impl(
-        runtime,
-        model,
-        real_user_path=_real_user_path,
-    )
+_build_opencode_config_payload = partial(
+    _opencode_build_config_payload_impl,
+    context_window_resolver=_effective_context_window,
+)
+_build_opencode_config_content = partial(
+    _opencode_build_config_content_impl,
+    context_window_resolver=_effective_context_window,
+)
+_write_opencode_config = partial(
+    _opencode_write_config_impl,
+    build_config_content=_build_opencode_config_content,
+    atomic_write_text=atomic_write_text,
+)
+_opencode_export_config_path = partial(
+    _opencode_export_config_path_impl,
+    real_user_path=_real_user_path,
+)
 
 
 def _opencode_gateway_env(runtime, model_info=None):
@@ -2561,31 +2536,21 @@ def _opencode_gateway_env(runtime, model_info=None):
     )
 
 
-def _opencode_global_omo_env(runtime):
-    return _opencode_global_omo_env_impl(
-        runtime,
-        clear_opencode_config_env=_clear_opencode_config_env,
-        inject_real_home_hints=_inject_real_home_hints,
-        real_user_path=_real_user_path,
-        apply_bypass_env=_opencode_apply_bypass_env,
-        apply_runtime_network_profile=_apply_runtime_network_profile,
-        apply_runtime_locale_profile=_apply_runtime_locale_profile,
-        apply_runtime_ip_stack_profile=_apply_runtime_ip_stack_profile,
-    )
-
-
-def _opencode_global_command(runtime, entrypoint):
-    return _opencode_global_command_impl(runtime, entrypoint)
-
-
-def _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agent):
-    return _opencode_session_command_impl(
-        runtime,
-        entrypoint,
-        launch_model_ref,
-        launch_agent,
-        default_agent=OPENCODE_LITE_DEFAULT_AGENT,
-    )
+_opencode_global_omo_env = partial(
+    _opencode_global_omo_env_impl,
+    clear_opencode_config_env=_clear_opencode_config_env,
+    inject_real_home_hints=_inject_real_home_hints,
+    real_user_path=_real_user_path,
+    apply_bypass_env=_opencode_apply_bypass_env,
+    apply_runtime_network_profile=_apply_runtime_network_profile,
+    apply_runtime_locale_profile=_apply_runtime_locale_profile,
+    apply_runtime_ip_stack_profile=_apply_runtime_ip_stack_profile,
+)
+_opencode_global_command = _opencode_global_command_impl
+_opencode_session_command = partial(
+    _opencode_session_command_impl,
+    default_agent=OPENCODE_LITE_DEFAULT_AGENT,
+)
 
 
 # Pi implementation lives in mms_pi.support; keep the former launcher-private
@@ -2694,26 +2659,18 @@ LAUNCHERS = {
 }
 
 
-def _is_opencode_global_profile_runtime(cli, runtime):
-    return _opencode_is_global_profile_runtime_impl(cli, runtime)
-
-
-def _opencode_global_export_env(runtime):
-    return _opencode_global_export_env_impl(
-        runtime,
-        apply_bypass_env=_opencode_apply_bypass_env,
-    )
-
-
-def _opencode_provider_export_env(runtime, model):
-    return _opencode_provider_export_env_impl(
-        runtime,
-        model,
-        export_config_path=_opencode_export_config_path,
-        write_opencode_config=_write_opencode_config,
-        apply_route_env=_opencode_apply_route_env,
-        apply_bypass_env=_opencode_apply_bypass_env,
-    )
+_is_opencode_global_profile_runtime = _opencode_is_global_profile_runtime_impl
+_opencode_global_export_env = partial(
+    _opencode_global_export_env_impl,
+    apply_bypass_env=_opencode_apply_bypass_env,
+)
+_opencode_provider_export_env = partial(
+    _opencode_provider_export_env_impl,
+    export_config_path=_opencode_export_config_path,
+    write_opencode_config=_write_opencode_config,
+    apply_route_env=_opencode_apply_route_env,
+    apply_bypass_env=_opencode_apply_bypass_env,
+)
 
 
 def _runtime_with_export_model(runtime, model_info=None):
