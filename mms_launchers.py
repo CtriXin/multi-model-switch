@@ -309,9 +309,7 @@ def _runtime_network_summary(runtime):
     )
 
 
-def _guard_utc_now():
-    """Compatibility wrapper for UTC guard timestamps."""
-    return _utc_now_z_impl()
+_guard_utc_now = _utc_now_z_impl
 
 
 def _runtime_locale_env(runtime=None):
@@ -332,9 +330,7 @@ def _provider_id_set_from_env(env_name):
     return _provider_id_set_from_env_impl(env_name, environ=os.environ)
 
 
-def _runtime_declares_sensitive_claude(runtime):
-    """Compatibility wrapper for runtime-declared sensitive Claude provider markers."""
-    return _runtime_declares_sensitive_claude_impl(runtime)
+_runtime_declares_sensitive_claude = _runtime_declares_sensitive_claude_impl
 
 
 def _load_model_context_overrides():
@@ -856,14 +852,10 @@ def _real_home_wrapper_scrub_lines():
     return real_home_wrapper_scrub_lines()
 
 
-def _normalize_path(value):
-    """Compatibility wrapper for HOME path normalization."""
-    return _normalize_path_impl(value)
+_normalize_path = _normalize_path_impl
 
 
-def _path_is_within(path, root):
-    """Compatibility wrapper for path containment checks."""
-    return _path_is_within_impl(path, root)
+_path_is_within = _path_is_within_impl
 
 
 def _path_under(path, root):
@@ -918,9 +910,7 @@ def _validate_home_context_or_exit(context):
     )
 
 
-def _home_context_lines(context):
-    """Compatibility wrapper for launch HOME context display lines."""
-    return _home_context_lines_impl(context)
+_home_context_lines = _home_context_lines_impl
 
 
 def _prepare_oauth_home_context(runtime, env, cli_name):
@@ -936,19 +926,13 @@ def _prepare_oauth_home_context(runtime, env, cli_name):
     )
 
 
-def _apply_proxy_env(env, proxy_url, no_proxy=""):
-    """Compatibility wrapper for applying proxy env values."""
-    return _apply_proxy_env_impl(env, proxy_url, no_proxy=no_proxy)
+_apply_proxy_env = _apply_proxy_env_impl
 
 
-def _proxy_dns_mode(proxy_url):
-    """Compatibility wrapper for proxy DNS mode classification."""
-    return _proxy_dns_mode_impl(proxy_url)
+_proxy_dns_mode = _proxy_dns_mode_impl
 
 
-def _split_no_proxy_values(no_proxy):
-    """Compatibility wrapper for NO_PROXY token splitting."""
-    return _split_no_proxy_values_impl(no_proxy)
+_split_no_proxy_values = _split_no_proxy_values_impl
 
 
 def _claude_no_proxy_conflicts(no_proxy):
