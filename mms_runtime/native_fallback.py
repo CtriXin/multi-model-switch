@@ -178,7 +178,7 @@ def _provider_has_model(provider, cfg, model_name):
 
 def _load_runtime_config():
     try:
-        from mms_state_io import mms_config_root_mode
+        from mms_runtime.state_io import mms_config_root_mode
 
         if mms_config_root_mode() == "preview":
             return {}

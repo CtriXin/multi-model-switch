@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 
-from mms_state_io import atomic_write_json, locked_state_file
+from mms_runtime.state_io import atomic_write_json, locked_state_file
 
 # Directory where mms caches per-account OAuth tokens for mms usage
 _MMS_TOKEN_CACHE_DIR = os.path.expanduser("~/.mms/token_cache")

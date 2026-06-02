@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mms_state_io import atomic_write_json, locked_state_file
+from mms_runtime.state_io import atomic_write_json, locked_state_file
 
 DEFAULT_PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mmc"))
 PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR

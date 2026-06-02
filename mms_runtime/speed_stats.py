@@ -16,7 +16,7 @@ try:
 except ImportError:  # pragma: no cover - not expected on macOS/Linux
     fcntl = None
 
-from mms_state_io import resolve_mms_config_dir
+from mms_runtime.state_io import resolve_mms_config_dir
 
 DEFAULT_PRIMARY_CONFIG_DIR = Path(resolve_mms_config_dir())
 PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR

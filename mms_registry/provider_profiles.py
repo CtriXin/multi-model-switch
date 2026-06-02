@@ -12,7 +12,7 @@ import os
 from functools import lru_cache
 from typing import Any
 
-from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
+from mms_runtime.state_io import mms_config_root_mode, resolve_mms_config_dir
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BUILTIN_PROFILE_PATH = os.path.join(_REPO_ROOT, "config", "provider-profiles.json")

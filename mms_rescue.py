@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from mms_state_io import atomic_write_text, locked_state_file, resolve_real_user_home
+from mms_runtime.state_io import atomic_write_text, locked_state_file, resolve_real_user_home
 
 
 RESCUE_SCHEMA = "mms.rescue_event.v1"

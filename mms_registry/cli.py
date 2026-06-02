@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 import mms_registry
 from mms_registry.capability_resolver import resolve_model_capabilities
-from mms_state_io import mms_config_root_status, resolve_mms_config_dir
+from mms_runtime.state_io import mms_config_root_status, resolve_mms_config_dir
 
 
 ROOT = Path(__file__).resolve().parent.parent

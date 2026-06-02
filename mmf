@@ -39,7 +39,7 @@ from mms_runtime import ensure_supported_python
 
 ensure_supported_python("MMF")
 
-from mms_state_io import mms_config_root_status, resolve_real_user_home
+from mms_runtime.state_io import mms_config_root_status, resolve_real_user_home
 
 os.environ.setdefault("MMS_COMMAND_NAME", "mmf")
 os.environ.setdefault("MMS_PREVIEW_MODE", "mmf")

@@ -236,7 +236,7 @@ def _config_root_for_snapshot(config_path: str = "") -> str:
     if config_path:
         return os.path.dirname(config_path)
     try:
-        from mms_state_io import resolve_mms_config_dir
+        from mms_runtime.state_io import resolve_mms_config_dir
 
         return resolve_mms_config_dir()
     except Exception:
@@ -287,7 +287,7 @@ def _is_preview_config_root(config_path: str = "", *, command_name: str = "mms")
     if not config_root:
         return False
     try:
-        from mms_state_io import mms_config_root_status
+        from mms_runtime.state_io import mms_config_root_status
 
         return mms_config_root_status(command=command_name, config_dir=config_root).get("mode") == "preview"
     except Exception:
@@ -3598,7 +3598,7 @@ def apply_config_plan(
         return {"ok": False, "errors": ["确认文字必须输入：保存配置"], "status": "blocked"}
     config_root = _config_root_for_snapshot(config_path)
     try:
-        from mms_state_io import mms_config_root_status
+        from mms_runtime.state_io import mms_config_root_status
 
         root_status = mms_config_root_status(command="mms-config-web", config_dir=config_root or None)
     except Exception:

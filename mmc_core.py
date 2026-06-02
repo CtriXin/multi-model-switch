@@ -42,7 +42,7 @@ from mmc_session_index import (
     list_indexed_sessions,
     record_claude_session_start,
 )
-from mms_state_io import atomic_write_json, locked_state_file
+from mms_runtime.state_io import atomic_write_json, locked_state_file
 from mms_runtime import prepend_binary_dir_to_path, resolve_cli_binary
 
 MMC_PUBLIC_MIGRATION_NOTICE = (

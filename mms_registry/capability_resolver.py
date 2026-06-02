@@ -108,7 +108,7 @@ def load_default_approved_facts() -> dict[str, Any]:
         return mms_registry.load_latest_approved_bundle(include_secret=False).get("payloads", {}).get("capabilities") or {}
     except Exception as exc:
         try:
-            from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
+            from mms_runtime.state_io import mms_config_root_mode, resolve_mms_config_dir
 
             config_root = resolve_mms_config_dir()
             if mms_config_root_mode(config_root) == "preview":

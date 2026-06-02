@@ -16,7 +16,7 @@ from mms_registry.schema import (
     REVISION_STATUSES,
     migrate as migrate_schema,
 )
-from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
+from mms_runtime.state_io import mms_config_root_mode, resolve_mms_config_dir
 
 
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"

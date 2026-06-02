@@ -1740,7 +1740,7 @@ def rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", 
             add_from_router_payload(payload)
         return candidates[: max(1, int(limit or 1))]
     try:
-        from mms_state_io import mms_config_root_status
+        from mms_runtime.state_io import mms_config_root_status
 
         if mms_config_root_status(config_dir=root).get("mode") == "preview":
             return []

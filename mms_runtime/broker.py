@@ -19,7 +19,7 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
-from mms_state_io import resolve_mms_config_dir
+from mms_runtime.state_io import resolve_mms_config_dir
 
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_mms_config_dir_counts_as_explicit_selected_root(tmp_path: Path) -> None:
-    from mms_state_io import mms_config_root_is_explicit, mms_config_root_status
+    from mms_runtime.state_io import mms_config_root_is_explicit, mms_config_root_status
 
     config_root = tmp_path / "selected-root"
     env = {"MMS_CONFIG_DIR": str(config_root), "MMS_REAL_HOME": str(tmp_path / "home")}
@@ -19,7 +19,7 @@ def test_mms_config_dir_counts_as_explicit_selected_root(tmp_path: Path) -> None
 
 
 def test_xdg_config_home_is_not_explicit_preview_root(tmp_path: Path) -> None:
-    from mms_state_io import mms_config_root_is_explicit, mms_config_root_status
+    from mms_runtime.state_io import mms_config_root_is_explicit, mms_config_root_status
 
     env = {"XDG_CONFIG_HOME": str(tmp_path / "xdg"), "MMS_REAL_HOME": str(tmp_path / "home")}
 

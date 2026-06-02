@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from math import pow
 from mms_runtime.fake_upstream import status_payload as _fake_upstream_status_payload
 from mms_runtime.i18n import pick as _L, get_language as _get_language
-from mms_state_io import resolve_mms_config_dir
+from mms_runtime.state_io import resolve_mms_config_dir
 
 # CJK locale 下 ambiguous-width 字符渲染为 2 列
 _lang = os.environ.get("LANG", "") or locale.getdefaultlocale()[0] or ""

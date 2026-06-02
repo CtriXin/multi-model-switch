@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mms_state_io import atomic_write_json, locked_state_file
+from mms_runtime.state_io import atomic_write_json, locked_state_file
 from mmc_project_store import (
     claude_raw_entry_path,
     claude_state_sessions_root,

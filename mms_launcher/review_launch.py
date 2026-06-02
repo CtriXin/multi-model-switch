@@ -701,7 +701,7 @@ def _latest_approved_router_candidates(
     if not _review_launch_explicit_config_root(env):
         return [], "", False
     try:
-        from mms_state_io import resolve_mms_config_dir
+        from mms_runtime.state_io import resolve_mms_config_dir
 
         config_root = resolve_mms_config_dir(_selected_config_root_env(env))
     except Exception as exc:

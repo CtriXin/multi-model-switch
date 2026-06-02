@@ -610,7 +610,7 @@ def test_get_export_env_exposes_context_bin_for_export_only_launch(monkeypatch, 
 
 def test_get_export_env_survives_deleted_current_directory(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
-    import mms_state_io
+    from mms_runtime import state_io as mms_state_io
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
@@ -642,7 +642,7 @@ def test_get_export_env_survives_deleted_current_directory(monkeypatch, tmp_path
 
 
 def test_resolve_current_workdir_does_not_fallback_to_real_home(monkeypatch, tmp_path):
-    import mms_state_io
+    from mms_runtime import state_io as mms_state_io
 
     real_home = tmp_path / "real-home"
     real_home.mkdir()
@@ -666,7 +666,7 @@ def test_resolve_current_workdir_does_not_fallback_to_real_home(monkeypatch, tmp
 
 
 def test_resolve_current_workdir_prefers_pwd_over_stale_mms_cwd(monkeypatch, tmp_path):
-    import mms_state_io
+    from mms_runtime import state_io as mms_state_io
 
     repo_dir = tmp_path / "repo"
     stale_dir = tmp_path / "stale"
@@ -689,7 +689,7 @@ def test_resolve_current_workdir_prefers_pwd_over_stale_mms_cwd(monkeypatch, tmp
 
 
 def test_resolve_current_workdir_uses_session_home_as_last_safe_fallback(monkeypatch, tmp_path):
-    import mms_state_io
+    from mms_runtime import state_io as mms_state_io
 
     real_home = tmp_path / "real-home"
     session_home = tmp_path / "session-home"

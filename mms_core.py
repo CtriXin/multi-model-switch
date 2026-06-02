@@ -141,13 +141,13 @@ from mms_opencode.resolver import (
     find_opencode_model_route as _find_opencode_model_route_impl,
     resolve_opencode_profile_runtime as _resolve_opencode_profile_runtime_impl,
 )
-from mms_state_io import (
+from mms_runtime.state_io import (
     mms_config_root_is_explicit,
     mms_config_root_status,
     resolve_mms_config_dir,
     resolve_real_user_home,
 )
-from mms_state_io import resolve_current_workdir as _safe_getcwd
+from mms_runtime.state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（按需写入文件，不影响 TUI 输出）
 _PROBE_DEBUG_DIR = os.path.join(

@@ -222,7 +222,7 @@ from mms_session.guard import (
 from mms_session.assets import resolve_local_hooks_dir as _resolve_local_hooks_dir_impl
 from mms_session.index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session.packet import write_session_packet
-from mms_state_io import (
+from mms_runtime.state_io import (
     atomic_write_json,
     atomic_write_text,
     load_json_dict_unlocked as _load_json_dict_unlocked_impl,
@@ -231,7 +231,7 @@ from mms_state_io import (
     resolve_mms_config_dir as _resolve_mms_config_dir,
     utc_now_z as _utc_now_z_impl,
 )
-from mms_state_io import resolve_current_workdir as _safe_getcwd
+from mms_runtime.state_io import resolve_current_workdir as _safe_getcwd
 
 _build_gateway_url = None
 codex_claude_bridge = None

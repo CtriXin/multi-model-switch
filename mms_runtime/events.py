@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from mms_state_io import resolve_mms_config_dir
+from mms_runtime.state_io import resolve_mms_config_dir
 
 
 class EventType(str, Enum):

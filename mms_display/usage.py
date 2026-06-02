@@ -24,7 +24,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
-from mms_state_io import resolve_mms_config_dir
+from mms_runtime.state_io import resolve_mms_config_dir
 
 try:
     import httpx as _httpx

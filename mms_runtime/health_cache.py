@@ -15,7 +15,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mms_state_io import resolve_mms_config_dir
+from mms_runtime.state_io import resolve_mms_config_dir
 from mms_runtime.speed_stats import get_speed_entry
 
 

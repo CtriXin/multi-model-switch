@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mms_state_io import resolve_mms_config_dir
+from mms_runtime.state_io import resolve_mms_config_dir
 
 DEFAULT_PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms"))
 PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR
