@@ -6,7 +6,7 @@ import inspect
 
 
 def load_bridge_helpers():
-    from mms_bridge import (
+    from mms_runtime.bridge import (
         _build_gateway_url as _bgw,
         _write_route_status as _wrs,
         codex_chatcompletions_bridge as _cccb,

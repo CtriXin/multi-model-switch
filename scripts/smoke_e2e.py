@@ -23,7 +23,7 @@ if ROOT_DIR not in sys.path:
 
 import httpx
 
-from mms_bridge import (
+from mms_runtime.bridge import (
     codex_chatcompletions_bridge,
     codex_responses_bridge,
     gateway_claude_bridge,

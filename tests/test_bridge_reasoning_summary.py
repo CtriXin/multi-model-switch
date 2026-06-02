@@ -1,4 +1,4 @@
-from mms_bridge import _AnthropicTranslator
+from mms_runtime.bridge import _AnthropicTranslator
 
 
 def test_reasoning_prefix_hidden_when_summary_is_empty():

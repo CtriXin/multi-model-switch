@@ -178,7 +178,7 @@ def test_resolve_codex_responses_fallback_routes_finds_codex_provider(monkeypatc
 
 
 def test_responses_proxy_retries_native_fallback_on_403(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -272,7 +272,7 @@ def test_responses_proxy_retries_native_fallback_on_403(monkeypatch):
 
 
 def test_responses_proxy_retries_native_fallback_on_cloudflare_524(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -362,7 +362,7 @@ def test_responses_proxy_retries_native_fallback_on_cloudflare_524(monkeypatch):
 
 
 def test_responses_proxy_converts_terminal_403_to_fail_closed(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     monkeypatch.setenv("MMS_LANG", "zh")
 
@@ -428,7 +428,7 @@ def test_responses_proxy_converts_terminal_403_to_fail_closed(monkeypatch):
 
 
 def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     monkeypatch.setenv("MMS_LANG", "zh")
 
@@ -465,7 +465,7 @@ def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail(monk
 
 def test_fail_closed_auth_error_payload_uses_english_when_mms_lang_en(monkeypatch):
     import mms_runtime.i18n as mms_i18n
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     monkeypatch.delenv("MMS_LANG", raising=False)
     mms_i18n.set_language("en")
@@ -495,7 +495,7 @@ def test_fail_closed_auth_error_payload_uses_english_when_mms_lang_en(monkeypatc
 
 
 def test_chatcompletions_fallback_uses_native_route_profile_and_proxy(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     class FakeResponse:
         status_code = 429
@@ -577,7 +577,7 @@ def test_chatcompletions_fallback_uses_native_route_profile_and_proxy(monkeypatc
 
 
 def test_gateway_bridge_retries_native_fallback_before_responding(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -667,7 +667,7 @@ def test_gateway_bridge_retries_native_fallback_before_responding(monkeypatch):
 
 
 def test_gateway_bridge_does_not_fallback_after_stream_response_started(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -748,7 +748,7 @@ def test_gateway_bridge_does_not_fallback_after_stream_response_started(monkeypa
 
 
 def test_gateway_bridge_does_not_fallback_on_local_programming_error(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -815,7 +815,7 @@ def test_gateway_bridge_does_not_fallback_on_local_programming_error(monkeypatch
 
 
 def test_gateway_claude_bridge_stores_native_fallback_routes(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = {"closed": 0}
 

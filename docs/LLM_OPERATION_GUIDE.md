@@ -85,7 +85,7 @@ Stop before editing when the change can affect any of these surfaces:
 | `mms_core.py` | source/config/model selection and route export semantics |
 | `mms_launchers.py` | actual CLI launch env, HOME/XDG isolation, session assets, bridge choice |
 | `mms_display/tui.py` | selection result shape and user confirmation semantics |
-| `mms_bridge.py` | protocol translation, auth headers, provider fallback, error semantics |
+| `mms_runtime/bridge.py` | protocol translation, auth headers, provider fallback, error semantics |
 | `mms_runtime/account_state.py` | account status, auth state, Permission denied paths |
 | `mms_session/index.py` | managed CLI session index and isolation state |
 | `mms_registry/adapter_registry.py` | CLI/provider capability mapping |

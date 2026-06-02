@@ -14,7 +14,7 @@ def _run_gateway_bridge_once(
     system: str | list[dict] | None = None,
     vision_sidecar: dict | None = None,
 ) -> dict:
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     captured: dict = {}
 

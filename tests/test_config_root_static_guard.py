@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 KNOWN_BAD_PATTERNS = {
-    "mms_bridge.py": [
+    "mms_runtime/bridge.py": [
         'return os.path.expanduser("~/.config/mms")',
     ],
     "mms_runtime/broker.py": [

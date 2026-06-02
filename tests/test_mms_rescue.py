@@ -20,7 +20,7 @@ def test_write_file_only_rescue_redacts_and_indexes(tmp_path):
             "error_type": "rate_limit",
             "error_summary": "Authorization: Bearer sk-secret-token-1234567890 hit quota",
         },
-        "git": {"status_short": " M mms_bridge.py"},
+        "git": {"status_short": " M mms_runtime/bridge.py"},
         "next_action": "Resume from rescue packet.",
     }
 
@@ -224,7 +224,7 @@ def test_rescue_config_root_prefers_real_home_env(tmp_path):
 
 
 def test_bridge_rescue_config_root_failure_does_not_fallback_to_stable(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     stable_root = tmp_path / "stable" / ".config" / "mms"
     stable_root.mkdir(parents=True)
@@ -283,7 +283,7 @@ def test_record_blocking_failure_redacts_secret_upstream_body(tmp_path):
 
 
 def test_bridge_blocking_failure_incident_log_uses_config_root_and_redacts(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -325,7 +325,7 @@ def test_bridge_blocking_failure_incident_log_uses_config_root_and_redacts(monke
 
 
 def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -410,7 +410,7 @@ def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tm
 
 
 def test_responses_proxy_hot_fallback_pause_writes_handover_only(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -520,7 +520,7 @@ def test_responses_proxy_hot_fallback_pause_writes_handover_only(monkeypatch, tm
 
 
 def test_responses_proxy_hot_fallback_prefers_anthropic_messages_for_deepseek(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -624,7 +624,7 @@ def test_responses_proxy_hot_fallback_prefers_anthropic_messages_for_deepseek(mo
 
 
 def test_responses_proxy_hot_fallback_uses_messages_for_cache_sensitive_openai_only_route(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -761,7 +761,7 @@ def _write_latest_approved_router_manifest(config_root: Path, *, router_payload:
 
 
 def test_rescue_hot_fallback_reads_verified_latest_approved_router(tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     config_root = tmp_path / "mms-config"
     router_payload = {
@@ -802,7 +802,7 @@ def test_rescue_hot_fallback_reads_verified_latest_approved_router(tmp_path):
 
 
 def test_rescue_hot_fallback_fails_closed_on_invalid_latest_approved_manifest(tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     config_root = tmp_path / "mms-config"
     router_payload = {
@@ -822,7 +822,7 @@ def test_rescue_hot_fallback_fails_closed_on_invalid_latest_approved_manifest(tm
 
 
 def test_rescue_hot_fallback_fails_closed_on_missing_preview_manifest(tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     config_root = tmp_path / "mms-next"
     generated = config_root / "generated"
@@ -856,7 +856,7 @@ def test_rescue_hot_fallback_fails_closed_on_missing_preview_manifest(tmp_path):
 
 
 def test_chatcompletions_fallback_retries_messages_when_gateway_requests_messages(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     class FakeResponse:
         status_code = 400
@@ -933,7 +933,7 @@ def test_chatcompletions_fallback_retries_messages_when_gateway_requests_message
 
 
 def test_primary_codex_chat_bridge_retries_messages_when_gateway_requests_messages(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     class FakeResponse:
         status_code = 400
@@ -1027,7 +1027,7 @@ def test_primary_codex_chat_bridge_retries_messages_when_gateway_requests_messag
 
 
 def test_anthropic_messages_hot_fallback_posts_messages_endpoint(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -1106,7 +1106,7 @@ def test_anthropic_messages_hot_fallback_posts_messages_endpoint(monkeypatch, tm
 
 
 def test_generate_rescue_summary_uses_anthropic_messages_route(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     config_root = tmp_path / "mms-config"
     rescue_dir = tmp_path / "repo" / ".mms" / "rescue" / "event"
@@ -1183,7 +1183,7 @@ def test_generate_rescue_summary_uses_anthropic_messages_route(monkeypatch, tmp_
 
 
 def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -1297,7 +1297,7 @@ def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, t
 
 
 def test_rescue_global_fallback_without_hot_switch_records_handover_only(tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
@@ -1344,7 +1344,7 @@ def test_rescue_global_fallback_without_hot_switch_records_handover_only(tmp_pat
 
 
 def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_path):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     monkeypatch.setenv("MMS_PROJECT_ROOT", str(tmp_path / "repo"))
     monkeypatch.setenv("MMS_RESCUE_CONFIG_ROOT", str(tmp_path / "config"))

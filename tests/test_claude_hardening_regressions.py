@@ -3582,7 +3582,7 @@ def test_provider_options_for_model_accepts_openai_base_url_only(monkeypatch):
 
 
 def test_bridge_fallback_cache_is_scoped_by_gateway_url(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     monkeypatch.setattr(
         mms_bridge,
@@ -3598,7 +3598,7 @@ def test_bridge_fallback_cache_is_scoped_by_gateway_url(monkeypatch):
 
 
 def test_claude_passthrough_rules_use_minimal_headers_for_sensitive_provider():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     header_names, header_prefixes = mms_bridge._claude_passthrough_rules(
         types.SimpleNamespace(
@@ -3612,7 +3612,7 @@ def test_claude_passthrough_rules_use_minimal_headers_for_sensitive_provider():
 
 
 def test_claude_passthrough_rules_drop_anthropic_beta_for_domestic_models():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     header_names, header_prefixes = mms_bridge._claude_passthrough_rules(
         types.SimpleNamespace(
@@ -3641,7 +3641,7 @@ def test_claude_passthrough_rules_drop_anthropic_beta_for_domestic_models():
     ],
 )
 def test_domestic_model_supports_thinking_capability_allowlist(model_name, expected):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     assert mms_bridge._domestic_model_supports_thinking(model_name) is expected
     assert mms_bridge._should_strip_domestic_thinking_signals(model_name) is (not expected)
@@ -3658,13 +3658,13 @@ def test_domestic_model_supports_thinking_capability_allowlist(model_name, expec
     ],
 )
 def test_anthropic_cache_control_allowlist_for_qwen_models(model_name, expected):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     assert mms_bridge._model_supports_anthropic_cache_control(model_name) is expected
 
 
 def test_strip_domestic_thinking_signals_removes_thinking_payload_fields():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "thinking": {"type": "enabled", "budget_tokens": 2048},
@@ -3701,7 +3701,7 @@ def test_strip_domestic_thinking_signals_removes_thinking_payload_fields():
 
 
 def test_apply_domestic_reasoning_controls_preserves_supported_thinking_and_sets_deepseek_effort():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "thinking": {"type": "enabled", "budget_tokens": 2048},
@@ -3731,7 +3731,7 @@ def test_apply_domestic_reasoning_controls_preserves_supported_thinking_and_sets
 
 
 def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "thinking": {"type": "enabled", "budget_tokens": 2048},
@@ -3759,7 +3759,7 @@ def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort(
 
 
 def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_roundtrip_family():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "thinking": {"type": "enabled", "budget_tokens": 2048},
@@ -3777,7 +3777,7 @@ def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_no
 
 
 def test_preserve_domestic_reasoning_roundtrip_supports_mimo():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "messages": [
@@ -3797,7 +3797,7 @@ def test_preserve_domestic_reasoning_roundtrip_supports_mimo():
 
 
 def test_preserve_domestic_reasoning_roundtrip_rehydrates_missing_thinking_block_from_reasoning_content():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "messages": [
@@ -3818,7 +3818,7 @@ def test_preserve_domestic_reasoning_roundtrip_rehydrates_missing_thinking_block
 
 
 def test_preserve_domestic_reasoning_roundtrip_propagates_split_kimi_tool_use_messages():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "messages": [
@@ -3854,7 +3854,7 @@ def test_preserve_domestic_reasoning_roundtrip_propagates_split_kimi_tool_use_me
 
 
 def test_canonicalize_domestic_anthropic_history_coalesces_split_kimi_tool_roundtrip():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "messages": [
@@ -3886,7 +3886,7 @@ def test_canonicalize_domestic_anthropic_history_coalesces_split_kimi_tool_round
 
 
 def test_canonicalize_domestic_anthropic_history_coalesces_split_mimo_tool_history():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "messages": [
@@ -3915,7 +3915,7 @@ def test_canonicalize_domestic_anthropic_history_coalesces_split_mimo_tool_histo
 
 
 def test_restore_session_domestic_reasoning_roundtrip_rehydrates_latest_kimi_tool_group():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "messages": [
@@ -3961,7 +3961,7 @@ def test_restore_session_domestic_reasoning_roundtrip_rehydrates_latest_kimi_too
 
 
 def test_restore_session_domestic_reasoning_roundtrip_rehydrates_compact_resume_tool_group():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = {
         "messages": [
@@ -4001,7 +4001,7 @@ def test_restore_session_domestic_reasoning_roundtrip_rehydrates_compact_resume_
 
 
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     class FakeResponse:
         status_code = 200
@@ -5402,7 +5402,7 @@ def test_gateway_ping_uses_x_api_key_for_anthropic_endpoint(monkeypatch):
 
 
 def test_gateway_claude_bridge_binds_ephemeral_port_and_waits_ready(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = {"wait": [], "closed": 0}
 
@@ -5447,7 +5447,7 @@ def test_gateway_claude_bridge_binds_ephemeral_port_and_waits_ready(monkeypatch)
 
 
 def test_bridge_httpx_kwargs_disable_ambient_proxy_by_default():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     kwargs = mms_bridge._bridge_httpx_kwargs(target_url="https://relay.example.com/v1/messages")
 
@@ -5455,7 +5455,7 @@ def test_bridge_httpx_kwargs_disable_ambient_proxy_by_default():
 
 
 def test_gateway_bridge_post_disables_trust_env_and_respects_runtime_proxy(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     captured = {}
 
@@ -5516,7 +5516,7 @@ def test_gateway_bridge_post_disables_trust_env_and_respects_runtime_proxy(monke
 
 
 def test_gateway_bridge_preserves_qwen_anthropic_cache_control(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     captured = {}
 
@@ -5595,7 +5595,7 @@ def test_gateway_bridge_preserves_qwen_anthropic_cache_control(monkeypatch):
 
 
 def test_gateway_bridge_stream_restores_kimi_reasoning_for_tool_continuation(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     requests = []
 
@@ -5729,7 +5729,7 @@ def test_gateway_bridge_stream_restores_kimi_reasoning_for_tool_continuation(mon
 
 
 def test_gateway_bridge_stream_publishes_kimi_reasoning_before_first_stream_finishes(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     requests = []
     ready = threading.Event()
@@ -5863,7 +5863,7 @@ def test_gateway_bridge_stream_publishes_kimi_reasoning_before_first_stream_fini
 
 
 def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     class FakeResponse:
         def __init__(self, status_code, body, headers=None):
@@ -5931,7 +5931,7 @@ def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkey
 
 
 def test_responses_input_to_messages_preserves_kimi_reasoning_for_split_tool_calls():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     messages = mms_bridge._responses_input_to_messages(
         "",
@@ -5972,7 +5972,7 @@ def test_responses_input_to_messages_preserves_kimi_reasoning_for_split_tool_cal
 
 
 def test_responses_input_to_messages_carries_kimi_reasoning_across_multiple_tool_rounds():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     messages = mms_bridge._responses_input_to_messages(
         "",
@@ -6031,7 +6031,7 @@ def test_responses_input_to_messages_carries_kimi_reasoning_across_multiple_tool
 
 
 def test_responses_payload_to_anthropic_messages_payload_preserves_kimi_reasoning():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = mms_bridge._responses_payload_to_anthropic_messages_payload(
         {
@@ -6066,7 +6066,7 @@ def test_responses_payload_to_anthropic_messages_payload_preserves_kimi_reasonin
 
 
 def test_chatcompletions_fallback_preserves_kimi_reasoning_for_tool_history(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     captured = {}
 
@@ -6158,7 +6158,7 @@ def test_chatcompletions_fallback_preserves_kimi_reasoning_for_tool_history(monk
 
 
 def test_chatcompletions_translator_emits_kimi_reasoning_in_completed_output():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     translator = mms_bridge._ChatCompletionsToResponsesTranslator("kimi-k2.6", response_id="resp_test")
     completed = None
@@ -6215,7 +6215,7 @@ def test_chatcompletions_translator_emits_kimi_reasoning_in_completed_output():
 
 
 def test_chatcompletions_translator_completed_output_roundtrips_kimi_tool_reasoning():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     translator = mms_bridge._ChatCompletionsToResponsesTranslator("kimi-k2.6", response_id="resp_test")
     completed_output = None
@@ -6267,7 +6267,7 @@ def test_chatcompletions_translator_completed_output_roundtrips_kimi_tool_reason
 
 def test_codex_chat_bridge_preserves_kimi_reasoning_across_real_tool_roundtrip():
     import importlib
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     mms_bridge = importlib.reload(mms_bridge)
 
@@ -6413,7 +6413,7 @@ def test_codex_chat_bridge_preserves_kimi_reasoning_across_real_tool_roundtrip()
 
 
 def test_build_codex_payload_maps_output_limit():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = mms_bridge._build_codex_payload(
         {
@@ -6428,7 +6428,7 @@ def test_build_codex_payload_maps_output_limit():
 
 
 def test_build_codex_payload_can_skip_output_limit_mapping():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = mms_bridge._build_codex_payload(
         {
@@ -6444,7 +6444,7 @@ def test_build_codex_payload_can_skip_output_limit_mapping():
 
 
 def test_build_codex_payload_can_disable_reasoning():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     payload = mms_bridge._build_codex_payload(
         {
@@ -6461,7 +6461,7 @@ def test_build_codex_payload_can_disable_reasoning():
 
 
 def test_gpt_on_claude_forward_as_responses_skips_output_limit_for_strict_upstream(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     captured = {}
 
@@ -6540,7 +6540,7 @@ def test_gpt_on_claude_forward_as_responses_skips_output_limit_for_strict_upstre
 
 
 def test_iter_sse_lines_defaults_event_name_and_skips_bad_json():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     class FakeResponse:
         @staticmethod
@@ -6566,7 +6566,7 @@ def test_iter_sse_lines_defaults_event_name_and_skips_bad_json():
 
 
 def test_forward_as_responses_retries_without_previous_response_id(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -6656,7 +6656,7 @@ def test_forward_as_responses_retries_without_previous_response_id(monkeypatch):
 
 
 def test_forward_as_responses_retries_on_generic_403_permission_denied(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     calls = []
 
@@ -6749,7 +6749,7 @@ def test_forward_as_responses_retries_on_generic_403_permission_denied(monkeypat
 
 
 def test_forward_as_responses_fail_closes_final_403_without_login_hint(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     monkeypatch.setenv("MMS_LANG", "zh")
 
@@ -6829,7 +6829,7 @@ def test_forward_as_responses_fail_closes_final_403_without_login_hint(monkeypat
 
 
 def test_responses_proxy_handler_strips_reasoning_when_disabled(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     captured = {}
 
@@ -6887,7 +6887,7 @@ def test_responses_proxy_handler_strips_reasoning_when_disabled(monkeypatch):
 
 
 def test_responses_proxy_handler_overrides_reasoning_effort_when_enabled(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     captured = {}
 
@@ -6943,7 +6943,7 @@ def test_responses_proxy_handler_overrides_reasoning_effort_when_enabled(monkeyp
 
 
 def test_gateway_bridge_post_fail_closes_upstream_403_without_login_hint(monkeypatch):
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     monkeypatch.setenv("MMS_LANG", "zh")
 
@@ -7009,7 +7009,7 @@ def test_gateway_bridge_post_fail_closes_upstream_403_without_login_hint(monkeyp
 
 
 def test_json_resp_to_sse_invalid_body_returns_error_event():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     body = mms_bridge._json_resp_to_sse(b"not-json")
     text = body.decode("utf-8")
@@ -7019,7 +7019,7 @@ def test_json_resp_to_sse_invalid_body_returns_error_event():
 
 
 def test_responses_bridge_models_endpoint_requires_auth_and_supports_query():
-    import mms_bridge
+    import mms_runtime.bridge as mms_bridge
 
     handler_classes = (
         mms_bridge._ResponsesProxyHandler,
