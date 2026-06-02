@@ -134,6 +134,7 @@ from mms_runtime.fake_upstream import (
     status_payload as _fake_upstream_status_payload,
 )
 from mms_runtime.host_context import host_capability_env, resolve_tool_bins, write_host_context
+from mms_claude import endpoint as _claude_endpoint
 from mms_claude import model as _claude_model
 from mms_claude import session as _claude_session
 from mms_claude.project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
@@ -2684,18 +2685,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
 
 
 
-def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
-    """Compatibility wrapper for Claude Anthropic endpoint resolution."""
-    from mms_claude.endpoint import resolve_anthropic_base_url
-
-    return resolve_anthropic_base_url(runtime, probe_model=probe_model)
-
-
-def _pick_gateway_model(runtime, base_url):
-    """Compatibility wrapper for Claude gateway model selection."""
-    from mms_claude.endpoint import pick_gateway_model
-
-    return pick_gateway_model(runtime, base_url)
+_resolve_anthropic_base_url = _claude_endpoint.resolve_anthropic_base_url
+_pick_gateway_model = _claude_endpoint.pick_gateway_model
 
 
 def _cleanup_stale_sessions(sessions_dir, stale_callback=None, *, max_entries=None, max_seconds=None):
