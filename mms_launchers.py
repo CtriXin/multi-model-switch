@@ -1389,6 +1389,7 @@ def _remember_anthropic_url(provider_id, configured_url, resolved_url):
 
 
 from mms_claude import settings as _claude_settings
+from mms_claude import state as _claude_state
 
 # Claude settings implementation lives in mms_claude.settings; keep the former
 # launcher-private names as aliases for existing monkeypatch-based tests/callers.
@@ -1973,99 +1974,19 @@ _session_managed_mcp_servers = _claude_settings.session_managed_mcp_servers
 _inject_managed_mcp_servers_into_claude_state = _claude_settings.inject_managed_mcp_servers_into_claude_state
 
 
-def _copy_allowed_scalar_fields(payload, allowed_keys):
-    """Compatibility wrapper for scalar allowlist copies."""
-    from mms_claude.state import copy_allowed_scalar_fields
-
-    return copy_allowed_scalar_fields(payload, allowed_keys)
-
-
-def _copy_allowed_scalar_dict_fields(payload, allowed_keys):
-    """Compatibility wrapper for scalar dict allowlist copies."""
-    from mms_claude.state import copy_allowed_scalar_dict_fields
-
-    return copy_allowed_scalar_dict_fields(payload, allowed_keys)
-
-
-def _sanitize_claude_ui_state_seed_payload(payload):
-    """Compatibility wrapper for Claude UI state seed sanitization."""
-    from mms_claude.state import sanitize_claude_ui_state_seed_payload
-
-    return sanitize_claude_ui_state_seed_payload(payload)
-
-
-def _merge_scalar_dict_entries(existing_payload, incoming_payload, *, prefer_max_numeric=False):
-    """Compatibility wrapper for scalar dict merging."""
-    from mms_claude.state import merge_scalar_dict_entries
-
-    return merge_scalar_dict_entries(
-        existing_payload,
-        incoming_payload,
-        prefer_max_numeric=prefer_max_numeric,
-    )
-
-
-def _merge_claude_ui_state_seed(target_payload, seed_payload):
-    """Compatibility wrapper for Claude UI state seed merging."""
-    from mms_claude.state import merge_claude_ui_state_seed
-
-    return merge_claude_ui_state_seed(target_payload, seed_payload)
-
-
-def _merge_claude_gateway_ui_state_payload(existing_payload, incoming_payload):
-    """Compatibility wrapper for Claude gateway UI state merging."""
-    from mms_claude.state import merge_claude_gateway_ui_state_payload
-
-    return merge_claude_gateway_ui_state_payload(existing_payload, incoming_payload)
-
-
-def _strip_claude_state_execution_surfaces(payload):
-    """Compatibility wrapper for stripping execution surfaces from Claude state."""
-    from mms_claude.state import strip_claude_state_execution_surfaces
-
-    return strip_claude_state_execution_surfaces(payload)
-
-
-def _sanitize_claude_project_state_entry(entry):
-    """Compatibility wrapper for Claude project state entry sanitization."""
-    from mms_claude.state import sanitize_claude_project_state_entry
-
-    return sanitize_claude_project_state_entry(entry)
-
-
-def _sanitize_claude_project_state_map(projects_data):
-    """Compatibility wrapper for Claude project state map sanitization."""
-    from mms_claude.state import sanitize_claude_project_state_map
-
-    return sanitize_claude_project_state_map(projects_data)
-
-
-def _load_real_claude_ui_state_seed():
-    """Compatibility wrapper for reading real Claude UI state seed."""
-    from mms_claude.state import load_real_claude_ui_state_seed
-
-    return load_real_claude_ui_state_seed()
-
-
-def _load_real_claude_project_state(project_path):
-    """Compatibility wrapper for reading real Claude project state."""
-    from mms_claude.state import load_real_claude_project_state
-
-    return load_real_claude_project_state(project_path)
-
-
-def _sanitize_oauth_claude_state_payload(data):
-    """Compatibility wrapper for OAuth Claude state sanitization."""
-    from mms_claude.state import sanitize_oauth_claude_state_payload
-
-    return sanitize_oauth_claude_state_payload(data)
-
-
-def _sanitize_codex_claude_state_payload(data):
-    """Compatibility wrapper for Codex-seeded Claude state sanitization."""
-    from mms_claude.state import sanitize_codex_claude_state_payload
-
-    return sanitize_codex_claude_state_payload(data)
+_copy_allowed_scalar_fields = _claude_state.copy_allowed_scalar_fields
+_copy_allowed_scalar_dict_fields = _claude_state.copy_allowed_scalar_dict_fields
+_sanitize_claude_ui_state_seed_payload = _claude_state.sanitize_claude_ui_state_seed_payload
+_merge_scalar_dict_entries = _claude_state.merge_scalar_dict_entries
+_merge_claude_ui_state_seed = _claude_state.merge_claude_ui_state_seed
+_merge_claude_gateway_ui_state_payload = _claude_state.merge_claude_gateway_ui_state_payload
+_strip_claude_state_execution_surfaces = _claude_state.strip_claude_state_execution_surfaces
+_sanitize_claude_project_state_entry = _claude_state.sanitize_claude_project_state_entry
+_sanitize_claude_project_state_map = _claude_state.sanitize_claude_project_state_map
+_load_real_claude_ui_state_seed = _claude_state.load_real_claude_ui_state_seed
+_load_real_claude_project_state = _claude_state.load_real_claude_project_state
+_sanitize_oauth_claude_state_payload = _claude_state.sanitize_oauth_claude_state_payload
+_sanitize_codex_claude_state_payload = _claude_state.sanitize_codex_claude_state_payload
 
 
 _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
@@ -2083,97 +2004,14 @@ _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
 )
 
 
-def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
-    """Compatibility wrapper for Claude restore-state stripping."""
-    from mms_claude.state import strip_claude_restore_state
-
-    return strip_claude_restore_state(data, strip_sensitive_auth=strip_sensitive_auth)
-
-
-def _load_project_scoped_claude_resume_session_id(
-    project_path,
-    *,
-    account_id="",
-    runtime_kind="",
-    resume_model="",
-):
-    """Compatibility wrapper for project-scoped Claude resume lookup."""
-    from mms_claude.session import load_project_scoped_claude_resume_session_id
-
-    return load_project_scoped_claude_resume_session_id(
-        project_path,
-        account_id=account_id,
-        runtime_kind=runtime_kind,
-        resume_model=resume_model,
-    )
-
-
-def _overlay_project_scoped_claude_resume_state(
-    data,
-    project_path,
-    *,
-    account_id="",
-    runtime_kind="",
-    resume_model="",
-):
-    """Compatibility wrapper for project-scoped Claude resume state overlay."""
-    from mms_claude.session import overlay_project_scoped_claude_resume_state
-
-    return overlay_project_scoped_claude_resume_state(
-        data,
-        project_path,
-        account_id=account_id,
-        runtime_kind=runtime_kind,
-        resume_model=resume_model,
-    )
-
-
-def _ensure_claude_project_trust(
-    data,
-    project_path,
-    project_state=None,
-    *,
-    allow_execution_surfaces=True,
-    disabled_session_surfaces=None,
-):
-    """Compatibility wrapper for Claude project trust state materialization."""
-    from mms_claude.state import ensure_claude_project_trust
-
-    return ensure_claude_project_trust(
-        data,
-        project_path,
-        project_state=project_state,
-        allow_execution_surfaces=allow_execution_surfaces,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _copy_claude_state_json(src, dst, *, mode="restore"):
-    """Compatibility wrapper for Claude state JSON copy/sanitization."""
-    from mms_claude.state import copy_claude_state_json
-
-    return copy_claude_state_json(src, dst, mode=mode)
-
-
-def _parse_iso8601_utc(value):
-    """Compatibility wrapper for OAuth token timestamp parsing."""
-    from mms_claude.state import parse_iso8601_utc
-
-    return parse_iso8601_utc(value)
-
-
-def _merge_oauth_token_state(existing_payload, incoming_payload):
-    """Compatibility wrapper for OAuth token state merging."""
-    from mms_claude.state import merge_oauth_token_state
-
-    return merge_oauth_token_state(existing_payload, incoming_payload)
-
-
-def _merge_oauth_claude_state_payload(existing_data, incoming_data):
-    """Compatibility wrapper for OAuth Claude state merging."""
-    from mms_claude.state import merge_oauth_claude_state_payload
-
-    return merge_oauth_claude_state_payload(existing_data, incoming_data)
+_strip_claude_restore_state = _claude_state.strip_claude_restore_state
+_load_project_scoped_claude_resume_session_id = _claude_session.load_project_scoped_claude_resume_session_id
+_overlay_project_scoped_claude_resume_state = _claude_session.overlay_project_scoped_claude_resume_state
+_ensure_claude_project_trust = _claude_state.ensure_claude_project_trust
+_copy_claude_state_json = _claude_state.copy_claude_state_json
+_parse_iso8601_utc = _claude_state.parse_iso8601_utc
+_merge_oauth_token_state = _claude_state.merge_oauth_token_state
+_merge_oauth_claude_state_payload = _claude_state.merge_oauth_claude_state_payload
 
 
 _masked_exposure_env_value = _runtime_exposure.masked_exposure_env_value
