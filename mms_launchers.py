@@ -370,22 +370,8 @@ def _lookup_context_window(model_name, provider_id=None):
     )
 
 
-def _runtime_supports_claude_1m(runtime):
-    """Compatibility wrapper for Claude 1M support policy."""
-    from mms_claude.model import runtime_supports_claude_1m
-
-    return runtime_supports_claude_1m(runtime)
-
-
-def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
-    """Compatibility wrapper for Claude-routed context window resolution."""
-    from mms_claude.model import effective_context_window
-
-    return effective_context_window(
-        *models,
-        enable_claude_1m=enable_claude_1m,
-        provider_id=provider_id,
-    )
+_runtime_supports_claude_1m = _claude_model.runtime_supports_claude_1m
+_effective_context_window = _claude_model.effective_context_window
 
 
 def _runtime_is_sensitive_claude_provider(runtime):
@@ -1499,27 +1485,15 @@ def _nsr_available_for_cli(cli_name):
 
 
 _normalize_nsr_mode = _normalize_nsr_mode_impl
-
-
-def _runtime_nsr_enabled(runtime):
-    """Compatibility wrapper for runtime NSR enablement."""
-    return _runtime_nsr_enabled_impl(runtime, normalize_nsr_mode_fn=_normalize_nsr_mode)
+_runtime_nsr_enabled = _runtime_nsr_enabled_impl
 
 
 _normalize_caveman_mode = _normalize_caveman_mode_impl
-
-
-def _runtime_caveman_enabled(runtime):
-    """Compatibility wrapper for runtime Caveman enablement."""
-    return _runtime_caveman_enabled_impl(runtime, normalize_caveman_mode_fn=_normalize_caveman_mode)
+_runtime_caveman_enabled = _runtime_caveman_enabled_impl
 
 
 _normalize_caveman_level = _normalize_caveman_level_impl
-
-
-def _runtime_caveman_level(runtime):
-    """Compatibility wrapper for runtime Caveman intensity."""
-    return _runtime_caveman_level_impl(runtime, normalize_caveman_level_fn=_normalize_caveman_level)
+_runtime_caveman_level = _runtime_caveman_level_impl
 
 
 def _caveman_hook_mode(caveman_level):
@@ -1535,23 +1509,11 @@ def _caveman_hook_env_prefix(caveman_level):
 
 
 _normalize_thinking_mode = _normalize_thinking_mode_impl
-
-
-def _runtime_thinking_enabled(runtime):
-    """Compatibility wrapper for runtime thinking enablement."""
-    return _runtime_thinking_enabled_impl(runtime, normalize_thinking_mode_fn=_normalize_thinking_mode)
+_runtime_thinking_enabled = _runtime_thinking_enabled_impl
 
 
 _normalize_reasoning_effort = _normalize_reasoning_effort_impl
-
-
-def _runtime_reasoning_effort(runtime, default="high"):
-    """Compatibility wrapper for runtime reasoning effort."""
-    return _runtime_reasoning_effort_impl(
-        runtime,
-        default=default,
-        normalize_reasoning_effort_fn=_normalize_reasoning_effort,
-    )
+_runtime_reasoning_effort = _runtime_reasoning_effort_impl
 
 
 _runtime_vision_sidecar = _runtime_vision_sidecar_impl
@@ -1613,25 +1575,9 @@ _normalize_ecc_mode = _normalize_ecc_mode_impl
 
 
 _normalize_agent_pack = _normalize_agent_pack_impl
-
-
-def _runtime_agent_pack(runtime):
-    """Compatibility wrapper for runtime agent pack selection."""
-    return _runtime_agent_pack_impl(
-        runtime,
-        normalize_agent_pack_fn=_normalize_agent_pack,
-        normalize_ecc_mode_fn=_normalize_ecc_mode,
-    )
-
-
-def _runtime_ecc_enabled(runtime):
-    """Compatibility wrapper for runtime ECC enablement."""
-    return _runtime_ecc_enabled_impl(runtime, runtime_agent_pack_fn=_runtime_agent_pack)
-
-
-def _runtime_omc_enabled(runtime):
-    """Compatibility wrapper for runtime OMC enablement."""
-    return _runtime_omc_enabled_impl(runtime, runtime_agent_pack_fn=_runtime_agent_pack)
+_runtime_agent_pack = _runtime_agent_pack_impl
+_runtime_ecc_enabled = _runtime_ecc_enabled_impl
+_runtime_omc_enabled = _runtime_omc_enabled_impl
 
 
 def _resolve_ecc_root():
