@@ -53,6 +53,18 @@ def apply_preferences_plan(payload: dict[str, Any] | None, *, config_path: str =
     return _backend().apply_preferences_plan(payload, config_path=config_path, preferences_path=preferences_path)
 
 
+def build_migration_export(current_cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    return _backend().build_migration_export(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+
+
+def build_migration_import_preview(current_cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    return _backend().build_migration_import_preview(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+
+
+def apply_migration_import(current_cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    return _backend().apply_migration_import(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+
+
 def reveal_local_path(payload: dict[str, Any] | None) -> dict[str, Any]:
     return _backend().reveal_local_path(payload)
 
@@ -120,6 +132,47 @@ class ConfigWebApp:
     def preferences_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             return apply_preferences_plan(payload, config_path=self.config_path, preferences_path=self.preferences_path)
+
+    def migration_export(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return build_migration_export(
+                self.cfg,
+                payload,
+                config_path=self.config_path,
+                preferences_path=self.preferences_path,
+                command_name=self.command_name,
+            )
+
+    def migration_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return build_migration_import_preview(
+                self.cfg,
+                payload,
+                config_path=self.config_path,
+                preferences_path=self.preferences_path,
+                command_name=self.command_name,
+            )
+
+    def migration_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            result = apply_migration_import(
+                self.cfg,
+                payload,
+                config_path=self.config_path,
+                preferences_path=self.preferences_path,
+                command_name=self.command_name,
+            )
+            if result.get("ok"):
+                preview = build_migration_import_preview(
+                    self.cfg,
+                    payload,
+                    config_path=self.config_path,
+                    preferences_path=self.preferences_path,
+                    command_name=self.command_name,
+                )
+                config_plan = preview.get("config_plan") if isinstance(preview.get("config_plan"), dict) else {}
+                self.cfg = config_plan.get("config") if isinstance(config_plan.get("config"), dict) else self.cfg
+            return result
 
     def reveal_path(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -234,6 +287,18 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/preferences/apply":
                 result = app.preferences_apply(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/migration/export":
+                result = app.migration_export(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/migration/preview":
+                result = app.migration_preview(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/migration/apply":
+                result = app.migration_apply(payload)
                 self._send(*_json_response(result, status=200 if result.get("ok") else 400))
                 return
             if path == "/api/path/reveal":

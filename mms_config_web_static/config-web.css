@@ -1643,6 +1643,16 @@
     }
     .diff { max-height: 320px; }
 
+    .migration-grid .card {
+      align-content: start;
+    }
+    #migrationText {
+      min-height: 150px;
+    }
+    #migrationResult .chips {
+      margin-bottom: 12px;
+    }
+
     /* ===== OpenCode metrics ===== */
     .oc-summary {
       display: grid;

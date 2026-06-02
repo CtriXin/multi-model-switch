@@ -274,6 +274,7 @@
                 <button class="ghost" data-section-jump="channel">通道配置</button>
                 <button class="ghost" data-section-jump="fallback">Fallback 设置</button>
                 <button class="ghost" data-section-jump="runtime">运行默认值</button>
+                <button class="ghost" data-section-jump="migration">迁移到另一台电脑</button>
               </div>
             </div>
             <div class="settings-next-step span3">
@@ -439,6 +440,55 @@
             <summary>查看已检测到的 Global / plugin 位置</summary>
             <div class="asset-roots" id="assetGlobalRoots"></div>
           </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 配置迁移 -->
+    <section class="panel" data-section="migration">
+      <h2>迁移 / 分享</h2>
+      <p>导出当前已保存配置；如果页面里还有草稿，先去保存审计。默认导出不含 API Key，私有迁移可用密码加密 Key，导入前必须先预览 diff。</p>
+      <div class="grid migration-grid">
+        <div class="card span5">
+          <h3>导出迁移包</h3>
+          <p class="muted">脱敏包适合发给 agent/debug；勾选 API Key 后会生成加密包，另一台电脑导入时输入同一个迁移密码。</p>
+          <label class="check">
+            <input id="migrationIncludeKeys" type="checkbox"><span>包含 API Key（加密）</span>
+          </label>
+          <label>迁移密码</label>
+          <input id="migrationExportPassword" type="password" placeholder="至少 8 位；只用于加密包">
+          <div class="btns">
+            <button id="exportMigration" class="secondary">导出迁移包</button>
+          </div>
+          <p class="muted">不会导出 OAuth、Claude/Codex 原生登录态、Keychain、浏览器 cookie。</p>
+        </div>
+        <div class="card span7">
+          <h3>导入到当前配置根</h3>
+          <p class="muted">先粘贴或上传迁移包，再预览。导入采用 merge：同 ID 通道覆盖，本机独有通道保留。</p>
+          <input id="migrationFile" type="file" accept="application/json,.json">
+          <label>迁移包 JSON</label>
+          <textarea id="migrationText" placeholder="粘贴 mms-config-migration-*.json 内容"></textarea>
+          <label>迁移密码（如果包里包含 API Key）</label>
+          <input id="migrationImportPassword" type="password" placeholder="导出时设置的迁移密码">
+          <div class="btns">
+            <button id="previewMigration">预览导入 diff</button>
+            <button id="applyMigration" class="danger">确认导入到当前配置根</button>
+          </div>
+          <label class="check">
+            <input id="confirmMigration" type="checkbox"><span>我已检查导入预览，同意写入当前配置根</span>
+          </label>
+          <label>确认文字</label>
+          <input id="migrationConfirmPhrase" placeholder="导入配置">
+          <label>导入原因 / audit reason</label>
+          <input id="migrationReason" value="setup-web-ui:migration-import">
+        </div>
+        <div class="card span12">
+          <h3>导入预览 / 结果</h3>
+          <div class="result" id="migrationResult">尚未导出或导入。</div>
+        </div>
+        <div class="card span12 ui-advanced-only">
+          <h3>迁移 diff</h3>
+          <div class="diff" id="migrationDiff">点击“预览导入 diff”后显示。</div>
         </div>
       </div>
     </section>

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import difflib
 import json
@@ -35,7 +36,7 @@ from mms_config_web_server import (
 )
 
 
-_SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key", "token", "secret", "authorization"}
+_SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key", "token", "secret", "authorization", "password", "passphrase"}
 _SENSITIVE_CONFIG_KEYS = {"home_dir", "proxy", "no_proxy"}
 _SAFE_TOKEN_COUNT_KEYS = {
     "cache_creation_input_tokens",
@@ -69,6 +70,8 @@ _REGISTRY_V2_GENERATED_FILES = (
     "model-capabilities.approved.json",
     "model-registry.latest-approved.json",
 )
+_MIGRATION_BUNDLE_SCHEMA = "mms.config_migration_bundle.v1"
+_MIGRATION_CREDENTIAL_BOX_SCHEMA = "mms.config_migration_credentials.aesgcm.v1"
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
@@ -1903,6 +1906,664 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _migration_crypto_available() -> bool:
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _migration_derive_key(password: str, salt: bytes, *, iterations: int) -> bytes:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=iterations,
+    )
+    return kdf.derive(password.encode("utf-8"))
+
+
+def _migration_encrypt_json(payload: dict[str, Any], password: str) -> dict[str, Any]:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    iterations = 220_000
+    salt = os.urandom(16)
+    nonce = os.urandom(12)
+    key = _migration_derive_key(password, salt, iterations=iterations)
+    plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext, _MIGRATION_BUNDLE_SCHEMA.encode("utf-8"))
+    return {
+        "schema": _MIGRATION_CREDENTIAL_BOX_SCHEMA,
+        "algorithm": "AES-256-GCM",
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "iterations": iterations,
+        "salt_b64": base64.b64encode(salt).decode("ascii"),
+        "nonce_b64": base64.b64encode(nonce).decode("ascii"),
+        "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
+        "plaintext_schema": "mms.config_migration_credentials_payload.v1",
+    }
+
+
+def _migration_decrypt_json(box: dict[str, Any], password: str) -> dict[str, Any]:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    if not isinstance(box, dict) or box.get("schema") != _MIGRATION_CREDENTIAL_BOX_SCHEMA:
+        raise ValueError("迁移包凭据格式不受支持。")
+    iterations = int(box.get("iterations") or 0)
+    if iterations < 100_000:
+        raise ValueError("迁移包凭据 KDF 强度过低，已拒绝导入。")
+    salt = base64.b64decode(str(box.get("salt_b64") or ""))
+    nonce = base64.b64decode(str(box.get("nonce_b64") or ""))
+    ciphertext = base64.b64decode(str(box.get("ciphertext_b64") or ""))
+    key = _migration_derive_key(password, salt, iterations=iterations)
+    plaintext = AESGCM(key).decrypt(nonce, ciphertext, _MIGRATION_BUNDLE_SCHEMA.encode("utf-8"))
+    payload = json.loads(plaintext.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("迁移包凭据解密后不是对象。")
+    return payload
+
+
+def _migration_config_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    provider_rows = snapshot.get("providers") if isinstance(snapshot.get("providers"), list) else []
+    providers: list[dict[str, Any]] = []
+    for row in provider_rows:
+        if not isinstance(row, dict):
+            continue
+        provider_id = _safe_text(row.get("id"))
+        if not provider_id:
+            continue
+        provider = {
+            "id": provider_id,
+            "name": _safe_text(row.get("name") or provider_id),
+            "enabled": row.get("enabled", True) is not False,
+            "role": _safe_text(row.get("role") or "auto"),
+            "priority": _normalize_priority(row.get("priority", 100)),
+            "family_priority_overrides": _normalize_family_priority_overrides(row.get("family_priority_overrides")),
+            "claude_1m_mode": _safe_text(row.get("claude_1m_mode") or "auto") or "auto",
+            "timezone": _safe_text(row.get("timezone")),
+            "note": _safe_text(row.get("note")),
+            "models_endpoint": _safe_text(row.get("models_endpoint") or "/models"),
+            "protocols": [str(item) for item in (row.get("protocols") or []) if item],
+            "supported_clis": [str(item) for item in (row.get("supported_clis") or []) if item],
+            "openai_base_url": _safe_text(row.get("openai_base_url") or row.get("effective_openai_base_url")),
+            "anthropic_base_url": _safe_text(row.get("anthropic_base_url") or row.get("effective_anthropic_base_url")),
+            "fallback_models": _normalize_model_list(row.get("approved_route_models") or row.get("fallback_models")),
+            "extra_models": _normalize_model_list(row.get("extra_models")),
+            "hidden_models": _normalize_model_list(row.get("hidden_models")),
+            "models": [],
+        }
+        model_rows = []
+        for model_row in row.get("models") if isinstance(row.get("models"), list) else []:
+            if not isinstance(model_row, dict):
+                continue
+            model_id = _safe_text(model_row.get("id") or model_row.get("model"))
+            if not model_id or _safe_text(model_row.get("source")) == "derived_alias":
+                continue
+            model_rows.append(
+                {
+                    "id": model_id,
+                    "source": _safe_text(model_row.get("source") or "migration"),
+                    "visible": model_row.get("visible", True) is not False,
+                    "favorite": model_row.get("favorite") is True,
+                }
+            )
+        if model_rows:
+            provider["models"] = model_rows
+        else:
+            provider.pop("models", None)
+        providers.append({key: value for key, value in provider.items() if value not in ("", {}, [])})
+
+    raw_config: dict[str, Any] = {}
+    if providers:
+        raw_config["providers"] = providers
+    provider_default = _safe_text(snapshot.get("provider_default"))
+    if provider_default:
+        raw_config["provider"] = {"default": provider_default}
+    for key in ("rescue", "vision_sidecar", "ui", "opencode"):
+        value = snapshot.get(key)
+        if isinstance(value, dict) and value:
+            raw_config[key] = _sanitize_for_output(value)
+    runtime = snapshot.get("runtime") if isinstance(snapshot.get("runtime"), dict) else {}
+    if runtime:
+        coding: dict[str, Any] = {}
+        preferred_cli = _safe_text(runtime.get("preferred_cli"))
+        coding_model = _safe_text(runtime.get("coding_preset_model"))
+        if preferred_cli:
+            coding["cli"] = preferred_cli
+        if coding_model:
+            coding["model"] = coding_model
+        if coding:
+            raw_config["presets"] = {"coding": coding}
+    return raw_config
+
+
+def _migration_payload_config_from_cfg(cfg: dict[str, Any], *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    snapshot = build_config_snapshot(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+    exported = _migration_config_from_snapshot(snapshot)
+    for key in ("load_balance",):
+        value = cfg.get(key) if isinstance(cfg.get(key), dict) else {}
+        if value:
+            exported[key] = _sanitize_for_output(value)
+    return exported
+
+
+def _migration_preferences_payload(config_path: str = "", preferences_path: str = "") -> dict[str, Any]:
+    target_path = _preferences_target_path(config_path=config_path, preferences_path=preferences_path)
+    prefs = _load_preferences_raw(target_path)
+    payload: dict[str, Any] = {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    disabled_clis = _normalize_model_list(launch.get("disabled_clis"))
+    if disabled_clis:
+        payload.setdefault("launch", {})["disabled_clis"] = disabled_clis
+    session_surfaces = prefs.get("session_surfaces") if isinstance(prefs.get("session_surfaces"), dict) else {}
+    disabled = session_surfaces.get("disabled") if isinstance(session_surfaces.get("disabled"), dict) else {}
+    normalized_disabled: dict[str, list[str]] = {}
+    for key in ("skills", "mcp", "hooks"):
+        values = _normalize_model_list(disabled.get(key))
+        if values:
+            normalized_disabled[key] = values
+    if normalized_disabled:
+        payload["session_surfaces"] = {"disabled": normalized_disabled}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    managed_root = _safe_text(assets.get("managed_root"))
+    if managed_root:
+        payload["assets"] = {"managed_root": managed_root}
+    return payload
+
+
+def _migration_collect_credentials(cfg: dict[str, Any]) -> list[dict[str, str]]:
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    mms_core = _load_mms_core()
+    credentials: list[dict[str, str]] = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            continue
+        provider_id = _safe_text(provider.get("id"))
+        if not provider_id:
+            continue
+        try:
+            raw = mms_core.load_provider_credentials(provider_id)
+        except Exception:
+            raw = {}
+        api_key = _safe_text(raw.get("api_key") or provider.get("api_key"))
+        openai_api_key = _safe_text(raw.get("openai_api_key") or provider.get("openai_api_key"))
+        if not api_key and not openai_api_key:
+            continue
+        openai_base = _safe_text(raw.get("openai_base_url") or raw.get("base_url") or provider.get("default_openai_base_url") or provider.get("openai_base_url") or provider.get("base_url"))
+        anthropic_base = _safe_text(raw.get("anthropic_base_url") or provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
+        credentials.append(
+            {
+                "provider_id": provider_id,
+                "base_url": (openai_base or anthropic_base).rstrip("/"),
+                "openai_base_url": openai_base.rstrip("/"),
+                "anthropic_base_url": anthropic_base.rstrip("/"),
+                "api_key": api_key or openai_api_key,
+                "openai_api_key": openai_api_key,
+            }
+        )
+    return credentials
+
+
+def build_migration_export(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    cfg = copy.deepcopy(current_cfg) if isinstance(current_cfg, dict) else {}
+    cfg = _hydrate_preview_config_from_latest_bundle(cfg, config_path=config_path, command_name=command_name)
+    include_credentials = _truthy(payload.get("include_credentials") or payload.get("include_secrets"), False)
+    password = _safe_text(payload.get("password") or payload.get("passphrase"))
+    warnings = [
+        "OAuth / Claude / Codex 原生登录态不会进入迁移包；另一台机器仍需人工登录原生 CLI。",
+        "Claude account、proxy/no_proxy、home_dir 等 human-only 配置不会被自动迁移。",
+    ]
+    policy_path = _policy_path_for_config(config_path)
+    bundle: dict[str, Any] = {
+        "schema": _MIGRATION_BUNDLE_SCHEMA,
+        "created_at": _now_iso(),
+        "source": {
+            "command": command_name,
+            "version": _version_info_for_snapshot(command_name),
+            "config_root": _config_root_for_snapshot(config_path),
+            "config_path": os.path.abspath(os.path.expanduser(config_path)) if config_path else "",
+            "preferences_path": os.path.abspath(os.path.expanduser(preferences_path)) if preferences_path else "",
+        },
+        "security": {
+            "contains_credentials": False,
+            "credential_box": "none",
+            "oauth_state": "excluded",
+            "native_cli_auth": "excluded",
+            "redaction": "api_key/password/token fields are never stored in payload",
+        },
+        "payload": {
+            "config": _migration_payload_config_from_cfg(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name),
+            "model_policy": _load_json_file(policy_path),
+            "preferences": _migration_preferences_payload(config_path=config_path, preferences_path=preferences_path),
+        },
+        "warnings": warnings,
+    }
+    credential_count = 0
+    if include_credentials:
+        if len(password) < 8:
+            return {
+                "ok": False,
+                "schema": "mms.config_migration_export_result.v1",
+                "status": "blocked",
+                "errors": ["包含 API Key 的迁移包必须输入至少 8 位迁移密码。"],
+                "crypto_available": _migration_crypto_available(),
+            }
+        if not _migration_crypto_available():
+            return {
+                "ok": False,
+                "schema": "mms.config_migration_export_result.v1",
+                "status": "blocked",
+                "errors": ["当前 Python 环境缺少 cryptography，不能导出包含 API Key 的加密迁移包。"],
+                "crypto_available": False,
+            }
+        credentials = _migration_collect_credentials(cfg)
+        credential_count = len(credentials)
+        credential_payload = {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "created_at": _now_iso(),
+            "credentials": credentials,
+        }
+        bundle["encrypted_credentials"] = _migration_encrypt_json(credential_payload, password)
+        bundle["security"]["contains_credentials"] = bool(credentials)
+        bundle["security"]["credential_box"] = "encrypted-aesgcm"
+    model_policy = (bundle.get("payload") or {}).get("model_policy") if isinstance(bundle.get("payload"), dict) else {}
+    summary = {
+        "providers": len((bundle.get("payload", {}).get("config", {}).get("providers") if isinstance(bundle.get("payload"), dict) else []) or []),
+        "policy_models": len((model_policy.get("models") if isinstance(model_policy, dict) else {}) or {}),
+        "preferences": bool((bundle.get("payload") or {}).get("preferences")),
+        "credentials": credential_count,
+        "encrypted_credentials": include_credentials,
+    }
+    bundle["summary"] = summary
+    return {
+        "ok": True,
+        "schema": "mms.config_migration_export_result.v1",
+        "status": "ready",
+        "bundle": bundle,
+        "summary": summary,
+        "filename": f"mms-config-migration-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
+    }
+
+
+def _parse_migration_bundle(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    raw = payload.get("bundle") or payload.get("migration_bundle") or payload.get("text") or payload.get("raw")
+    errors: list[str] = []
+    bundle: Any = {}
+    if isinstance(raw, dict):
+        bundle = raw
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            errors.append("请先粘贴或上传迁移包 JSON。")
+        else:
+            try:
+                bundle = json.loads(text)
+            except json.JSONDecodeError as exc:
+                errors.append(f"迁移包 JSON 解析失败：{exc}")
+    else:
+        errors.append("请提供迁移包 JSON。")
+    if not isinstance(bundle, dict):
+        errors.append("迁移包必须是 JSON 对象。")
+        bundle = {}
+    if bundle and bundle.get("schema") != _MIGRATION_BUNDLE_SCHEMA:
+        errors.append(f"迁移包 schema 不支持：{bundle.get('schema') or '-'}")
+    return bundle, errors
+
+
+def _migration_decrypted_credentials(bundle: dict[str, Any], password: str) -> tuple[list[dict[str, str]], list[str], list[str]]:
+    warnings: list[str] = []
+    errors: list[str] = []
+    box = bundle.get("encrypted_credentials") if isinstance(bundle.get("encrypted_credentials"), dict) else {}
+    if not box:
+        return [], warnings, errors
+    if not password:
+        errors.append("这个迁移包包含加密 API Key；请输入迁移密码后再预览或导入。")
+        return [], warnings, errors
+    if not _migration_crypto_available():
+        errors.append("当前 Python 环境缺少 cryptography，不能解密包含 API Key 的迁移包。")
+        return [], warnings, errors
+    try:
+        payload = _migration_decrypt_json(box, password)
+    except Exception as exc:
+        errors.append(f"迁移密码错误或凭据已损坏：{type(exc).__name__}: {exc}")
+        return [], warnings, errors
+    credentials = payload.get("credentials") if isinstance(payload.get("credentials"), list) else []
+    result: list[dict[str, str]] = []
+    for item in credentials:
+        if not isinstance(item, dict):
+            continue
+        provider_id = _safe_text(item.get("provider_id"))
+        api_key = _safe_text(item.get("api_key"))
+        openai_api_key = _safe_text(item.get("openai_api_key"))
+        if not provider_id or (not api_key and not openai_api_key):
+            continue
+        result.append(
+            {
+                "provider_id": provider_id,
+                "base_url": _safe_text(item.get("base_url")).rstrip("/"),
+                "openai_base_url": _safe_text(item.get("openai_base_url")).rstrip("/"),
+                "anthropic_base_url": _safe_text(item.get("anthropic_base_url")).rstrip("/"),
+                "api_key": api_key or openai_api_key,
+                "openai_api_key": openai_api_key,
+            }
+        )
+    if not result:
+        warnings.append("迁移包声明了加密凭据，但没有可导入的 provider API Key。")
+    return result, warnings, errors
+
+
+def _migration_provider_payload(provider: dict[str, Any]) -> dict[str, Any]:
+    provider_id = _safe_text(provider.get("id"))
+    result = {
+        "id": provider_id,
+        "original_id": provider_id,
+        "name": _safe_text(provider.get("name") or provider_id),
+        "enabled": provider.get("enabled", True) is not False,
+        "role": _safe_text(provider.get("role") or "auto"),
+        "priority": _normalize_priority(provider.get("priority", 100)),
+        "family_priority_overrides": _normalize_family_priority_overrides(provider.get("family_priority_overrides")),
+        "claude_1m_mode": _safe_text(provider.get("claude_1m_mode") or "auto") or "auto",
+        "timezone": _safe_text(provider.get("timezone")),
+        "note": _safe_text(provider.get("note")),
+        "models_endpoint": _safe_text(provider.get("models_endpoint") or "/models"),
+        "protocols": [str(item) for item in (provider.get("protocols") or []) if item],
+        "supported_clis": [str(item) for item in (provider.get("supported_clis") or []) if item],
+        "openai_base_url": _safe_text(provider.get("openai_base_url") or provider.get("default_openai_base_url") or provider.get("base_url")),
+        "anthropic_base_url": _safe_text(provider.get("anthropic_base_url") or provider.get("default_anthropic_base_url")),
+        "fallback_models": _normalize_model_list(provider.get("fallback_models") or provider.get("approved_route_models")),
+        "extra_models": _normalize_model_list(provider.get("extra_models")),
+        "hidden_models": _normalize_model_list(provider.get("hidden_models")),
+    }
+    models = []
+    for row in provider.get("models") if isinstance(provider.get("models"), list) else []:
+        if isinstance(row, dict):
+            model_id = _safe_text(row.get("id") or row.get("model"))
+            if model_id:
+                models.append({"id": model_id, "visible": row.get("visible", True) is not False})
+        else:
+            model_id = _safe_text(row)
+            if model_id:
+                models.append({"id": model_id, "visible": True})
+    if models:
+        result["models"] = models
+    return {key: value for key, value in result.items() if value not in ("", {}, [])}
+
+
+def _migration_preferences_apply_payload(bundle: dict[str, Any]) -> dict[str, Any]:
+    prefs = ((bundle.get("payload") or {}).get("preferences") if isinstance(bundle.get("payload"), dict) else {}) or {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    session_surfaces = prefs.get("session_surfaces") if isinstance(prefs.get("session_surfaces"), dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    return {
+        "disabled_clis": _normalize_model_list(launch.get("disabled_clis")),
+        "disabled": (session_surfaces.get("disabled") if isinstance(session_surfaces.get("disabled"), dict) else {}) or {},
+        "assets": {
+            "managed_enabled": bool(_safe_text(assets.get("managed_root"))),
+            "managed_root": _safe_text(assets.get("managed_root")),
+        },
+    }
+
+
+def _migration_draft_from_bundle(current_cfg: dict[str, Any], bundle: dict[str, Any], credentials: list[dict[str, str]], *, config_path: str = "") -> dict[str, Any]:
+    policy_payload = _load_json_file(_policy_path_for_config(config_path))
+    current_providers = {
+        _safe_text(row.get("id")): _migration_provider_payload(row)
+        for row in [_provider_summary(item, policy_payload=policy_payload) for item in current_cfg.get("providers", []) if isinstance(item, dict)]
+        if _safe_text(row.get("id"))
+    }
+    payload = bundle.get("payload") if isinstance(bundle.get("payload"), dict) else {}
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    incoming_providers = config.get("providers") if isinstance(config.get("providers"), list) else []
+    for provider in incoming_providers:
+        if not isinstance(provider, dict):
+            continue
+        normalized = _migration_provider_payload(provider)
+        provider_id = _safe_text(normalized.get("id"))
+        if provider_id:
+            current_providers[provider_id] = normalized
+    for update in credentials:
+        provider_id = _safe_text(update.get("provider_id"))
+        if not provider_id:
+            continue
+        provider = current_providers.setdefault(provider_id, {"id": provider_id, "name": provider_id, "enabled": True})
+        provider["update_credentials"] = True
+        provider["api_key"] = _safe_text(update.get("api_key"))
+        provider["openai_api_key"] = _safe_text(update.get("openai_api_key"))
+        if _safe_text(update.get("openai_base_url")):
+            provider["openai_base_url"] = _safe_text(update.get("openai_base_url"))
+        if _safe_text(update.get("anthropic_base_url")):
+            provider["anthropic_base_url"] = _safe_text(update.get("anthropic_base_url"))
+        if not _safe_text(provider.get("openai_base_url")) and not _safe_text(provider.get("anthropic_base_url")) and _safe_text(update.get("base_url")):
+            provider["openai_base_url"] = _safe_text(update.get("base_url"))
+
+    draft: dict[str, Any] = {"providers": list(current_providers.values())}
+    provider_default = _safe_text((config.get("provider") if isinstance(config.get("provider"), dict) else {}).get("default"))
+    if provider_default:
+        draft["provider_default"] = provider_default
+    for key in ("rescue", "vision_sidecar", "ui", "opencode", "load_balance"):
+        value = config.get(key) if isinstance(config.get(key), dict) else {}
+        if value:
+            draft[key] = value
+    presets = config.get("presets") if isinstance(config.get("presets"), dict) else {}
+    coding = presets.get("coding") if isinstance(presets.get("coding"), dict) else {}
+    runtime: dict[str, Any] = {}
+    if _safe_text(coding.get("cli")):
+        runtime["preferred_cli"] = _safe_text(coding.get("cli"))
+    if _safe_text(coding.get("model")):
+        runtime["coding_preset_model"] = _safe_text(coding.get("model"))
+    if runtime:
+        draft["runtime"] = runtime
+    model_policy = payload.get("model_policy") if isinstance(payload.get("model_policy"), dict) else {}
+    if model_policy:
+        draft["model_policy_import"] = model_policy
+    return draft
+
+
+def _merge_model_policy_import(policy_before: dict[str, Any], incoming: Any) -> dict[str, Any]:
+    if not isinstance(incoming, dict) or not incoming:
+        return policy_before
+    original = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
+    policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
+    policy.setdefault("version", incoming.get("version") if isinstance(incoming.get("version"), int) else 1)
+    policy.setdefault("description", "User-maintained model visibility and preference policy. MMS never stores provider secrets here.")
+    for section in ("models", "projects"):
+        src = incoming.get(section) if isinstance(incoming.get(section), dict) else {}
+        if not src:
+            continue
+        dst = policy.setdefault(section, {})
+        if not isinstance(dst, dict):
+            dst = {}
+            policy[section] = dst
+        for key, value in src.items():
+            key_text = _safe_text(key)
+            if not key_text:
+                continue
+            dst[key_text] = _sanitize_for_output(value)
+    if _mapping_digest(policy) != _mapping_digest(original):
+        policy["updated_at"] = _now_iso()
+    elif isinstance(original, dict) and "updated_at" in original:
+        policy["updated_at"] = original["updated_at"]
+    return policy
+
+
+def _build_migration_import_plan(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    current_cfg = copy.deepcopy(current_cfg) if isinstance(current_cfg, dict) else {}
+    current_cfg = _hydrate_preview_config_from_latest_bundle(current_cfg, config_path=config_path, command_name=command_name)
+    bundle, parse_errors = _parse_migration_bundle(payload)
+    warnings = [
+        "导入不会迁移 OAuth / Claude / Codex 原生登录态；只处理 WebUI 可审计配置、model-policy、preferences 和可选加密 API Key。",
+        "导入采用 merge 策略：同 ID provider 覆盖，当前机器独有 provider 默认保留。",
+    ]
+    credentials: list[dict[str, str]] = []
+    if not parse_errors:
+        credentials, cred_warnings, cred_errors = _migration_decrypted_credentials(bundle, _safe_text(payload.get("password") or payload.get("passphrase")))
+        warnings.extend(cred_warnings)
+        parse_errors.extend(cred_errors)
+    if parse_errors:
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_import_plan.v1",
+            "status": "blocked",
+            "errors": parse_errors,
+            "warnings": warnings,
+        }
+    draft = _migration_draft_from_bundle(current_cfg, bundle, credentials, config_path=config_path)
+    config_plan = build_config_plan(current_cfg, {"draft": draft}, config_path=config_path, preferences_path=preferences_path, include_secrets=True, command_name=command_name)
+    pref_payload = _migration_preferences_apply_payload(bundle)
+    pref_plan = build_preferences_plan(pref_payload, config_path=config_path, preferences_path=preferences_path)
+    ok = bool(config_plan.get("ok") and pref_plan.get("ok"))
+    errors = list(config_plan.get("errors") or [])
+    summary = {
+        "providers": (config_plan.get("summary") or {}).get("providers", 0),
+        "credential_updates": len(credentials),
+        "policy_models": (config_plan.get("summary") or {}).get("policy_models", 0),
+        "preferences_will_write": bool(pref_plan.get("will_write")),
+        "target_root": _config_root_for_snapshot(config_path),
+        "target_mode": (_model_source_status_for_snapshot(config_path, command_name=command_name).get("root") or {}).get("mode", ""),
+    }
+    return {
+        "ok": ok,
+        "schema": "mms.config_migration_import_plan.v1",
+        "status": "planned" if ok else "blocked",
+        "errors": errors,
+        "warnings": [*warnings, *(config_plan.get("warnings") or [])],
+        "bundle_summary": bundle.get("summary") if isinstance(bundle.get("summary"), dict) else {},
+        "summary": summary,
+        "draft": draft,
+        "config_plan": config_plan,
+        "preferences_payload": pref_payload,
+        "preferences_plan": pref_plan,
+        "diffs": {
+            "config_toml": (config_plan.get("diffs") or {}).get("config_toml", ""),
+            "model_policy_json": (config_plan.get("diffs") or {}).get("model_policy_json", ""),
+            "credentials": (config_plan.get("diffs") or {}).get("credentials", ""),
+            "preferences_toml": pref_plan.get("diff", ""),
+        },
+    }
+
+
+def build_migration_import_preview(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    plan = _build_migration_import_plan(
+        current_cfg,
+        payload,
+        config_path=config_path,
+        preferences_path=preferences_path,
+        command_name=command_name,
+    )
+    return _sanitize_for_output(plan)
+
+
+def apply_migration_import(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    if not _truthy(payload.get("confirm_migration"), False):
+        return {"ok": False, "schema": "mms.config_migration_import_result.v1", "status": "blocked", "errors": ["导入前必须勾选确认导入。"]}
+    if _safe_text(payload.get("confirm_phrase")) != "导入配置":
+        return {"ok": False, "schema": "mms.config_migration_import_result.v1", "status": "blocked", "errors": ["确认文字必须输入：导入配置"]}
+    reason = _safe_text(payload.get("reason")) or "setup-web-ui:migration-import"
+    plan = _build_migration_import_plan(
+        current_cfg,
+        payload,
+        config_path=config_path,
+        preferences_path=preferences_path,
+        command_name=command_name,
+    )
+    if not plan.get("ok"):
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_import_result.v1",
+            "status": "blocked",
+            "errors": plan.get("errors") or [],
+            "warnings": plan.get("warnings") or [],
+            "plan": _sanitize_for_output(plan),
+        }
+    draft = plan.get("draft") if isinstance(plan.get("draft"), dict) else {}
+    if _is_preview_config_root(config_path, command_name=command_name):
+        config_result = apply_registry_v2_preview_plan(
+            current_cfg,
+            {
+                "draft": draft,
+                "confirm_v2_preview": True,
+                "confirm_phrase": "写入预览DB",
+                "reason": reason,
+            },
+            config_path=config_path,
+            preferences_path=preferences_path,
+        )
+    else:
+        config_result = apply_config_plan(
+            current_cfg,
+            {
+                "draft": draft,
+                "confirm_save": True,
+                "confirm_phrase": "保存配置",
+                "reason": reason,
+            },
+            config_path=config_path,
+            preferences_path=preferences_path,
+        )
+    preferences_result: dict[str, Any] = {"ok": True, "status": "no_change"}
+    pref_plan = plan.get("preferences_plan") if isinstance(plan.get("preferences_plan"), dict) else {}
+    if config_result.get("ok") and pref_plan.get("will_write"):
+        pref_payload = dict(plan.get("preferences_payload") if isinstance(plan.get("preferences_payload"), dict) else {})
+        pref_payload.update(
+            {
+                "confirm_preferences": True,
+                "confirm_phrase": "保存偏好",
+                "reason": f"{reason}:preferences",
+            }
+        )
+        preferences_result = apply_preferences_plan(pref_payload, config_path=config_path, preferences_path=preferences_path)
+    ok = bool(config_result.get("ok") and preferences_result.get("ok"))
+    return _sanitize_for_output(
+        {
+            "ok": ok,
+            "schema": "mms.config_migration_import_result.v1",
+            "status": "imported" if ok else "failed",
+            "summary": plan.get("summary") or {},
+            "warnings": plan.get("warnings") or [],
+            "config_result": config_result,
+            "preferences_result": preferences_result,
+        }
+    )
+
+
 def _extract_draft(payload: dict[str, Any]) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     draft = payload.get("draft") if isinstance(payload.get("draft"), dict) else payload
@@ -2556,15 +3217,17 @@ def build_config_plan(
                 errors.append(f"通道 {provider['id']} 勾选了更新凭据，但 API Key 为空。")
             if not openai_base and not anthropic_base:
                 errors.append(f"通道 {provider['id']} 勾选了更新凭据，但 URL 为空。")
-            credential_updates.append(
-                {
-                    "provider_id": provider["id"],
-                    "base_url": (openai_base or anthropic_base).rstrip("/"),
-                    "openai_base_url": openai_base.rstrip("/"),
-                    "anthropic_base_url": anthropic_base.rstrip("/"),
-                    "api_key": api_key if include_secrets else _redact(api_key),
-                }
-            )
+            credential_update = {
+                "provider_id": provider["id"],
+                "base_url": (openai_base or anthropic_base).rstrip("/"),
+                "openai_base_url": openai_base.rstrip("/"),
+                "anthropic_base_url": anthropic_base.rstrip("/"),
+                "api_key": api_key if include_secrets else _redact(api_key),
+            }
+            openai_api_key = _safe_text(provider_payload.get("openai_api_key"))
+            if openai_api_key:
+                credential_update["openai_api_key"] = openai_api_key if include_secrets else _redact(openai_api_key)
+            credential_updates.append(credential_update)
         if provider.get("anthropic_base_url") and "anthropic_messages" not in provider.get("protocols", []):
             warnings.append(f"通道 {provider['id']} 填了 Anthropic URL，但 protocols 未包含 anthropic_messages。")
         if provider.get("openai_base_url") and "openai_chat_completions" not in provider.get("protocols", []):
@@ -2713,6 +3376,7 @@ def build_config_plan(
             "projects": {},
         }
     policy_after = _build_model_policy_from_draft(policy_before, draft)
+    policy_after = _merge_model_policy_import(policy_after, draft.get("model_policy_import"))
 
     try:
         mms_core = _load_mms_core()
@@ -3055,6 +3719,7 @@ def _save_provider_credentials_audited(update: dict[str, str], *, config_path: s
             update.get("api_key", ""),
             openai_base_url=update.get("openai_base_url", ""),
             anthropic_base_url=update.get("anthropic_base_url", ""),
+            openai_api_key=update.get("openai_api_key") if "openai_api_key" in update else None,
         )
         after_sha1 = mms_core._sha1_file(target_path)  # noqa: SLF001
         _append_audit(

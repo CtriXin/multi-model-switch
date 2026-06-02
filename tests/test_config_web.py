@@ -873,6 +873,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert '<script src="/static/config-web.js"></script>' in html
     assert '<body class="booting" data-ui-mode="default">' in html
     assert "读取本地配置中" in html
+    assert "/api/migration/export" in js_body.decode("utf-8")
+    assert "迁移 / 分享" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
     assert "这里直接改 MMS 启动会读取的模型能力" in html
@@ -1994,6 +1996,141 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
     assert any(path.name == "model-policy.json.bak" for path in bak_paths)
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_migration_export_encrypts_credentials(monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps({"version": 1, "models": {"mimo-v2.5": {"capabilities": {"context_window_tokens": 1000000}}}, "projects": {}}),
+        encoding="utf-8",
+    )
+    preferences_path.write_text(
+        '[launch]\ndisabled_clis = ["pi"]\n\n[session_surfaces.disabled]\nskills = ["lark-doc"]\n',
+        encoding="utf-8",
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["mimo-v2.5"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    monkeypatch.setattr(
+        mms_core,
+        "load_provider_credentials",
+        lambda provider_id="default": {
+            "base_url": "https://demo.example/v1",
+            "openai_base_url": "https://demo.example/v1",
+            "anthropic_base_url": "",
+            "api_key": "sk-migration-secret",
+            "openai_api_key": "",
+        },
+    )
+
+    result = mms_config_web.build_migration_export(
+        cfg,
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(result, ensure_ascii=False)
+
+    assert result["ok"] is True
+    assert result["bundle"]["schema"] == "mms.config_migration_bundle.v1"
+    assert result["bundle"]["security"]["contains_credentials"] is True
+    assert result["bundle"]["encrypted_credentials"]["schema"] == "mms.config_migration_credentials.aesgcm.v1"
+    assert result["summary"]["credentials"] == 1
+    assert result["bundle"]["payload"]["preferences"]["launch"]["disabled_clis"] == ["pi"]
+    assert "sk-migration-secret" not in encoded
+
+
+def test_config_web_migration_preview_merges_bundle_without_leaking_secret(tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    (tmp_path / "model-policy.json").write_text('{"version":1,"models":{},"projects":{}}\n', encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    credential_box = mms_config_web._migration_encrypt_json(
+        {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "credentials": [
+                {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-import-secret",
+                }
+            ],
+        },
+        "password123",
+    )
+    bundle = {
+        "schema": "mms.config_migration_bundle.v1",
+        "payload": {
+            "config": {
+                "providers": [
+                    {
+                        "id": "demo",
+                        "name": "Demo",
+                        "openai_base_url": "https://demo.example/v1",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["codex"],
+                        "fallback_models": ["gpt-5.5"],
+                    }
+                ],
+                "provider": {"default": "demo"},
+                "presets": {"coding": {"cli": "codex", "model": "gpt-5.5"}},
+            },
+            "model_policy": {
+                "version": 1,
+                "models": {"gpt-5.5": {"visible": True, "capabilities": {"context_window_tokens": 1000000}}},
+                "projects": {},
+            },
+            "preferences": {"launch": {"disabled_clis": ["pi"]}},
+        },
+        "encrypted_credentials": credential_box,
+    }
+
+    preview = mms_config_web.build_migration_import_preview(
+        {"providers": [{"id": "local", "name": "Local Only"}]},
+        {"bundle": bundle, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(preview, ensure_ascii=False)
+
+    assert preview["ok"] is True
+    assert preview["summary"]["providers"] == 2
+    assert preview["summary"]["credential_updates"] == 1
+    assert preview["summary"]["preferences_will_write"] is True
+    assert "provider demo" in preview["diffs"]["credentials"]
+    assert preview["config_plan"]["model_policy"]["models"]["gpt-5.5"]["capabilities"]["context_window_tokens"] == 1000000
+    assert "sk-import-secret" not in encoded
+
+
+def test_config_web_migration_apply_requires_confirmation(tmp_path):
+    bundle = {"schema": "mms.config_migration_bundle.v1", "payload": {"config": {"providers": [{"id": "demo"}]}}}
+    result = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {"bundle": bundle, "confirm_migration": False},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mms",
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "确认" in result["errors"][0]
 
 
 def test_config_web_legacy_save_blocks_preview_root(tmp_path):
