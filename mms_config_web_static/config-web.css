@@ -1534,6 +1534,29 @@
       box-shadow: none;
     }
     .chip button:hover { color: var(--danger); }
+    .model-management-chips {
+      margin-top: 10px;
+    }
+    .model-chip.is-extra,
+    .source-tag.source-extra {
+      border-color: var(--ok-soft);
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+    .model-chip.is-hidden {
+      border-color: var(--warn-soft);
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+    .model-advanced-cleanup {
+      margin-top: 14px;
+      color: var(--muted);
+    }
+    .model-advanced-cleanup summary {
+      cursor: pointer;
+      font-weight: 650;
+      color: var(--fg);
+    }
 
     /* ===== Result / Diff blocks ===== */
     .result, .diff {

@@ -1217,26 +1217,25 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Reasoning Effort" in html
     assert "Think on/off" in html
     assert "1M 上下文" in html
-    assert "一键刷新全部通道模型" in html
+    assert "拉取全部通道模型" in html
     assert "refreshAllProviderModels" in html
     assert "保存后不需要 [1m] 后缀" in html
     assert "刷新能力证据入口" not in html
     assert "打开通道 1M 设置" not in html
     assert "不要填 `200`" in html
-    assert "手动补充当前通道模型（extra_models" in html
-    assert "添加到补充模型库" in html
+    assert "手动添加当前通道模型（extra_models" in html
+    assert "添加为手动模型" in html
     assert "restoreModelPatch" in html
-    assert "恢复默认模型补丁" in html
-    assert "已恢复默认模型补丁" in html
-    assert "当前通道补充模型库（extra_models）" in html
-    assert "不是待删除列表，也不是全局模型池" in html
-    assert "编辑补充模型库" in html
-    assert "从补充库移除" in html
-    assert "移除全部通道未匹配隐藏规则" in html
-    assert "未匹配隐藏规则（hidden_models）" in html
-    assert "不等于远端不存在" in html
-    assert "拉取后自动标记缺失旧 route 为待清理" in html
-    assert "移除当前通道未匹配隐藏规则" in html
+    assert "清空手动添加和隐藏" in html
+    assert "已清空" in html
+    assert "手动添加模型（extra_models）" in html
+    assert "当前通道没有手动添加模型" in html
+    assert "从手动添加中移除" in html
+    assert "清理失效隐藏规则（全部通道）" in html
+    assert "当前隐藏模型（hidden_models）" in html
+    assert "取消表格里的“显示”勾选后" in html
+    assert "高级：拉取后把缺失旧 route 标记为待清理" in html
+    assert "清理当前通道失效隐藏规则" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
