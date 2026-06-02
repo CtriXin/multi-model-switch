@@ -793,13 +793,28 @@ def _apply_vision_sidecar(payload, sidecar_config, handler):
         base_url=_vision_sidecar_gateway_url(sidecar_config),
         model_name=sidecar_model,
     )
-    response = httpx.post(
-        target_url,
-        headers=headers,
-        json=sidecar_payload,
-        timeout=int(sidecar_config.get("timeout", 120) or 120),
-        **_route_httpx_kwargs(getattr(handler, "server", None), sidecar_config, target_url),
-    )
+    try:
+        response = httpx.post(
+            target_url,
+            headers=headers,
+            json=sidecar_payload,
+            timeout=int(sidecar_config.get("timeout", 120) or 120),
+            **_route_httpx_kwargs(getattr(handler, "server", None), sidecar_config, target_url),
+        )
+    except Exception as exc:
+        token = _native_fallback_error_token(exc)
+        request_error_types = tuple(
+            cls for cls in (
+                getattr(httpx, "RequestError", None),
+                getattr(httpx, "HTTPError", None),
+            ) if isinstance(cls, type)
+        )
+        is_request_error = bool(request_error_types) and isinstance(exc, request_error_types)
+        if token or is_request_error or isinstance(exc, (OSError, TimeoutError)):
+            detail = str(exc).strip()
+            detail = f":{detail[:200]}" if detail else ""
+            return None, f"{token or 'request_error'}:{exc.__class__.__name__}{detail}"
+        raise
     if response.status_code >= 400:
         body = response.content.decode("utf-8", errors="replace")
         return None, f"http_{response.status_code}:{body[:300]}"

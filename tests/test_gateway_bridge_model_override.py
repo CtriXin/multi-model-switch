@@ -13,6 +13,7 @@ def _run_gateway_bridge_once(
     messages: list[dict] | None = None,
     system: str | list[dict] | None = None,
     vision_sidecar: dict | None = None,
+    vision_post_error: Exception | None = None,
 ) -> dict:
     import mms_runtime.bridge as mms_bridge
 
@@ -27,6 +28,9 @@ def _run_gateway_bridge_once(
         captured.setdefault("post_calls", []).append({"url": url, **kwargs})
         captured["post_called"] = True
         if "vision.example.com" in url:
+            if vision_post_error is not None:
+                raise vision_post_error
+
             class VisionResponse:
                 status_code = 200
                 headers = {"content-type": "application/json"}
@@ -326,6 +330,52 @@ def test_gateway_bridge_uses_vision_sidecar_for_text_only_model_image_input(monk
         for message in captured["json"]["messages"]
         for block in (message.get("content") if isinstance(message.get("content"), list) else [])
     )
+
+
+def test_gateway_bridge_reports_vision_sidecar_transport_error_without_traceback(monkeypatch):
+    class ReadError(Exception):
+        pass
+
+    ReadError.__module__ = "httpx"
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=image_messages,
+        vision_sidecar={
+            "enabled": True,
+            "provider_id": "direct-kimi",
+            "provider_profile": "kimi-code",
+            "model": "K2.6",
+            "anthropic_base_url": "https://vision.example.com",
+            "api_key": "sk-vision",
+        },
+        vision_post_error=ReadError("[Errno 32] Broken pipe"),
+    )
+    body = json.loads(captured["body"].decode("utf-8"))
+
+    assert captured["status"] == 400
+    assert len(captured["post_calls"]) == 1
+    assert "does not support image input" in body["error"]["message"]
+    assert "Vision sidecar failed: connect_error:ReadError" in body["error"]["message"]
+    assert "Broken pipe" in body["error"]["message"]
 
 
 def test_gateway_bridge_uses_vision_sidecar_for_nested_tool_result_image(monkeypatch):
