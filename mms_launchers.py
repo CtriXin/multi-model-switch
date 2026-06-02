@@ -462,9 +462,7 @@ def _account_guard_state_path():
     return _real_user_path(".config", "mms", "account-guard-state.json")
 
 
-def _load_json_dict_unlocked(path):
-    """Compatibility wrapper for best-effort JSON object reads."""
-    return _load_json_dict_unlocked_impl(path)
+_load_json_dict_unlocked = _load_json_dict_unlocked_impl
 
 
 def _read_account_guard_state():
@@ -473,9 +471,7 @@ def _read_account_guard_state():
         return _load_json_dict_unlocked(path)
 
 
-def _claude_account_guard_entry(state, account_id):
-    """Compatibility wrapper for account guard state entries."""
-    return _claude_account_guard_entry_impl(state, account_id)
+_claude_account_guard_entry = _claude_account_guard_entry_impl
 
 
 def _count_live_session_dirs(sessions_dir):
@@ -486,9 +482,7 @@ def _count_live_session_dirs(sessions_dir):
     )
 
 
-def _proxy_fingerprint(proxy_url):
-    """Compatibility wrapper for proxy fingerprint display."""
-    return _proxy_fingerprint_impl(proxy_url)
+_proxy_fingerprint = _proxy_fingerprint_impl
 
 
 def _account_guard_profile(runtime):
@@ -516,9 +510,7 @@ def _claude_guard_runtime(runtime):
     return _claude_guard_runtime_impl(runtime, real_user_path_fn=_real_user_path)
 
 
-def _format_account_guard_summary(report):
-    """Compatibility wrapper for account guard summary text."""
-    return _format_account_guard_summary_impl(report)
+_format_account_guard_summary = _format_account_guard_summary_impl
 
 
 def _persist_account_guard_launch(account_id, report, *, session_home=""):
