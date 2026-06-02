@@ -242,7 +242,7 @@ Rules:
 
 Suggested module:
 
-- `mms_tui_launcher_flow.py`
+- `mms_launcher/tui_flow.py`
 
 Move the large `_handle_tui_launcher_selection` flow out of `mms_core.py`.
 

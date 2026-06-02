@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mms_tui_launcher_flow import (
+from mms_launcher.tui_flow import (
     apply_confirm_bypass_flag,
     apply_claude_network_guard_preview,
     apply_confirm_runtime_preferences,
@@ -84,7 +84,7 @@ from mms_tui_launcher_flow import (
 def test_load_balance_entry_removed_from_launcher_tui() -> None:
     import inspect
     import mms_tui
-    import mms_tui_launcher_flow as flow
+    import mms_launcher.tui_flow as flow
 
     launcher_source = inspect.getsource(mms_tui.select_family_tui)
 

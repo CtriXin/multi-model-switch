@@ -8,7 +8,7 @@ import os
 def handle_tui_launcher_selection(core, cfg, provider, once, cli_names, account_id=None, provider_id=None):
     """Run the TUI launcher flow using dependency hooks from ``mms_core``."""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
-    import mms_tui_launcher_flow as tui_flow
+    import mms_launcher.tui_flow as tui_flow
     from mms_launchers import (
         _caveman_available_for_cli,
         _ecc_available_for_claude,

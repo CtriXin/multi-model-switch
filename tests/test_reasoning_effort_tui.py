@@ -76,7 +76,7 @@ def test_confirm_profile_capabilities_apply_model_defaults(monkeypatch, tmp_path
 
 
 def test_launcher_flow_confirm_tui_keeps_ecc_default_off():
-    from mms_tui_launcher_flow import confirm_tui_options
+    from mms_launcher.tui_flow import confirm_tui_options
 
     runtime = {"agent_pack": "ecc"}
     options = confirm_tui_options(

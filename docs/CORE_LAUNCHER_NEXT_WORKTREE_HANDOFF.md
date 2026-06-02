@@ -56,7 +56,7 @@ OpenCode 瘦身阶段已经完成并合并：
    - 只搬通用 export/env host-tool 注入，不把 CLI-specific 行为过早抽象掉。
 
 4. TUI launcher flow 拆分
-   - 目标模块：`mms_tui_launcher_flow.py`
+   - 目标模块：`mms_launcher/tui_flow.py`
    - 从 `mms_core.py` 移出 `_handle_tui_launcher_selection` 的主流程。
    - 不改变 TUI 返回结构、不改默认 source/account/provider 选择语义。
 
@@ -151,7 +151,7 @@ Status: pre-human-gate candidate after latest `main` sync.
 
 ### Verified Gates
 
-- `rtk python3.13 -m py_compile mms_core.py mms_launchers.py mms_command_tools.py mms_launcher/export.py mms_runtime/validation.py mms_tui_launcher_flow.py mms_display/launcher_entry.py mms_display/confirm.py mms_pi/support.py`
+- `rtk python3.13 -m py_compile mms_core.py mms_launchers.py mms_command_tools.py mms_launcher/export.py mms_runtime/validation.py mms_launcher/tui_flow.py mms_display/launcher_entry.py mms_display/confirm.py mms_pi/support.py`
 - `rtk python3.13 -m pytest tests/test_pi_launcher.py tests/test_smoke_pi_matrix.py -q` -> `32 passed`
 - isolated temp HOME/XDG full suite: `rtk python3.13 -m pytest -q` -> `1430 passed, 4 skipped`
 - `git diff --check` -> pass

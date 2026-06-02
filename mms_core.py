@@ -4396,7 +4396,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
 
 
 def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="agent"):
-    from mms_tui_launcher_flow import opencode_lite_pro_health_summary_text
+    from mms_launcher.tui_flow import opencode_lite_pro_health_summary_text
 
     return opencode_lite_pro_health_summary_text(
         repo_root,
@@ -4409,7 +4409,7 @@ def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="agent"):
 
 
 def _opencode_profile_menu_options():
-    from mms_tui_launcher_flow import opencode_profile_menu_options
+    from mms_launcher.tui_flow import opencode_profile_menu_options
 
     return opencode_profile_menu_options(
         profile_options=_OPENCODE_PROFILE_OPTIONS,
@@ -4423,7 +4423,7 @@ _AGY_CONNECT_PROFILE_ID = "__connect_agy_oauth__"
 
 
 def _official_account_menu_options(cfg, cli_name):
-    from mms_tui_launcher_flow import official_account_menu_options
+    from mms_launcher.tui_flow import official_account_menu_options
 
     return official_account_menu_options(
         cfg,
@@ -4437,7 +4437,7 @@ def _official_account_menu_options(cfg, cli_name):
 
 
 def _select_opencode_profile(use_tui=False):
-    from mms_tui_launcher_flow import select_opencode_profile
+    from mms_launcher.tui_flow import select_opencode_profile
 
     return select_opencode_profile(
         use_tui=use_tui,

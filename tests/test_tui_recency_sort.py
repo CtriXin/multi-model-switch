@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from mms_tui import _sort_cli_names_by_last_used, _sort_model_entries_for_tui
 from mms_core import _sort_family_entries_for_tui
-from mms_tui_launcher_flow import TuiFamilyPayloadDeps, build_tui_family_payloads
+from mms_launcher.tui_flow import TuiFamilyPayloadDeps, build_tui_family_payloads
 
 
 NOW = datetime(2026, 5, 22, 12, 0, 0, tzinfo=timezone.utc)
