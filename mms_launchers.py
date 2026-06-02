@@ -2689,140 +2689,18 @@ _resolve_anthropic_base_url = _claude_endpoint.resolve_anthropic_base_url
 _pick_gateway_model = _claude_endpoint.pick_gateway_model
 
 
-def _cleanup_stale_sessions(sessions_dir, stale_callback=None, *, max_entries=None, max_seconds=None):
-    """Compatibility wrapper for Claude stale session cleanup."""
-    from mms_claude.session import cleanup_stale_sessions
-
-    return cleanup_stale_sessions(
-        sessions_dir,
-        stale_callback=stale_callback,
-        max_entries=max_entries,
-        max_seconds=max_seconds,
-    )
-
-
-def _copy_tree_files_if_missing(src, dst):
-    """Compatibility wrapper for Claude session tree backfill copies."""
-    from mms_claude.session import copy_tree_files_if_missing
-
-    return copy_tree_files_if_missing(src, dst)
-
-
-def _claude_project_resume_dir_names(project_path):
-    """Compatibility wrapper for Claude project resume dir names."""
-    from mms_claude.session import claude_project_resume_dir_names
-
-    return claude_project_resume_dir_names(project_path)
-
-
-def _claude_resume_scope_id(runtime_id="", *, runtime_kind="api_key", resume_model=""):
-    """Compatibility wrapper for Claude resume storage scope."""
-    from mms_claude.session import claude_resume_scope_id
-
-    return claude_resume_scope_id(
-        runtime_id,
-        runtime_kind=runtime_kind,
-        resume_model=resume_model,
-    )
-
-
-def _claude_resume_scope_is_model_shared(scope_id):
-    """Compatibility wrapper for Claude model-shared resume scopes."""
-    from mms_claude.session import claude_resume_scope_is_model_shared
-
-    return claude_resume_scope_is_model_shared(scope_id)
-
-
-def _claude_slot_roots_for_resume_backfill(account_id):
-    """Compatibility wrapper for Claude resume backfill roots."""
-    from mms_claude.session import claude_slot_roots_for_resume_backfill
-
-    return claude_slot_roots_for_resume_backfill(account_id)
-
-
-def _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd):
-    """Compatibility wrapper for real Claude project resume backfill."""
-    from mms_claude.session import backfill_real_claude_project_resume_files
-
-    return backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
-
-
-def _backfill_claude_project_resume_files(
-    target_projects_dir,
-    current_cwd,
-    account_id,
-    current_session_home="",
-    legacy_account_ids=None,
-    resume_model="",
-):
-    """Compatibility wrapper for Claude project resume backfill."""
-    from mms_claude.session import backfill_claude_project_resume_files
-
-    return backfill_claude_project_resume_files(
-        target_projects_dir,
-        current_cwd,
-        account_id,
-        current_session_home=current_session_home,
-        legacy_account_ids=legacy_account_ids,
-        resume_model=resume_model,
-    )
-
-
-def _link_claude_persistent_entry(session_claude_dir, entry, target):
-    """Compatibility wrapper for Claude persistent entry links."""
-    from mms_claude.session import link_claude_persistent_entry
-
-    return link_claude_persistent_entry(session_claude_dir, entry, target)
-
-
-def _prepare_claude_session_tree(
-    session_home,
-    session_claude_dir,
-    *,
-    account_id="",
-    account_home="",
-    runtime_kind="api_key",
-    resume_model="",
-    resume_scope_id="",
-    legacy_resume_scope_ids=None,
-    skip_real_entries=None,
-    source_claude_dir=None,
-    allowed_source_entries=None,
-):
-    """Compatibility wrapper for Claude session tree materialization."""
-    from mms_claude.session import prepare_claude_session_tree
-
-    return prepare_claude_session_tree(
-        session_home,
-        session_claude_dir,
-        account_id=account_id,
-        account_home=account_home,
-        runtime_kind=runtime_kind,
-        resume_model=resume_model,
-        resume_scope_id=resume_scope_id,
-        legacy_resume_scope_ids=legacy_resume_scope_ids,
-        skip_real_entries=skip_real_entries,
-        source_claude_dir=source_claude_dir,
-        allowed_source_entries=allowed_source_entries,
-    )
-
-
-def _sync_claude_session_state_to_account_home(session_home, account_home, *, state_mode="oauth"):
-    """Compatibility wrapper for Claude session state sync."""
-    from mms_claude.session import sync_claude_session_state_to_account_home
-
-    return sync_claude_session_state_to_account_home(
-        session_home,
-        account_home,
-        state_mode=state_mode,
-    )
-
-
-def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
-    """Compatibility wrapper for Claude slot finalization."""
-    from mms_claude.session import finalize_claude_slot
-
-    return finalize_claude_slot(session_home, exit_code=exit_code, stale_cleanup=stale_cleanup)
+_cleanup_stale_sessions = _claude_session.cleanup_stale_sessions
+_copy_tree_files_if_missing = _claude_session.copy_tree_files_if_missing
+_claude_project_resume_dir_names = _claude_session.claude_project_resume_dir_names
+_claude_resume_scope_id = _claude_session.claude_resume_scope_id
+_claude_resume_scope_is_model_shared = _claude_session.claude_resume_scope_is_model_shared
+_claude_slot_roots_for_resume_backfill = _claude_session.claude_slot_roots_for_resume_backfill
+_backfill_real_claude_project_resume_files = _claude_session.backfill_real_claude_project_resume_files
+_backfill_claude_project_resume_files = _claude_session.backfill_claude_project_resume_files
+_link_claude_persistent_entry = _claude_session.link_claude_persistent_entry
+_prepare_claude_session_tree = _claude_session.prepare_claude_session_tree
+_sync_claude_session_state_to_account_home = _claude_session.sync_claude_session_state_to_account_home
+_finalize_claude_slot = _claude_session.finalize_claude_slot
 
 
 def _claude_gateway_env(
