@@ -9,16 +9,16 @@
 <body class="booting">
 <header>
   <div>
-    <h1>MMS 配置中心</h1>
-    <p class="lead">把通道、模型能力、CLI、Skill / MCP / Hook 和保存审计放到同一个工作台。先配置，再测试，最后预览差异；preview root 写 DB，stable root 走 backup + audit。</p>
+    <h1>MMS 控制台</h1>
+    <p class="lead">默认先进入设置和调试：配置通道、模型能力、CLI、Skill / MCP / Hook，再去保存审计。配置源、DB root 和 bundle 诊断放到后面作为证据面板。</p>
   </div>
   <div class="statusbar" id="statusbar"><span class="pill warn boot-pulse">读取本地配置中</span></div>
 </header>
 <div class="shell">
   <aside class="side boot-nav" id="nav" aria-busy="true">
-    <button class="navbtn active" disabled>配置源<small>正在读取 root / DB / bundle</small></button>
-    <button class="navbtn" disabled>通道配置<small>加载后可编辑</small></button>
-    <button class="navbtn" disabled>模型测试<small>加载后可测试</small></button>
+    <button class="navbtn active" disabled>设置<small>读取后进入配置台</small></button>
+    <button class="navbtn" disabled>通道配置<small>URL / Key / 模型</small></button>
+    <button class="navbtn" disabled>能力面板<small>CLI / Skill / MCP</small></button>
   </aside>
   <main class="content">
     <section class="panel" data-section="source">
@@ -217,19 +217,44 @@
 
     <!-- Settings -->
     <section class="panel" data-section="settings">
-      <h2>设置</h2>
-      <p>这里是 WebUI 配置台：日常配置在当前页面改草稿，统一去保存页生成 diff / 审计摘要；TUI 后续只保留启动、应急和人工确认兜底。</p>
+      <h2>设置工作台</h2>
+      <p>先改会影响 MMS 启动的设置，再测试模型和会话能力，最后生成 diff 保存；配置源、DB root、bundle 这类证据放到下面的诊断入口。</p>
+      <div class="card boot-settings-card">
+        <h3>正在进入设置控制台</h3>
+        <p class="muted">先加载本地草稿、账号状态、能力偏好和 latest-approved bundle；不会自动请求远端 /models。</p>
+        <div class="loading-lines" aria-hidden="true"><span></span><span></span><span></span></div>
+      </div>
       <div class="settings-console">
         <div class="settings-hero">
-          <div>
-            <h3>把设置从 TUI 迁到可保存的 WebUI 表单</h3>
-            <p>用户只需要记住启动命令；通道、模型、Fallback、Runtime 和账号默认值都在 WebUI 里完成配置，再通过保存预览写入。</p>
+          <div class="settings-hero-copy">
+            <span class="settings-kicker">mmz1 实验界面 · 设置优先</span>
+            <h3>先把启动会用到的东西配好</h3>
+            <p>这里不是功能介绍页。常用入口只保留配置、测试、保存和人工确认；路径证据需要时再去“配置源”查。</p>
             <div id="settingsGapSummary" class="chips"></div>
           </div>
           <div class="settings-hero-actions">
             <button class="secondary" data-section-jump="save">生成保存预览</button>
+            <button class="ghost" data-section-jump="test">打开模型测试</button>
             <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
           </div>
+        </div>
+
+        <div class="settings-priority-grid">
+          <button class="settings-priority-card" data-section-jump="channel">
+            <span>01</span><strong>通道与模型</strong><small>URL、Key、模型能力、context 数量</small>
+          </button>
+          <button class="settings-priority-card" data-section-jump="sessionAssets">
+            <span>02</span><strong>CLI / Skill / MCP</strong><small>默认关闭、Global 区分、动态注入</small>
+          </button>
+          <button class="settings-priority-card" data-section-jump="fallback">
+            <span>03</span><strong>Fallback / Vision</strong><small>rescue、vision sidecar、默认策略</small>
+          </button>
+          <button class="settings-priority-card" data-section-jump="test">
+            <span>04</span><strong>调试验证</strong><small>/models、ping、chat evidence</small>
+          </button>
+          <button class="settings-priority-card" data-section-jump="save">
+            <span>05</span><strong>保存审计</strong><small>diff、backup、DB publish</small>
+          </button>
         </div>
 
         <div class="settings-tabs" id="settingsTabs">
@@ -349,7 +374,18 @@
           </details>
         </div>
 
-        <div class="setting-edit-card">
+        <div class="settings-diagnostic-row">
+          <button class="settings-diagnostic-card" data-section-jump="source">
+            <strong>配置源 / DB root</strong>
+            <span>root、registry、bundle、latest-approved 只作为诊断证据，放在这里统一查看。</span>
+          </button>
+          <button class="settings-diagnostic-card" data-section-jump="channel">
+            <strong>模型能力缺口</strong>
+            <span>Text / Vision / Reasoning / Long context 都回到模型配置里改，不靠模型名 tag 猜。</span>
+          </button>
+        </div>
+
+        <div class="setting-edit-card settings-report-card">
           <h3>报告 / 人工确认</h3>
           <div class="result" id="settingsReport">选择一个设置动作查看结果</div>
         </div>

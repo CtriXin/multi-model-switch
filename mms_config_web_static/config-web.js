@@ -1,15 +1,15 @@
 const sections=[
-  ['source','配置源','root / DB / bundle'],
-  ['channel','通道配置','URL / Key / 协议 / 模型'],
-  ['test','模型测试','ping / chat smoke'],
-  ['fallback','Fallback','rescue / vision'],
-  ['runtime','运行默认值','首选 CLI / OpenCode'],
-  ['sessionAssets','能力面板','技能 / MCP / 钩子'],
   ['settings','设置','配置台 / 账号 / 安全'],
+  ['channel','通道配置','URL / Key / 协议 / 模型'],
+  ['sessionAssets','能力面板','CLI / Skill / MCP / Hook'],
+  ['test','模型测试','ping / chat smoke'],
+  ['runtime','运行默认值','首选 CLI / OpenCode'],
+  ['fallback','Fallback','rescue / vision'],
   ['save','保存审计','diff / backup / audit'],
+  ['source','配置源','root / DB / bundle'],
   ['refs','本地参考','配置契约 / 文档']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let activeProviderFormTab='basic'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsActiveTab='accounts'; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let lastGateCommands=[]; let checkedMappingRows=new Set(); let assetTab='mms_dynamic'; let assetCli='all'; let assetKind='all'; let assetQuery=''; let assetDisabledDraft=null; let cliDisabledDraft=null; let assetGroupOpenState={}; let assetConfirmPrefsChecked=false; let assetConfirmPhraseValue=''; let assetPrefsResultText='不会走模型配置审计；这里只保存 CLI/Skill/MCP/Hook 偏好。';
+let state=null; let activeProvider=0; let activeProviderTab='config'; let activeProviderFormTab='basic'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsActiveTab='basics'; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let lastGateCommands=[]; let checkedMappingRows=new Set(); let assetTab='mms_dynamic'; let assetCli='all'; let assetKind='all'; let assetQuery=''; let assetDisabledDraft=null; let cliDisabledDraft=null; let assetGroupOpenState={}; let assetConfirmPrefsChecked=false; let assetConfirmPhraseValue=''; let assetPrefsResultText='不会走模型配置审计；这里只保存 CLI/Skill/MCP/Hook 偏好。';
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -18,7 +18,7 @@ function touchProvider(id){if(id)touchedProviders.add(id)}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
 function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
 function switchProviderFormTab(tab){activeProviderFormTab=tab||'basic';document.querySelectorAll('[data-provider-form-tab]').forEach(b=>b.classList.toggle('active',b.dataset.providerFormTab===activeProviderFormTab));document.querySelectorAll('[data-provider-form-panel]').forEach(p=>p.classList.toggle('active',p.dataset.providerFormPanel===activeProviderFormTab))}
-function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
+function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('settings') }
 function versionBadge(){const v=state.version_info||{};return v.display||v.release||v.git_describe||v.git_commit||'dev'}
 function rootAlias(root){return (root?.mode==='preview')?'mms-next':'mms'}
 function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">版本：${escapeHtml(versionBadge())}</span><span class="pill">${state.mode}</span><span class="pill">root：${escapeHtml(rootAlias(root))} / ${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">配置：${escapeHtml(state.paths.config||'-')}</span><span class="pill">策略模型：${state.policy_summary.model_count}</span>`}
@@ -308,9 +308,9 @@ function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-a
 function syncUiSettings(){state.ui=state.ui||{};state.ui.language=$('uiLanguage')?.value||'zh'}
 function renderUiSettings(mapping){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')};const counts=(state.tui_webui_mapping_summary||{}).counts||{};const missingRows=(mapping||[]).filter(row=>row.status==='missing').map(row=>row.tui_label);if($('settingsGapSummary')){$('settingsGapSummary').innerHTML=`<span class="chip">原生 ${counts.native||0}</span><span class="chip">报告 ${counts.report||0}</span><span class="chip">草稿 ${counts.draft_review||0}</span><span class="chip">人工确认 ${counts.human_gate||0}</span><span class="chip">缺失 ${counts.missing||0}</span>${missingRows.length?`<span class="chip">仍缺：${escapeHtml(missingRows.join(' / '))}</span>`:'<span class="chip">无缺失行</span>'}`}}
 function switchSettingsTab(tab){
-  settingsActiveTab=tab||'accounts';
+  settingsActiveTab=tab||'basics';
   const panels=[...document.querySelectorAll('[data-settings-panel]')];
-  if(!panels.some(p=>p.dataset.settingsPanel===settingsActiveTab))settingsActiveTab='accounts';
+  if(!panels.some(p=>p.dataset.settingsPanel===settingsActiveTab))settingsActiveTab='basics';
   document.querySelectorAll('[data-settings-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsTab===settingsActiveTab));
   panels.forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===settingsActiveTab));
 }

@@ -1088,9 +1088,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "applyV2Preview').disabled=!preview" in html
     assert "['settings','设置','配置台 / 账号 / 安全']" in html
     assert 'data-section="settings"' in html
-    assert "<h2>设置</h2>" in html
-    assert "这里是 WebUI 配置台" in html
-    assert "把设置从 TUI 迁到可保存的 WebUI 表单" in html
+    assert "<h2>设置工作台</h2>" in html
+    assert "先改会影响 MMS 启动的设置" in html
+    assert "先把启动会用到的东西配好" in html
+    assert "settings-priority-grid" in html
+    assert "配置源 / DB root" in html
+    assert "settings-diagnostic-row" in html
+    assert "setSection('settings')" in html
     assert "data-settings-tab" in html
     assert "function switchSettingsTab" in html
     assert "Snapshot Guard" in html
