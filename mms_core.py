@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
+from functools import partial
 
 try:
     import fcntl
@@ -83,6 +84,7 @@ def _ensure_rich():
     Panel, Table, Prompt, IntPrompt, Confirm, Text = _P, _T, _Pr, _IP, _C, _Tx
 
 from mms_runtime.account_state import seed_agy_state, seed_claude_state, seed_gemini_state
+from mms_commands import tools as _command_tools
 from mms_registry.adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 from mms_runtime.broker import (
     ensure_broker_config,
@@ -320,22 +322,9 @@ class WizardCancel(Exception):
     pass
 
 
-def _load_json_file(path, default):
-    from mms_commands.tools import load_json_file
-
-    return load_json_file(path, default)
-
-
-def _save_json_file(path, payload):
-    from mms_commands.tools import save_json_file
-
-    return save_json_file(path, payload)
-
-
-def _http_status_is_success(value):
-    from mms_commands.tools import http_status_is_success
-
-    return http_status_is_success(value)
+_load_json_file = _command_tools.load_json_file
+_save_json_file = _command_tools.save_json_file
+_http_status_is_success = _command_tools.http_status_is_success
 
 
 def _load_version_meta():
@@ -362,22 +351,12 @@ def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
     )
 
 
-def _extract_semver_text(value):
-    from mms_commands.tools import extract_semver_text
-
-    return extract_semver_text(value)
-
-
-def _installed_update_semver(version_meta):
-    from mms_commands.tools import installed_update_semver
-
-    return installed_update_semver(version_meta, update_notice_sources=UPDATE_NOTICE_SOURCES)
-
-
-def _semver_tag_gap(installed_version, known_tags, latest_tag=""):
-    from mms_commands.tools import semver_tag_gap
-
-    return semver_tag_gap(installed_version, known_tags, latest_tag)
+_extract_semver_text = _command_tools.extract_semver_text
+_installed_update_semver = partial(
+    _command_tools.installed_update_semver,
+    update_notice_sources=UPDATE_NOTICE_SOURCES,
+)
+_semver_tag_gap = _command_tools.semver_tag_gap
 
 
 def _update_notice():
@@ -442,53 +421,27 @@ DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM"}
 DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "doubao", "seed", "bailian")
 
 
-def _infer_model_family(model_name):
-    """从模型全名推断 (family, category)。
-
-    支持 provider/model 格式（如 bailian/kimi-2.5）：
-    先用完整名匹配，再用 '/' 后面的部分匹配。
-    """
-    from mms_commands.tools import infer_model_family
-
-    return infer_model_family(model_name, model_families=MODEL_FAMILIES)
-
-
-def _model_info_looks_domestic(model_info):
-    from mms_commands.tools import model_info_looks_domestic
-
-    return model_info_looks_domestic(
-        model_info,
-        infer_model_family=_infer_model_family,
-        domestic_model_families=DOMESTIC_MODEL_FAMILIES,
-        domestic_model_keywords=DOMESTIC_MODEL_KEYWORDS,
-    )
+_infer_model_family = partial(_command_tools.infer_model_family, model_families=MODEL_FAMILIES)
+_model_info_looks_domestic = partial(
+    _command_tools.model_info_looks_domestic,
+    infer_model_family=_infer_model_family,
+    domestic_model_families=DOMESTIC_MODEL_FAMILIES,
+    domestic_model_keywords=DOMESTIC_MODEL_KEYWORDS,
+)
 
 
 _MMS_HIDDEN_MODEL_FAMILIES = set()
 _MMS_HIDDEN_MODELS = set()
 
 
-def _mms_model_visible(model_name):
-    from mms_commands.tools import mms_model_visible
-
-    return mms_model_visible(
-        model_name,
-        infer_model_family=_infer_model_family,
-        hidden_models=_MMS_HIDDEN_MODELS,
-        hidden_model_families=_MMS_HIDDEN_MODEL_FAMILIES,
-    )
-
-
-def _filter_visible_models(models):
-    from mms_commands.tools import filter_visible_models
-
-    return filter_visible_models(models, mms_model_visible=_mms_model_visible)
-
-
-def _model_info_has_visible_models(model_info):
-    from mms_commands.tools import model_info_has_visible_models
-
-    return model_info_has_visible_models(model_info, mms_model_visible=_mms_model_visible)
+_mms_model_visible = partial(
+    _command_tools.mms_model_visible,
+    infer_model_family=_infer_model_family,
+    hidden_models=_MMS_HIDDEN_MODELS,
+    hidden_model_families=_MMS_HIDDEN_MODEL_FAMILIES,
+)
+_filter_visible_models = partial(_command_tools.filter_visible_models, mms_model_visible=_mms_model_visible)
+_model_info_has_visible_models = partial(_command_tools.model_info_has_visible_models, mms_model_visible=_mms_model_visible)
 
 
 def _preset_has_visible_model_options(preset):
@@ -500,27 +453,19 @@ CLI_MODEL_FAMILY_HINTS = {}
 
 
 def current_command():
-    from mms_commands.tools import current_command as current_command_helper
-
-    return current_command_helper(primary_command=PRIMARY_COMMAND, environ=os.environ, argv0=sys.argv[0] if sys.argv else "")
+    return _command_tools.current_command(primary_command=PRIMARY_COMMAND, environ=os.environ, argv0=sys.argv[0] if sys.argv else "")
 
 
 def display_title():
-    from mms_commands.tools import display_title as display_title_helper
-
-    return display_title_helper(current_command_fn=current_command)
+    return _command_tools.display_title(current_command_fn=current_command)
 
 
 def _git_output(args):
-    from mms_commands.tools import git_output
-
-    return git_output(args, subprocess_run=subprocess.run, file_path=__file__)
+    return _command_tools.git_output(args, subprocess_run=subprocess.run, file_path=__file__)
 
 
 def _release_version_info():
-    from mms_commands.tools import release_version_info
-
-    return release_version_info(load_version_meta=_load_version_meta, git_output=_git_output)
+    return _command_tools.release_version_info(load_version_meta=_load_version_meta, git_output=_git_output)
 
 
 def _about_status_snapshot(force_update=False):
@@ -585,10 +530,10 @@ def _about_status_snapshot(force_update=False):
     )
 
 
-def _cli_upgrade_shell_command(cli_name):
-    from mms_commands.tools import cli_upgrade_shell_command
-
-    return cli_upgrade_shell_command(cli_name, cli_version_packages=CLI_VERSION_PACKAGES)
+_cli_upgrade_shell_command = partial(
+    _command_tools.cli_upgrade_shell_command,
+    cli_version_packages=CLI_VERSION_PACKAGES,
+)
 
 
 def _run_about_upgrade(*, target="mms", include_clis=False):
@@ -617,33 +562,23 @@ def _run_about_upgrade(*, target="mms", include_clis=False):
 
 
 def config_command_hint():
-    from mms_commands.tools import config_command_hint as config_command_hint_helper
-
-    return config_command_hint_helper(current_command=current_command)
+    return _command_tools.config_command_hint(current_command=current_command)
 
 
 def export_command_hint(cli_name):
-    from mms_commands.tools import export_command_hint as export_command_hint_helper
-
-    return export_command_hint_helper(cli_name, current_command=current_command)
+    return _command_tools.export_command_hint(cli_name, current_command=current_command)
 
 
-def normalize_user_role(role):
-    from mms_commands.tools import normalize_user_role as normalize_user_role_helper
-
-    return normalize_user_role_helper(role, mode_all=MODE_ALL, mode_recommended=MODE_RECOMMENDED)
-
-
-def _normalize_ui_config(cfg):
-    from mms_commands.tools import normalize_ui_config
-
-    return normalize_ui_config(cfg, normalize_language=normalize_language)
+normalize_user_role = partial(
+    _command_tools.normalize_user_role,
+    mode_all=MODE_ALL,
+    mode_recommended=MODE_RECOMMENDED,
+)
+_normalize_ui_config = partial(_command_tools.normalize_ui_config, normalize_language=normalize_language)
 
 
 def _resolve_ui_language(cfg=None, cli_override=None):
-    from mms_commands.tools import resolve_ui_language
-
-    return resolve_ui_language(
+    return _command_tools.resolve_ui_language(
         cfg,
         cli_override,
         normalize_language=normalize_language,
@@ -651,10 +586,7 @@ def _resolve_ui_language(cfg=None, cli_override=None):
     )
 
 
-def _extract_global_lang(argv):
-    from mms_commands.tools import extract_global_lang
-
-    return extract_global_lang(argv, normalize_language=normalize_language)
+_extract_global_lang = partial(_command_tools.extract_global_lang, normalize_language=normalize_language)
 
 
 ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
@@ -682,17 +614,8 @@ _VISION_CAPABLE_MODEL_NAMES = {
 _VISION_CAPABLE_MODEL_HINTS = ("gemini-",)
 
 
-def _normalize_role(value):
-    """Normalize provider role to one of: primary, auto, fallback."""
-    from mms_commands.tools import normalize_role
-
-    return normalize_role(value, valid_roles=VALID_ROLES)
-
-
-def _normalize_positive_seconds(value, default, minimum=1):
-    from mms_commands.tools import normalize_positive_seconds
-
-    return normalize_positive_seconds(value, default, minimum=minimum)
+_normalize_role = partial(_command_tools.normalize_role, valid_roles=VALID_ROLES)
+_normalize_positive_seconds = _command_tools.normalize_positive_seconds
 
 
 def _default_provider():
@@ -705,28 +628,13 @@ def _default_provider():
     )
 
 
-def _default_account_home(account_id):
-    from mms_commands.tools import default_account_home
-
-    return default_account_home(account_id, accounts_dir=ACCOUNTS_DIR)
-
-
-def _normalize_priority(value):
-    from mms_commands.tools import normalize_priority
-
-    return normalize_priority(value, default_priority=DEFAULT_PRIORITY)
-
-
-def _canonical_model_family(value):
-    from mms_commands.tools import canonical_model_family
-
-    return canonical_model_family(value, model_families=MODEL_FAMILIES)
+_default_account_home = partial(_command_tools.default_account_home, accounts_dir=ACCOUNTS_DIR)
+_normalize_priority = partial(_command_tools.normalize_priority, default_priority=DEFAULT_PRIORITY)
+_canonical_model_family = partial(_command_tools.canonical_model_family, model_families=MODEL_FAMILIES)
 
 
 def _normalize_family_priority_overrides(value):
-    from mms_commands.tools import normalize_family_priority_overrides
-
-    return normalize_family_priority_overrides(
+    return _command_tools.normalize_family_priority_overrides(
         value,
         model_families=MODEL_FAMILIES,
         default_priority=DEFAULT_PRIORITY,
@@ -734,9 +642,7 @@ def _normalize_family_priority_overrides(value):
 
 
 def _runtime_priority_for_family(runtime, family_name):
-    from mms_commands.tools import runtime_priority_for_family
-
-    return runtime_priority_for_family(
+    return _command_tools.runtime_priority_for_family(
         runtime,
         family_name,
         canonical_model_family=_canonical_model_family,
@@ -746,9 +652,7 @@ def _runtime_priority_for_family(runtime, family_name):
 
 
 def _runtime_priority_for_model(runtime, model_name):
-    from mms_commands.tools import runtime_priority_for_model
-
-    return runtime_priority_for_model(
+    return _command_tools.runtime_priority_for_model(
         runtime,
         model_name,
         infer_model_family=_infer_model_family,
@@ -757,9 +661,7 @@ def _runtime_priority_for_model(runtime, model_name):
 
 
 def _runtime_with_priority(runtime, *, model_name="", family_name=""):
-    from mms_commands.tools import runtime_with_priority
-
-    return runtime_with_priority(
+    return _command_tools.runtime_with_priority(
         runtime,
         model_name=model_name,
         family_name=family_name,
@@ -772,15 +674,11 @@ def _runtime_with_priority(runtime, *, model_name="", family_name=""):
 
 
 def _normalize_claude_1m_mode(value, default="auto"):
-    from mms_commands.tools import normalize_claude_1m_mode
-
-    return normalize_claude_1m_mode(value, default=default, valid_modes=VALID_CLAUDE_1M_MODES)
+    return _command_tools.normalize_claude_1m_mode(value, default=default, valid_modes=VALID_CLAUDE_1M_MODES)
 
 
 def _normalize_timezone_name(value, default=DEFAULT_ACCOUNT_TIMEZONE):
-    from mms_commands.tools import normalize_timezone_name
-
-    return normalize_timezone_name(value, default=default)
+    return _command_tools.normalize_timezone_name(value, default=default)
 
 
 _ANTHROPIC_OFFICIAL_HOSTS = (
@@ -1124,15 +1022,10 @@ def _normalize_cache_config(cfg):
     )
 
 
-def _provider_map(cfg):
-    from mms_commands.tools import provider_map
-
-    return provider_map(cfg)
+_provider_map = _command_tools.provider_map
 
 
 def _model_context_window(model_name):
-    from mms_commands.tools import model_context_window
-
     def resolve_capabilities(clean):
         from mms_registry.capability_resolver import resolve_model_capabilities
 
@@ -1143,17 +1036,14 @@ def _model_context_window(model_name):
 
         return _MODEL_CONTEXT_WINDOWS
 
-    return model_context_window(
+    return _command_tools.model_context_window(
         model_name,
         resolve_model_capabilities=resolve_capabilities,
         model_context_windows=load_context_windows,
     )
 
 
-def _native_clis_for_model(model_name):
-    from mms_commands.tools import native_clis_for_model
-
-    return native_clis_for_model(model_name)
+_native_clis_for_model = _command_tools.native_clis_for_model
 
 
 def _is_installed_mms_layout(module_path=None):
@@ -1175,25 +1065,18 @@ def _default_gpt_reasoning_effort(module_path=None):
 
 
 def _default_reasoning_effort_for_model_info(model_info):
-    from mms_commands.tools import default_reasoning_effort_for_model_info
-
-    return default_reasoning_effort_for_model_info(
+    return _command_tools.default_reasoning_effort_for_model_info(
         model_info,
         model_matches_account_cli=_model_matches_account_cli,
         default_gpt_reasoning_effort=_default_gpt_reasoning_effort,
     )
 
 
-def _bridge_clis_for_model(model_name):
-    from mms_commands.tools import bridge_clis_for_model
-
-    return bridge_clis_for_model(model_name, infer_model_family=_infer_model_family)
+_bridge_clis_for_model = partial(_command_tools.bridge_clis_for_model, infer_model_family=_infer_model_family)
 
 
 def _model_capability_tags(model_name):
-    from mms_commands.tools import model_capability_tags
-
-    return model_capability_tags(
+    return _command_tools.model_capability_tags(
         model_name,
         infer_model_family=_infer_model_family,
         model_context_window=_model_context_window,
@@ -1204,38 +1087,15 @@ def _model_capability_tags(model_name):
     )
 
 
-def _model_supports_vision(model_name):
-    from mms_commands.tools import model_supports_vision
-
-    return model_supports_vision(
-        model_name,
-        vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
-        vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
-    )
-
-
-def _model_cli_summary(model_name):
-    from mms_commands.tools import model_cli_summary
-
-    return model_cli_summary(model_name, infer_model_family=_infer_model_family)
-
-
-def _model_capability_summary(model_name):
-    from mms_commands.tools import model_capability_summary
-
-    return model_capability_summary(model_name, model_capability_tags=_model_capability_tags)
-
-
-def _account_map(cfg):
-    from mms_commands.tools import account_map
-
-    return account_map(cfg)
-
-
-def _accounts_for_cli(cfg, cli_name):
-    from mms_commands.tools import accounts_for_cli
-
-    return accounts_for_cli(cfg, cli_name)
+_model_supports_vision = partial(
+    _command_tools.model_supports_vision,
+    vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
+    vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
+)
+_model_cli_summary = partial(_command_tools.model_cli_summary, infer_model_family=_infer_model_family)
+_model_capability_summary = partial(_command_tools.model_capability_summary, model_capability_tags=_model_capability_tags)
+_account_map = _command_tools.account_map
+_accounts_for_cli = _command_tools.accounts_for_cli
 
 
 def get_provider_definition(cfg, provider_id=None):
