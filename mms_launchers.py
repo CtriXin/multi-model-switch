@@ -104,6 +104,7 @@ from mms_opencode.session import (
     opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
     overlay_opencode_plugin as _overlay_opencode_plugin_impl,
 )
+from mms_agy import security as _agy_security
 from mms_codex import assets as _codex_assets
 from mms_codex import hooks as _codex_hooks
 from mms_codex import hook_trust as _codex_hook_trust
@@ -2541,51 +2542,12 @@ def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRAR
     return ensure_account_library_entries(account_home, entries=entries)
 
 
-def _macos_security_bin():
-    """Compatibility wrapper for macOS security binary discovery."""
-    from mms_agy.security import macos_security_bin
-
-    return macos_security_bin()
-
-
-def _agy_keychain_path(account_home):
-    """Compatibility wrapper for AGY account keychain path."""
-    from mms_agy.security import agy_keychain_path
-
-    return agy_keychain_path(account_home)
-
-
-def _agy_security_home_env(security_home):
-    """Compatibility wrapper for AGY security command env."""
-    from mms_agy.security import agy_security_home_env
-
-    return agy_security_home_env(security_home)
-
-
-def _run_agy_security_command(security_bin, args, *, security_home, check=False):
-    """Compatibility wrapper for AGY security command execution."""
-    from mms_agy.security import run_agy_security_command
-
-    return run_agy_security_command(
-        security_bin,
-        args,
-        security_home=security_home,
-        check=check,
-    )
-
-
-def _ensure_agy_account_keychain(account_home, session_home=None):
-    """Compatibility wrapper for AGY account keychain preparation."""
-    from mms_agy.security import ensure_agy_account_keychain
-
-    return ensure_agy_account_keychain(account_home, session_home=session_home)
-
-
-def _install_agy_security_wrapper(session_home, account_home, env):
-    """Compatibility wrapper for AGY session security wrapper install."""
-    from mms_agy.security import install_agy_security_wrapper
-
-    return install_agy_security_wrapper(session_home, account_home, env)
+_macos_security_bin = _agy_security.macos_security_bin
+_agy_keychain_path = _agy_security.agy_keychain_path
+_agy_security_home_env = _agy_security.agy_security_home_env
+_run_agy_security_command = _agy_security.run_agy_security_command
+_ensure_agy_account_keychain = _agy_security.ensure_agy_account_keychain
+_install_agy_security_wrapper = _agy_security.install_agy_security_wrapper
 
 
 def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
