@@ -2135,6 +2135,79 @@ def test_config_web_migration_apply_requires_confirmation(tmp_path):
     assert "确认" in result["errors"][0]
 
 
+def test_config_web_migration_apply_writes_config_credentials_preferences(monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+    preferences_path = tmp_path / "preferences.toml"
+    config_path.write_text("", encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *args, **kwargs: True)
+    credential_box = mms_config_web._migration_encrypt_json(
+        {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "credentials": [
+                {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-import-apply-secret",
+                }
+            ],
+        },
+        "password123",
+    )
+    bundle = {
+        "schema": "mms.config_migration_bundle.v1",
+        "payload": {
+            "config": {
+                "providers": [
+                    {
+                        "id": "demo",
+                        "name": "Demo",
+                        "openai_base_url": "https://demo.example/v1",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["opencode"],
+                        "fallback_models": ["gpt-5.5"],
+                    }
+                ],
+                "provider": {"default": "demo"},
+                "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+            },
+            "model_policy": {"version": 1, "models": {"gpt-5.5": {"visible": True}}, "projects": {}},
+            "preferences": {"launch": {"disabled_clis": ["pi"]}},
+        },
+        "encrypted_credentials": credential_box,
+    }
+
+    result = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {
+            "bundle": bundle,
+            "password": "password123",
+            "confirm_migration": True,
+            "confirm_phrase": "导入配置",
+        },
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(result, ensure_ascii=False)
+    saved_prefs = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert result["ok"] is True
+    assert result["status"] == "imported"
+    assert 'id = "demo"' in config_path.read_text(encoding="utf-8")
+    assert "sk-import-apply-secret" in credentials_path.read_text(encoding="utf-8")
+    assert saved_prefs["launch"]["disabled_clis"] == ["pi"]
+    assert result["start_status"]["ready_to_work"] is True
+    assert result["start_status"]["start_command"] == "mms"
+    assert "sk-import-apply-secret" not in encoded
+
+
 def test_config_web_migration_start_status_reports_ready_and_disabled_cli(tmp_path):
     config_path = tmp_path / "config.toml"
     preferences_path = tmp_path / "preferences.toml"
