@@ -569,6 +569,30 @@ def export_command_hint(cli_name):
     return _command_tools.export_command_hint(cli_name, current_command=current_command)
 
 
+_account_label = _command_tools.account_label
+_provider_template_payload = partial(_command_tools.provider_template_payload, provider_templates=PROVIDER_TEMPLATES)
+_mask_key = _command_tools.mask_key
+_set_nested = _command_tools.set_nested
+_get_nested = _command_tools.get_nested
+_unset_nested = _command_tools.unset_nested
+_split_cli_prefixed_resume_ref = _command_tools.split_cli_prefixed_resume_ref
+_uuid_resume_cli_hint = _command_tools.uuid_resume_cli_hint
+_first_resume_model = _command_tools.first_resume_model
+_session_resume_model = _command_tools.session_resume_model
+_is_config_help_request = _command_tools.is_config_help_request
+_is_help_request = _command_tools.is_help_request
+_is_setup_web_request = _command_tools.is_setup_web_request
+_is_session_prune_dry_run = _command_tools.is_session_prune_dry_run
+
+
+def _parse_csv_values(raw_value, allowed_values=None):
+    return _command_tools.parse_csv_values(raw_value, allowed_values=allowed_values, console=console)
+
+
+def _display_config_help():
+    return _command_tools.display_config_help(command_name=current_command(), console=console)
+
+
 normalize_user_role = partial(
     _command_tools.normalize_user_role,
     mode_all=MODE_ALL,
@@ -2090,12 +2114,6 @@ def _runtime_with_vision_sidecar(cfg, runtime):
     )
 
 
-def _account_label(account):
-    from mms_commands.tools import account_label
-
-    return account_label(account)
-
-
 def _account_env(account):
     from mms_commands.tools import account_env
 
@@ -2152,12 +2170,6 @@ def _ensure_interactive_terminal(action_hint):
         current_command=current_command,
         exit_func=sys.exit,
     )
-
-
-def _parse_csv_values(raw_value, allowed_values=None):
-    from mms_commands.tools import parse_csv_values
-
-    return parse_csv_values(raw_value, allowed_values=allowed_values, console=console)
 
 
 def _prompt_csv_values(label, default_values, allowed_values):
@@ -2220,12 +2232,6 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
         prompt_validated_timezone=_prompt_validated_timezone,
     )
-
-
-def _provider_template_payload(template_key):
-    from mms_commands.tools import provider_template_payload
-
-    return provider_template_payload(template_key, provider_templates=PROVIDER_TEMPLATES)
 
 
 def _select_provider_template(preset_id=None):
@@ -4995,12 +5001,6 @@ def _display_accounts(cfg):
     )
 
 
-def _display_config_help():
-    from mms_commands.tools import display_config_help
-
-    return display_config_help(command_name=current_command(), console=console)
-
-
 def _config_root_status():
     return mms_config_root_status(command=current_command(), config_dir=PRIMARY_CONFIG_DIR)
 
@@ -5248,32 +5248,6 @@ def _display_adapter_registry():
         table_cls=Table,
         console=console,
     )
-
-
-def _mask_key(val):
-    """遮蔽 API key，只显示前 4 和后 4 位"""
-    from mms_commands.tools import mask_key
-
-    return mask_key(val)
-
-
-def _set_nested(d, parts, val):
-    """设置嵌套 dict 的值"""
-    from mms_commands.tools import set_nested
-
-    return set_nested(d, parts, val)
-
-
-def _get_nested(d, parts):
-    from mms_commands.tools import get_nested
-
-    return get_nested(d, parts)
-
-
-def _unset_nested(d, parts):
-    from mms_commands.tools import unset_nested
-
-    return unset_nested(d, parts)
 
 
 def _coerce_config_value(key_path, raw_value):
@@ -5596,12 +5570,6 @@ def handle_session_command(argv):
     )
 
 
-def _split_cli_prefixed_resume_ref(session_ref):
-    from mms_commands.tools import split_cli_prefixed_resume_ref
-
-    return split_cli_prefixed_resume_ref(session_ref)
-
-
 def _codex_resume_roots():
     from mms_commands.tools import codex_resume_roots
 
@@ -5646,24 +5614,6 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
         resolve_claude_resume_ref=_resolve_claude_resume_ref,
         uuid_resume_cli_hint=_uuid_resume_cli_hint,
     )
-
-
-def _uuid_resume_cli_hint(session_ref):
-    from mms_commands.tools import uuid_resume_cli_hint
-
-    return uuid_resume_cli_hint(session_ref)
-
-
-def _first_resume_model(cli_models, default_models, recommend=None):
-    from mms_commands.tools import first_resume_model
-
-    return first_resume_model(cli_models, default_models, recommend)
-
-
-def _session_resume_model(session_record):
-    from mms_commands.tools import session_resume_model
-
-    return session_resume_model(session_record)
 
 
 def _resolve_resume_runtime_and_model(
@@ -5861,24 +5811,6 @@ def handle_opencode_smoke_command(argv):
     )
 
 
-def _is_help_request(argv):
-    from mms_commands.tools import is_help_request
-
-    return is_help_request(argv)
-
-
-def _is_setup_web_request(argv):
-    from mms_commands.tools import is_setup_web_request
-
-    return is_setup_web_request(argv)
-
-
-def _is_config_help_request(args_rest):
-    from mms_commands.tools import is_config_help_request
-
-    return is_config_help_request(args_rest)
-
-
 _PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS = {
     "migrate",
     "set",
@@ -6021,12 +5953,6 @@ def _is_config_preview_doctor_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
     return str(argv[1] or "").strip() in {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"}
-
-
-def _is_session_prune_dry_run(argv):
-    from mms_commands.tools import is_session_prune_dry_run
-
-    return is_session_prune_dry_run(argv)
 
 
 def main():
