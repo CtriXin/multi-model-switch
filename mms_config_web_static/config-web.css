@@ -1082,35 +1082,43 @@
       display: grid;
       gap: 14px;
     }
-    .settings-hero {
+    .settings-actionbar {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: 18px;
-      align-items: end;
-      border: 1.5px solid color-mix(in oklch, var(--fg) 18%, var(--border));
-      border-radius: var(--radius-xl);
-      padding: 18px;
-      background:
-        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 14%, transparent), transparent 34%),
-        linear-gradient(135deg, color-mix(in oklch, var(--surface) 84%, var(--bg)), var(--surface));
-      box-shadow: var(--shadow-sm);
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border));
+      border-radius: 16px;
+      background: oklch(100% 0 0 / .86);
+      box-shadow: 0 8px 20px oklch(18% 0.02 230 / .045);
     }
-    .settings-hero h3 {
-      font-size: clamp(22px, 3.2vw, 36px);
-      letter-spacing: -.035em;
-      line-height: 1.05;
-      margin-bottom: 8px;
+    .settings-actionbar strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 14px;
+      letter-spacing: -.012em;
     }
-    .settings-hero p {
-      color: color-mix(in oklch, var(--fg) 70%, var(--muted));
-      max-width: 760px;
+    .settings-actionbar span {
+      display: block;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.45;
     }
-    .settings-hero-actions {
+    .settings-actionbar .chips {
+      margin-top: 7px;
+    }
+    .settings-actionbar-actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
       justify-content: flex-end;
+      gap: 8px;
     }
+    .settings-actionbar-actions button {
+      min-height: 36px;
+      white-space: nowrap;
+    }
+
     .settings-tabs {
       display: flex;
       gap: 6px;
@@ -1816,8 +1824,8 @@
       .provider-form-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .provider-form-tab { justify-content: flex-start; }
       .oc-summary, .model-inventory-summary, .settings-tabs, .account-config-grid { grid-template-columns: 1fr 1fr; }
-      .settings-hero, .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid, .acceptance-head { grid-template-columns: 1fr; }
-      .settings-hero-actions { justify-content: flex-start; }
+      .settings-actionbar, .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid, .acceptance-head { grid-template-columns: 1fr; }
+      .settings-actionbar-actions { justify-content: flex-start; }
       .filterbar.compact { justify-content: flex-start; }
       .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
       .settings-stamp { white-space: normal; }
@@ -2990,159 +2998,41 @@
     .boot-settings-card .muted {
       color: var(--muted);
     }
-    .settings-hero {
+    .settings-actionbar {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(210px, auto);
-      align-items: stretch;
-      gap: 14px;
-      min-height: 0;
-      padding: clamp(16px, 2vw, 22px);
-      border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
-      border-radius: 22px;
-      background:
-        linear-gradient(90deg, oklch(100% 0 0), oklch(97% 0.012 166));
-      color: var(--fg);
-      box-shadow:
-        0 14px 34px oklch(20% 0.02 230 / .07),
-        0 1px 0 oklch(100% 0 0 / .9) inset;
-    }
-    .settings-hero-copy {
-      display: grid;
-      gap: 8px;
-      min-width: 0;
-    }
-    .settings-kicker {
-      display: inline-flex;
-      width: fit-content;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
-      gap: 6px;
-      padding: 5px 9px;
-      border: 1px solid color-mix(in oklch, var(--fg) 12%, var(--border));
-      border-radius: 999px;
-      background: oklch(99% 0.006 170);
-      color: color-mix(in oklch, var(--fg) 72%, var(--muted));
-      font-size: 12px;
-      font-weight: 800;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border));
+      border-radius: 16px;
+      background: oklch(100% 0 0 / .86);
+      box-shadow: 0 8px 20px oklch(18% 0.02 230 / .045);
     }
-    .settings-kicker::before {
-      content: "";
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--ok);
-    }
-    .settings-hero h3 {
-      max-width: 760px;
-      color: var(--fg);
-      font-size: clamp(24px, 3.2vw, 38px);
-      line-height: 1.04;
-      letter-spacing: -.045em;
-    }
-    .settings-hero p {
-      max-width: 780px;
-      color: color-mix(in oklch, var(--fg) 62%, var(--muted));
+    .settings-actionbar strong {
+      display: block;
+      margin-bottom: 2px;
       font-size: 14px;
-      line-height: 1.6;
+      letter-spacing: -.012em;
     }
-    .settings-hero .chips {
-      margin-top: 2px;
-    }
-    .settings-hero .chip,
-    .settings-hero .tag {
-      background: oklch(100% 0 0 / .82);
-      border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
-      color: color-mix(in oklch, var(--accent) 72%, black);
-    }
-    .settings-hero-actions {
-      display: grid;
-      align-content: stretch;
-      gap: 8px;
-      min-width: 210px;
-    }
-    .settings-hero-actions button {
-      justify-content: center;
-      min-height: 40px;
-      white-space: nowrap;
-    }
-
-    .settings-priority-grid {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 10px;
-    }
-    .settings-priority-card {
-      position: relative;
-      min-height: 112px;
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      justify-content: flex-start;
-      border: 1px solid color-mix(in oklch, var(--fg) 13%, var(--border));
-      border-radius: 18px;
-      padding: 13px;
-      background: oklch(100% 0 0 / .94);
-      color: var(--fg);
-      text-align: left;
-      box-shadow: 0 10px 24px oklch(18% 0.02 230 / .055);
-      overflow: hidden;
-      transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
-    }
-    .settings-priority-card::after {
-      content: "";
-      position: absolute;
-      inset: auto 13px 11px;
-      height: 3px;
-      border-radius: 999px;
-      background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent) 40%, oklch(72% 0.08 205)));
-      opacity: .72;
-    }
-    .settings-priority-card:hover {
-      transform: translateY(-1px);
-      border-color: color-mix(in oklch, var(--accent) 42%, var(--border));
-      background:
-        linear-gradient(180deg, oklch(100% 0 0), color-mix(in oklch, var(--accent) 5%, var(--surface)));
-      color: var(--fg);
-      box-shadow: 0 16px 32px oklch(18% 0.02 230 / .085);
-    }
-    .settings-priority-card:focus-visible {
-      outline: 3px solid color-mix(in oklch, var(--accent) 22%, transparent);
-      outline-offset: 2px;
-      background:
-        linear-gradient(180deg, oklch(100% 0 0), color-mix(in oklch, var(--accent) 5%, var(--surface)));
-      color: var(--fg);
-    }
-    .settings-priority-card:active {
-      transform: translateY(0);
-      background:
-        linear-gradient(180deg, oklch(100% 0 0), color-mix(in oklch, var(--accent) 8%, var(--surface)));
-      color: var(--fg);
-    }
-    .settings-priority-card span {
-      display: inline-flex;
-      width: fit-content;
-      margin-bottom: auto;
-      border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
-      border-radius: 999px;
-      padding: 3px 8px;
-      color: color-mix(in oklch, var(--accent) 76%, black);
-      background: var(--accent-soft);
-      font-size: 11px;
-      font-weight: 900;
-      letter-spacing: .02em;
-    }
-    .settings-priority-card strong {
+    .settings-actionbar span {
       display: block;
-      margin-top: 18px;
-      font-size: 16px;
-      line-height: 1.12;
-      letter-spacing: -.025em;
-    }
-    .settings-priority-card small {
-      display: block;
-      margin-top: 7px;
-      padding-bottom: 14px;
       color: var(--muted);
-      line-height: 1.42;
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+    .settings-actionbar .chips {
+      margin-top: 7px;
+    }
+    .settings-actionbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .settings-actionbar-actions button {
+      min-height: 36px;
+      white-space: nowrap;
     }
 
     .settings-tabs {
@@ -3271,9 +3161,6 @@
     }
 
     @media (max-width: 1180px) {
-      .settings-priority-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
       .settings-tabs {
         grid-template-columns: repeat(3, minmax(160px, 1fr));
       }
@@ -3282,25 +3169,11 @@
       [data-section="settings"] {
         padding: 14px;
       }
-      .settings-hero,
+      .settings-actionbar,
       .settings-diagnostic-row {
         grid-template-columns: 1fr;
       }
-      .settings-hero h3 {
-        font-size: clamp(24px, 8vw, 34px);
-      }
-      .settings-hero-actions {
-        min-width: 0;
-      }
-      .settings-priority-grid {
-        grid-template-columns: 1fr;
-      }
-      .settings-priority-card {
-        min-height: 92px;
-      }
-      .settings-priority-card strong {
-        margin-top: 12px;
-      }
+      .settings-actionbar-actions { justify-content: flex-start; }
       .settings-tabs {
         display: flex;
         overflow-x: auto;

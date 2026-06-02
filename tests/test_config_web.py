@@ -1090,8 +1090,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert 'data-section="settings"' in html
     assert "<h2>设置工作台</h2>" in html
     assert "先改会影响 MMS 启动的设置" in html
-    assert "先把启动会用到的东西配好" in html
-    assert "settings-priority-grid" in html
+    assert "默认模式只放常用设置" in html
+    assert "settings-actionbar" in html
+    assert "settings-priority-grid" not in html
     assert "配置源 / DB root" in html
     assert "settings-diagnostic-row" in html
     assert "默认模式" in html

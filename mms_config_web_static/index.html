@@ -231,36 +231,17 @@
         <div class="loading-lines" aria-hidden="true"><span></span><span></span><span></span></div>
       </div>
       <div class="settings-console">
-        <div class="settings-hero">
-          <div class="settings-hero-copy">
-            <span class="settings-kicker">mmz1 实验界面 · 设置优先</span>
-            <h3>先把启动会用到的东西配好</h3>
-            <p>这里不是功能介绍页。常用入口只保留配置、测试、保存和人工确认；路径证据需要时再去“配置源”查。</p>
+        <div class="settings-actionbar">
+          <div>
+            <strong>默认模式只放常用设置</strong>
+            <span>通道、能力、测试、保存请用左侧导航；路径和 DB 证据切到高级模式再看。</span>
             <div id="settingsGapSummary" class="chips ui-advanced-only"></div>
           </div>
-          <div class="settings-hero-actions">
+          <div class="settings-actionbar-actions">
             <button class="secondary" data-section-jump="save">生成保存预览</button>
             <button class="ghost" data-section-jump="test">打开模型测试</button>
             <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
           </div>
-        </div>
-
-        <div class="settings-priority-grid">
-          <button class="settings-priority-card" data-section-jump="channel">
-            <span>01</span><strong>通道与模型</strong><small>URL、Key、模型能力、context 数量</small>
-          </button>
-          <button class="settings-priority-card" data-section-jump="sessionAssets">
-            <span>02</span><strong>CLI / Skill / MCP</strong><small>默认关闭、Global 区分、动态注入</small>
-          </button>
-          <button class="settings-priority-card" data-section-jump="fallback">
-            <span>03</span><strong>Fallback / Vision</strong><small>rescue、vision sidecar、默认策略</small>
-          </button>
-          <button class="settings-priority-card" data-section-jump="test">
-            <span>04</span><strong>调试验证</strong><small>/models、ping、chat evidence</small>
-          </button>
-          <button class="settings-priority-card" data-section-jump="save">
-            <span>05</span><strong>保存审计</strong><small>diff、backup、DB publish</small>
-          </button>
         </div>
 
         <div class="settings-tabs" id="settingsTabs">
