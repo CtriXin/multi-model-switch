@@ -1480,9 +1480,7 @@ def _nsr_available_for_cli(cli_name):
     return os.path.isfile(wrapper) and bool(_resolve_nsr_root() or os.path.isfile(_NSR_BUILTIN_HOOK))
 
 
-def _normalize_nsr_mode(value, default="enable"):
-    """Compatibility wrapper for NSR mode normalization."""
-    return _normalize_nsr_mode_impl(value, default=default)
+_normalize_nsr_mode = _normalize_nsr_mode_impl
 
 
 def _runtime_nsr_enabled(runtime):
@@ -1490,9 +1488,7 @@ def _runtime_nsr_enabled(runtime):
     return _runtime_nsr_enabled_impl(runtime, normalize_nsr_mode_fn=_normalize_nsr_mode)
 
 
-def _normalize_caveman_mode(value, default="disable"):
-    """Compatibility wrapper for Caveman mode normalization."""
-    return _normalize_caveman_mode_impl(value, default=default)
+_normalize_caveman_mode = _normalize_caveman_mode_impl
 
 
 def _runtime_caveman_enabled(runtime):
@@ -1500,9 +1496,7 @@ def _runtime_caveman_enabled(runtime):
     return _runtime_caveman_enabled_impl(runtime, normalize_caveman_mode_fn=_normalize_caveman_mode)
 
 
-def _normalize_caveman_level(value, default="light"):
-    """Compatibility wrapper for Caveman intensity normalization."""
-    return _normalize_caveman_level_impl(value, default=default)
+_normalize_caveman_level = _normalize_caveman_level_impl
 
 
 def _runtime_caveman_level(runtime):
@@ -1522,9 +1516,7 @@ def _caveman_hook_env_prefix(caveman_level):
     return f"CAVEMAN_DEFAULT_MODE={shlex.quote(_caveman_hook_mode(caveman_level))} "
 
 
-def _normalize_thinking_mode(value, default="enable"):
-    """Compatibility wrapper for thinking mode normalization."""
-    return _normalize_thinking_mode_impl(value, default=default)
+_normalize_thinking_mode = _normalize_thinking_mode_impl
 
 
 def _runtime_thinking_enabled(runtime):
@@ -1532,9 +1524,7 @@ def _runtime_thinking_enabled(runtime):
     return _runtime_thinking_enabled_impl(runtime, normalize_thinking_mode_fn=_normalize_thinking_mode)
 
 
-def _normalize_reasoning_effort(value, default="high"):
-    """Compatibility wrapper for reasoning effort normalization."""
-    return _normalize_reasoning_effort_impl(value, default=default)
+_normalize_reasoning_effort = _normalize_reasoning_effort_impl
 
 
 def _runtime_reasoning_effort(runtime, default="high"):
@@ -1546,9 +1536,7 @@ def _runtime_reasoning_effort(runtime, default="high"):
     )
 
 
-def _runtime_vision_sidecar(runtime):
-    """Compatibility wrapper for runtime vision sidecar config."""
-    return _runtime_vision_sidecar_impl(runtime)
+_runtime_vision_sidecar = _runtime_vision_sidecar_impl
 
 
 def _resolve_native_fallback_routes(runtime, model_name):
@@ -1603,14 +1591,10 @@ def _omc_available_for_claude():
     return bool(_resolve_omc_root())
 
 
-def _normalize_ecc_mode(value, default="disable"):
-    """Compatibility wrapper for ECC/OMC mode normalization."""
-    return _normalize_ecc_mode_impl(value, default=default)
+_normalize_ecc_mode = _normalize_ecc_mode_impl
 
 
-def _normalize_agent_pack(value, default="none"):
-    """Compatibility wrapper for agent pack normalization."""
-    return _normalize_agent_pack_impl(value, default=default)
+_normalize_agent_pack = _normalize_agent_pack_impl
 
 
 def _runtime_agent_pack(runtime):
