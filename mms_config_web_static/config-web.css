@@ -667,6 +667,32 @@
       border-radius: var(--radius);
       padding: 12px;
     }
+    .delete-zone label {
+      color: var(--danger);
+    }
+    .delete-zone input {
+      border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
+      background: color-mix(in oklch, white 88%, var(--danger-soft));
+    }
+    .pending-delete-box {
+      display: none;
+      margin: 12px 0;
+      padding: 12px;
+      border: 1.5px solid color-mix(in oklch, var(--danger) 36%, var(--border));
+      border-radius: var(--radius);
+      background: color-mix(in oklch, var(--danger) 8%, white);
+    }
+    .pending-delete-box.is-visible {
+      display: block;
+    }
+    .pending-delete-box strong {
+      display: block;
+      color: var(--danger);
+      margin-bottom: 4px;
+    }
+    .pending-delete-box .chips {
+      margin: 8px 0;
+    }
 
     /* ===== Grid system ===== */
     .grid {

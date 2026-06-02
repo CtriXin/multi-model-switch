@@ -1182,6 +1182,12 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "pDeleteConfirm" in html
     assert "deleteProvider" in html
     assert "function deleteCurrentProviderDraft()" in html
+    assert "删除这个通道" in html
+    assert "标记删除" in html
+    assert "保存前不会生效" in html
+    assert "pendingProviderDeletes" in html
+    assert "function undoProviderDeleteDraft" in html
+    assert "已保存 API Key 不会在这一步自动清理" in html
     assert "maintenanceActions" not in html
     assert "/api/settings/report" in html
     assert "人工确认" in html
