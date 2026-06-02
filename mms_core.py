@@ -1189,22 +1189,9 @@ def _config_snapshot_path(snapshot_kind, filename="latest.json", *, config_path=
     )
 
 
-def _is_snapshot_ignored_file(path):
-    from mms_commands.tools import is_snapshot_ignored_file
-
-    return is_snapshot_ignored_file(path, ignored_files=SNAPSHOT_IGNORED_FILES)
-
-
-def _render_mms_config_agents_guard():
-    from mms_commands.tools import render_mms_config_agents_guard
-
-    return render_mms_config_agents_guard()
-
-
-def _render_mms_config_claude_guard():
-    from mms_commands.tools import render_mms_config_claude_guard
-
-    return render_mms_config_claude_guard()
+_is_snapshot_ignored_file = partial(_command_tools.is_snapshot_ignored_file, ignored_files=SNAPSHOT_IGNORED_FILES)
+_render_mms_config_agents_guard = _command_tools.render_mms_config_agents_guard
+_render_mms_config_claude_guard = _command_tools.render_mms_config_claude_guard
 
 
 def _ensure_mms_config_guard_files(config_path=None):
@@ -1220,22 +1207,9 @@ def _ensure_mms_config_guard_files(config_path=None):
     )
 
 
-def _sha256_text(value):
-    from mms_commands.tools import sha256_text
-
-    return sha256_text(value)
-
-
-def _snapshot_proxy_fingerprint(proxy_url):
-    from mms_commands.tools import snapshot_proxy_fingerprint
-
-    return snapshot_proxy_fingerprint(proxy_url)
-
-
-def _snapshot_cli_state(home_dir, cli_name):
-    from mms_commands.tools import snapshot_cli_state
-
-    return snapshot_cli_state(home_dir, cli_name)
+_sha256_text = _command_tools.sha256_text
+_snapshot_proxy_fingerprint = _command_tools.snapshot_proxy_fingerprint
+_snapshot_cli_state = _command_tools.snapshot_cli_state
 
 
 def _snapshot_file_entry(path):
@@ -1244,10 +1218,7 @@ def _snapshot_file_entry(path):
     return snapshot_file_entry(path, snapshot_file_content_bytes=_snapshot_file_content_bytes)
 
 
-def _normalize_claude_state_snapshot_payload(data):
-    from mms_commands.tools import normalize_claude_state_snapshot_payload
-
-    return normalize_claude_state_snapshot_payload(data)
+_normalize_claude_state_snapshot_payload = _command_tools.normalize_claude_state_snapshot_payload
 
 
 _CLAUDE_SESSION_ENV_KEYS = {
@@ -1271,16 +1242,14 @@ _CLAUDE_SESSION_ENV_KEYS = {
 }
 
 
-def _normalize_claude_settings_snapshot_payload(data):
-    from mms_commands.tools import normalize_claude_settings_snapshot_payload
-
-    return normalize_claude_settings_snapshot_payload(data, session_env_keys=_CLAUDE_SESSION_ENV_KEYS)
-
-
-def _snapshot_file_content_bytes(path):
-    from mms_commands.tools import snapshot_file_content_bytes
-
-    return snapshot_file_content_bytes(path, session_env_keys=_CLAUDE_SESSION_ENV_KEYS)
+_normalize_claude_settings_snapshot_payload = partial(
+    _command_tools.normalize_claude_settings_snapshot_payload,
+    session_env_keys=_CLAUDE_SESSION_ENV_KEYS,
+)
+_snapshot_file_content_bytes = partial(
+    _command_tools.snapshot_file_content_bytes,
+    session_env_keys=_CLAUDE_SESSION_ENV_KEYS,
+)
 
 
 def _snapshot_account_entry(account):
@@ -1346,28 +1315,10 @@ def _build_config_guard_snapshot(cfg, *, config_path=None):
     )
 
 
-def _snapshot_digest(snapshot_data):
-    from mms_commands.tools import snapshot_digest
-
-    return snapshot_digest(snapshot_data)
-
-
-def _load_json_snapshot(path):
-    from mms_commands.tools import load_json_snapshot
-
-    return load_json_snapshot(path)
-
-
-def _write_json_snapshot(path, payload):
-    from mms_commands.tools import write_json_snapshot
-
-    return write_json_snapshot(path, payload)
-
-
-def _snapshot_period_bucket(period_name):
-    from mms_commands.tools import snapshot_period_bucket
-
-    return snapshot_period_bucket(period_name)
+_snapshot_digest = _command_tools.snapshot_digest
+_load_json_snapshot = _command_tools.load_json_snapshot
+_write_json_snapshot = _command_tools.write_json_snapshot
+_snapshot_period_bucket = _command_tools.snapshot_period_bucket
 
 
 def _update_periodic_snapshot(period_name, snapshot_data, *, config_path=None):
@@ -1395,10 +1346,7 @@ def _snapshot_diff_lines(previous_snapshot, current_snapshot):
     )
 
 
-def _snapshot_prompt_allowed():
-    from mms_commands.tools import snapshot_prompt_allowed
-
-    return snapshot_prompt_allowed()
+_snapshot_prompt_allowed = _command_tools.snapshot_prompt_allowed
 
 
 def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
@@ -2814,10 +2762,7 @@ def _model_source_status_tui_payload(summary):
     return _L("模型真源 / Registry Truth", "Registry Truth"), _model_source_status_rows(summary), actions
 
 
-def _compact_tui_report_value(value, max_len=96):
-    from mms_commands.tools import compact_tui_report_value
-
-    return compact_tui_report_value(value, max_len=max_len)
+_compact_tui_report_value = _command_tools.compact_tui_report_value
 
 
 _SETTINGS_RESULT_RENDERED_TUI = False
@@ -2829,10 +2774,7 @@ def _settings_result_tui_available():
     return settings_result_tui_available(env=os.environ, stdin=sys.stdin, stdout=sys.stdout)
 
 
-def _settings_result_tui_payload(title, rows, note="", *, ok=True):
-    from mms_commands.tools import settings_result_tui_payload
-
-    return settings_result_tui_payload(title, rows, note, ok=ok, localize=_L)
+_settings_result_tui_payload = partial(_command_tools.settings_result_tui_payload, localize=_L)
 
 
 def _select_settings_result_tui(title, rows, note="", *, ok=True):
@@ -2887,94 +2829,20 @@ def _print_settings_error_report(title, exc):
     )
 
 
-def _rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False):
-    from mms_commands.tools import rescue_default_fallback_report_payload
-
-    return rescue_default_fallback_report_payload(
-        model,
-        cleared=cleared,
-        hot_fallback_enabled=hot_fallback_enabled,
-        localize=_L,
-    )
-
-
-def _rescue_hot_fallback_toggle_report_payload(enabled, *, has_default=True):
-    from mms_commands.tools import rescue_hot_fallback_toggle_report_payload
-
-    return rescue_hot_fallback_toggle_report_payload(enabled, has_default=has_default, localize=_L)
-
-
-def _rescue_demo_packet_report_payload(payload):
-    from mms_commands.tools import rescue_demo_packet_report_payload
-
-    return rescue_demo_packet_report_payload(payload, localize=_L)
-
-
-def _rescue_paths_report_payload(selected_rescue):
-    from mms_commands.tools import rescue_paths_report_payload
-
-    return rescue_paths_report_payload(selected_rescue, localize=_L)
-
-
-def _rescue_handover_report_payload(handover, fallback_model):
-    from mms_commands.tools import rescue_handover_report_payload
-
-    return rescue_handover_report_payload(handover, fallback_model, localize=_L)
-
-
-def _registry_source_staleness_report_payload(summary):
-    from mms_commands.tools import registry_source_staleness_report_payload
-
-    return registry_source_staleness_report_payload(summary, localize=_L)
-
-
-def _registry_refresh_sources_report_payload(summary):
-    from mms_commands.tools import registry_refresh_sources_report_payload
-
-    return registry_refresh_sources_report_payload(summary, localize=_L)
-
-
-def _registry_scheduled_refresh_report_payload(summary):
-    from mms_commands.tools import registry_scheduled_refresh_report_payload
-
-    return registry_scheduled_refresh_report_payload(summary, localize=_L)
-
-
-def _registry_openrouter_fetch_report_payload(summary):
-    from mms_commands.tools import registry_openrouter_fetch_report_payload
-
-    return registry_openrouter_fetch_report_payload(summary, localize=_L)
-
-
-def _registry_openrouter_diff_report_payload(summary):
-    from mms_commands.tools import registry_openrouter_diff_report_payload
-
-    return registry_openrouter_diff_report_payload(summary, localize=_L)
-
-
-def _registry_publish_approved_report_payload(summary):
-    from mms_commands.tools import registry_publish_approved_report_payload
-
-    return registry_publish_approved_report_payload(summary, localize=_L)
-
-
-def _registry_verify_approved_report_payload(summary):
-    from mms_commands.tools import registry_verify_approved_report_payload
-
-    return registry_verify_approved_report_payload(summary, localize=_L)
-
-
-def _registry_doctor_report_payload(status):
-    from mms_commands.tools import registry_doctor_report_payload
-
-    return registry_doctor_report_payload(status, localize=_L)
-
-
-def _about_tui_payload(about_snapshot):
-    """Build localized About status/actions for the Settings detail page."""
-    from mms_commands.tools import about_tui_payload
-
-    return about_tui_payload(about_snapshot, config_path=CONFIG_PATH, localize=_L)
+_rescue_default_fallback_report_payload = partial(_command_tools.rescue_default_fallback_report_payload, localize=_L)
+_rescue_hot_fallback_toggle_report_payload = partial(_command_tools.rescue_hot_fallback_toggle_report_payload, localize=_L)
+_rescue_demo_packet_report_payload = partial(_command_tools.rescue_demo_packet_report_payload, localize=_L)
+_rescue_paths_report_payload = partial(_command_tools.rescue_paths_report_payload, localize=_L)
+_rescue_handover_report_payload = partial(_command_tools.rescue_handover_report_payload, localize=_L)
+_registry_source_staleness_report_payload = partial(_command_tools.registry_source_staleness_report_payload, localize=_L)
+_registry_refresh_sources_report_payload = partial(_command_tools.registry_refresh_sources_report_payload, localize=_L)
+_registry_scheduled_refresh_report_payload = partial(_command_tools.registry_scheduled_refresh_report_payload, localize=_L)
+_registry_openrouter_fetch_report_payload = partial(_command_tools.registry_openrouter_fetch_report_payload, localize=_L)
+_registry_openrouter_diff_report_payload = partial(_command_tools.registry_openrouter_diff_report_payload, localize=_L)
+_registry_publish_approved_report_payload = partial(_command_tools.registry_publish_approved_report_payload, localize=_L)
+_registry_verify_approved_report_payload = partial(_command_tools.registry_verify_approved_report_payload, localize=_L)
+_registry_doctor_report_payload = partial(_command_tools.registry_doctor_report_payload, localize=_L)
+_about_tui_payload = partial(_command_tools.about_tui_payload, config_path=CONFIG_PATH, localize=_L)
 
 
 def _snapshot_guard_tui_payload():
