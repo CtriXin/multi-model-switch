@@ -1415,124 +1415,27 @@ def _remember_anthropic_url(provider_id, configured_url, resolved_url):
     _save_anthropic_url_file_cache(cache_data)
 
 
-def _load_real_claude_settings():
-    """Compatibility wrapper for reading real Claude settings."""
-    from mms_claude.settings import load_real_claude_settings
+from mms_claude import settings as _claude_settings
 
-    return load_real_claude_settings()
-
-
-def _load_claude_settings_from_dir(claude_dir):
-    """Compatibility wrapper for reading Claude settings from a directory."""
-    from mms_claude.settings import load_claude_settings_from_dir
-
-    return load_claude_settings_from_dir(claude_dir)
-
-
-def _load_claude_settings_template(filename):
-    """Compatibility wrapper for Claude settings template loading."""
-    from mms_claude.settings import load_claude_settings_template
-
-    return load_claude_settings_template(filename)
-
-
-def _load_mms_claude_settings_template():
-    """Compatibility wrapper for the MMS Claude session settings template."""
-    from mms_claude.settings import load_mms_claude_settings_template
-
-    return load_mms_claude_settings_template()
-
-
-def _load_global_claude_settings_template():
-    """Compatibility wrapper for the global Claude managed settings template."""
-    from mms_claude.settings import load_global_claude_settings_template
-
-    return load_global_claude_settings_template()
-
-
-def _global_claude_snapshot_path():
-    """Compatibility wrapper for global Claude managed snapshot path."""
-    from mms_claude.settings import global_claude_snapshot_path
-
-    return global_claude_snapshot_path()
-
-
-def _normalize_hook_command(command):
-    """Compatibility wrapper for hook command normalization."""
-    from mms_claude.settings import normalize_hook_command
-
-    return normalize_hook_command(command)
-
-
-def _extract_managed_claude_snapshot(settings_data, template_settings):
-    """Compatibility wrapper for Claude managed settings snapshot extraction."""
-    from mms_claude.settings import extract_managed_claude_snapshot
-
-    return extract_managed_claude_snapshot(settings_data, template_settings)
-
-
-def _snapshot_to_template(snapshot_data, seed_template):
-    """Compatibility wrapper for snapshot-to-template conversion."""
-    from mms_claude.settings import snapshot_to_template
-
-    return snapshot_to_template(snapshot_data, seed_template)
-
-
-def _merge_snapshot_with_current(snapshot_data, current_settings):
-    """Compatibility wrapper for managed snapshot/current merge."""
-    from mms_claude.settings import merge_snapshot_with_current
-
-    return merge_snapshot_with_current(snapshot_data, current_settings)
-
-
-def _prune_session_only_snapshot_entries(snapshot_data):
-    """Compatibility wrapper for pruning session-only snapshot entries."""
-    from mms_claude.settings import prune_session_only_snapshot_entries
-
-    return prune_session_only_snapshot_entries(snapshot_data)
-
-
-def _sanitize_global_snapshot(snapshot_data):
-    """Compatibility wrapper for global Claude snapshot sanitization."""
-    from mms_claude.settings import sanitize_global_snapshot
-
-    return sanitize_global_snapshot(snapshot_data)
-
-
-def _managed_snapshot_differs(previous_snapshot, current_settings, seed_template):
-    """Compatibility wrapper for managed Claude snapshot diffing."""
-    from mms_claude.settings import managed_snapshot_differs
-
-    return managed_snapshot_differs(previous_snapshot, current_settings, seed_template)
-
-
-def _managed_snapshot_template(previous_snapshot, seed_template, current_settings):
-    """Compatibility wrapper for managed Claude snapshot template building."""
-    from mms_claude.settings import managed_snapshot_template
-
-    return managed_snapshot_template(previous_snapshot, seed_template, current_settings)
-
-
-def _load_global_claude_snapshot():
-    """Compatibility wrapper for reading the global Claude managed snapshot."""
-    from mms_claude.settings import load_global_claude_snapshot
-
-    return load_global_claude_snapshot()
-
-
-def _write_global_claude_snapshot(snapshot_data):
-    """Compatibility wrapper for writing the global Claude managed snapshot."""
-    from mms_claude.settings import write_global_claude_snapshot
-
-    return write_global_claude_snapshot(snapshot_data)
-
-
-def _merge_claude_settings(base_settings, template_settings):
-    """Compatibility wrapper for Claude settings template merging."""
-    from mms_claude.settings import merge_claude_settings
-
-    return merge_claude_settings(base_settings, template_settings)
-
+# Claude settings implementation lives in mms_claude.settings; keep the former
+# launcher-private names as aliases for existing monkeypatch-based tests/callers.
+_load_real_claude_settings = _claude_settings.load_real_claude_settings
+_load_claude_settings_from_dir = _claude_settings.load_claude_settings_from_dir
+_load_claude_settings_template = _claude_settings.load_claude_settings_template
+_load_mms_claude_settings_template = _claude_settings.load_mms_claude_settings_template
+_load_global_claude_settings_template = _claude_settings.load_global_claude_settings_template
+_global_claude_snapshot_path = _claude_settings.global_claude_snapshot_path
+_normalize_hook_command = _claude_settings.normalize_hook_command
+_extract_managed_claude_snapshot = _claude_settings.extract_managed_claude_snapshot
+_snapshot_to_template = _claude_settings.snapshot_to_template
+_merge_snapshot_with_current = _claude_settings.merge_snapshot_with_current
+_prune_session_only_snapshot_entries = _claude_settings.prune_session_only_snapshot_entries
+_sanitize_global_snapshot = _claude_settings.sanitize_global_snapshot
+_managed_snapshot_differs = _claude_settings.managed_snapshot_differs
+_managed_snapshot_template = _claude_settings.managed_snapshot_template
+_load_global_claude_snapshot = _claude_settings.load_global_claude_snapshot
+_write_global_claude_snapshot = _claude_settings.write_global_claude_snapshot
+_merge_claude_settings = _claude_settings.merge_claude_settings
 
 def _repair_real_claude_settings():
     import json as _json
@@ -1570,107 +1473,17 @@ def repair_real_claude_settings_for_startup():
     return _repair_real_claude_settings()
 
 
-def repair_current_session_claude_settings(session_claude_dir):
-    """Compatibility wrapper for session-local Claude settings repair."""
-    from mms_claude.settings import repair_current_session_claude_settings as _repair_current
-
-    return _repair_current(session_claude_dir)
-
-
-def _strip_agent_im_hooks(hooks_data):
-    """Compatibility wrapper for inherited Claude hook filtering."""
-    from mms_claude.settings import strip_agent_im_hooks
-
-    return strip_agent_im_hooks(hooks_data)
-
-
-def _merge_claude_hook_groups(existing_groups, template_groups):
-    """Compatibility wrapper for Claude hook-group merging."""
-    from mms_claude.settings import merge_claude_hook_groups
-
-    return merge_claude_hook_groups(existing_groups, template_groups)
-
-
-def _merge_claude_hooks(existing_hooks, template_hooks):
-    """Compatibility wrapper for Claude hook merging."""
-    from mms_claude.settings import merge_claude_hooks
-
-    return merge_claude_hooks(existing_hooks, template_hooks)
-
-
-def _merge_claude_statusline(existing):
-    """Compatibility wrapper for Claude statusline defaults."""
-    from mms_claude.settings import merge_claude_statusline
-
-    return merge_claude_statusline(existing)
-
-
-def _merge_claude_permissions(existing):
-    """Compatibility wrapper for Claude permissions defaults."""
-    from mms_claude.settings import merge_claude_permissions
-
-    return merge_claude_permissions(existing)
-
-
-def _hook_command_exists(hook_items, command_path):
-    """Compatibility wrapper for hook command lookup."""
-    from mms_claude.settings import hook_command_exists
-
-    return hook_command_exists(hook_items, command_path)
-
-
-def _append_command_hook(hooks_data, event_name, command_path, matcher=None, timeout=None, status_message=None):
-    """Compatibility wrapper for appending file-backed command hooks."""
-    from mms_claude.settings import append_command_hook
-
-    return append_command_hook(
-        hooks_data,
-        event_name,
-        command_path,
-        matcher=matcher,
-        timeout=timeout,
-        status_message=status_message,
-    )
-
-
-def _append_shell_command_hook(
-    hooks_data,
-    event_name,
-    command_text,
-    *,
-    matcher=None,
-    timeout=None,
-    status_message=None,
-):
-    """Compatibility wrapper for appending shell command hooks."""
-    from mms_claude.settings import append_shell_command_hook
-
-    return append_shell_command_hook(
-        hooks_data,
-        event_name,
-        command_text,
-        matcher=matcher,
-        timeout=timeout,
-        status_message=status_message,
-    )
-
-
-def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
-    """Compatibility wrapper for MMS-managed Claude session hooks."""
-    from mms_claude.settings import merge_mms_session_hooks
-
-    return merge_mms_session_hooks(existing_hooks, template_hooks=template_hooks)
-
-
-def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
-    """Compatibility wrapper for Claude session hook filtering."""
-    from mms_claude.settings import filter_claude_session_hooks
-
-    return filter_claude_session_hooks(
-        hooks_data,
-        allow_execution_surfaces=allow_execution_surfaces,
-    )
-
+repair_current_session_claude_settings = _claude_settings.repair_current_session_claude_settings
+_strip_agent_im_hooks = _claude_settings.strip_agent_im_hooks
+_merge_claude_hook_groups = _claude_settings.merge_claude_hook_groups
+_merge_claude_hooks = _claude_settings.merge_claude_hooks
+_merge_claude_statusline = _claude_settings.merge_claude_statusline
+_merge_claude_permissions = _claude_settings.merge_claude_permissions
+_hook_command_exists = _claude_settings.hook_command_exists
+_append_command_hook = _claude_settings.append_command_hook
+_append_shell_command_hook = _claude_settings.append_shell_command_hook
+_merge_mms_session_hooks = _claude_settings.merge_mms_session_hooks
+_filter_claude_session_hooks = _claude_settings.filter_claude_session_hooks
 
 def _caveman_available_for_cli(cli_name):
     return str(cli_name or "").strip() in {"claude", "codex", "opencode", "agy"} and bool(_resolve_caveman_root())
