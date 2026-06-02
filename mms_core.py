@@ -1535,34 +1535,17 @@ def save_config(cfg, *, reason=None):
         )
 
 
-def _load_toml_file(path):
-    from mms_commands.tools import load_toml_file
-
-    return load_toml_file(path, toml_loads=tomllib.loads)
+_load_toml_file = partial(_command_tools.load_toml_file, toml_loads=tomllib.loads)
 
 
 def _existing_override_paths():
-    from mms_commands.tools import existing_paths
-
-    return existing_paths(OVERRIDE_PATHS)
+    return _command_tools.existing_paths(OVERRIDE_PATHS)
 
 
 def _existing_preferences_paths():
-    from mms_commands.tools import existing_paths
-
-    return existing_paths(PREFERENCES_PATHS)
-
-
-def _merge_dicts(base, override):
-    from mms_commands.tools import merge_dicts
-
-    return merge_dicts(base, override)
-
-
-def _pref_bool(value):
-    from mms_commands.tools import pref_bool
-
-    return pref_bool(value)
+    return _command_tools.existing_paths(PREFERENCES_PATHS)
+_merge_dicts = _command_tools.merge_dicts
+_pref_bool = _command_tools.pref_bool
 
 
 _PREFERENCE_ASSET_ROOT_KEYS = {
@@ -1585,10 +1568,11 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
 }
 
 
-def _sanitize_user_preferences(raw):
-    from mms_commands.tools import sanitize_user_preferences
-
-    return sanitize_user_preferences(raw, cli_names=CLI_NAMES, asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS)
+_sanitize_user_preferences = partial(
+    _command_tools.sanitize_user_preferences,
+    cli_names=CLI_NAMES,
+    asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS,
+)
 
 
 def load_user_preferences():
@@ -1614,10 +1598,7 @@ def preference_asset_root(asset_name):
     )
 
 
-def _merge_disabled_session_surfaces(*payloads):
-    from mms_commands.tools import merge_disabled_session_surfaces
-
-    return merge_disabled_session_surfaces(*payloads)
+_merge_disabled_session_surfaces = _command_tools.merge_disabled_session_surfaces
 
 
 def _runtime_with_launch_preferences(cfg, runtime, cli_name):
@@ -1645,34 +1626,11 @@ def apply_local_overrides(cfg):
     )
 
 
-def _env_file_path(cli_name):
-    from mms_commands.tools import env_file_path
-
-    return env_file_path(cli_name, env_dir=ENV_DIR)
-
-
-def _shell_quote(value):
-    from mms_commands.tools import shell_quote
-
-    return shell_quote(value)
-
-
-def _load_env_file(path):
-    from mms_commands.tools import load_env_file
-
-    return load_env_file(path)
-
-
-def _iso_now():
-    from mms_commands.tools import iso_now
-
-    return iso_now()
-
-
-def _local_now_slug():
-    from mms_commands.tools import local_now_slug
-
-    return local_now_slug()
+_env_file_path = partial(_command_tools.env_file_path, env_dir=ENV_DIR)
+_shell_quote = _command_tools.shell_quote
+_load_env_file = _command_tools.load_env_file
+_iso_now = _command_tools.iso_now
+_local_now_slug = _command_tools.local_now_slug
 
 
 def _load_usage_stats():
@@ -1684,10 +1642,7 @@ def _load_usage_stats():
     )
 
 
-def _load_usage_stats_from_path(usage_path):
-    from mms_commands.tools import load_usage_stats_from_path
-
-    return load_usage_stats_from_path(usage_path)
+_load_usage_stats_from_path = _command_tools.load_usage_stats_from_path
 
 
 def _write_usage_stats_locked(usage_path, data):
@@ -1816,16 +1771,8 @@ def _backup_config_tree(label):
     )
 
 
-def _runtime_usage_key(runtime, cli_name):
-    from mms_commands.tools import runtime_usage_key
-
-    return runtime_usage_key(runtime, cli_name)
-
-
-def _resolve_model_name(model_info):
-    from mms_commands.tools import resolve_model_name
-
-    return resolve_model_name(model_info)
+_runtime_usage_key = _command_tools.runtime_usage_key
+_resolve_model_name = _command_tools.resolve_model_name
 
 
 def _runtime_hint_from_runtime(runtime):
@@ -1863,10 +1810,7 @@ def _get_scene_usage():
     )
 
 
-def _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
-    from mms_commands.tools import infer_runtime_hint_from_usage_stats
-
-    return infer_runtime_hint_from_usage_stats(stats, cli_name, model_name)
+_infer_runtime_hint_from_usage_stats = _command_tools.infer_runtime_hint_from_usage_stats
 
 
 def _resolve_last_used_runtime(cfg, cli_name, last_item, default_models):
@@ -1901,22 +1845,9 @@ def _trace_record(source, **kv):
     return record_trace_override(_trace_enabled, _trace_overrides, source, **kv)
 
 
-def _trace_runtime_provider_id(runtime):
-    from mms_commands.tools import trace_runtime_provider_id
-
-    return trace_runtime_provider_id(runtime)
-
-
-def _trace_runtime_account_id(runtime):
-    from mms_commands.tools import trace_runtime_account_id
-
-    return trace_runtime_account_id(runtime)
-
-
-def _trace_runtime_bridge(runtime):
-    from mms_commands.tools import trace_runtime_bridge
-
-    return trace_runtime_bridge(runtime)
+_trace_runtime_provider_id = _command_tools.trace_runtime_provider_id
+_trace_runtime_account_id = _command_tools.trace_runtime_account_id
+_trace_runtime_bridge = _command_tools.trace_runtime_bridge
 
 
 def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
