@@ -38,7 +38,7 @@ from mms_core import (
     load_runtime_config as load_config,
     resolve_provider_context,
 )
-from mms_provider_profiles import ensure_default_user_agent
+from mms_registry.provider_profiles import ensure_default_user_agent
 
 _patch_fake_httpx(httpx)
 from mms_launchers import _anthropic_base_url, _claude_gateway_env, _openai_base_url

@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from mms_provider_profiles import load_provider_profiles, resolve_provider_profile
+from mms_registry.provider_profiles import load_provider_profiles, resolve_provider_profile
 
 
 class CapabilityBundleError(RuntimeError):

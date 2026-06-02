@@ -209,7 +209,7 @@ Rules:
 
 MMS now uses the latest-approved bundle for the low-risk resolver surfaces:
 
-- `mms_provider_profiles.load_provider_profiles()` first verifies the manifest,
+- `mms_registry.provider_profiles.load_provider_profiles()` first verifies the manifest,
   then reads `generated/provider-profiles.generated.json`.
 - `mms_registry.capability_resolver.resolve_model_capabilities()` first verifies the
   manifest, then reads `generated/model-capabilities.approved.json`.

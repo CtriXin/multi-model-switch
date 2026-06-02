@@ -231,7 +231,7 @@ def lookup_context_window(
         pass
 
     if profile_context_window_fn is None:
-        from mms_provider_profiles import profile_context_window as profile_context_window_fn
+        from mms_registry.provider_profiles import profile_context_window as profile_context_window_fn
 
     profiled = profile_context_window_fn(clean, provider_id=provider_id or "")
     if profiled is not None:

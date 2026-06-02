@@ -73,11 +73,11 @@ def test_mimo_without_1m_suffix_keeps_safe_context_on_anthropic(monkeypatch):
 
 def test_mimo_plain_model_uses_one_m_on_openrouter_and_openai_routes(monkeypatch, tmp_path):
     import mms_launchers
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
 
     assert mms_launchers._lookup_context_window("mimo-v2.5", provider_id="openrouter") == 1_048_576
     assert mms_launchers._lookup_context_window("mimo-v2.5-pro", provider_id="openrouter") == 1_048_576

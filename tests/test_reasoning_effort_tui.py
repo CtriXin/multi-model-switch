@@ -29,10 +29,10 @@ def test_confirm_tui_thinking_and_effort_defaults():
 
 
 def test_confirm_profile_capabilities_read_mimo_thinking(monkeypatch, tmp_path):
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
 
     caps = _confirm_profile_capabilities(
         "mimo-v2-pro",
@@ -49,10 +49,10 @@ def test_confirm_profile_capabilities_read_mimo_thinking(monkeypatch, tmp_path):
 
 
 def test_confirm_profile_capabilities_apply_model_defaults(monkeypatch, tmp_path):
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
 
     qwen_caps = _confirm_profile_capabilities(
         "qwen-plus",

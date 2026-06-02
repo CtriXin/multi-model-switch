@@ -115,11 +115,11 @@ def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatc
     mms_registry.write_json_atomic(tmp_path / "provider-profiles.json", legacy_profile)
     _write_bundle(tmp_path, profile_payload=approved_profile)
 
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
     assert (
-        mms_provider_profiles.profile_context_window(
+        provider_profiles.profile_context_window(
             "approved-model",
             provider_id="approved-provider",
         )
@@ -128,9 +128,9 @@ def test_provider_profiles_use_verified_latest_approved_before_legacy(monkeypatc
 
     generated_profile = tmp_path / "generated" / "provider-profiles.generated.json"
     generated_profile.write_text(json.dumps(legacy_profile), encoding="utf-8")
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
     assert (
-        mms_provider_profiles.profile_context_window(
+        provider_profiles.profile_context_window(
             "approved-model",
             provider_id="approved-provider",
         )
@@ -155,11 +155,11 @@ def test_provider_profiles_use_legacy_only_when_latest_manifest_missing(monkeypa
     }
     mms_registry.write_json_atomic(config_root / "provider-profiles.json", legacy_profile)
 
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
     assert (
-        mms_provider_profiles.profile_context_window(
+        provider_profiles.profile_context_window(
             "legacy-model",
             provider_id="legacy-provider",
         )
@@ -197,16 +197,16 @@ def test_provider_profile_cache_is_scoped_by_config_root(monkeypatch, tmp_path: 
         },
     )
 
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(root_a.parent))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
-    assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 111_000
+    assert provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 111_000
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(root_b.parent))
-    assert mms_provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 222_000
+    assert provider_profiles.profile_context_window("cache-model", provider_id="cache-provider") == 222_000
 
 
 def test_capability_resolver_uses_verified_latest_approved_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -260,9 +260,9 @@ def test_runtime_context_helpers_accept_only_approved_context_facts(monkeypatch,
 
     import mms_core
     import mms_launchers
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
 
     assert mms_launchers._lookup_context_window("runtime-approved-model") == 555_000
     assert mms_core._model_context_window("runtime-approved-model") == 555_000

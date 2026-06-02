@@ -123,7 +123,7 @@ from mms_runtime.fake_upstream import (
 )
 from mms_runtime.host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_claude.project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
-from mms_provider_profiles import profile_context_window, resolve_provider_profile
+from mms_registry.provider_profiles import profile_context_window, resolve_provider_profile
 from mms_pi import support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_runtime.env import (

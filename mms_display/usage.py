@@ -31,7 +31,7 @@ try:
 except ImportError:
     _httpx = None
 
-from mms_provider_profiles import ensure_default_user_agent
+from mms_registry.provider_profiles import ensure_default_user_agent
 
 Table = Text = None
 

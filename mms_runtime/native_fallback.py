@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from urllib.parse import urlsplit
 
-from mms_provider_profiles import resolve_provider_profile
+from mms_registry.provider_profiles import resolve_provider_profile
 
 _DIRECT_ID_TOKENS = ("direct", "native", "official")
 _DEFAULT_TRY_NEXT_ON = (

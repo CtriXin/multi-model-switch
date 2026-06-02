@@ -6,10 +6,10 @@ def _profiles(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
-    return mms_provider_profiles
+    provider_profiles.load_provider_profiles.cache_clear()
+    return provider_profiles
 
 
 def test_profile_budget_patch_maps_reasoning_effort(monkeypatch, tmp_path):

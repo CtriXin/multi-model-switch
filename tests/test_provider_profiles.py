@@ -1,9 +1,9 @@
 def _profiles(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
-    return mms_provider_profiles
+    provider_profiles.load_provider_profiles.cache_clear()
+    return provider_profiles
 
 
 def test_mimo_anthropic_profile_uses_api_key_and_thinking_toggle(monkeypatch, tmp_path):
@@ -426,12 +426,12 @@ def test_preview_root_missing_latest_bundle_ignores_legacy_profile_overlay(monke
     )
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
 
-    assert mms_provider_profiles.resolve_provider_profile(provider_id="preview-only-provider")[0] == ""
-    assert mms_provider_profiles.profile_context_window("any-model", provider_id="preview-only-provider") is None
+    assert provider_profiles.resolve_provider_profile(provider_id="preview-only-provider")[0] == ""
+    assert provider_profiles.profile_context_window("any-model", provider_id="preview-only-provider") is None
 
 
 def test_config_dir_root_missing_latest_bundle_ignores_legacy_profile_overlay(monkeypatch, tmp_path):
@@ -453,12 +453,12 @@ def test_config_dir_root_missing_latest_bundle_ignores_legacy_profile_overlay(mo
     )
     monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
 
-    assert mms_provider_profiles.resolve_provider_profile(provider_id="config-dir-provider")[0] == ""
-    assert mms_provider_profiles.profile_context_window("any-model", provider_id="config-dir-provider") is None
+    assert provider_profiles.resolve_provider_profile(provider_id="config-dir-provider")[0] == ""
+    assert provider_profiles.profile_context_window("any-model", provider_id="config-dir-provider") is None
 
 
 def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypatch, tmp_path):
@@ -481,9 +481,9 @@ def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypa
     monkeypatch.setenv("XDG_CONFIG_HOME", str(stable_root.parent))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
 
-    assert mms_provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == "stable-legacy-overlay"
-    assert mms_provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") == 54321
+    assert provider_profiles.resolve_provider_profile(provider_id="stable-overlay-provider")[0] == "stable-legacy-overlay"
+    assert provider_profiles.profile_context_window("any-model", provider_id="stable-overlay-provider") == 54321

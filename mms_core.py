@@ -872,7 +872,7 @@ def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False,
         raise RuntimeError("missing httpx")
     request_kwargs = dict(kwargs)
     try:
-        from mms_provider_profiles import ensure_default_user_agent
+        from mms_registry.provider_profiles import ensure_default_user_agent
         headers = request_kwargs.get("headers") or {}
         if not isinstance(headers, dict):
             headers = dict(headers)

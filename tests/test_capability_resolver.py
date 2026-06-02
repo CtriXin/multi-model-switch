@@ -117,9 +117,9 @@ def test_approved_registry_export_facts_win_over_provider_profile() -> None:
 
 def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_alias(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
     caps = resolve_model_capabilities(
         "mimo-v2.5-pro",
         provider_id="mimo-direct",
@@ -167,9 +167,9 @@ def test_gemini_3_family_uses_thinking_level_not_numeric_budget() -> None:
 
 def test_gemini_25_profile_uses_numeric_thinking_budget(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
-    import mms_provider_profiles
+    from mms_registry import provider_profiles
 
-    mms_provider_profiles.load_provider_profiles.cache_clear()
+    provider_profiles.load_provider_profiles.cache_clear()
     caps = resolve_model_capabilities(
         "gemini-2.5-pro",
         provider_id="gemini-direct",

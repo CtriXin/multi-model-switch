@@ -11,7 +11,7 @@ import os
 import urllib.error
 import urllib.request
 
-from mms_provider_profiles import ensure_default_user_agent
+from mms_registry.provider_profiles import ensure_default_user_agent
 from decimal import Decimal, InvalidOperation
 from typing import Any
 

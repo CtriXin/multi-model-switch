@@ -174,7 +174,7 @@ Once all four land, this table moves to a "verified" section.
 If you build a new project that consumes MMS routes:
 
 - Read this doc before writing any provider call.
-- Reuse the loader pattern from `mms_provider_profiles.py` (Python) or
+- Reuse the loader pattern from `mms_registry/provider_profiles.py` (Python) or
   the cross-language `loadProfiles / matchProfile / applyProfile` API
   documented in `PROVIDER_PROFILES.md`.
 - Write your protocol selection following Rule 1.

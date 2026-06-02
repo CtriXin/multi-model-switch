@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from mms_provider_profiles import (
+from mms_registry.provider_profiles import (
     apply_profile_auth_headers,
     apply_profile_body_patches,
     profile_context_window,

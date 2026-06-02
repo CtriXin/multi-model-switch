@@ -3469,7 +3469,7 @@ def _confirm_profile_capabilities(model_info, runtime=None):
         "effort_map": {},
     }
     try:
-        from mms_provider_profiles import profile_thinking_capabilities
+        from mms_registry.provider_profiles import profile_thinking_capabilities
     except Exception:
         return result
 
