@@ -2818,73 +2818,9 @@ def inspect_runtime_exposure(cli, runtime):
     return inspect_runtime_exposure_impl(cli, runtime)
 
 
-def _build_claude_session_settings(
-    base_settings=None,
-    *,
-    required_env=None,
-    default_env=None,
-    allow_execution_surfaces=True,
-    enable_caveman=False,
-    caveman_level="light",
-    enable_nsr=False,
-    enable_ecc=False,
-    enable_omc=False,
-    disabled_session_surfaces=None,
-):
-    """Compatibility wrapper for Claude session settings materialization."""
-    from mms_claude.settings import build_claude_session_settings
-
-    return build_claude_session_settings(
-        base_settings,
-        required_env=required_env,
-        default_env=default_env,
-        allow_execution_surfaces=allow_execution_surfaces,
-        enable_caveman=enable_caveman,
-        caveman_level=caveman_level,
-        enable_nsr=enable_nsr,
-        enable_ecc=enable_ecc,
-        enable_omc=enable_omc,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _write_claude_session_settings(
-    session_claude_dir,
-    *,
-    required_env=None,
-    default_env=None,
-    base_settings=None,
-    allow_execution_surfaces=True,
-    enable_caveman=False,
-    caveman_level="light",
-    enable_nsr=False,
-    enable_ecc=False,
-    enable_omc=False,
-    disabled_session_surfaces=None,
-):
-    """Compatibility wrapper for writing session-local Claude settings."""
-    from mms_claude.settings import write_claude_session_settings
-
-    return write_claude_session_settings(
-        session_claude_dir,
-        required_env=required_env,
-        default_env=default_env,
-        base_settings=base_settings,
-        allow_execution_surfaces=allow_execution_surfaces,
-        enable_caveman=enable_caveman,
-        caveman_level=caveman_level,
-        enable_nsr=enable_nsr,
-        enable_ecc=enable_ecc,
-        enable_omc=enable_omc,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir):
-    """Compatibility wrapper for OAuth session settings seeding."""
-    from mms_claude.settings import seed_oauth_claude_session_settings
-
-    return seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir)
+_build_claude_session_settings = _claude_settings.build_claude_session_settings
+_write_claude_session_settings = _claude_settings.write_claude_session_settings
+_seed_oauth_claude_session_settings = _claude_settings.seed_oauth_claude_session_settings
 
 
 def _gateway_ping(base_url, api_key, runtime=None):
