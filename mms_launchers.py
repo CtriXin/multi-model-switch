@@ -104,8 +104,10 @@ from mms_opencode.session import (
     opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
     overlay_opencode_plugin as _overlay_opencode_plugin_impl,
 )
+from mms_codex import assets as _codex_assets
 from mms_codex import hooks as _codex_hooks
 from mms_codex import hook_trust as _codex_hook_trust
+from mms_codex import resume as _codex_resume
 from mms_session import env as _session_env
 from mms_session import hook_commands as _session_hook_commands
 from mms_session import mcp as _session_mcp
@@ -2415,11 +2417,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
     )
 
 
-def _overlay_codex_shared_resume(home_dir, session_home):
-    """Compatibility wrapper for account Codex shared-resume overlay."""
-    from mms_codex.assets import overlay_codex_shared_resume
-
-    return overlay_codex_shared_resume(home_dir, session_home)
+_overlay_codex_shared_resume = _codex_assets.overlay_codex_shared_resume
 
 
 _CODEX_BOUNDED_RESUME_FILES = {
@@ -2461,119 +2459,21 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 )
 
 
-def _materialize_codex_session_entry(entry, src, dst):
-    """Compatibility wrapper for Codex session entry materialization."""
-    from mms_codex.assets import materialize_codex_session_entry
-
-    return materialize_codex_session_entry(entry, src, dst)
-
-
-def _overlay_codex_plugin_marketplace_cache(session_codex_dir, source_codex_dirs):
-    """Compatibility wrapper for Codex marketplace cache overlay."""
-    from mms_codex.assets import overlay_codex_plugin_marketplace_cache
-
-    return overlay_codex_plugin_marketplace_cache(session_codex_dir, source_codex_dirs)
-
-
-def _codex_entry_is_session_local(entry):
-    """Compatibility wrapper for Codex session-local entry filtering."""
-    from mms_codex.assets import codex_entry_is_session_local
-
-    return codex_entry_is_session_local(entry)
-
-
-def _bounded_env_int(name, default):
-    """Compatibility wrapper for bounded integer env parsing."""
-    from mms_codex.resume import _bounded_env_int as bounded_env_int
-
-    return bounded_env_int(name, default)
-
-
-def _first_existing_child(source_roots, entry_name, *, want_dir=False):
-    """Compatibility wrapper for first bounded-resume child lookup."""
-    from mms_codex.resume import _first_existing_child as first_existing_child
-
-    return first_existing_child(source_roots, entry_name, want_dir=want_dir)
-
-
-def _existing_children(source_roots, entry_name, *, want_dir=False):
-    """Compatibility wrapper for bounded-resume child lookup."""
-    from mms_codex.resume import _existing_children as existing_children
-
-    return existing_children(source_roots, entry_name, want_dir=want_dir)
-
-
-def _copy_tail_lines(src, dst, max_lines):
-    """Compatibility wrapper for bounded resume tail copy."""
-    from mms_codex.resume import _copy_tail_lines as copy_tail_lines
-
-    return copy_tail_lines(src, dst, max_lines)
-
-
-def _safe_relative_path(root, path):
-    """Compatibility wrapper for bounded resume relative paths."""
-    from mms_codex.resume import _safe_relative_path as safe_relative_path
-
-    return safe_relative_path(root, path)
-
-
-def _codex_session_file_cwd(path):
-    """Compatibility wrapper for Codex session-file cwd extraction."""
-    from mms_codex.resume import _codex_session_file_cwd as codex_session_file_cwd
-
-    return codex_session_file_cwd(path)
-
-
-def _path_is_same_or_child(path, root):
-    """Compatibility wrapper for same-or-child path checks."""
-    from mms_codex.resume import _path_is_same_or_child as path_is_same_or_child
-
-    return path_is_same_or_child(path, root)
-
-
-def _copy_latest_files_from_roots(src_roots, dst_root, max_files, *, max_file_bytes, project_path=""):
-    """Compatibility wrapper for bounded resume latest-file copy."""
-    from mms_codex.resume import _copy_latest_files_from_roots as copy_latest_files_from_roots
-
-    return copy_latest_files_from_roots(
-        src_roots,
-        dst_root,
-        max_files,
-        max_file_bytes=max_file_bytes,
-        project_path=project_path,
-    )
-
-
-def _copy_latest_files(src_root, dst_root, max_files, *, max_file_bytes):
-    """Compatibility wrapper for bounded resume latest-file copy."""
-    from mms_codex.resume import _copy_latest_files as copy_latest_files
-
-    return copy_latest_files(src_root, dst_root, max_files, max_file_bytes=max_file_bytes)
-
-
-def _codex_sibling_session_roots(sessions_dir, *, exclude_session_home="", max_roots=None):
-    """Compatibility wrapper for Codex sibling session roots."""
-    from mms_codex.resume import _codex_sibling_session_roots as codex_sibling_session_roots
-
-    return codex_sibling_session_roots(
-        sessions_dir,
-        exclude_session_home=exclude_session_home,
-        max_roots=max_roots,
-    )
-
-
-def _seed_codex_bounded_resume(source_roots, session_codex_dir):
-    """Compatibility wrapper for Codex bounded resume seeding."""
-    from mms_codex.resume import _seed_codex_bounded_resume as seed_codex_bounded_resume
-
-    return seed_codex_bounded_resume(source_roots, session_codex_dir)
-
-
-def _set_codex_resume_writeback_root(env, target_codex_dir):
-    """Compatibility wrapper for Codex resume write-back env injection."""
-    from mms_codex.resume import _set_codex_resume_writeback_root as set_writeback_root
-
-    return set_writeback_root(env, target_codex_dir)
+_materialize_codex_session_entry = _codex_assets.materialize_codex_session_entry
+_overlay_codex_plugin_marketplace_cache = _codex_assets.overlay_codex_plugin_marketplace_cache
+_codex_entry_is_session_local = _codex_assets.codex_entry_is_session_local
+_bounded_env_int = _codex_resume._bounded_env_int
+_first_existing_child = _codex_resume._first_existing_child
+_existing_children = _codex_resume._existing_children
+_copy_tail_lines = _codex_resume._copy_tail_lines
+_safe_relative_path = _codex_resume._safe_relative_path
+_codex_session_file_cwd = _codex_resume._codex_session_file_cwd
+_path_is_same_or_child = _codex_resume._path_is_same_or_child
+_copy_latest_files_from_roots = _codex_resume._copy_latest_files_from_roots
+_copy_latest_files = _codex_resume._copy_latest_files
+_codex_sibling_session_roots = _codex_resume._codex_sibling_session_roots
+_seed_codex_bounded_resume = _codex_resume._seed_codex_bounded_resume
+_set_codex_resume_writeback_root = _codex_resume._set_codex_resume_writeback_root
 
 
 def _mms_resume_command_name():
@@ -2592,60 +2492,14 @@ def _print_mms_resume_hint(cli_name, session_id):
     )
 
 
-def _codex_index_records(codex_dir):
-    """Compatibility wrapper for Codex bounded index records."""
-    from mms_codex.resume import _codex_index_records as codex_index_records
-
-    return codex_index_records(codex_dir)
-
-
-def _codex_resume_record_fingerprint(record):
-    """Compatibility wrapper for Codex resume record fingerprints."""
-    from mms_codex.resume import _codex_resume_record_fingerprint as resume_record_fingerprint
-
-    return resume_record_fingerprint(record)
-
-
-def _codex_resume_index_snapshot(codex_dir):
-    """Compatibility wrapper for Codex resume index snapshots."""
-    from mms_codex.resume import _codex_resume_index_snapshot as resume_index_snapshot
-
-    return resume_index_snapshot(codex_dir)
-
-
-def _codex_resume_sort_key(record):
-    """Compatibility wrapper for Codex resume sort keys."""
-    from mms_codex.resume import _codex_resume_sort_key as resume_sort_key
-
-    return resume_sort_key(record)
-
-
-def _codex_resume_hint_session_id(codex_dir, baseline_snapshot):
-    """Compatibility wrapper for Codex resume hint session selection."""
-    from mms_codex.resume import _codex_resume_hint_session_id as resume_hint_session_id
-
-    return resume_hint_session_id(codex_dir, baseline_snapshot)
-
-
-def _merge_tail_lines(src, dst, max_lines):
-    """Compatibility wrapper for Codex bounded resume tail merge."""
-    from mms_codex.resume import _merge_tail_lines as merge_tail_lines
-
-    return merge_tail_lines(src, dst, max_lines)
-
-
-def _copy_resume_dir_back(src_root, dst_root, max_files, *, max_file_bytes):
-    """Compatibility wrapper for Codex bounded resume dir write-back."""
-    from mms_codex.resume import _copy_resume_dir_back as copy_resume_dir_back
-
-    return copy_resume_dir_back(src_root, dst_root, max_files, max_file_bytes=max_file_bytes)
-
-
-def _sync_codex_bounded_resume_back(session_codex_dir, target_codex_dir):
-    """Compatibility wrapper for Codex bounded resume write-back."""
-    from mms_codex.resume import _sync_codex_bounded_resume_back as sync_bounded_resume_back
-
-    return sync_bounded_resume_back(session_codex_dir, target_codex_dir)
+_codex_index_records = _codex_resume._codex_index_records
+_codex_resume_record_fingerprint = _codex_resume._codex_resume_record_fingerprint
+_codex_resume_index_snapshot = _codex_resume._codex_resume_index_snapshot
+_codex_resume_sort_key = _codex_resume._codex_resume_sort_key
+_codex_resume_hint_session_id = _codex_resume._codex_resume_hint_session_id
+_merge_tail_lines = _codex_resume._merge_tail_lines
+_copy_resume_dir_back = _codex_resume._copy_resume_dir_back
+_sync_codex_bounded_resume_back = _codex_resume._sync_codex_bounded_resume_back
 
 
 def _write_codex_hook_trust_cache(
@@ -2673,25 +2527,9 @@ def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
     return sync_hook_trust_back(session_codex_dir, target_codex_dir)
 
 
-def _sync_codex_bounded_resume_back_from_env(env):
-    """Compatibility wrapper for env-driven Codex bounded resume write-back."""
-    from mms_codex.resume import _sync_codex_bounded_resume_back_from_env as sync_from_env
-
-    return sync_from_env(env)
-
-
-def _codex_resume_writeback_callback(env):
-    """Compatibility wrapper for Codex resume write-back callback."""
-    from mms_codex.resume import _codex_resume_writeback_callback as resume_writeback_callback
-
-    return resume_writeback_callback(env)
-
-
-def _codex_bounded_resume_entries():
-    """Compatibility wrapper for Codex bounded resume entry names."""
-    from mms_codex.resume import _codex_bounded_resume_entries as bounded_resume_entries
-
-    return bounded_resume_entries()
+_sync_codex_bounded_resume_back_from_env = _codex_resume._sync_codex_bounded_resume_back_from_env
+_codex_resume_writeback_callback = _codex_resume._codex_resume_writeback_callback
+_codex_bounded_resume_entries = _codex_resume._codex_bounded_resume_entries
 
 
 def _link_shared_dotfiles(session_home):
