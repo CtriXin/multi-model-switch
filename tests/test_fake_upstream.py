@@ -166,7 +166,7 @@ def test_confirm_context_lines_show_fake_only_when_enabled(monkeypatch):
 
 
 def test_fake_upstream_command_handler_toggles_and_renders_log():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     enabled_values = []
     tail_values = []

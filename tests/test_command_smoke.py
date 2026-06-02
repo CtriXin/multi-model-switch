@@ -31,7 +31,7 @@ def test_json_file_helpers_preserve_dict_only_load_and_secure_save(tmp_path):
     import json
     import stat
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     default = {"fallback": True}
     missing_path = tmp_path / "missing.json"
@@ -54,14 +54,14 @@ def test_json_file_helpers_preserve_dict_only_load_and_secure_save(tmp_path):
 
 
 def test_command_hint_helpers_preserve_current_command_formatting():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.config_command_hint(current_command=lambda: "mmg") == "mmg config api.edit"
     assert mms_command_tools.export_command_hint("claude", current_command=lambda: "mmg") == "mmg --export claude --apply"
 
 
 def test_command_metadata_helpers_preserve_wrapper_values(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.current_command(primary_command="mmg") == "mmg"
@@ -98,7 +98,7 @@ def test_command_metadata_helpers_preserve_wrapper_values(monkeypatch):
 
 
 def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     def normalize(raw):
@@ -168,7 +168,7 @@ def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeyp
 
 
 def test_normalize_config_sections_preserves_normalizer_order(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     order = ["provider", "account", "broker", "ui", "presets", "user", "cache"]
@@ -204,7 +204,7 @@ def test_normalize_config_sections_preserves_normalizer_order(monkeypatch):
 
 
 def test_runtime_config_and_write_target_helpers_preserve_delegation(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.load_runtime_config(
@@ -239,7 +239,7 @@ def test_config_path_and_sha1_helpers_preserve_paths_and_hashes(tmp_path, monkey
     import hashlib
     import os
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     config_path = tmp_path / "config" / "config.toml"
@@ -283,7 +283,7 @@ def test_config_path_and_sha1_helpers_preserve_paths_and_hashes(tmp_path, monkey
 def test_config_backup_and_audit_helpers_preserve_files(tmp_path, monkeypatch):
     import json
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     config_path = tmp_path / "config.toml"
@@ -323,7 +323,7 @@ def test_config_backup_and_audit_helpers_preserve_files(tmp_path, monkeypatch):
 
 
 def test_atomic_write_toml_helper_preserves_replace_and_temp_cleanup(tmp_path, monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class Writer:
@@ -346,7 +346,7 @@ def test_atomic_write_toml_helper_preserves_replace_and_temp_cleanup(tmp_path, m
 def test_config_write_caller_helper_preserves_skip_semantics(tmp_path):
     import os
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class Frame:
@@ -396,7 +396,7 @@ def test_config_write_caller_helper_preserves_skip_semantics(tmp_path):
 def test_locked_file_helpers_preserve_lock_paths_and_flock(tmp_path, monkeypatch):
     import threading
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class Fcntl:
@@ -441,7 +441,7 @@ def test_locked_file_helpers_preserve_lock_paths_and_flock(tmp_path, monkeypatch
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     marker = os.path.join(".config", "mms", "codex-gateway", "s") + os.sep
@@ -497,7 +497,7 @@ def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
 
 
 def test_base_user_broker_profile_merge_helper_preserves_gateway_overlay(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     active_config = tmp_path / "gateway" / "config.toml"
     base_config = tmp_path / "base" / "config.toml"
@@ -560,7 +560,7 @@ id = "second"
 def test_toml_and_existing_path_helpers_preserve_read_and_filtering(tmp_path):
     import tomllib
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     toml_path = tmp_path / "prefs.toml"
@@ -578,7 +578,7 @@ def test_toml_and_existing_path_helpers_preserve_read_and_filtering(tmp_path):
 def test_preference_and_override_load_helpers_preserve_merge_warning_and_sanitize():
     from datetime import datetime, timezone
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class DecodeError(Exception):
         pass
@@ -652,7 +652,7 @@ def test_usage_stats_file_helpers_preserve_defaults_secure_write_and_guard(tmp_p
     import json
     import stat
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     missing_path = tmp_path / "missing.json"
     assert mms_command_tools.load_usage_stats_from_path(str(missing_path)) == {"sources": {}}
@@ -687,7 +687,7 @@ def test_usage_stats_file_helpers_preserve_defaults_secure_write_and_guard(tmp_p
 
 
 def test_usage_stats_wrappers_preserve_lock_write_and_trigger(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class Lock:
@@ -766,7 +766,7 @@ def test_usage_stats_wrappers_preserve_lock_write_and_trigger(monkeypatch):
 
 
 def test_usage_routes_export_trigger_preserves_throttle_running_and_async_reset():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Lock:
         def __init__(self):
@@ -850,7 +850,7 @@ def test_usage_routes_export_trigger_preserves_throttle_running_and_async_reset(
 def test_backup_config_tree_preserves_real_home_backup_layout(tmp_path):
     import os
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     real_home = tmp_path / "real-home"
     primary_config = tmp_path / "active-config"
@@ -881,7 +881,7 @@ def test_backup_config_tree_preserves_real_home_backup_layout(tmp_path):
 
 
 def test_refresh_routes_export_for_hive_helper_preserves_load_override_export_and_errors():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
     messages = []
@@ -940,7 +940,7 @@ def test_refresh_routes_export_for_hive_helper_preserves_load_override_export_an
 
 
 def test_credentials_routes_export_trigger_preserves_force_quiet(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     calls = []
@@ -958,7 +958,7 @@ def test_credentials_routes_export_trigger_preserves_force_quiet(monkeypatch):
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     (tmp_path / "AGENTS.md").write_text("old agents", encoding="utf-8")
     (tmp_path / "CLAUDE.md").write_text("old claude", encoding="utf-8")
@@ -982,7 +982,7 @@ def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
 
 
 def test_snapshot_drift_prompt_helpers_preserve_tty_gate_and_preview():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Tty:
         def __init__(self, value):
@@ -1042,7 +1042,7 @@ def test_snapshot_drift_prompt_helpers_preserve_tty_gate_and_preview():
 
 
 def test_startup_snapshot_guard_helper_preserves_bootstrap_pending_and_exit_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Console:
         def __init__(self):
@@ -1107,7 +1107,7 @@ def test_startup_snapshot_guard_helper_preserves_bootstrap_pending_and_exit_flow
 
 
 def test_guard_accept_tui_confirm_helper_preserves_no_drift_and_confirm_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Console:
         def __init__(self):
@@ -1155,7 +1155,7 @@ def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     import stat
     from datetime import datetime
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.snapshot_proxy_fingerprint("") == "direct"
@@ -1470,7 +1470,7 @@ def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, 
 
 
 def test_session_command_parser_dispatches_prune_args():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
 
@@ -1486,7 +1486,7 @@ def test_session_command_parser_dispatches_prune_args():
 
 
 def test_command_request_classifiers_preserve_help_and_safe_prune_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.is_help_request(["config", "preferences.help"]) is True
@@ -1504,7 +1504,7 @@ def test_command_request_classifiers_preserve_help_and_safe_prune_semantics():
 def test_tui_usage_recency_helpers_preserve_sorting_and_cold_family_rules():
     from datetime import datetime, timezone
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     now = datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -1572,7 +1572,7 @@ def test_tui_usage_recency_helpers_preserve_sorting_and_cold_family_rules():
 
 
 def test_resolve_visible_clis_preserves_oauth_and_family_hint_rules():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     resolver_calls = []
 
@@ -1611,7 +1611,7 @@ def test_resolve_visible_clis_preserves_oauth_and_family_hint_rules():
 
 
 def test_use_tui_preserves_tty_width_and_oserror_rules():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Stdin:
         def __init__(self, is_tty):
@@ -1635,7 +1635,7 @@ def test_use_tui_preserves_tty_width_and_oserror_rules():
 
 
 def test_launcher_entry_and_model_info_helpers_preserve_filtering_rules():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.clean_model_info({"model": "gpt-5.5", "provider": {"id": "relay"}}) == {
         "model": "gpt-5.5",
@@ -1665,7 +1665,7 @@ def test_launcher_entry_and_model_info_helpers_preserve_filtering_rules():
 
 
 def test_resolve_interactive_launch_model_helper_preserves_runtime_branches():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     calls = []
@@ -1784,7 +1784,7 @@ def test_resolve_interactive_launch_model_wrapper_preserves_core_callbacks(monke
 
 
 def test_save_preset_interactive_helper_and_wrapper_preserve_prompt_save_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     prompts = iter(["daily", "main preset"])
@@ -1848,7 +1848,7 @@ def test_save_preset_interactive_helper_and_wrapper_preserve_prompt_save_flow(mo
 
 
 def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_config_precedence(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.available_broker_profiles_for_cli({}, "claude") == []
@@ -2013,7 +2013,7 @@ def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_confi
 
 
 def test_launch_trace_formatter_preserves_sources_and_override_chain():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     trace_overrides = [
         ("cli arg", {"cli": "codex", "model": "gpt-5.4"}),
@@ -2044,7 +2044,7 @@ def test_launch_trace_formatter_preserves_sources_and_override_chain():
 
 
 def test_direct_cli_launch_default_resolves_real_start_models():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "providers": [
@@ -2200,7 +2200,7 @@ def test_main_uses_direct_cli_launch_default_without_model_prompt(monkeypatch):
 def test_launch_with_tracking_helper_preserves_preferences_trace_and_broker_flow():
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
     runtime = {"id": "relay", "auth_mode": "api_key"}
@@ -2290,7 +2290,7 @@ def test_launch_with_tracking_helper_preserves_preferences_trace_and_broker_flow
 
 
 def test_trace_record_helper_preserves_enabled_filtering_and_none_skip():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     trace_overrides = []
     mms_command_tools.record_trace_override(
@@ -2313,7 +2313,7 @@ def test_trace_record_helper_preserves_enabled_filtering_and_none_skip():
 
 
 def test_settings_result_display_helpers_format_payload_and_fallback_report():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     payload = mms_command_tools.settings_result_tui_payload(
         "done",
@@ -2344,7 +2344,7 @@ def test_settings_result_display_helpers_format_payload_and_fallback_report():
 
 
 def test_settings_result_tui_available_preserves_env_and_tty_checks():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class FakeStream:
         def __init__(self, result=None, exc=None):
@@ -2379,7 +2379,7 @@ def test_settings_result_tui_available_preserves_env_and_tty_checks():
 
 
 def test_select_settings_result_tui_uses_payload_builder_and_selector():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
 
@@ -2408,7 +2408,7 @@ def test_select_settings_result_tui_uses_payload_builder_and_selector():
 
 
 def test_print_settings_result_report_preserves_tui_and_fallback_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     events = []
 
@@ -2477,7 +2477,7 @@ def test_print_settings_result_report_preserves_tui_and_fallback_flow():
 
 
 def test_print_settings_error_report_preserves_error_payload():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
     exc = RuntimeError("boom")
@@ -2501,7 +2501,7 @@ def test_print_settings_error_report_preserves_error_payload():
 
 
 def test_pause_after_tui_report_preserves_skip_and_fallback_prompt():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     events = []
 
@@ -2541,7 +2541,7 @@ def test_pause_after_tui_report_preserves_skip_and_fallback_prompt():
 
 
 def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     provider = {"id": "relay", "name": "Relay"}
     probe = {"error_kind": "protocol_unsupported", "details": ["provider: Relay", "error: unsupported"]}
@@ -2583,7 +2583,7 @@ def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
 
 
 def test_select_provider_interactive_preserves_prompt_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "providers": [
@@ -2628,7 +2628,7 @@ def test_select_provider_interactive_preserves_prompt_flow():
 
 
 def test_pick_recovery_actions_preserves_tui_and_prompt_fallback():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     findings = [{"title": "问题", "summary": "说明"}]
     actions = [
@@ -2676,7 +2676,7 @@ def test_pick_recovery_actions_preserves_tui_and_prompt_fallback():
 
 
 def test_run_recovery_action_preserves_dispatch_and_callbacks():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {"providers": [{"id": "relay"}, {"id": "backup"}]}
     provider = {"id": "relay", "base_url": "https://relay.example", "api_key": "sk-test"}
@@ -2755,7 +2755,7 @@ def test_run_recovery_action_preserves_dispatch_and_callbacks():
 def test_ensure_models_ready_helper_preserves_probe_and_recovery_flow():
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class FakeStdin:
         def __init__(self, tty):
@@ -2941,7 +2941,7 @@ def test_ensure_models_ready_wrapper_preserves_core_callbacks(monkeypatch):
 
 
 def test_rescue_report_payload_helpers_preserve_safe_local_outputs():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     localize = lambda zh, en: zh
     title, rows, note = mms_command_tools.rescue_default_fallback_report_payload(
@@ -2999,7 +2999,7 @@ def test_rescue_report_payload_helpers_preserve_safe_local_outputs():
 
 
 def test_registry_report_payload_helpers_preserve_compact_outputs():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     localize = lambda zh, en: zh
     source_title, source_rows, _source_note = mms_command_tools.registry_source_staleness_report_payload(
@@ -3091,7 +3091,7 @@ def test_registry_report_payload_helpers_preserve_compact_outputs():
 
 
 def test_about_and_snapshot_payload_helpers_preserve_version_actions():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     localize = lambda zh, en: zh
     title, info_lines, actions = mms_command_tools.about_tui_payload(
@@ -3150,7 +3150,7 @@ def test_about_and_snapshot_payload_helpers_preserve_version_actions():
 
 
 def test_about_upgrade_command_helpers_preserve_shell_commands():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.mms_upgrade_shell_command(
         preferred_language="en",
@@ -3172,7 +3172,7 @@ def test_about_upgrade_command_helpers_preserve_shell_commands():
 
 
 def test_run_about_upgrade_preserves_confirm_gate_and_execution():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Result:
         stdout = "ok"
@@ -3232,7 +3232,7 @@ def test_run_about_upgrade_preserves_confirm_gate_and_execution():
 
 
 def test_mms_config_guard_renderers_preserve_human_gate_text():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     agents_text = mms_command_tools.render_mms_config_agents_guard()
     claude_text = mms_command_tools.render_mms_config_claude_guard()
@@ -3248,7 +3248,7 @@ def test_mms_config_guard_renderers_preserve_human_gate_text():
 
 
 def test_manage_target_helpers_build_sorted_targets_and_fallback_selection():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "provider": {"default": "relay"},
@@ -3379,7 +3379,7 @@ def test_select_manage_target_wrapper_preserves_core_callbacks(monkeypatch):
 
 
 def test_run_manage_channels_helper_and_wrapper_preserve_loop(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cfg = {"version": 1}
@@ -3422,7 +3422,7 @@ def test_run_manage_channels_helper_and_wrapper_preserve_loop(monkeypatch):
 
 
 def test_run_connect_wizard_helper_and_wrapper_preserve_actions(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cfg = {"version": 1}
@@ -3497,7 +3497,7 @@ def test_run_connect_wizard_helper_and_wrapper_preserve_actions(monkeypatch):
 
 
 def test_manage_provider_target_helper_and_wrapper_preserve_actions(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class FakePanel:
@@ -3616,7 +3616,7 @@ def test_manage_provider_target_helper_and_wrapper_preserve_actions(monkeypatch)
 
 
 def test_prompt_account_rename_helper_and_wrapper_preserve_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cfg = {"accounts": [{"id": "codex-main"}]}
@@ -3667,7 +3667,7 @@ def test_prompt_account_rename_helper_and_wrapper_preserve_flow(monkeypatch):
 
 
 def test_manage_account_target_helper_and_wrapper_preserve_actions(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class FakePanel:
@@ -3773,7 +3773,7 @@ def test_manage_account_target_helper_and_wrapper_preserve_actions(monkeypatch):
 
 
 def test_run_account_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     console = _CollectingConsole()
@@ -3844,7 +3844,7 @@ def test_run_account_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
 
 
 def test_run_recommend_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cfg = {"recommend": {"models": ["model-a"]}}
@@ -3918,7 +3918,7 @@ def test_run_recommend_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
 
 
 def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     info_lines, actions = mms_command_tools.rescue_landing_tui_payload(
         "deepseek-v4-flash",
@@ -3964,7 +3964,7 @@ def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
 
 
 def test_latest_rescue_hot_fallback_event_filters_recent_events():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     old_event = {
         "type": "fallback",
@@ -3993,7 +3993,7 @@ def test_latest_rescue_hot_fallback_event_filters_recent_events():
 
 
 def test_model_source_and_speed_labels_preserve_thresholds():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.model_source_label("remote") == "远端列表"
     assert mms_command_tools.model_source_label("fallback") == "内置回退"
@@ -4015,7 +4015,7 @@ def test_model_source_and_speed_labels_preserve_thresholds():
 
 
 def test_runtime_map_helpers_filter_invalid_and_disabled_entries():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "providers": [
@@ -4039,7 +4039,7 @@ def test_runtime_map_helpers_filter_invalid_and_disabled_entries():
 
 
 def test_provider_endpoint_helpers_preserve_config_resolution_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.provider_label({}, default_provider_id="default") == "default"
     assert mms_command_tools.provider_label({"id": "relay", "name": "Relay"}, default_provider_id="default") == "Relay"
@@ -4062,7 +4062,7 @@ def test_provider_endpoint_helpers_preserve_config_resolution_semantics():
 
 
 def test_env_file_helpers_preserve_shell_parsing_and_paths(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     env_path = tmp_path / "credentials.sh"
     env_path.write_text(
@@ -4093,7 +4093,7 @@ def test_env_file_helpers_preserve_shell_parsing_and_paths(tmp_path):
 
 
 def test_provider_credentials_load_helper_preserves_env_file_legacy_precedence(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     credentials_path = tmp_path / "credentials.sh"
     credentials_path.write_text(
@@ -4175,7 +4175,7 @@ def test_provider_credentials_load_helper_preserves_env_file_legacy_precedence(t
 def test_provider_credentials_save_helper_preserves_file_shape_and_refresh(tmp_path):
     import stat
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     credentials_path = tmp_path / "credentials.sh"
     credentials_path.write_text(
@@ -4250,7 +4250,7 @@ def test_provider_credentials_save_helper_preserves_file_shape_and_refresh(tmp_p
 
 
 def test_api_credentials_helpers_preserve_default_provider_delegation():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     save_calls = []
     assert mms_command_tools.load_api_credentials(
@@ -4272,7 +4272,7 @@ def test_api_credentials_helpers_preserve_default_provider_delegation():
 
 
 def test_default_config_helper_preserves_baseline_shape_and_defaults():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     default_provider_calls = []
     cfg = mms_command_tools.default_config(
@@ -4310,7 +4310,7 @@ def test_default_config_helper_preserves_baseline_shape_and_defaults():
 
 
 def test_setup_wizard_helper_and_wrapper_preserve_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class FakePanel:
@@ -4384,7 +4384,7 @@ def test_setup_wizard_helper_and_wrapper_preserve_flow(monkeypatch):
 
 
 def test_legacy_api_migration_helper_preserves_credential_and_config_save_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     calls = []
@@ -4481,7 +4481,7 @@ def test_legacy_api_migration_helper_preserves_credential_and_config_save_flow()
 
 
 def test_runtime_context_resolvers_preserve_provider_credentials_and_account_home():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {"provider": {"default": "relay"}}
     provider_calls = []
@@ -4548,7 +4548,7 @@ def test_runtime_context_resolvers_preserve_provider_credentials_and_account_hom
 def test_definition_resolvers_preserve_default_fallbacks_and_missing_exits():
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     providers = {
@@ -4621,7 +4621,7 @@ def test_definition_resolvers_preserve_default_fallbacks_and_missing_exits():
 
 
 def test_save_provider_credentials_with_probe_preserves_autofix_failure_and_resolve_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     provider = {"id": "relay", "name": "Relay"}
     console = _CollectingConsole()
@@ -4678,7 +4678,7 @@ def test_save_provider_credentials_with_probe_preserves_autofix_failure_and_reso
 
 
 def test_provider_credential_flow_helpers_preserve_delegation():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     provider = {"id": "relay"}
     calls = []
@@ -4908,7 +4908,7 @@ def test_provider_credential_flow_wrappers_preserve_callbacks(monkeypatch):
 def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
 
@@ -4931,7 +4931,7 @@ def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
 def test_interactive_terminal_and_prompt_csv_helpers_preserve_exit_and_prompt_flow():
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class FakeStdin:
         def __init__(self, tty):
@@ -4999,7 +4999,7 @@ def test_interactive_terminal_and_prompt_csv_helpers_preserve_exit_and_prompt_fl
 
 
 def test_prompt_provider_metadata_helper_and_wrapper_preserve_prompt_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     calls = []
@@ -5104,7 +5104,7 @@ def test_prompt_provider_metadata_helper_and_wrapper_preserve_prompt_flow(monkey
 
 
 def test_prompt_account_metadata_helper_and_wrapper_preserve_prompt_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     calls = []
@@ -5210,7 +5210,7 @@ def test_prompt_account_metadata_helper_and_wrapper_preserve_prompt_flow(monkeyp
 
 
 def test_provider_template_helpers_preserve_payload_copy_and_generic_collapse():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     templates = {
@@ -5273,7 +5273,7 @@ def test_provider_template_helpers_preserve_payload_copy_and_generic_collapse():
 
 
 def test_model_family_visibility_helpers_preserve_display_filter_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     model_families = [
         {"family": "Claude", "keywords": ("claude",), "category": "Claude 系 ⭐"},
@@ -5318,7 +5318,7 @@ def test_model_family_visibility_helpers_preserve_display_filter_semantics():
 
 
 def test_preference_primitive_helpers_preserve_allowlist_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.merge_dicts(
         {"launch": {"defaults": {"bypass": False}, "cli": {"codex": {"reasoning_effort": "low"}}}},
@@ -5351,7 +5351,7 @@ def test_preference_primitive_helpers_preserve_allowlist_semantics():
 
 
 def test_preference_allowlist_sanitizers_preserve_runtime_shape(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     skill_root = tmp_path / "web-access"
     asset_keys = {"web_access": "web_access", "web-access": "web_access", "xmem": "xmem"}
@@ -5414,7 +5414,7 @@ def test_preference_allowlist_sanitizers_preserve_runtime_shape(tmp_path):
 
 
 def test_preference_runtime_overlay_helpers_preserve_merge_order():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     prefs = {
         "launch": {
@@ -5483,7 +5483,7 @@ def test_preference_runtime_overlay_helpers_preserve_merge_order():
 
 
 def test_usage_runtime_helpers_filter_sort_and_summarize_sources():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     stats = {
         "last_by_cli": {
@@ -5530,7 +5530,7 @@ def test_usage_runtime_helpers_filter_sort_and_summarize_sources():
 
 
 def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.vision_sidecar_model_candidates_for_provider("direct-mimo") == ["mimo-v2.5", "mimo-v2-omni"]
     assert mms_command_tools.vision_sidecar_model_candidates_for_provider("newapi-personal-kimi") == ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
@@ -5561,7 +5561,7 @@ def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
 
 
 def test_runtime_with_vision_sidecar_helper_preserves_selection_rules():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "providers": [
@@ -5623,7 +5623,7 @@ def test_runtime_with_vision_sidecar_helper_preserves_selection_rules():
 
 
 def test_model_capability_helpers_preserve_native_bridge_and_tags():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     def infer_family(model_name):
         normalized = str(model_name or "").lower()
@@ -5787,7 +5787,7 @@ def test_probe_file_cache_helpers_preserve_ttl_normalization_and_cleanup(tmp_pat
     import json
     import os
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cache_dir = str(tmp_path / "cache")
     cache_path = lambda provider_id: mms_command_tools.probe_file_cache_path(
@@ -5891,7 +5891,7 @@ def test_probe_file_cache_helpers_preserve_ttl_normalization_and_cleanup(tmp_pat
 
 
 def test_probe_models_helper_preserves_cache_manual_remote_and_core_wrapper(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     console = _CollectingConsole()
@@ -6055,7 +6055,7 @@ def test_probe_models_helper_preserves_cache_manual_remote_and_core_wrapper(monk
 
 
 def test_probe_startup_helper_preserves_memory_file_stale_and_live_paths(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class Console:
@@ -6151,7 +6151,7 @@ def test_probe_startup_helper_preserves_memory_file_stale_and_live_paths(monkeyp
 
 
 def test_warm_probe_cache_helper_preserves_skip_and_refresh_rules(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cfg = {
@@ -6194,7 +6194,7 @@ def test_warm_probe_cache_helper_preserves_skip_and_refresh_rules(monkeypatch):
 
 
 def test_warm_command_small_helpers_preserve_delegation(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cfg = {"providers": [{"id": "relay"}]}
@@ -6222,7 +6222,7 @@ def test_warm_command_small_helpers_preserve_delegation(monkeypatch):
 def test_warm_model_request_helper_and_wrapper_preserve_request_shapes(monkeypatch):
     from types import SimpleNamespace
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.warm_model_request(
@@ -6308,7 +6308,7 @@ def test_warm_model_request_helper_and_wrapper_preserve_request_shapes(monkeypat
 def test_detect_working_base_url_helper_and_wrapper_preserve_probe_order(monkeypatch):
     from types import SimpleNamespace
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.detect_working_base_url(
@@ -6376,7 +6376,7 @@ def test_detect_working_base_url_helper_and_wrapper_preserve_probe_order(monkeyp
 
 
 def test_availability_helpers_preserve_cache_warning_and_cli_check(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     console = _CollectingConsole()
@@ -6398,7 +6398,7 @@ def test_availability_helpers_preserve_cache_warning_and_cli_check(monkeypatch):
 def test_select_cli_helper_and_wrapper_preserve_prompt_install_flow(monkeypatch):
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class FakeIntPrompt:
@@ -6459,7 +6459,7 @@ def test_select_cli_helper_and_wrapper_preserve_prompt_install_flow(monkeypatch)
 
 
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.normalize_provider_id_input(" CRS Oracle! ", default_provider_id="default") == "crs-oracle"
     assert mms_command_tools.normalize_provider_id_input("!!!", default_provider_id="default") == "default"
@@ -6489,7 +6489,7 @@ def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
 
 
 def test_runtime_priority_and_supported_cli_helpers_preserve_normalization():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     model_families = [{"family": "GPT"}, {"family": "Claude"}]
     cli_names = ["claude", "codex", "opencode"]
@@ -6568,7 +6568,7 @@ def test_runtime_priority_and_supported_cli_helpers_preserve_normalization():
 
 
 def test_provider_normalization_helpers_preserve_default_and_cleanup_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     model_families = [{"family": "GPT"}, {"family": "Claude"}]
     defaults = {
@@ -6642,7 +6642,7 @@ def test_provider_normalization_helpers_preserve_default_and_cleanup_semantics()
 def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     from types import SimpleNamespace
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     valid_modes = {"auto", "enable", "disable"}
     assert mms_command_tools.normalize_claude_1m_mode("", default="auto", valid_modes=valid_modes) == "auto"
@@ -6765,7 +6765,7 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
 
 
 def test_prompt_validated_proxy_fields_helper_and_wrapper_preserve_retry_confirm_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     console = _CollectingConsole()
@@ -6827,7 +6827,7 @@ def test_prompt_validated_proxy_fields_helper_and_wrapper_preserve_retry_confirm
 
 
 def test_prompt_validated_timezone_helper_and_wrapper_preserve_retry_flow(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     console = _CollectingConsole()
@@ -6861,7 +6861,7 @@ def test_prompt_validated_timezone_helper_and_wrapper_preserve_retry_flow(monkey
 
 
 def test_account_normalization_helpers_preserve_oauth_profile_shape(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     model_families = [{"family": "GPT"}, {"family": "Claude"}]
     normalized = mms_command_tools.normalize_account(
@@ -6906,7 +6906,7 @@ def test_account_normalization_helpers_preserve_oauth_profile_shape(tmp_path):
 
 
 def test_semver_and_http_status_helpers_preserve_update_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.parse_semver_tag("v1.2.3") == (1, 2, 3)
     assert mms_command_tools.parse_semver_tag("1.2.3") is None
@@ -6927,7 +6927,7 @@ def test_semver_and_http_status_helpers_preserve_update_semantics():
 
 
 def test_fetch_latest_semver_tags_preserves_request_and_normalization():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     requests = []
 
@@ -6974,7 +6974,7 @@ def test_fetch_latest_semver_tags_preserves_request_and_normalization():
 
 
 def test_fetch_latest_semver_tag_returns_first_or_empty():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.fetch_latest_semver_tag(
         fetch_latest_semver_tags=lambda: ["v1.2.4", "v1.2.3"],
@@ -6985,7 +6985,7 @@ def test_fetch_latest_semver_tag_returns_first_or_empty():
 
 
 def test_detect_cli_version_preserves_missing_success_and_failure_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Result:
         stdout = "codex-cli 0.132.0\nextra"
@@ -7033,7 +7033,7 @@ def test_detect_cli_version_preserves_missing_success_and_failure_paths():
 
 
 def test_fetch_npm_package_latest_version_preserves_command_and_failures():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Result:
         stdout = "0.133.0\n"
@@ -7076,7 +7076,7 @@ def test_fetch_npm_package_latest_version_preserves_command_and_failures():
 
 
 def test_update_status_helpers_preserve_install_and_about_status_semantics():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     update_sources = {"install.sh", "homebrew"}
     localize = lambda zh, en: zh
@@ -7116,7 +7116,7 @@ def test_update_status_helpers_preserve_install_and_about_status_semantics():
 
 
 def test_update_notice_preserves_prompt_payload_and_throttle():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class TTY:
         def __init__(self, enabled=True):
@@ -7177,7 +7177,7 @@ def test_update_notice_preserves_prompt_payload_and_throttle():
 
 
 def test_major_update_notice_delegates_to_update_notice():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
     assert mms_command_tools.major_update_notice(
@@ -7187,7 +7187,7 @@ def test_major_update_notice_delegates_to_update_notice():
 
 
 def test_start_async_update_check_preserves_interval_running_and_worker_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     events = []
     saved = []
@@ -7246,7 +7246,7 @@ def test_start_async_update_check_preserves_interval_running_and_worker_flow():
 
 
 def test_release_version_info_preserves_installed_and_git_fallbacks():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
     info = mms_command_tools.release_version_info(
@@ -7283,7 +7283,7 @@ def test_release_version_info_preserves_installed_and_git_fallbacks():
 
 
 def test_git_output_preserves_command_cwd_and_failure_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Result:
         stdout = " main \n"
@@ -7316,7 +7316,7 @@ def test_git_output_preserves_command_cwd_and_failure_paths():
 
 
 def test_cli_version_status_preserves_cache_refresh_and_labels():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     packages = {"codex": "@openai/codex", "claude": "@anthropic-ai/claude-code"}
     detected = {
@@ -7362,7 +7362,7 @@ def test_cli_version_status_preserves_cache_refresh_and_labels():
 
 
 def test_about_status_snapshot_preserves_callback_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
     snapshot = mms_command_tools.about_status_snapshot(
@@ -7388,7 +7388,7 @@ def test_about_status_snapshot_preserves_callback_flow():
 
 
 def test_refresh_update_cache_for_about_preserves_force_and_error_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     saved = []
     base_cache = {"latest_tag": "v1.0.0"}
@@ -7428,7 +7428,7 @@ def test_refresh_update_cache_for_about_preserves_force_and_error_paths():
 
 
 def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     provider_runtime = {
         "runtime_kind": "provider",
@@ -7553,7 +7553,7 @@ def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
 def test_usage_rename_and_target_home_helpers_preserve_keys_and_paths(tmp_path):
     import os
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     stats = {
@@ -7639,7 +7639,7 @@ def test_usage_rename_and_target_home_helpers_preserve_keys_and_paths(tmp_path):
 
 
 def test_migrate_accounts_dirs_preserves_move_and_normalize_rules():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     made_dirs = []
     moves = []
@@ -7671,7 +7671,7 @@ def test_migrate_accounts_dirs_preserves_move_and_normalize_rules():
 
 
 def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     provider = {"id": "relay", "runtime_kind": "provider", "models": ["gpt-5.5"]}
     account = {"id": "codex-main", "runtime_kind": "account"}
@@ -7732,7 +7732,7 @@ def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths()
 
 
 def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     default_provider = {"id": "default", "name": "Default"}
     cfg = {
@@ -7921,7 +7921,7 @@ def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
 
 
 def test_model_display_grouping_helpers_preserve_recommend_and_provider_dedupe():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     def infer_display(model_name):
         if "qwen" in model_name:
@@ -8038,7 +8038,7 @@ def test_core_display_models_initializes_rich_before_passing_table_class(monkeyp
 
 
 def test_select_custom_model_helper_preserves_prompt_and_tui_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class FakeIntPrompt:
         values = iter([3, 2, 1])
@@ -8137,7 +8137,7 @@ def test_select_custom_model_wrapper_preserves_core_dependencies(monkeypatch):
 def test_select_model_interactive_helper_and_wrapper_preserve_prompt_retry(monkeypatch):
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class FakeIntPrompt:
@@ -8183,7 +8183,7 @@ def test_select_model_interactive_helper_and_wrapper_preserve_prompt_retry(monke
 
 
 def test_provider_options_map_helper_preserves_provider_and_account_alternatives():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     providers = [
         {
@@ -8252,7 +8252,7 @@ def test_provider_options_map_helper_preserves_provider_and_account_alternatives
 
 
 def test_apply_runtime_priority_changes_preserves_runtime_and_family_overrides():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "providers": [
@@ -8291,7 +8291,7 @@ def test_apply_runtime_priority_changes_preserves_runtime_and_family_overrides()
 
 
 def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     providers = [
         {
@@ -8366,7 +8366,7 @@ def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
 
 
 def test_resolve_best_provider_helper_preserves_role_priority_and_filters():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     providers = [
         {
@@ -8449,7 +8449,7 @@ def test_resolve_best_provider_helper_preserves_role_priority_and_filters():
 
 
 def test_provider_options_helper_preserves_selected_model_filtering():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Logger:
         def debug(self, *_args, **_kwargs):
@@ -8520,7 +8520,7 @@ def test_provider_options_helper_preserves_selected_model_filtering():
 
 
 def test_account_options_helper_preserves_oauth_filtering_and_default_marker():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "accounts": [
@@ -8587,7 +8587,7 @@ def test_account_options_helper_preserves_oauth_filtering_and_default_marker():
 
 
 def test_runtime_source_selection_helpers_preserve_sort_defaults_and_trace_ids():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     provider_options = [
         {
@@ -8693,7 +8693,7 @@ def test_runtime_source_selection_helpers_preserve_sort_defaults_and_trace_ids()
 
 
 def test_choose_runtime_source_helper_preserves_override_default_and_interactive_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     trace_calls = []
@@ -8798,7 +8798,7 @@ def test_choose_runtime_source_helper_preserves_override_default_and_interactive
 
 
 def test_runtime_resolver_helpers_preserve_provider_and_managed_oauth_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
     providers = {
@@ -8874,7 +8874,7 @@ def test_runtime_resolver_helpers_preserve_provider_and_managed_oauth_paths():
 
 
 def test_env_command_renders_and_writes_export_file(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     cfg = {"presets": {"demo": {"cli": "claude", "provider": "relay"}}}
@@ -8906,7 +8906,7 @@ def test_env_command_renders_and_writes_export_file(tmp_path):
 
 
 def test_activate_command_outputs_eval_exports(capsys):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     mms_command_tools.handle_activate_command(
         {"presets": {"demo": {"cli": "codex"}}},
@@ -8926,7 +8926,7 @@ def test_activate_command_outputs_eval_exports(capsys):
 
 
 def test_preset_helper_path_and_missing_preset_message(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     messages = []
     path = mms_command_tools.preset_env_file_path("Demo Preset!", env_dir=str(tmp_path))
@@ -8947,7 +8947,7 @@ def test_preset_helper_path_and_missing_preset_message(tmp_path):
 
 
 def test_preset_export_runtime_uses_provider_override_and_exports():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
 
@@ -8971,7 +8971,7 @@ def test_preset_export_runtime_uses_provider_override_and_exports():
 
 
 def test_preset_export_runtime_rejects_oauth_without_resolving_provider():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     messages = []
 
@@ -8990,7 +8990,7 @@ def test_preset_export_runtime_rejects_oauth_without_resolving_provider():
 
 
 def test_presets_command_renders_only_visible_presets():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     cfg = {
@@ -9020,7 +9020,7 @@ def test_presets_command_renders_only_visible_presets():
 
 
 def test_models_command_dispatches_selected_provider():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     calls = []
 
@@ -9039,7 +9039,7 @@ def test_models_command_dispatches_selected_provider():
 
 
 def test_select_provider_for_models_filters_providers_and_reprompts_invalid():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     answers = ["bad", "2"]
 
@@ -9072,7 +9072,7 @@ def test_select_provider_for_models_filters_providers_and_reprompts_invalid():
 
 
 def test_select_provider_for_models_returns_none_without_provider_targets():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Prompt:
         @staticmethod
@@ -9092,7 +9092,7 @@ def test_select_provider_for_models_returns_none_without_provider_targets():
 
 def test_models_command_unknown_provider_exits_with_available_list():
     import pytest
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
 
@@ -9114,7 +9114,7 @@ def test_models_command_unknown_provider_exits_with_available_list():
 
 
 def test_pick_manual_models_parses_unique_valid_indexes_only():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Prompt:
         @staticmethod
@@ -9140,7 +9140,7 @@ def test_pick_manual_models_parses_unique_valid_indexes_only():
 
 
 def test_pick_manual_models_empty_and_blank_cancel_without_selection():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Prompt:
         @staticmethod
@@ -9162,7 +9162,7 @@ def test_pick_manual_models_empty_and_blank_cancel_without_selection():
 
 
 def test_warm_command_uses_recent_models_without_live_requests():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     rows = [
         {
@@ -9227,7 +9227,7 @@ def test_warm_command_uses_recent_models_without_live_requests():
 
 def test_warm_command_unknown_provider_exits_before_probe():
     import pytest
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
 
@@ -9256,7 +9256,7 @@ def test_warm_command_unknown_provider_exits_before_probe():
 
 
 def test_export_command_writes_temp_env_file(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     env_path = tmp_path / "claude.sh"
@@ -9282,7 +9282,7 @@ def test_export_command_writes_temp_env_file(tmp_path):
 
 
 def test_export_command_rejects_unsupported_cli_before_export_lookup():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
 
@@ -9303,7 +9303,7 @@ def test_export_command_rejects_unsupported_cli_before_export_lookup():
 
 
 def test_config_help_display_helpers_render_expected_sections(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     active_path = tmp_path / "preferences.toml"
     active_path.write_text("# prefs\n", encoding="utf-8")
@@ -9342,7 +9342,7 @@ def test_config_help_display_helpers_render_expected_sections(tmp_path):
 
 
 def test_usage_stats_display_sorts_recent_sources():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
 
@@ -9378,7 +9378,7 @@ def test_usage_stats_display_sorts_recent_sources():
 
 
 def test_adapter_registry_display_renders_policy():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
 
@@ -9407,7 +9407,7 @@ def test_adapter_registry_display_renders_policy():
 
 
 def test_provider_account_display_helpers_render_rows():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     cfg = {
@@ -9493,7 +9493,7 @@ def test_provider_account_display_helpers_render_rows():
 
 
 def test_runtime_usage_display_handles_tui_empty_and_rows():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     events = []
     console = _CollectingConsole()
@@ -9537,7 +9537,7 @@ def test_runtime_usage_display_handles_tui_empty_and_rows():
 
 
 def test_config_display_renders_summary_and_masks_keys():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     provider_calls = []
@@ -9584,7 +9584,7 @@ def test_config_display_renders_summary_and_masks_keys():
 
 def test_config_nested_helpers_and_coercion():
     import pytest
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     data = {}
@@ -9621,7 +9621,7 @@ def test_config_nested_helpers_and_coercion():
 
 
 def test_config_ensure_helpers_dedupe_and_repair_defaults():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     providers_cfg, changed = mms_command_tools.ensure_provider_config(
         {
@@ -9654,7 +9654,7 @@ def test_config_ensure_helpers_dedupe_and_repair_defaults():
 
 
 def test_handle_config_migrate_preserves_backup_save_and_report_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     saved = []
@@ -9694,7 +9694,7 @@ def test_handle_config_migrate_preserves_backup_save_and_report_flow():
 
 
 def test_provider_default_handler_preserves_show_missing_and_save_refresh_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {"provider": {"default": "demo-a"}, "providers": [{"id": "demo-a"}, {"id": "demo-b"}]}
     console = _CollectingConsole()
@@ -9741,7 +9741,7 @@ def test_provider_default_handler_preserves_show_missing_and_save_refresh_flow()
 
 
 def test_provider_add_credentials_handlers_preserve_dispatch_and_validation():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "provider": {"default": "demo-a"},
@@ -9792,7 +9792,7 @@ def test_provider_add_credentials_handlers_preserve_dispatch_and_validation():
 def test_provider_credential_prompt_helper_preserves_defaults_keep_and_core_wrapper(monkeypatch):
     import pytest
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     console = _CollectingConsole()
@@ -9907,7 +9907,7 @@ def test_provider_credential_prompt_helper_preserves_defaults_keep_and_core_wrap
 
 
 def test_update_provider_model_overrides_preserves_patch_normalize_and_cache_invalidation():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "provider": {"default": "demo-a"},
@@ -9985,7 +9985,7 @@ def test_update_provider_model_overrides_preserves_patch_normalize_and_cache_inv
 
 
 def test_manage_provider_models_preserves_fallback_actions_and_tui_display():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     cfg = {
@@ -10086,7 +10086,7 @@ def test_manage_provider_models_preserves_fallback_actions_and_tui_display():
 
 
 def test_provider_edit_remove_handlers_preserve_validation_refresh_and_default_cleanup():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "provider": {"default": "demo-a"},
@@ -10178,7 +10178,7 @@ def test_provider_edit_remove_handlers_preserve_validation_refresh_and_default_c
 
 
 def test_provider_upsert_and_credentials_cleanup_helpers_preserve_rewrite_rules(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {"providers": [{"id": "demo-a", "name": "A"}], "provider": {"default": "demo-a"}}
     normalized_calls = []
@@ -10239,7 +10239,7 @@ def test_provider_upsert_and_credentials_cleanup_helpers_preserve_rewrite_rules(
 
 
 def test_provider_rename_handler_preserves_backup_default_usage_and_cache_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "provider": {"default": "demo-a"},
@@ -10298,7 +10298,7 @@ def test_provider_rename_handler_preserves_backup_default_usage_and_cache_flow()
 
 
 def test_account_default_handler_preserves_show_reject_and_save_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "account": {"defaults": {"codex": "codex-main"}},
@@ -10343,7 +10343,7 @@ def test_account_default_handler_preserves_show_reject_and_save_flow():
 
 
 def test_account_add_status_login_handlers_preserve_guards_and_dispatch():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     connect_calls = []
@@ -10425,7 +10425,7 @@ def test_account_add_status_login_handlers_preserve_guards_and_dispatch():
 
 
 def test_quick_connect_official_helper_preserves_account_save_default_and_core_guard(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class WizardBack(Exception):
@@ -10525,7 +10525,7 @@ def test_quick_connect_official_helper_preserves_account_save_default_and_core_g
 
 
 def test_quick_connect_gateway_helper_preserves_provider_credentials_and_advanced_endpoint():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class WizardBack(Exception):
         pass
@@ -10595,7 +10595,7 @@ def test_quick_connect_gateway_helper_preserves_provider_credentials_and_advance
 
 
 def test_account_env_helpers_preserve_scrub_seed_proxy_and_home_behavior():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     base_env = {
         "KEEP": "1",
@@ -10681,7 +10681,7 @@ def test_account_status_probe_helper_preserves_delegated_manual_and_cli_states()
     import subprocess
     from types import SimpleNamespace
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.account_status_command("codex") == ["codex", "login", "status"]
     assert mms_command_tools.account_status_command("gemini") is None
@@ -10752,7 +10752,7 @@ def test_account_login_runner_preserves_command_messages_and_exit_handling():
     import pytest
     from types import SimpleNamespace
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     calls = []
@@ -10819,7 +10819,7 @@ def test_account_login_runner_preserves_command_messages_and_exit_handling():
 
 
 def test_account_edit_remove_handlers_preserve_validation_and_defaults_cleanup():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "accounts": [
@@ -10891,7 +10891,7 @@ def test_account_edit_remove_handlers_preserve_validation_and_defaults_cleanup()
 
 
 def test_account_rename_handler_preserves_backup_move_defaults_and_usage_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {
         "accounts": [
@@ -10963,7 +10963,7 @@ def test_account_rename_handler_preserves_backup_move_defaults_and_usage_flow():
 
 
 def test_config_normalization_helpers_preserve_legacy_shapes():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     preset = mms_command_tools.normalize_preset_entry(
@@ -11019,7 +11019,7 @@ def test_config_normalization_helpers_preserve_legacy_shapes():
 
 
 def test_probe_async_interval_helpers_preserve_defaults_and_normalization(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.probe_async_refresh_after(
@@ -11042,7 +11042,7 @@ def test_probe_async_interval_helpers_preserve_defaults_and_normalization(monkey
 def test_probe_async_scheduler_helpers_preserve_inflight_throttle_and_cleanup(monkeypatch):
     import threading
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     class Executor:
@@ -11124,7 +11124,7 @@ def test_probe_async_scheduler_helpers_preserve_inflight_throttle_and_cleanup(mo
 
 
 def test_snapshot_diff_lines_reports_guard_drift_without_ignored_files():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     previous = {
         "defaults": {"provider_default": "relay-a"},
@@ -11178,7 +11178,7 @@ def test_snapshot_diff_lines_reports_guard_drift_without_ignored_files():
 
 
 def test_config_validator_reports_provider_account_errors():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     kwargs = {
@@ -11245,7 +11245,7 @@ def test_config_validator_reports_provider_account_errors():
 
 
 def test_config_get_set_unset_handlers_use_injected_save():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     saved = []
@@ -11294,7 +11294,7 @@ def test_config_get_set_unset_handlers_use_injected_save():
 
 def test_config_validate_handler_prints_success_and_failure():
     import pytest
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
 
@@ -11310,7 +11310,7 @@ def test_config_validate_handler_prints_success_and_failure():
 
 
 def test_api_and_config_file_handlers_preserve_masking_and_save_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     saved = []
@@ -11386,7 +11386,7 @@ def test_api_and_config_file_handlers_preserve_masking_and_save_flow():
 
 def test_handle_config_dispatch_preserves_command_routing_and_api_setup():
     import pytest
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {"cfg": True}
     console = _CollectingConsole()
@@ -11516,7 +11516,7 @@ def test_handle_config_dispatch_preserves_command_routing_and_api_setup():
 
 def test_session_list_info_display_helpers():
     import pytest
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     rows = [
@@ -11573,7 +11573,7 @@ def test_session_list_info_display_helpers():
 def test_session_gateway_stale_helpers_preserve_roots_size_and_sorting(tmp_path):
     import os
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     real_home = tmp_path / "home"
@@ -11613,7 +11613,7 @@ def test_session_gateway_stale_helpers_preserve_roots_size_and_sorting(tmp_path)
 
 
 def test_session_prune_handler_dry_run_and_apply_with_injected_remove():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     rows = [
         {"cli": "claude", "name": "123", "size": 1024, "mtime": "2026-05-28", "path": "/tmp/mms/claude-gateway/s/123"},
@@ -11660,7 +11660,7 @@ def test_session_prune_handler_dry_run_and_apply_with_injected_remove():
 
 
 def test_provider_model_table_display_renders_speed_and_sources():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     provider = {"id": "relay", "name": "Relay"}
@@ -11716,7 +11716,7 @@ def test_provider_model_table_display_renders_speed_and_sources():
 
 
 def test_openrouter_extension_arg_and_provider_helpers_preserve_detection_rules():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.provider_looks_openrouter({"id": "relay", "base_url": "https://openrouter.ai/api/v1"})
     assert mms_command_tools.provider_looks_openrouter({"provider_profile": "openrouter"})
@@ -11786,7 +11786,7 @@ def test_openrouter_extension_arg_and_provider_helpers_preserve_detection_rules(
 def test_openrouter_extension_handler_preserves_help_add_probe_json_and_env_fallback():
     import json
 
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     calls = []
@@ -11873,7 +11873,7 @@ def test_openrouter_extension_handler_preserves_help_add_probe_json_and_env_fall
 
 
 def test_openrouter_extension_display_helpers_render_summary_and_limits():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     console = _CollectingConsole()
     rows = [

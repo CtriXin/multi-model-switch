@@ -261,19 +261,19 @@ _GATEWAY_SESSION_MARKERS = (
 
 
 def _base_user_config_path_from_gateway(config_path):
-    from mms_command_tools import base_user_config_path_from_gateway
+    from mms_commands.tools import base_user_config_path_from_gateway
 
     return base_user_config_path_from_gateway(config_path, gateway_session_markers=_GATEWAY_SESSION_MARKERS)
 
 
 def _base_user_primary_dir_from_gateway(path):
-    from mms_command_tools import base_user_primary_dir_from_gateway
+    from mms_commands.tools import base_user_primary_dir_from_gateway
 
     return base_user_primary_dir_from_gateway(path, gateway_session_markers=_GATEWAY_SESSION_MARKERS)
 
 
 def _merge_base_user_broker_profiles(cfg, config_path):
-    from mms_command_tools import merge_base_user_broker_profiles
+    from mms_commands.tools import merge_base_user_broker_profiles
 
     return merge_base_user_broker_profiles(
         cfg,
@@ -321,19 +321,19 @@ class WizardCancel(Exception):
 
 
 def _load_json_file(path, default):
-    from mms_command_tools import load_json_file
+    from mms_commands.tools import load_json_file
 
     return load_json_file(path, default)
 
 
 def _save_json_file(path, payload):
-    from mms_command_tools import save_json_file
+    from mms_commands.tools import save_json_file
 
     return save_json_file(path, payload)
 
 
 def _http_status_is_success(value):
-    from mms_command_tools import http_status_is_success
+    from mms_commands.tools import http_status_is_success
 
     return http_status_is_success(value)
 
@@ -351,7 +351,7 @@ def _save_update_check_cache(payload):
 
 
 def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
-    from mms_command_tools import fetch_latest_semver_tags, normalize_semver_tags
+    from mms_commands.tools import fetch_latest_semver_tags, normalize_semver_tags
 
     return fetch_latest_semver_tags(
         limit=limit,
@@ -363,25 +363,25 @@ def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
 
 
 def _extract_semver_text(value):
-    from mms_command_tools import extract_semver_text
+    from mms_commands.tools import extract_semver_text
 
     return extract_semver_text(value)
 
 
 def _installed_update_semver(version_meta):
-    from mms_command_tools import installed_update_semver
+    from mms_commands.tools import installed_update_semver
 
     return installed_update_semver(version_meta, update_notice_sources=UPDATE_NOTICE_SOURCES)
 
 
 def _semver_tag_gap(installed_version, known_tags, latest_tag=""):
-    from mms_command_tools import semver_tag_gap
+    from mms_commands.tools import semver_tag_gap
 
     return semver_tag_gap(installed_version, known_tags, latest_tag)
 
 
 def _update_notice():
-    from mms_command_tools import parse_semver_tag, update_notice
+    from mms_commands.tools import parse_semver_tag, update_notice
 
     return update_notice(
         stdin=sys.stdin,
@@ -400,7 +400,7 @@ def _update_notice():
 
 def _start_async_update_check():
     global _UPDATE_CHECK_RUNNING
-    from mms_command_tools import start_async_update_check
+    from mms_commands.tools import start_async_update_check
 
     def get_running():
         return bool(_UPDATE_CHECK_RUNNING)
@@ -448,13 +448,13 @@ def _infer_model_family(model_name):
     支持 provider/model 格式（如 bailian/kimi-2.5）：
     先用完整名匹配，再用 '/' 后面的部分匹配。
     """
-    from mms_command_tools import infer_model_family
+    from mms_commands.tools import infer_model_family
 
     return infer_model_family(model_name, model_families=MODEL_FAMILIES)
 
 
 def _model_info_looks_domestic(model_info):
-    from mms_command_tools import model_info_looks_domestic
+    from mms_commands.tools import model_info_looks_domestic
 
     return model_info_looks_domestic(
         model_info,
@@ -469,7 +469,7 @@ _MMS_HIDDEN_MODELS = set()
 
 
 def _mms_model_visible(model_name):
-    from mms_command_tools import mms_model_visible
+    from mms_commands.tools import mms_model_visible
 
     return mms_model_visible(
         model_name,
@@ -480,13 +480,13 @@ def _mms_model_visible(model_name):
 
 
 def _filter_visible_models(models):
-    from mms_command_tools import filter_visible_models
+    from mms_commands.tools import filter_visible_models
 
     return filter_visible_models(models, mms_model_visible=_mms_model_visible)
 
 
 def _model_info_has_visible_models(model_info):
-    from mms_command_tools import model_info_has_visible_models
+    from mms_commands.tools import model_info_has_visible_models
 
     return model_info_has_visible_models(model_info, mms_model_visible=_mms_model_visible)
 
@@ -500,31 +500,31 @@ CLI_MODEL_FAMILY_HINTS = {}
 
 
 def current_command():
-    from mms_command_tools import current_command as current_command_helper
+    from mms_commands.tools import current_command as current_command_helper
 
     return current_command_helper(primary_command=PRIMARY_COMMAND, environ=os.environ, argv0=sys.argv[0] if sys.argv else "")
 
 
 def display_title():
-    from mms_command_tools import display_title as display_title_helper
+    from mms_commands.tools import display_title as display_title_helper
 
     return display_title_helper(current_command_fn=current_command)
 
 
 def _git_output(args):
-    from mms_command_tools import git_output
+    from mms_commands.tools import git_output
 
     return git_output(args, subprocess_run=subprocess.run, file_path=__file__)
 
 
 def _release_version_info():
-    from mms_command_tools import release_version_info
+    from mms_commands.tools import release_version_info
 
     return release_version_info(load_version_meta=_load_version_meta, git_output=_git_output)
 
 
 def _about_status_snapshot(force_update=False):
-    from mms_command_tools import (
+    from mms_commands.tools import (
         about_status_snapshot,
         cli_version_status,
         compare_semver_text,
@@ -586,13 +586,13 @@ def _about_status_snapshot(force_update=False):
 
 
 def _cli_upgrade_shell_command(cli_name):
-    from mms_command_tools import cli_upgrade_shell_command
+    from mms_commands.tools import cli_upgrade_shell_command
 
     return cli_upgrade_shell_command(cli_name, cli_version_packages=CLI_VERSION_PACKAGES)
 
 
 def _run_about_upgrade(*, target="mms", include_clis=False):
-    from mms_command_tools import mms_upgrade_shell_command, run_about_upgrade
+    from mms_commands.tools import mms_upgrade_shell_command, run_about_upgrade
 
     _ensure_rich()
 
@@ -617,31 +617,31 @@ def _run_about_upgrade(*, target="mms", include_clis=False):
 
 
 def config_command_hint():
-    from mms_command_tools import config_command_hint as config_command_hint_helper
+    from mms_commands.tools import config_command_hint as config_command_hint_helper
 
     return config_command_hint_helper(current_command=current_command)
 
 
 def export_command_hint(cli_name):
-    from mms_command_tools import export_command_hint as export_command_hint_helper
+    from mms_commands.tools import export_command_hint as export_command_hint_helper
 
     return export_command_hint_helper(cli_name, current_command=current_command)
 
 
 def normalize_user_role(role):
-    from mms_command_tools import normalize_user_role as normalize_user_role_helper
+    from mms_commands.tools import normalize_user_role as normalize_user_role_helper
 
     return normalize_user_role_helper(role, mode_all=MODE_ALL, mode_recommended=MODE_RECOMMENDED)
 
 
 def _normalize_ui_config(cfg):
-    from mms_command_tools import normalize_ui_config
+    from mms_commands.tools import normalize_ui_config
 
     return normalize_ui_config(cfg, normalize_language=normalize_language)
 
 
 def _resolve_ui_language(cfg=None, cli_override=None):
-    from mms_command_tools import resolve_ui_language
+    from mms_commands.tools import resolve_ui_language
 
     return resolve_ui_language(
         cfg,
@@ -652,7 +652,7 @@ def _resolve_ui_language(cfg=None, cli_override=None):
 
 
 def _extract_global_lang(argv):
-    from mms_command_tools import extract_global_lang
+    from mms_commands.tools import extract_global_lang
 
     return extract_global_lang(argv, normalize_language=normalize_language)
 
@@ -684,19 +684,19 @@ _VISION_CAPABLE_MODEL_HINTS = ("gemini-",)
 
 def _normalize_role(value):
     """Normalize provider role to one of: primary, auto, fallback."""
-    from mms_command_tools import normalize_role
+    from mms_commands.tools import normalize_role
 
     return normalize_role(value, valid_roles=VALID_ROLES)
 
 
 def _normalize_positive_seconds(value, default, minimum=1):
-    from mms_command_tools import normalize_positive_seconds
+    from mms_commands.tools import normalize_positive_seconds
 
     return normalize_positive_seconds(value, default, minimum=minimum)
 
 
 def _default_provider():
-    from mms_command_tools import default_provider
+    from mms_commands.tools import default_provider
 
     return default_provider(
         default_provider_id=DEFAULT_PROVIDER_ID,
@@ -706,25 +706,25 @@ def _default_provider():
 
 
 def _default_account_home(account_id):
-    from mms_command_tools import default_account_home
+    from mms_commands.tools import default_account_home
 
     return default_account_home(account_id, accounts_dir=ACCOUNTS_DIR)
 
 
 def _normalize_priority(value):
-    from mms_command_tools import normalize_priority
+    from mms_commands.tools import normalize_priority
 
     return normalize_priority(value, default_priority=DEFAULT_PRIORITY)
 
 
 def _canonical_model_family(value):
-    from mms_command_tools import canonical_model_family
+    from mms_commands.tools import canonical_model_family
 
     return canonical_model_family(value, model_families=MODEL_FAMILIES)
 
 
 def _normalize_family_priority_overrides(value):
-    from mms_command_tools import normalize_family_priority_overrides
+    from mms_commands.tools import normalize_family_priority_overrides
 
     return normalize_family_priority_overrides(
         value,
@@ -734,7 +734,7 @@ def _normalize_family_priority_overrides(value):
 
 
 def _runtime_priority_for_family(runtime, family_name):
-    from mms_command_tools import runtime_priority_for_family
+    from mms_commands.tools import runtime_priority_for_family
 
     return runtime_priority_for_family(
         runtime,
@@ -746,7 +746,7 @@ def _runtime_priority_for_family(runtime, family_name):
 
 
 def _runtime_priority_for_model(runtime, model_name):
-    from mms_command_tools import runtime_priority_for_model
+    from mms_commands.tools import runtime_priority_for_model
 
     return runtime_priority_for_model(
         runtime,
@@ -757,7 +757,7 @@ def _runtime_priority_for_model(runtime, model_name):
 
 
 def _runtime_with_priority(runtime, *, model_name="", family_name=""):
-    from mms_command_tools import runtime_with_priority
+    from mms_commands.tools import runtime_with_priority
 
     return runtime_with_priority(
         runtime,
@@ -772,13 +772,13 @@ def _runtime_with_priority(runtime, *, model_name="", family_name=""):
 
 
 def _normalize_claude_1m_mode(value, default="auto"):
-    from mms_command_tools import normalize_claude_1m_mode
+    from mms_commands.tools import normalize_claude_1m_mode
 
     return normalize_claude_1m_mode(value, default=default, valid_modes=VALID_CLAUDE_1M_MODES)
 
 
 def _normalize_timezone_name(value, default=DEFAULT_ACCOUNT_TIMEZONE):
-    from mms_command_tools import normalize_timezone_name
+    from mms_commands.tools import normalize_timezone_name
 
     return normalize_timezone_name(value, default=default)
 
@@ -817,13 +817,13 @@ _ACCOUNT_CA_ENV_KEYS = (
 
 
 def _url_matches_host_suffix(url, host_suffixes):
-    from mms_command_tools import url_matches_host_suffix
+    from mms_commands.tools import url_matches_host_suffix
 
     return url_matches_host_suffix(url, host_suffixes)
 
 
 def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
-    from mms_command_tools import runtime_should_disable_ambient_env
+    from mms_commands.tools import runtime_should_disable_ambient_env
 
     return runtime_should_disable_ambient_env(
         runtime,
@@ -834,7 +834,7 @@ def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
 
 
 def _scrub_account_command_env(env):
-    from mms_command_tools import scrub_account_command_env
+    from mms_commands.tools import scrub_account_command_env
 
     return scrub_account_command_env(
         env,
@@ -846,7 +846,7 @@ def _scrub_account_command_env(env):
 
 
 def _runtime_httpx_kwargs(runtime, *, target_url=""):
-    from mms_command_tools import runtime_httpx_kwargs
+    from mms_commands.tools import runtime_httpx_kwargs
 
     def should_disable(current, *, target_url, official_hosts):
         return _runtime_should_disable_ambient_env(current, target_url=target_url)
@@ -861,7 +861,7 @@ def _runtime_httpx_kwargs(runtime, *, target_url=""):
 
 
 def _runtime_force_ipv4(runtime):
-    from mms_command_tools import runtime_force_ipv4
+    from mms_commands.tools import runtime_force_ipv4
 
     return runtime_force_ipv4(runtime)
 
@@ -890,13 +890,13 @@ _SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
 
 
 def _validate_proxy_url(proxy_url):
-    from mms_command_tools import validate_proxy_url
+    from mms_commands.tools import validate_proxy_url
 
     return validate_proxy_url(proxy_url, supported_proxy_schemes=_SUPPORTED_PROXY_SCHEMES)
 
 
 def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.anthropic.com", force_ipv4=True):
-    from mms_command_tools import test_proxy_connectivity
+    from mms_commands.tools import test_proxy_connectivity
 
     return test_proxy_connectivity(
         proxy_url,
@@ -912,7 +912,7 @@ def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.ant
 
 
 def _prompt_validated_proxy_fields(current_proxy="", current_no_proxy="", *, wizard=False, target_url="https://api.anthropic.com"):
-    from mms_command_tools import prompt_validated_proxy_fields
+    from mms_commands.tools import prompt_validated_proxy_fields
 
     return prompt_validated_proxy_fields(
         current_proxy,
@@ -930,7 +930,7 @@ def _prompt_validated_proxy_fields(current_proxy="", current_no_proxy="", *, wiz
 
 
 def _prompt_validated_timezone(current_timezone="", *, wizard=False):
-    from mms_command_tools import prompt_validated_timezone
+    from mms_commands.tools import prompt_validated_timezone
 
     return prompt_validated_timezone(
         current_timezone,
@@ -945,7 +945,7 @@ def _prompt_validated_timezone(current_timezone="", *, wizard=False):
 
 
 def _normalize_account_id(account_id):
-    from mms_command_tools import normalize_account_id
+    from mms_commands.tools import normalize_account_id
 
     return normalize_account_id(account_id)
 
@@ -970,7 +970,7 @@ def _wizard_prompt(label, default="", password=False, required=False):
 
 
 def _normalize_account(account):
-    from mms_command_tools import normalize_account
+    from mms_commands.tools import normalize_account
 
     return normalize_account(
         account,
@@ -984,55 +984,55 @@ def _normalize_account(account):
 
 
 def _normalize_provider_id_input(provider_id):
-    from mms_command_tools import normalize_provider_id_input
+    from mms_commands.tools import normalize_provider_id_input
 
     return normalize_provider_id_input(provider_id, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _normalize_model_id_list(values):
-    from mms_command_tools import normalize_model_id_list
+    from mms_commands.tools import normalize_model_id_list
 
     return normalize_model_id_list(values)
 
 
 def _unique_runtime_id(existing_ids, base_id):
-    from mms_command_tools import unique_runtime_id
+    from mms_commands.tools import unique_runtime_id
 
     return unique_runtime_id(existing_ids, base_id)
 
 
 def _normalize_models_endpoint(value):
-    from mms_command_tools import normalize_models_endpoint
+    from mms_commands.tools import normalize_models_endpoint
 
     return normalize_models_endpoint(value)
 
 
 def _model_source_label(source):
-    from mms_command_tools import model_source_label
+    from mms_commands.tools import model_source_label
 
     return model_source_label(source)
 
 
 def _ttfb_label(ttfb_ms):
-    from mms_command_tools import ttfb_label
+    from mms_commands.tools import ttfb_label
 
     return ttfb_label(ttfb_ms)
 
 
 def _tps_label(tps_value):
-    from mms_command_tools import tps_label
+    from mms_commands.tools import tps_label
 
     return tps_label(tps_value)
 
 
 def _provider_env_name(provider_id, field):
-    from mms_command_tools import provider_env_name
+    from mms_commands.tools import provider_env_name
 
     return provider_env_name(provider_id, field, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _normalize_provider(provider):
-    from mms_command_tools import normalize_provider
+    from mms_commands.tools import normalize_provider
 
     return normalize_provider(
         provider,
@@ -1049,7 +1049,7 @@ def _normalize_provider(provider):
 
 
 def _normalize_supported_clis(value, protocols=None):
-    from mms_command_tools import normalize_supported_clis
+    from mms_commands.tools import normalize_supported_clis
 
     return normalize_supported_clis(
         value,
@@ -1060,7 +1060,7 @@ def _normalize_supported_clis(value, protocols=None):
 
 
 def _ensure_provider_config(cfg):
-    from mms_command_tools import ensure_provider_config
+    from mms_commands.tools import ensure_provider_config
 
     return ensure_provider_config(
         cfg,
@@ -1071,7 +1071,7 @@ def _ensure_provider_config(cfg):
 
 
 def _ensure_account_config(cfg):
-    from mms_command_tools import ensure_account_config
+    from mms_commands.tools import ensure_account_config
 
     return ensure_account_config(
         cfg,
@@ -1081,19 +1081,19 @@ def _ensure_account_config(cfg):
 
 
 def _normalize_preset_entry(name, preset):
-    from mms_command_tools import normalize_preset_entry
+    from mms_commands.tools import normalize_preset_entry
 
     return normalize_preset_entry(name, preset, normalize_account_id=_normalize_account_id)
 
 
 def _normalize_presets_config(cfg):
-    from mms_command_tools import normalize_presets_config
+    from mms_commands.tools import normalize_presets_config
 
     return normalize_presets_config(cfg, normalize_preset_entry=_normalize_preset_entry)
 
 
 def _normalize_config_sections(cfg):
-    from mms_command_tools import normalize_config_sections
+    from mms_commands.tools import normalize_config_sections
 
     return normalize_config_sections(
         cfg,
@@ -1108,13 +1108,13 @@ def _normalize_config_sections(cfg):
 
 
 def _normalize_user_config(cfg):
-    from mms_command_tools import normalize_user_config
+    from mms_commands.tools import normalize_user_config
 
     return normalize_user_config(cfg, mode_all=MODE_ALL, normalize_user_role=normalize_user_role)
 
 
 def _normalize_cache_config(cfg):
-    from mms_command_tools import normalize_cache_config
+    from mms_commands.tools import normalize_cache_config
 
     return normalize_cache_config(
         cfg,
@@ -1125,13 +1125,13 @@ def _normalize_cache_config(cfg):
 
 
 def _provider_map(cfg):
-    from mms_command_tools import provider_map
+    from mms_commands.tools import provider_map
 
     return provider_map(cfg)
 
 
 def _model_context_window(model_name):
-    from mms_command_tools import model_context_window
+    from mms_commands.tools import model_context_window
 
     def resolve_capabilities(clean):
         from mms_registry.capability_resolver import resolve_model_capabilities
@@ -1151,13 +1151,13 @@ def _model_context_window(model_name):
 
 
 def _native_clis_for_model(model_name):
-    from mms_command_tools import native_clis_for_model
+    from mms_commands.tools import native_clis_for_model
 
     return native_clis_for_model(model_name)
 
 
 def _is_installed_mms_layout(module_path=None):
-    from mms_command_tools import is_installed_mms_layout
+    from mms_commands.tools import is_installed_mms_layout
 
     return is_installed_mms_layout(
         module_path or __file__,
@@ -1166,7 +1166,7 @@ def _is_installed_mms_layout(module_path=None):
 
 
 def _default_gpt_reasoning_effort(module_path=None):
-    from mms_command_tools import default_gpt_reasoning_effort
+    from mms_commands.tools import default_gpt_reasoning_effort
 
     return default_gpt_reasoning_effort(
         module_path=module_path or __file__,
@@ -1175,7 +1175,7 @@ def _default_gpt_reasoning_effort(module_path=None):
 
 
 def _default_reasoning_effort_for_model_info(model_info):
-    from mms_command_tools import default_reasoning_effort_for_model_info
+    from mms_commands.tools import default_reasoning_effort_for_model_info
 
     return default_reasoning_effort_for_model_info(
         model_info,
@@ -1185,13 +1185,13 @@ def _default_reasoning_effort_for_model_info(model_info):
 
 
 def _bridge_clis_for_model(model_name):
-    from mms_command_tools import bridge_clis_for_model
+    from mms_commands.tools import bridge_clis_for_model
 
     return bridge_clis_for_model(model_name, infer_model_family=_infer_model_family)
 
 
 def _model_capability_tags(model_name):
-    from mms_command_tools import model_capability_tags
+    from mms_commands.tools import model_capability_tags
 
     return model_capability_tags(
         model_name,
@@ -1205,7 +1205,7 @@ def _model_capability_tags(model_name):
 
 
 def _model_supports_vision(model_name):
-    from mms_command_tools import model_supports_vision
+    from mms_commands.tools import model_supports_vision
 
     return model_supports_vision(
         model_name,
@@ -1215,31 +1215,31 @@ def _model_supports_vision(model_name):
 
 
 def _model_cli_summary(model_name):
-    from mms_command_tools import model_cli_summary
+    from mms_commands.tools import model_cli_summary
 
     return model_cli_summary(model_name, infer_model_family=_infer_model_family)
 
 
 def _model_capability_summary(model_name):
-    from mms_command_tools import model_capability_summary
+    from mms_commands.tools import model_capability_summary
 
     return model_capability_summary(model_name, model_capability_tags=_model_capability_tags)
 
 
 def _account_map(cfg):
-    from mms_command_tools import account_map
+    from mms_commands.tools import account_map
 
     return account_map(cfg)
 
 
 def _accounts_for_cli(cfg, cli_name):
-    from mms_command_tools import accounts_for_cli
+    from mms_commands.tools import accounts_for_cli
 
     return accounts_for_cli(cfg, cli_name)
 
 
 def get_provider_definition(cfg, provider_id=None):
-    from mms_command_tools import get_provider_definition as get_provider_definition_helper
+    from mms_commands.tools import get_provider_definition as get_provider_definition_helper
 
     return get_provider_definition_helper(
         cfg,
@@ -1253,7 +1253,7 @@ def get_provider_definition(cfg, provider_id=None):
 
 
 def get_account_definition(cfg, account_id=None, cli_name=None):
-    from mms_command_tools import get_account_definition as get_account_definition_helper
+    from mms_commands.tools import get_account_definition as get_account_definition_helper
 
     return get_account_definition_helper(
         cfg,
@@ -1269,7 +1269,7 @@ def get_account_definition(cfg, account_id=None, cli_name=None):
 
 
 def _active_config_path():
-    from mms_command_tools import active_sibling_path_from_gateway
+    from mms_commands.tools import active_sibling_path_from_gateway
 
     return active_sibling_path_from_gateway(
         CONFIG_PATH,
@@ -1279,7 +1279,7 @@ def _active_config_path():
 
 
 def _active_credentials_path():
-    from mms_command_tools import active_sibling_path_from_gateway
+    from mms_commands.tools import active_sibling_path_from_gateway
 
     return active_sibling_path_from_gateway(
         CREDENTIALS_PATH,
@@ -1289,7 +1289,7 @@ def _active_credentials_path():
 
 
 def _active_usage_path():
-    from mms_command_tools import active_sibling_path_from_gateway
+    from mms_commands.tools import active_sibling_path_from_gateway
 
     return active_sibling_path_from_gateway(
         USAGE_PATH,
@@ -1299,7 +1299,7 @@ def _active_usage_path():
 
 
 def _config_guard_root_dir(config_path=None):
-    from mms_command_tools import config_guard_root_dir
+    from mms_commands.tools import config_guard_root_dir
 
     return config_guard_root_dir(
         config_path=config_path,
@@ -1309,7 +1309,7 @@ def _config_guard_root_dir(config_path=None):
 
 
 def _config_snapshot_root(config_path=None):
-    from mms_command_tools import config_snapshot_root
+    from mms_commands.tools import config_snapshot_root
 
     return config_snapshot_root(
         config_path=config_path,
@@ -1319,7 +1319,7 @@ def _config_snapshot_root(config_path=None):
 
 
 def _config_snapshot_path(snapshot_kind, filename="latest.json", *, config_path=None):
-    from mms_command_tools import config_snapshot_path
+    from mms_commands.tools import config_snapshot_path
 
     return config_snapshot_path(
         snapshot_kind,
@@ -1330,25 +1330,25 @@ def _config_snapshot_path(snapshot_kind, filename="latest.json", *, config_path=
 
 
 def _is_snapshot_ignored_file(path):
-    from mms_command_tools import is_snapshot_ignored_file
+    from mms_commands.tools import is_snapshot_ignored_file
 
     return is_snapshot_ignored_file(path, ignored_files=SNAPSHOT_IGNORED_FILES)
 
 
 def _render_mms_config_agents_guard():
-    from mms_command_tools import render_mms_config_agents_guard
+    from mms_commands.tools import render_mms_config_agents_guard
 
     return render_mms_config_agents_guard()
 
 
 def _render_mms_config_claude_guard():
-    from mms_command_tools import render_mms_config_claude_guard
+    from mms_commands.tools import render_mms_config_claude_guard
 
     return render_mms_config_claude_guard()
 
 
 def _ensure_mms_config_guard_files(config_path=None):
-    from mms_command_tools import ensure_mms_config_guard_files
+    from mms_commands.tools import ensure_mms_config_guard_files
 
     return ensure_mms_config_guard_files(
         config_path=config_path,
@@ -1361,31 +1361,31 @@ def _ensure_mms_config_guard_files(config_path=None):
 
 
 def _sha256_text(value):
-    from mms_command_tools import sha256_text
+    from mms_commands.tools import sha256_text
 
     return sha256_text(value)
 
 
 def _snapshot_proxy_fingerprint(proxy_url):
-    from mms_command_tools import snapshot_proxy_fingerprint
+    from mms_commands.tools import snapshot_proxy_fingerprint
 
     return snapshot_proxy_fingerprint(proxy_url)
 
 
 def _snapshot_cli_state(home_dir, cli_name):
-    from mms_command_tools import snapshot_cli_state
+    from mms_commands.tools import snapshot_cli_state
 
     return snapshot_cli_state(home_dir, cli_name)
 
 
 def _snapshot_file_entry(path):
-    from mms_command_tools import snapshot_file_entry
+    from mms_commands.tools import snapshot_file_entry
 
     return snapshot_file_entry(path, snapshot_file_content_bytes=_snapshot_file_content_bytes)
 
 
 def _normalize_claude_state_snapshot_payload(data):
-    from mms_command_tools import normalize_claude_state_snapshot_payload
+    from mms_commands.tools import normalize_claude_state_snapshot_payload
 
     return normalize_claude_state_snapshot_payload(data)
 
@@ -1412,19 +1412,19 @@ _CLAUDE_SESSION_ENV_KEYS = {
 
 
 def _normalize_claude_settings_snapshot_payload(data):
-    from mms_command_tools import normalize_claude_settings_snapshot_payload
+    from mms_commands.tools import normalize_claude_settings_snapshot_payload
 
     return normalize_claude_settings_snapshot_payload(data, session_env_keys=_CLAUDE_SESSION_ENV_KEYS)
 
 
 def _snapshot_file_content_bytes(path):
-    from mms_command_tools import snapshot_file_content_bytes
+    from mms_commands.tools import snapshot_file_content_bytes
 
     return snapshot_file_content_bytes(path, session_env_keys=_CLAUDE_SESSION_ENV_KEYS)
 
 
 def _snapshot_account_entry(account):
-    from mms_command_tools import snapshot_account_entry
+    from mms_commands.tools import snapshot_account_entry
 
     return snapshot_account_entry(
         account,
@@ -1440,7 +1440,7 @@ def _snapshot_account_entry(account):
 
 
 def _snapshot_claude_identity_entry(home_dir):
-    from mms_command_tools import snapshot_claude_identity_entry
+    from mms_commands.tools import snapshot_claude_identity_entry
 
     return snapshot_claude_identity_entry(
         home_dir,
@@ -1452,7 +1452,7 @@ def _snapshot_claude_identity_entry(home_dir):
 
 
 def _snapshot_provider_entry(provider):
-    from mms_command_tools import snapshot_provider_entry
+    from mms_commands.tools import snapshot_provider_entry
 
     return snapshot_provider_entry(
         provider,
@@ -1467,7 +1467,7 @@ def _snapshot_provider_entry(provider):
 
 
 def _build_config_guard_snapshot(cfg, *, config_path=None):
-    from mms_command_tools import build_config_guard_snapshot
+    from mms_commands.tools import build_config_guard_snapshot
 
     return build_config_guard_snapshot(
         cfg,
@@ -1487,31 +1487,31 @@ def _build_config_guard_snapshot(cfg, *, config_path=None):
 
 
 def _snapshot_digest(snapshot_data):
-    from mms_command_tools import snapshot_digest
+    from mms_commands.tools import snapshot_digest
 
     return snapshot_digest(snapshot_data)
 
 
 def _load_json_snapshot(path):
-    from mms_command_tools import load_json_snapshot
+    from mms_commands.tools import load_json_snapshot
 
     return load_json_snapshot(path)
 
 
 def _write_json_snapshot(path, payload):
-    from mms_command_tools import write_json_snapshot
+    from mms_commands.tools import write_json_snapshot
 
     return write_json_snapshot(path, payload)
 
 
 def _snapshot_period_bucket(period_name):
-    from mms_command_tools import snapshot_period_bucket
+    from mms_commands.tools import snapshot_period_bucket
 
     return snapshot_period_bucket(period_name)
 
 
 def _update_periodic_snapshot(period_name, snapshot_data, *, config_path=None):
-    from mms_command_tools import update_periodic_snapshot
+    from mms_commands.tools import update_periodic_snapshot
 
     return update_periodic_snapshot(
         period_name,
@@ -1526,7 +1526,7 @@ def _update_periodic_snapshot(period_name, snapshot_data, *, config_path=None):
 
 
 def _snapshot_diff_lines(previous_snapshot, current_snapshot):
-    from mms_command_tools import snapshot_diff_lines
+    from mms_commands.tools import snapshot_diff_lines
 
     return snapshot_diff_lines(
         previous_snapshot,
@@ -1536,13 +1536,13 @@ def _snapshot_diff_lines(previous_snapshot, current_snapshot):
 
 
 def _snapshot_prompt_allowed():
-    from mms_command_tools import snapshot_prompt_allowed
+    from mms_commands.tools import snapshot_prompt_allowed
 
     return snapshot_prompt_allowed()
 
 
 def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
-    from mms_command_tools import confirm_startup_snapshot_drift
+    from mms_commands.tools import confirm_startup_snapshot_drift
 
     _ensure_rich()
     return confirm_startup_snapshot_drift(
@@ -1558,7 +1558,7 @@ def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
 
 
 def _ensure_startup_snapshot_guard(cfg, *, enforce=True):
-    from mms_command_tools import ensure_startup_snapshot_guard
+    from mms_commands.tools import ensure_startup_snapshot_guard
 
     return ensure_startup_snapshot_guard(
         cfg,
@@ -1608,13 +1608,13 @@ def load_runtime_config():
 
 
 def _config_write_target_path():
-    from mms_command_tools import config_write_target_path
+    from mms_commands.tools import config_write_target_path
 
     return config_write_target_path(active_config_path=_active_config_path, config_path=CONFIG_PATH)
 
 
 def _config_lock_path(config_path=None):
-    from mms_command_tools import config_lock_path
+    from mms_commands.tools import config_lock_path
 
     return config_lock_path(
         config_path,
@@ -1624,7 +1624,7 @@ def _config_lock_path(config_path=None):
 
 
 def _config_audit_path(config_path=None):
-    from mms_command_tools import config_audit_path
+    from mms_commands.tools import config_audit_path
 
     return config_audit_path(
         config_path,
@@ -1634,19 +1634,19 @@ def _config_audit_path(config_path=None):
 
 
 def _config_backup_root(config_path=None):
-    from mms_command_tools import config_backup_root
+    from mms_commands.tools import config_backup_root
 
     return config_backup_root(config_path, config_write_target_path=_config_write_target_path)
 
 
 def _sha1_file(path):
-    from mms_command_tools import sha1_file
+    from mms_commands.tools import sha1_file
 
     return sha1_file(path)
 
 
 def _config_write_caller():
-    from mms_command_tools import config_write_caller
+    from mms_commands.tools import config_write_caller
 
     return config_write_caller(
         current_file=__file__,
@@ -1656,7 +1656,7 @@ def _config_write_caller():
 
 @contextmanager
 def _locked_config_write(config_path):
-    from mms_command_tools import locked_config_write
+    from mms_commands.tools import locked_config_write
 
     with locked_config_write(
         config_path,
@@ -1669,14 +1669,14 @@ def _locked_config_write(config_path):
 
 @contextmanager
 def _locked_state_file(path):
-    from mms_command_tools import locked_state_file
+    from mms_commands.tools import locked_state_file
 
     with locked_state_file(path, process_lock=_STATE_FILE_PROCESS_LOCK, fcntl_module=fcntl):
         yield
 
 
 def _backup_config_file(config_path):
-    from mms_command_tools import backup_config_file
+    from mms_commands.tools import backup_config_file
 
     return backup_config_file(
         config_path,
@@ -1686,13 +1686,13 @@ def _backup_config_file(config_path):
 
 
 def _append_config_audit_entry(entry, *, config_path):
-    from mms_command_tools import append_config_audit_entry
+    from mms_commands.tools import append_config_audit_entry
 
     return append_config_audit_entry(entry, config_path=config_path, config_audit_path=_config_audit_path)
 
 
 def _atomic_write_toml(path, cfg):
-    from mms_command_tools import atomic_write_toml
+    from mms_commands.tools import atomic_write_toml
 
     return atomic_write_toml(path, cfg, tomli_w_module=tomli_w)
 
@@ -1728,31 +1728,31 @@ def save_config(cfg, *, reason=None):
 
 
 def _load_toml_file(path):
-    from mms_command_tools import load_toml_file
+    from mms_commands.tools import load_toml_file
 
     return load_toml_file(path, toml_loads=tomllib.loads)
 
 
 def _existing_override_paths():
-    from mms_command_tools import existing_paths
+    from mms_commands.tools import existing_paths
 
     return existing_paths(OVERRIDE_PATHS)
 
 
 def _existing_preferences_paths():
-    from mms_command_tools import existing_paths
+    from mms_commands.tools import existing_paths
 
     return existing_paths(PREFERENCES_PATHS)
 
 
 def _merge_dicts(base, override):
-    from mms_command_tools import merge_dicts
+    from mms_commands.tools import merge_dicts
 
     return merge_dicts(base, override)
 
 
 def _pref_bool(value):
-    from mms_command_tools import pref_bool
+    from mms_commands.tools import pref_bool
 
     return pref_bool(value)
 
@@ -1778,13 +1778,13 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
 
 
 def _sanitize_user_preferences(raw):
-    from mms_command_tools import sanitize_user_preferences
+    from mms_commands.tools import sanitize_user_preferences
 
     return sanitize_user_preferences(raw, cli_names=CLI_NAMES, asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS)
 
 
 def load_user_preferences():
-    from mms_command_tools import load_user_preferences_from_paths
+    from mms_commands.tools import load_user_preferences_from_paths
 
     return load_user_preferences_from_paths(
         existing_preferences_paths=_existing_preferences_paths,
@@ -1797,7 +1797,7 @@ def load_user_preferences():
 
 
 def preference_asset_root(asset_name):
-    from mms_command_tools import preference_asset_root as preference_asset_root_impl
+    from mms_commands.tools import preference_asset_root as preference_asset_root_impl
 
     return preference_asset_root_impl(
         asset_name,
@@ -1807,13 +1807,13 @@ def preference_asset_root(asset_name):
 
 
 def _merge_disabled_session_surfaces(*payloads):
-    from mms_command_tools import merge_disabled_session_surfaces
+    from mms_commands.tools import merge_disabled_session_surfaces
 
     return merge_disabled_session_surfaces(*payloads)
 
 
 def _runtime_with_launch_preferences(cfg, runtime, cli_name):
-    from mms_command_tools import runtime_with_launch_preferences
+    from mms_commands.tools import runtime_with_launch_preferences
 
     return runtime_with_launch_preferences(
         cfg,
@@ -1824,7 +1824,7 @@ def _runtime_with_launch_preferences(cfg, runtime, cli_name):
 
 
 def apply_local_overrides(cfg):
-    from mms_command_tools import apply_local_overrides as apply_local_overrides_impl
+    from mms_commands.tools import apply_local_overrides as apply_local_overrides_impl
 
     return apply_local_overrides_impl(
         cfg,
@@ -1838,37 +1838,37 @@ def apply_local_overrides(cfg):
 
 
 def _env_file_path(cli_name):
-    from mms_command_tools import env_file_path
+    from mms_commands.tools import env_file_path
 
     return env_file_path(cli_name, env_dir=ENV_DIR)
 
 
 def _shell_quote(value):
-    from mms_command_tools import shell_quote
+    from mms_commands.tools import shell_quote
 
     return shell_quote(value)
 
 
 def _load_env_file(path):
-    from mms_command_tools import load_env_file
+    from mms_commands.tools import load_env_file
 
     return load_env_file(path)
 
 
 def _iso_now():
-    from mms_command_tools import iso_now
+    from mms_commands.tools import iso_now
 
     return iso_now()
 
 
 def _local_now_slug():
-    from mms_command_tools import local_now_slug
+    from mms_commands.tools import local_now_slug
 
     return local_now_slug()
 
 
 def _load_usage_stats():
-    from mms_command_tools import load_usage_stats
+    from mms_commands.tools import load_usage_stats
 
     return load_usage_stats(
         active_usage_path=_active_usage_path,
@@ -1877,13 +1877,13 @@ def _load_usage_stats():
 
 
 def _load_usage_stats_from_path(usage_path):
-    from mms_command_tools import load_usage_stats_from_path
+    from mms_commands.tools import load_usage_stats_from_path
 
     return load_usage_stats_from_path(usage_path)
 
 
 def _write_usage_stats_locked(usage_path, data):
-    from mms_command_tools import write_usage_stats_locked
+    from mms_commands.tools import write_usage_stats_locked
 
     return write_usage_stats_locked(
         usage_path,
@@ -1894,7 +1894,7 @@ def _write_usage_stats_locked(usage_path, data):
 
 
 def _save_usage_stats(data):
-    from mms_command_tools import save_usage_stats
+    from mms_commands.tools import save_usage_stats
 
     return save_usage_stats(
         data,
@@ -1906,7 +1906,7 @@ def _save_usage_stats(data):
 
 
 def _update_usage_stats(mutator):
-    from mms_command_tools import update_usage_stats
+    from mms_commands.tools import update_usage_stats
 
     return update_usage_stats(
         mutator,
@@ -1938,7 +1938,7 @@ def _trigger_routes_export_after_usage_write():
     Stable roots keep model-routes.json reasonably fresh for legacy file
     readers. Preview roots use the verified latest-approved bundle instead.
     """
-    from mms_command_tools import trigger_routes_export_after_usage_write
+    from mms_commands.tools import trigger_routes_export_after_usage_write
 
     if not _usage_routes_export_should_run():
         return
@@ -1966,7 +1966,7 @@ def _trigger_routes_export_after_usage_write():
 
 def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False):
     """Synchronously refresh the Hive-facing routes export from current config."""
-    from mms_command_tools import refresh_routes_export_for_hive
+    from mms_commands.tools import refresh_routes_export_for_hive
 
     if startup_safe and not _usage_routes_export_should_run():
         return True
@@ -1990,7 +1990,7 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startu
 
 def _trigger_routes_export_after_credentials_write():
     """Best-effort routes export after provider key / URL changes."""
-    from mms_command_tools import trigger_routes_export_after_credentials_write
+    from mms_commands.tools import trigger_routes_export_after_credentials_write
 
     return trigger_routes_export_after_credentials_write(
         refresh_routes_export_for_hive=_refresh_routes_export_for_hive
@@ -1998,7 +1998,7 @@ def _trigger_routes_export_after_credentials_write():
 
 
 def _backup_config_tree(label):
-    from mms_command_tools import backup_config_tree
+    from mms_commands.tools import backup_config_tree
 
     return backup_config_tree(
         label,
@@ -2009,19 +2009,19 @@ def _backup_config_tree(label):
 
 
 def _runtime_usage_key(runtime, cli_name):
-    from mms_command_tools import runtime_usage_key
+    from mms_commands.tools import runtime_usage_key
 
     return runtime_usage_key(runtime, cli_name)
 
 
 def _resolve_model_name(model_info):
-    from mms_command_tools import resolve_model_name
+    from mms_commands.tools import resolve_model_name
 
     return resolve_model_name(model_info)
 
 
 def _runtime_hint_from_runtime(runtime):
-    from mms_command_tools import runtime_hint_from_runtime
+    from mms_commands.tools import runtime_hint_from_runtime
 
     return runtime_hint_from_runtime(
         runtime,
@@ -2031,7 +2031,7 @@ def _runtime_hint_from_runtime(runtime):
 
 
 def _record_usage(runtime, cli_name, model_info):
-    from mms_command_tools import record_usage
+    from mms_commands.tools import record_usage
 
     return record_usage(
         runtime,
@@ -2046,7 +2046,7 @@ def _record_usage(runtime, cli_name, model_info):
 
 
 def _get_scene_usage():
-    from mms_command_tools import get_scene_usage
+    from mms_commands.tools import get_scene_usage
 
     return get_scene_usage(
         load_usage_stats=_load_usage_stats,
@@ -2056,13 +2056,13 @@ def _get_scene_usage():
 
 
 def _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
-    from mms_command_tools import infer_runtime_hint_from_usage_stats
+    from mms_commands.tools import infer_runtime_hint_from_usage_stats
 
     return infer_runtime_hint_from_usage_stats(stats, cli_name, model_name)
 
 
 def _resolve_last_used_runtime(cfg, cli_name, last_item, default_models):
-    from mms_command_tools import resolve_last_used_runtime
+    from mms_commands.tools import resolve_last_used_runtime
 
     return resolve_last_used_runtime(
         cfg,
@@ -2088,25 +2088,25 @@ _trace_overrides = []
 
 def _trace_record(source, **kv):
     """记录一步 override 来源。source 是 config default / preset / CLI flags 等。"""
-    from mms_command_tools import record_trace_override
+    from mms_commands.tools import record_trace_override
 
     return record_trace_override(_trace_enabled, _trace_overrides, source, **kv)
 
 
 def _trace_runtime_provider_id(runtime):
-    from mms_command_tools import trace_runtime_provider_id
+    from mms_commands.tools import trace_runtime_provider_id
 
     return trace_runtime_provider_id(runtime)
 
 
 def _trace_runtime_account_id(runtime):
-    from mms_command_tools import trace_runtime_account_id
+    from mms_commands.tools import trace_runtime_account_id
 
     return trace_runtime_account_id(runtime)
 
 
 def _trace_runtime_bridge(runtime):
-    from mms_command_tools import trace_runtime_bridge
+    from mms_commands.tools import trace_runtime_bridge
 
     return trace_runtime_bridge(runtime)
 
@@ -2114,7 +2114,7 @@ def _trace_runtime_bridge(runtime):
 def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
     if not _trace_enabled:
         return
-    from mms_command_tools import trace_runtime_choice
+    from mms_commands.tools import trace_runtime_choice
 
     return trace_runtime_choice(
         source,
@@ -2130,7 +2130,7 @@ def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
 
 def _print_trace(cli_name, model_info, runtime):
     """打印 [MMS Trace] 到 stderr。"""
-    from mms_command_tools import format_launch_trace
+    from mms_commands.tools import format_launch_trace
 
     print(
         format_launch_trace(
@@ -2147,7 +2147,7 @@ def _print_trace(cli_name, model_info, runtime):
 
 
 def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=None):
-    from mms_command_tools import launch_with_tracking
+    from mms_commands.tools import launch_with_tracking
     from mms_launchers import launch_cli
 
     return launch_with_tracking(
@@ -2172,7 +2172,7 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=
 
 
 def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
-    from mms_command_tools import load_provider_credentials as load_provider_credentials_helper
+    from mms_commands.tools import load_provider_credentials as load_provider_credentials_helper
 
     return load_provider_credentials_helper(
         provider_id,
@@ -2189,7 +2189,7 @@ def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
 
 
 def save_provider_credentials(provider_id, base_url, api_key, openai_base_url="", anthropic_base_url="", openai_api_key=None):
-    from mms_command_tools import save_provider_credentials as save_provider_credentials_helper
+    from mms_commands.tools import save_provider_credentials as save_provider_credentials_helper
 
     return save_provider_credentials_helper(
         provider_id,
@@ -2214,7 +2214,7 @@ def save_provider_credentials(provider_id, base_url, api_key, openai_base_url=""
 
 
 def load_api_credentials():
-    from mms_command_tools import load_api_credentials as load_api_credentials_helper
+    from mms_commands.tools import load_api_credentials as load_api_credentials_helper
 
     return load_api_credentials_helper(
         default_provider_id=DEFAULT_PROVIDER_ID,
@@ -2223,7 +2223,7 @@ def load_api_credentials():
 
 
 def save_api_credentials(base_url, api_key):
-    from mms_command_tools import save_api_credentials as save_api_credentials_helper
+    from mms_commands.tools import save_api_credentials as save_api_credentials_helper
 
     return save_api_credentials_helper(
         base_url,
@@ -2234,7 +2234,7 @@ def save_api_credentials(base_url, api_key):
 
 
 def resolve_provider_context(cfg, provider_id=None):
-    from mms_command_tools import resolve_provider_context as resolve_provider_context_helper
+    from mms_commands.tools import resolve_provider_context as resolve_provider_context_helper
 
     return resolve_provider_context_helper(
         cfg,
@@ -2246,7 +2246,7 @@ def resolve_provider_context(cfg, provider_id=None):
 
 
 def resolve_account_context(cfg, account_id=None, cli_name=None):
-    from mms_command_tools import resolve_account_context as resolve_account_context_helper
+    from mms_commands.tools import resolve_account_context as resolve_account_context_helper
 
     return resolve_account_context_helper(
         cfg,
@@ -2258,7 +2258,7 @@ def resolve_account_context(cfg, account_id=None, cli_name=None):
 
 
 def _default_config(role=MODE_ALL):
-    from mms_command_tools import default_config
+    from mms_commands.tools import default_config
 
     return default_config(
         role,
@@ -2271,7 +2271,7 @@ def _default_config(role=MODE_ALL):
 
 
 def _migrate_legacy_api_config(cfg):
-    from mms_command_tools import migrate_legacy_api_config
+    from mms_commands.tools import migrate_legacy_api_config
 
     return migrate_legacy_api_config(
         cfg,
@@ -2288,43 +2288,43 @@ def _migrate_legacy_api_config(cfg):
 
 
 def _provider_label(provider):
-    from mms_command_tools import provider_label
+    from mms_commands.tools import provider_label
 
     return provider_label(provider, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _provider_openai_base_url(provider):
-    from mms_command_tools import provider_openai_base_url
+    from mms_commands.tools import provider_openai_base_url
 
     return provider_openai_base_url(provider)
 
 
 def _provider_anthropic_base_url(provider):
-    from mms_command_tools import provider_anthropic_base_url
+    from mms_commands.tools import provider_anthropic_base_url
 
     return provider_anthropic_base_url(provider)
 
 
 def _provider_has_configured_base_url(provider):
-    from mms_command_tools import provider_has_configured_base_url
+    from mms_commands.tools import provider_has_configured_base_url
 
     return provider_has_configured_base_url(provider)
 
 
 def _resolve_config_provider_id(provider_defs, provider_id):
-    from mms_command_tools import resolve_config_provider_id
+    from mms_commands.tools import resolve_config_provider_id
 
     return resolve_config_provider_id(provider_defs, provider_id)
 
 
 def _config_truthy(value, default=False):
-    from mms_command_tools import config_truthy
+    from mms_commands.tools import config_truthy
 
     return config_truthy(value, default=default)
 
 
 def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", explicit_provider_id=""):
-    from mms_command_tools import vision_sidecar_candidate_pairs
+    from mms_commands.tools import vision_sidecar_candidate_pairs
 
     return vision_sidecar_candidate_pairs(
         raw,
@@ -2335,7 +2335,7 @@ def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", exp
 
 
 def _runtime_with_vision_sidecar(cfg, runtime):
-    from mms_command_tools import runtime_with_vision_sidecar
+    from mms_commands.tools import runtime_with_vision_sidecar
 
     return runtime_with_vision_sidecar(
         cfg,
@@ -2352,13 +2352,13 @@ def _runtime_with_vision_sidecar(cfg, runtime):
 
 
 def _account_label(account):
-    from mms_command_tools import account_label
+    from mms_commands.tools import account_label
 
     return account_label(account)
 
 
 def _account_env(account):
-    from mms_command_tools import account_env
+    from mms_commands.tools import account_env
 
     return account_env(
         account,
@@ -2370,13 +2370,13 @@ def _account_env(account):
 
 
 def _account_status_command(cli_name):
-    from mms_command_tools import account_status_command
+    from mms_commands.tools import account_status_command
 
     return account_status_command(cli_name)
 
 
 def _probe_account_status(account):
-    from mms_command_tools import probe_account_status
+    from mms_commands.tools import probe_account_status
 
     return probe_account_status(
         account,
@@ -2390,7 +2390,7 @@ def _probe_account_status(account):
 
 
 def _run_account_login(account):
-    from mms_command_tools import run_account_login
+    from mms_commands.tools import run_account_login
 
     return run_account_login(
         account,
@@ -2403,7 +2403,7 @@ def _run_account_login(account):
 
 
 def _ensure_interactive_terminal(action_hint):
-    from mms_command_tools import ensure_interactive_terminal
+    from mms_commands.tools import ensure_interactive_terminal
 
     return ensure_interactive_terminal(
         action_hint,
@@ -2416,13 +2416,13 @@ def _ensure_interactive_terminal(action_hint):
 
 
 def _parse_csv_values(raw_value, allowed_values=None):
-    from mms_command_tools import parse_csv_values
+    from mms_commands.tools import parse_csv_values
 
     return parse_csv_values(raw_value, allowed_values=allowed_values, console=console)
 
 
 def _prompt_csv_values(label, default_values, allowed_values):
-    from mms_command_tools import prompt_csv_values
+    from mms_commands.tools import prompt_csv_values
 
     return prompt_csv_values(
         label,
@@ -2437,13 +2437,13 @@ def _prompt_csv_values(label, default_values, allowed_values):
 
 
 def _upsert_provider(cfg, provider):
-    from mms_command_tools import upsert_provider
+    from mms_commands.tools import upsert_provider
 
     return upsert_provider(cfg, provider, ensure_provider_config=_ensure_provider_config)
 
 
 def _delete_provider_credentials(provider_id):
-    from mms_command_tools import delete_provider_credentials
+    from mms_commands.tools import delete_provider_credentials
 
     return delete_provider_credentials(
         provider_id,
@@ -2460,7 +2460,7 @@ def _delete_provider_credentials(provider_id):
 
 
 def _prompt_provider_metadata(existing=None, preset_id=None):
-    from mms_command_tools import prompt_provider_metadata
+    from mms_commands.tools import prompt_provider_metadata
 
     return prompt_provider_metadata(
         existing,
@@ -2484,19 +2484,19 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
 
 
 def _provider_template_payload(template_key):
-    from mms_command_tools import provider_template_payload
+    from mms_commands.tools import provider_template_payload
 
     return provider_template_payload(template_key, provider_templates=PROVIDER_TEMPLATES)
 
 
 def _select_provider_template(preset_id=None):
-    from mms_command_tools import select_provider_template
+    from mms_commands.tools import select_provider_template
 
     return select_provider_template(preset_id, console=console)
 
 
 def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
-    from mms_command_tools import prompt_account_metadata
+    from mms_commands.tools import prompt_account_metadata
 
     return prompt_account_metadata(
         existing,
@@ -2519,7 +2519,7 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
 
 
 def _prompt_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
-    from mms_command_tools import prompt_provider_credentials
+    from mms_commands.tools import prompt_provider_credentials
 
     return prompt_provider_credentials(
         provider,
@@ -2540,7 +2540,7 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
 
 
 def _save_provider_credentials_with_probe(provider, base_url, api_key, openai_base_url="", anthropic_base_url=""):
-    from mms_command_tools import save_provider_credentials_with_probe
+    from mms_commands.tools import save_provider_credentials_with_probe
 
     return save_provider_credentials_with_probe(
         provider,
@@ -2558,7 +2558,7 @@ def _save_provider_credentials_with_probe(provider, base_url, api_key, openai_ba
 
 
 def _quick_connect_gateway(cfg, preset_id=None):
-    from mms_command_tools import quick_connect_gateway
+    from mms_commands.tools import quick_connect_gateway
 
     return quick_connect_gateway(
         cfg,
@@ -2592,7 +2592,7 @@ def _quick_connect_gateway(cfg, preset_id=None):
 
 
 def _quick_connect_official(cfg, preset_cli=None):
-    from mms_command_tools import quick_connect_official
+    from mms_commands.tools import quick_connect_official
 
     return quick_connect_official(
         cfg,
@@ -2623,13 +2623,13 @@ def _quick_connect_official(cfg, preset_cli=None):
 
 
 def _usage_rows_for_runtime(runtime_kind, runtime_id):
-    from mms_command_tools import usage_rows_for_runtime
+    from mms_commands.tools import usage_rows_for_runtime
 
     return usage_rows_for_runtime(runtime_kind, runtime_id, load_usage_stats=_load_usage_stats)
 
 
 def _usage_summary_for_runtime(runtime_kind, runtime_id):
-    from mms_command_tools import usage_summary_for_runtime
+    from mms_commands.tools import usage_summary_for_runtime
 
     return usage_summary_for_runtime(
         runtime_kind,
@@ -2639,7 +2639,7 @@ def _usage_summary_for_runtime(runtime_kind, runtime_id):
 
 
 def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", limit=80):
-    from mms_command_tools import rescue_route_fallback_model_candidates
+    from mms_commands.tools import rescue_route_fallback_model_candidates
 
     return rescue_route_fallback_model_candidates(
         config_dir,
@@ -2650,7 +2650,7 @@ def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="",
 
 
 def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
-    from mms_command_tools import rescue_fallback_model_candidates
+    from mms_commands.tools import rescue_fallback_model_candidates
 
     return rescue_fallback_model_candidates(
         cfg,
@@ -2662,25 +2662,25 @@ def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
 
 
 def _rescue_default_fallback(cfg):
-    from mms_command_tools import rescue_default_fallback
+    from mms_commands.tools import rescue_default_fallback
 
     return rescue_default_fallback(cfg)
 
 
 def _rescue_hot_fallback_enabled_cfg(cfg):
-    from mms_command_tools import rescue_hot_fallback_enabled_cfg
+    from mms_commands.tools import rescue_hot_fallback_enabled_cfg
 
     return rescue_hot_fallback_enabled_cfg(cfg, pref_bool=_pref_bool)
 
 
 def _set_rescue_default_fallback(cfg, *, model="", cli=""):
-    from mms_command_tools import set_rescue_default_fallback
+    from mms_commands.tools import set_rescue_default_fallback
 
     return set_rescue_default_fallback(cfg, model=model, cli=cli)
 
 
 def _set_rescue_hot_fallback_enabled(cfg, enabled=False):
-    from mms_command_tools import set_rescue_hot_fallback_enabled
+    from mms_commands.tools import set_rescue_hot_fallback_enabled
 
     return set_rescue_hot_fallback_enabled(cfg, enabled=enabled)
 
@@ -2690,14 +2690,14 @@ def _latest_rescue_hot_fallback_event():
         from mms_runtime.events import get_recent_events
     except Exception:
         return None
-    from mms_command_tools import latest_rescue_hot_fallback_event
+    from mms_commands.tools import latest_rescue_hot_fallback_event
 
     return latest_rescue_hot_fallback_event(get_recent_events=get_recent_events)
 
 
 def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None, hot_fallback_enabled=False):
     """Build the first Rescue settings page before drilling into packet history."""
-    from mms_command_tools import rescue_landing_tui_payload
+    from mms_commands.tools import rescue_landing_tui_payload
 
     return rescue_landing_tui_payload(
         default_label,
@@ -2709,7 +2709,7 @@ def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_ev
 
 def _registry_truth_tui_payload(status):
     """Build localized Registry Truth status/actions for the Settings detail page."""
-    from mms_command_tools import registry_truth_tui_payload
+    from mms_commands.tools import registry_truth_tui_payload
 
     return registry_truth_tui_payload(status, localize=_L)
 
@@ -2955,7 +2955,7 @@ def _model_source_status_tui_payload(summary):
 
 
 def _compact_tui_report_value(value, max_len=96):
-    from mms_command_tools import compact_tui_report_value
+    from mms_commands.tools import compact_tui_report_value
 
     return compact_tui_report_value(value, max_len=max_len)
 
@@ -2964,20 +2964,20 @@ _SETTINGS_RESULT_RENDERED_TUI = False
 
 
 def _settings_result_tui_available():
-    from mms_command_tools import settings_result_tui_available
+    from mms_commands.tools import settings_result_tui_available
 
     return settings_result_tui_available(env=os.environ, stdin=sys.stdin, stdout=sys.stdout)
 
 
 def _settings_result_tui_payload(title, rows, note="", *, ok=True):
-    from mms_command_tools import settings_result_tui_payload
+    from mms_commands.tools import settings_result_tui_payload
 
     return settings_result_tui_payload(title, rows, note, ok=ok, localize=_L)
 
 
 def _select_settings_result_tui(title, rows, note="", *, ok=True):
     from mms_tui import select_channel_action_tui
-    from mms_command_tools import select_settings_result_tui
+    from mms_commands.tools import select_settings_result_tui
 
     return select_settings_result_tui(
         title,
@@ -2991,7 +2991,7 @@ def _select_settings_result_tui(title, rows, note="", *, ok=True):
 
 def _print_settings_result_report(title, rows, note="", *, ok=True):
     global _SETTINGS_RESULT_RENDERED_TUI
-    from mms_command_tools import display_settings_result_report, print_settings_result_report
+    from mms_commands.tools import display_settings_result_report, print_settings_result_report
 
     def mark_tui_rendered():
         global _SETTINGS_RESULT_RENDERED_TUI
@@ -3017,7 +3017,7 @@ def _print_settings_result_report(title, rows, note="", *, ok=True):
 
 
 def _print_settings_error_report(title, exc):
-    from mms_command_tools import print_settings_error_report
+    from mms_commands.tools import print_settings_error_report
 
     return print_settings_error_report(
         title,
@@ -3028,7 +3028,7 @@ def _print_settings_error_report(title, exc):
 
 
 def _rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False):
-    from mms_command_tools import rescue_default_fallback_report_payload
+    from mms_commands.tools import rescue_default_fallback_report_payload
 
     return rescue_default_fallback_report_payload(
         model,
@@ -3039,93 +3039,93 @@ def _rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallbac
 
 
 def _rescue_hot_fallback_toggle_report_payload(enabled, *, has_default=True):
-    from mms_command_tools import rescue_hot_fallback_toggle_report_payload
+    from mms_commands.tools import rescue_hot_fallback_toggle_report_payload
 
     return rescue_hot_fallback_toggle_report_payload(enabled, has_default=has_default, localize=_L)
 
 
 def _rescue_demo_packet_report_payload(payload):
-    from mms_command_tools import rescue_demo_packet_report_payload
+    from mms_commands.tools import rescue_demo_packet_report_payload
 
     return rescue_demo_packet_report_payload(payload, localize=_L)
 
 
 def _rescue_paths_report_payload(selected_rescue):
-    from mms_command_tools import rescue_paths_report_payload
+    from mms_commands.tools import rescue_paths_report_payload
 
     return rescue_paths_report_payload(selected_rescue, localize=_L)
 
 
 def _rescue_handover_report_payload(handover, fallback_model):
-    from mms_command_tools import rescue_handover_report_payload
+    from mms_commands.tools import rescue_handover_report_payload
 
     return rescue_handover_report_payload(handover, fallback_model, localize=_L)
 
 
 def _registry_source_staleness_report_payload(summary):
-    from mms_command_tools import registry_source_staleness_report_payload
+    from mms_commands.tools import registry_source_staleness_report_payload
 
     return registry_source_staleness_report_payload(summary, localize=_L)
 
 
 def _registry_refresh_sources_report_payload(summary):
-    from mms_command_tools import registry_refresh_sources_report_payload
+    from mms_commands.tools import registry_refresh_sources_report_payload
 
     return registry_refresh_sources_report_payload(summary, localize=_L)
 
 
 def _registry_scheduled_refresh_report_payload(summary):
-    from mms_command_tools import registry_scheduled_refresh_report_payload
+    from mms_commands.tools import registry_scheduled_refresh_report_payload
 
     return registry_scheduled_refresh_report_payload(summary, localize=_L)
 
 
 def _registry_openrouter_fetch_report_payload(summary):
-    from mms_command_tools import registry_openrouter_fetch_report_payload
+    from mms_commands.tools import registry_openrouter_fetch_report_payload
 
     return registry_openrouter_fetch_report_payload(summary, localize=_L)
 
 
 def _registry_openrouter_diff_report_payload(summary):
-    from mms_command_tools import registry_openrouter_diff_report_payload
+    from mms_commands.tools import registry_openrouter_diff_report_payload
 
     return registry_openrouter_diff_report_payload(summary, localize=_L)
 
 
 def _registry_publish_approved_report_payload(summary):
-    from mms_command_tools import registry_publish_approved_report_payload
+    from mms_commands.tools import registry_publish_approved_report_payload
 
     return registry_publish_approved_report_payload(summary, localize=_L)
 
 
 def _registry_verify_approved_report_payload(summary):
-    from mms_command_tools import registry_verify_approved_report_payload
+    from mms_commands.tools import registry_verify_approved_report_payload
 
     return registry_verify_approved_report_payload(summary, localize=_L)
 
 
 def _registry_doctor_report_payload(status):
-    from mms_command_tools import registry_doctor_report_payload
+    from mms_commands.tools import registry_doctor_report_payload
 
     return registry_doctor_report_payload(status, localize=_L)
 
 
 def _about_tui_payload(about_snapshot):
     """Build localized About status/actions for the Settings detail page."""
-    from mms_command_tools import about_tui_payload
+    from mms_commands.tools import about_tui_payload
 
     return about_tui_payload(about_snapshot, config_path=CONFIG_PATH, localize=_L)
 
 
 def _snapshot_guard_tui_payload():
     """Build localized Snapshot Guard status/actions for the Settings detail page."""
-    from mms_command_tools import snapshot_guard_tui_payload
+    from mms_commands.tools import snapshot_guard_tui_payload
 
     return snapshot_guard_tui_payload(command_name=current_command(), localize=_L)
 
 
 def _display_runtime_usage(runtime_kind, runtime_id, title):
-    from mms_command_tools import display_runtime_usage
+    from mms_commands.tools import display_runtime_usage
 
     return display_runtime_usage(
         runtime_kind,
@@ -3142,7 +3142,7 @@ def _display_runtime_usage(runtime_kind, runtime_id, title):
 
 
 def _list_manage_targets(cfg):
-    from mms_command_tools import build_manage_targets
+    from mms_commands.tools import build_manage_targets
 
     default_provider_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
 
@@ -3156,7 +3156,7 @@ def _list_manage_targets(cfg):
 
 
 def _select_manage_target(cfg):
-    from mms_command_tools import select_manage_target, select_manage_target_fallback
+    from mms_commands.tools import select_manage_target, select_manage_target_fallback
 
     def select_target_tui(targets):
         from mms_tui import select_manage_target_tui
@@ -3180,7 +3180,7 @@ def _select_manage_target(cfg):
 
 
 def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hidden_models=None, models_endpoint=None):
-    from mms_command_tools import update_provider_model_overrides
+    from mms_commands.tools import update_provider_model_overrides
 
     return update_provider_model_overrides(
         cfg,
@@ -3199,7 +3199,7 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
 
 def _display_provider_model_table(provider, probe):
     from mms_runtime.speed_stats import get_speed_entry
-    from mms_command_tools import display_provider_model_table
+    from mms_commands.tools import display_provider_model_table
 
     _ensure_rich()
     return display_provider_model_table(
@@ -3219,7 +3219,7 @@ def _display_provider_model_table(provider, probe):
 
 def _pause_after_tui_report(prompt_text="按 Enter 返回"):
     global _SETTINGS_RESULT_RENDERED_TUI
-    from mms_command_tools import pause_after_tui_report
+    from mms_commands.tools import pause_after_tui_report
 
     def tui_rendered():
         return bool(_SETTINGS_RESULT_RENDERED_TUI)
@@ -3239,7 +3239,7 @@ def _pause_after_tui_report(prompt_text="按 Enter 返回"):
 
 
 def _manage_provider_models(cfg, provider_id):
-    from mms_command_tools import manage_provider_models
+    from mms_commands.tools import manage_provider_models
 
     def select_action_tui(title, info_lines, actions):
         from mms_tui import select_channel_action_tui
@@ -3267,7 +3267,7 @@ def _manage_provider_models(cfg, provider_id):
 
 
 def _select_provider_for_models(cfg):
-    from mms_command_tools import select_provider_for_models
+    from mms_commands.tools import select_provider_for_models
 
     return select_provider_for_models(
         cfg,
@@ -3279,19 +3279,19 @@ def _select_provider_for_models(cfg):
 
 
 def _select_provider_for_warm(cfg):
-    from mms_command_tools import select_provider_for_warm
+    from mms_commands.tools import select_provider_for_warm
 
     return select_provider_for_warm(cfg, select_provider_for_models=_select_provider_for_models)
 
 
 def _recent_models_for_provider(provider_id):
-    from mms_command_tools import recent_models_for_provider
+    from mms_commands.tools import recent_models_for_provider
 
     return recent_models_for_provider(provider_id, usage_rows_for_runtime=_usage_rows_for_runtime)
 
 
 def _pick_manual_models(models):
-    from mms_command_tools import pick_manual_models
+    from mms_commands.tools import pick_manual_models
 
     return pick_manual_models(
         models,
@@ -3302,7 +3302,7 @@ def _pick_manual_models(models):
 
 
 def _warm_model_request(provider, model_name):
-    from mms_command_tools import warm_model_request
+    from mms_commands.tools import warm_model_request
 
     def resolve_anthropic_base_url(provider, *, probe_model):
         from mms_launchers import _resolve_anthropic_base_url
@@ -3320,7 +3320,7 @@ def _warm_model_request(provider, model_name):
 
 
 def handle_warm_command(cfg, argv):
-    from mms_command_tools import handle_warm_command as handle_warm_command_impl
+    from mms_commands.tools import handle_warm_command as handle_warm_command_impl
 
     return handle_warm_command_impl(
         cfg,
@@ -3343,7 +3343,7 @@ def handle_warm_command(cfg, argv):
 
 
 def handle_models_command(cfg, argv):
-    from mms_command_tools import handle_models_command as handle_models_command_impl
+    from mms_commands.tools import handle_models_command as handle_models_command_impl
 
     return handle_models_command_impl(
         cfg,
@@ -3358,7 +3358,7 @@ def handle_models_command(cfg, argv):
 
 
 def _manage_provider_target(cfg, provider_id):
-    from mms_command_tools import manage_provider_target
+    from mms_commands.tools import manage_provider_target
 
     def select_action_tui(title, info_lines, actions):
         from mms_tui import select_channel_action_tui
@@ -3390,7 +3390,7 @@ def _manage_provider_target(cfg, provider_id):
 
 
 def _prompt_account_rename(cfg, account_id):
-    from mms_command_tools import prompt_account_rename
+    from mms_commands.tools import prompt_account_rename
 
     return prompt_account_rename(
         cfg,
@@ -3405,7 +3405,7 @@ def _prompt_account_rename(cfg, account_id):
 
 
 def _manage_account_target(cfg, account_id):
-    from mms_command_tools import manage_account_target
+    from mms_commands.tools import manage_account_target
 
     def select_action_tui(title, info_lines, actions):
         from mms_tui import select_channel_action_tui
@@ -3435,7 +3435,7 @@ def _manage_account_target(cfg, account_id):
 
 def _run_account_mgmt_tui(cfg):
     """账号管理：列表选择 + 详情操作。"""
-    from mms_command_tools import run_account_mgmt_tui
+    from mms_commands.tools import run_account_mgmt_tui
 
     def select_target_tui(targets):
         from mms_tui import select_manage_target_tui
@@ -3453,7 +3453,7 @@ def _run_account_mgmt_tui(cfg):
 
 def _run_recommend_mgmt_tui(cfg):
     """推荐模型管理：查看/添加/移除。"""
-    from mms_command_tools import run_recommend_mgmt_tui
+    from mms_commands.tools import run_recommend_mgmt_tui
 
     def load_select_channel_action_tui():
         from mms_tui import select_channel_action_tui
@@ -3471,7 +3471,7 @@ def _run_recommend_mgmt_tui(cfg):
 
 
 def run_manage_channels(cfg):
-    from mms_command_tools import run_manage_channels as run_manage_channels_impl
+    from mms_commands.tools import run_manage_channels as run_manage_channels_impl
 
     return run_manage_channels_impl(
         cfg,
@@ -3483,7 +3483,7 @@ def run_manage_channels(cfg):
 
 
 def run_connect_wizard(cfg):
-    from mms_command_tools import run_connect_wizard as run_connect_wizard_impl
+    from mms_commands.tools import run_connect_wizard as run_connect_wizard_impl
 
     def load_select_connect_tui():
         from mms_tui import select_connect_tui
@@ -3522,7 +3522,7 @@ def detect_working_base_url(configured_url, path, headers, body=None, timeout=5,
 
     返回：working_base_url (str) | None
     """
-    from mms_command_tools import detect_working_base_url as detect_working_base_url_impl
+    from mms_commands.tools import detect_working_base_url as detect_working_base_url_impl
 
     return detect_working_base_url_impl(
         configured_url,
@@ -3551,7 +3551,7 @@ _PROBE_ASYNC_LAST = {}
 
 
 def _probe_async_refresh_after(cfg=None):
-    from mms_command_tools import probe_async_refresh_after
+    from mms_commands.tools import probe_async_refresh_after
 
     return probe_async_refresh_after(
         cfg,
@@ -3561,7 +3561,7 @@ def _probe_async_refresh_after(cfg=None):
 
 
 def _probe_async_min_interval(cfg=None):
-    from mms_command_tools import probe_async_min_interval
+    from mms_commands.tools import probe_async_min_interval
 
     return probe_async_min_interval(
         cfg,
@@ -3571,13 +3571,13 @@ def _probe_async_min_interval(cfg=None):
 
 
 def _probe_file_cache_path(provider_id):
-    from mms_command_tools import probe_file_cache_path
+    from mms_commands.tools import probe_file_cache_path
 
     return probe_file_cache_path(provider_id, probe_file_cache_dir=_PROBE_FILE_CACHE_DIR)
 
 
 def _invalidate_probe_cache(provider_id):
-    from mms_command_tools import invalidate_probe_cache
+    from mms_commands.tools import invalidate_probe_cache
 
     return invalidate_probe_cache(
         provider_id,
@@ -3587,7 +3587,7 @@ def _invalidate_probe_cache(provider_id):
 
 
 def _probe_cache_age(provider_id):
-    from mms_command_tools import probe_cache_age
+    from mms_commands.tools import probe_cache_age
 
     return probe_cache_age(provider_id, probe_file_cache_path=_probe_file_cache_path)
 
@@ -3598,7 +3598,7 @@ def _load_probe_file_cache(provider_id, allow_stale=False):
     默认仅在 TTL 内返回；allow_stale=True 时，允许读取过期缓存，
     适合启动/TUI 首屏阶段先快速展示，再由后台预热异步刷新。
     """
-    from mms_command_tools import load_probe_file_cache
+    from mms_commands.tools import load_probe_file_cache
 
     return load_probe_file_cache(
         provider_id,
@@ -3616,7 +3616,7 @@ def _save_probe_file_cache(provider_id, result):
     remote 成功结果、fallback/manual 模型结果、负缓存都应落盘，
     避免模型选择页反复慢探测。
     """
-    from mms_command_tools import save_probe_file_cache
+    from mms_commands.tools import save_probe_file_cache
 
     return save_probe_file_cache(
         provider_id,
@@ -3627,13 +3627,13 @@ def _save_probe_file_cache(provider_id, result):
 
 
 def _base_probe_result_from_cache(provider_id, file_cached):
-    from mms_command_tools import base_probe_result_from_cache
+    from mms_commands.tools import base_probe_result_from_cache
 
     return base_probe_result_from_cache(provider_id, file_cached)
 
 
 def _ensure_probe_async_executor():
-    from mms_command_tools import ensure_probe_async_executor
+    from mms_commands.tools import ensure_probe_async_executor
 
     def set_executor(value):
         global _PROBE_ASYNC_EXECUTOR
@@ -3652,7 +3652,7 @@ def _ensure_probe_async_executor():
 
 
 def _schedule_probe_refresh(provider, cfg=None, *, reason="stale"):
-    from mms_command_tools import schedule_probe_refresh
+    from mms_commands.tools import schedule_probe_refresh
 
     return schedule_probe_refresh(
         provider,
@@ -3670,7 +3670,7 @@ def _schedule_probe_refresh(provider, cfg=None, *, reason="stale"):
 
 
 def _probe_models_for_startup(cfg, provider, emit_output=True):
-    from mms_command_tools import probe_models_for_startup
+    from mms_commands.tools import probe_models_for_startup
 
     return probe_models_for_startup(
         cfg,
@@ -3690,13 +3690,13 @@ def _probe_models_for_startup(cfg, provider, emit_output=True):
 
 
 def _provider_supports_mimo_anthropic_selectors(provider):
-    from mms_command_tools import provider_supports_mimo_anthropic_selectors
+    from mms_commands.tools import provider_supports_mimo_anthropic_selectors
 
     return provider_supports_mimo_anthropic_selectors(provider)
 
 
 def _derived_model_aliases(base_models, provider=None):
-    from mms_command_tools import derived_model_aliases
+    from mms_commands.tools import derived_model_aliases
 
     return derived_model_aliases(
         base_models,
@@ -3706,7 +3706,7 @@ def _derived_model_aliases(base_models, provider=None):
 
 
 def _apply_provider_model_patch(provider, base_result):
-    from mms_command_tools import apply_provider_model_patch
+    from mms_commands.tools import apply_provider_model_patch
 
     return apply_provider_model_patch(
         provider,
@@ -3717,7 +3717,7 @@ def _apply_provider_model_patch(provider, base_result):
 
 
 def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=False):
-    from mms_command_tools import probe_models
+    from mms_commands.tools import probe_models
 
     return probe_models(
         provider,
@@ -3747,7 +3747,7 @@ def _warm_probe_cache_async(cfg, default_provider):
 
     无缓存或缓存过旧的 provider 会被刷新，但不会阻塞当前启动。
     """
-    from mms_command_tools import warm_probe_cache_async
+    from mms_commands.tools import warm_probe_cache_async
 
     return warm_probe_cache_async(
         cfg,
@@ -3760,31 +3760,31 @@ def _warm_probe_cache_async(cfg, default_provider):
 
 
 def fetch_models(provider):
-    from mms_command_tools import fetch_models as fetch_models_helper
+    from mms_commands.tools import fetch_models as fetch_models_helper
 
     return fetch_models_helper(provider, probe_models=_probe_models)
 
 
 def _model_validation_findings(provider, probe):
-    from mms_command_tools import model_validation_findings
+    from mms_commands.tools import model_validation_findings
 
     return model_validation_findings(provider, probe, provider_label=_provider_label)
 
 
 def _build_model_recovery_actions(cfg, provider, probe):
-    from mms_command_tools import build_model_recovery_actions
+    from mms_commands.tools import build_model_recovery_actions
 
     return build_model_recovery_actions(cfg, provider, probe, provider_map=_provider_map)
 
 
 def _print_model_probe_details(probe):
-    from mms_command_tools import display_model_probe_details
+    from mms_commands.tools import display_model_probe_details
 
     return display_model_probe_details(probe, panel_cls=Panel, console=console)
 
 
 def _select_provider_interactive(cfg, current_provider_id):
-    from mms_command_tools import select_provider_interactive
+    from mms_commands.tools import select_provider_interactive
 
     return select_provider_interactive(
         cfg,
@@ -3804,7 +3804,7 @@ def _pick_recovery_actions(findings, actions):
             from mms_tui import select_actions_tui
         except ImportError:
             select_actions_tui = None
-    from mms_command_tools import pick_recovery_actions
+    from mms_commands.tools import pick_recovery_actions
 
     return pick_recovery_actions(
         findings,
@@ -3818,7 +3818,7 @@ def _pick_recovery_actions(findings, actions):
 
 
 def _run_recovery_action(cfg, provider, probe, action_id):
-    from mms_command_tools import run_recovery_action
+    from mms_commands.tools import run_recovery_action
 
     return run_recovery_action(
         cfg,
@@ -3833,7 +3833,7 @@ def _run_recovery_action(cfg, provider, probe, action_id):
 
 
 def setup_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
-    from mms_command_tools import setup_provider_credentials as setup_provider_credentials_helper
+    from mms_commands.tools import setup_provider_credentials as setup_provider_credentials_helper
 
     return setup_provider_credentials_helper(
         provider,
@@ -3846,7 +3846,7 @@ def setup_provider_credentials(provider, existing_base_url="", existing_api_key=
 
 
 def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=False):
-    from mms_command_tools import setup_api_credentials as setup_api_credentials_helper
+    from mms_commands.tools import setup_api_credentials as setup_api_credentials_helper
 
     return setup_api_credentials_helper(
         existing_base_url,
@@ -3858,7 +3858,7 @@ def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=
 
 
 def ensure_provider_credentials(cfg, provider_id=None):
-    from mms_command_tools import ensure_provider_credentials as ensure_provider_credentials_helper
+    from mms_commands.tools import ensure_provider_credentials as ensure_provider_credentials_helper
 
     return ensure_provider_credentials_helper(
         cfg,
@@ -3871,7 +3871,7 @@ def ensure_provider_credentials(cfg, provider_id=None):
 
 
 def ensure_api_credentials():
-    from mms_command_tools import ensure_api_credentials as ensure_api_credentials_helper
+    from mms_commands.tools import ensure_api_credentials as ensure_api_credentials_helper
 
     return ensure_api_credentials_helper(
         default_config=_default_config,
@@ -3880,7 +3880,7 @@ def ensure_api_credentials():
 
 
 def setup_wizard(ui_language=None):
-    from mms_command_tools import setup_wizard as setup_wizard_impl
+    from mms_commands.tools import setup_wizard as setup_wizard_impl
 
     return setup_wizard_impl(
         ui_language,
@@ -3904,7 +3904,7 @@ def setup_wizard(ui_language=None):
 # ── Model Fetching ──────────────────────────────────────
 
 def ensure_models_ready(cfg, provider):
-    from mms_command_tools import ensure_models_ready as ensure_models_ready_helper
+    from mms_commands.tools import ensure_models_ready as ensure_models_ready_helper
 
     return ensure_models_ready_helper(
         cfg,
@@ -3927,7 +3927,7 @@ def ensure_models_ready(cfg, provider):
 
 
 def categorize_models(models):
-    from mms_command_tools import categorize_models as categorize_models_impl
+    from mms_commands.tools import categorize_models as categorize_models_impl
 
     return categorize_models_impl(
         models,
@@ -3938,7 +3938,7 @@ def categorize_models(models):
 
 def display_models(models, role=MODE_ALL, recommend=None):
     _ensure_rich()
-    from mms_command_tools import display_models as display_models_impl
+    from mms_commands.tools import display_models as display_models_impl
 
     return display_models_impl(
         models,
@@ -3956,7 +3956,7 @@ def display_models(models, role=MODE_ALL, recommend=None):
 
 
 def _filter_models_for_display(models, role=MODE_ALL, recommend=None):
-    from mms_command_tools import filter_models_for_display
+    from mms_commands.tools import filter_models_for_display
 
     return filter_models_for_display(
         models,
@@ -3969,7 +3969,7 @@ def _filter_models_for_display(models, role=MODE_ALL, recommend=None):
 
 
 def _group_models_for_custom(models, role=MODE_ALL, recommend=None):
-    from mms_command_tools import group_models_for_custom
+    from mms_commands.tools import group_models_for_custom
 
     return group_models_for_custom(
         models,
@@ -3981,7 +3981,7 @@ def _group_models_for_custom(models, role=MODE_ALL, recommend=None):
 
 
 def _group_models_by_family_and_provider(aggregated_models, role=MODE_ALL, recommend=None):
-    from mms_command_tools import group_models_by_family_and_provider
+    from mms_commands.tools import group_models_by_family_and_provider
 
     return group_models_by_family_and_provider(
         aggregated_models,
@@ -3993,7 +3993,7 @@ def _group_models_by_family_and_provider(aggregated_models, role=MODE_ALL, recom
 
 
 def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tui=False, cfg=None, default_provider=None, default_models=None):
-    from mms_command_tools import select_custom_model
+    from mms_commands.tools import select_custom_model
 
     return select_custom_model(
         models,
@@ -4011,25 +4011,25 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
 
 
 def _ensure_models_cache_available(models_cache):
-    from mms_command_tools import ensure_models_cache_available
+    from mms_commands.tools import ensure_models_cache_available
 
     return ensure_models_cache_available(models_cache, console=console)
 
 
 def _model_matches_account_cli(cli_name, model_name):
-    from mms_command_tools import model_matches_account_cli
+    from mms_commands.tools import model_matches_account_cli
 
     return model_matches_account_cli(cli_name, model_name)
 
 
 def _provider_supports_cli_name(provider, cli_name):
-    from mms_command_tools import provider_supports_cli_name
+    from mms_commands.tools import provider_supports_cli_name
 
     return provider_supports_cli_name(provider, cli_name)
 
 
 def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
-    from mms_command_tools import provider_supports_model_for_cli
+    from mms_commands.tools import provider_supports_model_for_cli
     from mms_launchers import _pi_model_available_for_runtime
 
     return provider_supports_model_for_cli(
@@ -4044,7 +4044,7 @@ def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
 
 
 def _provider_candidates(cfg, default_provider, default_models):
-    from mms_command_tools import provider_candidates
+    from mms_commands.tools import provider_candidates
 
     return provider_candidates(
         cfg,
@@ -4056,7 +4056,7 @@ def _provider_candidates(cfg, default_provider, default_models):
 
 
 def _provider_models_for_cli(cli_name, models, provider=None):
-    from mms_command_tools import provider_models_for_cli
+    from mms_commands.tools import provider_models_for_cli
     from mms_launchers import _pi_model_available_for_runtime
 
     return provider_models_for_cli(
@@ -4069,7 +4069,7 @@ def _provider_models_for_cli(cli_name, models, provider=None):
 
 
 def _provider_effective_models(provider, cached_models, cfg=None):
-    from mms_command_tools import provider_effective_models
+    from mms_commands.tools import provider_effective_models
 
     return provider_effective_models(
         provider,
@@ -4081,7 +4081,7 @@ def _provider_effective_models(provider, cached_models, cfg=None):
 
 
 def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
-    from mms_command_tools import aggregate_provider_models
+    from mms_commands.tools import aggregate_provider_models
 
     return aggregate_provider_models(
         cfg,
@@ -4100,7 +4100,7 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
 
 def _resolve_best_provider(cfg, model_name, default_provider, default_models,
                            cli_name=None, protocol=None):
-    from mms_command_tools import resolve_best_provider
+    from mms_commands.tools import resolve_best_provider
 
     return resolve_best_provider(
         cfg,
@@ -4123,7 +4123,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
 
 
 def _build_model_families_for_cli(cfg, cli_name, default_provider, default_models):
-    from mms_command_tools import build_model_families_for_cli
+    from mms_commands.tools import build_model_families_for_cli
 
     return build_model_families_for_cli(
         cfg,
@@ -4147,7 +4147,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
 
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
-    from mms_command_tools import provider_options_for_model
+    from mms_commands.tools import provider_options_for_model
 
     return provider_options_for_model(
         cfg,
@@ -4173,7 +4173,7 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
 
 
 def _account_options_for_model(cfg, cli_name, default_models, model_info=None, allow_selected_model=False):
-    from mms_command_tools import account_options_for_model
+    from mms_commands.tools import account_options_for_model
 
     return account_options_for_model(
         cfg,
@@ -4199,7 +4199,7 @@ def _broker_options_for_cli(cfg, cli_name, model_info=None):
 
 
 def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
-    from mms_command_tools import resolve_provider_for_cli
+    from mms_commands.tools import resolve_provider_for_cli
 
     return resolve_provider_for_cli(
         cfg, cli_name, default_provider, default_models,
@@ -4208,13 +4208,13 @@ def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
 
 
 def _resolve_source_default_index(options, preferred_cli):
-    from mms_command_tools import resolve_source_default_index
+    from mms_commands.tools import resolve_source_default_index
 
     return resolve_source_default_index(options, preferred_cli)
 
 
 def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
-    from mms_command_tools import resolve_launch_runtime
+    from mms_commands.tools import resolve_launch_runtime
 
     return resolve_launch_runtime(
         cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id,
@@ -4225,13 +4225,13 @@ def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, acc
 
 
 def _runtime_choice_label(runtime):
-    from mms_command_tools import runtime_choice_label
+    from mms_commands.tools import runtime_choice_label
 
     return runtime_choice_label(runtime, account_label=_account_label, provider_label=_provider_label)
 
 
 def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model_info=None, allow_selected_model_accounts=False):
-    from mms_command_tools import list_runtime_sources
+    from mms_commands.tools import list_runtime_sources
 
     return list_runtime_sources(
         cfg,
@@ -4249,7 +4249,7 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model
 
 
 def _runtime_source_kind_label(runtime):
-    from mms_command_tools import runtime_source_kind_label
+    from mms_commands.tools import runtime_source_kind_label
 
     return runtime_source_kind_label(runtime)
 
@@ -4264,7 +4264,7 @@ def _choose_runtime_source(
     model_info=None,
     allow_selected_model_accounts=False,
 ):
-    from mms_command_tools import choose_runtime_source
+    from mms_commands.tools import choose_runtime_source
 
     return choose_runtime_source(
         cfg,
@@ -4290,7 +4290,7 @@ def _choose_runtime_source(
 
 
 def _resolve_direct_cli_launch_default(cli_name, cfg, default_provider, default_models):
-    from mms_command_tools import resolve_direct_cli_launch_default
+    from mms_commands.tools import resolve_direct_cli_launch_default
 
     return resolve_direct_cli_launch_default(
         cli_name,
@@ -4304,7 +4304,7 @@ def _resolve_direct_cli_launch_default(cli_name, cfg, default_provider, default_
 
 
 def _resolve_visible_clis(cfg, default_provider, default_models):
-    from mms_command_tools import resolve_visible_clis
+    from mms_commands.tools import resolve_visible_clis
 
     return resolve_visible_clis(
         cfg,
@@ -4320,13 +4320,13 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
 
 
 def _clean_model_info(model_info):
-    from mms_command_tools import clean_model_info
+    from mms_commands.tools import clean_model_info
 
     return clean_model_info(model_info)
 
 
 def select_model_interactive(models_list):
-    from mms_command_tools import select_model_interactive as select_model_interactive_helper
+    from mms_commands.tools import select_model_interactive as select_model_interactive_helper
 
     return select_model_interactive_helper(
         models_list,
@@ -4450,7 +4450,7 @@ def _select_opencode_profile(use_tui=False):
 
 
 def _opencode_default_profile_from_config(cfg):
-    from mms_command_tools import opencode_default_profile_from_config
+    from mms_commands.tools import opencode_default_profile_from_config
 
     return opencode_default_profile_from_config(
         cfg,
@@ -4475,7 +4475,7 @@ def _opencode_route_health_allows_route(row, *, now=None):
 
 
 def _opencode_resolver_deps():
-    from mms_command_tools import build_opencode_resolver_deps
+    from mms_commands.tools import build_opencode_resolver_deps
 
     return build_opencode_resolver_deps(
         resolver_deps_cls=_OpenCodeResolverDeps,
@@ -4514,7 +4514,7 @@ def _find_opencode_model_route(
     profile_id=_OPENCODE_AGENT_PROFILE_ID,
     provider_id="",
 ):
-    from mms_command_tools import find_opencode_model_route
+    from mms_commands.tools import find_opencode_model_route
 
     return find_opencode_model_route(
         cfg,
@@ -4552,7 +4552,7 @@ def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
 
 
 def save_preset_interactive(cfg, cli, model_info):
-    from mms_command_tools import save_preset_interactive as save_preset_interactive_helper
+    from mms_commands.tools import save_preset_interactive as save_preset_interactive_helper
 
     return save_preset_interactive_helper(
         cfg,
@@ -4566,25 +4566,25 @@ def save_preset_interactive(cfg, cli, model_info):
 
 
 def _uses_native_account_entry(runtime, cli):
-    from mms_command_tools import uses_native_account_entry
+    from mms_commands.tools import uses_native_account_entry
 
     return uses_native_account_entry(runtime, cli, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
 
 
 def _uses_broker_entry(runtime, cli):
-    from mms_command_tools import uses_broker_entry
+    from mms_commands.tools import uses_broker_entry
 
     return uses_broker_entry(runtime, cli)
 
 
 def _uses_managed_entry(runtime, cli):
-    from mms_command_tools import uses_managed_entry
+    from mms_commands.tools import uses_managed_entry
 
     return uses_managed_entry(runtime, cli, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
 
 
 def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, role, recommend):
-    from mms_command_tools import resolve_interactive_launch_model
+    from mms_commands.tools import resolve_interactive_launch_model
 
     return resolve_interactive_launch_model(
         cli,
@@ -4603,25 +4603,25 @@ def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, ro
 
 
 def _preset_model_info(preset):
-    from mms_command_tools import preset_model_info
+    from mms_commands.tools import preset_model_info
 
     return preset_model_info(preset)
 
 
 def _emit_preset_error(message, *, stderr_only=False):
-    from mms_command_tools import emit_preset_error
+    from mms_commands.tools import emit_preset_error
 
     return emit_preset_error(message, stderr_only=stderr_only, console=console)
 
 
 def _preset_env_file_path(preset_name):
-    from mms_command_tools import preset_env_file_path
+    from mms_commands.tools import preset_env_file_path
 
     return preset_env_file_path(preset_name, env_dir=ENV_DIR)
 
 
 def _resolve_named_preset(cfg, preset_name, *, stderr_only=False):
-    from mms_command_tools import resolve_named_preset
+    from mms_commands.tools import resolve_named_preset
 
     return resolve_named_preset(
         cfg,
@@ -4633,19 +4633,19 @@ def _resolve_named_preset(cfg, preset_name, *, stderr_only=False):
 
 
 def _infer_preset_auth_mode(preset):
-    from mms_command_tools import infer_preset_auth_mode
+    from mms_commands.tools import infer_preset_auth_mode
 
     return infer_preset_auth_mode(preset)
 
 
 def _available_broker_profiles_for_cli(cfg, cli_name):
-    from mms_command_tools import available_broker_profiles_for_cli
+    from mms_commands.tools import available_broker_profiles_for_cli
 
     return available_broker_profiles_for_cli(cfg, cli_name)
 
 
 def _broker_enabled_by_cli(cfg, cli_names):
-    from mms_command_tools import broker_enabled_by_cli
+    from mms_commands.tools import broker_enabled_by_cli
 
     return broker_enabled_by_cli(
         cfg,
@@ -4655,7 +4655,7 @@ def _broker_enabled_by_cli(cfg, cli_names):
 
 
 def _select_broker_profile_interactive(cfg, cli_name):
-    from mms_command_tools import select_broker_profile_interactive
+    from mms_commands.tools import select_broker_profile_interactive
 
     return select_broker_profile_interactive(
         cfg,
@@ -4669,7 +4669,7 @@ def _select_broker_profile_interactive(cfg, cli_name):
 
 
 def _launch_broker_experiment_interactive(cfg, cli_name):
-    from mms_command_tools import launch_broker_experiment_interactive
+    from mms_commands.tools import launch_broker_experiment_interactive
 
     return launch_broker_experiment_interactive(
         cfg,
@@ -4683,14 +4683,14 @@ def _launch_broker_experiment_interactive(cfg, cli_name):
 # ── CLI Selection (fallback) ───────────────────────────
 
 def check_cli_installed(cli_name):
-    from mms_command_tools import check_cli_installed as check_cli_installed_helper
+    from mms_commands.tools import check_cli_installed as check_cli_installed_helper
     from mms_runtime import resolve_cli_binary
 
     return check_cli_installed_helper(cli_name, resolve_cli_binary=resolve_cli_binary)
 
 
 def select_cli(cli_names=None):
-    from mms_command_tools import select_cli as select_cli_helper
+    from mms_commands.tools import select_cli as select_cli_helper
     from mms_launcher.installer import check_and_offer_install
 
     cli_names = cli_names or CLI_NAMES
@@ -4709,7 +4709,7 @@ def select_cli(cli_names=None):
 
 def _use_tui():
     """判断是否可以使用 curses TUI"""
-    from mms_command_tools import use_tui
+    from mms_commands.tools import use_tui
 
     return use_tui(sys.stdin, os.get_terminal_size)
 
@@ -4724,13 +4724,13 @@ _FAMILY_COLD_IDLE_DAYS = 21
 
 
 def _sort_family_entries_for_tui(families, preferred_family="", now=None):
-    from mms_command_tools import sort_family_entries_for_tui
+    from mms_commands.tools import sort_family_entries_for_tui
 
     return sort_family_entries_for_tui(families, preferred_family=preferred_family, now=now)
 
 
 def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferred_family=""):
-    from mms_command_tools import family_is_cold_for_tui
+    from mms_commands.tools import family_is_cold_for_tui
 
     return family_is_cold_for_tui(
         family_name,
@@ -4744,7 +4744,7 @@ def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferre
 
 
 def _build_provider_options_map(cfg, cli_name, default_provider, default_models, model_names):
-    from mms_command_tools import build_provider_options_map
+    from mms_commands.tools import build_provider_options_map
 
     return build_provider_options_map(
         cfg,
@@ -4765,7 +4765,7 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
 
 
 def _make_provider_options_loader(cfg, cli_name, default_provider, default_models):
-    from mms_command_tools import make_provider_options_loader
+    from mms_commands.tools import make_provider_options_loader
 
     return make_provider_options_loader(
         cfg,
@@ -4777,7 +4777,7 @@ def _make_provider_options_loader(cfg, cli_name, default_provider, default_model
 
 
 def _apply_runtime_priority_changes(cfg, pri_changes):
-    from mms_command_tools import apply_runtime_priority_changes
+    from mms_commands.tools import apply_runtime_priority_changes
 
     return apply_runtime_priority_changes(
         cfg,
@@ -4807,7 +4807,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
 def handle_export(cli_name, provider, apply=False):
     """输出指定 CLI 的 export 命令，或写入独立 env 文件。"""
-    from mms_command_tools import handle_export as handle_export_impl
+    from mms_commands.tools import handle_export as handle_export_impl
     from mms_launchers import get_export_env
 
     return handle_export_impl(
@@ -4832,7 +4832,7 @@ def _resolve_preset_export_runtime(cfg, preset, provider_override=None, *, stder
 
     返回 (cli, exports_dict, runtime) 或 None（如果不可导出）。
     """
-    from mms_command_tools import resolve_preset_export_runtime
+    from mms_commands.tools import resolve_preset_export_runtime
     from mms_launchers import get_export_env, validate_provider_for_cli
 
     return resolve_preset_export_runtime(
@@ -4850,7 +4850,7 @@ def _resolve_preset_export_runtime(cfg, preset, provider_override=None, *, stder
 
 
 def handle_env_command(cfg, argv):
-    from mms_command_tools import handle_env_command as handle_env_command_impl
+    from mms_commands.tools import handle_env_command as handle_env_command_impl
 
     return handle_env_command_impl(
         cfg,
@@ -4866,7 +4866,7 @@ def handle_env_command(cfg, argv):
 
 
 def handle_activate_command(cfg, argv):
-    from mms_command_tools import handle_activate_command as handle_activate_command_impl
+    from mms_commands.tools import handle_activate_command as handle_activate_command_impl
 
     return handle_activate_command_impl(
         cfg,
@@ -4881,7 +4881,7 @@ def handle_activate_command(cfg, argv):
 
 def handle_config(cfg, args_rest):
     """处理 config 子命令"""
-    from mms_command_tools import handle_config as handle_config_impl
+    from mms_commands.tools import handle_config as handle_config_impl
 
     def _run_config_web(*args, **kwargs):
         from mms_config_web import run_config_web
@@ -4935,7 +4935,7 @@ def handle_config(cfg, args_rest):
 
 
 def _handle_api_config(key_path, args_rest):
-    from mms_command_tools import handle_api_config
+    from mms_commands.tools import handle_api_config
 
     return handle_api_config(
         key_path,
@@ -4959,7 +4959,7 @@ def _validate_user_role(raw_value):
 
 
 def _handle_provider_default_config(cfg, args_rest):
-    from mms_command_tools import handle_provider_default_config
+    from mms_commands.tools import handle_provider_default_config
 
     return handle_provider_default_config(
         cfg,
@@ -4973,7 +4973,7 @@ def _handle_provider_default_config(cfg, args_rest):
 
 
 def _handle_provider_add_config(cfg, args_rest):
-    from mms_command_tools import handle_provider_add_config
+    from mms_commands.tools import handle_provider_add_config
 
     return handle_provider_add_config(
         cfg,
@@ -4983,7 +4983,7 @@ def _handle_provider_add_config(cfg, args_rest):
 
 
 def _handle_provider_edit_config(cfg, args_rest):
-    from mms_command_tools import handle_provider_edit_config
+    from mms_commands.tools import handle_provider_edit_config
 
     return handle_provider_edit_config(
         cfg,
@@ -5000,7 +5000,7 @@ def _handle_provider_edit_config(cfg, args_rest):
 
 
 def _handle_provider_remove_config(cfg, args_rest):
-    from mms_command_tools import handle_provider_remove_config
+    from mms_commands.tools import handle_provider_remove_config
 
     return handle_provider_remove_config(
         cfg,
@@ -5019,7 +5019,7 @@ def _handle_provider_remove_config(cfg, args_rest):
 
 
 def _handle_provider_credentials_config(cfg, args_rest):
-    from mms_command_tools import handle_provider_credentials_config
+    from mms_commands.tools import handle_provider_credentials_config
 
     return handle_provider_credentials_config(
         cfg,
@@ -5033,13 +5033,13 @@ def _handle_provider_credentials_config(cfg, args_rest):
 
 
 def _provider_looks_openrouter(provider):
-    from mms_command_tools import provider_looks_openrouter
+    from mms_commands.tools import provider_looks_openrouter
 
     return provider_looks_openrouter(provider)
 
 
 def _openrouter_provider_candidates(cfg):
-    from mms_command_tools import openrouter_provider_candidates
+    from mms_commands.tools import openrouter_provider_candidates
 
     return openrouter_provider_candidates(
         cfg,
@@ -5049,19 +5049,19 @@ def _openrouter_provider_candidates(cfg):
 
 
 def _parse_openrouter_extension_args(args_rest):
-    from mms_command_tools import parse_openrouter_extension_args
+    from mms_commands.tools import parse_openrouter_extension_args
 
     return parse_openrouter_extension_args(args_rest)
 
 
 def _display_openrouter_extension_help():
-    from mms_command_tools import display_openrouter_extension_help
+    from mms_commands.tools import display_openrouter_extension_help
 
     return display_openrouter_extension_help(current_command(), console=console)
 
 
 def _openrouter_extension_provider(cfg, provider_id=""):
-    from mms_command_tools import openrouter_extension_provider
+    from mms_commands.tools import openrouter_extension_provider
 
     return openrouter_extension_provider(
         cfg,
@@ -5074,7 +5074,7 @@ def _openrouter_extension_provider(cfg, provider_id=""):
 
 
 def _display_openrouter_extension_summary(summary, *, provider_label="", limit=12, show_models=False):
-    from mms_command_tools import display_openrouter_extension_summary
+    from mms_commands.tools import display_openrouter_extension_summary
 
     _ensure_rich()
     return display_openrouter_extension_summary(
@@ -5092,7 +5092,7 @@ def _handle_openrouter_extension_config(cfg, args_rest):
         openrouter_api_key_from_env,
         probe_openrouter_extension,
     )
-    from mms_command_tools import handle_openrouter_extension_config
+    from mms_commands.tools import handle_openrouter_extension_config
 
     return handle_openrouter_extension_config(
         cfg,
@@ -5109,7 +5109,7 @@ def _handle_openrouter_extension_config(cfg, args_rest):
 
 
 def _handle_account_default_config(cfg, args_rest):
-    from mms_command_tools import handle_account_default_config
+    from mms_commands.tools import handle_account_default_config
 
     return handle_account_default_config(
         cfg,
@@ -5124,7 +5124,7 @@ def _handle_account_default_config(cfg, args_rest):
 
 
 def _handle_account_add_config(cfg, args_rest):
-    from mms_command_tools import handle_account_add_config
+    from mms_commands.tools import handle_account_add_config
 
     return handle_account_add_config(
         cfg,
@@ -5137,7 +5137,7 @@ def _handle_account_add_config(cfg, args_rest):
 
 
 def _handle_account_edit_config(cfg, args_rest):
-    from mms_command_tools import handle_account_edit_config
+    from mms_commands.tools import handle_account_edit_config
 
     return handle_account_edit_config(
         cfg,
@@ -5153,7 +5153,7 @@ def _handle_account_edit_config(cfg, args_rest):
 
 
 def _handle_account_remove_config(cfg, args_rest):
-    from mms_command_tools import handle_account_remove_config
+    from mms_commands.tools import handle_account_remove_config
 
     return handle_account_remove_config(
         cfg,
@@ -5169,7 +5169,7 @@ def _handle_account_remove_config(cfg, args_rest):
 
 
 def _handle_account_status_config(cfg, args_rest):
-    from mms_command_tools import handle_account_status_config
+    from mms_commands.tools import handle_account_status_config
 
     return handle_account_status_config(
         cfg,
@@ -5182,7 +5182,7 @@ def _handle_account_status_config(cfg, args_rest):
 
 
 def _handle_account_login_config(cfg, args_rest):
-    from mms_command_tools import handle_account_login_config
+    from mms_commands.tools import handle_account_login_config
 
     return handle_account_login_config(
         cfg,
@@ -5196,13 +5196,13 @@ def _handle_account_login_config(cfg, args_rest):
 
 
 def _usage_key(runtime_kind, cli_name, runtime_id):
-    from mms_command_tools import usage_key
+    from mms_commands.tools import usage_key
 
     return usage_key(runtime_kind, cli_name, runtime_id)
 
 
 def _rename_usage_account(old_id, new_id, new_name, cli_name):
-    from mms_command_tools import rename_usage_account
+    from mms_commands.tools import rename_usage_account
 
     return rename_usage_account(
         old_id,
@@ -5216,7 +5216,7 @@ def _rename_usage_account(old_id, new_id, new_name, cli_name):
 
 
 def _rename_usage_provider(old_id, new_id, new_name):
-    from mms_command_tools import rename_usage_provider
+    from mms_commands.tools import rename_usage_provider
 
     return rename_usage_provider(
         old_id,
@@ -5229,7 +5229,7 @@ def _rename_usage_provider(old_id, new_id, new_name):
 
 
 def _target_account_home(old_home, new_id):
-    from mms_command_tools import target_account_home
+    from mms_commands.tools import target_account_home
 
     return target_account_home(
         old_home,
@@ -5240,7 +5240,7 @@ def _target_account_home(old_home, new_id):
 
 
 def _handle_provider_rename_config(cfg, args_rest):
-    from mms_command_tools import handle_provider_rename_config
+    from mms_commands.tools import handle_provider_rename_config
 
     return handle_provider_rename_config(
         cfg,
@@ -5259,7 +5259,7 @@ def _handle_provider_rename_config(cfg, args_rest):
 
 
 def _handle_account_rename_config(cfg, args_rest):
-    from mms_command_tools import handle_account_rename_config
+    from mms_commands.tools import handle_account_rename_config
 
     return handle_account_rename_config(
         cfg,
@@ -5281,7 +5281,7 @@ def _handle_account_rename_config(cfg, args_rest):
 
 
 def _migrate_accounts_dirs(cfg):
-    from mms_command_tools import migrate_accounts_dirs
+    from mms_commands.tools import migrate_accounts_dirs
 
     return migrate_accounts_dirs(
         cfg,
@@ -5293,7 +5293,7 @@ def _migrate_accounts_dirs(cfg):
 
 
 def _handle_config_migrate():
-    from mms_command_tools import handle_config_migrate
+    from mms_commands.tools import handle_config_migrate
 
     return handle_config_migrate(
         backup_config_tree=_backup_config_tree,
@@ -5308,7 +5308,7 @@ def _handle_config_migrate():
 
 
 def _display_providers(cfg):
-    from mms_command_tools import display_providers
+    from mms_commands.tools import display_providers
 
     return display_providers(
         cfg,
@@ -5324,7 +5324,7 @@ def _display_providers(cfg):
 
 
 def _display_accounts(cfg):
-    from mms_command_tools import display_accounts
+    from mms_commands.tools import display_accounts
 
     return display_accounts(
         cfg,
@@ -5337,7 +5337,7 @@ def _display_accounts(cfg):
 
 
 def _display_config_help():
-    from mms_command_tools import display_config_help
+    from mms_commands.tools import display_config_help
 
     return display_config_help(command_name=current_command(), console=console)
 
@@ -5504,7 +5504,7 @@ def _display_config_v2_release_readiness(args_rest):
 
 
 def _display_preferences_path():
-    from mms_command_tools import display_preferences_path
+    from mms_commands.tools import display_preferences_path
 
     return display_preferences_path(
         preference_paths=PREFERENCES_PATHS,
@@ -5514,13 +5514,13 @@ def _display_preferences_path():
 
 
 def _display_preferences_example():
-    from mms_command_tools import display_preferences_example
+    from mms_commands.tools import display_preferences_example
 
     return display_preferences_example(preferences_example_toml=PREFERENCES_EXAMPLE_TOML, console=console)
 
 
 def _display_human_gate_help():
-    from mms_command_tools import display_human_gate_help
+    from mms_commands.tools import display_human_gate_help
 
     return display_human_gate_help(
         command_name=current_command(),
@@ -5530,7 +5530,7 @@ def _display_human_gate_help():
 
 
 def _display_preferences_help():
-    from mms_command_tools import display_preferences_help
+    from mms_commands.tools import display_preferences_help
 
     return display_preferences_help(
         command_name=current_command(),
@@ -5543,7 +5543,7 @@ def _display_preferences_help():
 
 def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
-    from mms_command_tools import display_config
+    from mms_commands.tools import display_config
 
     return display_config(
         cfg,
@@ -5569,7 +5569,7 @@ def _display_config(cfg, prefix="", depth=0):
 
 
 def _display_usage_stats():
-    from mms_command_tools import display_usage_stats
+    from mms_commands.tools import display_usage_stats
 
     return display_usage_stats(
         load_usage_stats=_load_usage_stats,
@@ -5580,7 +5580,7 @@ def _display_usage_stats():
 
 
 def _display_adapter_registry():
-    from mms_command_tools import display_adapter_registry
+    from mms_commands.tools import display_adapter_registry
 
     return display_adapter_registry(
         top_source_companies=TOP_SOURCE_COMPANIES,
@@ -5593,32 +5593,32 @@ def _display_adapter_registry():
 
 def _mask_key(val):
     """遮蔽 API key，只显示前 4 和后 4 位"""
-    from mms_command_tools import mask_key
+    from mms_commands.tools import mask_key
 
     return mask_key(val)
 
 
 def _set_nested(d, parts, val):
     """设置嵌套 dict 的值"""
-    from mms_command_tools import set_nested
+    from mms_commands.tools import set_nested
 
     return set_nested(d, parts, val)
 
 
 def _get_nested(d, parts):
-    from mms_command_tools import get_nested
+    from mms_commands.tools import get_nested
 
     return get_nested(d, parts)
 
 
 def _unset_nested(d, parts):
-    from mms_command_tools import unset_nested
+    from mms_commands.tools import unset_nested
 
     return unset_nested(d, parts)
 
 
 def _coerce_config_value(key_path, raw_value):
-    from mms_command_tools import coerce_config_value
+    from mms_commands.tools import coerce_config_value
 
     return coerce_config_value(
         key_path,
@@ -5630,7 +5630,7 @@ def _coerce_config_value(key_path, raw_value):
 
 
 def _validate_config(cfg):
-    from mms_command_tools import validate_config
+    from mms_commands.tools import validate_config
 
     return validate_config(
         cfg,
@@ -5649,13 +5649,13 @@ def _validate_config(cfg):
 
 
 def _handle_config_get(cfg, args_rest):
-    from mms_command_tools import handle_config_get
+    from mms_commands.tools import handle_config_get
 
     return handle_config_get(cfg, args_rest, command_name=current_command(), console=console)
 
 
 def _handle_config_set(cfg, args_rest):
-    from mms_command_tools import handle_config_set
+    from mms_commands.tools import handle_config_set
 
     return handle_config_set(
         cfg,
@@ -5669,7 +5669,7 @@ def _handle_config_set(cfg, args_rest):
 
 
 def _handle_config_unset(cfg, args_rest):
-    from mms_command_tools import handle_config_unset
+    from mms_commands.tools import handle_config_unset
 
     return handle_config_unset(
         cfg,
@@ -5682,13 +5682,13 @@ def _handle_config_unset(cfg, args_rest):
 
 
 def _handle_config_file():
-    from mms_command_tools import handle_config_file
+    from mms_commands.tools import handle_config_file
 
     return handle_config_file(config_path=CONFIG_PATH, console=console)
 
 
 def _handle_config_validate(cfg):
-    from mms_command_tools import handle_config_validate
+    from mms_commands.tools import handle_config_validate
 
     return handle_config_validate(cfg, validate_config=_validate_config, console=console)
 
@@ -5854,7 +5854,7 @@ def _load_command_config():
 
 def _handle_session_ls(cli_name):
     from mms_session.index import list_indexed_sessions
-    from mms_command_tools import handle_session_ls
+    from mms_commands.tools import handle_session_ls
 
     return handle_session_ls(
         cli_name,
@@ -5866,7 +5866,7 @@ def _handle_session_ls(cli_name):
 
 def _handle_session_info(session_id, cli_name):
     from mms_session.index import get_indexed_session
-    from mms_command_tools import handle_session_info
+    from mms_commands.tools import handle_session_info
 
     return handle_session_info(
         session_id,
@@ -5878,26 +5878,26 @@ def _handle_session_info(session_id, cli_name):
 
 
 def _session_gateway_roots(cli_name):
-    from mms_command_tools import session_gateway_roots
+    from mms_commands.tools import session_gateway_roots
 
     return session_gateway_roots(cli_name, real_home=resolve_real_user_home())
 
 
 def _session_dir_size_bytes(path):
-    from mms_command_tools import session_dir_size_bytes
+    from mms_commands.tools import session_dir_size_bytes
 
     return session_dir_size_bytes(path)
 
 
 def _format_bytes(size):
-    from mms_command_tools import format_bytes
+    from mms_commands.tools import format_bytes
 
     return format_bytes(size)
 
 
 def _list_stale_gateway_sessions(cli_name):
     from mms_launchers import _session_home_is_active
-    from mms_command_tools import list_stale_gateway_sessions
+    from mms_commands.tools import list_stale_gateway_sessions
 
     return list_stale_gateway_sessions(
         cli_name,
@@ -5909,7 +5909,7 @@ def _list_stale_gateway_sessions(cli_name):
 
 def _handle_session_prune(cli_name, *, apply=False, yes=False):
     from mms_launchers import _finalize_claude_slot
-    from mms_command_tools import handle_session_prune
+    from mms_commands.tools import handle_session_prune
 
     return handle_session_prune(
         cli_name,
@@ -5926,7 +5926,7 @@ def _handle_session_prune(cli_name, *, apply=False, yes=False):
 
 def handle_session_command(argv):
     _ensure_rich()
-    from mms_command_tools import handle_session_command as handle_session_command_impl
+    from mms_commands.tools import handle_session_command as handle_session_command_impl
 
     return handle_session_command_impl(
         argv,
@@ -5938,25 +5938,25 @@ def handle_session_command(argv):
 
 
 def _split_cli_prefixed_resume_ref(session_ref):
-    from mms_command_tools import split_cli_prefixed_resume_ref
+    from mms_commands.tools import split_cli_prefixed_resume_ref
 
     return split_cli_prefixed_resume_ref(session_ref)
 
 
 def _codex_resume_roots():
-    from mms_command_tools import codex_resume_roots
+    from mms_commands.tools import codex_resume_roots
 
     return codex_resume_roots(os.environ, real_home=resolve_real_user_home())
 
 
 def _iter_codex_index_records():
-    from mms_command_tools import iter_codex_index_records
+    from mms_commands.tools import iter_codex_index_records
 
     yield from iter_codex_index_records(_codex_resume_roots())
 
 
 def _resolve_codex_resume_ref(session_ref, *, allow_passthrough=False):
-    from mms_command_tools import resolve_codex_resume_ref
+    from mms_commands.tools import resolve_codex_resume_ref
 
     return resolve_codex_resume_ref(
         session_ref,
@@ -5967,7 +5967,7 @@ def _resolve_codex_resume_ref(session_ref, *, allow_passthrough=False):
 
 def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
     from mms_session.index import list_indexed_sessions
-    from mms_command_tools import resolve_claude_resume_ref
+    from mms_commands.tools import resolve_claude_resume_ref
 
     return resolve_claude_resume_ref(
         session_ref,
@@ -5977,7 +5977,7 @@ def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
 
 
 def _resolve_resume_target(session_ref, cli_hint="auto"):
-    from mms_command_tools import resolve_resume_target
+    from mms_commands.tools import resolve_resume_target
 
     return resolve_resume_target(
         session_ref,
@@ -5990,19 +5990,19 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
 
 
 def _uuid_resume_cli_hint(session_ref):
-    from mms_command_tools import uuid_resume_cli_hint
+    from mms_commands.tools import uuid_resume_cli_hint
 
     return uuid_resume_cli_hint(session_ref)
 
 
 def _first_resume_model(cli_models, default_models, recommend=None):
-    from mms_command_tools import first_resume_model
+    from mms_commands.tools import first_resume_model
 
     return first_resume_model(cli_models, default_models, recommend)
 
 
 def _session_resume_model(session_record):
-    from mms_command_tools import session_resume_model
+    from mms_commands.tools import session_resume_model
 
     return session_resume_model(session_record)
 
@@ -6015,7 +6015,7 @@ def _resolve_resume_runtime_and_model(
     default_models,
     session_record,
 ):
-    from mms_command_tools import resolve_resume_runtime_and_model
+    from mms_commands.tools import resolve_resume_runtime_and_model
 
     return resolve_resume_runtime_and_model(
         cfg,
@@ -6037,7 +6037,7 @@ def _resolve_resume_runtime_and_model(
 
 
 def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, lang_override=None):
-    from mms_command_tools import handle_resume_command as handle_resume_command_impl
+    from mms_commands.tools import handle_resume_command as handle_resume_command_impl
 
     return handle_resume_command_impl(
         argv,
@@ -6063,7 +6063,7 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
 
 def handle_cache_command(argv):
     _ensure_rich()
-    from mms_command_tools import handle_cache_command as handle_cache_command_impl
+    from mms_commands.tools import handle_cache_command as handle_cache_command_impl
 
     return handle_cache_command_impl(
         argv,
@@ -6084,7 +6084,7 @@ def handle_cache_command(argv):
 
 def handle_guard_command(argv, bootstrap_cfg=None):
     _ensure_rich()
-    from mms_command_tools import handle_guard_command as handle_guard_command_impl
+    from mms_commands.tools import handle_guard_command as handle_guard_command_impl
 
     return handle_guard_command_impl(
         argv,
@@ -6106,7 +6106,7 @@ def handle_guard_command(argv, bootstrap_cfg=None):
 
 
 def _confirm_guard_accept_from_tui(cfg):
-    from mms_command_tools import confirm_guard_accept_from_tui
+    from mms_commands.tools import confirm_guard_accept_from_tui
 
     return confirm_guard_accept_from_tui(
         cfg,
@@ -6122,7 +6122,7 @@ def _confirm_guard_accept_from_tui(cfg):
 
 def handle_fake_upstream_command(argv):
     _ensure_rich()
-    from mms_command_tools import handle_fake_upstream_command as handle_fake_upstream_command_impl
+    from mms_commands.tools import handle_fake_upstream_command as handle_fake_upstream_command_impl
 
     return handle_fake_upstream_command_impl(
         argv,
@@ -6137,7 +6137,7 @@ def handle_fake_upstream_command(argv):
 
 def handle_logs_command(argv):
     _ensure_rich()
-    from mms_command_tools import handle_logs_command as handle_logs_command_impl
+    from mms_commands.tools import handle_logs_command as handle_logs_command_impl
 
     return handle_logs_command_impl(
         argv,
@@ -6150,7 +6150,7 @@ def handle_logs_command(argv):
 
 
 def handle_doctor_command(argv):
-    from mms_command_tools import handle_doctor_command as handle_doctor_command_impl
+    from mms_commands.tools import handle_doctor_command as handle_doctor_command_impl
 
     return handle_doctor_command_impl(
         argv,
@@ -6162,7 +6162,7 @@ def handle_doctor_command(argv):
 
 def handle_exposure_command(argv):
     _ensure_rich()
-    from mms_command_tools import handle_exposure_command as handle_exposure_command_impl
+    from mms_commands.tools import handle_exposure_command as handle_exposure_command_impl
     from mms_launchers import inspect_runtime_exposure
 
     return handle_exposure_command_impl(
@@ -6180,7 +6180,7 @@ def handle_exposure_command(argv):
 
 
 def handle_test_command(argv, subcommand_name="test"):
-    from mms_command_tools import handle_test_command as handle_test_command_impl
+    from mms_commands.tools import handle_test_command as handle_test_command_impl
 
     return handle_test_command_impl(
         argv,
@@ -6192,7 +6192,7 @@ def handle_test_command(argv, subcommand_name="test"):
 
 
 def handle_opencode_smoke_command(argv):
-    from mms_command_tools import handle_opencode_smoke_command as handle_opencode_smoke_command_impl
+    from mms_commands.tools import handle_opencode_smoke_command as handle_opencode_smoke_command_impl
 
     return handle_opencode_smoke_command_impl(
         argv,
@@ -6203,19 +6203,19 @@ def handle_opencode_smoke_command(argv):
 
 
 def _is_help_request(argv):
-    from mms_command_tools import is_help_request
+    from mms_commands.tools import is_help_request
 
     return is_help_request(argv)
 
 
 def _is_setup_web_request(argv):
-    from mms_command_tools import is_setup_web_request
+    from mms_commands.tools import is_setup_web_request
 
     return is_setup_web_request(argv)
 
 
 def _is_config_help_request(args_rest):
-    from mms_command_tools import is_config_help_request
+    from mms_commands.tools import is_config_help_request
 
     return is_config_help_request(args_rest)
 
@@ -6365,7 +6365,7 @@ def _is_config_preview_doctor_request(argv):
 
 
 def _is_session_prune_dry_run(argv):
-    from mms_command_tools import is_session_prune_dry_run
+    from mms_commands.tools import is_session_prune_dry_run
 
     return is_session_prune_dry_run(argv)
 
@@ -6683,7 +6683,7 @@ def main():
     # --presets
     if args.presets:
         _ensure_rich()
-        from mms_command_tools import handle_presets_command
+        from mms_commands.tools import handle_presets_command
 
         handle_presets_command(
             cfg,

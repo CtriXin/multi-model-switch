@@ -409,7 +409,7 @@ def test_logs_command_shows_copyable_commands(monkeypatch, capsys, tmp_path):
 
 
 def test_script_subcommand_sets_display_prog(monkeypatch, tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     script_dir = tmp_path / "scripts"
     script_dir.mkdir()
@@ -445,7 +445,7 @@ def test_script_subcommand_sets_display_prog(monkeypatch, tmp_path):
 
 
 def test_cache_command_show_renders_defaults():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Table:
         def __init__(self, *args, **kwargs):
@@ -493,7 +493,7 @@ def test_cache_command_show_renders_defaults():
 
 
 def test_cache_command_refresh_after_saves_normalized_config():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Console:
         def __init__(self):
@@ -534,7 +534,7 @@ def test_cache_command_refresh_after_saves_normalized_config():
 
 
 def test_guard_command_status_renders_drift(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Table:
         def __init__(self, *args, **kwargs):
@@ -597,7 +597,7 @@ def test_guard_command_status_renders_drift(tmp_path):
 
 
 def test_guard_command_accept_writes_snapshot_and_clears_pending(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Console:
         def __init__(self):
@@ -643,7 +643,7 @@ def test_guard_command_accept_writes_snapshot_and_clears_pending(tmp_path):
 
 
 def test_exposure_command_renders_runtime_sections():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     class Table:
         def __init__(self, *args, **kwargs):

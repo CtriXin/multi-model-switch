@@ -13,7 +13,7 @@ class _FakeConsole:
 
 
 def test_split_cli_prefixed_resume_ref():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     assert mms_command_tools.split_cli_prefixed_resume_ref("codex:abc") == ("codex", "abc")
@@ -23,7 +23,7 @@ def test_split_cli_prefixed_resume_ref():
 
 
 def test_codex_resume_helper_reads_bounded_indexes_once(tmp_path):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     first_root = tmp_path / "codex-a"
     second_root = tmp_path / "codex-b"
@@ -65,7 +65,7 @@ def test_codex_resume_helper_reads_bounded_indexes_once(tmp_path):
 
 
 def test_resume_model_and_uuid_helpers_preserve_preference_order():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     assert mms_command_tools.uuid_resume_cli_hint("019e3990-4e86-7591-abca-d59641c6173a") == "codex"
     assert mms_command_tools.uuid_resume_cli_hint("2ea6c1bc-8632-4d5c-94ba-672b4a744871") == "claude"
@@ -83,7 +83,7 @@ def test_resume_model_and_uuid_helpers_preserve_preference_order():
 
 
 def test_command_tools_handle_resume_command_preserves_parse_and_launch_flow():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     captured = {}
     console = _FakeConsole()
@@ -144,7 +144,7 @@ def test_command_tools_handle_resume_command_preserves_parse_and_launch_flow():
 
 
 def test_command_tools_resolve_resume_runtime_preserves_last_used_and_session_source_paths():
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
 
     cfg = {"recommend": {"models": ["gpt-5.5"]}}
     default_provider = {"id": "default-provider"}
@@ -302,7 +302,7 @@ def test_resolve_claude_resume_ref_from_index(monkeypatch):
 
 
 def test_resolve_resume_target_requires_prefix_when_ambiguous(monkeypatch):
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cli, session_id, record, error = mms_command_tools.resolve_resume_target(

@@ -108,7 +108,7 @@ def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
 
 
 def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch) -> None:
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     stats = {
@@ -153,7 +153,7 @@ def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch)
 
 
 def test_rescue_fallback_candidates_include_routed_models(monkeypatch, tmp_path: Path) -> None:
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     generated = tmp_path / "generated"
@@ -341,7 +341,7 @@ def test_rescue_route_candidates_fail_closed_on_missing_preview_manifest(tmp_pat
 
 
 def test_rescue_default_fallback_config_roundtrip() -> None:
-    import mms_command_tools
+    import mms_commands.tools as mms_command_tools
     import mms_core
 
     cfg: dict = {}
