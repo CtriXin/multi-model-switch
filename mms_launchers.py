@@ -4202,116 +4202,45 @@ def _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agen
     )
 
 
-def _pi_wrapper_path(*args, **kwargs):
-    return _pi_support._pi_wrapper_path(*args, **kwargs)
-
-def _pi_retry_extension_path(*args, **kwargs):
-    return _pi_support._pi_retry_extension_path(*args, **kwargs)
-
-def _pi_npx_cache_dir(*args, **kwargs):
-    return _pi_support._pi_npx_cache_dir(*args, **kwargs)
-
-def _pi_settings_payload(*args, **kwargs):
-    return _pi_support._pi_settings_payload(*args, **kwargs)
-
-def _pi_provider_ref(*args, **kwargs):
-    return _pi_support._pi_provider_ref(*args, **kwargs)
-
-def _pi_normalize_model_key(*args, **kwargs):
-    return _pi_support._pi_normalize_model_key(*args, **kwargs)
-
-def _pi_reference_payload(*args, **kwargs):
-    return _pi_support._pi_reference_payload(*args, **kwargs)
-
-def _pi_reference_model_row(*args, **kwargs):
-    return _pi_support._pi_reference_model_row(*args, **kwargs)
-
-def _pi_first_positive_int(*args, **kwargs):
-    return _pi_support._pi_first_positive_int(*args, **kwargs)
-
-def _pi_hint_max_tokens(*args, **kwargs):
-    return _pi_support._pi_hint_max_tokens(*args, **kwargs)
-
-def _pi_hint_context_window(*args, **kwargs):
-    return _pi_support._pi_hint_context_window(*args, **kwargs)
-
-def _pi_reference_supports_vision(*args, **kwargs):
-    return _pi_support._pi_reference_supports_vision(*args, **kwargs)
-
-def _pi_model_supported(*args, **kwargs):
-    return _pi_support._pi_model_supported(*args, **kwargs)
-
-def _pi_model_replacement(*args, **kwargs):
-    return _pi_support._pi_model_replacement(*args, **kwargs)
-
-def _pi_model_block_reason(*args, **kwargs):
-    return _pi_support._pi_model_block_reason(*args, **kwargs)
-
-def _pi_model_available_for_runtime(*args, **kwargs):
-    return _pi_support._pi_model_available_for_runtime(*args, **kwargs)
-
-def _pi_exposed_model_names(*args, **kwargs):
-    return _pi_support._pi_exposed_model_names(*args, **kwargs)
-
-def _pi_model_input_types(*args, **kwargs):
-    return _pi_support._pi_model_input_types(*args, **kwargs)
-
-def _pi_model_capabilities(*args, **kwargs):
-    return _pi_support._pi_model_capabilities(*args, **kwargs)
-
-def _pi_anthropic_base_root(*args, **kwargs):
-    return _pi_support._pi_anthropic_base_root(*args, **kwargs)
-
-def _pi_openai_base_url(*args, **kwargs):
-    return _pi_support._pi_openai_base_url(*args, **kwargs)
-
-def _pi_protocol_variant(*args, **kwargs):
-    return _pi_support._pi_protocol_variant(*args, **kwargs)
-
-def _pi_protocol_variants(*args, **kwargs):
-    return _pi_support._pi_protocol_variants(*args, **kwargs)
-
-def _pi_runtime_model_names(*args, **kwargs):
-    return _pi_support._pi_runtime_model_names(*args, **kwargs)
-
-def _pi_profile_id(*args, **kwargs):
-    return _pi_support._pi_profile_id(*args, **kwargs)
-
-def _pi_pick_protocol(*args, **kwargs):
-    return _pi_support._pi_pick_protocol(*args, **kwargs)
-
-def _pi_provider_compat(*args, **kwargs):
-    return _pi_support._pi_provider_compat(*args, **kwargs)
-
-def _pi_model_compat(*args, **kwargs):
-    return _pi_support._pi_model_compat(*args, **kwargs)
-
-def _pi_model_thinking_level_map(*args, **kwargs):
-    return _pi_support._pi_model_thinking_level_map(*args, **kwargs)
-
-def _pi_effective_selected_model(*args, **kwargs):
-    return _pi_support._pi_effective_selected_model(*args, **kwargs)
-
-def _pi_wire_model_name(*args, **kwargs):
-    return _pi_support._pi_wire_model_name(*args, **kwargs)
-
-def _pi_model_entry(*args, **kwargs):
-    return _pi_support._pi_model_entry(*args, **kwargs)
-
-def _pi_group_provider_ref(*args, **kwargs):
-    return _pi_support._pi_group_provider_ref(*args, **kwargs)
-
-def _pi_build_models_payload(*args, **kwargs):
-    return _pi_support._pi_build_models_payload(*args, **kwargs)
-
-def _pi_gateway_env(*args, **kwargs):
-    return _pi_support._pi_gateway_env(*args, **kwargs)
-
-def _pi_provider_export_env(*args, **kwargs):
-    return _pi_support._pi_provider_export_env(*args, **kwargs)
-
-def launch_pi(*args, **kwargs):
-    return _pi_support.launch_pi(*args, **kwargs)
+# Pi implementation lives in mms_pi.support; keep the former launcher-private
+# names as direct aliases for existing monkeypatch-based tests/callers.
+_pi_wrapper_path = _pi_support._pi_wrapper_path
+_pi_retry_extension_path = _pi_support._pi_retry_extension_path
+_pi_npx_cache_dir = _pi_support._pi_npx_cache_dir
+_pi_settings_payload = _pi_support._pi_settings_payload
+_pi_provider_ref = _pi_support._pi_provider_ref
+_pi_normalize_model_key = _pi_support._pi_normalize_model_key
+_pi_reference_payload = _pi_support._pi_reference_payload
+_pi_reference_model_row = _pi_support._pi_reference_model_row
+_pi_first_positive_int = _pi_support._pi_first_positive_int
+_pi_hint_max_tokens = _pi_support._pi_hint_max_tokens
+_pi_hint_context_window = _pi_support._pi_hint_context_window
+_pi_reference_supports_vision = _pi_support._pi_reference_supports_vision
+_pi_model_supported = _pi_support._pi_model_supported
+_pi_model_replacement = _pi_support._pi_model_replacement
+_pi_model_block_reason = _pi_support._pi_model_block_reason
+_pi_model_available_for_runtime = _pi_support._pi_model_available_for_runtime
+_pi_exposed_model_names = _pi_support._pi_exposed_model_names
+_pi_model_input_types = _pi_support._pi_model_input_types
+_pi_model_capabilities = _pi_support._pi_model_capabilities
+_pi_anthropic_base_root = _pi_support._pi_anthropic_base_root
+_pi_openai_base_url = _pi_support._pi_openai_base_url
+_pi_protocol_variant = _pi_support._pi_protocol_variant
+_pi_protocol_variants = _pi_support._pi_protocol_variants
+_pi_runtime_model_names = _pi_support._pi_runtime_model_names
+_pi_profile_id = _pi_support._pi_profile_id
+_pi_pick_protocol = _pi_support._pi_pick_protocol
+_pi_provider_compat = _pi_support._pi_provider_compat
+_pi_model_compat = _pi_support._pi_model_compat
+_pi_model_thinking_level_map = _pi_support._pi_model_thinking_level_map
+_pi_effective_selected_model = _pi_support._pi_effective_selected_model
+_pi_wire_model_name = _pi_support._pi_wire_model_name
+_pi_model_entry = _pi_support._pi_model_entry
+_pi_group_provider_ref = _pi_support._pi_group_provider_ref
+_pi_build_models_payload = _pi_support._pi_build_models_payload
+_pi_gateway_env = _pi_support._pi_gateway_env
+_pi_provider_export_env = _pi_support._pi_provider_export_env
+launch_pi = _pi_support.launch_pi
 
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
