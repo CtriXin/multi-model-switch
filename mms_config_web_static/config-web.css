@@ -1652,6 +1652,15 @@
     #migrationResult .chips {
       margin-bottom: 12px;
     }
+    .start-work-card {
+      border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+      background: linear-gradient(135deg, var(--surface), color-mix(in oklch, var(--accent) 7%, var(--surface)));
+    }
+    .start-work-status {
+      display: grid;
+      gap: 10px;
+      margin: 12px 0;
+    }
 
     /* ===== OpenCode metrics ===== */
     .oc-summary {

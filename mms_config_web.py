@@ -9,6 +9,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -129,6 +130,8 @@ def _redact(value: Any) -> str:
 
 def _is_secret_like_key(key_lower: str) -> bool:
     if key_lower in _SAFE_TOKEN_COUNT_KEYS or key_lower.endswith("_tokens"):
+        return False
+    if key_lower.startswith(("has_api_key", "missing_api_key")):
         return False
     return key_lower in _SECRET_KEYS or any(token in key_lower for token in ("token", "secret", "api_key"))
 
@@ -2266,6 +2269,156 @@ def _migration_decrypted_credentials(bundle: dict[str, Any], password: str) -> t
     return result, warnings, errors
 
 
+def _safe_local_command_name(command_name: str = "mms") -> str:
+    command = _safe_text(command_name or "mms") or "mms"
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", command):
+        return "mms"
+    return command
+
+
+def _migration_start_status_from_snapshot(snapshot: dict[str, Any], *, command_name: str = "mms", disabled_clis_override: list[str] | None = None) -> dict[str, Any]:
+    command = _safe_local_command_name(command_name)
+    providers = [item for item in (snapshot.get("providers") if isinstance(snapshot.get("providers"), list) else []) if isinstance(item, dict)]
+    enabled = [item for item in providers if item.get("enabled", True) is not False]
+    missing_key = [_safe_text(item.get("id")) for item in enabled if not item.get("has_api_key")]
+    missing_url = [
+        _safe_text(item.get("id"))
+        for item in enabled
+        if not _safe_text(item.get("openai_base_url") or item.get("anthropic_base_url") or item.get("effective_openai_base_url") or item.get("effective_anthropic_base_url"))
+    ]
+    missing_models = [_safe_text(item.get("id")) for item in enabled if int(item.get("model_count") or 0) <= 0]
+    ready_providers = [
+        _safe_text(item.get("id"))
+        for item in enabled
+        if item.get("has_api_key")
+        and int(item.get("model_count") or 0) > 0
+        and _safe_text(item.get("openai_base_url") or item.get("anthropic_base_url") or item.get("effective_openai_base_url") or item.get("effective_anthropic_base_url"))
+    ]
+    source_status = snapshot.get("model_source_status") if isinstance(snapshot.get("model_source_status"), dict) else {}
+    root = source_status.get("root") if isinstance(source_status.get("root"), dict) else {}
+    bundle = source_status.get("generated_bundle") if isinstance(source_status.get("generated_bundle"), dict) else {}
+    preview_root = root.get("mode") == "preview"
+    bundle_verified = bool(bundle.get("verified"))
+    bundle_runtime_ready = bundle.get("runtime_ready") is True
+    runtime = snapshot.get("runtime") if isinstance(snapshot.get("runtime"), dict) else {}
+    preferred_cli = _safe_text(runtime.get("preferred_cli") or "opencode")
+    coding_model = _safe_text(runtime.get("coding_preset_model"))
+    disabled_clis = list(disabled_clis_override or [])
+    if not disabled_clis:
+        session_assets = snapshot.get("session_assets") if isinstance(snapshot.get("session_assets"), dict) else {}
+        cli_visibility = session_assets.get("cli_visibility") if isinstance(session_assets.get("cli_visibility"), dict) else {}
+        disabled_clis = _normalize_model_list(cli_visibility.get("disabled"))
+    blockers: list[dict[str, Any]] = []
+    if not enabled:
+        blockers.append({"id": "no_enabled_provider", "label": "没有启用通道", "detail": "请先导入或启用至少一个 provider。"})
+    if missing_key:
+        blockers.append({"id": "missing_api_key", "label": "缺少 API Key", "detail": "这些通道没有 Key，无法直接开始工作。", "providers": missing_key})
+    if missing_url:
+        blockers.append({"id": "missing_base_url", "label": "缺少 Base URL", "detail": "这些通道没有 OpenAI/Anthropic Base URL。", "providers": missing_url})
+    if missing_models:
+        blockers.append({"id": "missing_models", "label": "缺少模型", "detail": "这些通道没有可用模型，请拉取或手动添加模型。", "providers": missing_models})
+    if preview_root and not bundle_verified:
+        blockers.append({"id": "bundle_not_verified", "label": "预览 Bundle 未验证", "detail": "preview root 需要 latest-approved bundle 验证通过后更稳。"})
+    if preferred_cli in disabled_clis:
+        blockers.append({"id": "preferred_cli_disabled", "label": "首选 CLI 已默认关闭", "detail": f"{preferred_cli} 在 preferences 中被关闭；启动后请换 CLI 或先打开。"})
+    provider_ready = bool(bundle_runtime_ready if preview_root else ready_providers)
+    ready_to_work = provider_ready and preferred_cli not in disabled_clis
+    start_command = command
+    return {
+        "schema": "mms.config_migration_start_status.v1",
+        "ready_to_work": ready_to_work,
+        "start_command": start_command,
+        "copy_command": start_command,
+        "preferred_cli": preferred_cli,
+        "coding_model": coding_model,
+        "command_name": command,
+        "target_mode": _safe_text(root.get("mode") or ("preview" if preview_root else "stable")),
+        "config_root": _safe_text(root.get("config_root") or source_status.get("config_root") or _config_root_for_snapshot(snapshot.get("paths", {}).get("config") if isinstance(snapshot.get("paths"), dict) else "")),
+        "terminal_launch_available": sys.platform == "darwin",
+        "provider_count": len(providers),
+        "enabled_provider_count": len(enabled),
+        "ready_provider_ids": ready_providers,
+        "missing_api_key_provider_ids": missing_key,
+        "missing_base_url_provider_ids": missing_url,
+        "missing_model_provider_ids": missing_models,
+        "preview_bundle": {
+            "verified": bundle_verified,
+            "runtime_ready": bundle_runtime_ready,
+            "status": _safe_text(bundle.get("status")),
+            "missing_api_key_count": int(bundle.get("router_missing_api_key_count") or 0),
+            "missing_base_url_count": int(bundle.get("router_missing_base_url_count") or 0),
+        },
+        "blockers": blockers,
+        "notes": [
+            "按钮只启动当前 MMS 命令，不会迁移 OAuth / Claude / Codex 原生登录态。",
+            "如果 API Key 已随加密迁移包导入，通常可以直接打开终端运行。",
+        ],
+    }
+
+
+def build_migration_start_status(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None = None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    del payload
+    snapshot = build_config_snapshot(current_cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+    prefs = _load_preferences_raw(_preferences_target_path(config_path=config_path, preferences_path=preferences_path))
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    disabled_clis = _normalize_model_list(launch.get("disabled_clis"))
+    return _migration_start_status_from_snapshot(snapshot, command_name=command_name, disabled_clis_override=disabled_clis)
+
+
+def start_migration_work_session(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None = None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    status = build_migration_start_status(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+    command = _safe_text(status.get("start_command") or _safe_local_command_name(command_name))
+    cwd = os.getcwd()
+    shell_command = f"cd {shlex.quote(cwd)} && {command}"
+    if sys.platform != "darwin":
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_start_result.v1",
+            "status": "unsupported_platform",
+            "errors": ["当前系统不支持从 WebUI 自动打开终端；可以复制启动命令手动运行。"],
+            "command": command,
+            "shell_command": shell_command,
+            "start_status": status,
+        }
+    script = f'tell application "Terminal" to activate\ntell application "Terminal" to do script {json.dumps(shell_command)}'
+    try:
+        subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema": "mms.config_migration_start_result.v1",
+            "status": "failed",
+            "errors": [f"打开终端失败：{type(exc).__name__}: {exc}"],
+            "command": command,
+            "shell_command": shell_command,
+            "start_status": status,
+        }
+    return {
+        "ok": True,
+        "schema": "mms.config_migration_start_result.v1",
+        "status": "started",
+        "command": command,
+        "shell_command": shell_command,
+        "cwd": cwd,
+        "start_status": status,
+    }
+
+
 def _migration_provider_payload(provider: dict[str, Any]) -> dict[str, Any]:
     provider_id = _safe_text(provider.get("id"))
     result = {
@@ -2551,6 +2704,14 @@ def apply_migration_import(
         )
         preferences_result = apply_preferences_plan(pref_payload, config_path=config_path, preferences_path=preferences_path)
     ok = bool(config_result.get("ok") and preferences_result.get("ok"))
+    applied_cfg = ((plan.get("config_plan") or {}).get("config") if isinstance(plan.get("config_plan"), dict) else {}) or current_cfg
+    start_status = build_migration_start_status(
+        applied_cfg if isinstance(applied_cfg, dict) else current_cfg,
+        {},
+        config_path=config_path,
+        preferences_path=preferences_path,
+        command_name=command_name,
+    )
     return _sanitize_for_output(
         {
             "ok": ok,
@@ -2560,6 +2721,7 @@ def apply_migration_import(
             "warnings": plan.get("warnings") or [],
             "config_result": config_result,
             "preferences_result": preferences_result,
+            "start_status": start_status,
         }
     )
 

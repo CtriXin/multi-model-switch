@@ -65,6 +65,14 @@ def apply_migration_import(current_cfg: dict[str, Any] | None, payload: dict[str
     return _backend().apply_migration_import(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
 
 
+def build_migration_start_status(current_cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    return _backend().build_migration_start_status(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+
+
+def start_migration_work_session(current_cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    return _backend().start_migration_work_session(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
+
+
 def reveal_local_path(payload: dict[str, Any] | None) -> dict[str, Any]:
     return _backend().reveal_local_path(payload)
 
@@ -173,6 +181,26 @@ class ConfigWebApp:
                 config_plan = preview.get("config_plan") if isinstance(preview.get("config_plan"), dict) else {}
                 self.cfg = config_plan.get("config") if isinstance(config_plan.get("config"), dict) else self.cfg
             return result
+
+    def migration_start_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return build_migration_start_status(
+                self.cfg,
+                payload,
+                config_path=self.config_path,
+                preferences_path=self.preferences_path,
+                command_name=self.command_name,
+            )
+
+    def migration_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return start_migration_work_session(
+                self.cfg,
+                payload,
+                config_path=self.config_path,
+                preferences_path=self.preferences_path,
+                command_name=self.command_name,
+            )
 
     def reveal_path(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -299,6 +327,14 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/migration/apply":
                 result = app.migration_apply(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/migration/start-status":
+                result = app.migration_start_status(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok", True) else 400))
+                return
+            if path == "/api/migration/start":
+                result = app.migration_start(payload)
                 self._send(*_json_response(result, status=200 if result.get("ok") else 400))
                 return
             if path == "/api/path/reveal":

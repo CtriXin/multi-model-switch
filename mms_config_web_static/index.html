@@ -486,6 +486,16 @@
           <h3>导入预览 / 结果</h3>
           <div class="result" id="migrationResult">尚未导出或导入。</div>
         </div>
+        <div class="card span12 start-work-card">
+          <h3>导入后开工</h3>
+          <p class="muted">导入完成后先看这里：如果 Key、模型和 Bundle 都就绪，可以直接打开一个新 Terminal 运行当前命令。</p>
+          <div class="start-work-status" id="migrationStartStatus">等待开工检查。</div>
+          <div class="btns">
+            <button id="refreshStartStatus" class="ghost">刷新开工检查</button>
+            <button id="startWorkNow" class="secondary">打开终端开始工作</button>
+            <button id="copyStartCommand" class="ghost">复制启动命令</button>
+          </div>
+        </div>
         <div class="card span12 ui-advanced-only">
           <h3>迁移 diff</h3>
           <div class="diff" id="migrationDiff">点击“预览导入 diff”后显示。</div>

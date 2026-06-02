@@ -874,7 +874,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert '<body class="booting" data-ui-mode="default">' in html
     assert "读取本地配置中" in html
     assert "/api/migration/export" in js_body.decode("utf-8")
+    assert "/api/migration/start" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
+    assert "导入后开工" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
     assert "这里直接改 MMS 启动会读取的模型能力" in html
@@ -2131,6 +2133,107 @@ def test_config_web_migration_apply_requires_confirmation(tmp_path):
     assert result["ok"] is False
     assert result["status"] == "blocked"
     assert "确认" in result["errors"][0]
+
+
+def test_config_web_migration_start_status_reports_ready_and_disabled_cli(tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    preferences_path.write_text('[launch]\ndisabled_clis = ["opencode"]\n', encoding="utf-8")
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+    }
+
+    status = mms_config_web.build_migration_start_status(
+        cfg,
+        {},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mmz1",
+    )
+
+    assert status["schema"] == "mms.config_migration_start_status.v1"
+    assert status["start_command"] == "mmz1"
+    assert status["preferred_cli"] == "opencode"
+    assert status["ready_provider_ids"] == ["demo"]
+    assert status["ready_to_work"] is False
+    assert any(item["id"] == "preferred_cli_disabled" for item in status["blockers"])
+
+
+def test_config_web_migration_start_status_ready_when_provider_is_complete(tmp_path):
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+    }
+
+    status = mms_config_web.build_migration_start_status(
+        cfg,
+        {},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz1",
+    )
+
+    assert status["ready_to_work"] is True
+    assert status["blockers"] == []
+    assert status["copy_command"] == "mmz1"
+
+
+def test_config_web_migration_start_opens_terminal_with_sanitized_command(monkeypatch, tmp_path):
+    calls = []
+
+    class DummyPopen:
+        def __init__(self, args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setattr(mms_config_web.sys, "platform", "darwin")
+    monkeypatch.setattr(mms_config_web.subprocess, "Popen", DummyPopen)
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ]
+    }
+
+    result = mms_config_web.start_migration_work_session(
+        cfg,
+        {},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz1;rm -rf /",
+    )
+
+    assert result["ok"] is True
+    assert result["command"] == "mms"
+    osascript_calls = [args for args, _kwargs in calls if args and args[0] == "osascript"]
+    assert osascript_calls
+    assert "rm -rf" not in osascript_calls[-1][-1]
 
 
 def test_config_web_legacy_save_blocks_preview_root(tmp_path):
