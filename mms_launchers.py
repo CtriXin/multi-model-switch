@@ -1717,39 +1717,11 @@ _is_loop_family_hook_command = _session_hook_commands.is_loop_family_hook_comman
 _hook_command_targets_exist = _session_hook_commands.hook_command_targets_exist
 
 
-def _filter_missing_managed_hook_commands(hooks_data):
-    """Compatibility wrapper for dropping missing managed hook commands."""
-    from mms_claude.settings import filter_missing_managed_hook_commands
-
-    return filter_missing_managed_hook_commands(hooks_data)
-
-
-def _filter_hook_commands(hooks_data, predicate):
-    """Compatibility wrapper for filtering hook commands."""
-    from mms_claude.settings import filter_hook_commands
-
-    return filter_hook_commands(hooks_data, predicate)
-
-
-def _normalize_session_surface_disabled(disabled_session_surfaces):
-    """Compatibility wrapper for disabled session-surface normalization."""
-    from mms_claude.settings import normalize_session_surface_disabled
-
-    return normalize_session_surface_disabled(disabled_session_surfaces)
-
-
-def _session_surface_disabled(disabled_session_surfaces, surface, value):
-    """Compatibility wrapper for disabled session-surface lookup."""
-    from mms_claude.settings import session_surface_disabled
-
-    return session_surface_disabled(disabled_session_surfaces, surface, value)
-
-
-def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None):
-    """Compatibility wrapper for disabled MCP filtering."""
-    from mms_claude.settings import filter_mcp_servers_by_disabled
-
-    return filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces)
+_filter_missing_managed_hook_commands = _claude_settings.filter_missing_managed_hook_commands
+_filter_hook_commands = _claude_settings.filter_hook_commands
+_normalize_session_surface_disabled = _claude_settings.normalize_session_surface_disabled
+_session_surface_disabled = _claude_settings.session_surface_disabled
+_filter_mcp_servers_by_disabled = _claude_settings.filter_mcp_servers_by_disabled
 
 
 _mcp_command_has_path = _session_hook_commands.mcp_command_has_path
@@ -1772,29 +1744,9 @@ def _mcp_server_spec_has_entrypoint(spec):
     return bool(command)
 
 
-def _normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=None, env=None):
-    """Compatibility wrapper for session MCP normalization."""
-    from mms_claude.settings import normalize_session_mcp_servers
-
-    return normalize_session_mcp_servers(
-        mcp_servers,
-        disabled_session_surfaces=disabled_session_surfaces,
-        env=env,
-    )
-
-
-def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
-    """Compatibility wrapper for disabled hook filtering."""
-    from mms_claude.settings import filter_hooks_by_disabled
-
-    return filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
-
-
-def _session_skill_disabled(disabled_session_surfaces, skill_name):
-    """Compatibility wrapper for disabled skill lookup."""
-    from mms_claude.settings import session_skill_disabled
-
-    return session_skill_disabled(disabled_session_surfaces, skill_name)
+_normalize_session_mcp_servers = _claude_settings.normalize_session_mcp_servers
+_filter_hooks_by_disabled = _claude_settings.filter_hooks_by_disabled
+_session_skill_disabled = _claude_settings.session_skill_disabled
 
 
 def _caveman_claude_activate_command(caveman_root, caveman_level="light"):
