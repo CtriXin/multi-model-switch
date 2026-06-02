@@ -107,6 +107,7 @@ from mms_opencode.session import (
 from mms_codex import hooks as _codex_hooks
 from mms_codex import hook_trust as _codex_hook_trust
 from mms_session import hook_commands as _session_hook_commands
+from mms_session import overlays as _session_overlays
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
@@ -1839,154 +1840,19 @@ _collect_codex_hook_trust_seed_sources = _codex_hook_trust._collect_codex_hook_t
 _append_codex_session_hook_trust_states = _codex_hook_trust._append_codex_session_hook_trust_states
 
 
-def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root, *, exclude_names=None):
-    """Compatibility wrapper for session entry overlays."""
-    from mms_session.overlays import _overlay_session_entry_dir as overlay_session_entry_dir
-
-    return overlay_session_entry_dir(
-        parent_dir,
-        overlay_root,
-        entry_name,
-        extra_source_root,
-        exclude_names=exclude_names,
-    )
-
-
-def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for session skill overlays."""
-    from mms_session.overlays import _overlay_session_skill_dir as overlay_session_skill_dir
-
-    return overlay_session_skill_dir(
-        parent_dir,
-        overlay_root,
-        skill_name,
-        skill_root,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
-    """Compatibility wrapper for Caveman session overlays."""
-    from mms_session.overlays import _overlay_caveman_session_entries as overlay_caveman_session_entries
-
-    return overlay_caveman_session_entries(
-        parent_dir,
-        session_home,
-        enable_caveman=enable_caveman,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False, disabled_session_surfaces=None):
-    """Compatibility wrapper for ECC session overlays."""
-    from mms_session.overlays import _overlay_ecc_session_entries as overlay_ecc_session_entries
-
-    return overlay_ecc_session_entries(
-        parent_dir,
-        session_home,
-        enable_ecc=enable_ecc,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_omc_session_entries(parent_dir, session_home, *, enable_omc=False, disabled_session_surfaces=None):
-    """Compatibility wrapper for OMC session overlays."""
-    from mms_session.overlays import _overlay_omc_session_entries as overlay_omc_session_entries
-
-    return overlay_omc_session_entries(
-        parent_dir,
-        session_home,
-        enable_omc=enable_omc,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_web_access_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for web-access session overlays."""
-    from mms_session.overlays import _overlay_web_access_session_entries as overlay_web_access_session_entries
-
-    return overlay_web_access_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_weber_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for weber session overlays."""
-    from mms_session.overlays import _overlay_weber_session_entries as overlay_weber_session_entries
-
-    return overlay_weber_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for agent-browser session overlays."""
-    from mms_session.overlays import _overlay_agent_browser_session_entries as overlay_agent_browser_session_entries
-
-    return overlay_agent_browser_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_codegraph_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for CodeGraph session overlays."""
-    from mms_session.overlays import _overlay_codegraph_session_entries as overlay_codegraph_session_entries
-
-    return overlay_codegraph_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for TOON session overlays."""
-    from mms_session.overlays import _overlay_toon_session_entries as overlay_toon_session_entries
-
-    return overlay_toon_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_xmem_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for xmem session overlays."""
-    from mms_session.overlays import _overlay_xmem_session_entries as overlay_xmem_session_entries
-
-    return overlay_xmem_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for token-saver session overlays."""
-    from mms_session.overlays import _overlay_token_saver_session_entries as overlay_token_saver_session_entries
-
-    return overlay_token_saver_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for auto-github-contributor session overlays."""
-    from mms_session.overlays import _overlay_auto_github_contributor_session_entries as overlay_auto_gh_session_entries
-
-    return overlay_auto_gh_session_entries(
-        parent_dir,
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
+_overlay_session_entry_dir = _session_overlays._overlay_session_entry_dir
+_overlay_session_skill_dir = _session_overlays._overlay_session_skill_dir
+_overlay_caveman_session_entries = _session_overlays._overlay_caveman_session_entries
+_overlay_ecc_session_entries = _session_overlays._overlay_ecc_session_entries
+_overlay_omc_session_entries = _session_overlays._overlay_omc_session_entries
+_overlay_web_access_session_entries = _session_overlays._overlay_web_access_session_entries
+_overlay_weber_session_entries = _session_overlays._overlay_weber_session_entries
+_overlay_agent_browser_session_entries = _session_overlays._overlay_agent_browser_session_entries
+_overlay_codegraph_session_entries = _session_overlays._overlay_codegraph_session_entries
+_overlay_toon_session_entries = _session_overlays._overlay_toon_session_entries
+_overlay_xmem_session_entries = _session_overlays._overlay_xmem_session_entries
+_overlay_token_saver_session_entries = _session_overlays._overlay_token_saver_session_entries
+_overlay_auto_github_contributor_session_entries = _session_overlays._overlay_auto_github_contributor_session_entries
 
 
 def _overlay_agy_session_assets(
