@@ -261,17 +261,14 @@ _GATEWAY_SESSION_MARKERS = (
     os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
 )
 
-
-def _base_user_config_path_from_gateway(config_path):
-    from mms_commands.tools import base_user_config_path_from_gateway
-
-    return base_user_config_path_from_gateway(config_path, gateway_session_markers=_GATEWAY_SESSION_MARKERS)
-
-
-def _base_user_primary_dir_from_gateway(path):
-    from mms_commands.tools import base_user_primary_dir_from_gateway
-
-    return base_user_primary_dir_from_gateway(path, gateway_session_markers=_GATEWAY_SESSION_MARKERS)
+_base_user_config_path_from_gateway = partial(
+    _command_tools.base_user_config_path_from_gateway,
+    gateway_session_markers=_GATEWAY_SESSION_MARKERS,
+)
+_base_user_primary_dir_from_gateway = partial(
+    _command_tools.base_user_primary_dir_from_gateway,
+    gateway_session_markers=_GATEWAY_SESSION_MARKERS,
+)
 
 
 def _merge_base_user_broker_profiles(cfg, config_path):
@@ -640,16 +637,12 @@ _VISION_CAPABLE_MODEL_HINTS = ("gemini-",)
 
 _normalize_role = partial(_command_tools.normalize_role, valid_roles=VALID_ROLES)
 _normalize_positive_seconds = _command_tools.normalize_positive_seconds
-
-
-def _default_provider():
-    from mms_commands.tools import default_provider
-
-    return default_provider(
-        default_provider_id=DEFAULT_PROVIDER_ID,
-        default_provider_protocols=DEFAULT_PROVIDER_PROTOCOLS,
-        provider_capable_clis=PROVIDER_CAPABLE_CLIS,
-    )
+_default_provider = partial(
+    _command_tools.default_provider,
+    default_provider_id=DEFAULT_PROVIDER_ID,
+    default_provider_protocols=DEFAULT_PROVIDER_PROTOCOLS,
+    provider_capable_clis=PROVIDER_CAPABLE_CLIS,
+)
 
 
 _default_account_home = partial(_command_tools.default_account_home, accounts_dir=ACCOUNTS_DIR)
@@ -736,12 +729,7 @@ _ACCOUNT_CA_ENV_KEYS = (
     "SSL_CERT_FILE",
     "REQUESTS_CA_BUNDLE",
 )
-
-
-def _url_matches_host_suffix(url, host_suffixes):
-    from mms_commands.tools import url_matches_host_suffix
-
-    return url_matches_host_suffix(url, host_suffixes)
+_url_matches_host_suffix = _command_tools.url_matches_host_suffix
 
 
 def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
@@ -782,10 +770,7 @@ def _runtime_httpx_kwargs(runtime, *, target_url=""):
     )
 
 
-def _runtime_force_ipv4(runtime):
-    from mms_commands.tools import runtime_force_ipv4
-
-    return runtime_force_ipv4(runtime)
+_runtime_force_ipv4 = _command_tools.runtime_force_ipv4
 
 
 def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False, **kwargs):
@@ -809,12 +794,7 @@ def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False,
 
 
 _SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
-
-
-def _validate_proxy_url(proxy_url):
-    from mms_commands.tools import validate_proxy_url
-
-    return validate_proxy_url(proxy_url, supported_proxy_schemes=_SUPPORTED_PROXY_SCHEMES)
+_validate_proxy_url = partial(_command_tools.validate_proxy_url, supported_proxy_schemes=_SUPPORTED_PROXY_SCHEMES)
 
 
 def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.anthropic.com", force_ipv4=True):
@@ -866,10 +846,7 @@ def _prompt_validated_timezone(current_timezone="", *, wizard=False):
     )
 
 
-def _normalize_account_id(account_id):
-    from mms_commands.tools import normalize_account_id
-
-    return normalize_account_id(account_id)
+_normalize_account_id = _command_tools.normalize_account_id
 
 
 def _wizard_prompt(label, default="", password=False, required=False):
@@ -905,52 +882,17 @@ def _normalize_account(account):
     )
 
 
-def _normalize_provider_id_input(provider_id):
-    from mms_commands.tools import normalize_provider_id_input
-
-    return normalize_provider_id_input(provider_id, default_provider_id=DEFAULT_PROVIDER_ID)
-
-
-def _normalize_model_id_list(values):
-    from mms_commands.tools import normalize_model_id_list
-
-    return normalize_model_id_list(values)
-
-
-def _unique_runtime_id(existing_ids, base_id):
-    from mms_commands.tools import unique_runtime_id
-
-    return unique_runtime_id(existing_ids, base_id)
-
-
-def _normalize_models_endpoint(value):
-    from mms_commands.tools import normalize_models_endpoint
-
-    return normalize_models_endpoint(value)
-
-
-def _model_source_label(source):
-    from mms_commands.tools import model_source_label
-
-    return model_source_label(source)
-
-
-def _ttfb_label(ttfb_ms):
-    from mms_commands.tools import ttfb_label
-
-    return ttfb_label(ttfb_ms)
-
-
-def _tps_label(tps_value):
-    from mms_commands.tools import tps_label
-
-    return tps_label(tps_value)
-
-
-def _provider_env_name(provider_id, field):
-    from mms_commands.tools import provider_env_name
-
-    return provider_env_name(provider_id, field, default_provider_id=DEFAULT_PROVIDER_ID)
+_normalize_provider_id_input = partial(
+    _command_tools.normalize_provider_id_input,
+    default_provider_id=DEFAULT_PROVIDER_ID,
+)
+_normalize_model_id_list = _command_tools.normalize_model_id_list
+_unique_runtime_id = _command_tools.unique_runtime_id
+_normalize_models_endpoint = _command_tools.normalize_models_endpoint
+_model_source_label = _command_tools.model_source_label
+_ttfb_label = _command_tools.ttfb_label
+_tps_label = _command_tools.tps_label
+_provider_env_name = partial(_command_tools.provider_env_name, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _normalize_provider(provider):
@@ -2074,27 +2016,9 @@ def _provider_has_configured_base_url(provider):
     return provider_has_configured_base_url(provider)
 
 
-def _resolve_config_provider_id(provider_defs, provider_id):
-    from mms_commands.tools import resolve_config_provider_id
-
-    return resolve_config_provider_id(provider_defs, provider_id)
-
-
-def _config_truthy(value, default=False):
-    from mms_commands.tools import config_truthy
-
-    return config_truthy(value, default=default)
-
-
-def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", explicit_provider_id=""):
-    from mms_commands.tools import vision_sidecar_candidate_pairs
-
-    return vision_sidecar_candidate_pairs(
-        raw,
-        provider_ids,
-        explicit_model=explicit_model,
-        explicit_provider_id=explicit_provider_id,
-    )
+_resolve_config_provider_id = _command_tools.resolve_config_provider_id
+_config_truthy = _command_tools.config_truthy
+_vision_sidecar_candidate_pairs = _command_tools.vision_sidecar_candidate_pairs
 
 
 def _runtime_with_vision_sidecar(cfg, runtime):
