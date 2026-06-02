@@ -1357,7 +1357,7 @@ def test_launch_opencode_lite_pro_prefers_fallback_when_primary_preflight_fails(
 def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypatch):
     import mms_core
     import mms_launchers
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     captured = {}
     cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}

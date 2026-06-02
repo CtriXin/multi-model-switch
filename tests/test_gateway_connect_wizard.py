@@ -95,7 +95,7 @@ def test_quick_connect_gateway_prompts_name_url_key_before_advanced_fields(monke
 
 def test_run_connect_wizard_tui_escape_cancels_without_text_fallback(monkeypatch):
     import mms_core
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     messages = []
     cfg = {"providers": []}
@@ -125,7 +125,7 @@ def test_run_connect_wizard_tui_escape_cancels_without_text_fallback(monkeypatch
 
 def test_run_connect_wizard_tui_error_still_uses_text_fallback(monkeypatch):
     import mms_core
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     messages = []
 

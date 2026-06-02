@@ -383,7 +383,7 @@ Reset targets MMS-owned install/config surfaces. It intentionally avoids shared 
 Run focused checks before publishing launcher/session changes:
 
 ```bash
-python3 -m py_compile mms_core.py mms_launchers.py mms_tui.py
+python3 -m py_compile mms_core.py mms_launchers.py mms_display/tui.py
 PYTHONPATH=. python3 -m pytest -q tests/test_codex_history_growth.py
 PYTHONPATH=. python3 -m pytest -q tests/test_claude_hardening_regressions.py -k 'resume or routing or bridge'
 git diff --check

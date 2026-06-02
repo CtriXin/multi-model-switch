@@ -122,7 +122,7 @@ def launch_codex_runtime(model_info, runtime, once=False, extra_args=None):
     if "reasoning_effort" in runtime:
         reasoning_effort = _runtime_reasoning_effort(runtime, default=gpt_default_effort)
     else:
-        from mms_tui import select_reasoning_effort_tui as _sel_effort
+        from mms_display.tui import select_reasoning_effort_tui as _sel_effort
         reasoning_effort = _sel_effort(default=gpt_default_effort)
     console.print(f"[dim]thinking: {'on' if thinking_enabled else 'off'} · effort: {reasoning_effort}[/dim]")
     native_fallback_routes = _resolve_codex_responses_fallback_routes(runtime, model)

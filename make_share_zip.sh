@@ -17,7 +17,6 @@ FILES=(
     "README.md"
     "mms_core.py"
     "mms_launchers.py"
-    "mms_tui.py"
     "config.example.toml"
     "install.sh"
 )
@@ -34,6 +33,7 @@ DIRS=(
     "mms_runtime"
     "mms_display"
     "mms_registry"
+    "mms_commands"
 )
 
 for file in "${FILES[@]}"; do

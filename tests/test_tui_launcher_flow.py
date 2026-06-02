@@ -83,7 +83,7 @@ from mms_launcher.tui_flow import (
 
 def test_load_balance_entry_removed_from_launcher_tui() -> None:
     import inspect
-    import mms_tui
+    import mms_display.tui as mms_tui
     import mms_launcher.tui_flow as flow
 
     launcher_source = inspect.getsource(mms_tui.select_family_tui)

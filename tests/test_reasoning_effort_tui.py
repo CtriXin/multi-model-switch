@@ -1,4 +1,4 @@
-from mms_tui import (
+from mms_display.tui import (
     _COLD_FAMILY_BUCKET_ID,
     _ECC_TOGGLE_KEY,
     _EFFORT_OPTIONS,

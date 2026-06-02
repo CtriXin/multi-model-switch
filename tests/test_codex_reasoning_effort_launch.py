@@ -46,7 +46,7 @@ def test_mms_core_keeps_high_for_installed_layout(monkeypatch):
 
 def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     import mms_launchers
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     captured = {}
 
@@ -107,7 +107,7 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
 
 def test_launch_codex_uses_runtime_thinking_and_effort_without_prompt(monkeypatch):
     import mms_launchers
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     captured = {}
 
@@ -158,7 +158,7 @@ def test_launch_codex_uses_runtime_thinking_and_effort_without_prompt(monkeypatc
 
 def test_launch_codex_bypass_mode_skips_hook_review_prompt(monkeypatch):
     import mms_launchers
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     captured = {}
 
@@ -204,7 +204,7 @@ def test_launch_codex_bypass_mode_skips_hook_review_prompt(monkeypatch):
 
 def test_launch_codex_uses_lazy_helpers_after_initialization(monkeypatch):
     import mms_launchers
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     captured = {}
 

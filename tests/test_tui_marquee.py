@@ -1,4 +1,4 @@
-from mms_tui import _display_width, _marquee_text
+from mms_display.tui import _display_width, _marquee_text
 
 
 def test_marquee_text_scrolls_long_model_names():

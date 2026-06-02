@@ -2976,7 +2976,7 @@ def _settings_result_tui_payload(title, rows, note="", *, ok=True):
 
 
 def _select_settings_result_tui(title, rows, note="", *, ok=True):
-    from mms_tui import select_channel_action_tui
+    from mms_display.tui import select_channel_action_tui
     from mms_commands.tools import select_settings_result_tui
 
     return select_settings_result_tui(
@@ -3159,7 +3159,7 @@ def _select_manage_target(cfg):
     from mms_commands.tools import select_manage_target, select_manage_target_fallback
 
     def select_target_tui(targets):
-        from mms_tui import select_manage_target_tui
+        from mms_display.tui import select_manage_target_tui
         return select_manage_target_tui(targets)
 
     return select_manage_target(
@@ -3242,7 +3242,7 @@ def _manage_provider_models(cfg, provider_id):
     from mms_commands.tools import manage_provider_models
 
     def select_action_tui(title, info_lines, actions):
-        from mms_tui import select_channel_action_tui
+        from mms_display.tui import select_channel_action_tui
         return select_channel_action_tui(title, info_lines, actions)
 
     return manage_provider_models(
@@ -3361,7 +3361,7 @@ def _manage_provider_target(cfg, provider_id):
     from mms_commands.tools import manage_provider_target
 
     def select_action_tui(title, info_lines, actions):
-        from mms_tui import select_channel_action_tui
+        from mms_display.tui import select_channel_action_tui
         return select_channel_action_tui(title, info_lines, actions)
 
     return manage_provider_target(
@@ -3408,7 +3408,7 @@ def _manage_account_target(cfg, account_id):
     from mms_commands.tools import manage_account_target
 
     def select_action_tui(title, info_lines, actions):
-        from mms_tui import select_channel_action_tui
+        from mms_display.tui import select_channel_action_tui
         return select_channel_action_tui(title, info_lines, actions)
 
     return manage_account_target(
@@ -3438,7 +3438,7 @@ def _run_account_mgmt_tui(cfg):
     from mms_commands.tools import run_account_mgmt_tui
 
     def select_target_tui(targets):
-        from mms_tui import select_manage_target_tui
+        from mms_display.tui import select_manage_target_tui
         return select_manage_target_tui(targets)
 
     return run_account_mgmt_tui(
@@ -3456,7 +3456,7 @@ def _run_recommend_mgmt_tui(cfg):
     from mms_commands.tools import run_recommend_mgmt_tui
 
     def load_select_channel_action_tui():
-        from mms_tui import select_channel_action_tui
+        from mms_display.tui import select_channel_action_tui
         return select_channel_action_tui
 
     return run_recommend_mgmt_tui(
@@ -3486,7 +3486,7 @@ def run_connect_wizard(cfg):
     from mms_commands.tools import run_connect_wizard as run_connect_wizard_impl
 
     def load_select_connect_tui():
-        from mms_tui import select_connect_tui
+        from mms_display.tui import select_connect_tui
         return select_connect_tui
 
     return run_connect_wizard_impl(
@@ -3801,7 +3801,7 @@ def _pick_recovery_actions(findings, actions):
     select_actions_tui = None
     if use_tui:
         try:
-            from mms_tui import select_actions_tui
+            from mms_display.tui import select_actions_tui
         except ImportError:
             select_actions_tui = None
     from mms_commands.tools import pick_recovery_actions

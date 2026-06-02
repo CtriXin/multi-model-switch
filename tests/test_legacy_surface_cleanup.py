@@ -69,7 +69,7 @@ def test_tui_settings_action_descriptors_have_stable_labels() -> None:
 
 
 def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
-    import mms_tui
+    import mms_display.tui as mms_tui
 
     items = mms_tui._settings_menu()
     ids = [item["id"] for item in items]

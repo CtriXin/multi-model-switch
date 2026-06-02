@@ -1880,9 +1880,9 @@ def _tui_webui_mapping_summary(rows: list[dict[str, str]] | None = None) -> dict
         "rows_with_open_target": with_open,
         "user_check_policy": "每行都可在 WebUI 点击：打开跳到页面落点，报告/人工确认验证 API 或人工确认卡，原生/草稿行再用保存预览核对写入。",
         "source_files": [
-            "mms_tui.py:_connect_actions",
-            "mms_tui.py:select_submodel_tui",
-            "mms_tui.py:_settings_menu",
+            "mms_display/tui.py:_connect_actions",
+            "mms_display/tui.py:select_submodel_tui",
+            "mms_display/tui.py:_settings_menu",
             "mms_core.py settings/provider/account/rescue action handlers",
         ],
         "policy": "原生/报告行由对应 WebUI 模块承接；human_gate/missing 行保留 CLI 人工路径。load_balance 已明确不进入本轮迁移。",

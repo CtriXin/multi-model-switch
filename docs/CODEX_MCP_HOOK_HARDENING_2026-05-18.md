@@ -130,7 +130,7 @@ Regression coverage:
 Commands run for the hardening commit:
 
 ```bash
-python3.13 -m py_compile mms_core.py mms_launchers.py mms_tui.py
+python3.13 -m py_compile mms_core.py mms_launchers.py mms_display/tui.py
 python3.13 -m pytest -q tests/test_claude_hardening_regressions.py tests/test_opencode_launcher.py tests/test_mms_runtime.py
 npm run build --if-present
 git diff --check

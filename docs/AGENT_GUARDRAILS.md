@@ -27,7 +27,7 @@
 
 - `mms_core.py`
 - `mms_launchers.py`
-- `mms_tui.py`
+- `mms_display/tui.py`
 - `mms_bridge.py`
 - `mms_runtime/account_state.py`
 - `mms_session/index.py`

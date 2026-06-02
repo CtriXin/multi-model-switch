@@ -155,7 +155,7 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
         if "reasoning_effort" in runtime:
             _reasoning_effort = _runtime_reasoning_effort(runtime, default=_gpt_default_effort)
         elif _gpt_openai_url and _is_gpt_model(probe_model):
-            from mms_tui import select_reasoning_effort_tui as _sel_effort_claude
+            from mms_display.tui import select_reasoning_effort_tui as _sel_effort_claude
             _reasoning_effort = _sel_effort_claude(default=_gpt_default_effort)
         else:
             _reasoning_effort = "high"

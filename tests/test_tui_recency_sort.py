@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from mms_tui import _sort_cli_names_by_last_used, _sort_model_entries_for_tui
+from mms_display.tui import _sort_cli_names_by_last_used, _sort_model_entries_for_tui
 from mms_core import _sort_family_entries_for_tui
 from mms_launcher.tui_flow import TuiFamilyPayloadDeps, build_tui_family_payloads
 

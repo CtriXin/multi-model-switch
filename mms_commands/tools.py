@@ -7465,7 +7465,7 @@ def select_custom_model(
         return (None, None) if is_aggregated else None
 
     if use_tui and select_model_tui is None:
-        from mms_tui import select_model_tui as select_model_tui_impl
+        from mms_display.tui import select_model_tui as select_model_tui_impl
 
         select_model_tui = select_model_tui_impl
 

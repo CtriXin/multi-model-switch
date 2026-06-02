@@ -290,7 +290,7 @@ def select_opencode_profile(
     options = profile_menu_options()
     if use_tui:
         try:
-            from mms_tui import select_channel_action_tui
+            from mms_display.tui import select_channel_action_tui
             return select_channel_action_tui(
                 "OpenCode Mode",
                 [(option["label"], option["summary"]) for option in options[:4]],
@@ -927,7 +927,7 @@ def handle_tui_profile_action(
 
 
 def load_provider_browse_tui_tools():
-    from mms_tui import select_provider_browse_tui, select_provider_models_tui
+    from mms_display.tui import select_provider_browse_tui, select_provider_models_tui
 
     return {
         "select_provider_browse_tui": select_provider_browse_tui,
@@ -1360,7 +1360,7 @@ def load_rescue_tools():
 
 
 def load_select_model_tui():
-    from mms_tui import select_model_tui
+    from mms_display.tui import select_model_tui
 
     return select_model_tui
 
