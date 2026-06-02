@@ -103,6 +103,7 @@ from mms_opencode.session import (
     opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
     overlay_opencode_plugin as _overlay_opencode_plugin_impl,
 )
+from mms_codex import hook_trust as _codex_hook_trust
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
@@ -2027,121 +2028,19 @@ def _build_codex_session_hooks(
     )
 
 
-def _codex_hook_event_state_key(event_name):
-    """Compatibility wrapper for Codex hook event state keys."""
-    from mms_codex.hook_trust import _codex_hook_event_state_key as codex_hook_event_state_key
-
-    return codex_hook_event_state_key(event_name)
-
-
-def _codex_hook_fingerprint(hook):
-    """Compatibility wrapper for Codex hook fingerprinting."""
-    from mms_codex.hook_trust import _codex_hook_fingerprint as codex_hook_fingerprint
-
-    return codex_hook_fingerprint(hook)
-
-
-def _codex_hook_index(hooks_payload):
-    """Compatibility wrapper for Codex hook indexing."""
-    from mms_codex.hook_trust import _codex_hook_index as codex_hook_index
-
-    return codex_hook_index(hooks_payload)
-
-
-def _decode_toml_basic_key(value):
-    """Compatibility wrapper for TOML basic key decoding."""
-    from mms_codex.hook_trust import _decode_toml_basic_key as decode_toml_basic_key
-
-    return decode_toml_basic_key(value)
-
-
-def _codex_hook_trust_records_from_config(config_text):
-    """Compatibility wrapper for Codex hook trust record parsing."""
-    from mms_codex.hook_trust import _codex_hook_trust_records_from_config as records_from_config
-
-    return records_from_config(config_text)
-
-
-def _normalize_codex_hook_trust_toml_layout(config_text):
-    """Compatibility wrapper for Codex hook trust TOML layout cleanup."""
-    from mms_codex.hook_trust import _normalize_codex_hook_trust_toml_layout as normalize_layout
-
-    return normalize_layout(config_text)
-
-
-def _replace_codex_hook_trust_hashes(config_text, trusted_hashes_by_key):
-    """Compatibility wrapper for replacing Codex hook trust hashes."""
-    from mms_codex.hook_trust import _replace_codex_hook_trust_hashes as replace_hashes
-
-    return replace_hashes(config_text, trusted_hashes_by_key)
-
-
-def _append_codex_exact_hook_trust_hashes(config_text, trusted_hashes_by_key):
-    """Compatibility wrapper for appending exact Codex hook trust hashes."""
-    from mms_codex.hook_trust import _append_codex_exact_hook_trust_hashes as append_hashes
-
-    return append_hashes(config_text, trusted_hashes_by_key)
-
-
-def _codex_hook_trust_refresh_enabled():
-    """Compatibility wrapper for Codex hook trust refresh flag parsing."""
-    from mms_codex.hook_trust import _codex_hook_trust_refresh_enabled as refresh_enabled
-
-    return refresh_enabled()
-
-
-def _codex_app_server_hooks_list(codex_home, *, cwds=None, timeout=4.0):
-    """Compatibility wrapper for reading current Codex app-server hook hashes."""
-    from mms_codex.hook_trust import _codex_app_server_hooks_list as app_server_hooks_list
-
-    return app_server_hooks_list(codex_home, cwds=cwds, timeout=timeout)
-
-
-def _refresh_codex_current_hook_trust_cache(
-    target_codex_dir,
-    *,
-    cwds=None,
-    managed_only=False,
-    timeout=4.0,
-    allow_non_real_home=False,
-):
-    """Compatibility wrapper for refreshing Codex hook trust cache."""
-    from mms_codex.hook_trust import _refresh_codex_current_hook_trust_cache as refresh_cache
-
-    return refresh_cache(
-        target_codex_dir,
-        cwds=cwds,
-        managed_only=managed_only,
-        timeout=timeout,
-        allow_non_real_home=allow_non_real_home,
-    )
-
-
-def _collect_codex_hook_trust_seed_sources(codex_roots):
-    """Compatibility wrapper for collecting Codex hook trust seed sources."""
-    from mms_codex.hook_trust import _collect_codex_hook_trust_seed_sources as collect_seed_sources
-
-    return collect_seed_sources(codex_roots)
-
-
-def _append_codex_session_hook_trust_states(
-    config_text,
-    *,
-    target_hooks_path,
-    target_hooks,
-    trust_config_texts=None,
-    source_hook_payloads_by_path=None,
-):
-    """Compatibility wrapper for Codex session hook trust state rendering."""
-    from mms_codex.hook_trust import _append_codex_session_hook_trust_states as append_trust_states
-
-    return append_trust_states(
-        config_text,
-        target_hooks_path=target_hooks_path,
-        target_hooks=target_hooks,
-        trust_config_texts=trust_config_texts,
-        source_hook_payloads_by_path=source_hook_payloads_by_path,
-    )
+_codex_hook_event_state_key = _codex_hook_trust._codex_hook_event_state_key
+_codex_hook_fingerprint = _codex_hook_trust._codex_hook_fingerprint
+_codex_hook_index = _codex_hook_trust._codex_hook_index
+_decode_toml_basic_key = _codex_hook_trust._decode_toml_basic_key
+_codex_hook_trust_records_from_config = _codex_hook_trust._codex_hook_trust_records_from_config
+_normalize_codex_hook_trust_toml_layout = _codex_hook_trust._normalize_codex_hook_trust_toml_layout
+_replace_codex_hook_trust_hashes = _codex_hook_trust._replace_codex_hook_trust_hashes
+_append_codex_exact_hook_trust_hashes = _codex_hook_trust._append_codex_exact_hook_trust_hashes
+_codex_hook_trust_refresh_enabled = _codex_hook_trust._codex_hook_trust_refresh_enabled
+_codex_app_server_hooks_list = _codex_hook_trust._codex_app_server_hooks_list
+_refresh_codex_current_hook_trust_cache = _codex_hook_trust._refresh_codex_current_hook_trust_cache
+_collect_codex_hook_trust_seed_sources = _codex_hook_trust._collect_codex_hook_trust_seed_sources
+_append_codex_session_hook_trust_states = _codex_hook_trust._append_codex_session_hook_trust_states
 
 
 def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root, *, exclude_names=None):
