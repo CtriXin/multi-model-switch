@@ -6,13 +6,19 @@
   <title>MMS 配置中心</title>
   <link rel="stylesheet" href="/static/config-web.css">
 </head>
-<body class="booting">
+<body class="booting" data-ui-mode="default">
 <header>
   <div>
     <h1>MMS 控制台</h1>
-    <p class="lead">默认先进入设置和调试：配置通道、模型能力、CLI、Skill / MCP / Hook，再去保存审计。配置源、DB root 和 bundle 诊断放到后面作为证据面板。</p>
+    <p class="lead">默认先进入设置和调试：配置通道、模型能力、CLI、Skill / MCP / Hook，再去保存审计。路径、DB 和 bundle 诊断只在高级模式里展开。</p>
   </div>
-  <div class="statusbar" id="statusbar"><span class="pill warn boot-pulse">读取本地配置中</span></div>
+  <div class="header-tools">
+    <div class="ui-mode-toggle" id="uiModeToggle" aria-label="界面模式">
+      <button class="active" data-ui-mode-button="default" type="button">默认模式</button>
+      <button data-ui-mode-button="advanced" type="button">高级模式</button>
+    </div>
+    <div class="statusbar" id="statusbar"><span class="pill warn boot-pulse">读取本地配置中</span></div>
+  </div>
 </header>
 <div class="shell">
   <aside class="side boot-nav" id="nav" aria-busy="true">
@@ -21,7 +27,7 @@
     <button class="navbtn" disabled>能力面板<small>CLI / Skill / MCP</small></button>
   </aside>
   <main class="content">
-    <section class="panel" data-section="source">
+    <section class="panel ui-advanced-only" data-section="source">
       <h2>配置源状态</h2>
       <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；registry 的 报告 / 人工确认操作也在这里，不再藏到 设置总表。</p>
       <div class="module-actions">
@@ -74,7 +80,7 @@
                   <button id="fetchAllModels" class="secondary">拉取全部通道模型</button>
                   <button id="testList" class="secondary">测试当前通道列表接口</button>
                   <button id="openModelTest" class="ghost">去 Ping / Chat 测试</button>
-                  <label class="check"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>高级：拉取后把缺失旧 route 标记为待清理</span></label>
+                  <label class="check ui-advanced-only"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>高级：拉取后把缺失旧 route 标记为待清理</span></label>
                   <input id="modelSearch" placeholder="搜索模型" style="max-width:260px">
                 </div>
                 <label style="margin-top:14px">手动添加当前通道模型（extra_models，逗号或换行分隔）</label>
@@ -83,13 +89,13 @@
                   <button id="addManualModels" class="secondary">添加为手动模型</button>
                   <button id="clearHidden" class="ghost">显示全部隐藏模型</button>
                   <button id="restoreModelPatch" class="ghost">清空手动添加和隐藏</button>
-                  <button id="clearAllStaleHidden" class="ghost">清理失效隐藏规则（全部通道）</button>
+                  <button id="clearAllStaleHidden" class="ghost ui-advanced-only">清理失效隐藏规则（全部通道）</button>
                 </div>
               </div>
               <div id="modelChips" class="card"></div>
-              <div class="card" id="staleHiddenBox"></div>
+              <div class="card ui-advanced-only" id="staleHiddenBox"></div>
               <div class="table-wrap model-table-wrap"><table id="modelTable"></table></div>
-              <div class="result module-report" id="modelConfigResult">模型配置动作结果会显示在这里。</div>
+              <div class="result module-report ui-advanced-only" id="modelConfigResult">模型配置动作结果会显示在这里。</div>
             </div>
           </div>
         </div>
@@ -145,7 +151,7 @@
           <div class="check" style="margin-top:10px">
             <input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span>
           </div>
-          <div class="btns">
+          <div class="btns ui-advanced-only">
             <button class="ghost" data-settings-action="rescue_events" data-report-target="fallbackReport">查看 rescue 事件</button>
             <button class="ghost" data-settings-action="rescue_handover_gate" data-report-target="fallbackReport">交接确认</button>
             <button class="ghost" data-settings-action="rescue_create_demo_gate" data-report-target="fallbackReport">Demo packet 确认</button>
@@ -167,7 +173,7 @@
             <button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button>
           </div>
         </div>
-        <div class="card span12">
+        <div class="card span12 ui-advanced-only">
           <h3>Fallback 报告 / 人工确认</h3>
           <div class="result" id="fallbackReport">选择 fallback 动作查看结果。</div>
         </div>
@@ -199,7 +205,7 @@
           </select>
           <p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p>
         </div>
-        <div class="card span12">
+        <div class="card span12 ui-advanced-only">
           <h3>OpenCode Agent 名单</h3>
           <p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。顺序表示 priority/fallback 顺序，不是 round-robin。</p>
           <div class="oc-summary" id="opencodeOverrideSummary"></div>
@@ -218,7 +224,7 @@
     <!-- Settings -->
     <section class="panel" data-section="settings">
       <h2>设置工作台</h2>
-      <p>先改会影响 MMS 启动的设置，再测试模型和会话能力，最后生成 diff 保存；配置源、DB root、bundle 这类证据放到下面的诊断入口。</p>
+      <p>先改会影响 MMS 启动的设置，再测试模型和会话能力，最后生成 diff 保存；路径、DB、bundle 这类证据切到高级模式再看。</p>
       <div class="card boot-settings-card">
         <h3>正在进入设置控制台</h3>
         <p class="muted">先加载本地草稿、账号状态、能力偏好和 latest-approved bundle；不会自动请求远端 /models。</p>
@@ -230,7 +236,7 @@
             <span class="settings-kicker">mmz1 实验界面 · 设置优先</span>
             <h3>先把启动会用到的东西配好</h3>
             <p>这里不是功能介绍页。常用入口只保留配置、测试、保存和人工确认；路径证据需要时再去“配置源”查。</p>
-            <div id="settingsGapSummary" class="chips"></div>
+            <div id="settingsGapSummary" class="chips ui-advanced-only"></div>
           </div>
           <div class="settings-hero-actions">
             <button class="secondary" data-section-jump="save">生成保存预览</button>
@@ -260,9 +266,9 @@
         <div class="settings-tabs" id="settingsTabs">
           <button class="settings-tab" data-settings-tab="basics"><strong>常用设置</strong><span>语言 / 保存入口</span></button>
           <button class="settings-tab" data-settings-tab="accounts"><strong>账号默认值</strong><span>default / priority / note</span></button>
-          <button class="settings-tab" data-settings-tab="guard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
-          <button class="settings-tab" data-settings-tab="about"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
-          <button class="settings-tab" data-settings-tab="audit"><strong>验收辅助</strong><span>折叠的 TUI 对照</span></button>
+          <button class="settings-tab ui-advanced-only" data-settings-tab="guard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
+          <button class="settings-tab ui-advanced-only" data-settings-tab="about"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
+          <button class="settings-tab ui-advanced-only" data-settings-tab="audit"><strong>验收辅助</strong><span>折叠的 TUI 对照</span></button>
         </div>
 
         <div class="settings-tab-panel" data-settings-panel="basics">
@@ -277,7 +283,7 @@
               </select>
               <div class="btns">
                 <button id="saveUiLanguage" class="ghost">暂存语言修改</button>
-                <button class="ghost" data-settings-action="language_status" data-report-target="settingsReport">语言状态</button>
+                <button class="ghost ui-advanced-only" data-settings-action="language_status" data-report-target="settingsReport">语言状态</button>
               </div>
             </div>
             <div class="setting-edit-card span4">
@@ -309,7 +315,7 @@
           </div>
         </div>
 
-        <div class="settings-tab-panel" data-settings-panel="guard">
+        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="guard">
           <div class="settings-panel-grid">
             <div class="setting-edit-card span6">
               <h3>启动快照守卫（Snapshot Guard）</h3>
@@ -330,7 +336,7 @@
           </div>
         </div>
 
-        <div class="settings-tab-panel" data-settings-panel="about">
+        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="about">
           <div class="settings-panel-grid">
             <div class="setting-edit-card span6">
               <h3>关于 / 版本</h3>
@@ -354,7 +360,7 @@
           </div>
         </div>
 
-        <div class="settings-tab-panel" data-settings-panel="audit">
+        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="audit">
           <details class="setting-edit-card" open>
             <summary>开发验收辅助，不作为用户设置入口</summary>
             <p class="muted">这些表只用于核对 TUI 功能迁移，不再占据设置主页面。</p>
@@ -374,7 +380,7 @@
           </details>
         </div>
 
-        <div class="settings-diagnostic-row">
+        <div class="settings-diagnostic-row ui-advanced-only">
           <button class="settings-diagnostic-card" data-section-jump="source">
             <strong>配置源 / DB root</strong>
             <span>root、registry、bundle、latest-approved 只作为诊断证据，放在这里统一查看。</span>
@@ -385,7 +391,7 @@
           </button>
         </div>
 
-        <div class="setting-edit-card settings-report-card">
+        <div class="setting-edit-card settings-report-card ui-advanced-only">
           <h3>报告 / 人工确认</h3>
           <div class="result" id="settingsReport">选择一个设置动作查看结果</div>
         </div>
@@ -423,14 +429,14 @@
           </div>
         </div>
         <div class="asset-list" id="assetCards"></div>
-        <div class="asset-source-strip" id="assetManagedRoots"></div>
+        <div class="asset-source-strip ui-advanced-only" id="assetManagedRoots"></div>
       </div>
-      <details class="oc-advanced" id="assetCliDetails">
+      <details class="oc-advanced ui-advanced-only" id="assetCliDetails">
         <summary>展开查看各 CLI 的 TUI 确认页能力和来源</summary>
         <div class="card asset-confirm-map" id="assetConfirmMap"></div>
         <div class="asset-cli-grid" id="assetCliOverview"></div>
       </details>
-      <div class="grid asset-ops-grid">
+      <div class="grid asset-ops-grid ui-advanced-only">
         <div class="card span6 asset-config-card asset-ops-card">
           <h3>备份：复制 TOML 片段</h3>
           <p class="muted" id="assetConfigContract">这里保留可复制片段；正常保存请使用底部出现的未保存变化栏。</p>
@@ -494,7 +500,7 @@
             <p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p>
           </div>
         </div>
-        <div class="span12">
+        <div class="span12 ui-advanced-only">
           <h3 style="margin-bottom:8px">原始 diff / 审计详情</h3>
           <div class="diff" id="diffBox">点击“生成保存预览”</div>
         </div>
@@ -502,7 +508,7 @@
     </section>
 
     <!-- 本地参考 -->
-    <section class="panel" data-section="refs">
+    <section class="panel ui-advanced-only" data-section="refs">
       <h2>本地参考</h2>
       <p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p>
       <div class="grid" id="refsGrid"></div>

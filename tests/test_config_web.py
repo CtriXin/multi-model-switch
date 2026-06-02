@@ -871,7 +871,7 @@ def test_config_web_frontend_assets_are_external_files():
 
     assert '<link rel="stylesheet" href="/static/config-web.css">' in html
     assert '<script src="/static/config-web.js"></script>' in html
-    assert '<body class="booting">' in html
+    assert '<body class="booting" data-ui-mode="default">' in html
     assert "读取本地配置中" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
@@ -970,7 +970,7 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     html = _frontend_source()
 
-    assert "['source','配置源','root / DB / bundle']" in html
+    assert "['source','配置源','root / DB / bundle','advanced']" in html
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
     assert "status.headline" in html
@@ -1094,6 +1094,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "settings-priority-grid" in html
     assert "配置源 / DB root" in html
     assert "settings-diagnostic-row" in html
+    assert "默认模式" in html
+    assert "高级模式" in html
+    assert "data-ui-mode-button" in html
+    assert "body[data-ui-mode=\"default\"] .ui-advanced-only" in html
+    assert "localStorage.getItem('mmsConfigWebUiMode')" in html
     assert "setSection('settings')" in html
     assert "data-settings-tab" in html
     assert "function switchSettingsTab" in html

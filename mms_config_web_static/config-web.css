@@ -91,6 +91,56 @@
       flex-wrap: wrap;
       justify-content: flex-end;
     }
+    .header-tools {
+      display: grid;
+      gap: 10px;
+      justify-items: end;
+    }
+    .ui-mode-toggle {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: oklch(100% 0 0 / .72);
+      box-shadow: var(--shadow-sm);
+    }
+    .ui-mode-toggle button {
+      min-height: 28px;
+      border: 0;
+      border-radius: 999px;
+      padding: 5px 12px;
+      background: transparent;
+      color: var(--muted);
+      box-shadow: none;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .ui-mode-toggle button:hover {
+      background: var(--fg-soft);
+      color: var(--fg);
+      box-shadow: none;
+    }
+    .ui-mode-toggle button.active {
+      background: var(--fg);
+      color: var(--surface);
+    }
+    body[data-ui-mode="default"] .ui-advanced-only {
+      display: none !important;
+    }
+    body[data-ui-mode="default"] .statusbar .pill:nth-child(n+3) {
+      display: none;
+    }
+    body[data-ui-mode="default"] [data-provider-form-tab="advanced"],
+    body[data-ui-mode="default"] [data-provider-form-tab="reports"],
+    body[data-ui-mode="default"] [data-provider-form-panel="advanced"],
+    body[data-ui-mode="default"] [data-provider-form-panel="reports"],
+    body[data-ui-mode="default"] .account-advanced,
+    body[data-ui-mode="default"] .provider-advanced,
+    body[data-ui-mode="default"] .asset-control-card:nth-child(n+2),
+    body[data-ui-mode="default"] .asset-card .asset-details {
+      display: none !important;
+    }
     .boot-pulse {
       animation: bootPulse 1.1s ease-in-out infinite;
     }
@@ -1747,6 +1797,7 @@
     @media (max-width: 980px) {
       header { grid-template-columns: 1fr; }
       .statusbar { justify-content: flex-start; }
+      .header-tools { justify-items: start; }
       .shell { grid-template-columns: 1fr; padding: 16px; }
       .side, .provider-editor {
         position: relative;
@@ -3048,7 +3099,23 @@
     .settings-priority-card:hover {
       transform: translateY(-1px);
       border-color: color-mix(in oklch, var(--accent) 42%, var(--border));
+      background:
+        linear-gradient(180deg, oklch(100% 0 0), color-mix(in oklch, var(--accent) 5%, var(--surface)));
+      color: var(--fg);
       box-shadow: 0 16px 32px oklch(18% 0.02 230 / .085);
+    }
+    .settings-priority-card:focus-visible {
+      outline: 3px solid color-mix(in oklch, var(--accent) 22%, transparent);
+      outline-offset: 2px;
+      background:
+        linear-gradient(180deg, oklch(100% 0 0), color-mix(in oklch, var(--accent) 5%, var(--surface)));
+      color: var(--fg);
+    }
+    .settings-priority-card:active {
+      transform: translateY(0);
+      background:
+        linear-gradient(180deg, oklch(100% 0 0), color-mix(in oklch, var(--accent) 8%, var(--surface)));
+      color: var(--fg);
     }
     .settings-priority-card span {
       display: inline-flex;

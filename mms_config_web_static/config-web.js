@@ -6,10 +6,10 @@ const sections=[
   ['runtime','运行默认值','首选 CLI / OpenCode'],
   ['fallback','Fallback','rescue / vision'],
   ['save','保存审计','diff / backup / audit'],
-  ['source','配置源','root / DB / bundle'],
-  ['refs','本地参考','配置契约 / 文档']
+  ['source','配置源','root / DB / bundle','advanced'],
+  ['refs','本地参考','配置契约 / 文档','advanced']
 ];
-let state=null; let activeProvider=0; let activeProviderTab='config'; let activeProviderFormTab='basic'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsActiveTab='basics'; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let lastGateCommands=[]; let checkedMappingRows=new Set(); let assetTab='mms_dynamic'; let assetCli='all'; let assetKind='all'; let assetQuery=''; let assetDisabledDraft=null; let cliDisabledDraft=null; let assetGroupOpenState={}; let assetConfirmPrefsChecked=false; let assetConfirmPhraseValue=''; let assetPrefsResultText='不会走模型配置审计；这里只保存 CLI/Skill/MCP/Hook 偏好。';
+let state=null; let activeProvider=0; let activeProviderTab='config'; let activeProviderFormTab='basic'; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false; let editingExtraModels=false; let settingsActiveTab='basics'; let settingsMappingFilter='all'; let touchedProviders=new Set(); let staleCleanupProviders=new Set(); let lastGateCommands=[]; let checkedMappingRows=new Set(); let assetTab='mms_dynamic'; let assetCli='all'; let assetKind='all'; let assetQuery=''; let assetDisabledDraft=null; let cliDisabledDraft=null; let assetGroupOpenState={}; let assetConfirmPrefsChecked=false; let assetConfirmPhraseValue=''; let assetPrefsResultText='不会走模型配置审计；这里只保存 CLI/Skill/MCP/Hook 偏好。'; let uiMode=localStorage.getItem('mmsConfigWebUiMode')==='advanced'?'advanced':'default';
 const $=id=>document.getElementById(id);
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3600)}
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
@@ -18,7 +18,23 @@ function touchProvider(id){if(id)touchedProviders.add(id)}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
 function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
 function switchProviderFormTab(tab){activeProviderFormTab=tab||'basic';document.querySelectorAll('[data-provider-form-tab]').forEach(b=>b.classList.toggle('active',b.dataset.providerFormTab===activeProviderFormTab));document.querySelectorAll('[data-provider-form-panel]').forEach(p=>p.classList.toggle('active',p.dataset.providerFormPanel===activeProviderFormTab))}
-function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('settings') }
+function applyUiMode(nextMode){
+  uiMode=nextMode==='advanced'?'advanced':'default';
+  localStorage.setItem('mmsConfigWebUiMode',uiMode);
+  document.body.dataset.uiMode=uiMode;
+  document.querySelectorAll('[data-ui-mode-button]').forEach(btn=>btn.classList.toggle('active',btn.dataset.uiModeButton===uiMode));
+  if(uiMode==='default'){
+    const activeSection=document.querySelector('[data-section]:not(.hide)')?.dataset.section;
+    if(['source','refs'].includes(activeSection))setSection('settings');
+    if(['advanced','reports'].includes(activeProviderFormTab))switchProviderFormTab('basic');
+    if(['guard','about','audit'].includes(settingsActiveTab))switchSettingsTab('basics');
+  }
+}
+function bindUiModeToggle(){
+  document.querySelectorAll('[data-ui-mode-button]').forEach(btn=>{btn.onclick=()=>{applyUiMode(btn.dataset.uiModeButton);toast(uiMode==='advanced'?'已切换到高级模式：显示诊断和路径信息':'已切换到默认模式：隐藏诊断和展示信息')}});
+  applyUiMode(uiMode);
+}
+function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub,mode])=>`<button class="navbtn ${mode==='advanced'?'ui-advanced-only':''}" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('settings'); applyUiMode(uiMode) }
 function versionBadge(){const v=state.version_info||{};return v.display||v.release||v.git_describe||v.git_commit||'dev'}
 function rootAlias(root){return (root?.mode==='preview')?'mms-next':'mms'}
 function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">版本：${escapeHtml(versionBadge())}</span><span class="pill">${state.mode}</span><span class="pill">root：${escapeHtml(rootAlias(root))} / ${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">配置：${escapeHtml(state.paths.config||'-')}</span><span class="pill">策略模型：${state.policy_summary.model_count}</span>`}
@@ -415,6 +431,7 @@ function draft(){syncProvider();syncFallback();syncRuntime();syncAccounts();sync
 function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderSessionAssets();renderSettings();renderRefs()}
 function setBootMessage(message){const bar=$('statusbar');if(bar)bar.innerHTML=`<span class="pill warn boot-pulse">${escapeHtml(message)}</span>`;const report=$('sourceReport');if(report)report.textContent=`${message}，不会自动刷新远端 /models。`}
 async function load(){document.body.classList.add('booting');setBootMessage('读取本地配置中');const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];loadAcceptanceState(state.tui_webui_mapping||[]);renderNav();renderAll();$('nav')?.classList.remove('boot-nav');$('nav')?.removeAttribute('aria-busy');document.body.classList.remove('booting');}
+bindUiModeToggle();
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,family_priority_overrides:{},claude_1m_mode:'auto',timezone:'Asia/Singapore',note:'',models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.pending_api_key=false;p.update_credentials=false;p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
 $('modelSearch').oninput=renderModelTable
