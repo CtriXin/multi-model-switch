@@ -83,7 +83,7 @@ def _ensure_rich():
     Panel, Table, Prompt, IntPrompt, Confirm, Text = _P, _T, _Pr, _IP, _C, _Tx
 
 from mms_account_state import seed_agy_state, seed_claude_state, seed_gemini_state
-from mms_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
+from mms_registry.adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 from mms_runtime.broker import (
     ensure_broker_config,
     handle_broker_command,

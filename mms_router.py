@@ -52,7 +52,7 @@ _LEARN_THRESHOLD = 3
 
 _BUILTIN_GUARDRAIL_FILES = {
     "mms_core", "mms_launchers", "mms_bridge", "mms_router", "mms_tui",
-    "mms_adapter_registry", "mms_account_state",
+    "mms_registry/adapter_registry.py", "mms_registry.adapter_registry", "mms_account_state",
     "auth", "schema", "migration", "security", "config.toml",
 }
 

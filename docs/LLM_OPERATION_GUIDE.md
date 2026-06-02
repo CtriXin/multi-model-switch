@@ -88,7 +88,7 @@ Stop before editing when the change can affect any of these surfaces:
 | `mms_bridge.py` | protocol translation, auth headers, provider fallback, error semantics |
 | `mms_account_state.py` | account status, auth state, Permission denied paths |
 | `mms_session/index.py` | managed CLI session index and isolation state |
-| `mms_adapter_registry.py` | CLI/provider capability mapping |
+| `mms_registry/adapter_registry.py` | CLI/provider capability mapping |
 | `mms` entrypoint | user-facing launcher behavior |
 | retired `ccs` / `mmc` cleanup logic | must not reintroduce legacy entrypoints or `~/.config/ccs` fallback |
 

@@ -9,7 +9,7 @@
 
 对应代码常量见：
 
-- [`mms_adapter_registry.py`](../mms_adapter_registry.py)
+- [`mms_registry/adapter_registry.py`](../mms_registry/adapter_registry.py)
 
 直接在 CLI 查看：
 
