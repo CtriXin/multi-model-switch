@@ -136,6 +136,7 @@ from mms_registry.provider_profiles import profile_context_window, resolve_provi
 from mms_pi import support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_runtime import exposure as _runtime_exposure
+from mms_runtime import models as _runtime_models
 from mms_runtime import urls as _runtime_urls
 from mms_runtime import validation as _runtime_validation
 from mms_runtime.env import (
@@ -2734,46 +2735,12 @@ def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_
     )
 
 
-def validate_account_for_cli(cli, account):
-    """Compatibility wrapper for account launch validation."""
-    from mms_runtime.validation import validate_account_for_cli as validate_account_for_cli_impl
-
-    return validate_account_for_cli_impl(cli, account)
-
-
-def _openai_base_url(provider):
-    """Compatibility wrapper for effective OpenAI base URL."""
-    from mms_runtime.urls import openai_base_url
-
-    return openai_base_url(provider)
-
-
-def _anthropic_base_url(provider):
-    """Compatibility wrapper for effective Anthropic base URL."""
-    from mms_runtime.urls import anthropic_base_url
-
-    return anthropic_base_url(provider)
-
-
-def _anthropic_probe_target(runtime):
-    """Compatibility wrapper for Anthropic probe target derivation."""
-    from mms_runtime.urls import anthropic_probe_target
-
-    return anthropic_probe_target(runtime)
-
-
-def _resolve_model(model_info):
-    """Compatibility wrapper for runtime model extraction."""
-    from mms_runtime.models import resolve_model
-
-    return resolve_model(model_info)
-
-
-def _normalized_model_name(model_name):
-    """Compatibility wrapper for model-name normalization."""
-    from mms_runtime.models import normalized_model_name
-
-    return normalized_model_name(model_name)
+validate_account_for_cli = _runtime_validation.validate_account_for_cli
+_openai_base_url = _runtime_urls.openai_base_url
+_anthropic_base_url = _runtime_urls.anthropic_base_url
+_anthropic_probe_target = _runtime_urls.anthropic_probe_target
+_resolve_model = _runtime_models.resolve_model
+_normalized_model_name = _runtime_models.normalized_model_name
 
 
 def _is_claude_family_model_name(model_name):
