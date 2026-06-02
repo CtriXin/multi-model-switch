@@ -106,7 +106,9 @@ from mms_opencode.session import (
 )
 from mms_codex import hooks as _codex_hooks
 from mms_codex import hook_trust as _codex_hook_trust
+from mms_session import env as _session_env
 from mms_session import hook_commands as _session_hook_commands
+from mms_session import mcp as _session_mcp
 from mms_session import overlays as _session_overlays
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
@@ -1894,25 +1896,9 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
     )
 
 
-def _configure_ecc_session_env(env_data, *, enable_ecc=False):
-    """Compatibility wrapper for ECC session env configuration."""
-    from mms_session.env import configure_ecc_session_env
-
-    return configure_ecc_session_env(env_data, enable_ecc=enable_ecc)
-
-
-def _configure_agent_pack_session_env(env_data, *, agent_pack="none"):
-    """Compatibility wrapper for agent-pack session env configuration."""
-    from mms_session.env import configure_agent_pack_session_env
-
-    return configure_agent_pack_session_env(env_data, agent_pack=agent_pack)
-
-
-def _session_required_env_from_runtime_env(env):
-    """Compatibility wrapper for session-required runtime env extraction."""
-    from mms_session.env import session_required_env_from_runtime_env
-
-    return session_required_env_from_runtime_env(env)
+_configure_ecc_session_env = _session_env.configure_ecc_session_env
+_configure_agent_pack_session_env = _session_env.configure_agent_pack_session_env
+_session_required_env_from_runtime_env = _session_env.session_required_env_from_runtime_env
 
 
 def _sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
@@ -2052,46 +2038,12 @@ def _enabled_real_codex_plugin_names():
     return enabled
 
 
-def _resolve_hive_root(module_path=None):
-    """Compatibility wrapper for Hive MCP root discovery."""
-    from mms_session.mcp import resolve_hive_root
-
-    return resolve_hive_root(module_path=module_path)
-
-
-def _default_hive_session_mcp_server():
-    """Compatibility wrapper for default Hive session MCP server discovery."""
-    from mms_session.mcp import default_hive_session_mcp_server
-
-    return default_hive_session_mcp_server()
-
-
-def _resolve_pilot_root(module_path=None):
-    """Compatibility wrapper for Pilot MCP root discovery."""
-    from mms_session.mcp import resolve_pilot_root
-
-    return resolve_pilot_root(module_path=module_path)
-
-
-def _default_pilot_session_mcp_server():
-    """Compatibility wrapper for default Pilot session MCP server discovery."""
-    from mms_session.mcp import default_pilot_session_mcp_server
-
-    return default_pilot_session_mcp_server()
-
-
-def _replace_plugin_root_tokens(value, plugin_root):
-    """Compatibility wrapper for plugin MCP root token replacement."""
-    from mms_session.mcp import replace_plugin_root_tokens
-
-    return replace_plugin_root_tokens(value, plugin_root)
-
-
-def _load_plugin_mcp_servers(plugin_root):
-    """Compatibility wrapper for plugin MCP server loading."""
-    from mms_session.mcp import load_plugin_mcp_servers
-
-    return load_plugin_mcp_servers(plugin_root)
+_resolve_hive_root = _session_mcp.resolve_hive_root
+_default_hive_session_mcp_server = _session_mcp.default_hive_session_mcp_server
+_resolve_pilot_root = _session_mcp.resolve_pilot_root
+_default_pilot_session_mcp_server = _session_mcp.default_pilot_session_mcp_server
+_replace_plugin_root_tokens = _session_mcp.replace_plugin_root_tokens
+_load_plugin_mcp_servers = _session_mcp.load_plugin_mcp_servers
 
 
 def _agent_pack_mcp_servers(agent_pack):
