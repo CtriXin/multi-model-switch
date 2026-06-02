@@ -1462,9 +1462,15 @@ def _session_feature_root_kwargs():
     }
 
 
-def _resolve_nsr_root():
-    """Compatibility wrapper for NSR root resolution."""
-    return _resolve_nsr_root_impl(**_session_feature_root_kwargs())
+def _make_session_feature_root_resolver(resolve_fn, name):
+    def _resolver():
+        return resolve_fn(**_session_feature_root_kwargs())
+
+    _resolver.__name__ = name
+    return _resolver
+
+
+_resolve_nsr_root = _make_session_feature_root_resolver(_resolve_nsr_root_impl, "_resolve_nsr_root")
 
 
 def _nsr_available_for_cli(cli_name):
@@ -1549,9 +1555,7 @@ def _asset_root_preference(asset_name):
     return _asset_root_preference_impl(asset_name, preference_asset_root_fn=preference_asset_root)
 
 
-def _resolve_caveman_root():
-    """Compatibility wrapper for Caveman root resolution."""
-    return _resolve_caveman_root_impl(**_session_feature_root_kwargs())
+_resolve_caveman_root = _make_session_feature_root_resolver(_resolve_caveman_root_impl, "_resolve_caveman_root")
 
 
 def _ecc_available_for_claude():
@@ -1571,49 +1575,15 @@ _runtime_ecc_enabled = _runtime_ecc_enabled_impl
 _runtime_omc_enabled = _runtime_omc_enabled_impl
 
 
-def _resolve_ecc_root():
-    """Compatibility wrapper for ECC root resolution."""
-    return _resolve_ecc_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_omc_root():
-    """Compatibility wrapper for OMC root resolution."""
-    return _resolve_omc_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_web_access_root():
-    """Compatibility wrapper for web-access root resolution."""
-    return _resolve_web_access_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_weber_root():
-    """Compatibility wrapper for Weber root resolution."""
-    return _resolve_weber_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_agent_browser_root():
-    """Compatibility wrapper for Agent Browser root resolution."""
-    return _resolve_agent_browser_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_codegraph_root():
-    """Compatibility wrapper for CodeGraph skill root resolution."""
-    return _resolve_codegraph_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_toon_root():
-    """Compatibility wrapper for TOON root resolution."""
-    return _resolve_toon_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_token_saver_root():
-    """Compatibility wrapper for token-saver root resolution."""
-    return _resolve_token_saver_root_impl(**_session_feature_root_kwargs())
-
-
-def _resolve_xmem_root():
-    """Compatibility wrapper for xmem root resolution."""
-    return _resolve_xmem_root_impl(**_session_feature_root_kwargs())
+_resolve_ecc_root = _make_session_feature_root_resolver(_resolve_ecc_root_impl, "_resolve_ecc_root")
+_resolve_omc_root = _make_session_feature_root_resolver(_resolve_omc_root_impl, "_resolve_omc_root")
+_resolve_web_access_root = _make_session_feature_root_resolver(_resolve_web_access_root_impl, "_resolve_web_access_root")
+_resolve_weber_root = _make_session_feature_root_resolver(_resolve_weber_root_impl, "_resolve_weber_root")
+_resolve_agent_browser_root = _make_session_feature_root_resolver(_resolve_agent_browser_root_impl, "_resolve_agent_browser_root")
+_resolve_codegraph_root = _make_session_feature_root_resolver(_resolve_codegraph_root_impl, "_resolve_codegraph_root")
+_resolve_toon_root = _make_session_feature_root_resolver(_resolve_toon_root_impl, "_resolve_toon_root")
+_resolve_token_saver_root = _make_session_feature_root_resolver(_resolve_token_saver_root_impl, "_resolve_token_saver_root")
+_resolve_xmem_root = _make_session_feature_root_resolver(_resolve_xmem_root_impl, "_resolve_xmem_root")
 
 
 _xmem_cli_path = partial(
@@ -1624,9 +1594,10 @@ _xmem_cli_path = partial(
 )
 
 
-def _resolve_auto_github_contributor_root():
-    """Compatibility wrapper for auto-github-contributor root resolution."""
-    return _resolve_auto_github_contributor_root_impl(**_session_feature_root_kwargs())
+_resolve_auto_github_contributor_root = _make_session_feature_root_resolver(
+    _resolve_auto_github_contributor_root_impl,
+    "_resolve_auto_github_contributor_root",
+)
 
 
 _mms_toon_script_path = partial(_launcher_script_path, __file__, "mms-toon")
@@ -1710,18 +1681,14 @@ _configure_codex_nsr_hooks = _codex_hooks.configure_codex_nsr_hooks
 _configure_claude_caveman_hooks = _claude_settings.configure_claude_caveman_hooks
 
 
-def _load_ecc_claude_hooks():
-    """Compatibility wrapper for ECC Claude hook loading."""
+def _load_claude_agent_pack_hooks_from(resolver_name):
     from mms_claude.settings import load_claude_agent_pack_hooks
 
-    return load_claude_agent_pack_hooks(_resolve_ecc_root())
+    return load_claude_agent_pack_hooks(globals()[resolver_name]())
 
 
-def _load_omc_claude_hooks():
-    """Compatibility wrapper for OMC Claude hook loading."""
-    from mms_claude.settings import load_claude_agent_pack_hooks
-
-    return load_claude_agent_pack_hooks(_resolve_omc_root())
+_load_ecc_claude_hooks = partial(_load_claude_agent_pack_hooks_from, "_resolve_ecc_root")
+_load_omc_claude_hooks = partial(_load_claude_agent_pack_hooks_from, "_resolve_omc_root")
 
 
 _configure_claude_ecc_hooks = _claude_settings.configure_claude_ecc_hooks
