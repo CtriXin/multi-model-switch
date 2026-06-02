@@ -106,6 +106,7 @@ from mms_opencode.session import (
 )
 from mms_agy import security as _agy_security
 from mms_codex import assets as _codex_assets
+from mms_codex import claude_state as _codex_claude_state
 from mms_codex import hooks as _codex_hooks
 from mms_codex import hook_trust as _codex_hook_trust
 from mms_codex import resume as _codex_resume
@@ -2627,14 +2628,7 @@ def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS
     return exit_oauth_claude_manual_only(runtime, model_info, caller=caller)
 
 
-def _sync_codex_session_claude_json(session_home, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for Codex session Claude-state seeding."""
-    from mms_codex.claude_state import sync_codex_session_claude_json
-
-    return sync_codex_session_claude_json(
-        session_home,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
+_sync_codex_session_claude_json = _codex_claude_state.sync_codex_session_claude_json
 
 
 def _toml_quote(value):
@@ -2657,21 +2651,8 @@ def _toml_bare_key(key):
     return f'"{escaped}"'
 
 
-def _strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces=None):
-    """Compatibility wrapper for disabled Codex MCP block stripping."""
-    from mms_codex.claude_state import strip_codex_mcp_server_blocks
-
-    return strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces)
-
-
-def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for Claude MCP -> Codex config rendering."""
-    from mms_codex.claude_state import append_codex_mcp_servers_from_claude_json
-
-    return append_codex_mcp_servers_from_claude_json(
-        config_text,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
+_strip_codex_mcp_server_blocks = _codex_claude_state.strip_codex_mcp_server_blocks
+_append_codex_mcp_servers_from_claude_json = _codex_claude_state.append_codex_mcp_servers_from_claude_json
 
 
 validate_account_for_cli = _runtime_validation.validate_account_for_cli
