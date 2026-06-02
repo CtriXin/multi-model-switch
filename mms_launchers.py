@@ -135,9 +135,27 @@ from mms_runtime.fake_upstream import (
 )
 from mms_runtime.host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_claude import endpoint as _claude_endpoint
+from mms_claude.launch import launch_claude_runtime as launch_claude
 from mms_claude import model as _claude_model
 from mms_claude import session as _claude_session
 from mms_claude.project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_codex.launch import launch_codex_runtime as launch_codex
+from mms_display.launch import (
+    emit_dns_guard_hint as _emit_dns_guard_hint_impl,
+    launch_status as _launch_status_impl,
+    print_launch_step_done as _print_launch_step_done_impl,
+    show_launch_info as _show_launch_info_impl,
+    timed_launch_step as _timed_launch_step_impl,
+)
+from mms_launcher.exec import (
+    exec_or_run as _exec_or_run_impl,
+    print_session_summary as _print_session_summary_impl,
+)
+from mms_launcher.export import (
+    launcher_script_path as _launcher_script_path,
+    real_home_wrapper_scrub_lines as _real_home_wrapper_scrub_lines_impl,
+    xmem_cli_path as _xmem_cli_path_impl,
+)
 from mms_registry.provider_profiles import profile_context_window, resolve_provider_profile
 from mms_pi import support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
@@ -302,6 +320,13 @@ def _ensure_speed_stats():
     build_provider_speed_scope = load_speed_stats_helper()
 
 console = LauncherLazyConsole()
+_launch_status = partial(_launch_status_impl, console=console)
+_print_launch_step_done = partial(
+    _print_launch_step_done_impl,
+    console=console,
+    perf_counter_fn=perf_counter,
+)
+_timed_launch_step = partial(_timed_launch_step_impl, perf_counter_fn=perf_counter)
 
 # Keep the former private helper names importable while the implementation lives in mms_opencode.agents.
 _opencode_lite_agent_configs = opencode_lite_agent_configs
@@ -383,32 +408,6 @@ def _runtime_is_sensitive_claude_provider(runtime):
     )
 
 
-
-
-def _launch_status(message, *, spinner="dots"):
-    """为启动慢步骤提供可见 spinner，避免用户干等。"""
-    from mms_display.launch import launch_status
-
-    return launch_status(message, spinner=spinner, console=console)
-
-
-def _print_launch_step_done(label, started_at, detail=None, *, style="dim"):
-    from mms_display.launch import print_launch_step_done
-
-    return print_launch_step_done(
-        label,
-        started_at,
-        detail,
-        style=style,
-        console=console,
-        perf_counter_fn=perf_counter,
-    )
-
-
-def _timed_launch_step(timings, label):
-    from mms_display.launch import timed_launch_step
-
-    return timed_launch_step(timings, label, perf_counter_fn=perf_counter)
 
 
 def _prepare_claude_env_with_status(runtime, **kwargs):
@@ -841,10 +840,7 @@ def _reserve_session_home(
     )
 
 
-def _real_home_wrapper_scrub_lines():
-    from mms_launcher.export import real_home_wrapper_scrub_lines
-
-    return real_home_wrapper_scrub_lines()
+_real_home_wrapper_scrub_lines = _real_home_wrapper_scrub_lines_impl
 
 
 _normalize_path = _normalize_path_impl
@@ -972,17 +968,11 @@ def _claude_bypass_requires_proxy(runtime):
     )
 
 
-def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
-    """Compatibility wrapper for DNS guard hint display."""
-    from mms_display.launch import emit_dns_guard_hint
-
-    return emit_dns_guard_hint(
-        runtime,
-        cli_name=cli_name,
-        auth_mode=auth_mode,
-        runtime_dns_mode_fn=_runtime_dns_mode,
-        console=console,
-    )
+_emit_dns_guard_hint = partial(
+    _emit_dns_guard_hint_impl,
+    runtime_dns_mode_fn=_runtime_dns_mode,
+    console=console,
+)
 
 
 def _claude_network_guard_cache_key(runtime, require_proxy):
@@ -1626,14 +1616,12 @@ def _resolve_xmem_root():
     return _resolve_xmem_root_impl(**_session_feature_root_kwargs())
 
 
-def _xmem_cli_path():
-    from mms_launcher.export import xmem_cli_path
-
-    return xmem_cli_path(
-        environ=os.environ,
-        real_user_path=_real_user_path,
-        which=shutil.which,
-    )
+_xmem_cli_path = partial(
+    _xmem_cli_path_impl,
+    environ=os.environ,
+    real_user_path=_real_user_path,
+    which=shutil.which,
+)
 
 
 def _resolve_auto_github_contributor_root():
@@ -1641,34 +1629,11 @@ def _resolve_auto_github_contributor_root():
     return _resolve_auto_github_contributor_root_impl(**_session_feature_root_kwargs())
 
 
-def _mms_toon_script_path():
-    from mms_launcher.export import launcher_script_path
-
-    return launcher_script_path(__file__, "mms-toon")
-
-
-def _mms_context_script_path():
-    from mms_launcher.export import launcher_script_path
-
-    return launcher_script_path(__file__, "mms-context")
-
-
-def _mms_gain_script_path():
-    from mms_launcher.export import launcher_script_path
-
-    return launcher_script_path(__file__, "mms-gain")
-
-
-def _token_saver_script_path():
-    from mms_launcher.export import launcher_script_path
-
-    return launcher_script_path(__file__, "token-saver")
-
-
-def _token_gain_script_path():
-    from mms_launcher.export import launcher_script_path
-
-    return launcher_script_path(__file__, "token-gain")
+_mms_toon_script_path = partial(_launcher_script_path, __file__, "mms-toon")
+_mms_context_script_path = partial(_launcher_script_path, __file__, "mms-context")
+_mms_gain_script_path = partial(_launcher_script_path, __file__, "mms-gain")
+_token_saver_script_path = partial(_launcher_script_path, __file__, "token-saver")
+_token_gain_script_path = partial(_launcher_script_path, __file__, "token-gain")
 
 
 _is_caveman_hook_command = _session_hook_commands.is_caveman_hook_command
@@ -2355,19 +2320,6 @@ _with_1m_suffix = _claude_model.with_1m_suffix
 _apply_claude_model_overrides = _claude_model.apply_claude_model_overrides
 
 
-def launch_claude(model_info, runtime, once=False, extra_args=None):
-    """Compatibility wrapper for the Claude launch flow."""
-    from mms_claude.launch import launch_claude_runtime
-
-    return launch_claude_runtime(
-        model_info,
-        runtime,
-        once=once,
-        extra_args=extra_args,
-    )
-
-
-
 _resolve_anthropic_base_url = _claude_endpoint.resolve_anthropic_base_url
 _pick_gateway_model = _claude_endpoint.pick_gateway_model
 
@@ -2448,19 +2400,6 @@ def _append_codex_bypass_flags(cmd, runtime):
     ):
         if flag not in cmd:
             cmd.append(flag)
-
-
-def launch_codex(model_info, runtime, once=False, extra_args=None):
-    """Compatibility wrapper for the Codex launch flow."""
-    from mms_codex.launch import launch_codex_runtime
-
-    return launch_codex_runtime(
-        model_info,
-        runtime,
-        once=once,
-        extra_args=extra_args,
-    )
-
 
 
 def _opencode_run_preflight(env, agent, model_ref, timeout=None, bypass=True):
@@ -2814,11 +2753,7 @@ def get_export_env(cli, runtime, model_info=None):
     )
 
 
-def _show_launch_info(cli, runtime, auth_mode):
-    """Compatibility wrapper for launch-time display."""
-    from mms_display.launch import show_launch_info
-
-    return show_launch_info(cli, runtime, auth_mode)
+_show_launch_info = _show_launch_info_impl
 
 
 def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
@@ -2848,11 +2783,7 @@ def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
     )
 
 
-def _print_session_summary(bridge_info):
-    """Compatibility wrapper for local bridge session summaries."""
-    from mms_launcher.exec import print_session_summary
-
-    return print_session_summary(bridge_info)
+_print_session_summary = _print_session_summary_impl
 
 
 def _exec_or_run(
@@ -2867,9 +2798,7 @@ def _exec_or_run(
     bridge_info=None,
 ):
     """Compatibility wrapper for launcher process execution."""
-    from mms_launcher.exec import exec_or_run
-
-    return exec_or_run(
+    return _exec_or_run_impl(
         cmd,
         env,
         once,
