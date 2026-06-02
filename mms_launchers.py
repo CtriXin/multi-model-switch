@@ -131,6 +131,7 @@ from mms_runtime.fake_upstream import (
     status_payload as _fake_upstream_status_payload,
 )
 from mms_runtime.host_context import host_capability_env, resolve_tool_bins, write_host_context
+from mms_claude import model as _claude_model
 from mms_claude.project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_registry.provider_profiles import profile_context_window, resolve_provider_profile
 from mms_pi import support as _pi_support
@@ -2743,46 +2744,12 @@ _resolve_model = _runtime_models.resolve_model
 _normalized_model_name = _runtime_models.normalized_model_name
 
 
-def _is_claude_family_model_name(model_name):
-    """Compatibility wrapper for Claude family model detection."""
-    from mms_claude.model import is_claude_family_model_name
-
-    return is_claude_family_model_name(model_name)
-
-
-def _claude_visible_model_name(model_name, *, fallback_model=""):
-    """Compatibility wrapper for Claude-visible model slot names."""
-    from mms_claude.model import claude_visible_model_name
-
-    return claude_visible_model_name(model_name, fallback_model=fallback_model)
-
-
-def _apply_claude_visible_model_overrides(target, model_name, *, fallback_model=""):
-    """Compatibility wrapper for Claude-visible model overrides."""
-    from mms_claude.model import apply_claude_visible_model_overrides
-
-    return apply_claude_visible_model_overrides(target, model_name, fallback_model=fallback_model)
-
-
-def _claude_resume_model_name(*candidates):
-    """Compatibility wrapper for Claude resume model normalization."""
-    from mms_claude.model import claude_resume_model_name
-
-    return claude_resume_model_name(*candidates)
-
-
-def _with_1m_suffix(model_name, *, enable_1m=True):
-    """Compatibility wrapper for Claude 1M model suffixing."""
-    from mms_claude.model import with_1m_suffix
-
-    return with_1m_suffix(model_name, enable_1m=enable_1m)
-
-
-def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
-    """Compatibility wrapper for Claude model env overrides."""
-    from mms_claude.model import apply_claude_model_overrides
-
-    return apply_claude_model_overrides(target, model_info, enable_1m=enable_1m)
+_is_claude_family_model_name = _claude_model.is_claude_family_model_name
+_claude_visible_model_name = _claude_model.claude_visible_model_name
+_apply_claude_visible_model_overrides = _claude_model.apply_claude_visible_model_overrides
+_claude_resume_model_name = _claude_model.claude_resume_model_name
+_with_1m_suffix = _claude_model.with_1m_suffix
+_apply_claude_model_overrides = _claude_model.apply_claude_model_overrides
 
 
 def launch_claude(model_info, runtime, once=False, extra_args=None):
