@@ -1735,25 +1735,13 @@ _codex_caveman_session_hook = _codex_hooks.codex_caveman_session_hook
 _configure_codex_caveman_hooks = _codex_hooks.configure_codex_caveman_hooks
 
 
-def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
-    """Compatibility wrapper for Claude NSR hook configuration."""
-    from mms_claude.settings import configure_claude_nsr_hooks
-
-    return configure_claude_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
+_configure_claude_nsr_hooks = _claude_settings.configure_claude_nsr_hooks
 
 
 _configure_codex_nsr_hooks = _codex_hooks.configure_codex_nsr_hooks
 
 
-def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):
-    """Compatibility wrapper for Claude caveman hook configuration."""
-    from mms_claude.settings import configure_claude_caveman_hooks
-
-    return configure_claude_caveman_hooks(
-        hooks_data,
-        enable_caveman=enable_caveman,
-        caveman_level=caveman_level,
-    )
+_configure_claude_caveman_hooks = _claude_settings.configure_claude_caveman_hooks
 
 
 def _load_ecc_claude_hooks():
@@ -1770,18 +1758,8 @@ def _load_omc_claude_hooks():
     return load_claude_agent_pack_hooks(_resolve_omc_root())
 
 
-def _configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
-    """Compatibility wrapper for Claude ECC hook configuration."""
-    from mms_claude.settings import configure_claude_ecc_hooks
-
-    return configure_claude_ecc_hooks(hooks_data, enable_ecc=enable_ecc)
-
-
-def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
-    """Compatibility wrapper for Claude OMC hook configuration."""
-    from mms_claude.settings import configure_claude_omc_hooks
-
-    return configure_claude_omc_hooks(hooks_data, enable_omc=enable_omc)
+_configure_claude_ecc_hooks = _claude_settings.configure_claude_ecc_hooks
+_configure_claude_omc_hooks = _claude_settings.configure_claude_omc_hooks
 
 
 _build_codex_session_hooks = _codex_hooks.build_codex_session_hooks
@@ -1861,28 +1839,9 @@ _configure_agent_pack_session_env = _session_env.configure_agent_pack_session_en
 _session_required_env_from_runtime_env = _session_env.session_required_env_from_runtime_env
 
 
-def _sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
-    """Compatibility wrapper for Claude settings inheritance allowlist."""
-    from mms_claude.settings import sanitize_claude_inherited_settings_payload
-
-    return sanitize_claude_inherited_settings_payload(
-        settings_data,
-        allow_execution_surfaces=allow_execution_surfaces,
-    )
-
-
-def _sanitize_account_claude_settings_payload(settings_data):
-    """Compatibility wrapper for account-scoped Claude settings sanitization."""
-    from mms_claude.settings import sanitize_account_claude_settings_payload
-
-    return sanitize_account_claude_settings_payload(settings_data)
-
-
-def _default_session_mcp_servers():
-    """Compatibility wrapper for default session MCP discovery."""
-    from mms_claude.settings import default_session_mcp_servers
-
-    return default_session_mcp_servers()
+_sanitize_claude_inherited_settings_payload = _claude_settings.sanitize_claude_inherited_settings_payload
+_sanitize_account_claude_settings_payload = _claude_settings.sanitize_account_claude_settings_payload
+_default_session_mcp_servers = _claude_settings.default_session_mcp_servers
 
 
 def _installed_claude_plugin_paths():
@@ -2006,72 +1965,12 @@ _replace_plugin_root_tokens = _session_mcp.replace_plugin_root_tokens
 _load_plugin_mcp_servers = _session_mcp.load_plugin_mcp_servers
 
 
-def _agent_pack_mcp_servers(agent_pack):
-    """Compatibility wrapper for agent-pack MCP discovery."""
-    from mms_claude.settings import agent_pack_mcp_servers
-
-    return agent_pack_mcp_servers(agent_pack)
-
-
-def _merge_agent_pack_mcp_servers(mcp_servers, *, agent_pack="none", disabled_session_surfaces=None):
-    """Compatibility wrapper for agent-pack MCP merging."""
-    from mms_claude.settings import merge_agent_pack_mcp_servers
-
-    return merge_agent_pack_mcp_servers(
-        mcp_servers,
-        agent_pack=agent_pack,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_surfaces=None):
-    """Compatibility wrapper for session-only Claude MCP injection."""
-    from mms_claude.settings import ensure_session_only_claude_mcp_servers
-
-    return ensure_session_only_claude_mcp_servers(
-        settings_data,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
-    """Compatibility wrapper for session-managed MCP allowlist."""
-    from mms_claude.settings import session_managed_mcp_server_allowlist
-
-    return session_managed_mcp_server_allowlist(
-        allow_execution_surfaces=allow_execution_surfaces
-    )
-
-
-def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True, disabled_session_surfaces=None):
-    """Compatibility wrapper for session-managed Claude MCP collection."""
-    from mms_claude.settings import session_managed_mcp_servers
-
-    return session_managed_mcp_servers(
-        settings_data,
-        allow_execution_surfaces=allow_execution_surfaces,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-
-
-def _inject_managed_mcp_servers_into_claude_state(
-    payload,
-    settings_data=None,
-    *,
-    allow_execution_surfaces=True,
-    disabled_session_surfaces=None,
-    agent_pack="none",
-):
-    """Compatibility wrapper for Claude state managed MCP injection."""
-    from mms_claude.settings import inject_managed_mcp_servers_into_claude_state
-
-    return inject_managed_mcp_servers_into_claude_state(
-        payload,
-        settings_data=settings_data,
-        allow_execution_surfaces=allow_execution_surfaces,
-        disabled_session_surfaces=disabled_session_surfaces,
-        agent_pack=agent_pack,
-    )
+_agent_pack_mcp_servers = _claude_settings.agent_pack_mcp_servers
+_merge_agent_pack_mcp_servers = _claude_settings.merge_agent_pack_mcp_servers
+_ensure_session_only_claude_mcp_servers = _claude_settings.ensure_session_only_claude_mcp_servers
+_session_managed_mcp_server_allowlist = _claude_settings.session_managed_mcp_server_allowlist
+_session_managed_mcp_servers = _claude_settings.session_managed_mcp_servers
+_inject_managed_mcp_servers_into_claude_state = _claude_settings.inject_managed_mcp_servers_into_claude_state
 
 
 def _copy_allowed_scalar_fields(payload, allowed_keys):
