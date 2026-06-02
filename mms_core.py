@@ -4884,7 +4884,7 @@ def handle_config(cfg, args_rest):
     from mms_commands.tools import handle_config as handle_config_impl
 
     def _run_config_web(*args, **kwargs):
-        from mms_config_web import run_config_web
+        from mms_config.web import run_config_web
 
         return run_config_web(*args, **kwargs)
 
@@ -6483,7 +6483,7 @@ def main():
             handle_config(cfg, argv[1:])
             return
         if command in {"setup", "setup-web", "web-setup"}:
-            from mms_config_web import run_config_web
+            from mms_config.web import run_config_web
 
             setup_args = list(argv[1:])
             if setup_args and setup_args[0] in {"web", "config-web"}:

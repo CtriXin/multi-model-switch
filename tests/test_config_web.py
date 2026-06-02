@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-import mms_config_web
+import mms_config.web as mms_config_web
 import mms_core
 
 
