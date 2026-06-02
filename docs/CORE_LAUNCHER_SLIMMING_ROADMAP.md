@@ -161,7 +161,7 @@ These constraints remain active for future slimming:
 - Do not change `auth_mode` semantics during refactors.
 - Do not alter cache-sensitive Anthropic/OpenAI transport selection silently.
 - Do not reintroduce `ccs` entrypoints, `~/.config/ccs`, or `CCS_*` compatibility.
-- Treat `mms_core.py`, `mms_launchers.py`, `mms_tui.py`, `mms_bridge.py`, `mms_account_state.py`, `mms_session/index.py`, `mms_registry/adapter_registry.py`, and `mms` as protected surfaces.
+- Treat `mms_core.py`, `mms_launchers.py`, `mms_tui.py`, `mms_bridge.py`, `mms_runtime/account_state.py`, `mms_session/index.py`, `mms_registry/adapter_registry.py`, and `mms` as protected surfaces.
 
 ## Proof Strategy
 

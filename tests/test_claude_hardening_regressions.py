@@ -4662,7 +4662,7 @@ def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypa
 
 
 def test_keychain_reads_are_opt_in(monkeypatch):
-    import mms_account_state
+    from mms_runtime import account_state as mms_account_state
     import mms_display.usage as mms_usage
 
     monkeypatch.delenv("MMS_ALLOW_KEYCHAIN_READ", raising=False)

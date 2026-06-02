@@ -61,7 +61,7 @@ def test_project_store_starts_empty_without_global_seed(tmp_path, scoped_store):
 
 
 def test_seed_claude_state_does_not_copy_global_user_identity(tmp_path):
-    from mms_account_state import seed_claude_state
+    from mms_runtime.account_state import seed_claude_state
 
     account_home = tmp_path / "account-home"
     account_home.mkdir()

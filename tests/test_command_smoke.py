@@ -1382,7 +1382,7 @@ def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
 
 
 def test_usage_main_initializes_rich_before_render(monkeypatch):
-    import mms_account_state
+    from mms_runtime import account_state as mms_account_state
     import mms_display.usage as mms_usage
 
     def _fake_ensure_rich():

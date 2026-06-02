@@ -194,7 +194,7 @@ def _get_cached_models(env_var: str, cache: dict) -> tuple[list[str], bool]:
 
 def _keychain_claude_token() -> tuple[str | None, str | None]:
     """Returns (access_token, email) from macOS Keychain 'Claude Code-credentials'."""
-    from mms_account_state import keychain_reads_enabled
+    from mms_runtime.account_state import keychain_reads_enabled
 
     if not keychain_reads_enabled():
         return None, None
@@ -357,7 +357,7 @@ async def _section_claude(accounts: list[dict]) -> None:
     table.add_column("状态", style="dim")
 
     # Build token pool: opt-in keychain (current active) + all cached tokens.
-    from mms_account_state import load_cached_claude_tokens
+    from mms_runtime.account_state import load_cached_claude_tokens
     kc_token, kc_email = _keychain_claude_token()
     cached_tokens: list[dict] = load_cached_claude_tokens()
     # Deduplicate: keyed by accessToken prefix
@@ -741,7 +741,7 @@ def usage_main(cfg: dict, argv: list[str] | None = None) -> None:
     _ensure_rich()
 
     # Keychain reads are opt-in because macOS may show an access prompt.
-    from mms_account_state import cache_current_claude_token
+    from mms_runtime.account_state import cache_current_claude_token
     cache_current_claude_token()
 
     accounts = cfg.get("accounts", [])

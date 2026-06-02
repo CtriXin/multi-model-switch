@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
-from mms_account_state import activated_claude_account_state, seed_agy_state, seed_claude_state, seed_gemini_state
+from mms_runtime.account_state import activated_claude_account_state, seed_agy_state, seed_claude_state, seed_gemini_state
 from mms_launcher.account_guard import (
     account_guard_profile as _account_guard_profile_impl,
     build_account_guard_report as _build_account_guard_report_impl,
