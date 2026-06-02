@@ -480,7 +480,7 @@ def test_runtime_events_use_selected_config_root(monkeypatch, tmp_path):
 
 
 def test_broker_credentials_and_cache_use_selected_config_root(monkeypatch, tmp_path):
-    import mms_broker
+    from mms_runtime import broker as mms_broker
 
     real_home = tmp_path / "real-home"
     stable_root = real_home / ".config" / "mms"

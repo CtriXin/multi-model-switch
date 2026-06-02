@@ -5295,7 +5295,7 @@ def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer(monkeypa
 
 
 def test_build_broker_env_scrubs_inherited_claude_auth_env(monkeypatch):
-    import mms_broker
+    from mms_runtime import broker as mms_broker
 
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
     monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-haiku-4-5")

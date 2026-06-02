@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import mms_broker
+from mms_runtime import broker as mms_broker
 import mms_launchers
 
 

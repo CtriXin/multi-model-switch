@@ -22,7 +22,7 @@ from urllib.request import urlopen
 from mms_state_io import resolve_mms_config_dir
 
 
-_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _default_broker_repo() -> str:

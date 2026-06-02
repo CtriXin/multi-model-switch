@@ -11,7 +11,7 @@ KNOWN_BAD_PATTERNS = {
     "mms_bridge.py": [
         'return os.path.expanduser("~/.config/mms")',
     ],
-    "mms_broker.py": [
+    "mms_runtime/broker.py": [
         'PRIMARY_CREDENTIALS_PATH = os.path.expanduser("~/.config/mms/credentials.sh")',
         'BROKER_CACHE_DIR = os.path.expanduser("~/.config/mms/cache/broker")',
     ],
