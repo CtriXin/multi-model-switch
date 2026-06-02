@@ -2056,6 +2056,103 @@ def test_config_web_migration_export_encrypts_credentials(monkeypatch, tmp_path)
     assert "sk-migration-secret" not in encoded
 
 
+def test_config_web_migration_export_import_uses_openssl_when_cryptography_missing(monkeypatch, tmp_path):
+    if not mms_config_web._migration_openssl_available():
+        pytest.skip("openssl is required for the no-cryptography migration fallback")
+    monkeypatch.setattr(mms_config_web, "_migration_cryptography_available", lambda: False)
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+    preferences_path = tmp_path / "preferences.toml"
+    config_path.write_text("", encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        mms_core,
+        "load_provider_credentials",
+        lambda provider_id="default": {
+            "base_url": "https://demo.example/v1",
+            "openai_base_url": "https://demo.example/v1",
+            "anthropic_base_url": "",
+            "api_key": "sk-openssl-migration-secret",
+            "openai_api_key": "",
+        },
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    export = mms_config_web.build_migration_export(
+        cfg,
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert export["ok"] is True
+    assert export["crypto_backend"] == "openssl"
+    assert export["bundle"]["encrypted_credentials"]["schema"] == "mms.config_migration_credentials.openssl-cbc-hmac.v1"
+    assert "sk-openssl-migration-secret" not in json.dumps(export, ensure_ascii=False)
+
+    preview = mms_config_web.build_migration_import_preview(
+        {"providers": []},
+        {"bundle": export["bundle"], "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert preview["ok"] is True
+    assert preview["summary"]["credential_updates"] == 1
+    assert "sk-openssl-migration-secret" not in json.dumps(preview, ensure_ascii=False)
+
+    applied = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {
+            "bundle": export["bundle"],
+            "password": "password123",
+            "confirm_migration": True,
+            "confirm_phrase": "导入配置",
+        },
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert applied["ok"] is True
+    assert "sk-openssl-migration-secret" in credentials_path.read_text(encoding="utf-8")
+    assert "sk-openssl-migration-secret" not in json.dumps(applied, ensure_ascii=False)
+
+
+def test_config_web_migration_export_reports_when_no_secret_crypto(monkeypatch, tmp_path):
+    monkeypatch.setattr(mms_config_web, "_migration_cryptography_available", lambda: False)
+    monkeypatch.setattr(mms_config_web, "_migration_openssl_available", lambda: False)
+
+    result = mms_config_web.build_migration_export(
+        {"providers": [{"id": "demo", "api_key": "sk-secret"}]},
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mms",
+    )
+
+    assert result["ok"] is False
+    assert result["crypto_backend"] == "none"
+    assert "openssl" in result["errors"][0]
+    assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
+
+
 def test_config_web_migration_preview_merges_bundle_without_leaking_secret(tmp_path):
     pytest.importorskip("cryptography")
     config_path = tmp_path / "config.toml"

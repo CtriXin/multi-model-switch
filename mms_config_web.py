@@ -6,6 +6,8 @@ from __future__ import annotations
 import base64
 import copy
 import difflib
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -72,7 +74,9 @@ _REGISTRY_V2_GENERATED_FILES = (
     "model-registry.latest-approved.json",
 )
 _MIGRATION_BUNDLE_SCHEMA = "mms.config_migration_bundle.v1"
-_MIGRATION_CREDENTIAL_BOX_SCHEMA = "mms.config_migration_credentials.aesgcm.v1"
+_MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA = "mms.config_migration_credentials.aesgcm.v1"
+_MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA = "mms.config_migration_credentials.openssl-cbc-hmac.v1"
+_MIGRATION_CREDENTIAL_BOX_SCHEMA = _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
@@ -1909,30 +1913,36 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def _migration_crypto_available() -> bool:
+def _migration_cryptography_available() -> bool:
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # noqa: F401
 
         return True
     except Exception:
         return False
 
 
+def _migration_openssl_available() -> bool:
+    return bool(shutil.which("openssl"))
+
+
+def _migration_secret_crypto_backend() -> str:
+    if _migration_cryptography_available():
+        return "cryptography"
+    if _migration_openssl_available():
+        return "openssl"
+    return "none"
+
+
+def _migration_crypto_available() -> bool:
+    return _migration_secret_crypto_backend() != "none"
+
+
 def _migration_derive_key(password: str, salt: bytes, *, iterations: int) -> bytes:
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=iterations,
-    )
-    return kdf.derive(password.encode("utf-8"))
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations, dklen=32)
 
 
-def _migration_encrypt_json(payload: dict[str, Any], password: str) -> dict[str, Any]:
+def _migration_encrypt_json_aesgcm(payload: dict[str, Any], password: str) -> dict[str, Any]:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     iterations = 220_000
@@ -1942,7 +1952,7 @@ def _migration_encrypt_json(payload: dict[str, Any], password: str) -> dict[str,
     plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ciphertext = AESGCM(key).encrypt(nonce, plaintext, _MIGRATION_BUNDLE_SCHEMA.encode("utf-8"))
     return {
-        "schema": _MIGRATION_CREDENTIAL_BOX_SCHEMA,
+        "schema": _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA,
         "algorithm": "AES-256-GCM",
         "kdf": "PBKDF2-HMAC-SHA256",
         "iterations": iterations,
@@ -1953,11 +1963,9 @@ def _migration_encrypt_json(payload: dict[str, Any], password: str) -> dict[str,
     }
 
 
-def _migration_decrypt_json(box: dict[str, Any], password: str) -> dict[str, Any]:
+def _migration_decrypt_json_aesgcm(box: dict[str, Any], password: str) -> dict[str, Any]:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-    if not isinstance(box, dict) or box.get("schema") != _MIGRATION_CREDENTIAL_BOX_SCHEMA:
-        raise ValueError("迁移包凭据格式不受支持。")
     iterations = int(box.get("iterations") or 0)
     if iterations < 100_000:
         raise ValueError("迁移包凭据 KDF 强度过低，已拒绝导入。")
@@ -1970,6 +1978,137 @@ def _migration_decrypt_json(box: dict[str, Any], password: str) -> dict[str, Any
     if not isinstance(payload, dict):
         raise ValueError("迁移包凭据解密后不是对象。")
     return payload
+
+
+def _migration_openssl_passfile(password: str) -> str:
+    fd, path = tempfile.mkstemp(prefix="mms-migration-pass-", text=False)
+    try:
+        os.chmod(path, 0o600)
+        os.write(fd, password.encode("utf-8"))
+        os.close(fd)
+        fd = -1
+        return path
+    except Exception:
+        try:
+            if fd >= 0:
+                os.close(fd)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
+
+
+def _migration_run_openssl_enc(data: bytes, password: str, *, decrypt: bool, iterations: int) -> bytes:
+    openssl = shutil.which("openssl")
+    if not openssl:
+        raise ValueError("当前 Python 环境缺少 cryptography，且找不到 openssl，不能处理加密 API Key。")
+    passfile = _migration_openssl_passfile(password)
+    try:
+        cmd = [
+            openssl,
+            "enc",
+            "-aes-256-cbc",
+            "-pbkdf2",
+            "-iter",
+            str(iterations),
+            "-md",
+            "sha256",
+            "-salt",
+            "-pass",
+            f"file:{passfile}",
+        ]
+        if decrypt:
+            cmd.insert(2, "-d")
+        proc = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    finally:
+        try:
+            os.unlink(passfile)
+        except OSError:
+            pass
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        message = detail[-1] if detail else "openssl enc failed"
+        raise ValueError(f"OpenSSL 加密后备失败：{message}")
+    return proc.stdout
+
+
+def _migration_openssl_mac_payload(box: dict[str, Any]) -> bytes:
+    fields = {
+        "schema": _safe_text(box.get("schema")),
+        "algorithm": _safe_text(box.get("algorithm")),
+        "kdf": _safe_text(box.get("kdf")),
+        "iterations": int(box.get("iterations") or 0),
+        "mac_salt_b64": _safe_text(box.get("mac_salt_b64")),
+        "ciphertext_b64": _safe_text(box.get("ciphertext_b64")),
+        "plaintext_schema": _safe_text(box.get("plaintext_schema")),
+        "aad": _MIGRATION_BUNDLE_SCHEMA,
+    }
+    return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _migration_encrypt_json_openssl(payload: dict[str, Any], password: str) -> dict[str, Any]:
+    iterations = 220_000
+    mac_salt = os.urandom(16)
+    plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ciphertext = _migration_run_openssl_enc(plaintext, password, decrypt=False, iterations=iterations)
+    box = {
+        "schema": _MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA,
+        "algorithm": "AES-256-CBC+HMAC-SHA256",
+        "kdf": "OpenSSL-PBKDF2-HMAC-SHA256 + PBKDF2-HMAC-SHA256-MAC",
+        "iterations": iterations,
+        "mac_salt_b64": base64.b64encode(mac_salt).decode("ascii"),
+        "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
+        "plaintext_schema": "mms.config_migration_credentials_payload.v1",
+    }
+    mac_key = _migration_derive_key(password, mac_salt, iterations=iterations)
+    box["hmac_b64"] = base64.b64encode(
+        hmac.new(mac_key, _migration_openssl_mac_payload(box), hashlib.sha256).digest()
+    ).decode("ascii")
+    return box
+
+
+def _migration_decrypt_json_openssl(box: dict[str, Any], password: str) -> dict[str, Any]:
+    iterations = int(box.get("iterations") or 0)
+    if iterations < 100_000:
+        raise ValueError("迁移包凭据 KDF 强度过低，已拒绝导入。")
+    mac_salt = base64.b64decode(str(box.get("mac_salt_b64") or ""))
+    ciphertext = base64.b64decode(str(box.get("ciphertext_b64") or ""))
+    expected = base64.b64decode(str(box.get("hmac_b64") or ""))
+    mac_key = _migration_derive_key(password, mac_salt, iterations=iterations)
+    actual = hmac.new(mac_key, _migration_openssl_mac_payload(box), hashlib.sha256).digest()
+    if not expected or not hmac.compare_digest(actual, expected):
+        raise ValueError("迁移密码错误或凭据已损坏。")
+    plaintext = _migration_run_openssl_enc(ciphertext, password, decrypt=True, iterations=iterations)
+    payload = json.loads(plaintext.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("迁移包凭据解密后不是对象。")
+    return payload
+
+
+def _migration_encrypt_json(payload: dict[str, Any], password: str) -> dict[str, Any]:
+    backend = _migration_secret_crypto_backend()
+    if backend == "cryptography":
+        return _migration_encrypt_json_aesgcm(payload, password)
+    if backend == "openssl":
+        return _migration_encrypt_json_openssl(payload, password)
+    raise ValueError("当前 Python 环境缺少 cryptography，且找不到 openssl，不能导出包含 API Key 的加密迁移包。")
+
+
+def _migration_decrypt_json(box: dict[str, Any], password: str) -> dict[str, Any]:
+    if not isinstance(box, dict):
+        raise ValueError("迁移包凭据格式不受支持。")
+    schema = box.get("schema")
+    if schema == _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA:
+        if not _migration_cryptography_available():
+            raise ValueError("这个迁移包使用 AES-GCM，需要当前 Python 环境安装 cryptography 才能解密。")
+        return _migration_decrypt_json_aesgcm(box, password)
+    if schema == _MIGRATION_CREDENTIAL_BOX_OPENSSL_SCHEMA:
+        if not _migration_openssl_available():
+            raise ValueError("这个迁移包使用 OpenSSL 后备加密；当前环境找不到 openssl，不能解密。")
+        return _migration_decrypt_json_openssl(box, password)
+    raise ValueError("迁移包凭据格式不受支持。")
 
 
 def _migration_config_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -2157,6 +2296,7 @@ def build_migration_export(
     }
     credential_count = 0
     if include_credentials:
+        crypto_backend = _migration_secret_crypto_backend()
         if len(password) < 8:
             return {
                 "ok": False,
@@ -2164,14 +2304,16 @@ def build_migration_export(
                 "status": "blocked",
                 "errors": ["包含 API Key 的迁移包必须输入至少 8 位迁移密码。"],
                 "crypto_available": _migration_crypto_available(),
+                "crypto_backend": crypto_backend,
             }
-        if not _migration_crypto_available():
+        if crypto_backend == "none":
             return {
                 "ok": False,
                 "schema": "mms.config_migration_export_result.v1",
                 "status": "blocked",
-                "errors": ["当前 Python 环境缺少 cryptography，不能导出包含 API Key 的加密迁移包。"],
+                "errors": ["当前 Python 环境缺少 cryptography，且找不到 openssl，不能导出包含 API Key 的加密迁移包。"],
                 "crypto_available": False,
+                "crypto_backend": crypto_backend,
             }
         credentials = _migration_collect_credentials(cfg)
         credential_count = len(credentials)
@@ -2180,9 +2322,25 @@ def build_migration_export(
             "created_at": _now_iso(),
             "credentials": credentials,
         }
-        bundle["encrypted_credentials"] = _migration_encrypt_json(credential_payload, password)
+        try:
+            encrypted_credentials = _migration_encrypt_json(credential_payload, password)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "schema": "mms.config_migration_export_result.v1",
+                "status": "blocked",
+                "errors": [f"API Key 加密失败：{type(exc).__name__}: {exc}"],
+                "crypto_available": _migration_crypto_available(),
+                "crypto_backend": crypto_backend,
+            }
+        bundle["encrypted_credentials"] = encrypted_credentials
         bundle["security"]["contains_credentials"] = bool(credentials)
-        bundle["security"]["credential_box"] = "encrypted-aesgcm"
+        bundle["security"]["credential_box"] = (
+            "encrypted-aesgcm"
+            if encrypted_credentials.get("schema") == _MIGRATION_CREDENTIAL_BOX_AESGCM_SCHEMA
+            else "encrypted-openssl-cbc-hmac"
+        )
+        bundle["security"]["credential_crypto_backend"] = crypto_backend
     model_policy = (bundle.get("payload") or {}).get("model_policy") if isinstance(bundle.get("payload"), dict) else {}
     summary = {
         "providers": len((bundle.get("payload", {}).get("config", {}).get("providers") if isinstance(bundle.get("payload"), dict) else []) or []),
@@ -2198,6 +2356,8 @@ def build_migration_export(
         "status": "ready",
         "bundle": bundle,
         "summary": summary,
+        "crypto_available": _migration_crypto_available(),
+        "crypto_backend": _migration_secret_crypto_backend(),
         "filename": f"mms-config-migration-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
     }
 
@@ -2235,9 +2395,6 @@ def _migration_decrypted_credentials(bundle: dict[str, Any], password: str) -> t
         return [], warnings, errors
     if not password:
         errors.append("这个迁移包包含加密 API Key；请输入迁移密码后再预览或导入。")
-        return [], warnings, errors
-    if not _migration_crypto_available():
-        errors.append("当前 Python 环境缺少 cryptography，不能解密包含 API Key 的迁移包。")
         return [], warnings, errors
     try:
         payload = _migration_decrypt_json(box, password)
