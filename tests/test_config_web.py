@@ -952,6 +952,33 @@ def test_config_web_server_skips_snapshot_for_shell_and_static_assets():
     assert b".panel" in css_body
 
 
+def test_config_web_server_send_ignores_client_disconnect():
+    class ClosedWriter:
+        def write(self, _body):
+            raise BrokenPipeError("client closed")
+
+    class HeaderClosedHandler(mms_config_web_server._SetupWebHandler):
+        def send_response(self, *_args, **_kwargs):
+            return None
+
+        def send_header(self, *_args, **_kwargs):
+            return None
+
+        def end_headers(self):
+            raise BrokenPipeError("client closed")
+
+    class BodyClosedHandler(HeaderClosedHandler):
+        def end_headers(self):
+            return None
+
+    header_closed = object.__new__(HeaderClosedHandler)
+    body_closed = object.__new__(BodyClosedHandler)
+    body_closed.wfile = ClosedWriter()
+
+    assert header_closed._send(200, b"ok", "text/plain") is False
+    assert body_closed._send(200, b"ok", "text/plain") is False
+
+
 def test_config_web_markdown_contains_manual_snippets(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
