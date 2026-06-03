@@ -22,6 +22,7 @@ SECONDS = {
     "weekly": 7 * 24 * 60 * 60,
     "manual": 10**12,
 }
+REMIND_FETCH_TIMEOUT_SEC = 3
 
 
 def real_home() -> Path:
@@ -97,13 +98,14 @@ def git_bin() -> str:
     return found
 
 
-def run_git(root: str, *items: str, check: bool = True) -> subprocess.CompletedProcess:
+def run_git(root: str, *items: str, check: bool = True, timeout: float | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [git_bin(), "-C", root, *items],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=check,
+        timeout=timeout,
     )
 
 
@@ -111,10 +113,13 @@ def git_text(root: str, *items: str) -> str:
     return run_git(root, *items).stdout.strip()
 
 
-def fetch_remote(args: argparse.Namespace) -> tuple[bool, str]:
+def fetch_remote(args: argparse.Namespace, *, timeout: float | None = None) -> tuple[bool, str]:
     if not args.root or not args.branch:
         return False, "missing root/branch"
-    proc = run_git(args.root, "fetch", "--quiet", "--prune", args.remote, args.branch, check=False)
+    try:
+        proc = run_git(args.root, "fetch", "--quiet", "--prune", args.remote, args.branch, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f"git fetch timed out after {timeout:g}s"
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout or "git fetch failed").strip()
     return True, ""
@@ -157,7 +162,7 @@ def remind(args: argparse.Namespace) -> int:
     state = load_state()
     if not due(args, state):
         return 0
-    ok, detail = fetch_remote(args)
+    ok, detail = fetch_remote(args, timeout=REMIND_FETCH_TIMEOUT_SEC)
     if not ok:
         print(f"· {args.command} update check skipped: {detail}", file=sys.stderr)
         mark_checked(args, state, {"error": detail})
