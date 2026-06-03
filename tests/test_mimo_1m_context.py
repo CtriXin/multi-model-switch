@@ -8,6 +8,13 @@ def _empty_context_overrides():
     return {"models": {}, "provider_overrides": {}}
 
 
+def _conservative_capabilities(*_args, **_kwargs):
+    return {
+        "context_window_tokens": 8_192,
+        "sources": {"context_window_tokens": "conservative_fallback"},
+    }
+
+
 def test_mimo_pro_1m_suffix_uses_one_m_context(monkeypatch):
     import mms_launchers
 
@@ -47,6 +54,7 @@ def test_mimo_pro_without_1m_suffix_keeps_safe_context(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", _conservative_capabilities)
 
     assert (
         mms_launchers._lookup_context_window(
@@ -61,6 +69,7 @@ def test_mimo_without_1m_suffix_keeps_safe_context_on_anthropic(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", _conservative_capabilities)
 
     assert (
         mms_launchers._lookup_context_window(
@@ -128,6 +137,30 @@ def test_mimo_context_policy_enables_plain_model_1m(monkeypatch, tmp_path):
             provider_id="mimo-direct-anthropic",
         )
         == 1_000_000
+    )
+
+
+def test_mimo_approved_capability_enables_plain_model_1m_before_safe_cap(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+
+    def fake_resolve_model_capabilities(model_name, *, provider_id="", **_kwargs):
+        assert model_name == "mimo-v2.5"
+        assert provider_id == "newapi-tencent"
+        return {
+            "context_window_tokens": 1_048_576,
+            "sources": {"context_window_tokens": "approved_facts"},
+        }
+
+    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", fake_resolve_model_capabilities)
+
+    assert (
+        mms_launchers._lookup_context_window(
+            "mimo-v2.5",
+            provider_id="newapi-tencent",
+        )
+        == 1_048_576
     )
 
 

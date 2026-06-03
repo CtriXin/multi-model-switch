@@ -392,6 +392,8 @@ def _lookup_context_window(model_name, provider_id=None):
         provider_id=provider_id,
         context_overrides_loader=_load_model_context_overrides,
         model_context_windows=_MODEL_CONTEXT_WINDOWS,
+        profile_context_window_fn=profile_context_window,
+        capability_resolver=resolve_model_capabilities,
     )
 
 
