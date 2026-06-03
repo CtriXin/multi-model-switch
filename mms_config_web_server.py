@@ -81,6 +81,10 @@ def test_provider_models(cfg: dict[str, Any] | None, payload: dict[str, Any] | N
     return _backend().test_provider_models(cfg, payload, config_path=config_path, command_name=command_name)
 
 
+def refresh_model_capability_truth(cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, config_path: str = "", command_name: str = "mms") -> dict[str, Any]:
+    return _backend().refresh_model_capability_truth(cfg, payload, config_path=config_path, command_name=command_name)
+
+
 def run_model_smoke(cfg: dict[str, Any] | None, payload: dict[str, Any] | None, *, chat: bool = False, config_path: str = "", command_name: str = "mms") -> dict[str, Any]:
     return _backend().run_model_smoke(cfg, payload, chat=chat, config_path=config_path, command_name=command_name)
 
@@ -210,6 +214,10 @@ class ConfigWebApp:
         with self.lock:
             return test_provider_models(self.cfg, payload, config_path=self.config_path, command_name=self.command_name)
 
+    def capability_truth(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            return refresh_model_capability_truth(self.cfg, payload, config_path=self.config_path, command_name=self.command_name)
+
     def model_test(self, payload: dict[str, Any], *, chat: bool = False) -> dict[str, Any]:
         with self.lock:
             return run_model_smoke(self.cfg, payload, chat=chat, config_path=self.config_path, command_name=self.command_name)
@@ -289,6 +297,9 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if path == "/api/provider/models" or path == "/api/provider/test":
                 self._send(*_json_response(app.provider_test(payload)))
+                return
+            if path == "/api/model-capabilities/refresh":
+                self._send(*_json_response(app.capability_truth(payload)))
                 return
             if path == "/api/model/test":
                 self._send(*_json_response(app.model_test(payload, chat=False)))
