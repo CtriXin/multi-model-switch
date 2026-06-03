@@ -14,5 +14,5 @@
 
 Python 侧只负责：
 
-- `mms_config_web_assets.py`：从本目录读取静态文件。
-- `mms_config_web_server.py`：提供 `/static/config-web.css`、`/static/config-web.js` 和 WebUI API。
+- `mms_config/web_assets.py`：从本目录读取静态文件。
+- `mms_config/web_server.py`：提供 `/static/config-web.css`、`/static/config-web.js` 和 WebUI API。

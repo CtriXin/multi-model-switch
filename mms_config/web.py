@@ -23,16 +23,16 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
-from mms_config_web_assets import _HTML_PAGE
+from mms_config.web_assets import _HTML_PAGE
 from mms_session_assets import build_session_assets_snapshot
-from mms_config_web_settings import (
+from mms_config.web_settings import (
     _settings_action_cards,
     _webui_capability_coverage,
     _tui_webui_mapping,
     _tui_webui_mapping_summary,
     build_settings_report,
 )
-from mms_config_web_server import (
+from mms_config.web_server import (
     ConfigWebApp,
     _SetupWebHandler,
     _html_page,
@@ -310,7 +310,7 @@ def _policy_path_for_config(config_path: str = "") -> str:
     if config_path:
         return os.path.join(os.path.dirname(config_path), "model-policy.json")
     try:
-        import mms_router
+        from mms_registry import router as mms_router
 
         return str(getattr(mms_router, "MODEL_POLICY_PATH", ""))
     except Exception:
@@ -1241,7 +1241,7 @@ def _load_capability_truth_payloads(config_path: str = "", *, refresh_sources: b
         db_path = mms_registry.default_registry_db_path(config_dir=config_root or None)
         if refresh_sources:
             try:
-                from mms_registry_cli import refresh_source_snapshots
+                from mms_registry.cli import refresh_source_snapshots
 
                 refresh_reports.append(refresh_source_snapshots(db_path=db_path, if_due=False))
             except Exception as exc:

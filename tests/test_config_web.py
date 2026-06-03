@@ -6,8 +6,8 @@ from urllib.request import urlopen
 import pytest
 
 import mms_config.web as mms_config_web
-import mms_config_web_assets
-import mms_config_web_server
+from mms_config import web_assets as mms_config_web_assets
+from mms_config import web_server as mms_config_web_server
 import mms_core
 
 
@@ -856,8 +856,8 @@ def test_config_web_print_summary_exits_without_server(capsys):
 
 
 def test_config_web_reexports_split_backend_modules():
-    import mms_config_web_server
-    import mms_config_web_settings
+    from mms_config import web_server as mms_config_web_server
+    from mms_config import web_settings as mms_config_web_settings
 
     assert mms_config_web.ConfigWebApp is mms_config_web_server.ConfigWebApp
     assert mms_config_web.run_config_web is mms_config_web_server.run_config_web

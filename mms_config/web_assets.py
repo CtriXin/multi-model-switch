@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-_STATIC_DIR = Path(__file__).resolve().with_name("mms_config_web_static")
+_STATIC_DIR = Path(__file__).resolve().parents[1] / "mms_config_web_static"
 _ASSET_TYPES = {
     "index.html": "text/html; charset=utf-8",
     "config-web.css": "text/css; charset=utf-8",

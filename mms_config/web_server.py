@@ -17,7 +17,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from mms_config_web_assets import read_index_html, read_static_asset
+from mms_config.web_assets import read_index_html, read_static_asset
 
 
 def _backend():
