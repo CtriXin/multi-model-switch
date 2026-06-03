@@ -275,6 +275,8 @@ _DELEGATE_TARGETS = {
         '_sanitized_mapping',
         '_usage_summary',
         'build_config_snapshot',
+    ),
+    'mms_config.web_docs': (
         'build_config_snippets',
         'build_reference_cards',
         'build_setup_flow',
