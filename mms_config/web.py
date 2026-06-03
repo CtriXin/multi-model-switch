@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import copy
 import difflib
 import hashlib
 import hmac
@@ -1163,26 +1162,15 @@ def apply_migration_import(
 
 
 def _extract_draft(payload: dict[str, Any]) -> dict[str, Any]:
-    payload = payload if isinstance(payload, dict) else {}
-    draft = payload.get("draft") if isinstance(payload.get("draft"), dict) else payload
-    return draft if isinstance(draft, dict) else {}
+    from mms_config.web_provider import _extract_draft as extract_draft_impl
+
+    return extract_draft_impl(payload)
 
 
 def _route_model_rows_from_payload(provider_payload: dict[str, Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in provider_payload.get("models") if isinstance(provider_payload.get("models"), list) else []:
-        if isinstance(item, dict):
-            model_id = _safe_text(item.get("id") or item.get("model"))
-            visible = item.get("visible") is not False
-        else:
-            model_id = _safe_text(item)
-            visible = True
-        if not model_id or model_id in seen or not visible:
-            continue
-        seen.add(model_id)
-        rows.append({"id": model_id, "visible": True})
-    return rows
+    from mms_config.web_provider import _route_model_rows_from_payload as route_model_rows_from_payload_impl
+
+    return route_model_rows_from_payload_impl(provider_payload)
 
 
 def _copy_existing_provider(
@@ -1193,118 +1181,24 @@ def _copy_existing_provider(
     force_model_rows: bool = False,
     clear_fallback_models: bool = False,
 ) -> dict[str, Any]:
-    provider = dict(existing or {})
-    provider_id = _slug(provider_payload.get("id") or provider_payload.get("original_id") or provider.get("id"), "provider")
-    provider["id"] = provider_id
-    provider["name"] = _safe_text(provider_payload.get("name") or provider_id)
-    provider["enabled"] = _truthy(provider_payload.get("enabled"), True)
-    role = _safe_text(provider_payload.get("role") or provider.get("role") or "auto").lower()
-    provider["role"] = role if role in _ALLOWED_ROLES else "auto"
-    provider["priority"] = _normalize_priority(provider_payload.get("priority", provider.get("priority", 100)))
-    if "family_priority_overrides" in provider_payload:
-        overrides = _normalize_family_priority_overrides(provider_payload.get("family_priority_overrides"))
-        if overrides:
-            provider["family_priority_overrides"] = overrides
-        else:
-            provider.pop("family_priority_overrides", None)
-    if "claude_1m_mode" in provider_payload:
-        mode = _safe_text(provider_payload.get("claude_1m_mode") or "auto")
-        normalized = mode if mode in {"auto", "enable", "disable"} else "auto"
-        if normalized != "auto" or "claude_1m_mode" in provider:
-            provider["claude_1m_mode"] = normalized
-        else:
-            provider.pop("claude_1m_mode", None)
-    if "timezone" in provider_payload:
-        timezone_name = _safe_text(provider_payload.get("timezone"))
-        if timezone_name:
-            provider["timezone"] = timezone_name
-        else:
-            provider.pop("timezone", None)
-    if "note" in provider_payload:
-        note = _safe_text(provider_payload.get("note"))
-        if note:
-            provider["note"] = note
-        elif "note" in provider:
-            provider["note"] = ""
-        else:
-            provider.pop("note", None)
-    provider["protocols"] = _normalize_choice_list(provider_payload.get("protocols"), _ALLOWED_PROTOCOLS, _ALLOWED_PROTOCOLS)
-    provider["supported_clis"] = _normalize_choice_list(provider_payload.get("supported_clis"), _ALLOWED_CLIS, ("claude", "codex", "opencode"))
-    endpoint = _safe_text(provider_payload.get("models_endpoint") or provider.get("models_endpoint") or "/models")
-    if endpoint.lower() in {"manual", "none", "off"}:
-        endpoint = "manual"
-    elif endpoint and not endpoint.startswith("/"):
-        endpoint = "/" + endpoint
-    provider["models_endpoint"] = endpoint or "/models"
-    if "openai_base_url" in provider_payload or "base_url" in provider_payload:
-        openai_base = _safe_text(provider_payload.get("openai_base_url") or provider_payload.get("base_url"))
-        if (
-            _safe_text(provider_payload.get("openai_base_url_source")) == "credentials"
-            and not _safe_text(provider.get("default_openai_base_url") or provider.get("openai_base_url") or provider.get("base_url"))
-            and openai_base == _safe_text(provider_payload.get("effective_openai_base_url"))
-        ):
-            openai_base = ""
-    else:
-        openai_base = _safe_text(provider.get("default_openai_base_url") or provider.get("openai_base_url"))
-    if "anthropic_base_url" in provider_payload:
-        anthropic_base = _safe_text(provider_payload.get("anthropic_base_url"))
-        if (
-            _safe_text(provider_payload.get("anthropic_base_url_source")) == "credentials"
-            and not _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
-            and anthropic_base == _safe_text(provider_payload.get("effective_anthropic_base_url"))
-        ):
-            anthropic_base = ""
-    else:
-        anthropic_base = _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
-    if openai_base:
-        provider["default_openai_base_url"] = openai_base.rstrip("/")
-    elif "default_openai_base_url" in provider:
-        provider["default_openai_base_url"] = ""
-    else:
-        provider.pop("default_openai_base_url", None)
-    if anthropic_base:
-        provider["default_anthropic_base_url"] = anthropic_base.rstrip("/")
-    elif "default_anthropic_base_url" in provider:
-        provider["default_anthropic_base_url"] = ""
-    else:
-        provider.pop("default_anthropic_base_url", None)
-    provider["fallback_models"] = [] if clear_fallback_models else _normalize_model_list(provider_payload.get("fallback_models"))
-    provider["extra_models"] = _normalize_model_list(provider_payload.get("extra_models"))
-    provider["hidden_models"] = _normalize_model_list(provider_payload.get("hidden_models"))
-    if preserve_model_rows:
-        route_rows = _route_model_rows_from_payload(provider_payload)
-        configured_model_ids = set(provider["fallback_models"]) | set(provider["extra_models"])
-        has_route_only_rows = any(row["id"] not in configured_model_ids for row in route_rows)
-        existing_has_models = isinstance(provider.get("models"), list)
-        if route_rows and (force_model_rows or has_route_only_rows or existing_has_models):
-            provider["models"] = route_rows
-        elif force_model_rows or existing_has_models:
-            provider.pop("models", None)
-    return provider
+    from mms_config.web_provider import _copy_existing_provider as copy_existing_provider_impl
+
+    return copy_existing_provider_impl(
+        existing,
+        provider_payload,
+        preserve_model_rows=preserve_model_rows,
+        force_model_rows=force_model_rows,
+        clear_fallback_models=clear_fallback_models,
+    )
 
 
 def _strip_implicit_provider_timezone_defaults(
     next_cfg: dict[str, Any],
     providers_payload: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    payload_by_id: dict[str, dict[str, Any]] = {}
-    for payload in providers_payload:
-        if not isinstance(payload, dict):
-            continue
-        for key in (_safe_text(payload.get("id")), _safe_text(payload.get("original_id"))):
-            if key:
-                payload_by_id[key] = payload
-    for provider in next_cfg.get("providers") if isinstance(next_cfg.get("providers"), list) else []:
-        if not isinstance(provider, dict):
-            continue
-        payload = payload_by_id.get(_safe_text(provider.get("id")))
-        if not payload or "timezone" not in payload:
-            continue
-        # mms_core normalization materializes Asia/Singapore as the implicit
-        # default. Keep it out of persisted WebUI drafts unless the user typed it.
-        if not _safe_text(payload.get("timezone")):
-            provider.pop("timezone", None)
-    return next_cfg
+    from mms_config.web_provider import _strip_implicit_provider_timezone_defaults as strip_implicit_provider_timezone_defaults_impl
+
+    return strip_implicit_provider_timezone_defaults_impl(next_cfg, providers_payload)
 
 
 def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
@@ -1314,29 +1208,27 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
 
 
 def _provider_urls(provider: dict[str, Any] | None) -> dict[str, str]:
-    provider = provider if isinstance(provider, dict) else {}
-    return {
-        "openai": _safe_text(provider.get("default_openai_base_url") or provider.get("openai_base_url") or provider.get("base_url")),
-        "anthropic": _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url")),
-    }
+    from mms_config.web_provider import _provider_urls as provider_urls_impl
+
+    return provider_urls_impl(provider)
 
 
 def _provider_by_id(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
-    return {
-        _safe_text(provider.get("id")): provider
-        for provider in providers
-        if isinstance(provider, dict) and _safe_text(provider.get("id"))
-    }
+    from mms_config.web_provider import _provider_by_id as provider_by_id_impl
+
+    return provider_by_id_impl(cfg)
 
 
 def _provider_default_id(cfg: dict[str, Any]) -> str:
-    provider_cfg = cfg.get("provider") if isinstance(cfg.get("provider"), dict) else {}
-    return _safe_text(provider_cfg.get("default"))
+    from mms_config.web_provider import _provider_default_id as provider_default_id_impl
+
+    return provider_default_id_impl(cfg)
 
 
 def _mapping_digest(payload: Any) -> str:
-    return json.dumps(_sanitize_for_output(payload if isinstance(payload, dict) else {}), ensure_ascii=False, sort_keys=True)
+    from mms_config.web_provider import _mapping_digest as mapping_digest_impl
+
+    return mapping_digest_impl(payload)
 
 
 def _build_review_summary(
