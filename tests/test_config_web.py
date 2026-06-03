@@ -550,6 +550,61 @@ def test_config_web_bundle_runtime_models_are_not_manual_extra_models():
     assert provider["models"][0]["source"] == "approved"
 
 
+def test_config_web_plan_removes_approved_selector_from_fallback_models(tmp_path):
+    current_cfg = {
+        "provider": {"default": "mimo-direct"},
+        "providers": [
+            {
+                "id": "mimo-direct",
+                "name": "MiMo Direct",
+                "enabled": True,
+                "models_endpoint": "manual",
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["claude"],
+                "fallback_models": ["mimo-v2.5", "mimo-v2.5[1m]"],
+            }
+        ],
+    }
+    payload = {
+        "draft": {
+            "provider_default": "mimo-direct",
+            "route_scope_provider_ids": ["mimo-direct"],
+            "providers": [
+                {
+                    "original_id": "mimo-direct",
+                    "id": "mimo-direct",
+                    "name": "MiMo Direct",
+                    "enabled": True,
+                    "models_endpoint": "manual",
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude"],
+                    "approved_route_models": ["mimo-v2.5"],
+                    "extra_models": [],
+                    "hidden_models": [],
+                    "models": [{"id": "mimo-v2.5", "visible": True}],
+                }
+            ],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {},
+            "opencode": {},
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(
+        current_cfg,
+        payload,
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    provider = plan["config"]["providers"][0]
+    assert provider["models"] == [{"id": "mimo-v2.5", "visible": True}]
+    assert "mimo-v2.5[1m]" not in json.dumps(provider)
+    assert plan["route_scope_provider_ids"] == ["mimo-direct"]
+    assert plan["summary"]["will_write_config"] is True
+
+
 def test_config_web_bundle_runtime_exposes_derived_aliases_for_hiding():
     cfg = {
         "providers": [
@@ -1022,6 +1077,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert "compatSelectorBox" in js_body.decode("utf-8")
     assert "已批准兼容 selector" in js_body.decode("utf-8")
     assert "不是手动添加的 extra_models" in js_body.decode("utf-8")
+    assert "removeApprovedRouteModel" in js_body.decode("utf-8")
+    assert "data-rm-approved" in js_body.decode("utf-8")
+    assert "从当前通道批准清单移除" in js_body.decode("utf-8")
     assert "modelSourceLabel(source,r.id)" in js_body.decode("utf-8")
     assert "modelSourceTitle(source,r.id)" in js_body.decode("utf-8")
     assert css_type.startswith("text/css")
