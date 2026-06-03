@@ -3458,7 +3458,8 @@ def test_config_web_capability_truth_button_and_fields_are_present():
     assert "/api/model-capabilities/refresh" in html
     assert "data-truth-field=\"context_window_tokens\"" in html
     assert "data-truth-field=\"vision\"" in html
-    assert "模型能力真相源" in html
+    assert "已知能力快照" in html
+    assert "不实时读取官方原文" in html
 
 
 def test_config_web_max_output_tokens_are_saved_to_model_policy(tmp_path):

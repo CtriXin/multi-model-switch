@@ -893,7 +893,7 @@ def _model_capability_defaults(
 
 
 def capability_truth_refresh_fields() -> list[dict[str, str]]:
-    """Fields that can be refreshed from structured source truth without LLM prose parsing."""
+    """Fields that can be refreshed from structured capability snapshots without LLM prose parsing."""
     labels = {
         "context_window_tokens": ("上下文", "官方/结构化 context window token 数"),
         "max_output_tokens": ("输出上限", "官方/结构化 max output token 数"),
@@ -1147,7 +1147,7 @@ def refresh_model_capability_truth(
     config_path: str = "",
     command_name: str = "mms",
 ) -> dict[str, Any]:
-    """Build draft capability updates from structured source truth only.
+    """Build draft capability updates from structured capability snapshots only.
 
     This is intentionally a draft helper: it never writes model-policy or the
     runtime bundle. Existing save/preview flow remains the only persistence path.
@@ -1217,7 +1217,7 @@ def refresh_model_capability_truth(
         "unmatched_models": unmatched[:80],
         "warnings": warnings,
         "refresh_reports": refresh_reports,
-        "note": "只使用结构化 source snapshot / approved capabilities / provider catalog 字段；结果只进入页面草稿，保存发布后才生效。",
+        "note": "只使用 MMS 已收录/已导入的结构化 source snapshot、approved capabilities 和 provider catalog 字段；不会实时读取官方原文，结果只进入页面草稿，保存发布后才生效。",
     }
 
 
