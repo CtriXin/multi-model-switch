@@ -156,25 +156,30 @@ def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monk
     assert result == "session-match"
 
 
-def test_backfill_project_store_resume_files_cross_account(tmp_path, scoped_store):
+def test_backfill_project_store_resume_files_cross_account_and_path_alias(monkeypatch, tmp_path, scoped_store):
     import mms_launchers
     from mms_project_store import claude_raw_entry_path, ensure_claude_project_store
 
     project_dir = tmp_path / "repo"
-    project_dir.mkdir()
+    work_dir = project_dir / "work"
+    work_dir.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "canonical_project_path", lambda _path=None: str(project_dir.resolve()))
 
-    ensure_claude_project_store(str(project_dir), account_id="relay-a")
-    ensure_claude_project_store(str(project_dir), account_id="relay-b")
-    source_projects = claude_raw_entry_path("projects", str(project_dir), account_id="relay-b")
-    source_file = source_projects / "repo-key" / "session-cross.jsonl"
+    ensure_claude_project_store(str(work_dir), account_id="relay-a")
+    ensure_claude_project_store(str(work_dir), account_id="relay-b")
+    source_projects = claude_raw_entry_path("projects", str(work_dir), account_id="relay-b")
+    source_file = source_projects / str(work_dir.resolve()).replace(os.sep, "-") / "session-cross.jsonl"
     source_file.parent.mkdir(parents=True, exist_ok=True)
     source_file.write_text('{"sessionId":"session-cross"}\n', encoding="utf-8")
 
-    target_projects = claude_raw_entry_path("projects", str(project_dir), account_id="relay-a")
-    mms_launchers._backfill_project_store_claude_resume_files(str(target_projects), str(project_dir))
+    target_projects = claude_raw_entry_path("projects", str(work_dir), account_id="relay-a")
+    mms_launchers._backfill_project_store_claude_resume_files(str(target_projects), str(work_dir))
+    mms_launchers._mirror_claude_project_resume_dir_aliases(str(target_projects), str(work_dir))
 
-    copied = target_projects / "repo-key" / "session-cross.jsonl"
-    assert copied.read_text(encoding="utf-8") == '{"sessionId":"session-cross"}\n'
+    copied_work = target_projects / str(work_dir.resolve()).replace(os.sep, "-") / "session-cross.jsonl"
+    copied_root = target_projects / str(project_dir.resolve()).replace(os.sep, "-") / "session-cross.jsonl"
+    assert copied_work.read_text(encoding="utf-8") == '{"sessionId":"session-cross"}\n'
+    assert copied_root.read_text(encoding="utf-8") == '{"sessionId":"session-cross"}\n'
 
 
 def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp_path):
@@ -1037,6 +1042,41 @@ def test_load_project_scoped_claude_resume_session_id_does_not_require_matching_
     )
 
     assert result == "session-gpt"
+
+
+def test_project_scoped_claude_resume_matches_cwd_and_git_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    project_dir = tmp_path / "repo"
+    work_dir = project_dir / "work"
+    work_dir.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "canonical_project_path", lambda _path=None: str(project_dir.resolve()))
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(project_dir.resolve()),
+                "cwd": str(work_dir.resolve()),
+                "account_id": "openrouter",
+                "runtime_kind": "api_key",
+                "resume_model": "anthropic/claude-opus-4.8",
+                "session_id": "session-root",
+                "last_active_at": "2026-04-16T13:00:00+00:00",
+            }
+        ],
+    )
+
+    payload = mms_launchers._overlay_project_scoped_claude_resume_state(
+        {"projects": {str(work_dir.resolve()): {"hasTrustDialogAccepted": True}}},
+        str(work_dir),
+        account_id="newapi-personal-tokyo",
+        runtime_kind="api_key",
+        resume_model="deepseek-v4-flash",
+    )
+
+    assert payload["projects"][str(work_dir.resolve())]["lastSessionId"] == "session-root"
+    assert payload["projects"][str(project_dir.resolve())]["lastSessionId"] == "session-root"
 
 
 def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):

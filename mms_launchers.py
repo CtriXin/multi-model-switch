@@ -112,7 +112,14 @@ from mms_fake_upstream import (
     status_payload as _fake_upstream_status_payload,
 )
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
-from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_project_store import (
+    CLAUDE_PERSISTENT_ENTRIES,
+    canonical_project_path,
+    claude_raw_entry_path,
+    ensure_claude_project_store,
+    read_slot_marker,
+    write_slot_marker,
+)
 from mms_provider_profiles import profile_context_window, resolve_provider_profile
 import mms_pi_support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
@@ -6210,6 +6217,20 @@ def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
     return payload
 
 
+def _claude_resume_project_path_variants(project_path):
+    variants = []
+    raw = os.path.realpath(str(project_path or "").strip())
+    if raw:
+        variants.append(raw)
+    try:
+        canonical = os.path.realpath(canonical_project_path(raw or None))
+        if canonical and canonical not in variants:
+            variants.append(canonical)
+    except Exception:
+        pass
+    return variants
+
+
 def _load_project_scoped_claude_resume_session_id(
     project_path,
     *,
@@ -6217,10 +6238,10 @@ def _load_project_scoped_claude_resume_session_id(
     runtime_kind="",
     resume_model="",
 ):
-    normalized_project = os.path.realpath(str(project_path or "").strip())
+    normalized_projects = set(_claude_resume_project_path_variants(project_path))
     # Native Claude resume is project-scoped. MMS should not hide a resumable
     # conversation just because the current launch uses another model/provider.
-    if not normalized_project:
+    if not normalized_projects:
         return None
     try:
         sessions = list_indexed_sessions("claude")
@@ -6232,7 +6253,8 @@ def _load_project_scoped_claude_resume_session_id(
         session_project = os.path.realpath(
             str(session.get("project_path") or session.get("cwd") or "").strip()
         )
-        if session_project != normalized_project:
+        session_cwd = os.path.realpath(str(session.get("cwd") or "").strip())
+        if session_project not in normalized_projects and session_cwd not in normalized_projects:
             continue
         session_id = str(session.get("session_id") or "").strip()
         if not session_id or session_id.startswith("pid-"):
@@ -6255,11 +6277,11 @@ def _overlay_project_scoped_claude_resume_state(
     resume_model="",
 ):
     payload = dict(data) if isinstance(data, dict) else {}
-    normalized_project = os.path.realpath(str(project_path or "").strip())
-    if not normalized_project:
+    normalized_projects = _claude_resume_project_path_variants(project_path)
+    if not normalized_projects:
         return payload
     session_id = _load_project_scoped_claude_resume_session_id(
-        normalized_project,
+        normalized_projects[0],
         account_id=account_id,
         runtime_kind=runtime_kind,
         resume_model=resume_model,
@@ -6270,10 +6292,11 @@ def _overlay_project_scoped_claude_resume_state(
     projects = payload.get("projects")
     if not isinstance(projects, dict):
         projects = {}
-    entry = projects.get(normalized_project)
-    next_entry = dict(entry) if isinstance(entry, dict) else {}
-    next_entry["lastSessionId"] = session_id
-    projects[normalized_project] = next_entry
+    for normalized_project in normalized_projects:
+        entry = projects.get(normalized_project)
+        next_entry = dict(entry) if isinstance(entry, dict) else {}
+        next_entry["lastSessionId"] = session_id
+        projects[normalized_project] = next_entry
     payload["projects"] = projects
     return payload
 
@@ -9757,15 +9780,35 @@ def _copy_tree_files_if_missing(src, dst):
                 pass
 
 
+def _mirror_claude_project_resume_dir_aliases(projects_dir, current_cwd):
+    projects_dir = os.path.abspath(os.path.expanduser(str(projects_dir or "")))
+    if not os.path.isdir(projects_dir):
+        return
+    aliases = [
+        os.path.join(projects_dir, dirname)
+        for dirname in _claude_project_resume_dir_names(current_cwd)
+    ]
+    aliases = [path for path in dict.fromkeys(aliases)]
+    existing = [path for path in aliases if os.path.isdir(path)]
+    if not existing:
+        return
+    for source in existing:
+        for target in aliases:
+            if os.path.realpath(source) == os.path.realpath(target):
+                continue
+            _copy_tree_files_if_missing(source, target)
+
+
 def _normalized_claude_slot_account(value):
     return str(value or "").strip().lower()
 
 
 def _claude_project_resume_dir_names(project_path):
-    paths = {
-        os.path.abspath(os.path.expanduser(str(project_path or ""))),
-        os.path.realpath(os.path.expanduser(str(project_path or ""))),
-    }
+    paths = set(_claude_resume_project_path_variants(project_path))
+    raw = os.path.expanduser(str(project_path or ""))
+    if raw:
+        paths.add(os.path.abspath(raw))
+        paths.add(os.path.realpath(raw))
     names = set()
     for path in paths:
         if not path:
@@ -9862,6 +9905,7 @@ def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, acco
             if os.path.realpath(source_projects_dir) == os.path.realpath(target_projects_dir):
                 continue
             _copy_tree_files_if_missing(source_projects_dir, target_projects_dir)
+    _mirror_claude_project_resume_dir_aliases(target_projects_dir, current_cwd)
 
 
 def _link_claude_persistent_entry(session_claude_dir, entry, target):
