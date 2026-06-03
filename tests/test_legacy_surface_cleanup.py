@@ -88,6 +88,8 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
 def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
     import mms_core
 
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
     monkeypatch.setattr(
         mms_core,
         "_load_version_meta",
@@ -105,6 +107,34 @@ def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
     assert info["release"] == "v9.9.9"
     assert info["install_channel"] == "latest-tag"
     assert info["source"] == "install.sh"
+    assert info["release_track"] == "stable"
+    assert info["release_track_version"] == "3.x-stable"
+    assert info["release_track_label"] == "3.x Stable"
+
+
+def test_release_version_info_uses_command_env_for_dev_and_canary_tracks(monkeypatch) -> None:
+    import mms_core
+
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmg")
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.setattr(mms_core, "_load_version_meta", lambda: {"install_channel": "dev", "installed_ref": "dev"})
+    monkeypatch.setattr(mms_core, "_git_output", lambda args: "dev" if args[0] == "branch" else "abc123")
+
+    canary = mms_core._release_version_info()
+
+    assert canary["release_track"] == "canary"
+    assert canary["release_track_version"] == "4.0.0-canary"
+    assert canary["release_track_label"] == "4.0 Canary Preview"
+
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setattr(mms_core, "_load_version_meta", lambda: {"install_channel": "canary", "installed_ref": "canary"})
+    monkeypatch.setattr(mms_core, "_git_output", lambda args: "canary" if args[0] == "branch" else "abc123")
+
+    dev = mms_core._release_version_info()
+
+    assert dev["release_track"] == "dev"
+    assert dev["release_track_version"] == "4.0.0-dev"
+    assert dev["release_track_label"] == "4.0 Dev Preview"
 
 
 def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch) -> None:
@@ -885,6 +915,7 @@ def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     assert about_title == "关于 / About"
     assert [label for label, _value in about_info] == [
         "MMS",
+        "版本轨道",
         "MMS 最新",
         "Codex",
         "Codex 最新",

@@ -294,12 +294,15 @@ def _version_info_for_snapshot(command_name: str = "mms") -> dict[str, Any]:
     branch = _safe_text(info.get("git_branch"))
     commit = _safe_text(info.get("git_commit"))
     channel = _safe_text(info.get("install_channel"))
+    track_label = _safe_text(info.get("release_track_label") or info.get("release_track_version"))
     if branch and commit:
         display = f"{branch}@{commit}"
     elif channel and release:
         display = f"{channel} {release}"
     else:
         display = release
+    if track_label:
+        display = f"{track_label} · {display}"
     info["command"] = command_name
     info["display"] = display
     return info

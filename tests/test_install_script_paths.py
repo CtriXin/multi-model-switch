@@ -370,12 +370,15 @@ def test_piped_channel_flags_resolve_stable_dev_and_canary_refs():
 
     assert "Planned install ref: v1.16.5" in stable.stdout
     assert "Install channel: stable" in stable.stdout
+    assert "Version track: 3.x Stable (3.x-stable)" in stable.stdout
     assert "Dev ref: dev" in dev.stdout
     assert "Planned install ref: dev" in dev.stdout
     assert "Install channel: dev" in dev.stdout
+    assert "Version track: 4.0 Dev Preview (4.0.0-dev)" in dev.stdout
     assert "Canary ref: canary" in canary.stdout
     assert "Planned install ref: canary" in canary.stdout
     assert "Install channel: canary" in canary.stdout
+    assert "Version track: 4.0 Canary Preview (4.0.0-canary)" in canary.stdout
 
 
 def test_dev_channel_defaults_to_dev_branch():

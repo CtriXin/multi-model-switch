@@ -25,6 +25,18 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 | Dev | Dev == `dev` == `mmf` | `dev` | `--channel dev` / `--dev` | 作者日常工作机、需要最新修复的人 | 开发中稳定，小步提交，targeted tests 通过 |
 | Canary | Canary == `canary` == `mmg` | `canary` | `--channel canary` / `--canary` | 测试机、夜间试验 | 最快实验分支，小步高频 commit，必须方便回滚 |
 
+## 版本轨道
+
+当前版本语义按 channel track 表达，不要求每个小步 commit 都改正式 semver：
+
+| Channel | Version track | 说明 |
+|---|---|---|
+| Stable / Main | `3.x Stable` | 公开稳定安装线；继续用正式 `v3.x.y` tag / release 表达可安装版本。 |
+| Dev / `mmf` | `4.0.0-dev` / `4.0 Dev Preview` | 4.0 预览开发线；承载 WebUI-first、preview DB/config v2、launcher 瘦身等能力。 |
+| Canary / `mmg` | `4.0.0-canary` / `4.0 Canary Preview` | 4.0 金丝雀实验线；比 Dev 更激进，仍以小 commit + git hash 支持回滚。 |
+
+不要把当前 Canary 叫 `5.0`。`5.0` 留给未来真正的大破坏边界，例如 4.0 稳定迁移完成后再重构 launcher/runtime 公共 API。
+
 ## 当前过渡策略
 
 - `main` 暂时不停止迭代，会和 `dev` 同步一段时间，避免已有安装入口突然断档；同步窗口结束后 `main` 固定为 Stable/default。

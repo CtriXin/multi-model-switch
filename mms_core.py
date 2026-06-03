@@ -804,6 +804,53 @@ def _git_output(args):
     return str(result.stdout or "").strip()
 
 
+def _release_track_for_channel(version_meta, git_branch=""):
+    """Return display-only channel track; preview tracks are not stable semver."""
+    version_meta = version_meta if isinstance(version_meta, dict) else {}
+    install_channel = str(version_meta.get("install_channel") or "").strip().lower()
+    installed_ref = str(version_meta.get("installed_ref") or "").strip().lower()
+    preview_mode = str(os.environ.get("MMS_PREVIEW_MODE") or "").strip().lower()
+    command_name = str(os.environ.get("MMS_COMMAND_NAME") or "").strip().lower()
+    branch = str(git_branch or "").strip().lower()
+
+    canary_markers = {"canary", "mmg", "mms-canary"}
+    dev_markers = {"dev", "mmf", "mms-dev"}
+    if preview_mode in canary_markers or command_name == "mmg":
+        return {
+            "release_track": "canary",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-canary",
+            "release_track_label": "4.0 Canary Preview",
+        }
+    if preview_mode in dev_markers or command_name == "mmf":
+        return {
+            "release_track": "dev",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-dev",
+            "release_track_label": "4.0 Dev Preview",
+        }
+    if install_channel == "canary" or installed_ref == "canary" or branch == "canary":
+        return {
+            "release_track": "canary",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-canary",
+            "release_track_label": "4.0 Canary Preview",
+        }
+    if install_channel == "dev" or installed_ref == "dev" or branch == "dev":
+        return {
+            "release_track": "dev",
+            "release_track_series": "4.0",
+            "release_track_version": "4.0.0-dev",
+            "release_track_label": "4.0 Dev Preview",
+        }
+    return {
+        "release_track": "stable",
+        "release_track_series": "3.x",
+        "release_track_version": "3.x-stable",
+        "release_track_label": "3.x Stable",
+    }
+
+
 def _release_version_info():
     version_meta = _load_version_meta()
     installed_version = str(version_meta.get("installed_version") or "").strip()
@@ -812,7 +859,7 @@ def _release_version_info():
     git_branch = _git_output(["branch", "--show-current"])
     git_commit = _git_output(["rev-parse", "--short", "HEAD"])
     release = installed_version or git_describe or git_commit or "dev"
-    return {
+    info = {
         "release": release,
         "installed_version": installed_version,
         "installed_ref": installed_ref,
@@ -822,6 +869,8 @@ def _release_version_info():
         "install_channel": str(version_meta.get("install_channel") or "").strip(),
         "source": str(version_meta.get("source") or "").strip(),
     }
+    info.update(_release_track_for_channel(version_meta, git_branch))
+    return info
 
 
 def _refresh_update_cache_for_about(force_update=False):
@@ -5979,6 +6028,7 @@ def _about_tui_payload(about_snapshot):
     claude_status = clis.get("claude") if isinstance(clis.get("claude"), dict) else {}
     info_lines = [
         ("MMS", f"{mms_status.get('current') or version_info.get('release') or 'dev'} · {mms_status.get('status') or '-'}"),
+        (_L("版本轨道", "Version track"), version_info.get("release_track_label") or version_info.get("release_track_version") or "-"),
         (_L("MMS 最新", "MMS latest"), mms_status.get("latest") or _L("未检查", "not checked")),
         ("Codex", _format_cli_about_line(codex_status)),
         (_L("Codex 最新", "Codex latest"), _format_about_latest_value(codex_status)),

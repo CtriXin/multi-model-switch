@@ -26,6 +26,7 @@ SOURCE_TMP_DIR=""
 INSTALL_REF=""
 RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
+REQUESTED_INSTALL_CHANNEL=""
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
 DEV_CHANNEL_REF="${MMS_INSTALL_DEV_REF:-dev}"
@@ -149,6 +150,36 @@ resolve_local_source_ref() {
         return 0
     fi
     echo "local-source"
+}
+
+release_track_id() {
+    case "${REQUESTED_INSTALL_CHANNEL:-$INSTALL_CHANNEL}" in
+        canary) printf "canary" ;;
+        dev) printf "dev" ;;
+        *)
+            case "${INSTALL_REF:-$RESOLVED_INSTALL_REF}" in
+                canary) printf "canary" ;;
+                dev) printf "dev" ;;
+                *) printf "stable" ;;
+            esac
+            ;;
+    esac
+}
+
+release_track_version() {
+    case "$(release_track_id)" in
+        canary) printf "4.0.0-canary" ;;
+        dev) printf "4.0.0-dev" ;;
+        *) printf "3.x-stable" ;;
+    esac
+}
+
+release_track_label() {
+    case "$(release_track_id)" in
+        canary) printf "4.0 Canary Preview" ;;
+        dev) printf "4.0 Dev Preview" ;;
+        *) printf "3.x Stable" ;;
+    esac
 }
 
 ensure_install_ref_resolved() {
@@ -1052,14 +1083,20 @@ download_remote_source() {
 
 write_version_metadata() {
     ensure_install_ref_resolved
+    local track_id
+    local track_version
+    local track_label
+    track_id="$(release_track_id)"
+    track_version="$(release_track_version)"
+    track_label="$(release_track_label)"
     mkdir -p "$(dirname "$VERSION_META_PATH")"
-    "$(_python_bin)" - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" <<'PY'
+    "$(_python_bin)" - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" "$track_id" "$track_version" "$track_label" <<'PY'
 import json
 import re
 import sys
 from datetime import datetime, timezone
 
-path, resolved_ref, install_channel, preferred_language = sys.argv[1:5]
+path, resolved_ref, install_channel, preferred_language, track_id, track_version, track_label = sys.argv[1:8]
 resolved_ref = str(resolved_ref or "").strip()
 installed_version = resolved_ref if re.fullmatch(r"v\d+\.\d+\.\d+", resolved_ref) else ""
 preferred_language = "en" if str(preferred_language).strip().lower().startswith("en") else "zh"
@@ -1068,6 +1105,9 @@ payload = {
     "installed_ref": resolved_ref,
     "installed_version": installed_version,
     "install_channel": install_channel,
+    "release_track": track_id,
+    "release_track_version": track_version,
+    "release_track_label": track_label,
     "preferred_language": preferred_language,
     "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "source": "install.sh",
@@ -2287,6 +2327,7 @@ print_version_overview() {
     echo "  $(t "稳定版（Stable/latest release）" "Stable release (latest release)"): ${stable_ref:-$(t "未获取" "unavailable")}"
     echo "  $(t "Dev ref" "Dev ref"): $DEV_CHANNEL_REF"
     echo "  $(t "Canary ref" "Canary ref"): $CANARY_CHANNEL_REF"
+    echo "  $(t "版本轨道" "Version track"): $(release_track_label) ($(release_track_version))"
     echo "  $(t "线上最新（latest tag）" "Latest upstream tag (latest tag)"): ${latest_tag_ref:-$(t "未获取" "unavailable")}"
     echo "  $(t "本次准备安装" "Planned install ref"): ${RESOLVED_INSTALL_REF:-local-source}"
     echo "  $(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
@@ -4261,18 +4302,22 @@ while [[ $# -gt 0 ]]; do
             fi
             INSTALL_REF=""
             INSTALL_CHANNEL="$1"
+            REQUESTED_INSTALL_CHANNEL="$1"
             ;;
         --stable)
             INSTALL_REF=""
             INSTALL_CHANNEL="stable"
+            REQUESTED_INSTALL_CHANNEL="stable"
             ;;
         --dev)
             INSTALL_REF=""
             INSTALL_CHANNEL="dev"
+            REQUESTED_INSTALL_CHANNEL="dev"
             ;;
         --canary)
             INSTALL_REF=""
             INSTALL_CHANNEL="canary"
+            REQUESTED_INSTALL_CHANNEL="canary"
             ;;
         --ref)
             shift
