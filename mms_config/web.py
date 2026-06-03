@@ -1000,16 +1000,23 @@ def _truth_field_source(field: str, row: dict[str, Any], source_path: str = "") 
     confidence = _safe_text(row.get("confidence") or "structured")
     source_layer = _safe_text(row.get("source_layer")).lower()
     source_name = _safe_text(row.get("source_name"))
+    checked_at = _safe_text(row.get("checked_at"))
+    if not checked_at:
+        ref = _truth_first_provider_ref(row)
+        checked_at = _safe_text(ref.get("checked_at")) if isinstance(ref, dict) else ""
     layer = source_layer or "official"
     if field == "tool_use" or "provider_catalog" in confidence or "openrouter" in confidence:
         layer = "provider_catalog"
-    return {
+    result = {
         "source_layer": layer,
         "source_name": source_name,
         "confidence": confidence,
         "source_path": source_path,
         "evidence_urls": _truth_evidence_urls(row),
     }
+    if checked_at:
+        result["checked_at"] = checked_at
+    return result
 
 
 def _truth_caps_from_row(row: dict[str, Any], *, fields: set[str], source_path: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
@@ -3549,11 +3556,46 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
         models = {}
         policy["models"] = models
     providers = draft.get("providers") if isinstance(draft.get("providers"), list) else []
+
+    def sanitize_capability_source(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        result: dict[str, Any] = {}
+        for key in ("source_layer", "source_name", "confidence", "source_path", "checked_at"):
+            text = _safe_text(value.get(key))
+            if text:
+                result[key] = text
+        urls = value.get("evidence_urls") if isinstance(value.get("evidence_urls"), list) else []
+        clean_urls = [_safe_text(item) for item in urls if _safe_text(item)]
+        if clean_urls:
+            result["evidence_urls"] = list(dict.fromkeys(clean_urls))[:6]
+        return result
+
+    def capability_value(entry: dict[str, Any], field: str) -> Any:
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        return caps.get(field)
+
+    def capability_changed(before_entry: dict[str, Any], after_entry: dict[str, Any], field: str) -> bool:
+        return _mapping_digest({"value": capability_value(before_entry, field)}) != _mapping_digest({"value": capability_value(after_entry, field)})
+
+    def source_for_field(source_map: dict[str, Any], field: str) -> dict[str, Any]:
+        if not isinstance(source_map, dict):
+            return {}
+        source = source_map.get(field)
+        if source is None and field == "supports_thinking":
+            source = source_map.get("thinking")
+        if source is None and field == "cache_sensitive_transport":
+            source = source_map.get("cache_sensitive")
+        if source is None and field == "long_context":
+            source = source_map.get("context_window_tokens") or source_map.get("one_m_context")
+        return sanitize_capability_source(source)
+
     for provider in providers:
         if not isinstance(provider, dict):
             continue
         hidden = set(_normalize_model_list(provider.get("hidden_models")))
         caps_map = dict(provider.get("model_capabilities") if isinstance(provider.get("model_capabilities"), dict) else {})
+        source_map = dict(provider.get("model_capability_sources") if isinstance(provider.get("model_capability_sources"), dict) else {})
         rows = provider.get("models") if isinstance(provider.get("models"), list) else []
         for row in rows:
             if not isinstance(row, dict):
@@ -3565,6 +3607,8 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if not touched:
                 continue
             caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
+            if isinstance(row.get("capability_sources"), dict):
+                source_map[model_id] = row.get("capability_sources")
             if model_id in hidden or row.get("visible") is False:
                 entry = models.setdefault(model_id, {})
                 if isinstance(entry, dict):
@@ -3587,6 +3631,7 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if not isinstance(entry, dict):
                 entry = {}
                 models[model_id] = entry
+            before_entry_for_sources = copy.deepcopy(entry)
             cap_payload = entry.setdefault("capabilities", {})
             if not isinstance(cap_payload, dict):
                 cap_payload = {}
@@ -3613,6 +3658,28 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                 max_output_tokens = _normalize_context_tokens(caps.get("max_output_tokens") or caps.get("official_max_output_tokens"))
                 if max_output_tokens:
                     cap_payload["max_output_tokens"] = max_output_tokens
+            per_model_sources = source_map.get(model_id) if isinstance(source_map.get(model_id), dict) else {}
+            if per_model_sources:
+                source_payload = entry.get("capability_sources") if isinstance(entry.get("capability_sources"), dict) else {}
+                source_payload = dict(source_payload)
+                for field in (
+                    "text",
+                    "vision",
+                    "tool_use",
+                    "reasoning",
+                    "thinking",
+                    "supports_thinking",
+                    "one_m_context",
+                    "long_context",
+                    "context_window_tokens",
+                    "max_output_tokens",
+                    "cache_sensitive_transport",
+                ):
+                    source = source_for_field(per_model_sources, field)
+                    if source and capability_changed(before_entry_for_sources, entry, field):
+                        source_payload[field] = source
+                if source_payload:
+                    entry["capability_sources"] = source_payload
     def comparable(payload: dict[str, Any]) -> dict[str, Any]:
         copy_payload = copy.deepcopy(payload) if isinstance(payload, dict) else {}
         copy_payload.pop("updated_at", None)
@@ -4028,10 +4095,47 @@ def _build_review_summary(
         for key in sorted(caps):
             flat[f"capabilities.{key}"] = caps.get(key)
         for key in sorted(entry):
-            if key in {"visible", "favorite", "capabilities"}:
+            if key in {"visible", "favorite", "capabilities", "capability_sources"}:
                 continue
             flat[key] = entry.get(key)
         return flat
+
+    def policy_source_label(source: Any) -> str:
+        if not isinstance(source, dict):
+            return ""
+        name = _safe_text(source.get("source_name"))
+        layer = _safe_text(source.get("source_layer")).lower()
+        confidence = _safe_text(source.get("confidence")).lower()
+        if name:
+            return name
+        if "openrouter" in confidence:
+            return "OpenRouter catalog"
+        if layer == "provider_catalog":
+            return "Provider catalog"
+        if layer == "official":
+            return "官方 / 已确认"
+        if layer == "manual":
+            return "手动调整"
+        return layer or ""
+
+    def policy_source_for_field(entry: Any, field: str) -> dict[str, Any]:
+        if not isinstance(entry, dict):
+            return {}
+        sources = entry.get("capability_sources") if isinstance(entry.get("capability_sources"), dict) else {}
+        key = field.replace("capabilities.", "", 1)
+        source = sources.get(key)
+        if source is None and key == "supports_thinking":
+            source = sources.get("thinking")
+        if source is None and key == "long_context":
+            source = sources.get("context_window_tokens") or sources.get("one_m_context")
+        if source is None and key == "cache_sensitive_transport":
+            source = sources.get("cache_sensitive")
+        source = source if isinstance(source, dict) else {}
+        label = policy_source_label(source)
+        result = _sanitize_for_output(source) if source else {}
+        if label:
+            result["label"] = label
+        return result
 
     def policy_change_rows(before_entry: Any, after_entry: Any) -> list[dict[str, Any]]:
         before_flat = policy_flat(before_entry)
@@ -4042,6 +4146,7 @@ def _build_review_summary(
             after_value = after_flat.get(field)
             if _mapping_digest({field: before_value}) == _mapping_digest({field: after_value}):
                 continue
+            source = policy_source_for_field(after_entry, field)
             rows.append(
                 {
                     "field": field,
@@ -4050,6 +4155,8 @@ def _build_review_summary(
                     "after": after_value,
                     "before_label": policy_value_display(before_value),
                     "after_label": policy_value_display(after_value),
+                    "source": source,
+                    "source_label": source.get("label", ""),
                 }
             )
         return rows
