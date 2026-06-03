@@ -1317,12 +1317,17 @@ def refresh_model_capability_truth(
     requested_fields = {_safe_text(item) for item in payload.get("fields") or [] if _safe_text(item)}
     fields = requested_fields.intersection(_CAPABILITY_TRUTH_REFRESH_FIELDS) or set(_CAPABILITY_TRUTH_REFRESH_FIELDS)
     model_ids = _normalize_model_list(payload.get("models")) or _truth_model_ids_from_provider(provider)
+    use_openrouter_catalog = _truthy(payload.get("openrouter_catalog"), False)
     truth_payloads, refresh_reports, warnings = _load_capability_truth_payloads(
         config_path,
         refresh_sources=_truthy(payload.get("refresh_sources"), True),
     )
+    # OpenRouter refresh should mean OpenRouter-only matching; the local snapshot button covers official/approved facts.
+    if use_openrouter_catalog:
+        truth_payloads = []
+        refresh_reports = []
     catalog_sources: list[dict[str, Any]] = []
-    if _truthy(payload.get("openrouter_catalog"), False):
+    if use_openrouter_catalog:
         source_url = _safe_text(payload.get("openrouter_url") or _OPENROUTER_MODELS_API_URL)
         try:
             timeout = float(payload.get("openrouter_timeout") or 20.0)
@@ -3546,6 +3551,30 @@ def _copy_existing_provider(
     return provider
 
 
+def _strip_implicit_provider_timezone_defaults(
+    next_cfg: dict[str, Any],
+    providers_payload: list[dict[str, Any]],
+) -> dict[str, Any]:
+    payload_by_id: dict[str, dict[str, Any]] = {}
+    for payload in providers_payload:
+        if not isinstance(payload, dict):
+            continue
+        for key in (_safe_text(payload.get("id")), _safe_text(payload.get("original_id"))):
+            if key:
+                payload_by_id[key] = payload
+    for provider in next_cfg.get("providers") if isinstance(next_cfg.get("providers"), list) else []:
+        if not isinstance(provider, dict):
+            continue
+        payload = payload_by_id.get(_safe_text(provider.get("id")))
+        if not payload or "timezone" not in payload:
+            continue
+        # mms_core normalization materializes Asia/Singapore as the implicit
+        # default. Keep it out of persisted WebUI drafts unless the user typed it.
+        if not _safe_text(payload.get("timezone")):
+            provider.pop("timezone", None)
+    return next_cfg
+
+
 def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
     original_policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
     policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
@@ -3604,9 +3633,18 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if not model_id:
                 continue
             touched = row.get("policy_touched") is True or row.get("touched") is True
-            if not touched:
+            capability_touched = row.get("capability_touched") is True or row.get("capabilities_touched") is True
+            if not touched and not capability_touched:
                 continue
-            caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
+            row_policy_caps = row.get("policy_capabilities") if isinstance(row.get("policy_capabilities"), dict) else None
+            if row_policy_caps is not None:
+                caps_map[model_id] = row_policy_caps
+            else:
+                caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
+            if capability_touched and not touched:
+                if isinstance(row.get("capability_sources"), dict):
+                    source_map[model_id] = row.get("capability_sources")
+                continue
             if isinstance(row.get("capability_sources"), dict):
                 source_map[model_id] = row.get("capability_sources")
             if model_id in hidden or row.get("visible") is False:
@@ -4077,6 +4115,8 @@ def _build_review_summary(
     }
 
     def policy_value_display(value: Any) -> str:
+        if value is None:
+            return "未写入配置"
         if isinstance(value, int) and value >= 1000:
             if value >= 1_000_000 and value % 1_000_000 == 0:
                 return f"{value // 1_000_000}M"
@@ -4512,6 +4552,7 @@ def build_config_plan(
             next_cfg, _ = mms_core._ensure_provider_config(next_cfg)  # noqa: SLF001 - reuse existing normalization
     except Exception:
         pass
+    next_cfg = _strip_implicit_provider_timezone_defaults(next_cfg, providers_payload)
     next_cfg = _strip_empty_provider_model_lists(next_cfg)
 
     before_config_text = _toml_text(_sanitize_for_output(current_cfg))
