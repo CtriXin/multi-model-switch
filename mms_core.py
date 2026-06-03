@@ -85,6 +85,7 @@ def _ensure_rich():
 
 from mms_runtime.account_state import seed_agy_state, seed_claude_state, seed_gemini_state
 from mms_commands import tools as _command_tools
+from mms_commands import about_runtime as _about_runtime
 from mms_registry.adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 from mms_runtime.broker import (
     ensure_broker_config,
@@ -473,64 +474,18 @@ def _release_version_info():
 
 
 def _about_status_snapshot(force_update=False):
-    from mms_commands.tools import (
-        about_status_snapshot,
-        cli_version_status,
-        compare_semver_text,
-        detect_cli_version,
-        fetch_npm_package_latest_version,
-        mms_update_status,
-        refresh_update_cache_for_about,
-    )
-
-    def refresh_cache(*, force_update=False):
-        return refresh_update_cache_for_about(
-            force_update=force_update,
-            load_update_check_cache=_load_update_check_cache,
-            fetch_latest_semver_tags=_fetch_latest_semver_tags,
-            save_update_check_cache=_save_update_check_cache,
-            now=time.time,
-        )
-
-    def detect_cli(command_name):
-        return detect_cli_version(
-            command_name,
-            which=shutil.which,
-            subprocess_run=subprocess.run,
-            extract_semver_text=_extract_semver_text,
-            localize=_L,
-        )
-
-    def fetch_latest_package(package_name):
-        return fetch_npm_package_latest_version(
-            package_name,
-            which=shutil.which,
-            subprocess_run=subprocess.run,
-            extract_semver_text=_extract_semver_text,
-        )
-
-    def cli_status(*, force_update=False):
-        return cli_version_status(
-            force_update=force_update,
-            load_update_check_cache=_load_update_check_cache,
-            save_update_check_cache=_save_update_check_cache,
-            cli_version_packages=CLI_VERSION_PACKAGES,
-            detect_cli_version=detect_cli,
-            fetch_npm_package_latest_version=fetch_latest_package,
-            compare_semver_text=compare_semver_text,
-            localize=_L,
-            now=time.time,
-        )
-
-    def mms_status(version_info, cache):
-        return mms_update_status(version_info, cache, localize=_L)
-
-    return about_status_snapshot(
+    return _about_runtime.about_status_snapshot(
         force_update=force_update,
         release_version_info=_release_version_info,
-        refresh_update_cache_for_about=refresh_cache,
-        cli_version_status=cli_status,
-        mms_update_status=mms_status,
+        load_update_check_cache=_load_update_check_cache,
+        fetch_latest_semver_tags=_fetch_latest_semver_tags,
+        save_update_check_cache=_save_update_check_cache,
+        cli_version_packages=CLI_VERSION_PACKAGES,
+        which=shutil.which,
+        subprocess_run=subprocess.run,
+        extract_semver_text=_extract_semver_text,
+        localize=_L,
+        now=time.time,
     )
 
 
@@ -541,23 +496,14 @@ _cli_upgrade_shell_command = partial(
 
 
 def _run_about_upgrade(*, target="mms", include_clis=False):
-    from mms_commands.tools import mms_upgrade_shell_command, run_about_upgrade
-
     _ensure_rich()
-
-    def mms_upgrade_command(*, include_clis=False):
-        return mms_upgrade_shell_command(
-            include_clis=include_clis,
-            preferred_language=_load_version_meta().get("preferred_language", ""),
-            normalize_language=normalize_language,
-        )
-
-    return run_about_upgrade(
+    return _about_runtime.run_about_upgrade(
         target=target,
         include_clis=include_clis,
         ensure_rich=_ensure_rich,
         cli_upgrade_shell_command=_cli_upgrade_shell_command,
-        mms_upgrade_shell_command=mms_upgrade_command,
+        load_version_meta=_load_version_meta,
+        normalize_language=normalize_language,
         confirm_ask=Confirm.ask,
         subprocess_run=subprocess.run,
         console=console,
