@@ -1019,6 +1019,11 @@ def test_config_web_frontend_assets_are_external_files():
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
     assert "这里直接改 MMS 启动会读取的模型能力" in html
+    assert "compatSelectorBox" in js_body.decode("utf-8")
+    assert "已批准兼容 selector" in js_body.decode("utf-8")
+    assert "不是手动添加的 extra_models" in js_body.decode("utf-8")
+    assert "modelSourceLabel(source,r.id)" in js_body.decode("utf-8")
+    assert "modelSourceTitle(source,r.id)" in js_body.decode("utf-8")
     assert css_type.startswith("text/css")
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
