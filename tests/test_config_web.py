@@ -3671,6 +3671,50 @@ def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):
     assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
 
 
+def test_config_web_model_smoke_shows_openrouter_claude_403_error(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status_code = 403
+        text = '{"error":{"message":"model not allowed for sk-or-v1-secretvalue123456"}}'
+
+        @staticmethod
+        def json():
+            return {"error": {"message": "model not allowed for sk-or-v1-secretvalue123456", "code": 403}}
+
+    class FakeCore:
+        @staticmethod
+        def _runtime_httpx_request(method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(mms_config_web, "_load_mms_core", lambda: FakeCore)
+
+    result = mms_config_web.run_model_smoke(
+        {"providers": []},
+        {
+            "provider": {
+                "id": "openrouter",
+                "protocols": ["openai_chat_completions"],
+                "openai_base_url": "https://openrouter.ai/api/v1",
+                "api_key": "sk-or-v1-secretvalue123456",
+            },
+            "model": "anthropic/claude-opus-4.8",
+            "protocol": "auto",
+        },
+    )
+
+    encoded = json.dumps(result, ensure_ascii=False)
+    assert result["ok"] is False
+    assert result["status_code"] == 403
+    assert result["protocol"] == "openai_chat_completions"
+    assert result["cache_transport_evidence"]["request_path"] == "/chat/completions"
+    assert calls[0][1] == "https://openrouter.ai/api/v1/chat/completions"
+    assert "model not allowed" in result["error"]
+    assert "OpenRouter 返回 403" in result["diagnosis"]
+    assert "sk-or-v1-secretvalue123456" not in encoded
+
+
 def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch, tmp_path):
     (tmp_path / "model-policy.json").write_text(
         json.dumps(

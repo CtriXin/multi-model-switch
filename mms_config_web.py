@@ -144,6 +144,15 @@ def _redact(value: Any) -> str:
     return f"{text[:3]}***{text[-3:]}"
 
 
+def _redact_inline_secrets(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    text = re.sub(r"Bearer\s+[A-Za-z0-9._-]+", "Bearer ***", text)
+    text = re.sub(r"\b(?:sk|sk-or-v1|sk-ant|ak)-[A-Za-z0-9._-]{12,}\b", "***", text)
+    return text
+
+
 def _is_secret_like_key(key_lower: str) -> bool:
     if key_lower in _SAFE_TOKEN_COUNT_KEYS or key_lower.endswith("_tokens"):
         return False
@@ -5575,6 +5584,62 @@ def _join_anthropic_messages_url(base_url: str) -> str:
     return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
 
 
+def _response_json_and_text(response: Any) -> tuple[Any, str]:
+    try:
+        data = response.json()
+    except Exception:
+        data = None
+    text = _safe_text(getattr(response, "text", ""))
+    if not text and data is not None:
+        try:
+            text = json.dumps(_sanitize_for_output(data), ensure_ascii=False)
+        except Exception:
+            text = str(data)
+    return data, _redact_inline_secrets(text)
+
+
+def _model_smoke_error_preview(data: Any, text: str) -> str:
+    candidates: list[str] = []
+    if isinstance(data, dict):
+        error = data.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "detail", "code", "type"):
+                value = _safe_text(error.get(key))
+                if value:
+                    candidates.append(value)
+        elif error:
+            candidates.append(_safe_text(error))
+        for key in ("message", "detail", "error_description"):
+            value = _safe_text(data.get(key))
+            if value:
+                candidates.append(value)
+        if not candidates:
+            try:
+                candidates.append(json.dumps(_sanitize_for_output(data), ensure_ascii=False))
+            except Exception:
+                candidates.append(str(data))
+    if not candidates and text:
+        candidates.append(text)
+    return _redact_inline_secrets(" · ".join(item for item in candidates if item))[:500]
+
+
+def _model_smoke_diagnosis(provider: dict[str, Any], model: str, protocol: str, status_code: int) -> str:
+    provider_id = _safe_text(provider.get("id")).lower()
+    model_lower = model.lower()
+    if (
+        status_code == 403
+        and provider_id == "openrouter"
+        and protocol == "openai_chat_completions"
+        and (model_lower.startswith("anthropic/") or "claude" in model_lower)
+    ):
+        return "OpenRouter 返回 403：模型存在，但当前 key/account 可能没有该 Anthropic/Claude 模型权限，或 OpenRouter route/provider 被限制；当前通道未配置 anthropic_base_url，所以 auto 走的是 /chat/completions。"
+    if status_code == 404:
+        return "上游返回 404：优先检查 model id 是否是该 provider 当前可用的精确 ID。"
+    if status_code == 401:
+        return "上游返回 401：优先检查 API Key 是否正确、是否已保存到当前预览配置。"
+    return ""
+
+
 def run_model_smoke(
     cfg: dict[str, Any],
     payload: dict[str, Any],
@@ -5613,7 +5678,7 @@ def run_model_smoke(
                 timeout=30,
             )
             status_code = int(getattr(response, "status_code", 0) or 0)
-            data = response.json()
+            data, response_text = _response_json_and_text(response)
             content = data.get("content") if isinstance(data, dict) else None
             preview = ""
             if isinstance(content, list) and content:
@@ -5621,6 +5686,7 @@ def run_model_smoke(
                 if isinstance(first, dict):
                     preview = _safe_text(first.get("text"))
             preview = preview or _safe_text(data.get("text") if isinstance(data, dict) else "")
+            error_preview = "" if 200 <= status_code < 300 else _model_smoke_error_preview(data, response_text)
             request_path = "/v1/messages" if "/v1/messages" in url else "/messages"
         else:
             api_key = _safe_text(provider.get("openai_api_key") or provider.get("api_key"))
@@ -5642,23 +5708,28 @@ def run_model_smoke(
                 timeout=30,
             )
             status_code = int(getattr(response, "status_code", 0) or 0)
-            data = response.json()
+            data, response_text = _response_json_and_text(response)
             choices = data.get("choices") if isinstance(data, dict) else None
             preview = ""
             if isinstance(choices, list) and choices:
                 message = choices[0].get("message") if isinstance(choices[0], dict) else {}
                 if isinstance(message, dict):
                     preview = _safe_text(message.get("content"))
+            error_preview = "" if 200 <= status_code < 300 else _model_smoke_error_preview(data, response_text)
             request_path = "/chat/completions"
         latency_ms = int((time.time() - started) * 1000)
+        ok = 200 <= status_code < 300
+        diagnosis = "" if ok else _model_smoke_diagnosis(provider, model, protocol, status_code)
         return {
-            "ok": 200 <= status_code < 300,
+            "ok": ok,
             "status_code": status_code,
             "provider_id": provider.get("id"),
             "model": model,
             "protocol": protocol,
             "latency_ms": latency_ms,
-            "response_preview": preview[:500],
+            "response_preview": (preview or error_preview)[:500],
+            "error": "" if ok else error_preview,
+            "diagnosis": diagnosis,
             "cache_transport_evidence": {
                 "schema": "cache_transport_evidence.v1",
                 "provider_id": provider.get("id"),
