@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import copy
+import difflib
 from datetime import datetime, timezone
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any
 
@@ -40,16 +43,149 @@ def _now_iso() -> str:
     return _call_backend("_now_iso")
 
 
-def _atomic_write_preferences_toml(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    return _call_backend("_atomic_write_preferences_toml", *args, **kwargs)
+def _backend_web_wrapper(name: str) -> bool:
+    func = getattr(_backend(), name, None)
+    return callable(func) and getattr(func, "__module__", "") == "mms_config.web" and getattr(func, "__name__", "") == name
+
+
+def _call_backend_override(name: str, default: Any, *args: Any, **kwargs: Any) -> Any:
+    func = getattr(_backend(), name, None)
+    if callable(func) and not _backend_web_wrapper(name):
+        return func(*args, **kwargs)
+    return default(*args, **kwargs)
+
+
+def _pretty_json(payload: dict[str, Any]) -> str:
+    return _call_backend_override("_pretty_json", _pretty_json_impl, payload)
+
+
+def _toml_key(key: Any) -> str:
+    return _call_backend_override("_toml_key", _toml_key_impl, key)
+
+
+def _toml_scalar(value: Any) -> str:
+    return _call_backend_override("_toml_scalar", _toml_scalar_impl, value)
+
+
+def _fallback_toml_dumps(payload: dict[str, Any]) -> str:
+    return _call_backend_override("_fallback_toml_dumps", _fallback_toml_dumps_impl, payload)
+
+
+def _toml_dumps(payload: dict[str, Any]) -> str:
+    return _call_backend_override("_toml_dumps", _toml_dumps_impl, payload)
 
 
 def _toml_text(payload: dict[str, Any]) -> str:
-    return _call_backend("_toml_text", payload)
+    return _call_backend_override("_toml_text", _toml_text_impl, payload)
 
 
-def _diff_text(*args: Any, **kwargs: Any) -> str:
-    return _call_backend("_diff_text", *args, **kwargs)
+def _atomic_write_preferences_toml(path: str, payload: dict[str, Any]) -> None:
+    return _call_backend_override("_atomic_write_preferences_toml", _atomic_write_preferences_toml_impl, path, payload)
+
+
+def _diff_text(before: str, after: str, *, before_name: str, after_name: str) -> str:
+    return _call_backend_override("_diff_text", _diff_text_impl, before, after, before_name=before_name, after_name=after_name)
+
+
+def _pretty_json_impl(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
+
+
+def _toml_key_impl(key: Any) -> str:
+    text = str(key)
+    if re.fullmatch(r"[A-Za-z0-9_-]+", text):
+        return text
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _toml_scalar_impl(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
+    if value is None:
+        return '""'
+    if isinstance(value, datetime):
+        return json.dumps(value.isoformat(), ensure_ascii=False)
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _fallback_toml_dumps_impl(payload: dict[str, Any]) -> str:
+    lines: list[str] = []
+
+    def emit_table(mapping: dict[str, Any], prefix: list[str]) -> None:
+        scalars: list[tuple[str, Any]] = []
+        nested: list[tuple[str, dict[str, Any]]] = []
+        for key, value in mapping.items():
+            if isinstance(value, dict):
+                nested.append((str(key), value))
+            else:
+                scalars.append((str(key), value))
+
+        if prefix and scalars:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append("[" + ".".join(_toml_key(part) for part in prefix) + "]")
+        for key, value in scalars:
+            lines.append(f"{_toml_key(key)} = {_toml_scalar(value)}")
+        for key, value in nested:
+            emit_table(value, [*prefix, key])
+
+    emit_table(payload if isinstance(payload, dict) else {}, [])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _toml_dumps_impl(payload: dict[str, Any]) -> str:
+    try:
+        import tomli_w
+
+        return tomli_w.dumps(payload)
+    except Exception:
+        pass
+    try:
+        mms_core = _load_mms_core()
+        writer = getattr(mms_core, "tomli_w", None)
+        if writer is not None:
+            return writer.dumps(payload)
+    except Exception:
+        pass
+    return _fallback_toml_dumps(payload)
+
+
+def _toml_text_impl(payload: dict[str, Any]) -> str:
+    return _toml_dumps(payload)
+
+
+def _atomic_write_preferences_toml_impl(path: str, payload: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(_toml_dumps(payload))
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _diff_text_impl(before: str, after: str, *, before_name: str, after_name: str) -> str:
+    if before == after:
+        return ""
+    return "".join(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=before_name,
+            tofile=after_name,
+        )
+    )
 
 
 def _config_root_for_snapshot(config_path: str = "") -> str:
@@ -58,10 +194,6 @@ def _config_root_for_snapshot(config_path: str = "") -> str:
 
 def _policy_path_for_config(config_path: str = "") -> str:
     return _call_backend("_policy_path_for_config", config_path)
-
-
-def _pretty_json(payload: Any) -> str:
-    return _call_backend("_pretty_json", payload)
 
 
 def _sanitize_for_output(value: Any) -> Any:
@@ -119,6 +251,7 @@ def _latest_audit_rows(config_path: str, limit: int = 8) -> list[dict[str, Any]]
     except Exception:
         return []
 
+
 def _copy_backup_file(target_path: str, *, config_path: str, label: str) -> str:
     if not target_path or not os.path.exists(target_path):
         return ""
@@ -131,9 +264,11 @@ def _copy_backup_file(target_path: str, *, config_path: str, label: str) -> str:
     shutil.copy2(target_path, f"{backup_path}.bak")
     return backup_path
 
+
 def _bak_path_for_backup(backup_path: str) -> str:
     bak_path = f"{backup_path}.bak" if backup_path else ""
     return bak_path if bak_path and os.path.exists(bak_path) else ""
+
 
 def _registry_v2_snapshot_generated_bundle(config_root: str) -> dict[str, Any]:
     generated_dir = os.path.join(config_root, "generated")
@@ -182,6 +317,7 @@ def _registry_v2_snapshot_generated_bundle(config_root: str) -> dict[str, Any]:
     summary.update({"skipped": False, "backup_dir": backup_dir, "manifest_path": manifest_path, "files": existing})
     return summary
 
+
 def _registry_v2_restore_generated_bundle(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(snapshot, dict):
         return {"attempted": False, "reason": "missing_snapshot"}
@@ -229,6 +365,7 @@ def _registry_v2_restore_generated_bundle(snapshot: dict[str, Any] | None) -> di
         "backup_dir": backup_dir,
     }
 
+
 def _registry_v2_restore_webui_credential_backend(secret_backend: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(secret_backend, dict) or bool(secret_backend.get("skipped")):
         return {"attempted": False, "reason": "not_written"}
@@ -247,6 +384,7 @@ def _registry_v2_restore_webui_credential_backend(secret_backend: dict[str, Any]
         os.remove(path)
         return {"attempted": True, "restored": False, "removed_new_file": True, "path": path}
     return {"attempted": True, "restored": False, "removed_new_file": False, "path": path}
+
 
 def _registry_v2_restore_db_candidate(candidate: dict[str, Any] | None, *, config_root: str) -> dict[str, Any]:
     if not isinstance(candidate, dict):
@@ -275,6 +413,7 @@ def _registry_v2_restore_db_candidate(candidate: dict[str, Any] | None, *, confi
         return {"attempted": True, "restored": False, "removed_new_db": bool(removed), "removed": removed}
     return {"attempted": False, "reason": "no_candidate_backup", "db_path": db_path}
 
+
 def _rollback_registry_v2_preview_apply(
     *,
     config_root: str,
@@ -290,6 +429,7 @@ def _rollback_registry_v2_preview_apply(
         "credential_backend": _registry_v2_restore_webui_credential_backend(secret_backend),
         "db": _registry_v2_restore_db_candidate(candidate, config_root=config_root),
     }
+
 
 def _append_audit(*, config_path: str, target_path: str, backup_path: str, reason: str, before_sha1: str, after_sha1: str, function: str) -> None:
     mms_core = _load_mms_core()
@@ -308,6 +448,7 @@ def _append_audit(*, config_path: str, target_path: str, backup_path: str, reaso
         },
         config_path=config_path,
     )
+
 
 def _save_provider_credentials_audited(update: dict[str, str], *, config_path: str, reason: str) -> dict[str, str]:
     mms_core = _load_mms_core()
@@ -336,6 +477,7 @@ def _save_provider_credentials_audited(update: dict[str, str], *, config_path: s
         )
     return {"provider_id": update["provider_id"], "target_path": os.path.abspath(target_path), "backup_path": backup_path, "bak_path": _bak_path_for_backup(backup_path)}
 
+
 def _write_model_policy_audited(policy_path: str, payload: dict[str, Any], *, config_path: str, reason: str) -> dict[str, str]:
     mms_core = _load_mms_core()
     lock_path = config_path or mms_core._config_write_target_path()  # noqa: SLF001
@@ -361,6 +503,7 @@ def _write_model_policy_audited(policy_path: str, payload: dict[str, Any], *, co
         )
     return {"target_path": os.path.abspath(policy_path), "backup_path": backup_path, "bak_path": _bak_path_for_backup(backup_path)}
 
+
 def _preferences_target_path(*, config_path: str = "", preferences_path: str = "") -> str:
     preferences_path = _safe_text(preferences_path)
     if preferences_path:
@@ -373,11 +516,13 @@ def _preferences_target_path(*, config_path: str = "", preferences_path: str = "
         return os.path.abspath(os.path.expanduser(str(paths[0])))
     return os.path.abspath(os.path.expanduser("~/.config/mms/preferences.toml"))
 
+
 def _preferences_lock_path(*, config_path: str = "", preferences_path: str = "") -> str:
     if config_path:
         return os.path.abspath(config_path)
     target = _preferences_target_path(config_path=config_path, preferences_path=preferences_path)
     return os.path.join(os.path.dirname(target), "config.toml")
+
 
 def _load_preferences_raw(path: str) -> dict[str, Any]:
     if not os.path.exists(path):
@@ -388,6 +533,7 @@ def _load_preferences_raw(path: str) -> dict[str, Any]:
     except Exception:
         loaded = {}
     return loaded if isinstance(loaded, dict) else {}
+
 
 def _normalize_asset_preferences_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
@@ -419,6 +565,7 @@ def _normalize_asset_preferences_payload(payload: dict[str, Any] | None) -> dict
     if managed_root:
         normalized["assets"]["managed_root"] = os.path.abspath(os.path.expanduser(managed_root))
     return normalized
+
 
 def _merge_asset_preferences(current: dict[str, Any], asset_preferences: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(current) if isinstance(current, dict) else {}
@@ -474,6 +621,7 @@ def build_preferences_plan(
             "managed_root": ((asset_preferences.get("assets") or {}).get("managed_root") if isinstance(asset_preferences.get("assets"), dict) else ""),
         },
     }
+
 
 def _copy_preferences_backup(target_path: str, *, lock_path: str) -> str:
     mms_core = _load_mms_core()
@@ -546,6 +694,7 @@ def apply_preferences_plan(
         "diff": plan.get("diff") or "",
         "audit_tail": _latest_audit_rows(lock_path),
     }
+
 
 def _expand_reveal_path(raw_path: Any) -> str:
     path = _safe_text(raw_path)

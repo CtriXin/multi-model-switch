@@ -3,14 +3,11 @@
 
 from __future__ import annotations
 
-import difflib
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -404,104 +401,51 @@ def _load_json_file(path: str) -> dict[str, Any]:
 
 
 def _pretty_json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
+    from mms_config.web_apply import _pretty_json as pretty_json_impl
+
+    return pretty_json_impl(payload)
 
 
 def _toml_key(key: Any) -> str:
-    text = str(key)
-    if re.fullmatch(r"[A-Za-z0-9_-]+", text):
-        return text
-    return json.dumps(text, ensure_ascii=False)
+    from mms_config.web_apply import _toml_key as toml_key_impl
+
+    return toml_key_impl(key)
 
 
 def _toml_scalar(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int) and not isinstance(value, bool):
-        return str(value)
-    if isinstance(value, float):
-        return repr(value)
-    if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
-    if value is None:
-        return '""'
-    if isinstance(value, datetime):
-        return json.dumps(value.isoformat(), ensure_ascii=False)
-    return json.dumps(str(value), ensure_ascii=False)
+    from mms_config.web_apply import _toml_scalar as toml_scalar_impl
+
+    return toml_scalar_impl(value)
 
 
 def _fallback_toml_dumps(payload: dict[str, Any]) -> str:
-    lines: list[str] = []
+    from mms_config.web_apply import _fallback_toml_dumps as fallback_toml_dumps_impl
 
-    def emit_table(mapping: dict[str, Any], prefix: list[str]) -> None:
-        scalars: list[tuple[str, Any]] = []
-        nested: list[tuple[str, dict[str, Any]]] = []
-        for key, value in mapping.items():
-            if isinstance(value, dict):
-                nested.append((str(key), value))
-            else:
-                scalars.append((str(key), value))
-
-        if prefix and scalars:
-            if lines and lines[-1] != "":
-                lines.append("")
-            lines.append("[" + ".".join(_toml_key(part) for part in prefix) + "]")
-        for key, value in scalars:
-            lines.append(f"{_toml_key(key)} = {_toml_scalar(value)}")
-        for key, value in nested:
-            emit_table(value, [*prefix, key])
-
-    emit_table(payload if isinstance(payload, dict) else {}, [])
-    return "\n".join(lines).rstrip() + "\n"
+    return fallback_toml_dumps_impl(payload)
 
 
 def _toml_dumps(payload: dict[str, Any]) -> str:
-    try:
-        import tomli_w
+    from mms_config.web_apply import _toml_dumps as toml_dumps_impl
 
-        return tomli_w.dumps(payload)
-    except Exception:
-        pass
-    try:
-        mms_core = _load_mms_core()
-        writer = getattr(mms_core, "tomli_w", None)
-        if writer is not None:
-            return writer.dumps(payload)
-    except Exception:
-        pass
-    return _fallback_toml_dumps(payload)
+    return toml_dumps_impl(payload)
 
 
 def _toml_text(payload: dict[str, Any]) -> str:
-    return _toml_dumps(payload)
+    from mms_config.web_apply import _toml_text as toml_text_impl
+
+    return toml_text_impl(payload)
 
 
 def _atomic_write_preferences_toml(path: str, payload: dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(_toml_dumps(payload))
-        os.replace(temp_path, path)
-    finally:
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+    from mms_config.web_apply import _atomic_write_preferences_toml as atomic_write_preferences_toml_impl
+
+    atomic_write_preferences_toml_impl(path, payload)
 
 
 def _diff_text(before: str, after: str, *, before_name: str, after_name: str) -> str:
-    if before == after:
-        return ""
-    return "".join(
-        difflib.unified_diff(
-            before.splitlines(keepends=True),
-            after.splitlines(keepends=True),
-            fromfile=before_name,
-            tofile=after_name,
-        )
-    )
+    from mms_config.web_apply import _diff_text as diff_text_impl
+
+    return diff_text_impl(before, after, before_name=before_name, after_name=after_name)
 
 
 def _provider_credentials_status(provider_id: str) -> dict[str, Any]:
