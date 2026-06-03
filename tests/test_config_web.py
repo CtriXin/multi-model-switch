@@ -147,13 +147,13 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert all(item["click_targets"] for item in mapping)
     assert all(item["acceptance_check"] for item in mapping)
     assert {item["tui_action_id"] for item in mapping} >= {
-        "provider_mgmt",
-        "account_mgmt",
-        "registry",
-        "guard",
+        "webui_only:provider_mgmt",
+        "webui_only:account_mgmt",
+        "webui_only:registry",
+        "webui_only:guard",
         "rescue",
         "language",
-        "routes_export",
+        "webui_only:routes_export",
         "about",
     }
     assert {item["id"] for item in mapping} >= {
@@ -302,7 +302,7 @@ def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
     assert mapping["summary"]["counts"]["human_gate"] > 0
     assert mapping["summary"]["counts"]["missing"] == 0
     assert mapping["summary"]["clickable_rows"] == mapping["summary"]["total"]
-    assert any(item["tui_action_id"] == "provider_mgmt" for item in mapping["mapping"])
+    assert any(item["tui_action_id"] == "webui_only:provider_mgmt" for item in mapping["mapping"])
     assert guard["write_policy"] == "read_only_report"
     assert guard["status"] == "report"
     assert "mmf guard status" in guard["commands"]

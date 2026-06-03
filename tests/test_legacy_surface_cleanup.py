@@ -75,9 +75,11 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
     ids = [item["id"] for item in items]
 
     assert "rescue" in ids
-    assert "provider_mgmt" in ids
     assert "settings_webui" in ids
-    assert "advanced" in ids
+    assert "language" in ids
+    assert "about" in ids
+    assert "provider_mgmt" not in ids
+    assert "advanced" not in ids
     assert "registry" not in ids
     assert "guard" not in ids
     assert "routes_export" not in ids
@@ -85,8 +87,10 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
     assert "fake_upstream" not in ids
     webui_entry = next(item for item in items if item["id"] == "settings_webui")
     assert "WebUI" in webui_entry["label"]
-    advanced = next(item for item in items if item["id"] == "advanced")
-    assert "应急" in advanced["label"]
+    rescue = next(item for item in items if item["id"] == "rescue")
+    assert "服务器" in rescue["label"]
+    about = next(item for item in items if item["id"] == "about")
+    assert "升级" in about["label"]
 
 
 def test_about_release_version_prefers_installed_version(monkeypatch) -> None:

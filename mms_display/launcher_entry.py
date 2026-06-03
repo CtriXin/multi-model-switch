@@ -118,7 +118,6 @@ def handle_tui_launcher_selection(core, cfg, provider, once, cli_names, account_
             select_language_tui,
             select_rescue_event_tui,
             select_settings_tui,
-            select_provider_mgmt_tui,
         )
 
         return tui_flow.TuiSettingsActionDeps(
@@ -126,12 +125,7 @@ def handle_tui_launcher_selection(core, cfg, provider, once, cli_names, account_
             select_channel_action_tui=select_channel_action_tui,
             select_language_tui=select_language_tui,
             select_rescue_event_tui=select_rescue_event_tui,
-            select_provider_mgmt_tui=select_provider_mgmt_tui,
             save_config=core.save_config,
-            probe_cache=core._PROBE_CACHE,
-            ensure_provider_credentials=core.ensure_provider_credentials,
-            probe_models=core._probe_models,
-            provider_mgmt_export_model_routes_loader=tui_flow.load_export_model_routes,
             routes_export_loader=tui_flow.load_model_routes_exporter,
             registry_cli_loader=tui_flow.load_registry_cli_tools,
             registry_truth_tui_payload=core._registry_truth_tui_payload,

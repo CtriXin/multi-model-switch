@@ -58,12 +58,7 @@ class TuiSettingsActionDeps:
     select_channel_action_tui: Callable[..., Any]
     select_language_tui: Callable[..., Any]
     select_rescue_event_tui: Callable[..., Any]
-    select_provider_mgmt_tui: Callable[..., Any]
     save_config: Callable[..., Any]
-    probe_cache: Any
-    ensure_provider_credentials: Callable[..., Any]
-    probe_models: Callable[..., Any]
-    provider_mgmt_export_model_routes_loader: Callable[..., Any]
     routes_export_loader: Callable[..., Any]
     registry_cli_loader: Callable[..., Any]
     registry_truth_tui_payload: Callable[..., Any]
@@ -1347,36 +1342,14 @@ def webui_settings_report_payload(*, localize):
             ),
             (
                 localize("TUI 保留", "TUI keeps"),
-                localize("通道 role/priority 快调、语言、rescue 和高级应急入口", "Channel role/priority quick edit, language, rescue, and emergency entry"),
+                localize("WebUI 提示、服务器/救援、语言、关于/runner 升级", "WebUI hint, server/rescue, language, and about/runner upgrade"),
             ),
         ],
         localize(
-            "TUI 不再承载完整设置面；复杂配置请进 WebUI。这里没有改变任何 runtime defaults。",
+            "TUI 不再承载完整设置面；通道/账号/Registry 等复杂配置请进 WebUI 或 CLI。这里没有改变任何 runtime defaults。",
             "TUI no longer owns the full settings surface. Use WebUI for complex config. Runtime defaults were not changed.",
         ),
     )
-
-
-def select_advanced_settings_action(*, select_channel_action_tui, localize):
-    title = localize("高级/应急设置", "Advanced / Emergency Settings")
-    info_lines = [
-        (
-            localize("定位", "Position"),
-            localize("这些入口已从 TUI 顶层折叠；日常配置请用 WebUI。", "These entries are folded out of top-level TUI; use WebUI for daily config."),
-        ),
-        (
-            localize("安全", "Safety"),
-            localize("仍走原有只读报告 / human gate，不自动写真实配置。", "Still uses existing read-only reports / human gates; no automatic real-config writes."),
-        ),
-    ]
-    actions = [
-        ("account_mgmt", localize("账号管理（应急）", "Account Management (Emergency)")),
-        ("registry", localize("模型真源 / Registry Truth", "Registry Truth")),
-        ("guard", localize("启动快照 / Snapshot Guard", "Snapshot Guard")),
-        ("routes_export", localize("Legacy 路由导出", "Legacy Route Export")),
-        ("about", localize("关于 / 版本", "About / Version")),
-    ]
-    return safe_tui_call(select_channel_action_tui, title, info_lines, actions)
 
 
 def load_registry_cli_tools():
@@ -1429,27 +1402,6 @@ def handle_tui_settings_action(
         deps.print_settings_result_report(*webui_settings_report_payload(localize=deps.localize))
         deps.pause_after_tui_report(deps.localize("按 Enter 返回设置", "Press Enter to return to Settings"))
         return {"status": "continue", "cfg": cfg, "changed": False}
-    if settings_action == "advanced":
-        advanced_action = select_advanced_settings_action(
-            select_channel_action_tui=deps.select_channel_action_tui,
-            localize=deps.localize,
-        )
-        if advanced_action == "__interrupt__":
-            return {"status": "interrupt", "cfg": cfg, "changed": False}
-        if not advanced_action:
-            return {"status": "continue", "cfg": cfg, "changed": False}
-        settings_action = advanced_action
-    if settings_action == "provider_mgmt":
-        provider_mgmt_result = handle_tui_provider_mgmt_settings_action(
-            cfg,
-            select_provider_mgmt_tui=deps.select_provider_mgmt_tui,
-            save_config=deps.save_config,
-            probe_cache=deps.probe_cache,
-            ensure_provider_credentials=deps.ensure_provider_credentials,
-            probe_models=deps.probe_models,
-            export_model_routes_loader=deps.provider_mgmt_export_model_routes_loader,
-        )
-        return {"cfg": cfg, **provider_mgmt_result}
     if settings_action == "language":
         language_result = handle_tui_language_settings_action(
             cfg,
@@ -1544,47 +1496,6 @@ def handle_tui_settings_action(
         )
         return rescue_result
     return {"status": "continue", "cfg": cfg, "changed": False}
-
-
-def handle_tui_provider_mgmt_settings_action(
-    cfg,
-    *,
-    select_provider_mgmt_tui,
-    save_config,
-    probe_cache,
-    ensure_provider_credentials,
-    probe_models,
-    export_model_routes_loader,
-):
-    providers_raw = cfg.get("providers", [])
-    result_providers = safe_tui_call(select_provider_mgmt_tui, providers_raw)
-    if result_providers == "__interrupt__":
-        return {"status": "interrupt"}
-    if result_providers is None:
-        return {"status": "continue", "changed": False}
-
-    for updated_provider in result_providers:
-        provider_id = updated_provider.get("id")
-        for original in cfg.get("providers", []):
-            if original.get("id") == provider_id:
-                original["role"] = updated_provider.get("role", "auto")
-                original["priority"] = updated_provider.get("priority", 100)
-                break
-    save_config(cfg)
-    probe_cache.clear()
-    current_provider = ensure_provider_credentials(cfg)
-    default_models = probe_models(current_provider, emit_output=False).get("models")
-    try:
-        export_model_routes_loader()(cfg, force=True)
-    except Exception:
-        pass
-    return {
-        "status": "continue",
-        "changed": True,
-        "current_provider": current_provider,
-        "default_models": default_models,
-        "families_dirty": True,
-    }
 
 
 def handle_tui_language_settings_action(

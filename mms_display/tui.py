@@ -1634,11 +1634,10 @@ def _settings_menu():
     current_lang = _get_language()
     language_desc = _L("当前：英文", "Current: English") if current_lang == "en" else _L("当前：中文", "Current: Chinese")
     return [
-        {"id": "provider_mgmt", "label": _L("通道快调", "Channel Quick Edit"), "desc": _L("只调 role / priority", "Only role / priority")},
         {"id": "settings_webui", "label": _L("WebUI 设置台", "WebUI Settings"), "desc": _L("配置主入口：通道/账号/Skill/MCP", "Main config: channels/accounts/skills/MCP")},
+        {"id": "rescue", "label": _L("服务器/救援", "Server / Rescue"), "desc": _L("无浏览器时的 fallback / 失败恢复", "No-browser fallback / failure recovery")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
-        {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("fallback / 最近失败", "Fallback / recent failures")},
-        {"id": "advanced", "label": _L("高级/应急", "Advanced / Emergency"), "desc": _L("旧设置入口已折叠", "Legacy settings are folded")},
+        {"id": "about", "label": _L("关于/升级", "About / Upgrade"), "desc": _L("版本 / runner 升级", "Version / runner upgrade")},
     ]
 
 
@@ -2201,151 +2200,6 @@ def select_provider_models_tui(provider_name, models):
             elif 32 <= key <= 126:
                 search += chr(key)
                 idx = 0
-
-    try:
-        return curses.wrapper(_inner)
-    except curses.error:
-        return None
-
-
-def select_provider_mgmt_tui(providers):
-    """Provider 管理 — H6 风格。"""
-    if not providers:
-        return None
-
-    ROLE_CYCLE = ["auto", "primary", "fallback"]
-    _ROLE_COLORS = {"primary": 3, "auto": 4, "fallback": 5}
-
-    import copy
-    items = copy.deepcopy(providers)
-    items.sort(
-        key=lambda p: (
-            -int(p.get("priority", 100) or 100),
-            p.get("name") or p.get("id", ""),
-        ),
-    )
-    changed = False
-
-    def _inner(stdscr):
-        nonlocal items, changed
-        curses.curs_set(0)
-        curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_CYAN, -1)
-        curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_RED, -1)
-        curses.init_pair(4, curses.COLOR_YELLOW, -1)
-        curses.init_pair(5, curses.COLOR_GREEN, -1)
-
-        idx = 0
-        scroll = 0
-
-        while True:
-            stdscr.erase()
-            max_y, max_w = stdscr.getmaxyx()
-            ac = curses.color_pair(1)
-
-            total_w = min(60, max_w - 4)
-            left_w = 24
-            right_w = total_w - left_w
-            visible = min(len(items), max_y - 7)
-            ph = visible + 5
-            px = (max_w - total_w) // 2
-            py = max(1, (max_y - ph) // 2)
-            ll = px + 2
-            lr = px + left_w - 1
-            rl = px + left_w + 2
-            rr = px + total_w - 2
-
-            row = py
-            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
-            row += 1
-            title = "通道管理" + (" *" if changed else "")
-            _safe_addstr(stdscr, row, ll, title, curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
-            row += 1
-            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
-            row += 1
-
-            if idx < scroll:
-                scroll = idx
-            elif idx >= scroll + visible:
-                scroll = idx - visible + 1
-
-            content_y = row
-            for i in range(scroll, min(scroll + visible, len(items))):
-                y = content_y + (i - scroll)
-                p = items[i]
-                is_sel = (i == idx)
-                name = p.get("name") or p.get("id", "?")
-                role = p.get("role", "auto")
-                pri = p.get("priority", 100)
-                enabled = p.get("enabled", True)
-                rc = curses.color_pair(_ROLE_COLORS.get(role, 2))
-
-                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
-
-                if is_sel:
-                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 1, name, curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
-                    info = f"{role} P:{pri}"
-                    if not enabled:
-                        info += " [off]"
-                    _safe_addstr(stdscr, y, rl, info, rc | curses.A_BOLD)
-                else:
-                    name_attr = curses.color_pair(2) if enabled else curses.A_DIM
-                    _safe_addstr(stdscr, y, ll + 1, name, name_attr, max_w=left_w - 4)
-                    info = f"{role} P:{pri}"
-                    if not enabled:
-                        info += " [off]"
-                    _safe_addstr(stdscr, y, rl, info, rc | curses.A_DIM)
-
-            bot_y = content_y + visible
-            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
-            bot_y += 1
-            _safe_addstr(stdscr, bot_y, ll, "R", curses.color_pair(4) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 2, "角色", curses.color_pair(4) | curses.A_DIM)
-            _safe_addstr(stdscr, bot_y, ll + 8, "+/-", curses.color_pair(5) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 12, "优先级", curses.color_pair(5) | curses.A_DIM)
-            _safe_addstr(stdscr, bot_y, ll + 21, "Enter", curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 27, "保存", curses.A_DIM)
-            _safe_addstr(stdscr, bot_y, ll + 34, "Esc", curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 38, "取消", curses.A_DIM)
-            bot_y += 1
-            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
-
-            stdscr.refresh()
-            key = stdscr.getch()
-            if key == curses.KEY_UP:
-                idx = (idx - 1) % len(items)
-            elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(items)
-            elif key in (ord('r'), ord('R')):
-                p = items[idx]
-                cur = p.get("role", "auto")
-                try:
-                    ni = (ROLE_CYCLE.index(cur) + 1) % len(ROLE_CYCLE)
-                except ValueError:
-                    ni = 0
-                p["role"] = ROLE_CYCLE[ni]
-                changed = True
-            elif key in (ord('+'), ord('=')):
-                items[idx]["priority"] = min(200, items[idx].get("priority", 100) + 5)
-                changed = True
-                selected_id = items[idx].get("id")
-                items.sort(key=lambda p: (-int(p.get("priority", 100) or 100), p.get("name") or p.get("id", "")))
-                idx = next((i for i, item in enumerate(items) if item.get("id") == selected_id), idx)
-            elif key in (ord('-'), ord('_')):
-                items[idx]["priority"] = max(0, items[idx].get("priority", 100) - 5)
-                changed = True
-                selected_id = items[idx].get("id")
-                items.sort(key=lambda p: (-int(p.get("priority", 100) or 100), p.get("name") or p.get("id", "")))
-                idx = next((i for i, item in enumerate(items) if item.get("id") == selected_id), idx)
-            elif key in (10, 13, curses.KEY_ENTER):
-                if changed:
-                    return items
-                return None
-            elif key == 27:
-                return None
 
     try:
         return curses.wrapper(_inner)

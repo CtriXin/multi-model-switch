@@ -35,7 +35,6 @@ from mms_launcher.tui_flow import (
     handle_tui_launch_confirmation,
     handle_tui_language_settings_action,
     handle_tui_provider_browse_action,
-    handle_tui_provider_mgmt_settings_action,
     handle_tui_profile_action,
     handle_tui_registry_settings_action,
     handle_tui_routes_export_settings_action,
@@ -1682,91 +1681,6 @@ def test_apply_tui_priority_changes_skips_save_without_changes() -> None:
     assert calls == []
 
 
-def test_handle_tui_provider_mgmt_settings_action_updates_priorities_and_refreshes() -> None:
-    calls = []
-    cfg = {
-        "providers": [
-            {"id": "p1", "role": "auto", "priority": 100},
-            {"id": "p2", "role": "fallback", "priority": 10},
-        ]
-    }
-
-    class ProbeCache(dict):
-        def clear(self):
-            calls.append(("clear",))
-            super().clear()
-
-    def export_model_routes(cfg_arg, *, force):
-        calls.append(("export", cfg_arg, force))
-
-    result = handle_tui_provider_mgmt_settings_action(
-        cfg,
-        select_provider_mgmt_tui=lambda providers: calls.append(("select", providers)) or [
-            {"id": "p1", "role": "primary", "priority": 500},
-            {"id": "missing", "role": "fallback", "priority": 1},
-        ],
-        save_config=lambda cfg_arg: calls.append(("save", cfg_arg)),
-        probe_cache=ProbeCache({"p1": "cached"}),
-        ensure_provider_credentials=lambda cfg_arg: calls.append(("ensure", cfg_arg)) or {"id": "p1"},
-        probe_models=lambda provider, *, emit_output: calls.append(("probe", provider, emit_output)) or {"models": ["gpt-5.4"]},
-        export_model_routes_loader=lambda: export_model_routes,
-    )
-
-    assert result == {
-        "status": "continue",
-        "changed": True,
-        "current_provider": {"id": "p1"},
-        "default_models": ["gpt-5.4"],
-        "families_dirty": True,
-    }
-    assert cfg["providers"] == [
-        {"id": "p1", "role": "primary", "priority": 500},
-        {"id": "p2", "role": "fallback", "priority": 10},
-    ]
-    assert calls == [
-        ("select", cfg["providers"]),
-        ("save", cfg),
-        ("clear",),
-        ("ensure", cfg),
-        ("probe", {"id": "p1"}, False),
-        ("export", cfg, True),
-    ]
-
-
-def test_handle_tui_provider_mgmt_settings_action_handles_cancel_interrupt_and_export_failure() -> None:
-    assert handle_tui_provider_mgmt_settings_action(
-        {"providers": []},
-        select_provider_mgmt_tui=lambda _providers: None,
-        save_config=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
-        probe_cache={},
-        ensure_provider_credentials=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
-        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        export_model_routes_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
-    ) == {"status": "continue", "changed": False}
-
-    assert handle_tui_provider_mgmt_settings_action(
-        {"providers": []},
-        select_provider_mgmt_tui=lambda _providers: (_ for _ in ()).throw(KeyboardInterrupt),
-        save_config=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
-        probe_cache={},
-        ensure_provider_credentials=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
-        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        export_model_routes_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
-    ) == {"status": "interrupt"}
-
-    cfg = {"providers": [{"id": "p1"}]}
-    result = handle_tui_provider_mgmt_settings_action(
-        cfg,
-        select_provider_mgmt_tui=lambda _providers: [{"id": "p1"}],
-        save_config=lambda *_args: None,
-        probe_cache={},
-        ensure_provider_credentials=lambda _cfg: {"id": "p1"},
-        probe_models=lambda _provider, *, emit_output: {"models": []},
-        export_model_routes_loader=lambda: (_ for _ in ()).throw(RuntimeError("export unavailable")),
-    )
-    assert result["changed"] is True
-
-
 def test_handle_tui_language_settings_action_saves_supported_language() -> None:
     calls = []
     cfg = {}
@@ -2296,12 +2210,7 @@ def _settings_action_deps(**overrides):
         "select_channel_action_tui": unused,
         "select_language_tui": unused,
         "select_rescue_event_tui": unused,
-        "select_provider_mgmt_tui": unused,
         "save_config": unused,
-        "probe_cache": {},
-        "ensure_provider_credentials": unused,
-        "probe_models": unused,
-        "provider_mgmt_export_model_routes_loader": unused,
         "routes_export_loader": unused,
         "registry_cli_loader": unused,
         "registry_truth_tui_payload": unused,
@@ -2377,64 +2286,17 @@ def test_handle_tui_settings_action_webui_hint_reports_without_change() -> None:
     assert calls[1] == ("pause", "按 Enter 返回设置")
 
 
-def test_handle_tui_settings_action_advanced_dispatches_folded_route_export() -> None:
-    calls = []
-    cfg = {"providers": []}
-
-    result = handle_tui_settings_action(
-        cfg,
-        "/repo",
-        deps=_settings_action_deps(
-            select_settings_tui=lambda: "advanced",
-            select_channel_action_tui=lambda title, rows, actions: calls.append(("advanced", title, rows, actions)) or "routes_export",
-            routes_export_loader=lambda: ("/tmp/model-routes.json", lambda *args, **kwargs: calls.append(("export", args, kwargs))),
-            console=type("Console", (), {"print": staticmethod(lambda *args, **kwargs: calls.append(("print", args, kwargs)))})(),
-        ),
-    )
-
-    assert result == {"status": "continue", "cfg": cfg, "success": True}
-    assert calls[0][0] == "advanced"
-    assert ("routes_export", "Legacy 路由导出") in calls[0][3]
-    assert calls[1][0] == "export"
-
-
-def test_handle_tui_settings_action_dispatches_provider_mgmt_changed() -> None:
-    calls = []
+def test_handle_tui_settings_action_retired_settings_actions_are_noops() -> None:
     cfg = {"providers": [{"id": "p1", "role": "auto", "priority": 10}]}
-    probe_cache = {"stale": True}
-    refreshed_provider = {"id": "p1"}
 
-    result = handle_tui_settings_action(
-        cfg,
-        "/repo",
-        deps=_settings_action_deps(
-            select_settings_tui=lambda: "provider_mgmt",
-            select_provider_mgmt_tui=lambda providers: calls.append(("select_provider", providers)) or [{"id": "p1", "role": "primary", "priority": 99}],
-            save_config=lambda cfg_arg: calls.append(("save", cfg_arg.copy())),
-            probe_cache=probe_cache,
-            ensure_provider_credentials=lambda cfg_arg: calls.append(("ensure", cfg_arg)) or refreshed_provider,
-            probe_models=lambda provider, *, emit_output: calls.append(("probe", provider, emit_output)) or {"models": ["m1"]},
-            provider_mgmt_export_model_routes_loader=lambda: (lambda cfg_arg, *, force: calls.append(("export", cfg_arg, force))),
-        ),
-    )
+    for retired_action in ("advanced", "provider_mgmt"):
+        assert handle_tui_settings_action(
+            cfg,
+            "/repo",
+            deps=_settings_action_deps(select_settings_tui=lambda action=retired_action: action),
+        ) == {"status": "continue", "cfg": cfg, "changed": False}
 
-    assert result == {
-        "status": "continue",
-        "cfg": cfg,
-        "changed": True,
-        "current_provider": refreshed_provider,
-        "default_models": ["m1"],
-        "families_dirty": True,
-    }
-    assert cfg["providers"] == [{"id": "p1", "role": "primary", "priority": 99}]
-    assert probe_cache == {}
-    assert calls == [
-        ("select_provider", [{"id": "p1", "role": "primary", "priority": 99}]),
-        ("save", {"providers": [{"id": "p1", "role": "primary", "priority": 99}]}),
-        ("ensure", cfg),
-        ("probe", refreshed_provider, False),
-        ("export", cfg, True),
-    ]
+    assert cfg == {"providers": [{"id": "p1", "role": "auto", "priority": 10}]}
 
 
 def test_handle_tui_settings_action_language_change_does_not_refresh_runtime() -> None:
