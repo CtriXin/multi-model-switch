@@ -2333,6 +2333,36 @@ print_version_overview() {
     echo "  $(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
 }
 
+legacy_config_has_route_candidates() {
+    "$(_python_bin)" - "$REAL_HOME/.config/mms" <<'PY' >/dev/null 2>&1
+import sys
+import tomllib
+from pathlib import Path
+
+root = Path(sys.argv[1]).expanduser()
+config_path = root / "config.toml"
+if not config_path.exists():
+    raise SystemExit(1)
+try:
+    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+providers = config.get("providers")
+if not isinstance(providers, list):
+    raise SystemExit(1)
+
+for provider in providers:
+    if not isinstance(provider, dict) or provider.get("enabled") is False:
+        continue
+    for key in ("fallback_models", "extra_models"):
+        models = provider.get(key)
+        if isinstance(models, list) and any(str(item).strip() for item in models):
+            raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 run_install_check() {
     local node_label=""
     local cli_name=""
@@ -4739,7 +4769,7 @@ if [ -x "$BIN_DIR/mms" ]; then
 
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
         echo ""
-        if [ -f "$CONFIG_PATH" ] || [ -f "$CREDENTIALS_PATH" ]; then
+        if legacy_config_has_route_candidates; then
             echo "  $(t "下一步（首次 preview/mmf 只做这两行）:" "Next step (first preview/mmf run: only do these two lines):")"
             echo "    $NEXT_MMF_CMD preview prepare"
             echo "    $NEXT_MMF_CMD"
@@ -4748,7 +4778,7 @@ if [ -x "$BIN_DIR/mms" ]; then
             echo "  $(t "下一步（全新机器先配通道）:" "Next step (fresh machine: configure providers first):")"
             echo "    $NEXT_MMF_CMD config web"
             echo "    $NEXT_MMF_CMD"
-            echo "  $(t "说明：没有检测到 ~/.config/mms 配置，先在 WebUI 添加 provider/API Key 并保存。" "Note: no ~/.config/mms config was detected; add providers/API keys in the WebUI first.")"
+            echo "  $(t "说明：没有检测到可迁移的旧模型路由，先在 WebUI 添加 provider/API Key 并保存。" "Note: no migratable legacy model routes were detected; add providers/API keys in the WebUI first.")"
         fi
         echo ""
         echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"
