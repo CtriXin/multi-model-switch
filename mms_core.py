@@ -2309,6 +2309,7 @@ _registry_truth_tui_payload = partial(_command_tools.registry_truth_tui_payload,
 
 
 from mms_config import reports as _config_reports
+from mms_config import command_guards as _config_command_guards
 
 _model_source_status_rows = partial(_config_reports.model_source_status_rows, localize=_L)
 _model_source_status_report_payload = partial(_config_reports.model_source_status_report_payload, localize=_L)
@@ -5452,28 +5453,7 @@ def handle_opencode_smoke_command(argv):
     )
 
 
-_PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS = {
-    "migrate",
-    "set",
-    "unset",
-    "load-balance.default",
-    "load-balance.profile.add",
-    "load-balance.profile.remove",
-    "provider.default",
-    "provider.add",
-    "provider.edit",
-    "provider.rename",
-    "provider.remove",
-    "provider.credentials",
-    "account.default",
-    "account.add",
-    "account.edit",
-    "account.remove",
-    "account.rename",
-    "account.login",
-    "connect",
-}
-
+_PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS = _config_command_guards.PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS
 
 def _preview_root_mode():
     try:
@@ -5486,36 +5466,7 @@ def _preview_root_missing_legacy_config():
     return _preview_root_mode() and not os.path.exists(CONFIG_PATH)
 
 
-def _config_subcommand_mutates_legacy_config(args_rest):
-    if not args_rest:
-        return False
-    key_path = str(args_rest[0] or "").strip()
-    if not key_path or key_path in {"-h", "--help", "help"}:
-        return False
-    if key_path in {"web", "webui", "setup.web", "setup-web"}:
-        return False
-    if key_path in _PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS:
-        return True
-    if key_path in {"api.setup", "api.edit"}:
-        return True
-    if key_path in {"api.base_url", "api.api_key"}:
-        return len(args_rest) > 1
-    if key_path.startswith("api."):
-        return True
-    if key_path in {"extension.openrouter", "openrouter"}:
-        action = str(args_rest[1] if len(args_rest) > 1 else "").strip()
-        return action in {"add", "enable"}
-    if len(args_rest) == 2 and key_path not in {
-        "get",
-        "provider.list",
-        "account.list",
-        "account.status",
-        "load-balance.show",
-        "validate",
-    }:
-        return True
-    return False
-
+_config_subcommand_mutates_legacy_config = _config_command_guards.config_subcommand_mutates_legacy_config
 
 def _exit_preview_legacy_config_disabled(args_rest=None):
     status = mms_config_root_status(command=current_command())
@@ -5536,57 +5487,17 @@ def _guard_preview_legacy_config_mutation(args_rest):
         _exit_preview_legacy_config_disabled(args_rest)
 
 
-def _is_command_alias_request(argv, command, aliases):
-    return len(argv) >= 2 and argv[0] == command and str(argv[1] or "").strip() in aliases
-
-
-def _is_config_root_status_request(argv):
-    return _is_command_alias_request(argv, "config", {"root", "root.status", "status.root"})
-
-
-def _is_config_model_source_status_request(argv):
-    return _is_command_alias_request(argv, "config", {"source", "sources", "model-source", "model-sources"})
-
-
-def _is_config_consumer_bundle_status_request(argv):
-    return _is_command_alias_request(argv, "config", {"bundle", "consumer-bundle", "manifest"})
-
-
-def _is_config_registry_v2_save_plan_request(argv):
-    return _is_command_alias_request(argv, "config", {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"})
-
-
-def _is_config_preview_check_request(argv):
-    return _is_command_alias_request(argv, "config", {"check", "preview-check", "preview.check", "v2-check"})
-
-
-def _is_config_v2_promotion_plan_request(argv):
-    return _is_command_alias_request(argv, "config", {"promote-plan", "promotion-plan", "promote.check", "promote"})
-
-
-def _is_config_v2_release_readiness_request(argv):
-    return _is_command_alias_request(
-        argv,
-        "config",
-        {"release-readiness", "readiness", "v2-readiness", "4.0-readiness", "release.check"},
-    )
-
-
-def _is_config_v2_migration_plan_request(argv):
-    return _is_command_alias_request(argv, "migrate", {"config-v2", "config.v2", "v2", "config-v2-plan"})
-
-
-def _is_config_registry_v2_apply_plan_request(argv):
-    return _is_command_alias_request(
-        argv,
-        "config",
-        {"apply-plan", "apply.plan", "preview-apply", "apply-preview", "registry-apply-plan"},
-    )
-
-
-def _is_config_preview_doctor_request(argv):
-    return _is_command_alias_request(argv, "config", {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"})
-
+_is_command_alias_request = _config_command_guards.is_command_alias_request
+_is_config_root_status_request = _config_command_guards.is_config_root_status_request
+_is_config_model_source_status_request = _config_command_guards.is_config_model_source_status_request
+_is_config_consumer_bundle_status_request = _config_command_guards.is_config_consumer_bundle_status_request
+_is_config_registry_v2_save_plan_request = _config_command_guards.is_config_registry_v2_save_plan_request
+_is_config_preview_check_request = _config_command_guards.is_config_preview_check_request
+_is_config_v2_promotion_plan_request = _config_command_guards.is_config_v2_promotion_plan_request
+_is_config_v2_release_readiness_request = _config_command_guards.is_config_v2_release_readiness_request
+_is_config_v2_migration_plan_request = _config_command_guards.is_config_v2_migration_plan_request
+_is_config_registry_v2_apply_plan_request = _config_command_guards.is_config_registry_v2_apply_plan_request
+_is_config_preview_doctor_request = _config_command_guards.is_config_preview_doctor_request
 
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
