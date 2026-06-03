@@ -3551,6 +3551,30 @@ def _copy_existing_provider(
     return provider
 
 
+def _strip_implicit_provider_timezone_defaults(
+    next_cfg: dict[str, Any],
+    providers_payload: list[dict[str, Any]],
+) -> dict[str, Any]:
+    payload_by_id: dict[str, dict[str, Any]] = {}
+    for payload in providers_payload:
+        if not isinstance(payload, dict):
+            continue
+        for key in (_safe_text(payload.get("id")), _safe_text(payload.get("original_id"))):
+            if key:
+                payload_by_id[key] = payload
+    for provider in next_cfg.get("providers") if isinstance(next_cfg.get("providers"), list) else []:
+        if not isinstance(provider, dict):
+            continue
+        payload = payload_by_id.get(_safe_text(provider.get("id")))
+        if not payload or "timezone" not in payload:
+            continue
+        # mms_core normalization materializes Asia/Singapore as the implicit
+        # default. Keep it out of persisted WebUI drafts unless the user typed it.
+        if not _safe_text(payload.get("timezone")):
+            provider.pop("timezone", None)
+    return next_cfg
+
+
 def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
     original_policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
     policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
@@ -4091,6 +4115,8 @@ def _build_review_summary(
     }
 
     def policy_value_display(value: Any) -> str:
+        if value is None:
+            return "未写入配置"
         if isinstance(value, int) and value >= 1000:
             if value >= 1_000_000 and value % 1_000_000 == 0:
                 return f"{value // 1_000_000}M"
@@ -4526,6 +4552,7 @@ def build_config_plan(
             next_cfg, _ = mms_core._ensure_provider_config(next_cfg)  # noqa: SLF001 - reuse existing normalization
     except Exception:
         pass
+    next_cfg = _strip_implicit_provider_timezone_defaults(next_cfg, providers_payload)
     next_cfg = _strip_empty_provider_model_lists(next_cfg)
 
     before_config_text = _toml_text(_sanitize_for_output(current_cfg))

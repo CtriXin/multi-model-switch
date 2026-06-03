@@ -1111,6 +1111,52 @@ def test_config_web_review_summary_frontend_has_policy_tabs():
     assert "<th>来源</th>" in html
 
 
+def test_config_web_plan_ignores_implicit_provider_timezone_default(tmp_path):
+    current = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models_endpoint": "/models",
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+    payload = {
+        "draft": {
+            "providers": [
+                {
+                    "id": "demo",
+                    "original_id": "demo",
+                    "name": "Demo",
+                    "enabled": True,
+                    "role": "auto",
+                    "priority": 100,
+                    "claude_1m_mode": "auto",
+                    "timezone": "",
+                    "models_endpoint": "/models",
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                    "fallback_models": [],
+                    "extra_models": [],
+                    "hidden_models": [],
+                }
+            ]
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(current, payload, config_path=str(tmp_path / "config.toml"))
+
+    provider = plan["config"]["providers"][0]
+    assert "timezone" not in provider
+    assert "通道元数据变化：demo" not in json.dumps(plan["review_summary"], ensure_ascii=False)
+
+
 def test_config_web_markdown_contains_manual_snippets(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
@@ -3760,6 +3806,9 @@ def test_config_web_capability_truth_button_and_fields_are_present():
     assert "不是厂商官方真值" in html
     assert "openrouter_catalog:openrouter" in html
     assert "providerPayloadForCapabilityRefresh" in html
+    assert "fieldsForCapabilityRefresh" in html
+    assert "field!=='tool_use'" in html
+    assert "工具（手动项）" in html
     assert "capability_touched:true" in html
     assert "有变化的草稿" in html
 
