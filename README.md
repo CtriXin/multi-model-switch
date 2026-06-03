@@ -108,6 +108,15 @@ mmm -> Main worktree          # 当前 main 的 mms，root ~/.config/mms
 
 启动更新提醒默认只提醒、手动确认更新：`mmg` 每次启动检查，`mmf` / `mmm` 每日检查，`mmd` 每周检查，`mms` 每日只提示 public installed copy。手动运行 `mmf update` / `mmg update` / `mmd update` / `mmm update` 时只允许 clean worktree fast-forward；dirty 或分叉会拒绝。
 
+## Config V2 Preview Root
+
+Config V2 Preview Root 是 Dev / Canary 的预览配置根，用来先在 DB / latest-approved bundle 里验证 provider、route、model policy 和 credentials 引用，再由人类决定是否推进到 Stable。
+
+- `mms -> ~/.config/mms`：Stable / Main 入口，默认读取稳定配置；不会因为 preview 失败静默 fallback 到 preview。
+- `mmf -> ~/.config/mms-next`：Dev 入口，使用 preview DB root；`mmg` Canary 也使用同一个 preview root。
+- 首次迁移旧配置时先看只读计划：`mms migrate config-v2 --json`；preview 发布和 release-readiness 都应显示 `apply_enabled=false`，直到人类确认 Stable promotion。
+- `Claude config` 仍是 human-only；preview/root readiness 只能检查和生成证据，不能自动改写 Claude account、proxy、HOME、OAuth 或真实 `~/.config/mms`。
+
 ## Web UI 教程：从通道到模型可见性
 
 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动:
