@@ -3596,16 +3596,6 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         gateway_url = getattr(self.server, "gateway_url")
         gateway_key = getattr(self.server, "gateway_key")
 
-        # 跨 provider 负载：根据当前 tier 选用对应 slot 的 url/key
-        slot_configs = getattr(self.server, "slot_configs", {})
-        current_level = getattr(self.server, "_last_level", "heavy")
-        if current_level in slot_configs:
-            slot = slot_configs[current_level]
-            if slot.get("url"):
-                gateway_url = slot["url"]
-            if slot.get("key"):
-                gateway_key = slot["key"]
-
         # ── GPT-on-Claude 桥接：仅 OpenAI 系列模型走 Responses API ──
         resolved_model = str(payload.get("model") or "")
         openai_url = getattr(self.server, "openai_url", None)
@@ -6146,10 +6136,7 @@ def gateway_claude_bridge(
     heavy_model: 所有请求默认使用的模型名（替换 Claude Code 发来的 claude-* 模型名）。
     medium_model: 智能路由下的中档模型（LLM 分类低置信度时使用）。
     light_model: 智能路由下的轻量模型（明确简单任务时使用）。
-    slot_configs: 跨 provider 负载配置。
-        {"medium": {"url": str, "key": str}, "light": {"url": str, "key": str}}
-        当某个 tier 命中时，使用对应 slot 的 url/key 代替默认 gateway_url/gateway_key。
-        未配置的 slot 仍使用默认 gateway。
+    slot_configs: Deprecated compatibility parameter; ignored because load_balance is retired.
     """
     _ensure_httpx()
     if httpx is None:
@@ -6168,8 +6155,6 @@ def gateway_claude_bridge(
     server.route_status_paths = list(route_status_paths or [])
     server.context_windows = dict(context_windows or {})
     server.session_context_window = _coerce_context_window(session_context_window)
-    # 止血：暂时禁用 bridge 层跨 provider slot 切换，避免实际 provider/account 漂移。
-    server.slot_configs = {}
     server.provider_id = str(provider_id or "")
     server.provider_profile = str(provider_profile or "")
     server.openai_url = openai_url

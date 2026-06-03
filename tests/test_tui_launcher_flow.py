@@ -88,6 +88,18 @@ def test_load_balance_entry_removed_from_launcher_tui() -> None:
     assert not hasattr(flow, "handle_tui_load_balance_action")
 
 
+
+
+def test_load_balance_removed_from_claude_launcher_runtime_path() -> None:
+    import inspect
+    import mms_claude.launch as claude_launch
+
+    source = inspect.getsource(claude_launch.launch_claude_runtime)
+
+    assert "lb_slot_configs" not in source
+    assert "slot_configs=" not in source
+    assert "负载均衡" not in source
+
 def test_config_help_omits_load_balance_commands(monkeypatch) -> None:
     import mms_core
 

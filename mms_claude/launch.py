@@ -131,9 +131,6 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
         else:
             _print_launch_step_done("Anthropic endpoint 解析", step_start, resolve_detail, style="yellow")
 
-        # 跨 provider 负载配置：per-slot upstream url/key
-        lb_slot_configs = model_info.get("lb_slot_configs") if isinstance(model_info, dict) else None
-
         # GPT-on-Claude: 获取 OpenAI URL 供 bridge 转发 GPT 模型
         _gpt_openai_url = _openai_base_url(runtime) or None
         # Claude Code 内部 NM() 只认识 Claude 模型的 context window。
@@ -185,7 +182,6 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
                                                     advertised_models=advertised_models,
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
-                                                    slot_configs=lb_slot_configs,
                                                     provider_id=provider_id,
                                                     provider_profile=provider_profile,
                                                     openai_url=_gpt_openai_url,
@@ -214,8 +210,6 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
                     parts.append(f"medium: {lb_medium}")
                 if lb_light:
                     parts.append(f"light: {lb_light}")
-                if lb_slot_configs:
-                    parts.append("跨provider")
                 console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
             else:
                 # 直连 Anthropic provider 也统一过本地 bridge，补齐测速与 patched /v1/models。
@@ -286,7 +280,6 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
                                                 advertised_models=advertised_models,
                                                 speed_scope=speed_scope,
                                                 route_status_paths=route_status_paths,
-                                                slot_configs=lb_slot_configs,
                                                 provider_id=provider_id,
                                                 provider_profile=provider_profile,
                                                 openai_url=openai_url,
@@ -325,7 +318,6 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
                                                 advertised_models=advertised_models,
                                                 speed_scope=speed_scope,
                                                 route_status_paths=route_status_paths,
-                                                slot_configs=lb_slot_configs,
                                                 provider_id=provider_id,
                                                 provider_profile=provider_profile,
                                                 openai_url=openai_url,
@@ -355,9 +347,9 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
             state_home = None
 
         elif lb_light or lb_medium:
-            # 3b. 探测失败但配置了负载均衡 → 用 OpenAI 端点 + bridge 启用智能路由
+            # 3b. 探测失败但配置了智能路由 → 用 OpenAI 端点 + bridge
             console.print(
-                f"[yellow]⚠ Anthropic 探测失败，但配置了负载均衡，用 OpenAI bridge 启用智能路由[/yellow]"
+                "[yellow]⚠ Anthropic 探测失败，但配置了智能路由，用 OpenAI bridge 继续[/yellow]"
             )
             openai_url = _openai_base_url(runtime)
             api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
@@ -369,7 +361,6 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
                                                     advertised_models=advertised_models,
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
-                                                    slot_configs=lb_slot_configs,
                                                     provider_id=provider_id,
                                                     provider_profile=provider_profile,
                                                     openai_url=openai_url,
@@ -404,7 +395,7 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
                 cleanup_ctx = None
 
         else:
-            # 3c. 探测失败且无 bridge 无负载均衡 → 保底继续
+            # 3c. 探测失败且无 bridge / 智能路由 → 保底继续
             configured_anthropic_url = str(_anthropic_base_url(runtime) or "").strip().rstrip("/")
             if configured_anthropic_url:
                 bridge_gw_url = configured_anthropic_url
