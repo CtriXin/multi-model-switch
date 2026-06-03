@@ -619,129 +619,6 @@
       color: var(--muted);
       border: 1px dashed color-mix(in oklch, var(--fg) 18%, var(--border));
     }
-    .gate-report {
-      white-space: normal;
-      font-family: var(--font-body);
-      display: grid;
-      gap: 16px;
-      color: var(--fg);
-    }
-    .gate-plate {
-      border: 1px solid color-mix(in oklch, var(--danger) 28%, var(--border));
-      background:
-        radial-gradient(circle at 12% 0, color-mix(in oklch, var(--danger) 13%, transparent), transparent 34%),
-        radial-gradient(circle at 100% 100%, color-mix(in oklch, var(--accent) 9%, transparent), transparent 32%),
-        linear-gradient(135deg, oklch(99.5% 0.007 34), oklch(98% 0.01 210));
-      border-radius: 18px;
-      padding: 16px;
-      box-shadow: 0 14px 30px oklch(22% 0.035 235 / .075);
-    }
-    .gate-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: start;
-      border-bottom: 1px solid color-mix(in oklch, var(--danger) 18%, var(--border));
-      padding-bottom: 10px;
-      margin-bottom: 10px;
-    }
-    .gate-head h4 {
-      font-size: clamp(18px, 2.4vw, 26px);
-      line-height: 1.08;
-      letter-spacing: -.035em;
-    }
-    .gate-head p {
-      margin-top: 6px;
-      max-width: 740px;
-      color: var(--muted);
-    }
-    .gate-risk {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-      color: color-mix(in oklch, var(--danger) 82%, black);
-      border: 1px solid color-mix(in oklch, var(--danger) 34%, var(--border));
-      background: color-mix(in oklch, var(--danger) 10%, white);
-      border-radius: 999px;
-      padding: 7px 10px;
-      white-space: nowrap;
-    }
-    .gate-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-    }
-    .gate-box {
-      border: 1px solid color-mix(in oklch, var(--fg) 10%, var(--border));
-      background:
-        linear-gradient(180deg, oklch(100% 0 0), oklch(98.4% 0.006 220));
-      border-radius: 16px;
-      padding: 14px;
-      min-width: 0;
-      box-shadow: 0 8px 20px oklch(20% 0.03 230 / .045);
-    }
-    .gate-box h5 {
-      margin: 0 0 8px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: color-mix(in oklch, var(--fg) 74%, var(--muted));
-    }
-    .gate-list {
-      margin: 0;
-      padding-left: 18px;
-      color: color-mix(in oklch, var(--fg) 78%, var(--muted));
-    }
-    .gate-list li { margin: 5px 0; }
-    .gate-command-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
-      align-items: center;
-      margin: 7px 0;
-      padding: 9px 10px;
-      border: 1px solid color-mix(in oklch, var(--fg) 16%, var(--border));
-      background:
-        linear-gradient(180deg, oklch(99.2% 0.004 230), oklch(96.8% 0.007 230));
-      border-radius: 12px;
-    }
-    .gate-command-row code {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.45;
-      word-break: break-word;
-      color: color-mix(in oklch, var(--fg) 90%, var(--accent));
-    }
-    .copy-gate-command {
-      border-radius: 999px;
-      padding: 6px 9px;
-      font-family: var(--font-mono);
-      font-size: 10px;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    .gate-raw {
-      border: 1px dashed color-mix(in oklch, var(--fg) 16%, var(--border));
-      border-radius: 14px;
-      padding: 10px 12px;
-      background: color-mix(in oklch, var(--bg) 60%, var(--surface));
-    }
-    .gate-raw summary {
-      cursor: pointer;
-      color: var(--muted);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      margin-top: 8px;
-    }
-    .gate-raw pre {
-      margin-top: 10px;
-      max-height: 260px;
-      overflow: auto;
-      white-space: pre-wrap;
-      color: color-mix(in oklch, var(--fg) 82%, var(--muted));
-    }
     .delete-zone {
       border: 1.5px dashed color-mix(in oklch, var(--danger) 42%, var(--border));
       background: color-mix(in oklch, var(--danger) 7%, transparent);
@@ -1134,71 +1011,6 @@
       padding-top: 14px;
       margin-top: 0;
     }
-    .result .usage-report,
-    .result .account-report {
-      font-family: var(--font-body);
-      white-space: normal;
-      font-size: 13px;
-      line-height: 1.55;
-    }
-    .result .usage-report h4,
-    .result .account-report h4 {
-      font-size: 16px;
-      margin-bottom: 6px;
-    }
-    .result .usage-report p,
-    .result .account-report p { color: var(--muted); }
-    .result .usage-report table,
-    .result .account-report table {
-      font-family: var(--font-body);
-      min-width: 760px;
-    }
-    .result .usage-report .table-wrap,
-    .result .account-report .table-wrap { margin-top: 10px; }
-    .usage-report .chips {
-      gap: 5px;
-      margin: 8px 0 12px;
-    }
-    .usage-report .chip {
-      padding: 4px 9px;
-      font-size: 11.5px;
-    }
-    .result .usage-report table.usage-model-table {
-      min-width: 0;
-      table-layout: fixed;
-      font-size: 12.5px;
-    }
-    .usage-model-table th,
-    .usage-model-table td {
-      padding: 8px 10px;
-      vertical-align: middle;
-    }
-    .usage-model-table th:nth-child(1) { width: 36%; }
-    .usage-model-table th:nth-child(2) { width: 16%; }
-    .usage-model-table th:nth-child(3) { width: 12%; }
-    .usage-model-table th:nth-child(4) { width: 11%; }
-    .usage-model-table th:nth-child(5) { width: 11%; }
-    .usage-model-table th:nth-child(6) { width: 14%; }
-    .usage-model-table td:first-child {
-      font-family: var(--font-mono);
-      word-break: break-word;
-    }
-    .usage-detail {
-      margin-top: 12px;
-      border: 1.5px dashed var(--border);
-      border-radius: var(--radius);
-      background: var(--bg);
-      padding: 11px 12px;
-    }
-    .usage-detail summary {
-      cursor: pointer;
-      font-weight: 700;
-      color: var(--fg);
-      user-select: none;
-    }
-    .usage-detail summary::marker { color: var(--muted); }
-    .usage-detail .table-wrap { margin-top: 10px; }
-
     .settings-console {
       display: grid;
       gap: 14px;
@@ -1993,7 +1805,7 @@
       .provider-form-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .provider-form-tab { justify-content: flex-start; }
       .oc-summary, .model-inventory-summary, .settings-tabs, .account-config-grid { grid-template-columns: 1fr 1fr; }
-      .settings-actionbar, .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .gate-head, .gate-grid, .acceptance-head { grid-template-columns: 1fr; }
+      .settings-actionbar, .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .acceptance-head { grid-template-columns: 1fr; }
       .settings-actionbar-actions { justify-content: flex-start; }
       .filterbar.compact { justify-content: flex-start; }
       .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
@@ -3393,28 +3205,6 @@
       border-color: color-mix(in oklch, var(--accent) 42%, var(--border));
       background: var(--surface);
     }
-    .settings-report-card {
-      margin-top: 0;
-      overflow: hidden;
-      border-color: color-mix(in oklch, var(--accent) 22%, var(--border));
-      background:
-        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 12%, transparent), transparent 32%),
-        linear-gradient(180deg, oklch(100% 0 0), oklch(97.6% 0.008 224));
-      color: var(--fg);
-    }
-    .settings-report-card h3 {
-      color: var(--fg);
-      letter-spacing: -.02em;
-    }
-    .settings-report-card .result {
-      background:
-        radial-gradient(circle at 100% 0, color-mix(in oklch, var(--accent) 8%, transparent), transparent 30%),
-        linear-gradient(180deg, oklch(99.7% 0.003 230), oklch(96.8% 0.007 230));
-      border-color: color-mix(in oklch, var(--accent) 18%, var(--border));
-      color: var(--fg);
-      box-shadow: inset 0 1px 0 oklch(100% 0 0 / .8);
-    }
-
     @media (max-width: 1180px) {
       .settings-tabs {
         grid-template-columns: repeat(3, minmax(160px, 1fr));
@@ -3432,17 +3222,6 @@
         grid-template-columns: 1fr;
       }
       .settings-module-grid {
-        grid-template-columns: 1fr;
-      }
-      .gate-head,
-      .gate-command-row {
-        grid-template-columns: 1fr;
-      }
-      .gate-risk,
-      .copy-gate-command {
-        justify-self: start;
-      }
-      .gate-grid {
         grid-template-columns: 1fr;
       }
       .settings-actionbar-actions { justify-content: flex-start; }

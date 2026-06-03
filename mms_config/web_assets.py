@@ -14,6 +14,7 @@ _STATIC_DIR = Path(__file__).resolve().parents[1] / "mms_config_web_static"
 _ASSET_TYPES = {
     "index.html": "text/html; charset=utf-8",
     "config-web.css": "text/css; charset=utf-8",
+    "config-web-reports.css": "text/css; charset=utf-8",
     "config-web-reports.js": "application/javascript; charset=utf-8",
     "config-web.js": "application/javascript; charset=utf-8",
 }

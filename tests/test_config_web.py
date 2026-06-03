@@ -23,6 +23,7 @@ def _frontend_source() -> str:
         [
             mms_config_web._HTML_PAGE,
             mms_config_web_assets.read_static_asset("config-web.css")[0].decode("utf-8"),
+            mms_config_web_assets.read_static_asset("config-web-reports.css")[0].decode("utf-8"),
             mms_config_web_assets.read_static_asset("config-web-reports.js")[0].decode("utf-8"),
             mms_config_web_assets.read_static_asset("config-web.js")[0].decode("utf-8"),
         ]
@@ -1051,16 +1052,21 @@ def test_config_web_reexports_split_backend_modules():
 def test_config_web_frontend_assets_are_external_files():
     html = mms_config_web._HTML_PAGE
     css_body, css_type = mms_config_web_assets.read_static_asset("config-web.css")
-    reports_body, reports_type = mms_config_web_assets.read_static_asset("config-web-reports.js")
+    reports_css_body, reports_css_type = mms_config_web_assets.read_static_asset("config-web-reports.css")
+    reports_js_body, reports_js_type = mms_config_web_assets.read_static_asset("config-web-reports.js")
     js_body, js_type = mms_config_web_assets.read_static_asset("config-web.js")
 
     assert '<link rel="stylesheet" href="/static/config-web.css">' in html
+    assert '<link rel="stylesheet" href="/static/config-web-reports.css">' in html
     assert '<script src="/static/config-web-reports.js"></script>' in html
     assert '<script src="/static/config-web.js"></script>' in html
     assert '<body class="booting" data-ui-mode="default">' in html
     assert "读取本地配置中" in html
-    assert reports_type.startswith("application/javascript")
-    assert "renderSettingsReport" in reports_body.decode("utf-8")
+    assert reports_css_type.startswith("text/css")
+    assert b".settings-report-card" in reports_css_body
+    assert b".gate-report" in reports_css_body
+    assert reports_js_type.startswith("application/javascript")
+    assert "renderSettingsReport" in reports_js_body.decode("utf-8")
     assert "/api/migration/export" in js_body.decode("utf-8")
     assert "/api/migration/start" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
@@ -1106,9 +1112,12 @@ def test_config_web_server_serves_external_static_assets(tmp_path):
         with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
             css_body = response.read()
             css_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web-reports.css", timeout=3) as response:
+            reports_css_body = response.read()
+            reports_css_type = response.headers.get("Content-Type", "")
         with urlopen(f"{url}/static/config-web-reports.js", timeout=3) as response:
-            reports_body = response.read()
-            reports_type = response.headers.get("Content-Type", "")
+            reports_js_body = response.read()
+            reports_js_type = response.headers.get("Content-Type", "")
         with urlopen(f"{url}/static/config-web.js", timeout=3) as response:
             js_body = response.read()
             js_type = response.headers.get("Content-Type", "")
@@ -1118,8 +1127,12 @@ def test_config_web_server_serves_external_static_assets(tmp_path):
         thread.join(timeout=3)
 
     assert css_type.startswith("text/css")
+    assert reports_css_type.startswith("text/css")
+    assert reports_js_type.startswith("application/javascript")
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
+    assert b".gate-report" in reports_css_body
+    assert b"renderSettingsReport" in reports_js_body
     assert b"function renderAll" in js_body
 
 
@@ -1140,9 +1153,12 @@ def test_config_web_server_skips_snapshot_for_shell_and_static_assets():
         with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
             css_body = response.read()
             css_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web-reports.css", timeout=3) as response:
+            reports_css_body = response.read()
+            reports_css_type = response.headers.get("Content-Type", "")
         with urlopen(f"{url}/static/config-web-reports.js", timeout=3) as response:
-            reports_body = response.read()
-            reports_type = response.headers.get("Content-Type", "")
+            reports_js_body = response.read()
+            reports_js_type = response.headers.get("Content-Type", "")
     finally:
         server.shutdown()
         server.server_close()
@@ -1150,11 +1166,14 @@ def test_config_web_server_skips_snapshot_for_shell_and_static_assets():
 
     assert html_type.startswith("text/html")
     assert css_type.startswith("text/css")
-    assert reports_type.startswith("application/javascript")
+    assert reports_css_type.startswith("text/css")
+    assert reports_js_type.startswith("application/javascript")
+    assert b'<link rel="stylesheet" href="/static/config-web-reports.css">' in html_body
     assert b'<script src="/static/config-web-reports.js"></script>' in html_body
     assert b'<script src="/static/config-web.js"></script>' in html_body
     assert b".panel" in css_body
-    assert b"renderSettingsReport" in reports_body
+    assert b".settings-report-card" in reports_css_body
+    assert b"renderSettingsReport" in reports_js_body
 
 
 def test_config_web_server_send_ignores_client_disconnect():
