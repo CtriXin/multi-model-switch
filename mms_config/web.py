@@ -257,12 +257,15 @@ _DELEGATE_TARGETS = {
     'mms_config.web_review': (
         ('_build_review_summary', 'build_review_summary'),
     ),
-    'mms_config.web_snapshot': (
+    'mms_config.web_opencode': (
         '_normalize_agent_model_overrides',
         '_normalize_opencode_agent_roster',
         '_opencode_agent_catalog',
         '_opencode_agent_preset',
         '_opencode_roster_defaults',
+        '_strip_empty_provider_model_lists',
+    ),
+    'mms_config.web_snapshot': (
         '_provider_credentials_status',
         '_provider_derived_model_aliases',
         '_provider_effective_model_rows',
@@ -270,7 +273,6 @@ _DELEGATE_TARGETS = {
         '_provider_summary',
         '_runtime_usage_rows',
         '_sanitized_mapping',
-        '_strip_empty_provider_model_lists',
         '_usage_summary',
         'build_config_snapshot',
         'build_config_snippets',
