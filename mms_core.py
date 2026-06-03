@@ -5667,64 +5667,56 @@ def _guard_preview_legacy_config_mutation(args_rest):
         _exit_preview_legacy_config_disabled(args_rest)
 
 
+def _is_command_alias_request(argv, command, aliases):
+    return len(argv) >= 2 and argv[0] == command and str(argv[1] or "").strip() in aliases
+
+
 def _is_config_root_status_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"root", "root.status", "status.root"}
+    return _is_command_alias_request(argv, "config", {"root", "root.status", "status.root"})
 
 
 def _is_config_model_source_status_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"source", "sources", "model-source", "model-sources"}
+    return _is_command_alias_request(argv, "config", {"source", "sources", "model-source", "model-sources"})
 
 
 def _is_config_consumer_bundle_status_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"bundle", "consumer-bundle", "manifest"}
+    return _is_command_alias_request(argv, "config", {"bundle", "consumer-bundle", "manifest"})
 
 
 def _is_config_registry_v2_save_plan_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}
+    return _is_command_alias_request(argv, "config", {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"})
 
 
 def _is_config_preview_check_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"check", "preview-check", "preview.check", "v2-check"}
+    return _is_command_alias_request(argv, "config", {"check", "preview-check", "preview.check", "v2-check"})
 
 
 def _is_config_v2_promotion_plan_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"promote-plan", "promotion-plan", "promote.check", "promote"}
+    return _is_command_alias_request(argv, "config", {"promote-plan", "promotion-plan", "promote.check", "promote"})
 
 
 def _is_config_v2_release_readiness_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"release-readiness", "readiness", "v2-readiness", "4.0-readiness", "release.check"}
+    return _is_command_alias_request(
+        argv,
+        "config",
+        {"release-readiness", "readiness", "v2-readiness", "4.0-readiness", "release.check"},
+    )
 
 
 def _is_config_v2_migration_plan_request(argv):
-    if len(argv) < 2 or argv[0] != "migrate":
-        return False
-    return str(argv[1] or "").strip() in {"config-v2", "config.v2", "v2", "config-v2-plan"}
+    return _is_command_alias_request(argv, "migrate", {"config-v2", "config.v2", "v2", "config-v2-plan"})
 
 
 def _is_config_registry_v2_apply_plan_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"apply-plan", "apply.plan", "preview-apply", "apply-preview", "registry-apply-plan"}
+    return _is_command_alias_request(
+        argv,
+        "config",
+        {"apply-plan", "apply.plan", "preview-apply", "apply-preview", "registry-apply-plan"},
+    )
 
 
 def _is_config_preview_doctor_request(argv):
-    if len(argv) < 2 or argv[0] != "config":
-        return False
-    return str(argv[1] or "").strip() in {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"}
+    return _is_command_alias_request(argv, "config", {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"})
 
 
 def main():

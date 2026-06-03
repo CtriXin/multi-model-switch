@@ -341,43 +341,31 @@ _opencode_permission_bypass_value = opencode_permission_bypass_value
 _opencode_apply_agent_bypass_permissions = opencode_apply_agent_bypass_permissions
 
 
-def _mask_proxy_url(proxy_url):
-    """Compatibility wrapper for proxy URL masking."""
-    return _mask_proxy_url_impl(proxy_url, mask_secret_fn=_mask_secret_impl)
+_mask_proxy_url = partial(_mask_proxy_url_impl, mask_secret_fn=_mask_secret_impl)
+_runtime_locale_env = partial(_runtime_locale_env_impl, normalize_language_fn=normalize_language)
+_proxy_dns_mode = _proxy_dns_mode_impl
 
 
-def _runtime_network_summary(runtime):
-    """Compatibility wrapper for runtime network display summaries."""
-    return _runtime_network_summary_impl(
-        runtime,
-        mask_proxy_url_fn=_mask_proxy_url,
-        runtime_force_ipv4_fn=_runtime_force_ipv4,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-        proxy_dns_mode_fn=_proxy_dns_mode,
-        runtime_locale_env_fn=_runtime_locale_env,
-        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
-    )
+_runtime_network_summary = partial(
+    _runtime_network_summary_impl,
+    mask_proxy_url_fn=_mask_proxy_url,
+    runtime_force_ipv4_fn=_runtime_force_ipv4,
+    fake_upstream_enabled_fn=_fake_upstream_enabled,
+    proxy_dns_mode_fn=_proxy_dns_mode,
+    runtime_locale_env_fn=_runtime_locale_env,
+    default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+)
 
 
 _guard_utc_now = _utc_now_z_impl
 
 
-def _runtime_locale_env(runtime=None):
-    """Compatibility wrapper for runtime locale env projection."""
-    return _runtime_locale_env_impl(runtime, normalize_language_fn=normalize_language)
+_apply_runtime_locale_profile = partial(
+    _apply_runtime_locale_profile_impl,
+    runtime_locale_env_fn=_runtime_locale_env,
+)
 
-
-def _apply_runtime_locale_profile(env, runtime=None):
-    """Compatibility wrapper for applying runtime locale env."""
-    return _apply_runtime_locale_profile_impl(
-        env,
-        runtime,
-        runtime_locale_env_fn=_runtime_locale_env,
-    )
-
-def _provider_id_set_from_env(env_name):
-    """Compatibility wrapper for provider id env-set parsing."""
-    return _provider_id_set_from_env_impl(env_name, environ=os.environ)
+_provider_id_set_from_env = partial(_provider_id_set_from_env_impl, environ=os.environ)
 
 
 _runtime_declares_sensitive_claude = _runtime_declares_sensitive_claude_impl
@@ -405,13 +393,11 @@ _runtime_supports_claude_1m = _claude_model.runtime_supports_claude_1m
 _effective_context_window = _claude_model.effective_context_window
 
 
-def _runtime_is_sensitive_claude_provider(runtime):
-    """Compatibility wrapper for sensitive Claude provider detection."""
-    return _runtime_is_sensitive_claude_provider_impl(
-        runtime,
-        provider_id_set_from_env_fn=_provider_id_set_from_env,
-        runtime_declares_sensitive_claude_fn=_runtime_declares_sensitive_claude,
-    )
+_runtime_is_sensitive_claude_provider = partial(
+    _runtime_is_sensitive_claude_provider_impl,
+    provider_id_set_from_env_fn=_provider_id_set_from_env,
+    runtime_declares_sensitive_claude_fn=_runtime_declares_sensitive_claude,
+)
 
 
 
@@ -491,13 +477,11 @@ def _count_live_session_dirs(sessions_dir):
 _proxy_fingerprint = _proxy_fingerprint_impl
 
 
-def _account_guard_profile(runtime):
-    """Compatibility wrapper for account guard profile snapshots."""
-    return _account_guard_profile_impl(
-        runtime,
-        runtime_force_ipv4_fn=_runtime_force_ipv4,
-        default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
-    )
+_account_guard_profile = partial(
+    _account_guard_profile_impl,
+    runtime_force_ipv4_fn=_runtime_force_ipv4,
+    default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
+)
 
 
 def _build_account_guard_report(account):
@@ -733,22 +717,15 @@ _session_guard_lock_path = partial(_session_guard_lock_path_impl, lock_name=_SES
 _session_guard_process_identity = _session_guard_process_identity_impl
 
 
-def _session_guard_pid_alive(pid, *, identity=""):
-    """Compatibility wrapper for guarded PID liveness checks."""
-    return _session_guard_pid_alive_impl(
-        pid,
-        identity=identity,
-        process_identity_fn=_session_guard_process_identity,
-    )
-
-
-def _read_session_guard_marker(session_home):
-    """Compatibility wrapper for session guard marker reads."""
-    return _read_session_guard_marker_impl(
-        session_home,
-        marker_path_fn=_session_guard_marker_path,
-        load_json_dict_unlocked_fn=_load_json_dict_unlocked,
-    )
+_session_guard_pid_alive = partial(
+    _session_guard_pid_alive_impl,
+    process_identity_fn=_session_guard_process_identity,
+)
+_read_session_guard_marker = partial(
+    _read_session_guard_marker_impl,
+    marker_path_fn=_session_guard_marker_path,
+    load_json_dict_unlocked_fn=_load_json_dict_unlocked,
+)
 
 
 def _write_session_guard_marker(session_home, *, account_id="", runtime_kind="", child_pid=None):
@@ -780,9 +757,7 @@ def _session_home_is_active(session_home):
     )
 
 
-def _bounded_env_float(name, default):
-    """Compatibility wrapper for bounded float env parsing."""
-    return _bounded_env_float_impl(name, default, environ=os.environ)
+_bounded_env_float = partial(_bounded_env_float_impl, environ=os.environ)
 
 
 def _session_cleanup_launch_max_entries():
@@ -840,21 +815,14 @@ def _path_under(path, root):
         return False
 
 
-def _runtime_net_mode(runtime):
-    """Compatibility wrapper for runtime network mode labels."""
-    return _runtime_net_mode_impl(
-        runtime,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-    )
+_runtime_net_mode = partial(_runtime_net_mode_impl, fake_upstream_enabled_fn=_fake_upstream_enabled)
 
 
-def _runtime_dns_mode(runtime):
-    """Compatibility wrapper for runtime DNS mode labels."""
-    return _runtime_dns_mode_impl(
-        runtime,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-        proxy_dns_mode_fn=_proxy_dns_mode,
-    )
+_runtime_dns_mode = partial(
+    _runtime_dns_mode_impl,
+    fake_upstream_enabled_fn=_fake_upstream_enabled,
+    proxy_dns_mode_fn=_proxy_dns_mode,
+)
 
 
 def _build_home_context(env, runtime, cli_name):
@@ -902,18 +870,13 @@ def _prepare_oauth_home_context(runtime, env, cli_name):
 _apply_proxy_env = _apply_proxy_env_impl
 
 
-_proxy_dns_mode = _proxy_dns_mode_impl
-
-
 _split_no_proxy_values = _split_no_proxy_values_impl
 
 
-def _claude_no_proxy_conflicts(no_proxy):
-    """Compatibility wrapper for Claude NO_PROXY conflict detection."""
-    return _claude_no_proxy_conflicts_impl(
-        no_proxy,
-        no_proxy_tokens=_CLAUDE_NO_PROXY_TOKENS,
-    )
+_claude_no_proxy_conflicts = partial(
+    _claude_no_proxy_conflicts_impl,
+    no_proxy_tokens=_CLAUDE_NO_PROXY_TOKENS,
+)
 
 
 def _run_proxy_probe(proxy_url, target_url, *, no_proxy="", force_ipv4=True, resolve_ip=False):
@@ -929,25 +892,18 @@ def _run_proxy_probe(proxy_url, target_url, *, no_proxy="", force_ipv4=True, res
     )
 
 
-def _base_claude_network_guard(runtime, *, require_proxy=False):
-    """Compatibility wrapper for Claude network guard base payloads."""
-    return _base_claude_network_guard_impl(
-        runtime,
-        require_proxy=require_proxy,
-        runtime_force_ipv4_fn=_runtime_force_ipv4,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-        proxy_fingerprint_fn=_proxy_fingerprint,
-        proxy_dns_mode_fn=_proxy_dns_mode,
-        claude_no_proxy_conflicts_fn=_claude_no_proxy_conflicts,
-    )
-
-
-def _claude_bypass_requires_proxy(runtime):
-    """Compatibility wrapper for Claude BYPASS proxy requirement policy."""
-    return _claude_bypass_requires_proxy_impl(
-        runtime,
-        runtime_is_sensitive_claude_provider_fn=_runtime_is_sensitive_claude_provider,
-    )
+_base_claude_network_guard = partial(
+    _base_claude_network_guard_impl,
+    runtime_force_ipv4_fn=_runtime_force_ipv4,
+    fake_upstream_enabled_fn=_fake_upstream_enabled,
+    proxy_fingerprint_fn=_proxy_fingerprint,
+    proxy_dns_mode_fn=_proxy_dns_mode,
+    claude_no_proxy_conflicts_fn=_claude_no_proxy_conflicts,
+)
+_claude_bypass_requires_proxy = partial(
+    _claude_bypass_requires_proxy_impl,
+    runtime_is_sensitive_claude_provider_fn=_runtime_is_sensitive_claude_provider,
+)
 
 
 _emit_dns_guard_hint = partial(
@@ -957,27 +913,19 @@ _emit_dns_guard_hint = partial(
 )
 
 
-def _claude_network_guard_cache_key(runtime, require_proxy):
-    """Compatibility wrapper for Claude network guard cache keys."""
-    return _claude_network_guard_cache_key_impl(
-        runtime,
-        require_proxy,
-        runtime_force_ipv4_fn=_runtime_force_ipv4,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-    )
-
-
-def get_claude_network_guard_preview(runtime, *, require_proxy=False):
-    """Compatibility wrapper for cached Claude network guard previews."""
-    return _get_claude_network_guard_preview_impl(
-        runtime,
-        require_proxy=require_proxy,
-        cache=_CLAUDE_NETWORK_GUARD_CACHE,
-        ttl_sec=_CLAUDE_NETWORK_GUARD_TTL_SEC,
-        perf_counter_fn=perf_counter,
-        cache_key_fn=_claude_network_guard_cache_key,
-        base_guard_fn=_base_claude_network_guard,
-    )
+_claude_network_guard_cache_key = partial(
+    _claude_network_guard_cache_key_impl,
+    runtime_force_ipv4_fn=_runtime_force_ipv4,
+    fake_upstream_enabled_fn=_fake_upstream_enabled,
+)
+get_claude_network_guard_preview = partial(
+    _get_claude_network_guard_preview_impl,
+    cache=_CLAUDE_NETWORK_GUARD_CACHE,
+    ttl_sec=_CLAUDE_NETWORK_GUARD_TTL_SEC,
+    perf_counter_fn=perf_counter,
+    cache_key_fn=_claude_network_guard_cache_key,
+    base_guard_fn=_base_claude_network_guard,
+)
 
 
 def build_claude_network_guard(runtime, *, require_proxy=False):
@@ -1533,7 +1481,6 @@ def _default_gpt_reasoning_effort(module_path=None):
 
 
 def _asset_root_preference(asset_name):
-    """Compatibility wrapper for asset root preferences."""
     return _asset_root_preference_impl(asset_name, preference_asset_root_fn=preference_asset_root)
 
 
