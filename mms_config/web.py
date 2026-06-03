@@ -112,6 +112,15 @@ def _delegate(module_name: str, target_name: str, *, local_name: str | None = No
 
 
 _DELEGATE_TARGETS = {
+    'mms_config.web_accounts': (
+        '_account_by_id',
+        '_account_defaults',
+        '_account_review_fields',
+        '_account_summaries',
+        '_account_summary',
+        '_apply_account_draft',
+        '_copy_existing_account',
+    ),
     'mms_config.web_apply': (
         '_append_audit',
         '_atomic_write_preferences_toml',
@@ -249,13 +258,6 @@ _DELEGATE_TARGETS = {
         ('_build_review_summary', 'build_review_summary'),
     ),
     'mms_config.web_snapshot': (
-        '_account_by_id',
-        '_account_defaults',
-        '_account_review_fields',
-        '_account_summaries',
-        '_account_summary',
-        '_apply_account_draft',
-        '_copy_existing_account',
         '_load_balance_summary',
         '_normalize_agent_model_overrides',
         '_normalize_load_balance_draft',
