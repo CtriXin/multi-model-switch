@@ -75,14 +75,18 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
     ids = [item["id"] for item in items]
 
     assert "rescue" in ids
-    assert "registry" in ids
-    assert "guard" in ids
+    assert "provider_mgmt" in ids
+    assert "settings_webui" in ids
+    assert "advanced" in ids
+    assert "registry" not in ids
+    assert "guard" not in ids
+    assert "routes_export" not in ids
     assert "recommend" not in ids
     assert "fake_upstream" not in ids
-    routes_export = next(item for item in items if item["id"] == "routes_export")
-    assert "Legacy" in routes_export["label"]
-    assert "model-routes.json" in routes_export["desc"]
-    assert "v2" in routes_export["desc"]
+    webui_entry = next(item for item in items if item["id"] == "settings_webui")
+    assert "WebUI" in webui_entry["label"]
+    advanced = next(item for item in items if item["id"] == "advanced")
+    assert "应急" in advanced["label"]
 
 
 def test_about_release_version_prefers_installed_version(monkeypatch) -> None:

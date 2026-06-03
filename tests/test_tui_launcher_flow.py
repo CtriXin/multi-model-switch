@@ -2357,6 +2357,47 @@ def test_handle_tui_settings_action_handles_interrupt_and_cancel() -> None:
     ) == {"status": "continue", "cfg": cfg, "changed": False}
 
 
+def test_handle_tui_settings_action_webui_hint_reports_without_change() -> None:
+    calls = []
+    cfg = {"providers": []}
+
+    result = handle_tui_settings_action(
+        cfg,
+        "/repo",
+        deps=_settings_action_deps(
+            select_settings_tui=lambda: "settings_webui",
+            print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+            pause_after_tui_report=lambda prompt: calls.append(("pause", prompt)),
+        ),
+    )
+
+    assert result == {"status": "continue", "cfg": cfg, "changed": False}
+    assert calls[0][0] == "report"
+    assert calls[0][1][1][0] == ("推荐入口", "mmg config web (canary) / mms config web")
+    assert calls[1] == ("pause", "按 Enter 返回设置")
+
+
+def test_handle_tui_settings_action_advanced_dispatches_folded_route_export() -> None:
+    calls = []
+    cfg = {"providers": []}
+
+    result = handle_tui_settings_action(
+        cfg,
+        "/repo",
+        deps=_settings_action_deps(
+            select_settings_tui=lambda: "advanced",
+            select_channel_action_tui=lambda title, rows, actions: calls.append(("advanced", title, rows, actions)) or "routes_export",
+            routes_export_loader=lambda: ("/tmp/model-routes.json", lambda *args, **kwargs: calls.append(("export", args, kwargs))),
+            console=type("Console", (), {"print": staticmethod(lambda *args, **kwargs: calls.append(("print", args, kwargs)))})(),
+        ),
+    )
+
+    assert result == {"status": "continue", "cfg": cfg, "success": True}
+    assert calls[0][0] == "advanced"
+    assert ("routes_export", "Legacy 路由导出") in calls[0][3]
+    assert calls[1][0] == "export"
+
+
 def test_handle_tui_settings_action_dispatches_provider_mgmt_changed() -> None:
     calls = []
     cfg = {"providers": [{"id": "p1", "role": "auto", "priority": 10}]}

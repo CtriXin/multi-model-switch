@@ -1634,14 +1634,11 @@ def _settings_menu():
     current_lang = _get_language()
     language_desc = _L("当前：英文", "Current: English") if current_lang == "en" else _L("当前：中文", "Current: Chinese")
     return [
-        {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
-        {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
-        {"id": "registry", "label": _L("模型真源", "Registry Truth"), "desc": _L("模型 DB / source truth", "Model DB / source truth")},
-        {"id": "guard", "label": _L("启动快照", "Snapshot Guard"), "desc": _L("查看/接受 config drift", "Inspect / accept config drift")},
-        {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("设置 fallback / 最近失败", "Set fallback / recent failures")},
+        {"id": "provider_mgmt", "label": _L("通道快调", "Channel Quick Edit"), "desc": _L("只调 role / priority", "Only role / priority")},
+        {"id": "settings_webui", "label": _L("WebUI 设置台", "WebUI Settings"), "desc": _L("配置主入口：通道/账号/Skill/MCP", "Main config: channels/accounts/skills/MCP")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
-        {"id": "routes_export", "label": _L("Legacy 路由导出", "Legacy Route Export"), "desc": _L("兼容导出 model-routes.json；v2 发布请进模型真源", "Compatibility export for model-routes.json; use Registry Truth for v2 publish")},
-        {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
+        {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("fallback / 最近失败", "Fallback / recent failures")},
+        {"id": "advanced", "label": _L("高级/应急", "Advanced / Emergency"), "desc": _L("旧设置入口已折叠", "Legacy settings are folded")},
     ]
 
 

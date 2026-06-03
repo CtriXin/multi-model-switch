@@ -241,7 +241,7 @@
     <!-- Settings -->
     <section class="panel" data-section="settings">
       <h2>设置工作台</h2>
-      <p>先改会影响 MMS 启动的设置，再测试模型和会话能力，最后生成 diff 保存；路径、DB、bundle 这类证据切到高级模式再看。</p>
+      <p>WebUI 是新的主配置面：通道、模型能力、账号默认值、Skill / MCP / Hook、Runtime 和保存审计拆到独立模块；TUI 只保留启动时必须的轻量快调。</p>
       <div class="card boot-settings-card">
         <h3>正在进入设置控制台</h3>
         <p class="muted">先加载本地草稿、账号状态、能力偏好和 latest-approved bundle；不会自动请求远端 /models。</p>
@@ -251,7 +251,7 @@
         <div class="settings-actionbar">
           <div>
             <strong>默认模式只放常用设置</strong>
-            <span>通道、能力、测试、保存请用左侧导航；路径和 DB 证据切到高级模式再看。</span>
+            <span>这里是配置总入口；真正编辑发生在下方模块卡片或左侧导航，路径和 DB 证据切到高级模式再看。</span>
             <div id="settingsGapSummary" class="chips ui-advanced-only"></div>
           </div>
           <div class="settings-actionbar-actions">
@@ -262,7 +262,7 @@
         </div>
 
         <div class="settings-tabs" id="settingsTabs">
-          <button class="settings-tab" data-settings-tab="basics"><strong>常用设置</strong><span>语言 / 保存入口</span></button>
+          <button class="settings-tab" data-settings-tab="basics"><strong>设置入口</strong><span>模块拆分 / 保存路径</span></button>
           <button class="settings-tab" data-settings-tab="accounts"><strong>账号默认值</strong><span>default / priority / note</span></button>
           <button class="settings-tab ui-advanced-only" data-settings-tab="guard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
           <button class="settings-tab ui-advanced-only" data-settings-tab="about"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
@@ -270,6 +270,44 @@
         </div>
 
         <div class="settings-tab-panel" data-settings-panel="basics">
+          <div class="settings-module-grid">
+            <article class="settings-module-card primary" data-section-jump="channel">
+              <span class="module-kicker">Channel</span>
+              <h3>通道与模型能力</h3>
+              <p>维护 Base URL、API Key、protocol、模型显示/隐藏、context、thinking 和能力标签。</p>
+              <div><span class="tag">WebUI 原生</span><span class="tag">TUI 只保留 role/priority 快调</span></div>
+            </article>
+            <article class="settings-module-card" data-section-jump="sessionAssets">
+              <span class="module-kicker">Surfaces</span>
+              <h3>Skill / MCP / Hook</h3>
+              <p>统一查看 CLI 启动前会注入的能力面，保存默认关闭偏好，不写模型配置审计。</p>
+              <div><span class="tag">按 CLI 展开</span><span class="tag">偏好保存</span></div>
+            </article>
+            <article class="settings-module-card" data-section-jump="runtime">
+              <span class="module-kicker">Runtime</span>
+              <h3>启动默认值</h3>
+              <p>管理默认 CLI、OpenCode profile、reasoning / thinking 等运行偏好。</p>
+              <div><span class="tag">日常设置</span><span class="tag">不碰 Claude config</span></div>
+            </article>
+            <article class="settings-module-card" data-section-jump="fallback">
+              <span class="module-kicker">Fallback</span>
+              <h3>Rescue / Vision Sidecar</h3>
+              <p>保留中断救援、fallback model 和 vision sidecar 配置；TUI 仅留应急入口。</p>
+              <div><span class="tag">WebUI 原生</span><span class="tag">TUI 应急</span></div>
+            </article>
+            <article class="settings-module-card" data-section-jump="migration">
+              <span class="module-kicker">Migration</span>
+              <h3>迁移分享</h3>
+              <p>导出/导入脱敏配置包或加密凭据包，用于换机和 preview root 迁移。</p>
+              <div><span class="tag">人工确认</span><span class="tag">不自动写 real config</span></div>
+            </article>
+            <article class="settings-module-card save-card" data-section-jump="save">
+              <span class="module-kicker">Audit</span>
+              <h3>保存审计</h3>
+              <p>所有配置修改最后都汇总到这里生成 diff、风险摘要和确认写入。</p>
+              <div><span class="tag">diff first</span><span class="tag">backup / audit</span></div>
+            </article>
+          </div>
           <div class="settings-panel-grid">
             <div class="setting-edit-card span5">
               <h3>界面语言 <span class="tag">可配置</span></h3>
@@ -285,13 +323,12 @@
               </div>
             </div>
             <div class="setting-edit-card span4">
-              <h3>配置入口 <span class="tag">主路径</span></h3>
-              <p class="muted">通道 URL/API Key、模型补丁、Fallback、Runtime 默认值都在各自模块配置，不再回到 TUI 里点散落菜单。</p>
+              <h3>TUI 收缩策略 <span class="tag">WebUI-first</span></h3>
+              <p class="muted">TUI 只保留通道 role/priority 快调、语言、rescue 和高级/应急入口；账号、Registry、Snapshot、路由导出默认回到 WebUI 或人工确认。</p>
               <div class="btns">
                 <button class="ghost" data-section-jump="channel">通道配置</button>
-                <button class="ghost" data-section-jump="fallback">Fallback 设置</button>
+                <button class="ghost" data-section-jump="sessionAssets">能力面板</button>
                 <button class="ghost" data-section-jump="runtime">运行默认值</button>
-                <button class="ghost" data-section-jump="migration">迁移到另一台电脑</button>
               </div>
             </div>
             <div class="settings-next-step span3">

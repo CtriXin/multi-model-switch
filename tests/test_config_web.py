@@ -1093,7 +1093,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "['settings','设置','配置台 / 账号 / 安全']" in html
     assert 'data-section="settings"' in html
     assert "<h2>设置工作台</h2>" in html
-    assert "先改会影响 MMS 启动的设置" in html
+    assert "WebUI 是新的主配置面" in html
+    assert "settings-module-grid" in html
+    assert "TUI 只保留启动时必须的轻量快调" in html
+    assert "TUI 收缩策略" in html
     assert "默认模式只放常用设置" in html
     assert "settings-actionbar" in html
     assert "settings-priority-grid" not in html

@@ -1334,6 +1334,51 @@ def select_tui_settings_action(*, select_settings_tui):
     return {"status": "action", "action": settings_action}
 
 
+def webui_settings_report_payload(*, localize):
+    return (
+        localize("WebUI 设置台 / 主配置入口", "WebUI Settings / Main Config Surface"),
+        [
+            (localize("推荐入口", "Recommended entry"), "mmg config web (canary) / mms config web"),
+            (localize("通道配置", "Channels"), "Base URL / API Key / protocol / model capabilities"),
+            (localize("能力面板", "Surfaces"), "Skill / MCP / Hook / session assets"),
+            (
+                localize("保存路径", "Save path"),
+                localize("保存审计页生成 diff；preview root 写 DB candidate + latest-approved bundle", "Save audit builds diff; preview root writes DB candidate + latest-approved bundle"),
+            ),
+            (
+                localize("TUI 保留", "TUI keeps"),
+                localize("通道 role/priority 快调、语言、rescue 和高级应急入口", "Channel role/priority quick edit, language, rescue, and emergency entry"),
+            ),
+        ],
+        localize(
+            "TUI 不再承载完整设置面；复杂配置请进 WebUI。这里没有改变任何 runtime defaults。",
+            "TUI no longer owns the full settings surface. Use WebUI for complex config. Runtime defaults were not changed.",
+        ),
+    )
+
+
+def select_advanced_settings_action(*, select_channel_action_tui, localize):
+    title = localize("高级/应急设置", "Advanced / Emergency Settings")
+    info_lines = [
+        (
+            localize("定位", "Position"),
+            localize("这些入口已从 TUI 顶层折叠；日常配置请用 WebUI。", "These entries are folded out of top-level TUI; use WebUI for daily config."),
+        ),
+        (
+            localize("安全", "Safety"),
+            localize("仍走原有只读报告 / human gate，不自动写真实配置。", "Still uses existing read-only reports / human gates; no automatic real-config writes."),
+        ),
+    ]
+    actions = [
+        ("account_mgmt", localize("账号管理（应急）", "Account Management (Emergency)")),
+        ("registry", localize("模型真源 / Registry Truth", "Registry Truth")),
+        ("guard", localize("启动快照 / Snapshot Guard", "Snapshot Guard")),
+        ("routes_export", localize("Legacy 路由导出", "Legacy Route Export")),
+        ("about", localize("关于 / 版本", "About / Version")),
+    ]
+    return safe_tui_call(select_channel_action_tui, title, info_lines, actions)
+
+
 def load_registry_cli_tools():
     from mms_registry.cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
 
@@ -1380,6 +1425,20 @@ def handle_tui_settings_action(
         return {"status": "continue", "cfg": cfg, "changed": False}
 
     settings_action = settings_result["action"]
+    if settings_action == "settings_webui":
+        deps.print_settings_result_report(*webui_settings_report_payload(localize=deps.localize))
+        deps.pause_after_tui_report(deps.localize("按 Enter 返回设置", "Press Enter to return to Settings"))
+        return {"status": "continue", "cfg": cfg, "changed": False}
+    if settings_action == "advanced":
+        advanced_action = select_advanced_settings_action(
+            select_channel_action_tui=deps.select_channel_action_tui,
+            localize=deps.localize,
+        )
+        if advanced_action == "__interrupt__":
+            return {"status": "interrupt", "cfg": cfg, "changed": False}
+        if not advanced_action:
+            return {"status": "continue", "cfg": cfg, "changed": False}
+        settings_action = advanced_action
     if settings_action == "provider_mgmt":
         provider_mgmt_result = handle_tui_provider_mgmt_settings_action(
             cfg,

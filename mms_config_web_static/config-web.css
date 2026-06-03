@@ -3191,6 +3191,59 @@
       background: oklch(100% 0 0 / .92);
       box-shadow: 0 10px 26px oklch(18% 0.02 230 / .05);
     }
+    .settings-module-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .settings-module-card {
+      min-width: 0;
+      border: 1px solid color-mix(in oklch, var(--fg) 12%, var(--border));
+      border-radius: 18px;
+      padding: 14px;
+      background:
+        radial-gradient(circle at top right, color-mix(in oklch, var(--accent) 12%, transparent), transparent 44%),
+        linear-gradient(180deg, oklch(100% 0 0), oklch(97.8% 0.007 226));
+      box-shadow: 0 10px 24px oklch(18% 0.02 230 / .045);
+      cursor: pointer;
+      transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+    }
+    .settings-module-card:hover {
+      transform: translateY(-2px);
+      border-color: color-mix(in oklch, var(--accent) 42%, var(--border));
+      box-shadow: 0 16px 30px oklch(20% 0.035 230 / .08);
+    }
+    .settings-module-card.primary,
+    .settings-module-card.save-card {
+      background:
+        radial-gradient(circle at top right, color-mix(in oklch, var(--accent) 18%, transparent), transparent 45%),
+        linear-gradient(135deg, oklch(99.5% 0.008 220), oklch(96.5% 0.018 210));
+    }
+    .settings-module-card h3 {
+      margin: 4px 0 6px;
+      letter-spacing: -.02em;
+    }
+    .settings-module-card p {
+      min-height: 54px;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .settings-module-card div {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    .module-kicker {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
     .settings-panel-grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -3261,6 +3314,9 @@
       .settings-tabs {
         grid-template-columns: repeat(3, minmax(160px, 1fr));
       }
+      .settings-module-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
     @media (max-width: 780px) {
       [data-section="settings"] {
@@ -3268,6 +3324,9 @@
       }
       .settings-actionbar,
       .settings-diagnostic-row {
+        grid-template-columns: 1fr;
+      }
+      .settings-module-grid {
         grid-template-columns: 1fr;
       }
       .settings-actionbar-actions { justify-content: flex-start; }
