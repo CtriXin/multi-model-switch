@@ -585,6 +585,17 @@ def _lookup_context_window(model_name, provider_id=None):
         if suffixed_window is not None:
             return suffixed_window
     else:
+        # Latest-approved capability facts are the WebUI/runtime truth after
+        # preview publish. Keep the MiMo safe-base branch as a fallback only, or
+        # the UI can show 1M while Claude launch still receives 262K.
+        approved_window = _capability_context_window(
+            clean,
+            provider_id=provider_id,
+            accepted_sources={"approved_facts", "model_policy", "manual_override"},
+        )
+        if approved_window is not None:
+            return approved_window
+
         if _provider_advertises_plain_mimo_1m(provider_key):
             plain_one_m_window = _MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS.get(lower)
             if plain_one_m_window is not None:
@@ -602,14 +613,6 @@ def _lookup_context_window(model_name, provider_id=None):
     model_clean = _model_override_lookup(clean, lower)
     if model_clean is not None:
         return model_clean
-
-    approved_window = _capability_context_window(
-        clean,
-        provider_id=provider_id,
-        accepted_sources={"approved_facts", "model_policy", "manual_override"},
-    )
-    if approved_window is not None:
-        return approved_window
 
     profiled = profile_context_window(clean, provider_id=provider_id or "")
     if profiled is not None:
