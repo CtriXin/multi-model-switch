@@ -1992,28 +1992,10 @@ def _migrate_legacy_api_config(cfg):
     )
 
 
-def _provider_label(provider):
-    from mms_commands.tools import provider_label
-
-    return provider_label(provider, default_provider_id=DEFAULT_PROVIDER_ID)
-
-
-def _provider_openai_base_url(provider):
-    from mms_commands.tools import provider_openai_base_url
-
-    return provider_openai_base_url(provider)
-
-
-def _provider_anthropic_base_url(provider):
-    from mms_commands.tools import provider_anthropic_base_url
-
-    return provider_anthropic_base_url(provider)
-
-
-def _provider_has_configured_base_url(provider):
-    from mms_commands.tools import provider_has_configured_base_url
-
-    return provider_has_configured_base_url(provider)
+_provider_label = partial(_command_tools.provider_label, default_provider_id=DEFAULT_PROVIDER_ID)
+_provider_openai_base_url = _command_tools.provider_openai_base_url
+_provider_anthropic_base_url = _command_tools.provider_anthropic_base_url
+_provider_has_configured_base_url = _command_tools.provider_has_configured_base_url
 
 
 _resolve_config_provider_id = _command_tools.resolve_config_provider_id
@@ -2050,10 +2032,7 @@ def _account_env(account):
     )
 
 
-def _account_status_command(cli_name):
-    from mms_commands.tools import account_status_command
-
-    return account_status_command(cli_name)
+_account_status_command = _command_tools.account_status_command
 
 
 def _probe_account_status(account):
@@ -2330,28 +2309,10 @@ def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
     )
 
 
-def _rescue_default_fallback(cfg):
-    from mms_commands.tools import rescue_default_fallback
-
-    return rescue_default_fallback(cfg)
-
-
-def _rescue_hot_fallback_enabled_cfg(cfg):
-    from mms_commands.tools import rescue_hot_fallback_enabled_cfg
-
-    return rescue_hot_fallback_enabled_cfg(cfg, pref_bool=_pref_bool)
-
-
-def _set_rescue_default_fallback(cfg, *, model="", cli=""):
-    from mms_commands.tools import set_rescue_default_fallback
-
-    return set_rescue_default_fallback(cfg, model=model, cli=cli)
-
-
-def _set_rescue_hot_fallback_enabled(cfg, enabled=False):
-    from mms_commands.tools import set_rescue_hot_fallback_enabled
-
-    return set_rescue_hot_fallback_enabled(cfg, enabled=enabled)
+_rescue_default_fallback = _command_tools.rescue_default_fallback
+_rescue_hot_fallback_enabled_cfg = partial(_command_tools.rescue_hot_fallback_enabled_cfg, pref_bool=_pref_bool)
+_set_rescue_default_fallback = _command_tools.set_rescue_default_fallback
+_set_rescue_hot_fallback_enabled = _command_tools.set_rescue_hot_fallback_enabled
 
 
 def _latest_rescue_hot_fallback_event():
@@ -2376,11 +2337,7 @@ def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_ev
     )
 
 
-def _registry_truth_tui_payload(status):
-    """Build localized Registry Truth status/actions for the Settings detail page."""
-    from mms_commands.tools import registry_truth_tui_payload
-
-    return registry_truth_tui_payload(status, localize=_L)
+_registry_truth_tui_payload = partial(_command_tools.registry_truth_tui_payload, localize=_L)
 
 
 def _model_source_status_rows(summary):
@@ -3605,16 +3562,8 @@ def _ensure_models_cache_available(models_cache):
     return ensure_models_cache_available(models_cache, console=console)
 
 
-def _model_matches_account_cli(cli_name, model_name):
-    from mms_commands.tools import model_matches_account_cli
-
-    return model_matches_account_cli(cli_name, model_name)
-
-
-def _provider_supports_cli_name(provider, cli_name):
-    from mms_commands.tools import provider_supports_cli_name
-
-    return provider_supports_cli_name(provider, cli_name)
+_model_matches_account_cli = _command_tools.model_matches_account_cli
+_provider_supports_cli_name = _command_tools.provider_supports_cli_name
 
 
 def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
@@ -4154,22 +4103,9 @@ def save_preset_interactive(cfg, cli, model_info):
     )
 
 
-def _uses_native_account_entry(runtime, cli):
-    from mms_commands.tools import uses_native_account_entry
-
-    return uses_native_account_entry(runtime, cli, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
-
-
-def _uses_broker_entry(runtime, cli):
-    from mms_commands.tools import uses_broker_entry
-
-    return uses_broker_entry(runtime, cli)
-
-
-def _uses_managed_entry(runtime, cli):
-    from mms_commands.tools import uses_managed_entry
-
-    return uses_managed_entry(runtime, cli, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
+_uses_native_account_entry = partial(_command_tools.uses_native_account_entry, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
+_uses_broker_entry = _command_tools.uses_broker_entry
+_uses_managed_entry = partial(_command_tools.uses_managed_entry, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
 
 
 def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, role, recommend):
@@ -4191,10 +4127,7 @@ def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, ro
     )
 
 
-def _preset_model_info(preset):
-    from mms_commands.tools import preset_model_info
-
-    return preset_model_info(preset)
+_preset_model_info = _command_tools.preset_model_info
 
 
 def _emit_preset_error(message, *, stderr_only=False):
@@ -4203,10 +4136,7 @@ def _emit_preset_error(message, *, stderr_only=False):
     return emit_preset_error(message, stderr_only=stderr_only, console=console)
 
 
-def _preset_env_file_path(preset_name):
-    from mms_commands.tools import preset_env_file_path
-
-    return preset_env_file_path(preset_name, env_dir=ENV_DIR)
+_preset_env_file_path = partial(_command_tools.preset_env_file_path, env_dir=ENV_DIR)
 
 
 def _resolve_named_preset(cfg, preset_name, *, stderr_only=False):
@@ -4221,16 +4151,8 @@ def _resolve_named_preset(cfg, preset_name, *, stderr_only=False):
     )
 
 
-def _infer_preset_auth_mode(preset):
-    from mms_commands.tools import infer_preset_auth_mode
-
-    return infer_preset_auth_mode(preset)
-
-
-def _available_broker_profiles_for_cli(cfg, cli_name):
-    from mms_commands.tools import available_broker_profiles_for_cli
-
-    return available_broker_profiles_for_cli(cfg, cli_name)
+_infer_preset_auth_mode = _command_tools.infer_preset_auth_mode
+_available_broker_profiles_for_cli = _command_tools.available_broker_profiles_for_cli
 
 
 def _broker_enabled_by_cli(cfg, cli_names):
@@ -4621,10 +4543,7 @@ def _handle_provider_credentials_config(cfg, args_rest):
     )
 
 
-def _provider_looks_openrouter(provider):
-    from mms_commands.tools import provider_looks_openrouter
-
-    return provider_looks_openrouter(provider)
+_provider_looks_openrouter = _command_tools.provider_looks_openrouter
 
 
 def _openrouter_provider_candidates(cfg):
@@ -4637,10 +4556,7 @@ def _openrouter_provider_candidates(cfg):
     )
 
 
-def _parse_openrouter_extension_args(args_rest):
-    from mms_commands.tools import parse_openrouter_extension_args
-
-    return parse_openrouter_extension_args(args_rest)
+_parse_openrouter_extension_args = _command_tools.parse_openrouter_extension_args
 
 
 def _display_openrouter_extension_help():
@@ -4784,10 +4700,7 @@ def _handle_account_login_config(cfg, args_rest):
     )
 
 
-def _usage_key(runtime_kind, cli_name, runtime_id):
-    from mms_commands.tools import usage_key
-
-    return usage_key(runtime_kind, cli_name, runtime_id)
+_usage_key = _command_tools.usage_key
 
 
 def _rename_usage_account(old_id, new_id, new_name, cli_name):
