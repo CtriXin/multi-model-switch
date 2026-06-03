@@ -750,6 +750,57 @@ def test_config_web_review_summary_includes_model_policy_detail_rows(tmp_path):
     assert any(change["label"] == "看图" and change["source_label"] == "OpenRouter catalog" for change in item["changes"])
 
 
+def test_config_web_capability_touched_rows_save_only_changed_capability_subset(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "deepseek-v4-flash"
+    row["visible"] = True
+    row["capability_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "tool_use": True,
+        "reasoning": True,
+        "thinking": True,
+        "context_window_tokens": 1_048_576,
+        "one_m_context": True,
+        "long_context": True,
+    }
+    row["policy_capabilities"] = {
+        "context_window_tokens": 1_048_576,
+        "one_m_context": True,
+        "long_context": True,
+    }
+    row["capability_sources"] = {
+        "context_window_tokens": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+        },
+        "one_m_context": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+        },
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    entry = plan["model_policy"]["models"]["deepseek-v4-flash"]
+    assert "visible" not in entry
+    assert entry["capabilities"] == {
+        "context_window_tokens": 1_048_576,
+        "long_context": True,
+        "one_m_context": True,
+    }
+    assert "text" not in entry["capabilities"]
+    changes = plan["review_summary"]["model_policy_changes"]["items"][0]["changes"]
+    assert any(change["label"] == "上下文" and change["source_label"] == "OpenRouter catalog" for change in changes)
+
+
 def test_config_web_one_m_and_think_capabilities_are_saved_to_model_policy(tmp_path):
     payload = _large_route_draft_payload(count=1)
     row = payload["draft"]["providers"][0]["models"][0]
@@ -3652,6 +3703,50 @@ def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, t
     assert "不是厂商官方真值" in result["note"]
 
 
+def test_config_web_openrouter_refresh_does_not_fallback_to_local_snapshots(monkeypatch, tmp_path):
+    payload = {
+        "provider": {"id": "demo", "models": [{"id": "claude-opus-4-6-thinking", "visible": True}]},
+        "fields": ["context_window_tokens", "thinking"],
+        "refresh_sources": False,
+        "openrouter_catalog": True,
+    }
+
+    monkeypatch.setattr(
+        mms_config_web,
+        "_load_capability_truth_payloads",
+        lambda *_args, **_kwargs: (
+            [
+                {
+                    "_source_path": "official.json",
+                    "models": [
+                        {
+                            "alias": "claude-opus-4-6-thinking",
+                            "confidence": "official_exact",
+                            "official_context_window_tokens": 1_000_000,
+                            "supports_thinking": True,
+                        }
+                    ],
+                }
+            ],
+            [{"source": "local"}],
+            [],
+        ),
+    )
+    monkeypatch.setattr(mms_config_web, "_fetch_openrouter_catalog_payload", lambda **_kwargs: {"data": []})
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["source_mode"] == "openrouter_catalog"
+    assert result["matched_model_count"] == 0
+    assert result["refresh_reports"] == []
+    assert result["unmatched_models"] == ["claude-opus-4-6-thinking"]
+
+
 def test_config_web_capability_truth_button_and_fields_are_present():
     html = _frontend_source()
 
@@ -3664,6 +3759,9 @@ def test_config_web_capability_truth_button_and_fields_are_present():
     assert "OpenRouter catalog" in html
     assert "不是厂商官方真值" in html
     assert "openrouter_catalog:openrouter" in html
+    assert "providerPayloadForCapabilityRefresh" in html
+    assert "capability_touched:true" in html
+    assert "有变化的草稿" in html
 
 
 def test_config_web_max_output_tokens_are_saved_to_model_policy(tmp_path):

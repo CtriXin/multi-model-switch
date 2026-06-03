@@ -1317,12 +1317,17 @@ def refresh_model_capability_truth(
     requested_fields = {_safe_text(item) for item in payload.get("fields") or [] if _safe_text(item)}
     fields = requested_fields.intersection(_CAPABILITY_TRUTH_REFRESH_FIELDS) or set(_CAPABILITY_TRUTH_REFRESH_FIELDS)
     model_ids = _normalize_model_list(payload.get("models")) or _truth_model_ids_from_provider(provider)
+    use_openrouter_catalog = _truthy(payload.get("openrouter_catalog"), False)
     truth_payloads, refresh_reports, warnings = _load_capability_truth_payloads(
         config_path,
         refresh_sources=_truthy(payload.get("refresh_sources"), True),
     )
+    # OpenRouter refresh should mean OpenRouter-only matching; the local snapshot button covers official/approved facts.
+    if use_openrouter_catalog:
+        truth_payloads = []
+        refresh_reports = []
     catalog_sources: list[dict[str, Any]] = []
-    if _truthy(payload.get("openrouter_catalog"), False):
+    if use_openrouter_catalog:
         source_url = _safe_text(payload.get("openrouter_url") or _OPENROUTER_MODELS_API_URL)
         try:
             timeout = float(payload.get("openrouter_timeout") or 20.0)
@@ -3604,9 +3609,18 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if not model_id:
                 continue
             touched = row.get("policy_touched") is True or row.get("touched") is True
-            if not touched:
+            capability_touched = row.get("capability_touched") is True or row.get("capabilities_touched") is True
+            if not touched and not capability_touched:
                 continue
-            caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
+            row_policy_caps = row.get("policy_capabilities") if isinstance(row.get("policy_capabilities"), dict) else None
+            if row_policy_caps is not None:
+                caps_map[model_id] = row_policy_caps
+            else:
+                caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
+            if capability_touched and not touched:
+                if isinstance(row.get("capability_sources"), dict):
+                    source_map[model_id] = row.get("capability_sources")
+                continue
             if isinstance(row.get("capability_sources"), dict):
                 source_map[model_id] = row.get("capability_sources")
             if model_id in hidden or row.get("visible") is False:
