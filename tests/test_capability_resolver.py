@@ -115,6 +115,47 @@ def test_approved_registry_export_facts_win_over_provider_profile() -> None:
         assert caps["sources"][field] == "approved_facts"
 
 
+def test_model_policy_context_wins_over_approved_facts() -> None:
+    caps = resolve_model_capabilities(
+        "mimo-v2.5",
+        approved_facts={"mimo-v2.5": {"context_window_tokens": 262_144}},
+        model_policy={
+            "models": {
+                "mimo-v2.5": {
+                    "capabilities": {
+                        "context_window_tokens": 1_000_000,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["sources"]["context_window_tokens"] == "model_policy"
+
+
+def test_model_policy_one_m_and_thinking_aliases_drive_capabilities() -> None:
+    caps = resolve_model_capabilities(
+        "mimo-v2.5",
+        approved_facts={},
+        model_policy={
+            "models": {
+                "mimo-v2.5": {
+                    "capabilities": {
+                        "one_m_context": True,
+                        "thinking": True,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["sources"]["context_window_tokens"] == "model_policy"
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["supports_thinking"] == "model_policy"
+
+
 def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_alias(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     from mms_registry import provider_profiles
@@ -133,6 +174,24 @@ def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_ali
     assert caps["sources"]["context_window_tokens"] == "provider_profile"
     assert caps["sources"]["max_output_tokens"] == "provider_profile"
     assert caps["sources"]["body_patch_aliases"] == "provider_profile"
+
+
+def test_provider_profile_marks_minimax_m3_as_one_m_context(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    from mms_registry import provider_profiles as mms_provider_profiles
+
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    caps = resolve_model_capabilities(
+        "MiniMax-M3",
+        provider_id="minimax-direct",
+        base_url="https://api.minimax.io/v1",
+        approved_facts={},
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["context_window_tokens"] == "provider_profile"
+    assert caps["sources"]["supports_thinking"] == "provider_profile"
 
 
 def test_missing_or_corrupt_registry_facts_fall_back_safely(tmp_path) -> None:
@@ -219,6 +278,7 @@ def test_cache_sensitive_dual_protocol_routes_keep_anthropic_first() -> None:
 
 
 def test_selected_root_missing_latest_approved_capabilities_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     with pytest.raises(CapabilityBundleError, match="latest-approved capabilities unavailable"):
         resolve_model_capabilities("missing-approved-model")
@@ -228,6 +288,8 @@ def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monk
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
 
     caps = resolve_model_capabilities("legacy-unknown-model")
 

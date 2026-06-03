@@ -691,6 +691,13 @@ def _pi_pick_protocol(runtime, model_name):
     available = {item["protocol"] for item in variants}
     variant_by_protocol = {item["protocol"]: item for item in variants}
     caps = _pi_model_capabilities(runtime, model_name)
+    normalized_model = _pi_normalize_model_key(model_name)
+    if "anthropic_messages" in available and normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-")):
+        return variant_by_protocol["anthropic_messages"], caps
+    if "openai_chat_completions" in available and normalized_model.startswith(("deepseek", "mimo-")):
+        return variant_by_protocol["openai_chat_completions"], caps
+    if "responses" in available and normalized_model.startswith(("gpt-", "o1", "o3", "o4")):
+        return variant_by_protocol["responses"], caps
     hints = caps.get("protocol_hints") if isinstance(caps.get("protocol_hints"), dict) else {}
     preferred = str(hints.get("preferred_protocol") or "").strip()
     if preferred == "responses":

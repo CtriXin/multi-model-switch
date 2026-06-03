@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s' \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"CAVEMAN MODE ACTIVE (lite). No filler/hedging. Keep full sentences. Code/commits/security: write normal. Off: stop caveman/normal mode.\\\"}}\"",
+            "timeout": 5,
+            "statusMessage": "Loading caveman mode"
+          }
+        ]
+      }
+    ]
+  }
+}

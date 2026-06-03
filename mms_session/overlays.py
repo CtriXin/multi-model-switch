@@ -76,6 +76,14 @@ def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_sourc
     dst = os.path.join(parent_dir, entry_name)
     merged_dir = os.path.join(overlay_root, entry_name)
     os.makedirs(merged_dir, exist_ok=True)
+    for item in list(os.listdir(merged_dir)):
+        if item not in exclude_names:
+            continue
+        stale = os.path.join(merged_dir, item)
+        if os.path.islink(stale) or os.path.isfile(stale):
+            os.unlink(stale)
+        elif os.path.isdir(stale):
+            shutil.rmtree(stale)
 
     def _merge_dir(src_dir):
         src_dir = str(src_dir or "").strip()

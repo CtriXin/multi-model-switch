@@ -33,6 +33,10 @@ disabled_session_surfaces = {{ skills = ["agent-browser"], mcp = ["pilot"] }}
 skills = ["web-access", "web-access"]
 hooks = ["/tmp/drop.sh"]
 
+[assets]
+managed_enabled = true
+managed_root = "{tmp_path / "managed-assets"}"
+
 [assets.roots]
 web_access = "{skill_root}"
 xmem = "{xmem_root}"
@@ -70,6 +74,8 @@ base_url = "https://should-not-load.example"
         "xmem": str(xmem_root),
         "codegraph": str(codegraph_root),
     }
+    assert prefs["assets"]["managed_enabled"] is True
+    assert prefs["assets"]["managed_root"] == str(tmp_path / "managed-assets")
     assert "provider" not in prefs
     assert "api_key" not in prefs["launch"]["defaults"]
     assert "credentials" not in prefs["assets"]["roots"]

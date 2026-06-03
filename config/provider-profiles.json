@@ -535,7 +535,9 @@
       },
       "references": [
         "https://platform.minimaxi.com/docs/api-reference/text-anthropic-api",
-        "https://platform.minimaxi.com/docs/api-reference/text-openai-api"
+        "https://platform.minimaxi.com/docs/api-reference/text-openai-api",
+        "https://www.minimax.io/models/text/m3",
+        "https://www.minimax.io/blog/minimax-m3"
       ],
       "endpoints": {
         "openai_base_url": "https://api.minimaxi.com/v1",
@@ -586,7 +588,8 @@
         "minimax-m2.5-highspeed": 204800,
         "minimax-m2.1": 204800,
         "minimax-m2.1-highspeed": 204800,
-        "minimax-m2": 204800
+        "minimax-m2": 204800,
+        "minimax-m3": 1000000
       },
       "api_formats": {
         "openai_chat": {

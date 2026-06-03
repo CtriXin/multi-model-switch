@@ -1,0 +1,6 @@
+interface:
+  display_name: "xmem"
+  short_description: "Cross-project truth index for agents"
+  default_prompt: "Use $xmem to find prior project context and verified invariants."
+policy:
+  allow_implicit_invocation: true

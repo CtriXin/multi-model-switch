@@ -141,6 +141,10 @@ if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]] && [ -n "$_ROUTE_STATUS" ] 
     if [ "$route_age" -lt 600 ]; then
         r_tier=$(jq -r '.tier // empty' "$_ROUTE_STATUS" 2>/dev/null)
         r_model=$(jq -r '.model // empty' "$_ROUTE_STATUS" 2>/dev/null)
+        r_ctx=$(jq -r '.context_window_tokens // .context_window_size // empty' "$_ROUTE_STATUS" 2>/dev/null)
+        if [ -n "$r_ctx" ] && [ "$r_ctx" != "null" ] && [ "$r_ctx" -gt 0 ] 2>/dev/null; then
+            ctx_max="$r_ctx"
+        fi
         if [ -n "$r_model" ]; then
             r_model_short=$(echo "$r_model" | sed 's/^claude-//;s/-[0-9]*-[0-9]*$//;s/-[0-9]*$//')
             case "$r_tier" in
@@ -229,6 +233,11 @@ cost_fmt=$(printf "%.2f" "$cost" 2>/dev/null || echo "$cost")
 cin_k=$((ctx_in / 1000))
 cout_k=$((ctx_out / 1000))
 ctx_total_k=$(((ctx_in + ctx_out) / 1000))
+ctx_total=$((ctx_in + ctx_out))
+if [ "$ctx_max" -gt 0 ] 2>/dev/null; then
+    pct=$((ctx_total * 100 / ctx_max))
+    [ "$pct" -gt 100 ] && pct=100
+fi
 
 if [ "$ctx_max" -ge 1000000 ]; then
     ctx_max_fmt="$(( ctx_max / 1000000 ))M"

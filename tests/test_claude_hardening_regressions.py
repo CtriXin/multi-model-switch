@@ -2396,6 +2396,81 @@ def test_materialize_codex_session_entry_merges_existing_generated_skill_dir(tmp
     assert os.path.islink(generated_skills / "keep-skill")
 
 
+def test_materialize_codex_session_entry_filters_disabled_global_skills(tmp_path):
+    import mms_launchers
+
+    real_skills = tmp_path / "real" / "skills"
+    generated_skills = tmp_path / "gateway" / "skills"
+    (real_skills / "keep-skill").mkdir(parents=True)
+    (real_skills / "blocked-skill").mkdir(parents=True)
+
+    mms_launchers._materialize_codex_session_entry_filtered(
+        "skills",
+        str(real_skills),
+        str(generated_skills),
+        disabled_session_surfaces={"skills": ["codex:blocked-skill"]},
+    )
+
+    assert os.path.islink(generated_skills / "keep-skill")
+    assert not (generated_skills / "blocked-skill").exists()
+    assert (real_skills / "blocked-skill").is_dir()
+
+
+def test_prepare_claude_session_tree_filters_disabled_global_skills(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    raw_root = tmp_path / "project-store"
+    for entry in mms_launchers.CLAUDE_PERSISTENT_ENTRIES:
+        target = raw_root / entry
+        if entry.endswith(".jsonl"):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+
+    source_claude_dir = tmp_path / "source-claude"
+    (source_claude_dir / "skills" / "keep-skill").mkdir(parents=True)
+    (source_claude_dir / "skills" / "blocked-skill").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "ensure_claude_project_store",
+        lambda cwd, account_id="": {"project_key": "project-key"},
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "claude_raw_entry_path",
+        lambda entry, cwd, account_id="": raw_root / entry,
+    )
+    monkeypatch.setattr(mms_launchers, "record_claude_session_start", lambda **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "write_slot_marker", lambda *args, **kwargs: None)
+
+    session_home = tmp_path / "session"
+    session_claude_dir = session_home / ".claude"
+    session_claude_dir.mkdir(parents=True)
+    os.symlink(source_claude_dir / "skills", session_claude_dir / "skills")
+    stale_overlay = session_home / ".mms-global-skill-overlay" / "claude" / "skills"
+    stale_overlay.mkdir(parents=True)
+    os.symlink(source_claude_dir / "skills" / "blocked-skill", stale_overlay / "blocked-skill")
+
+    mms_launchers._prepare_claude_session_tree(
+        str(session_home),
+        str(session_claude_dir),
+        account_id="relay-a",
+        source_claude_dir=str(source_claude_dir),
+        disabled_session_surfaces={"skills": ["claude:blocked-skill"]},
+    )
+
+    assert os.path.islink(session_claude_dir / "skills")
+    assert os.path.islink(session_claude_dir / "skills" / "keep-skill")
+    assert not (session_claude_dir / "skills" / "blocked-skill").exists()
+    assert (source_claude_dir / "skills" / "blocked-skill").is_dir()
+
+
 def test_codex_gateway_env_materializes_session_toon_skill_and_wrapper(monkeypatch, tmp_path):
     import mms_launchers
 

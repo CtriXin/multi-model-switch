@@ -197,7 +197,10 @@ def build_confirm_preview_catalog(
     _L = localize
     _safe_getcwd = safe_getcwd
     runtime = runtime if isinstance(runtime, dict) else {}
-    allow_execution_surfaces = not (cli == "claude" and runtime.get("auth_mode") == "oauth")
+    allow_execution_surfaces = not (
+        (cli == "claude" and runtime.get("auth_mode") == "oauth")
+        or cli == "pi"
+    )
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
         "mcp": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},

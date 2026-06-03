@@ -545,7 +545,7 @@ def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
         encoding="utf-8",
     )
     (preview_root / "route_status.json").write_text(
-        json.dumps({"tier": "light", "model": "claude-preview-20260101"}),
+        json.dumps({"tier": "light", "model": "claude-preview-20260101", "context_window_tokens": 1_000_000}),
         encoding="utf-8",
     )
     (preview_root / "health-cache.json").write_text(
@@ -594,6 +594,7 @@ def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
 
     assert "preview" in result.stdout
     assert "stable" not in result.stdout
+    assert "3k/1M" in result.stdout
     assert "●" in result.stdout
 
 

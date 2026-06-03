@@ -28,6 +28,9 @@ from mms_launcher.account_guard import (
 )
 from mms_runtime.i18n import normalize_language
 from mms_launcher.console import LauncherLazyConsole
+
+# Back-compat for tests/external imports that still reset the former lazy console.
+_LazyConsole = LauncherLazyConsole
 from mms_launcher.health import (
     health_check_due as _health_check_due_impl,
     load_gateway_health_cache as _load_gateway_health_cache_impl,
@@ -124,6 +127,8 @@ from mms_core import (
     _runtime_httpx_request,
     detect_working_base_url,
     load_config,
+    managed_assets_enabled,
+    managed_assets_root,
     preference_asset_root,
 )
 from mms_registry.capability_resolver import resolve_model_capabilities
@@ -1388,6 +1393,8 @@ def _session_feature_root_kwargs():
         "module_file": __file__,
         "real_user_path_fn": _real_user_path,
         "asset_root_preference_fn": _asset_root_preference,
+        "managed_assets_enabled_fn": managed_assets_enabled,
+        "managed_assets_root_fn": managed_assets_root,
         "environ": os.environ,
     }
 
@@ -1577,6 +1584,23 @@ def _mcp_server_spec_has_entrypoint(spec):
 _normalize_session_mcp_servers = _claude_settings.normalize_session_mcp_servers
 _filter_hooks_by_disabled = _claude_settings.filter_hooks_by_disabled
 _session_skill_disabled = _claude_settings.session_skill_disabled
+
+
+def _disabled_skill_names_for_cli(disabled_session_surfaces, cli_name):
+    cli_name = str(cli_name or "").strip().lower()
+    disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
+    names = set()
+    for item in disabled.get("skills", set()):
+        value = str(item or "").strip()
+        if not value:
+            continue
+        if ":" in value:
+            scope, name = value.split(":", 1)
+            if scope.strip().lower() == cli_name and name.strip():
+                names.add(name.strip())
+        else:
+            names.add(value)
+    return names
 
 
 def _caveman_claude_activate_command(caveman_root, caveman_level="light"):
@@ -2011,6 +2035,7 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 
 
 _materialize_codex_session_entry = _codex_assets.materialize_codex_session_entry
+_materialize_codex_session_entry_filtered = _codex_assets.materialize_codex_session_entry_filtered
 _overlay_codex_plugin_marketplace_cache = _codex_assets.overlay_codex_plugin_marketplace_cache
 _codex_entry_is_session_local = _codex_assets.codex_entry_is_session_local
 _bounded_env_int = _codex_resume._bounded_env_int

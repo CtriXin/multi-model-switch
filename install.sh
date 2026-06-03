@@ -310,29 +310,34 @@ optional_omc_installed() {
 
 bundled_session_asset_present() {
     local asset="$1"
+    local assets_root="$MMS_HOME/assets/session-assets"
+    local legacy_vendor="$MMS_HOME/vendor"
     case "$asset" in
         caveman)
-            [ -f "$MMS_HOME/vendor/caveman/skills/caveman/SKILL.md" ] \
-                && [ -f "$MMS_HOME/vendor/caveman/hooks/caveman-activate.js" ] \
-                && [ -f "$MMS_HOME/vendor/caveman/hooks/caveman-mode-tracker.js" ]
+            [ -f "$assets_root/packs/caveman/skills/caveman/SKILL.md" ] \
+                && [ -f "$assets_root/packs/caveman/hooks/caveman-activate.js" ] \
+                && [ -f "$assets_root/packs/caveman/hooks/caveman-mode-tracker.js" ] \
+                || { [ -f "$legacy_vendor/caveman/skills/caveman/SKILL.md" ] \
+                    && [ -f "$legacy_vendor/caveman/hooks/caveman-activate.js" ] \
+                    && [ -f "$legacy_vendor/caveman/hooks/caveman-mode-tracker.js" ]; }
             ;;
         token-saver)
-            [ -f "$MMS_HOME/vendor/token-saver/SKILL.md" ]
+            [ -f "$assets_root/skills/token-saver/SKILL.md" ] || [ -f "$legacy_vendor/token-saver/SKILL.md" ]
             ;;
         toon)
-            [ -f "$MMS_HOME/vendor/toon/SKILL.md" ]
+            [ -f "$assets_root/skills/toon/SKILL.md" ] || [ -f "$legacy_vendor/toon/SKILL.md" ]
             ;;
         xmem)
-            [ -f "$MMS_HOME/vendor/xmem/SKILL.md" ]
+            [ -f "$assets_root/skills/xmem/SKILL.md" ] || [ -f "$legacy_vendor/xmem/SKILL.md" ]
             ;;
         web-access)
-            [ -f "$MMS_HOME/vendor/web-access/SKILL.md" ]
+            [ -f "$assets_root/skills/web-access/SKILL.md" ] || [ -f "$legacy_vendor/web-access/SKILL.md" ]
             ;;
         weber)
-            [ -f "$MMS_HOME/vendor/weber/SKILL.md" ]
+            [ -f "$assets_root/skills/weber/SKILL.md" ] || [ -f "$legacy_vendor/weber/SKILL.md" ]
             ;;
         agent-browser)
-            [ -f "$MMS_HOME/vendor/agent-browser/SKILL.md" ]
+            [ -f "$assets_root/skills/agent-browser/SKILL.md" ] || [ -f "$legacy_vendor/agent-browser/SKILL.md" ]
             ;;
         nsr)
             [ -f "$MMS_HOME/hooks/nsr-builtin-hook.py" ] \
@@ -347,16 +352,17 @@ bundled_session_asset_present() {
 
 print_bundled_session_asset_status() {
     local asset label path mode
+    local assets_root="$MMS_HOME/assets/session-assets"
     echo "$(t "内建 session assets" "Bundled session assets")"
     for asset in caveman token-saver toon xmem web-access weber agent-browser nsr; do
         case "$asset" in
-            caveman) label="Caveman"; path="$MMS_HOME/vendor/caveman"; mode="$(t "按 session 注入；默认随偏好/确认页启用" "session-local; enabled by preference/confirm screen")" ;;
-            token-saver) label="token-saver"; path="$MMS_HOME/vendor/token-saver"; mode="$(t "默认可用" "available by default")" ;;
-            toon) label="TOON"; path="$MMS_HOME/vendor/toon"; mode="$(t "默认可用" "available by default")" ;;
-            xmem) label="xmem"; path="$MMS_HOME/vendor/xmem"; mode="$(t "默认可用；hook 静默 fail-open" "available by default; hooks are silent/fail-open")" ;;
-            web-access) label="web-access"; path="$MMS_HOME/vendor/web-access"; mode="$(t "默认可用" "available by default")" ;;
-            weber) label="weber"; path="$MMS_HOME/vendor/weber"; mode="$(t "默认可用" "available by default")" ;;
-            agent-browser) label="agent-browser"; path="$MMS_HOME/vendor/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
+            caveman) label="Caveman"; path="$assets_root/packs/caveman"; mode="$(t "按 session 注入；默认随偏好/确认页启用" "session-local; enabled by preference/confirm screen")" ;;
+            token-saver) label="token-saver"; path="$assets_root/skills/token-saver"; mode="$(t "默认可用" "available by default")" ;;
+            toon) label="TOON"; path="$assets_root/skills/toon"; mode="$(t "默认可用" "available by default")" ;;
+            xmem) label="xmem"; path="$assets_root/skills/xmem"; mode="$(t "默认可用；hook 静默 fail-open" "available by default; hooks are silent/fail-open")" ;;
+            web-access) label="web-access"; path="$assets_root/skills/web-access"; mode="$(t "默认可用" "available by default")" ;;
+            weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用" "available by default")" ;;
+            agent-browser) label="agent-browser"; path="$assets_root/skills/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
             nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-builtin-hook.py"; mode="$(t "默认开启；仍只在 MMS session 注入 hook" "enabled by default; hooks remain MMS-session-local")" ;;
         esac
         if bundled_session_asset_present "$asset"; then
@@ -4511,6 +4517,8 @@ cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
+copy_dir_safely "$SOURCE_DIR/assets" "$MMS_HOME/assets" "assets 目录" "assets directory"
+copy_dir_safely "$SOURCE_DIR/mms_config_web_static" "$MMS_HOME/mms_config_web_static" "WebUI 静态资源目录" "WebUI static assets directory"
 copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor" "vendor 目录" "vendor directory"
 copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scripts directory"
 for package_dir in mms_opencode mms_codex mms_claude mms_agy mms_pi mms_session mms_launcher mms_runtime mms_display mms_registry mms_commands mms_config; do

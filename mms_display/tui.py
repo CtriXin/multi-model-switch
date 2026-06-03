@@ -3448,6 +3448,38 @@ def _confirm_explicit_thinking_default(runtime):
     return None
 
 
+def _confirm_policy_capability_flags(tokens):
+    flags = {"thinking": [], "reasoning": []}
+    try:
+        from mms_registry.capability_resolver import load_default_model_policy
+
+        policy = load_default_model_policy()
+    except Exception:
+        return flags
+    models = policy.get("models") if isinstance(policy, dict) else {}
+    if not isinstance(models, dict):
+        return flags
+
+    def norm(value):
+        text = str(value or "").strip().lower()
+        return text.rsplit("/", 1)[-1]
+
+    wanted = {norm(token) for token in tokens if norm(token)}
+    for key, entry in models.items():
+        if norm(key) not in wanted or not isinstance(entry, dict):
+            continue
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        if isinstance(caps.get("thinking"), bool):
+            flags["thinking"].append(bool(caps["thinking"]))
+        elif isinstance(caps.get("supports_thinking"), bool):
+            flags["thinking"].append(bool(caps["supports_thinking"]))
+        if isinstance(caps.get("reasoning"), bool):
+            flags["reasoning"].append(bool(caps["reasoning"]))
+        elif isinstance(caps.get("reasoning_effort"), bool):
+            flags["reasoning"].append(bool(caps["reasoning_effort"]))
+    return flags
+
+
 def _confirm_profile_capabilities(model_info, runtime=None):
     tokens = _confirm_model_tokens(model_info)
     fallback_thinking = any(
@@ -3517,6 +3549,13 @@ def _confirm_profile_capabilities(model_info, runtime=None):
             result["default_enabled"] = False
         result["effort_allowed"] = sorted(effort_allowed)
         result["effort_map"] = effort_map
+
+    policy_flags = _confirm_policy_capability_flags(tokens)
+    if policy_flags["thinking"]:
+        result["thinking_supported"] = any(policy_flags["thinking"])
+        result["default_enabled"] = any(policy_flags["thinking"])
+    if policy_flags["reasoning"]:
+        result["effort_supported"] = any(policy_flags["reasoning"])
     return result
 
 

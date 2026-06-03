@@ -1,8 +1,13 @@
 import json
+import threading
+from http.server import ThreadingHTTPServer
+from urllib.request import urlopen
 
 import pytest
 
 import mms_config.web as mms_config_web
+import mms_config_web_assets
+import mms_config_web_server
 import mms_core
 
 
@@ -11,6 +16,16 @@ def _isolate_mms_root_env(monkeypatch):
     # These tests pass explicit config_path values; ambient MMS session env should not reclassify temp roots.
     for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR", "MMS_COMMAND_NAME", "MMS_PREVIEW_MODE"):
         monkeypatch.delenv(key, raising=False)
+
+
+def _frontend_source() -> str:
+    return "\n".join(
+        [
+            mms_config_web._HTML_PAGE,
+            mms_config_web_assets.read_static_asset("config-web.css")[0].decode("utf-8"),
+            mms_config_web_assets.read_static_asset("config-web.js")[0].decode("utf-8"),
+        ]
+    )
 
 
 def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
@@ -71,6 +86,15 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         command_name="mms",
     )
     encoded = json.dumps(snapshot, ensure_ascii=False)
+    encoded_config_scope = json.dumps(
+        {
+            "providers": snapshot["providers"],
+            "accounts": snapshot["accounts"],
+            "account_defaults": snapshot["account_defaults"],
+            "vision_sidecar": snapshot["vision_sidecar"],
+        },
+        ensure_ascii=False,
+    )
 
     assert snapshot["mode"] == "interactive_audited_save"
     assert snapshot["schema"] == "mms.setup_web.snapshot.v2"
@@ -95,11 +119,11 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["accounts"][0]["webui_write_policy"] == "claude_human_only_locked"
     assert snapshot["account_defaults"] == {"claude": "claude-main"}
     assert snapshot["account_write_policy"]["claude"] == "human_only_locked"
-    assert "http://proxy.example" not in encoded
-    assert "http://provider-proxy.example" not in encoded
-    assert "provider.internal" not in encoded
-    assert "localhost" not in encoded
-    assert "/Users/example/.config/mms/accounts/claude-main" not in encoded
+    assert "http://proxy.example" not in encoded_config_scope
+    assert "http://provider-proxy.example" not in encoded_config_scope
+    assert "provider.internal" not in encoded_config_scope
+    assert "localhost" not in encoded_config_scope
+    assert "/Users/example/.config/mms/accounts/claude-main" not in encoded_config_scope
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
@@ -177,9 +201,12 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "validation",
         "fallbacks",
         "runtime",
+        "session_assets",
     ]
     assert {item["id"] for item in snapshot["test_contracts"]} >= {"models_endpoint", "model_ping", "simple_chat"}
     assert snapshot["save_contract"]["requires_confirm_save"] is True
+    assert snapshot["session_assets"]["schema"] == "mms.session_assets.snapshot.v1"
+    assert "preference_snippet" in snapshot["session_assets"]
 
 
 def test_config_web_settings_report_is_read_only_and_lists_gap_status(tmp_path):
@@ -571,6 +598,121 @@ def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     assert rows[0]["source"] == "approved"
 
 
+def test_config_web_model_capability_defaults_cover_mimo_and_minimax_m3():
+    cfg = {
+        "providers": [
+            {
+                "id": "capability-demo",
+                "name": "Capability Demo",
+                "enabled": True,
+                "models_endpoint": "manual",
+                "fallback_models": ["mimo-v2.5", "mimo-v2.5-pro", "MiniMax-M3"],
+            }
+        ],
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(
+        cfg,
+        config_path="/tmp/mms/config.toml",
+        command_name="mms",
+    )
+    rows = {row["id"]: row["capabilities"] for row in snapshot["providers"][0]["models"]}
+
+    assert rows["mimo-v2.5"]["vision"] is True
+    assert rows["mimo-v2.5"]["tool_use"] is True
+    assert rows["mimo-v2.5"]["reasoning"] is True
+    assert rows["mimo-v2.5"]["long_context"] is True
+    assert rows["mimo-v2.5-pro"]["vision"] is False
+    assert rows["mimo-v2.5-pro"]["tool_use"] is True
+    assert rows["mimo-v2.5-pro"]["reasoning"] is True
+    assert rows["MiniMax-M3"]["tool_use"] is True
+    assert rows["MiniMax-M3"]["reasoning"] is True
+    assert rows["MiniMax-M3"]["long_context"] is True
+
+
+def test_config_web_text_capability_false_hides_model_in_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "non-text-embedding-model"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": False,
+        "vision": False,
+        "tool_use": False,
+        "reasoning": False,
+        "long_context": False,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    entry = plan["model_policy"]["models"]["non-text-embedding-model"]
+    assert entry["visible"] is False
+    assert entry["capabilities"]["text"] is False
+
+
+def test_config_web_context_tokens_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "tool_use": True,
+        "reasoning": True,
+        "long_context": False,
+        "context_window_tokens": 1_000_000,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["long_context"] is True
+
+
+def test_config_web_one_m_and_think_capabilities_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "tool_use": True,
+        "reasoning": True,
+        "thinking": True,
+        "one_m_context": True,
+        "cache_sensitive": True,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["long_context"] is True
+    assert caps["one_m_context"] is True
+    assert caps["thinking"] is True
+    assert caps["supports_thinking"] is True
+    assert caps["reasoning"] is True
+    assert caps["cache_sensitive_transport"] is True
+
+
 def test_config_web_json_response_keeps_non_secret_counts_visible():
     _status, body, _content_type = mms_config_web._json_response(
         {
@@ -580,6 +722,7 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
             "runtime_blockers": {"missing_api_key_count": 32, "missing_base_url_count": 0},
             "secret_count": 2,
             "secrets": [{"value": "sk-super-secret-value"}],
+            "model": {"capabilities": {"context_window_tokens": 1_000_000, "max_output_tokens": 131_072}},
         }
     )
     payload = json.loads(body)
@@ -591,6 +734,8 @@ def test_config_web_json_response_keeps_non_secret_counts_visible():
     assert payload["runtime_blockers"]["missing_base_url_count"] == 0
     assert payload["secret_count"] == 2
     assert payload["secrets"] != [{"value": "sk-super-secret-value"}]
+    assert payload["model"]["capabilities"]["context_window_tokens"] == 1_000_000
+    assert payload["model"]["capabilities"]["max_output_tokens"] == 131_072
     assert "sk-super-secret-value" not in body.decode("utf-8")
 
 
@@ -710,6 +855,103 @@ def test_config_web_print_summary_exits_without_server(capsys):
     assert payload["recommendations"]
 
 
+def test_config_web_reexports_split_backend_modules():
+    import mms_config_web_server
+    import mms_config_web_settings
+
+    assert mms_config_web.ConfigWebApp is mms_config_web_server.ConfigWebApp
+    assert mms_config_web.run_config_web is mms_config_web_server.run_config_web
+    assert mms_config_web.build_settings_report is mms_config_web_settings.build_settings_report
+
+
+def test_config_web_frontend_assets_are_external_files():
+    html = mms_config_web._HTML_PAGE
+    css_body, css_type = mms_config_web_assets.read_static_asset("config-web.css")
+    js_body, js_type = mms_config_web_assets.read_static_asset("config-web.js")
+
+    assert '<link rel="stylesheet" href="/static/config-web.css">' in html
+    assert '<script src="/static/config-web.js"></script>' in html
+    assert '<body class="booting" data-ui-mode="default">' in html
+    assert "读取本地配置中" in html
+    assert "/api/migration/export" in js_body.decode("utf-8")
+    assert "/api/migration/start" in js_body.decode("utf-8")
+    assert "迁移 / 分享" in html
+    assert "导入后开工" in html
+    assert "<style>" not in html
+    assert "刷新能力证据入口" not in html
+    assert "这里直接改 MMS 启动会读取的模型能力" in html
+    assert css_type.startswith("text/css")
+    assert js_type.startswith("application/javascript")
+    assert b".panel" in css_body
+    assert b"model-table-wrap" in css_body
+    assert b"cap-toggle-grid" in css_body
+    assert b"body.booting" in css_body
+    assert b"CAPABILITY_META" in js_body
+    assert b"function renderAll" in js_body
+    assert b"setBootMessage" in js_body
+    assert "MMS 自动别名".encode("utf-8") in js_body
+    assert "能力配置".encode("utf-8") in js_body
+    assert "缓存优先".encode("utf-8") in js_body
+    assert "派生 alias".encode("utf-8") not in js_body
+
+
+def test_config_web_server_serves_external_static_assets(tmp_path):
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
+            css_body = response.read()
+            css_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web.js", timeout=3) as response:
+            js_body = response.read()
+            js_type = response.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert css_type.startswith("text/css")
+    assert js_type.startswith("application/javascript")
+    assert b".panel" in css_body
+    assert b"function renderAll" in js_body
+
+
+def test_config_web_server_skips_snapshot_for_shell_and_static_assets():
+    class NoSnapshotApp:
+        def snapshot(self):
+            raise AssertionError("snapshot should only run for data endpoints")
+
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": NoSnapshotApp()})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        with urlopen(f"{url}/", timeout=3) as response:
+            html_body = response.read()
+            html_type = response.headers.get("Content-Type", "")
+        with urlopen(f"{url}/static/config-web.css", timeout=3) as response:
+            css_body = response.read()
+            css_type = response.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert html_type.startswith("text/html")
+    assert css_type.startswith("text/css")
+    assert b'<script src="/static/config-web.js"></script>' in html_body
+    assert b".panel" in css_body
+
+
 def test_config_web_markdown_contains_manual_snippets(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
@@ -730,9 +972,9 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 
 
 def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
-    assert "['source','配置源','root / DB / bundle']" in html
+    assert "['source','配置源','root / DB / bundle','advanced']" in html
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
     assert "status.headline" in html
@@ -760,6 +1002,76 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderApplyResult(data)" in html
+    assert "function assetDraftDiff()" in html
+    assert "能力草稿" in html
+    assert 'data-section="sessionAssets"' in html
+    assert "Skill / MCP 管理" in html
+    assert "这里就是会话能力的配置入口" in html
+    assert "function renderSessionAssets()" in html
+    assert "assetPreferenceSnippet" in html
+    assert "applyAssetPrefs" in html
+    assert "/api/preferences/apply" in html
+    assert "保存偏好" in html
+    assert "assetCards" in html
+    assert "assetControlHelp" in html
+    assert "添加到 MMS 动态" in html
+    assert "MMS managed assets root" in html
+    assert "managed_root" in html
+    assert "在这里开 / 关" in html
+    assert "asset-search" in html
+    assert "asset-list" in html
+    assert "assetManagedRoots" in html
+    assert "function renderAssetManagedRoots()" in html
+    assert "当前加载来源 / 路径诊断" in html
+    assert "MMS 自带动态能力读当前包内 assets/session-assets" in html
+    assert "asset-source-diagnostic" in html
+    assert "roots.filter(Boolean)" in html
+    assert "roots.slice(0,6)" not in html
+    assert ".asset-toolbar .filterbar button.active" in html
+    assert 'aria-pressed="${active?' in html
+    assert "function assetDisableSupported(row)" in html
+    assert "全局 Skill 当前只读展示" in html
+    assert "不可在此关闭" in html
+    assert "function renderAssetRows(rows)" in html
+    assert "assetGroupOpenState" in html
+    assert "data-asset-group-details" in html
+    assert "function assetSkillFamilyHint(name)" in html
+    assert "Lark CLI 技能组" in html
+    assert "整组默认关闭" in html
+    assert "asset-group-cards" in html
+    assert "展开查看各 CLI 的 TUI 确认页能力和来源" in html
+    assert "assetConfirmMap" in html
+    assert "function renderAssetConfirmMap()" in html
+    assert "TUI 确认页对照" in html
+    assert "D / Space" in html
+    assert "assetCliOverview" in html
+    assert "asset-cli-card" in html
+    assert "function renderAssetCliOverview()" in html
+    assert "TUI 确认页同源预览" in html
+    assert "只看这个 CLI" in html
+    assert "全局来源（只读）" in html
+    assert "Tab/C/N/T/E/X/D" in html
+    assert "按开关启用" in html
+    assert "偏好关闭" in html
+    assert "Aptos" in html
+    assert ".asset-card::before" in html
+    assert "overflow-wrap: anywhere" in html
+    assert "本次未保存变化" in html
+    assert "assetPendingBar" in html
+    assert "asset-pending-bar" in html
+    assert "保存并应用" in html
+    assert "备份：复制 TOML 片段" in html
+    assert "查看已检测到的 Global / plugin 位置" in html
+    assert "asset-ops-grid" in html
+    assert "copyAssetPrefs" in html
+    assert "启动确认页仍可临时打开" in html
+    assert "打开位置" in html
+    assert "data-asset-reveal-path" in html
+    assert "/api/path/reveal" in html
+    assert "function assetPathButtons" in html
+    assert "全局继承" in html
+    assert "MMS 动态注入" in html
+    assert "高级信息：路径、触发和 key" in html
     assert "已发布，但 runtime 未就绪" in html
     assert "mmf 会读到这次保存后的最新 bundle" in html
     assert "missing key/base URL" in html
@@ -780,9 +1092,19 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "applyV2Preview').disabled=!preview" in html
     assert "['settings','设置','配置台 / 账号 / 安全']" in html
     assert 'data-section="settings"' in html
-    assert "<h2>设置</h2>" in html
-    assert "这里是 WebUI 配置台" in html
-    assert "把设置从 TUI 迁到可保存的 WebUI 表单" in html
+    assert "<h2>设置工作台</h2>" in html
+    assert "先改会影响 MMS 启动的设置" in html
+    assert "默认模式只放常用设置" in html
+    assert "settings-actionbar" in html
+    assert "settings-priority-grid" not in html
+    assert "配置源 / DB root" in html
+    assert "settings-diagnostic-row" in html
+    assert "默认模式" in html
+    assert "高级模式" in html
+    assert "data-ui-mode-button" in html
+    assert "body[data-ui-mode=\"default\"] .ui-advanced-only" in html
+    assert "localStorage.getItem('mmsConfigWebUiMode')" in html
+    assert "setSection('settings')" in html
     assert "data-settings-tab" in html
     assert "function switchSettingsTab" in html
     assert "Snapshot Guard" in html
@@ -860,6 +1182,12 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "pDeleteConfirm" in html
     assert "deleteProvider" in html
     assert "function deleteCurrentProviderDraft()" in html
+    assert "删除这个通道" in html
+    assert "标记删除" in html
+    assert "保存前不会生效" in html
+    assert "pendingProviderDeletes" in html
+    assert "function undoProviderDeleteDraft" in html
+    assert "已保存 API Key 不会在这一步自动清理" in html
     assert "maintenanceActions" not in html
     assert "/api/settings/report" in html
     assert "人工确认" in html
@@ -905,21 +1233,29 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "renderProviderList();renderTestSelectors();" in html
     assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
-    assert "这是当前通道的模型清单，不是全局模型池" in html
-    assert "手动补充当前通道模型（extra_models" in html
-    assert "添加到补充模型库" in html
+    assert "这里直接改 MMS 启动会读取的模型能力" in html
+    assert "Reasoning Effort" in html
+    assert "Think on/off" in html
+    assert "1M 上下文" in html
+    assert "拉取全部通道模型" in html
+    assert "refreshAllProviderModels" in html
+    assert "保存后不需要 [1m] 后缀" in html
+    assert "刷新能力证据入口" not in html
+    assert "打开通道 1M 设置" not in html
+    assert "不要填 `200`" in html
+    assert "手动添加当前通道模型（extra_models" in html
+    assert "添加为手动模型" in html
     assert "restoreModelPatch" in html
-    assert "恢复默认模型补丁" in html
-    assert "已恢复默认模型补丁" in html
-    assert "当前通道补充模型库（extra_models）" in html
-    assert "不是待删除列表，也不是全局模型池" in html
-    assert "编辑补充模型库" in html
-    assert "从补充库移除" in html
-    assert "移除全部通道未匹配隐藏规则" in html
-    assert "未匹配隐藏规则（hidden_models）" in html
-    assert "不等于远端不存在" in html
-    assert "拉取后自动标记缺失旧 route 为待清理" in html
-    assert "移除当前通道未匹配隐藏规则" in html
+    assert "清空手动添加和隐藏" in html
+    assert "已清空" in html
+    assert "手动添加模型（extra_models）" in html
+    assert "当前通道没有手动添加模型" in html
+    assert "从手动添加中移除" in html
+    assert "清理失效隐藏规则（全部通道）" in html
+    assert "当前隐藏模型（hidden_models）" in html
+    assert "取消表格里的“显示”勾选后" in html
+    assert "高级：拉取后把缺失旧 route 标记为待清理" in html
+    assert "清理当前通道失效隐藏规则" in html
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
@@ -931,7 +1267,7 @@ def test_config_web_allows_pi_in_supported_clis():
 
 
 def test_config_web_fetch_models_does_not_persist_to_fallback_models():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
     assert "不会自动写入 fallback_models" in html
     assert "p.fallback_models=[...new Set(data.models)]" not in html
@@ -966,7 +1302,7 @@ def test_config_web_plan_does_not_materialize_empty_fallback_models(tmp_path):
 
 
 def test_config_web_opencode_agent_overrides_are_advanced_ui():
-    html = mms_config_web._HTML_PAGE
+    html = _frontend_source()
 
     assert "OpenCode 默认 profile" in html
     assert "OpenCode Agent 名单" in html
@@ -1668,6 +2004,412 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
     assert any(path.name == "model-policy.json.bak" for path in bak_paths)
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_migration_export_encrypts_credentials(monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps({"version": 1, "models": {"mimo-v2.5": {"capabilities": {"context_window_tokens": 1000000}}}, "projects": {}}),
+        encoding="utf-8",
+    )
+    preferences_path.write_text(
+        '[launch]\ndisabled_clis = ["pi"]\n\n[session_surfaces.disabled]\nskills = ["lark-doc"]\n',
+        encoding="utf-8",
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["mimo-v2.5"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    monkeypatch.setattr(
+        mms_core,
+        "load_provider_credentials",
+        lambda provider_id="default": {
+            "base_url": "https://demo.example/v1",
+            "openai_base_url": "https://demo.example/v1",
+            "anthropic_base_url": "",
+            "api_key": "sk-migration-secret",
+            "openai_api_key": "",
+        },
+    )
+
+    result = mms_config_web.build_migration_export(
+        cfg,
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(result, ensure_ascii=False)
+
+    assert result["ok"] is True
+    assert result["bundle"]["schema"] == "mms.config_migration_bundle.v1"
+    assert result["bundle"]["security"]["contains_credentials"] is True
+    assert result["bundle"]["encrypted_credentials"]["schema"] == "mms.config_migration_credentials.aesgcm.v1"
+    assert result["summary"]["credentials"] == 1
+    assert result["bundle"]["payload"]["preferences"]["launch"]["disabled_clis"] == ["pi"]
+    assert "sk-migration-secret" not in encoded
+
+
+def test_config_web_migration_export_import_uses_openssl_when_cryptography_missing(monkeypatch, tmp_path):
+    if not mms_config_web._migration_openssl_available():
+        pytest.skip("openssl is required for the no-cryptography migration fallback")
+    monkeypatch.setattr(mms_config_web, "_migration_cryptography_available", lambda: False)
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+    preferences_path = tmp_path / "preferences.toml"
+    config_path.write_text("", encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        mms_core,
+        "load_provider_credentials",
+        lambda provider_id="default": {
+            "base_url": "https://demo.example/v1",
+            "openai_base_url": "https://demo.example/v1",
+            "anthropic_base_url": "",
+            "api_key": "sk-openssl-migration-secret",
+            "openai_api_key": "",
+        },
+    )
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "provider": {"default": "demo"},
+    }
+
+    export = mms_config_web.build_migration_export(
+        cfg,
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert export["ok"] is True
+    assert export["crypto_backend"] == "openssl"
+    assert export["bundle"]["encrypted_credentials"]["schema"] == "mms.config_migration_credentials.openssl-cbc-hmac.v1"
+    assert "sk-openssl-migration-secret" not in json.dumps(export, ensure_ascii=False)
+
+    preview = mms_config_web.build_migration_import_preview(
+        {"providers": []},
+        {"bundle": export["bundle"], "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert preview["ok"] is True
+    assert preview["summary"]["credential_updates"] == 1
+    assert "sk-openssl-migration-secret" not in json.dumps(preview, ensure_ascii=False)
+
+    applied = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {
+            "bundle": export["bundle"],
+            "password": "password123",
+            "confirm_migration": True,
+            "confirm_phrase": "导入配置",
+        },
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    assert applied["ok"] is True
+    assert "sk-openssl-migration-secret" in credentials_path.read_text(encoding="utf-8")
+    assert "sk-openssl-migration-secret" not in json.dumps(applied, ensure_ascii=False)
+
+
+def test_config_web_migration_export_reports_when_no_secret_crypto(monkeypatch, tmp_path):
+    monkeypatch.setattr(mms_config_web, "_migration_cryptography_available", lambda: False)
+    monkeypatch.setattr(mms_config_web, "_migration_openssl_available", lambda: False)
+
+    result = mms_config_web.build_migration_export(
+        {"providers": [{"id": "demo", "api_key": "sk-secret"}]},
+        {"include_credentials": True, "password": "password123"},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mms",
+    )
+
+    assert result["ok"] is False
+    assert result["crypto_backend"] == "none"
+    assert "openssl" in result["errors"][0]
+    assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_config_web_migration_preview_merges_bundle_without_leaking_secret(tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    (tmp_path / "model-policy.json").write_text('{"version":1,"models":{},"projects":{}}\n', encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    credential_box = mms_config_web._migration_encrypt_json(
+        {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "credentials": [
+                {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-import-secret",
+                }
+            ],
+        },
+        "password123",
+    )
+    bundle = {
+        "schema": "mms.config_migration_bundle.v1",
+        "payload": {
+            "config": {
+                "providers": [
+                    {
+                        "id": "demo",
+                        "name": "Demo",
+                        "openai_base_url": "https://demo.example/v1",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["codex"],
+                        "fallback_models": ["gpt-5.5"],
+                    }
+                ],
+                "provider": {"default": "demo"},
+                "presets": {"coding": {"cli": "codex", "model": "gpt-5.5"}},
+            },
+            "model_policy": {
+                "version": 1,
+                "models": {"gpt-5.5": {"visible": True, "capabilities": {"context_window_tokens": 1000000}}},
+                "projects": {},
+            },
+            "preferences": {"launch": {"disabled_clis": ["pi"]}},
+        },
+        "encrypted_credentials": credential_box,
+    }
+
+    preview = mms_config_web.build_migration_import_preview(
+        {"providers": [{"id": "local", "name": "Local Only"}]},
+        {"bundle": bundle, "password": "password123"},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(preview, ensure_ascii=False)
+
+    assert preview["ok"] is True
+    assert preview["summary"]["providers"] == 2
+    assert preview["summary"]["credential_updates"] == 1
+    assert preview["summary"]["preferences_will_write"] is True
+    assert "provider demo" in preview["diffs"]["credentials"]
+    assert preview["config_plan"]["model_policy"]["models"]["gpt-5.5"]["capabilities"]["context_window_tokens"] == 1000000
+    assert "sk-import-secret" not in encoded
+
+
+def test_config_web_migration_apply_requires_confirmation(tmp_path):
+    bundle = {"schema": "mms.config_migration_bundle.v1", "payload": {"config": {"providers": [{"id": "demo"}]}}}
+    result = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {"bundle": bundle, "confirm_migration": False},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mms",
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "确认" in result["errors"][0]
+
+
+def test_config_web_migration_apply_writes_config_credentials_preferences(monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+    preferences_path = tmp_path / "preferences.toml"
+    config_path.write_text("", encoding="utf-8")
+    preferences_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *args, **kwargs: True)
+    credential_box = mms_config_web._migration_encrypt_json(
+        {
+            "schema": "mms.config_migration_credentials_payload.v1",
+            "credentials": [
+                {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-import-apply-secret",
+                }
+            ],
+        },
+        "password123",
+    )
+    bundle = {
+        "schema": "mms.config_migration_bundle.v1",
+        "payload": {
+            "config": {
+                "providers": [
+                    {
+                        "id": "demo",
+                        "name": "Demo",
+                        "openai_base_url": "https://demo.example/v1",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["opencode"],
+                        "fallback_models": ["gpt-5.5"],
+                    }
+                ],
+                "provider": {"default": "demo"},
+                "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+            },
+            "model_policy": {"version": 1, "models": {"gpt-5.5": {"visible": True}}, "projects": {}},
+            "preferences": {"launch": {"disabled_clis": ["pi"]}},
+        },
+        "encrypted_credentials": credential_box,
+    }
+
+    result = mms_config_web.apply_migration_import(
+        {"providers": []},
+        {
+            "bundle": bundle,
+            "password": "password123",
+            "confirm_migration": True,
+            "confirm_phrase": "导入配置",
+        },
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mms",
+    )
+    encoded = json.dumps(result, ensure_ascii=False)
+    saved_prefs = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert result["ok"] is True
+    assert result["status"] == "imported"
+    assert 'id = "demo"' in config_path.read_text(encoding="utf-8")
+    assert "sk-import-apply-secret" in credentials_path.read_text(encoding="utf-8")
+    assert saved_prefs["launch"]["disabled_clis"] == ["pi"]
+    assert result["start_status"]["ready_to_work"] is True
+    assert result["start_status"]["start_command"] == "mms"
+    assert "sk-import-apply-secret" not in encoded
+
+
+def test_config_web_migration_start_status_reports_ready_and_disabled_cli(tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    preferences_path.write_text('[launch]\ndisabled_clis = ["opencode"]\n', encoding="utf-8")
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+    }
+
+    status = mms_config_web.build_migration_start_status(
+        cfg,
+        {},
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+        command_name="mmz1",
+    )
+
+    assert status["schema"] == "mms.config_migration_start_status.v1"
+    assert status["start_command"] == "mmz1"
+    assert status["preferred_cli"] == "opencode"
+    assert status["ready_provider_ids"] == ["demo"]
+    assert status["ready_to_work"] is False
+    assert any(item["id"] == "preferred_cli_disabled" for item in status["blockers"])
+
+
+def test_config_web_migration_start_status_ready_when_provider_is_complete(tmp_path):
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ],
+        "presets": {"coding": {"cli": "opencode", "model": "gpt-5.5"}},
+    }
+
+    status = mms_config_web.build_migration_start_status(
+        cfg,
+        {},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz1",
+    )
+
+    assert status["ready_to_work"] is True
+    assert status["blockers"] == []
+    assert status["copy_command"] == "mmz1"
+
+
+def test_config_web_migration_start_opens_terminal_with_sanitized_command(monkeypatch, tmp_path):
+    calls = []
+
+    class DummyPopen:
+        def __init__(self, args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setattr(mms_config_web.sys, "platform", "darwin")
+    monkeypatch.setattr(mms_config_web.subprocess, "Popen", DummyPopen)
+    cfg = {
+        "providers": [
+            {
+                "id": "demo",
+                "api_key": "sk-ready",
+                "default_openai_base_url": "https://demo.example/v1",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["gpt-5.5"],
+            }
+        ]
+    }
+
+    result = mms_config_web.start_migration_work_session(
+        cfg,
+        {},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz1;rm -rf /",
+    )
+
+    assert result["ok"] is True
+    assert result["command"] == "mms"
+    osascript_calls = [args for args, _kwargs in calls if args and args[0] == "osascript"]
+    assert osascript_calls
+    assert "rm -rf" not in osascript_calls[-1][-1]
 
 
 def test_config_web_legacy_save_blocks_preview_root(tmp_path):
@@ -2477,6 +3219,116 @@ def test_config_web_registry_v2_apply_requires_explicit_preview_confirmation(tmp
     assert not config_root.exists()
 
 
+def test_config_web_preferences_apply_uses_backup_and_audit(tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    preferences_path.write_text(
+        '[launch.defaults]\nbypass = false\n\n[assets.roots]\nweb_access = "/tmp/web"\n',
+        encoding="utf-8",
+    )
+    payload = {
+        "disabled_clis": ["pi", "agy"],
+        "disabled": {"skills": ["web-access", "claude:lark-doc"], "mcp": ["pilot"], "hooks": ["echo hi"]},
+        "assets": {"managed_enabled": True, "managed_root": str(tmp_path / "assets")},
+        "confirm_preferences": True,
+        "confirm_phrase": "保存偏好",
+        "reason": "test:asset-preferences",
+    }
+
+    plan = mms_config_web.build_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    result = mms_config_web.apply_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    saved = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert plan["will_write"] is True
+    assert result["ok"] is True
+    assert result["status"] == "saved"
+    assert result["backup_path"]
+    assert (tmp_path / "config-audit.jsonl").exists()
+    assert saved["launch"]["defaults"]["bypass"] is False
+    assert saved["launch"]["disabled_clis"] == ["pi", "agy"]
+    assert saved["assets"]["roots"]["web_access"] == "/tmp/web"
+    assert saved["assets"]["managed_root"] == str(tmp_path / "assets")
+    assert saved["session_surfaces"]["disabled"]["skills"] == ["web-access", "claude:lark-doc"]
+    assert saved["session_surfaces"]["disabled"]["mcp"] == ["pilot"]
+
+
+def test_config_web_preferences_apply_has_toml_fallback_without_tomli_w(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    preferences_path = tmp_path / "preferences.toml"
+    payload = {
+        "disabled": {"skills": ["web-access"], "mcp": ["hive"], "hooks": []},
+        "assets": {"managed_enabled": True, "managed_root": str(tmp_path / "assets")},
+        "confirm_preferences": True,
+        "confirm_phrase": "保存偏好",
+    }
+
+    monkeypatch.setattr(mms_core, "tomli_w", None)
+    monkeypatch.setattr(
+        mms_core,
+        "_atomic_write_toml",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AttributeError("'NoneType' object has no attribute 'dump'")),
+    )
+
+    result = mms_config_web.apply_preferences_plan(
+        payload,
+        config_path=str(config_path),
+        preferences_path=str(preferences_path),
+    )
+    saved = mms_core._load_toml_file(str(preferences_path))  # noqa: SLF001
+
+    assert result["ok"] is True
+    assert result["status"] == "saved"
+    assert saved["session_surfaces"]["disabled"]["skills"] == ["web-access"]
+    assert saved["session_surfaces"]["disabled"]["mcp"] == ["hive"]
+    assert saved["assets"]["managed_root"] == str(tmp_path / "assets")
+
+
+def test_config_web_preferences_apply_requires_confirmation(tmp_path):
+    result = mms_config_web.apply_preferences_plan(
+        {"disabled": {"skills": ["web-access"]}},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert not (tmp_path / "preferences.toml").exists()
+
+
+def test_config_web_reveal_local_path_opens_finder_without_shell(monkeypatch, tmp_path):
+    target = tmp_path / "skills" / "demo" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# demo\n", encoding="utf-8")
+    calls = []
+
+    class Completed:
+        returncode = 0
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Completed()
+
+    monkeypatch.setattr(mms_config_web.sys, "platform", "darwin")
+    monkeypatch.setattr(mms_config_web.subprocess, "run", fake_run)
+
+    result = mms_config_web.reveal_local_path({"path": str(target)})
+    blocked = mms_config_web.reveal_local_path({"path": "https://example.com/skill"})
+
+    assert result["ok"] is True
+    assert result["status"] == "opened"
+    assert calls == [(["open", "-R", str(target)], {"stdout": mms_config_web.subprocess.DEVNULL, "stderr": mms_config_web.subprocess.DEVNULL, "timeout": 5, "check": False})]
+    assert blocked["ok"] is False
+    assert blocked["status"] == "blocked"
+
+
 def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):
     monkeypatch.setattr(
         mms_config_web,
@@ -2495,8 +3347,48 @@ def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):
 
     assert result["ok"] is True
     assert result["models"] == ["m-a", "m-b"]
+    assert result["model_capabilities"]["m-a"]["text"] is True
+    assert isinstance(result["model_capabilities"]["m-b"], dict)
     assert result["cache_transport_evidence"]["request_path"] == "/models"
     assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch, tmp_path):
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mimo-v2.5": {
+                        "capabilities": {
+                            "one_m_context": True,
+                            "thinking": True,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mms_config_web,
+        "probe_provider_models",
+        lambda provider, force_refresh=False: {
+            "models": ["mimo-v2.5"],
+            "raw_models": ["mimo-v2.5"],
+            "base_source": "remote",
+        },
+    )
+
+    result = mms_config_web.test_provider_models(
+        {"providers": []},
+        {"provider": {"id": "demo", "openai_base_url": "https://demo.example/v1", "api_key": "sk-secret"}},
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = result["model_capabilities"]["mimo-v2.5"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["thinking"] is True
+    assert caps["reasoning"] is True
 
 
 def test_setup_web_requests_are_guard_exempt():

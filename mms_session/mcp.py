@@ -13,6 +13,46 @@ def _launchers():
     return _module
 
 
+def _asset_root_candidates_from_root(root, surface, *names):
+    root = str(root or "").strip()
+    if not root:
+        return []
+    root = os.path.abspath(os.path.expanduser(root))
+    surface = str(surface or "").strip()
+    candidates = []
+    for name in names:
+        raw = str(name or "").strip()
+        if not raw:
+            continue
+        variants = [raw]
+        for alt in (raw.replace("_", "-"), raw.replace("-", "_")):
+            if alt not in variants:
+                variants.append(alt)
+        for variant in variants:
+            if surface:
+                candidates.append(os.path.join(root, surface, variant))
+            candidates.append(os.path.join(root, "packages", variant))
+    deduped = []
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
+def _managed_asset_root_candidates(surface, *names):
+    launchers = _launchers()
+    try:
+        if not launchers.managed_assets_enabled():
+            return []
+        root = str(launchers.managed_assets_root() or "").strip()
+    except Exception:
+        return []
+    return _asset_root_candidates_from_root(root, surface, *names)
+
+
 def resolve_hive_root(module_path=None):
     launchers = _launchers()
     candidates = []
@@ -22,6 +62,7 @@ def resolve_hive_root(module_path=None):
     install_home = str(os.environ.get("HIVE_HOME") or "").strip()
     if install_home:
         candidates.append(os.path.abspath(os.path.expanduser(install_home)))
+    candidates.extend(_managed_asset_root_candidates("mcp", "hive"))
 
     module_dir = os.path.dirname(os.path.abspath(module_path or launchers.__file__))
     local_candidates = [
@@ -70,6 +111,7 @@ def resolve_pilot_root(module_path=None):
     explicit = str(os.environ.get("MMS_PILOT_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend(_managed_asset_root_candidates("mcp", "pilot"))
 
     module_dir = os.path.dirname(os.path.abspath(module_path or launchers.__file__))
     auto_skills_root = os.path.dirname(os.path.dirname(module_dir))

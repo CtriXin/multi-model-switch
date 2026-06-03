@@ -429,6 +429,7 @@ def prepare_claude_session_tree(
     skip_real_entries=None,
     source_claude_dir=None,
     allowed_source_entries=None,
+    disabled_session_surfaces=None,
 ):
     import mms_launchers as _launchers
 
@@ -466,7 +467,20 @@ def prepare_claude_session_tree(
                 continue
             src = os.path.join(scoped_claude_dir, entry)
             dst = os.path.join(session_claude_dir, entry)
-            if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+            if not os.path.exists(src) and not os.path.islink(src):
+                continue
+            if entry == "skills":
+                disabled_names = _launchers._disabled_skill_names_for_cli(disabled_session_surfaces, "claude")
+                if disabled_names:
+                    _launchers._overlay_session_entry_dir(
+                        session_claude_dir,
+                        os.path.join(session_home, ".mms-global-skill-overlay", "claude"),
+                        "skills",
+                        scoped_claude_dir,
+                        exclude_names=disabled_names,
+                    )
+                    continue
+            if os.path.exists(dst) or os.path.islink(dst):
                 continue
             os.symlink(src, dst)
     for entry in _launchers.CLAUDE_PERSISTENT_ENTRIES:

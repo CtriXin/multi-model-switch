@@ -3351,14 +3351,45 @@ def sanitize_asset_roots(payload, *, asset_root_keys):
     return result
 
 
+def sanitize_managed_assets_root(value):
+    path = str(value or "").strip()
+    if not path:
+        return ""
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def sanitize_disabled_clis(value, *, cli_names):
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    allowed = set(cli_names)
+    result = []
+    seen = set()
+    for item in value:
+        cli_name = str(item or "").strip().lower()
+        if not cli_name or cli_name not in allowed or cli_name in seen:
+            continue
+        seen.add(cli_name)
+        result.append(cli_name)
+    return result
+
+
 def sanitize_user_preferences(raw, *, cli_names, asset_root_keys):
     raw = raw if isinstance(raw, dict) else {}
     launch = raw.get("launch") if isinstance(raw.get("launch"), dict) else {}
     session_surfaces = raw.get("session_surfaces") if isinstance(raw.get("session_surfaces"), dict) else {}
     assets = raw.get("assets") if isinstance(raw.get("assets"), dict) else {}
 
-    result = {"launch": {"defaults": {}, "cli": {}}, "session_surfaces": {"disabled": {}}, "assets": {"roots": {}}}
+    result = {
+        "launch": {"defaults": {}, "cli": {}, "disabled_clis": []},
+        "session_surfaces": {"disabled": {}},
+        "assets": {"roots": {}, "managed_enabled": True, "managed_root": ""},
+    }
     result["launch"]["defaults"] = sanitize_launch_preferences(launch.get("defaults"))
+    disabled_clis = sanitize_disabled_clis(launch.get("disabled_clis", launch.get("disabled")), cli_names=cli_names)
+    if disabled_clis:
+        result["launch"]["disabled_clis"] = disabled_clis
     cli_tables = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
     for cli_name, table in cli_tables.items():
         normalized_cli = str(cli_name or "").strip().lower()
@@ -3370,10 +3401,63 @@ def sanitize_user_preferences(raw, *, cli_names, asset_root_keys):
     global_disabled = sanitize_disabled_session_surfaces(session_surfaces.get("disabled"))
     if global_disabled:
         result["session_surfaces"]["disabled"] = global_disabled
+    managed_enabled = pref_bool(assets.get("managed_enabled", assets.get("enabled")))
+    if managed_enabled is not None:
+        result["assets"]["managed_enabled"] = managed_enabled
+    managed_root = sanitize_managed_assets_root(assets.get("managed_root", assets.get("root")))
+    if managed_root:
+        result["assets"]["managed_root"] = managed_root
     roots = sanitize_asset_roots(assets.get("roots"), asset_root_keys=asset_root_keys)
     if roots:
         result["assets"]["roots"] = roots
     return result
+
+
+def managed_assets_enabled(*, load_user_preferences, environ=os.environ):
+    explicit_root = str(environ.get("MMS_MANAGED_ASSETS_ROOT") or environ.get("MMS_ASSETS_ROOT") or "").strip()
+    if explicit_root:
+        return True
+    try:
+        prefs = load_user_preferences()
+    except Exception:
+        prefs = {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    return assets.get("managed_enabled") is not False
+
+
+def managed_assets_root(*, load_user_preferences, resolve_real_user_home, environ=os.environ):
+    explicit = str(environ.get("MMS_MANAGED_ASSETS_ROOT") or environ.get("MMS_ASSETS_ROOT") or "").strip()
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+    try:
+        prefs = load_user_preferences()
+    except Exception:
+        prefs = {}
+    prefs = prefs if isinstance(prefs, dict) else {}
+    assets = prefs.get("assets") if isinstance(prefs.get("assets"), dict) else {}
+    configured = str(assets.get("managed_root") or "").strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    return os.path.join(resolve_real_user_home(), ".local", "share", "mms", "assets")
+
+
+def preference_disabled_clis(prefs, *, cli_names):
+    prefs = prefs if isinstance(prefs, dict) else {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    return set(sanitize_disabled_clis(launch.get("disabled_clis", launch.get("disabled")), cli_names=cli_names))
+
+
+def disabled_clis_for_cfg(cfg, *, cli_names, load_user_preferences):
+    prefs = (cfg or {}).get("_mms_preferences") if isinstance(cfg, dict) else None
+    if not isinstance(prefs, dict):
+        prefs = load_user_preferences()
+    return preference_disabled_clis(prefs, cli_names=cli_names)
+
+
+def cli_disabled_by_preferences(cfg, cli_name, *, cli_names, load_user_preferences):
+    cli_name = str(cli_name or "").strip().lower()
+    return bool(cli_name and cli_name in disabled_clis_for_cfg(cfg, cli_names=cli_names, load_user_preferences=load_user_preferences))
 
 
 def merge_disabled_session_surfaces(*payloads):
@@ -3709,7 +3793,7 @@ def model_context_window(
         return None
     try:
         caps = resolve_model_capabilities(clean)
-        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
+        if caps.get("sources", {}).get("context_window_tokens") in {"approved_facts", "model_policy", "manual_override"}:
             window = int(caps.get("context_window_tokens"))
             if window > 0:
                 return window
@@ -4733,12 +4817,8 @@ def derived_model_aliases(
         aliases.append("claude-sonnet-4-6")
     if any(model_id.startswith("claude-opus-4-") or model_id.startswith("claude-opus-4.") for model_id in claude_tails):
         aliases.append("claude-opus-4-6")
-    if provider_supports_mimo_anthropic_selectors(provider):
-        model_set = set(base_models)
-        for model_id in ("mimo-v2.5-pro", "mimo-v2.5"):
-            selector = f"{model_id}[1m]"
-            if model_id in model_set and selector not in model_set:
-                aliases.append(selector)
+    # MiMo 1M is now controlled by model-policy context_window_tokens. Keep
+    # explicit legacy [1m] selectors from config, but do not invent duplicates.
     return aliases
 
 
@@ -4955,6 +5035,7 @@ def model_capability_tags(
     tool_use_families,
     vision_capable_model_names,
     vision_capable_model_hints,
+    resolve_model_capabilities=None,
 ):
     normalized = str(model_name or "").strip().lower()
     if not normalized:
@@ -4971,6 +5052,13 @@ def model_capability_tags(
         tags.append("tool_use")
     if any(hint in normalized for hint in reasoning_model_hints):
         tags.append("reasoning")
+    if resolve_model_capabilities is not None:
+        try:
+            caps = resolve_model_capabilities(model_name)
+            if caps.get("supports_thinking") is True and caps.get("sources", {}).get("supports_thinking") != "conservative_fallback":
+                tags.append("thinking")
+        except Exception:
+            pass
     context_window = model_context_window(model_name)
     if context_window and context_window >= 200_000:
         tags.append("long_context")
@@ -7713,10 +7801,14 @@ def resolve_visible_clis(
     accounts_for_cli,
     check_cli_installed,
     resolve_provider_for_cli,
+    disabled_clis=(),
 ):
     visible = []
+    disabled = set(disabled_clis or [])
 
     for cli_name in cli_names:
+        if cli_name in disabled:
+            continue
         if cli_name in managed_oauth_clis:
             if accounts_for_cli(cfg, cli_name):
                 visible.append(cli_name)
@@ -9591,6 +9683,7 @@ def manage_provider_models(
     console,
     normalize_model_id_list=normalize_model_id_list,
     normalize_models_endpoint=normalize_models_endpoint,
+    refresh_all_provider_model_defaults=None,
 ):
     ensure_rich()
     changed = False
@@ -9617,7 +9710,8 @@ def manage_provider_models(
             ("5", "移除补充/取消隐藏"),
             ("6", "恢复默认模型补丁"),
             ("7", "编辑模型列表接口"),
-            ("8", "返回"),
+            ("8", "一键刷新全部通道模型默认清单"),
+            ("9", "返回"),
         ]
 
         choice = None
@@ -9634,8 +9728,10 @@ def manage_provider_models(
             ))
             for action_id, action_label in actions:
                 console.print(f"  {action_id}. {action_label}")
-            choice = prompt_ask("选择操作", choices=[action[0] for action in actions], default="8")
+            choice = prompt_ask("选择操作", choices=[action[0] for action in actions], default="9")
         if choice is None:
+            return current_cfg, changed
+        if choice == "9":
             return current_cfg, changed
         if choice == "1":
             if use_tui():
@@ -9724,6 +9820,17 @@ def manage_provider_models(
             )
             console.print(f"[green]✓ 已更新模型列表接口: {new_endpoint}[/green]")
             changed = True
+            continue
+        if choice == "8":
+            if not callable(refresh_all_provider_model_defaults):
+                return current_cfg, changed
+            result = refresh_all_provider_model_defaults(current_cfg, emit_output=True)
+            current_cfg = result.get("config") if isinstance(result.get("config"), dict) else current_cfg
+            console.print(
+                f"[green]✓ 已刷新 {result.get('refreshed_providers', 0)} 个通道默认模型清单，"
+                f"失败 {result.get('failed_providers', 0)} 个；人工 extra/hidden/model-policy 不会被覆盖[/green]"
+            )
+            changed = changed or bool(result.get("refreshed_providers"))
             continue
         return current_cfg, changed
 
@@ -11709,6 +11816,7 @@ def handle_presets_command(
     cfg,
     *,
     preset_has_visible_model_options,
+    preset_cli_enabled=None,
     infer_preset_auth_mode,
     default_provider_id,
     table_cls,
@@ -11718,6 +11826,7 @@ def handle_presets_command(
     visible_presets = {
         name: preset for name, preset in presets.items()
         if preset_has_visible_model_options(preset)
+        and (not callable(preset_cli_enabled) or preset_cli_enabled(preset))
     }
     if visible_presets:
         table = table_cls(title="已保存预设")
@@ -11812,9 +11921,11 @@ def display_preferences_help(*, command_name, preference_paths, preferences_doc_
     console.print(f"  {command_name} config preferences.doc")
     console.print(f"  {command_name} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
+    console.print("  launch.disabled_clis: hide/disable MMS launch targets such as pi or agy")
     console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, caveman_level, nsr_mode, agent_pack, bypass")
-    console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
+    console.print("  launch.cli.<claude|codex|opencode|pi|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
+    console.print("  assets.managed_enabled / assets.managed_root: user-managed MMS session assets")
     console.print("  assets.roots: web_access, weber, agent_browser, codegraph, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")

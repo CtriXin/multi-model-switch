@@ -222,6 +222,7 @@ def build_claude_gateway_env(
             resume_scope_id=resume_scope_id,
             legacy_resume_scope_ids=legacy_resume_scope_ids,
             skip_real_entries={"settings.json"},
+            disabled_session_surfaces=disabled_session_surfaces,
         )
     report = runtime.get("_account_guard_report")
     if report:

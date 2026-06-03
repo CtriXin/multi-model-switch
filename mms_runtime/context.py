@@ -195,6 +195,27 @@ def lookup_context_window(
     if model_exact is not None:
         return model_exact
 
+    def _capability_context_window(accepted_sources):
+        try:
+            resolver = capability_resolver
+            if resolver is None:
+                from mms_registry.capability_resolver import resolve_model_capabilities as resolver
+
+            caps = resolver(clean, provider_id=provider_id or "")
+            if caps.get("sources", {}).get("context_window_tokens") in set(accepted_sources):
+                window = coerce_context_window(caps.get("context_window_tokens"))
+                if window is not None:
+                    return window
+        except Exception:
+            return None
+        return None
+
+    # User policy is the preferred surface for context size. It must win before
+    # the legacy MiMo safe-base guard that otherwise caps plain model names.
+    policy_window = _capability_context_window({"model_policy", "manual_override"})
+    if policy_window is not None:
+        return policy_window
+
     if has_1m_suffix:
         suffixed_window = ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
         if suffixed_window is not None:
@@ -218,17 +239,9 @@ def lookup_context_window(
     if model_clean is not None:
         return model_clean
 
-    try:
-        if capability_resolver is None:
-            from mms_registry.capability_resolver import resolve_model_capabilities as capability_resolver
-
-        caps = capability_resolver(clean, provider_id=provider_id or "")
-        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
-            approved_window = coerce_context_window(caps.get("context_window_tokens"))
-            if approved_window is not None:
-                return approved_window
-    except Exception:
-        pass
+    approved_window = _capability_context_window({"approved_facts", "model_policy", "manual_override"})
+    if approved_window is not None:
+        return approved_window
 
     if profile_context_window_fn is None:
         from mms_registry.provider_profiles import profile_context_window as profile_context_window_fn

@@ -31,7 +31,72 @@ def expand_candidate(value):
     return os.path.abspath(os.path.expanduser(str(value or "").strip()))
 
 
-def resolve_nsr_root(*, module_file, real_user_path_fn, asset_root_preference_fn, environ=os.environ):
+def _asset_root_candidates_from_root(root, surface, *names):
+    root = str(root or "").strip()
+    if not root:
+        return []
+    root = expand_candidate(root)
+    surface = str(surface or "").strip()
+    candidates = []
+    for name in names:
+        raw = str(name or "").strip()
+        if not raw:
+            continue
+        variants = [raw]
+        for alt in (raw.replace("_", "-"), raw.replace("-", "_")):
+            if alt not in variants:
+                variants.append(alt)
+        for variant in variants:
+            if surface:
+                candidates.append(os.path.join(root, surface, variant))
+            candidates.append(os.path.join(root, "packages", variant))
+    deduped = []
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
+def _managed_asset_root_candidates(surface, *names, managed_assets_enabled_fn=None, managed_assets_root_fn=None):
+    if not callable(managed_assets_enabled_fn) or not callable(managed_assets_root_fn):
+        return []
+    try:
+        if not managed_assets_enabled_fn():
+            return []
+        root = str(managed_assets_root_fn() or "").strip()
+    except Exception:
+        return []
+    return _asset_root_candidates_from_root(root, surface, *names)
+
+
+def _bundled_assets_root(module_file):
+    root = os.path.join(_module_dir(module_file), "assets", "session-assets")
+    return root if os.path.isdir(root) else ""
+
+
+def _bundled_asset_root_candidates(module_file, surface, *names):
+    return _asset_root_candidates_from_root(_bundled_assets_root(module_file), surface, *names)
+
+
+def _asset_callback_kwargs(values):
+    return {
+        "managed_assets_enabled_fn": values.get("managed_assets_enabled_fn"),
+        "managed_assets_root_fn": values.get("managed_assets_root_fn"),
+    }
+
+
+def resolve_nsr_root(
+    *,
+    module_file,
+    real_user_path_fn,
+    asset_root_preference_fn,
+    managed_assets_enabled_fn=None,
+    managed_assets_root_fn=None,
+    environ=os.environ,
+):
     candidates = []
     for key in ("MMS_NSR_ROOT", "NSR_ROOT"):
         explicit = str(environ.get(key) or "").strip()
@@ -43,6 +108,8 @@ def resolve_nsr_root(*, module_file, real_user_path_fn, asset_root_preference_fn
     nsr_home = str(environ.get("NSR_HOME") or "").strip()
     if nsr_home:
         candidates.append(expand_candidate(nsr_home))
+    candidates.extend(_managed_asset_root_candidates("packs", "nsr", "non-stop-run", **_asset_callback_kwargs(locals())))
+    candidates.extend(_bundled_asset_root_candidates(module_file, "packs", "nsr", "non-stop-run"))
     candidates.extend([
         os.path.join(_module_dir(module_file), "vendor", "non-stop-run"),
         real_user_path_fn("auto-skills", "shared-skills", "nsr"),
@@ -160,7 +227,15 @@ def default_gpt_reasoning_effort(*, module_path, is_installed_mms_layout_fn):
     return "high" if is_installed_mms_layout_fn(module_path=module_path) else "xhigh"
 
 
-def resolve_caveman_root(*, module_file, real_user_path_fn, asset_root_preference_fn, environ=os.environ):
+def resolve_caveman_root(
+    *,
+    module_file,
+    real_user_path_fn,
+    asset_root_preference_fn,
+    managed_assets_enabled_fn=None,
+    managed_assets_root_fn=None,
+    environ=os.environ,
+):
     candidates = []
     explicit = str(environ.get("MMS_CAVEMAN_ROOT") or "").strip()
     if explicit:
@@ -168,6 +243,8 @@ def resolve_caveman_root(*, module_file, real_user_path_fn, asset_root_preferenc
     pref = asset_root_preference_fn("caveman")
     if pref:
         candidates.append(expand_candidate(pref))
+    candidates.extend(_managed_asset_root_candidates("packs", "caveman", **_asset_callback_kwargs(locals())))
+    candidates.extend(_bundled_asset_root_candidates(module_file, "packs", "caveman"))
     candidates.extend([
         os.path.join(_module_dir(module_file), "vendor", "caveman"),
         real_user_path_fn("auto-skills", "vendor", "caveman"),
@@ -228,7 +305,15 @@ def runtime_omc_enabled(runtime, *, runtime_agent_pack_fn=runtime_agent_pack):
     return runtime_agent_pack_fn(runtime) == "omc"
 
 
-def resolve_ecc_root(*, module_file, real_user_path_fn, asset_root_preference_fn, environ=os.environ):
+def resolve_ecc_root(
+    *,
+    module_file,
+    real_user_path_fn,
+    asset_root_preference_fn,
+    managed_assets_enabled_fn=None,
+    managed_assets_root_fn=None,
+    environ=os.environ,
+):
     candidates = []
     explicit = str(environ.get("MMS_ECC_ROOT") or "").strip()
     if explicit:
@@ -236,6 +321,8 @@ def resolve_ecc_root(*, module_file, real_user_path_fn, asset_root_preference_fn
     pref = asset_root_preference_fn("ecc")
     if pref:
         candidates.append(expand_candidate(pref))
+    candidates.extend(_managed_asset_root_candidates("packs", "ecc", "everything-claude-code", **_asset_callback_kwargs(locals())))
+    candidates.extend(_bundled_asset_root_candidates(module_file, "packs", "ecc", "everything-claude-code"))
     candidates.extend([
         os.path.join(_module_dir(module_file), "agent-packs", "everything-claude-code"),
         os.path.join(_module_dir(module_file), "vendor", "everything-claude-code"),
@@ -254,7 +341,15 @@ def resolve_ecc_root(*, module_file, real_user_path_fn, asset_root_preference_fn
     return _dedupe_existing(candidates, _has_ecc)
 
 
-def resolve_omc_root(*, module_file, real_user_path_fn, asset_root_preference_fn, environ=os.environ):
+def resolve_omc_root(
+    *,
+    module_file,
+    real_user_path_fn,
+    asset_root_preference_fn,
+    managed_assets_enabled_fn=None,
+    managed_assets_root_fn=None,
+    environ=os.environ,
+):
     candidates = []
     explicit = str(environ.get("MMS_OMC_ROOT") or "").strip()
     if explicit:
@@ -262,6 +357,8 @@ def resolve_omc_root(*, module_file, real_user_path_fn, asset_root_preference_fn
     pref = asset_root_preference_fn("omc")
     if pref:
         candidates.append(expand_candidate(pref))
+    candidates.extend(_managed_asset_root_candidates("packs", "omc", "oh-my-claudecode", **_asset_callback_kwargs(locals())))
+    candidates.extend(_bundled_asset_root_candidates(module_file, "packs", "omc", "oh-my-claudecode"))
     candidates.extend([
         os.path.join(_module_dir(module_file), "agent-packs", "oh-my-claudecode"),
         os.path.join(_module_dir(module_file), "vendor", "oh-my-claudecode"),
@@ -289,6 +386,8 @@ def resolve_skill_root(
     real_user_path_fn,
     asset_root_preference_fn,
     module_file,
+    managed_assets_enabled_fn=None,
+    managed_assets_root_fn=None,
     environ=os.environ,
 ):
     candidates = []
@@ -299,6 +398,15 @@ def resolve_skill_root(
     if pref:
         candidates.append(expand_candidate(pref))
     module_dir = _module_dir(module_file)
+    candidates.extend(
+        _managed_asset_root_candidates(
+            "skills",
+            preference_key,
+            preference_key.replace("_", "-"),
+            **_asset_callback_kwargs(locals()),
+        )
+    )
+    candidates.extend(_bundled_asset_root_candidates(module_file, "skills", preference_key, preference_key.replace("_", "-")))
     for origin, parts in default_parts:
         if origin == "module":
             candidates.append(os.path.join(module_dir, *parts))
@@ -360,6 +468,15 @@ def resolve_codegraph_root(**kwargs):
         candidates.append(expand_candidate(pref))
     module_dir = _module_dir(kwargs["module_file"])
     real_user_path_fn = kwargs["real_user_path_fn"]
+    candidates.extend(
+        _managed_asset_root_candidates(
+            "skills",
+            "codegraph",
+            managed_assets_enabled_fn=kwargs.get("managed_assets_enabled_fn"),
+            managed_assets_root_fn=kwargs.get("managed_assets_root_fn"),
+        )
+    )
+    candidates.extend(_bundled_asset_root_candidates(kwargs["module_file"], "skills", "codegraph"))
     candidates.extend(
         [
             os.path.join(module_dir, "vendor", "codegraph"),

@@ -399,7 +399,12 @@ def build_codex_gateway_env(runtime, base_url, model_info=None):
                 continue
             src = os.path.join(real_codex_dir, entry)
             dst = os.path.join(codex_dir, entry)
-            _materialize_codex_session_entry(entry, src, dst)
+            _materialize_codex_session_entry(
+                entry,
+                src,
+                dst,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
     source_roots = [gateway_codex_dir]
     source_roots.extend(sibling_codex_roots)
     source_roots.append(real_codex_dir)

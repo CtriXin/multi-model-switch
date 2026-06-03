@@ -5407,9 +5407,10 @@ def test_preference_allowlist_sanitizers_preserve_runtime_shape(tmp_path):
                 "codex": {"reasoning_effort": "low", "disabled_session_surfaces": {"skills": ["agent-browser"]}},
                 "gemini": {"bypass": True},
             },
+            "disabled_clis": [],
         },
         "session_surfaces": {"disabled": {"mcp": ["pilot"], "hooks": ["/tmp/drop.sh"]}},
-        "assets": {"roots": {"web_access": str(skill_root)}},
+        "assets": {"roots": {"web_access": str(skill_root)}, "managed_enabled": True, "managed_root": ""},
     }
 
 
@@ -7826,7 +7827,7 @@ def test_provider_model_list_helpers_preserve_visibility_cli_and_source_shape():
     assert mms_command_tools.derived_model_aliases(
         ["claude-sonnet-4-5-20250929", "mimo-v2.5"],
         {"id": "mimo-direct", "anthropic_base_url": "https://relay.example/anthropic"},
-    ) == ["claude-sonnet-4-6", "mimo-v2.5[1m]"]
+    ) == ["claude-sonnet-4-6"]
 
     patched = mms_command_tools.apply_provider_model_patch(
         {

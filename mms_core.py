@@ -195,6 +195,9 @@ PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
 # User-owned preference overlay. Install/update never overwrites this file.
 
+[launch]
+disabled_clis = []            # e.g. ["pi", "agy"] hides/disables these MMS launch targets
+
 [launch.defaults]
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
@@ -219,16 +222,20 @@ skills = []                   # e.g. ["agent-browser", "token-saver"]
 mcp = []                      # e.g. ["pilot", "hive"]
 hooks = []                    # hook names or paths shown on confirm screen
 
+[assets]
+managed_enabled = true        # true = read user managed assets root before bundled assets
+managed_root = "~/.local/share/mms/assets"
+
 [assets.roots]
 # Optional custom roots; env vars like MMS_WEB_ACCESS_ROOT still win.
 # web_access = "~/my-skills/web-access"
 # weber = "~/my-skills/weber"
-# codegraph = "~/vendor/codegraph"
-# token_saver = "~/vendor/token-saver"
-# toon = "~/vendor/toon"
+# codegraph = "~/my-skills/codegraph"
+# token_saver = "~/my-skills/token-saver"
+# toon = "~/my-skills/toon"
 # xmem = "~/auto-skills/shared-skills/xmem"
-# caveman = "~/vendor/caveman"
-# nsr = "~/vendor/non-stop-run"
+# caveman = "~/my-packs/caveman"
+# nsr = "~/my-packs/non-stop-run"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
 """
@@ -1012,6 +1019,11 @@ _bridge_clis_for_model = partial(_command_tools.bridge_clis_for_model, infer_mod
 
 
 def _model_capability_tags(model_name):
+    def resolve_capabilities(clean):
+        from mms_registry.capability_resolver import resolve_model_capabilities
+
+        return resolve_model_capabilities(clean)
+
     return _command_tools.model_capability_tags(
         model_name,
         infer_model_family=_infer_model_family,
@@ -1020,6 +1032,7 @@ def _model_capability_tags(model_name):
         tool_use_families=_TOOL_USE_FAMILIES,
         vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
         vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
+        resolve_model_capabilities=resolve_capabilities,
     )
 
 
@@ -1509,6 +1522,8 @@ _sanitize_user_preferences = partial(
     cli_names=CLI_NAMES,
     asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS,
 )
+_sanitize_disabled_clis = partial(_command_tools.sanitize_disabled_clis, cli_names=CLI_NAMES)
+_sanitize_disabled_session_surfaces = _command_tools.sanitize_disabled_session_surfaces
 
 
 def load_user_preferences():
@@ -1530,6 +1545,43 @@ def preference_asset_root(asset_name):
     return preference_asset_root_impl(
         asset_name,
         asset_root_keys=_PREFERENCE_ASSET_ROOT_KEYS,
+        load_user_preferences=load_user_preferences,
+    )
+
+
+def managed_assets_enabled():
+    return _command_tools.managed_assets_enabled(
+        load_user_preferences=load_user_preferences,
+        environ=os.environ,
+    )
+
+
+def managed_assets_root():
+    """Return the stable user-owned MMS assets root without creating it."""
+    return _command_tools.managed_assets_root(
+        load_user_preferences=load_user_preferences,
+        resolve_real_user_home=resolve_real_user_home,
+        environ=os.environ,
+    )
+
+
+def _preference_disabled_clis(prefs):
+    return _command_tools.preference_disabled_clis(prefs, cli_names=CLI_NAMES)
+
+
+def _disabled_clis_for_cfg(cfg):
+    return _command_tools.disabled_clis_for_cfg(
+        cfg,
+        cli_names=CLI_NAMES,
+        load_user_preferences=load_user_preferences,
+    )
+
+
+def _cli_disabled_by_preferences(cfg, cli_name):
+    return _command_tools.cli_disabled_by_preferences(
+        cfg,
+        cli_name,
+        cli_names=CLI_NAMES,
         load_user_preferences=load_user_preferences,
     )
 
@@ -2713,6 +2765,102 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
     )
 
 
+def _model_default_rows_from_probe(provider, probe):
+    models = _normalize_model_id_list((probe or {}).get("models") or [])
+    if not models:
+        return []
+    existing_caps = {}
+    for row in provider.get("models") or []:
+        if not isinstance(row, dict):
+            continue
+        model_id = str(row.get("id") or row.get("model") or "").strip()
+        caps = row.get("capabilities")
+        if model_id and isinstance(caps, dict):
+            existing_caps[model_id] = dict(caps)
+    hidden = {item.lower() for item in _normalize_model_id_list(provider.get("hidden_models") or [])}
+    source = str((probe or {}).get("base_source") or "remote").strip() or "remote"
+    rows = []
+    for model_id in models:
+        row = {
+            "id": model_id,
+            "source": source,
+            "visible": model_id.lower() not in hidden,
+        }
+        if model_id in existing_caps:
+            row["capabilities"] = existing_caps[model_id]
+        rows.append(row)
+    return rows
+
+
+def _update_provider_model_default_rows(cfg, provider_id, probe):
+    updated_cfg = dict(cfg)
+    providers = []
+    changed = False
+    for item in cfg.get("providers", []):
+        if item.get("id") != provider_id:
+            providers.append(item)
+            continue
+        updated = dict(item)
+        rows = _model_default_rows_from_probe(updated, probe)
+        if rows and updated.get("models") != rows:
+            updated["models"] = rows
+            changed = True
+        providers.append(_normalize_provider(updated))
+    updated_cfg["providers"] = providers
+    return updated_cfg, changed
+
+
+def _refresh_all_provider_model_defaults(cfg, *, emit_output=True):
+    current_cfg = dict(cfg)
+    refreshed = 0
+    failed = 0
+    total_models = 0
+    details = []
+    for provider_def in cfg.get("providers", []):
+        provider_id = str(provider_def.get("id") or "").strip()
+        if not provider_id:
+            continue
+        provider = resolve_provider_context(current_cfg, provider_id)
+        if provider.get("enabled") is False:
+            details.append({"provider_id": provider_id, "status": "skipped_disabled", "models": 0})
+            continue
+        probe = _probe_models(provider, emit_output=emit_output, force_refresh=True)
+        models = probe.get("models") or []
+        if probe.get("error") or not models:
+            failed += 1
+            details.append({
+                "provider_id": provider_id,
+                "status": "failed",
+                "models": 0,
+                "error": probe.get("error") or probe.get("error_kind") or "empty_models",
+            })
+            continue
+        current_cfg, changed = _update_provider_model_default_rows(current_cfg, provider_id, probe)
+        detail = {
+            "provider_id": provider_id,
+            "models": len(models),
+            "source": probe.get("base_source") or "remote",
+            "status": "updated_defaults" if changed else "unchanged",
+        }
+        if changed:
+            refreshed += 1
+            total_models += len(models)
+        details.append(detail)
+    if refreshed:
+        save_config(current_cfg)
+        for detail in details:
+            if detail.get("status") == "updated_defaults":
+                _invalidate_probe_cache(detail.get("provider_id"))
+    return {
+        "ok": failed == 0,
+        "refreshed_providers": refreshed,
+        "failed_providers": failed,
+        "total_models": total_models,
+        "details": details,
+        "config": current_cfg,
+    }
+
+
 def _display_provider_model_table(provider, probe):
     from mms_runtime.speed_stats import get_speed_entry
     from mms_commands.tools import display_provider_model_table
@@ -2777,6 +2925,7 @@ def _manage_provider_models(cfg, provider_id):
         normalize_model_id_list=_normalize_model_id_list,
         normalize_models_endpoint=_normalize_models_endpoint,
         update_provider_model_overrides=_update_provider_model_overrides,
+        refresh_all_provider_model_defaults=_refresh_all_provider_model_defaults,
         panel_cls=Panel,
         console=console,
     )
@@ -3810,6 +3959,7 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
         accounts_for_cli=_accounts_for_cli,
         check_cli_installed=check_cli_installed,
         resolve_provider_for_cli=_resolve_provider_for_cli,
+        disabled_clis=_disabled_clis_for_cfg(cfg),
     )
 
 
@@ -6037,6 +6187,7 @@ def main():
         handle_presets_command(
             cfg,
             preset_has_visible_model_options=_preset_has_visible_model_options,
+            preset_cli_enabled=lambda preset: not _cli_disabled_by_preferences(cfg, preset.get("cli")),
             infer_preset_auth_mode=_infer_preset_auth_mode,
             default_provider_id=DEFAULT_PROVIDER_ID,
             table_cls=Table,
@@ -6065,6 +6216,9 @@ def main():
         if p is None:
             return
         cli = p["cli"]
+        if _cli_disabled_by_preferences(cfg, cli):
+            console.print(f"[yellow]预设 {args.preset} 使用的 CLI `{cli}` 已在 preferences.toml 中关闭。[/yellow]")
+            return
         model_info = _preset_model_info(p)
         _trace_record(f'preset "{args.preset}"', cli=cli, model=p.get("model"), provider=p.get("provider"), account=p.get("account"), bridge=p.get("bridge"))
         if args.account or args.provider:
@@ -6100,6 +6254,10 @@ def main():
             target = "opencode"
         elif target != "opencode":
             parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile agent")
+    if target in CLI_NAMES and _cli_disabled_by_preferences(cfg, target):
+        console.print(f"[yellow]{target} 已在 preferences.toml 的 launch.disabled_clis 中关闭。[/yellow]")
+        console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
+        return
 
     if target:
         launch_default = {}

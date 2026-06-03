@@ -13,7 +13,7 @@ def _launchers():
     return _module
 
 
-def overlay_codex_shared_resume(home_dir, session_home):
+def overlay_codex_shared_resume(home_dir, session_home, *, disabled_session_surfaces=None):
     account_codex_dir = os.path.join(home_dir, ".codex")
     real_codex_dir = _launchers()._real_user_path(".codex")
     if os.path.realpath(account_codex_dir) == os.path.realpath(real_codex_dir):
@@ -35,7 +35,12 @@ def overlay_codex_shared_resume(home_dir, session_home):
             continue
         src = os.path.join(account_codex_dir, entry)
         dst = os.path.join(session_codex_dir, entry)
-        _launchers()._materialize_codex_session_entry(entry, src, dst)
+        _launchers()._materialize_codex_session_entry_filtered(
+            entry,
+            src,
+            dst,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
 
     source_roots = [account_codex_dir]
     source_roots.extend(
@@ -50,7 +55,35 @@ def overlay_codex_shared_resume(home_dir, session_home):
     return account_codex_dir
 
 
-def materialize_codex_session_entry(entry, src, dst):
+def materialize_codex_session_entry(entry, src, dst, *, disabled_session_surfaces=None):
+    return materialize_codex_session_entry_filtered(
+        entry,
+        src,
+        dst,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+
+
+def materialize_codex_session_entry_filtered(entry, src, dst, *, disabled_session_surfaces=None):
+    if entry == "skills" and os.path.isdir(src):
+        disabled_names = _launchers()._disabled_skill_names_for_cli(disabled_session_surfaces, "codex")
+        if disabled_names or (os.path.isdir(dst) and not os.path.islink(dst)):
+            if os.path.islink(dst):
+                os.unlink(dst)
+            os.makedirs(dst, exist_ok=True)
+            for child in os.listdir(src):
+                child_dst = os.path.join(dst, child)
+                if child in disabled_names:
+                    if os.path.islink(child_dst) or os.path.isfile(child_dst):
+                        os.unlink(child_dst)
+                    elif os.path.isdir(child_dst):
+                        shutil.rmtree(child_dst)
+                    continue
+                child_src = os.path.join(src, child)
+                if os.path.exists(child_dst) or os.path.islink(child_dst):
+                    continue
+                os.symlink(child_src, child_dst)
+            return
     if os.path.isdir(src) and os.path.isdir(dst):
         os.makedirs(dst, exist_ok=True)
         for child in os.listdir(src):
