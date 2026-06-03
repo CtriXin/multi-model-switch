@@ -28,6 +28,25 @@ def _frontend_source() -> str:
     )
 
 
+def test_config_web_version_display_includes_release_track(monkeypatch):
+    class FakeCore:
+        @staticmethod
+        def _release_version_info():
+            return {
+                "release": "v3.4.0-1-gabc123",
+                "git_branch": "canary",
+                "git_commit": "abc123",
+                "release_track_label": "4.0 Canary Preview",
+            }
+
+    monkeypatch.setattr(mms_config_web, "_load_mms_core", lambda: FakeCore)
+
+    info = mms_config_web._version_info_for_snapshot("mmg")
+
+    assert info["command"] == "mmg"
+    assert info["display"] == "4.0 Canary Preview · canary@abc123"
+
+
 def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     cfg = {
         "providers": [

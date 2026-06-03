@@ -35,6 +35,8 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
 
+当前版本轨道：Stable/Main 继续 `3.x Stable`；Dev / `mmf` 是 `4.0.0-dev` / `4.0 Dev Preview`；Canary / `mmg` 是 `4.0.0-canary` / `4.0 Canary Preview`。小步迭代用 git commit hash 追踪，不为每个小 commit 递增正式 semver；`5.0` 暂不使用。
+
 当前本机维护者命令已固定：`mms` = public installed copy（`/Users/xin/.mms/mms`）；`mmd` = stable worktree（`.worktrees/stable-v3.3-no-db/mms`，root=`/Users/xin/.config/mms`）；`mmf` = dev worktree（`.worktrees/dev/mmf`，root=`/Users/xin/.config/mms-next`）；`mmg` = canary worktree（`.worktrees/canary/mms`，root=`/Users/xin/.config/mms-next`）；`mmm` = main worktree（当前 main 的 `mms`，root=`/Users/xin/.config/mms`）。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
 ## 安装 / 升级

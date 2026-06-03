@@ -914,6 +914,7 @@ def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     assert about_title == "关于 / About"
     assert [label for label, _value in about_info] == [
         "MMS",
+        "版本轨道",
         "MMS 最新",
         "Codex",
         "Codex 最新",

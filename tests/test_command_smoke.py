@@ -3102,6 +3102,7 @@ def test_about_and_snapshot_payload_helpers_preserve_version_actions():
                 "git_commit": "abc123",
                 "install_channel": "latest-tag",
                 "source": "install.sh",
+                "release_track_label": "3.x Stable",
             },
             "mms": {
                 "current": "v9.9.9",
@@ -3136,6 +3137,7 @@ def test_about_and_snapshot_payload_helpers_preserve_version_actions():
 
     assert title == "关于 / About"
     assert ("MMS", "v9.9.9 · 有新版 v9.9.10") in info_lines
+    assert ("版本轨道", "3.x Stable") in info_lines
     assert ("Codex", "codex-cli 0.132.0 · 有新版") in info_lines
     assert ("Claude 最新", "未检查") in info_lines
     assert ("Config", "/tmp/mms/config.toml") in info_lines
@@ -7246,9 +7248,11 @@ def test_start_async_update_check_preserves_interval_running_and_worker_flow():
     assert events == []
 
 
-def test_release_version_info_preserves_installed_and_git_fallbacks():
+def test_release_version_info_preserves_installed_and_git_fallbacks(monkeypatch):
     import mms_commands.tools as mms_command_tools
 
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
     calls = []
     info = mms_command_tools.release_version_info(
         load_version_meta=lambda: {
@@ -7268,6 +7272,10 @@ def test_release_version_info_preserves_installed_and_git_fallbacks():
         "git_commit": "git-value",
         "install_channel": "latest-tag",
         "source": "install.sh",
+        "release_track": "stable",
+        "release_track_series": "3.x",
+        "release_track_version": "3.x-stable",
+        "release_track_label": "3.x Stable",
     }
     assert calls == [
         ("describe", "--tags", "--always", "--dirty"),
@@ -7281,6 +7289,28 @@ def test_release_version_info_preserves_installed_and_git_fallbacks():
     )
     assert fallback["release"] == "abc123"
     assert fallback["installed_version"] == ""
+
+
+def test_release_version_info_uses_command_env_for_dev_and_canary_tracks(monkeypatch):
+    import mms_commands.tools as mms_command_tools
+
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmg")
+    canary = mms_command_tools.release_version_info(
+        load_version_meta=lambda: {"install_channel": "dev", "installed_ref": "dev"},
+        git_output=lambda args: "dev" if args[0] == "branch" else "abc123",
+    )
+    assert canary["release_track"] == "canary"
+    assert canary["release_track_version"] == "4.0.0-canary"
+    assert canary["release_track_label"] == "4.0 Canary Preview"
+
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    dev = mms_command_tools.release_version_info(
+        load_version_meta=lambda: {"install_channel": "canary", "installed_ref": "canary"},
+        git_output=lambda args: "canary" if args[0] == "branch" else "abc123",
+    )
+    assert dev["release_track"] == "dev"
+    assert dev["release_track_version"] == "4.0.0-dev"
+    assert dev["release_track_label"] == "4.0 Dev Preview"
 
 
 def test_git_output_preserves_command_cwd_and_failure_paths():
