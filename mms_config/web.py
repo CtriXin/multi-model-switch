@@ -265,7 +265,7 @@ _DELEGATE_TARGETS = {
         '_opencode_roster_defaults',
         '_strip_empty_provider_model_lists',
     ),
-    'mms_config.web_snapshot': (
+    'mms_config.web_provider_snapshot': (
         '_provider_credentials_status',
         '_provider_derived_model_aliases',
         '_provider_effective_model_rows',
@@ -274,6 +274,8 @@ _DELEGATE_TARGETS = {
         '_runtime_usage_rows',
         '_sanitized_mapping',
         '_usage_summary',
+    ),
+    'mms_config.web_snapshot': (
         'build_config_snapshot',
     ),
     'mms_config.web_docs': (
