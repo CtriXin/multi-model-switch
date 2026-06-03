@@ -3391,6 +3391,96 @@ def test_config_web_provider_model_fetch_returns_policy_capabilities(monkeypatch
     assert caps["reasoning"] is True
 
 
+
+def test_config_web_capability_truth_refresh_uses_structured_source(monkeypatch, tmp_path):
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [
+                {"id": "mimo-v2.5", "visible": True, "capabilities": {"vision": False}},
+            ],
+        },
+        "fields": ["context_window_tokens", "max_output_tokens", "vision", "tool_use", "reasoning", "thinking", "one_m_context"],
+        "refresh_sources": False,
+    }
+
+    monkeypatch.setattr(
+        mms_config_web,
+        "_load_capability_truth_payloads",
+        lambda *_args, **_kwargs: (
+            [
+                {
+                    "_source_path": "official.json",
+                    "models": [
+                        {
+                            "alias": "mimo-v2.5",
+                            "confidence": "official_exact",
+                            "official_context_window_tokens": 1_000_000,
+                            "official_max_output_tokens": 131_072,
+                            "supports_vision": True,
+                            "supports_thinking": True,
+                            "one_million_context": True,
+                            "provider_supported_parameters": ["tools", "tool_choice", "reasoning"],
+                            "evidence": [{"url": "https://example.test/models", "official": True}],
+                        }
+                    ],
+                }
+            ],
+            [],
+            [],
+        ),
+    )
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["mode"] == "draft_only"
+    assert result["matched_model_count"] == 1
+    caps = result["model_capabilities"]["mimo-v2.5"]
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["max_output_tokens"] == 131_072
+    assert caps["vision"] is True
+    assert caps["tool_use"] is True
+    assert caps["reasoning"] is True
+    assert caps["thinking"] is True
+    assert caps["one_m_context"] is True
+    assert result["model_sources"]["mimo-v2.5"]["vision"]["source_layer"] == "official"
+
+
+def test_config_web_capability_truth_button_and_fields_are_present():
+    html = _frontend_source()
+
+    assert "refreshCapabilityTruth" in html
+    assert "/api/model-capabilities/refresh" in html
+    assert "data-truth-field=\"context_window_tokens\"" in html
+    assert "data-truth-field=\"vision\"" in html
+    assert "模型能力真相源" in html
+
+
+def test_config_web_max_output_tokens_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "max_output_tokens": 131_072,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["mimo-v2.5"]["capabilities"]
+    assert caps["max_output_tokens"] == 131_072
+
 def test_setup_web_requests_are_guard_exempt():
     assert mms_core._is_setup_web_request(["setup"])
     assert mms_core._is_setup_web_request(["config", "web"])

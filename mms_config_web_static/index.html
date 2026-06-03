@@ -76,6 +76,22 @@
               <div class="model-inventory-summary" id="modelInventorySummary"></div>
               <div class="card model-controls-card">
                 <p class="muted model-fetch-note">模型拉取可以在本页自助完成，不需要 agent 代跑命令；拉取结果会先进入页面草稿，生成保存预览并发布后才会写入配置。</p>
+                <div class="truth-refresh-box">
+                  <strong>模型能力真相源</strong>
+                  <p class="muted">只刷新能从结构化 source 确认的字段，不用 LLM 读文档；结果先进入草稿，保存预览后才生效。</p>
+                  <div class="checks truth-field-checks">
+                    <label class="check"><input data-truth-field="context_window_tokens" type="checkbox" checked><span>上下文</span></label>
+                    <label class="check"><input data-truth-field="max_output_tokens" type="checkbox" checked><span>输出上限</span></label>
+                    <label class="check"><input data-truth-field="vision" type="checkbox" checked><span>看图</span></label>
+                    <label class="check"><input data-truth-field="tool_use" type="checkbox" checked><span>工具</span></label>
+                    <label class="check"><input data-truth-field="reasoning" type="checkbox" checked><span>推理</span></label>
+                    <label class="check"><input data-truth-field="thinking" type="checkbox" checked><span>Think</span></label>
+                    <label class="check"><input data-truth-field="one_m_context" type="checkbox" checked><span>1M</span></label>
+                  </div>
+                  <div class="btns">
+                    <button id="refreshCapabilityTruth" class="secondary">刷新当前通道能力真相</button>
+                  </div>
+                </div>
                 <div class="btns">
                   <button id="fetchModels">拉取当前通道模型</button>
                   <button id="fetchAllModels" class="secondary">拉取全部通道模型</button>

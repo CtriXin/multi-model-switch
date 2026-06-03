@@ -2722,6 +2722,28 @@
       margin: 0 0 12px;
       max-width: 860px;
     }
+    .truth-refresh-box {
+      display: grid;
+      gap: 10px;
+      margin: 0 0 14px;
+      padding: 13px;
+      border: 1.5px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--accent) 7%, transparent), transparent 42%),
+        color-mix(in oklch, var(--surface) 84%, var(--bg));
+    }
+    .truth-refresh-box p,
+    .truth-refresh-box .btns {
+      margin: 0;
+    }
+    .truth-field-checks {
+      gap: 7px;
+    }
+    .truth-field-checks .check {
+      padding-block: 6px;
+      background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+    }
     .model-controls-card .btns {
       gap: 8px;
       margin-top: 10px;
