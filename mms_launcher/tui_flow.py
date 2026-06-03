@@ -59,21 +59,13 @@ class TuiSettingsActionDeps:
     select_language_tui: Callable[..., Any]
     select_rescue_event_tui: Callable[..., Any]
     save_config: Callable[..., Any]
-    routes_export_loader: Callable[..., Any]
-    registry_cli_loader: Callable[..., Any]
-    registry_truth_tui_payload: Callable[..., Any]
     print_settings_error_report: Callable[..., Any]
     print_settings_result_report: Callable[..., Any]
-    registry_report_payloads: Any
     pause_after_tui_report: Callable[..., Any]
     localize: Callable[..., Any]
     about_status_snapshot: Callable[..., Any]
     about_tui_payload: Callable[..., Any]
     run_about_upgrade: Callable[..., Any]
-    snapshot_guard_tui_payload: Callable[..., Any]
-    handle_guard_command: Callable[..., Any]
-    confirm_guard_accept_from_tui: Callable[..., Any]
-    run_account_mgmt_tui: Callable[..., Any]
     rescue_tools_loader: Callable[..., Any]
     rescue_default_fallback: Callable[..., Any]
     rescue_hot_fallback_enabled_cfg: Callable[..., Any]
@@ -934,11 +926,6 @@ def load_export_model_routes():
     return __import__("mms_registry.router", fromlist=["export_model_routes"]).export_model_routes
 
 
-def load_model_routes_exporter():
-    router = __import__("mms_registry.router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])
-    return router.MODEL_ROUTES_PATH, router.export_model_routes
-
-
 def load_check_and_offer_install():
     return __import__("mms_launcher.installer", fromlist=["check_and_offer_install"]).check_and_offer_install
 
@@ -1352,21 +1339,6 @@ def webui_settings_report_payload(*, localize):
     )
 
 
-def load_registry_cli_tools():
-    from mms_registry.cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
-
-    return {
-        "diff_openrouter_catalog": diff_openrouter_catalog,
-        "fetch_openrouter_catalog": fetch_openrouter_catalog,
-        "publish_approved_bundle": publish_approved_bundle,
-        "refresh_source_snapshots": refresh_source_snapshots,
-        "registry_status": registry_status,
-        "scheduled_refresh": scheduled_refresh,
-        "source_freshness": source_freshness,
-        "verify_approved_bundle": verify_approved_bundle,
-    }
-
-
 def load_rescue_tools():
     from mms_runtime.rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
 
@@ -1415,25 +1387,6 @@ def handle_tui_settings_action(
             "changed": False,
             "settings_changed": language_result.get("changed", False),
         }
-    if settings_action == "routes_export":
-        result = handle_tui_routes_export_settings_action(
-            cfg,
-            export_model_routes_loader=deps.routes_export_loader,
-            console=deps.console,
-        )
-        return {"cfg": cfg, **result}
-    if settings_action == "registry":
-        registry_result = handle_tui_registry_settings_action(
-            registry_cli_loader=deps.registry_cli_loader,
-            registry_truth_tui_payload=deps.registry_truth_tui_payload,
-            select_channel_action_tui=deps.select_channel_action_tui,
-            print_settings_error_report=deps.print_settings_error_report,
-            print_settings_result_report=deps.print_settings_result_report,
-            registry_report_payloads=deps.registry_report_payloads,
-            pause_after_tui_report=deps.pause_after_tui_report,
-            localize=deps.localize,
-        )
-        return {"cfg": cfg, **registry_result}
     if settings_action == "about":
         about_result = handle_tui_about_settings_action(
             about_status_snapshot=deps.about_status_snapshot,
@@ -1444,23 +1397,6 @@ def handle_tui_settings_action(
             console=deps.console,
         )
         return {"cfg": cfg, **about_result}
-    if settings_action == "guard":
-        guard_result = handle_tui_guard_settings_action(
-            cfg,
-            snapshot_guard_tui_payload=deps.snapshot_guard_tui_payload,
-            select_channel_action_tui=deps.select_channel_action_tui,
-            handle_guard_command=deps.handle_guard_command,
-            confirm_guard_accept_from_tui=deps.confirm_guard_accept_from_tui,
-            pause_after_tui_report=deps.pause_after_tui_report,
-            console=deps.console,
-        )
-        return {"cfg": cfg, **guard_result}
-    if settings_action == "account_mgmt":
-        result = handle_tui_account_mgmt_settings_action(
-            cfg,
-            run_account_mgmt_tui=deps.run_account_mgmt_tui,
-        )
-        return {"cfg": cfg, **result}
     if settings_action == "rescue":
         rescue_tools = deps.rescue_tools_loader()
         rescue_result = handle_tui_rescue_settings_action(
@@ -1516,149 +1452,6 @@ def handle_tui_language_settings_action(
     return {"status": "continue", "changed": False}
 
 
-def handle_tui_routes_export_settings_action(
-    cfg,
-    *,
-    export_model_routes_loader,
-    console,
-):
-    try:
-        model_routes_path, export_model_routes = export_model_routes_loader()
-        export_model_routes(cfg, force=True)
-        console.print(f"[green]✓ 已导出 {model_routes_path}[/green]")
-        return {"status": "continue", "success": True}
-    except Exception as e:
-        console.print(f"[red]导出失败: {e}[/red]")
-        return {"status": "continue", "success": False}
-
-
-def handle_tui_registry_settings_action(
-    *,
-    registry_cli_loader,
-    registry_truth_tui_payload,
-    select_channel_action_tui,
-    print_settings_error_report,
-    print_settings_result_report,
-    registry_report_payloads,
-    pause_after_tui_report,
-    localize,
-):
-    registry_cli = registry_cli_loader()
-    status = registry_cli["registry_status"]()
-    registry_title, registry_info, registry_actions = registry_truth_tui_payload(status)
-    registry_action = safe_tui_call(
-        select_channel_action_tui,
-        registry_title,
-        registry_info,
-        registry_actions,
-    )
-    if registry_action == "__interrupt__":
-        return {"status": "interrupt"}
-
-    registry_call_specs = {
-        "check_staleness": (
-            registry_cli["source_freshness"],
-            {},
-            localize("检查 Source Staleness 失败", "Check Source Staleness failed"),
-            registry_report_payloads["source_staleness"],
-        ),
-        "refresh_sources": (
-            registry_cli["refresh_source_snapshots"],
-            {"if_due": False},
-            localize("刷新 Sources 失败", "Refresh Sources failed"),
-            registry_report_payloads["refresh_sources"],
-        ),
-        "refresh_due_sources": (
-            registry_cli["refresh_source_snapshots"],
-            {"if_due": True},
-            localize("刷新 Sources 失败", "Refresh Sources failed"),
-            registry_report_payloads["refresh_sources"],
-        ),
-        "scheduled_dry_run": (
-            registry_cli["scheduled_refresh"],
-            {"dry_run": True, "no_network": True},
-            localize("定时刷新失败", "Scheduled Refresh failed"),
-            registry_report_payloads["scheduled_refresh"],
-        ),
-        "scheduled_no_network": (
-            registry_cli["scheduled_refresh"],
-            {"dry_run": False, "no_network": True},
-            localize("定时刷新失败", "Scheduled Refresh failed"),
-            registry_report_payloads["scheduled_refresh"],
-        ),
-        "fetch_openrouter": (
-            registry_cli["fetch_openrouter_catalog"],
-            {},
-            localize("拉取 OpenRouter Catalog 失败", "Fetch OpenRouter Catalog failed"),
-            registry_report_payloads["openrouter_fetch"],
-        ),
-        "diff_openrouter": (
-            registry_cli["diff_openrouter_catalog"],
-            {"limit": 12},
-            localize("OpenRouter Candidate Diff 失败", "OpenRouter Candidate Diff failed"),
-            registry_report_payloads["openrouter_diff"],
-        ),
-        "publish_approved": (
-            registry_cli["publish_approved_bundle"],
-            {},
-            localize("发布 Approved Bundle 失败", "Publish Approved Bundle failed"),
-            registry_report_payloads["publish_approved"],
-        ),
-        "verify_approved": (
-            registry_cli["verify_approved_bundle"],
-            {},
-            localize("验证 Approved Bundle 失败", "Verify Approved Bundle failed"),
-            registry_report_payloads["verify_approved"],
-        ),
-    }
-
-    if registry_action in registry_call_specs:
-        action_func, kwargs, error_title, payload_func = registry_call_specs[registry_action]
-        try:
-            summary = action_func(**kwargs)
-        except Exception as exc:
-            print_settings_error_report(error_title, exc)
-        else:
-            print_settings_result_report(*payload_func(summary))
-        pause_after_tui_report("按 Enter 返回设置")
-    elif registry_action == "doctor":
-        status = registry_cli["registry_status"]()
-        print_settings_result_report(*registry_report_payloads["doctor"](status))
-        pause_after_tui_report("按 Enter 返回设置")
-    return {"status": "continue"}
-
-
-def handle_tui_guard_settings_action(
-    cfg,
-    *,
-    snapshot_guard_tui_payload,
-    select_channel_action_tui,
-    handle_guard_command,
-    confirm_guard_accept_from_tui,
-    pause_after_tui_report,
-    console,
-):
-    guard_title, guard_info, guard_actions = snapshot_guard_tui_payload()
-    guard_action = safe_tui_call(
-        select_channel_action_tui,
-        guard_title,
-        guard_info,
-        guard_actions,
-    )
-    if guard_action == "__interrupt__":
-        return {"status": "interrupt"}
-    if guard_action == "status":
-        handle_guard_command(["status"], bootstrap_cfg=cfg)
-        pause_after_tui_report("按 Enter 返回设置")
-    elif guard_action == "accept":
-        if confirm_guard_accept_from_tui(cfg):
-            handle_guard_command(["accept"], bootstrap_cfg=cfg)
-        else:
-            console.print("[yellow]已取消接受当前快照。[/yellow]")
-        pause_after_tui_report("按 Enter 返回设置")
-    return {"status": "continue"}
-
-
 def handle_tui_about_settings_action(
     *,
     about_status_snapshot,
@@ -1694,15 +1487,6 @@ def handle_tui_about_settings_action(
             run_about_upgrade(target=upgrade_target)
             pause_after_tui_report("按 Enter 返回关于")
             continue
-
-
-def handle_tui_account_mgmt_settings_action(
-    cfg,
-    *,
-    run_account_mgmt_tui,
-):
-    run_account_mgmt_tui(cfg)
-    return {"status": "continue"}
 
 
 def apply_rescue_default_fallback_action(

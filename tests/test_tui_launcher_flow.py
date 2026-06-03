@@ -23,12 +23,10 @@ from mms_launcher.tui_flow import (
     enforce_confirm_bypass_network_guard,
     ensure_cli_installed_for_launch,
     execute_confirmed_launch,
-    handle_tui_account_mgmt_settings_action,
     handle_tui_about_settings_action,
     handle_tui_broker_action,
     handle_tui_connect_action,
     handle_tui_family_action,
-    handle_tui_guard_settings_action,
     handle_tui_last_action,
     handle_tui_last_used_action,
     handle_tui_launch_candidate_action,
@@ -36,8 +34,6 @@ from mms_launcher.tui_flow import (
     handle_tui_language_settings_action,
     handle_tui_provider_browse_action,
     handle_tui_profile_action,
-    handle_tui_registry_settings_action,
-    handle_tui_routes_export_settings_action,
     handle_tui_rescue_settings_action,
     handle_tui_settings_action,
     handle_rescue_packet_action,
@@ -1728,263 +1724,6 @@ def test_handle_tui_language_settings_action_skips_cancel_invalid_and_interrupt(
     assert calls == []
 
 
-def test_handle_tui_routes_export_settings_action_exports_and_reports_success() -> None:
-    calls = []
-
-    class Console:
-        @staticmethod
-        def print(message):
-            calls.append(("print", message))
-
-    def export_model_routes(cfg, *, force):
-        calls.append(("export", cfg, force))
-
-    result = handle_tui_routes_export_settings_action(
-        {"cfg": True},
-        export_model_routes_loader=lambda: ("/tmp/model-routes.json", export_model_routes),
-        console=Console(),
-    )
-
-    assert result == {"status": "continue", "success": True}
-    assert calls == [
-        ("export", {"cfg": True}, True),
-        ("print", "[green]✓ 已导出 /tmp/model-routes.json[/green]"),
-    ]
-
-
-def test_handle_tui_routes_export_settings_action_reports_loader_or_export_failure() -> None:
-    messages = []
-
-    class Console:
-        @staticmethod
-        def print(message):
-            messages.append(message)
-
-    assert handle_tui_routes_export_settings_action(
-        {},
-        export_model_routes_loader=lambda: (_ for _ in ()).throw(RuntimeError("loader failed")),
-        console=Console(),
-    ) == {"status": "continue", "success": False}
-
-    def export_model_routes(_cfg, *, force):
-        assert force is True
-        raise RuntimeError("export failed")
-
-    assert handle_tui_routes_export_settings_action(
-        {},
-        export_model_routes_loader=lambda: ("/tmp/model-routes.json", export_model_routes),
-        console=Console(),
-    ) == {"status": "continue", "success": False}
-
-    assert messages == [
-        "[red]导出失败: loader failed[/red]",
-        "[red]导出失败: export failed[/red]",
-    ]
-
-
-def test_handle_tui_registry_settings_action_runs_supported_actions() -> None:
-    calls = []
-    selected_actions = iter(["check_staleness", "refresh_due_sources", "scheduled_dry_run", "diff_openrouter", "doctor"])
-
-    def make_cli():
-        return {
-            "registry_status": lambda: calls.append(("status",)) or {"ok": True},
-            "source_freshness": lambda: calls.append(("freshness",)) or {"action": "freshness"},
-            "refresh_source_snapshots": lambda *, if_due: calls.append(("refresh", if_due)) or {"action": "refresh"},
-            "scheduled_refresh": lambda *, dry_run, no_network: calls.append(("scheduled", dry_run, no_network)) or {"action": "scheduled"},
-            "fetch_openrouter_catalog": lambda: calls.append(("fetch",)) or {"action": "fetch"},
-            "diff_openrouter_catalog": lambda *, limit: calls.append(("diff", limit)) or {"action": "diff"},
-            "publish_approved_bundle": lambda: calls.append(("publish",)) or {"action": "publish"},
-            "verify_approved_bundle": lambda: calls.append(("verify",)) or {"action": "verify"},
-        }
-
-    payloads = {
-        "source_staleness": lambda summary: ("fresh title", [summary]),
-        "refresh_sources": lambda summary: ("refresh title", [summary]),
-        "scheduled_refresh": lambda summary: ("scheduled title", [summary]),
-        "openrouter_fetch": lambda summary: ("fetch title", [summary]),
-        "openrouter_diff": lambda summary: ("diff title", [summary]),
-        "publish_approved": lambda summary: ("publish title", [summary]),
-        "verify_approved": lambda summary: ("verify title", [summary]),
-        "doctor": lambda status: ("doctor title", [status]),
-    }
-
-    for _ in range(5):
-        assert handle_tui_registry_settings_action(
-            registry_cli_loader=make_cli,
-            registry_truth_tui_payload=lambda status: calls.append(("payload", status)) or ("Registry", ["info"], []),
-            select_channel_action_tui=lambda title, info, actions: calls.append(("select", title, info, actions)) or next(selected_actions),
-            print_settings_error_report=lambda title, exc: calls.append(("error", title, str(exc))),
-            print_settings_result_report=lambda title, rows, *rest, **kwargs: calls.append(("report", title, rows, rest, kwargs)),
-            registry_report_payloads=payloads,
-            pause_after_tui_report=lambda message: calls.append(("pause", message)),
-            localize=lambda zh, en: zh,
-        ) == {"status": "continue"}
-
-    assert ("freshness",) in calls
-    assert ("refresh", True) in calls
-    assert ("scheduled", True, True) in calls
-    assert ("diff", 12) in calls
-    assert calls.count(("status",)) == 6
-    assert calls.count(("pause", "按 Enter 返回设置")) == 5
-    assert ("report", "fresh title", [{"action": "freshness"}], (), {}) in calls
-    assert ("report", "doctor title", [{"ok": True}], (), {}) in calls
-
-
-def test_handle_tui_registry_settings_action_handles_error_interrupt_and_back() -> None:
-    calls = []
-
-    def make_cli():
-        def fail_refresh(*, if_due):
-            calls.append(("refresh", if_due))
-            raise RuntimeError("refresh failed")
-
-        return {
-            "registry_status": lambda: calls.append(("status",)) or {},
-            "source_freshness": lambda: {},
-            "refresh_source_snapshots": fail_refresh,
-            "scheduled_refresh": lambda *, dry_run, no_network: {},
-            "fetch_openrouter_catalog": lambda: {},
-            "diff_openrouter_catalog": lambda *, limit: {},
-            "publish_approved_bundle": lambda: {},
-            "verify_approved_bundle": lambda: {},
-        }
-
-    payloads = {
-        "source_staleness": lambda summary: ("fresh title", [summary]),
-        "refresh_sources": lambda summary: ("refresh title", [summary]),
-        "scheduled_refresh": lambda summary: ("scheduled title", [summary]),
-        "openrouter_fetch": lambda summary: ("fetch title", [summary]),
-        "openrouter_diff": lambda summary: ("diff title", [summary]),
-        "publish_approved": lambda summary: ("publish title", [summary]),
-        "verify_approved": lambda summary: ("verify title", [summary]),
-        "doctor": lambda status: ("doctor title", [status]),
-    }
-
-    assert handle_tui_registry_settings_action(
-        registry_cli_loader=make_cli,
-        registry_truth_tui_payload=lambda status: ("Registry", [], []),
-        select_channel_action_tui=lambda *_args: "refresh_sources",
-        print_settings_error_report=lambda title, exc: calls.append(("error", title, str(exc))),
-        print_settings_result_report=lambda *_args, **_kwargs: calls.append(("report",)),
-        registry_report_payloads=payloads,
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        localize=lambda zh, en: zh,
-    ) == {"status": "continue"}
-    assert ("error", "刷新 Sources 失败", "refresh failed") in calls
-    assert ("pause", "按 Enter 返回设置") in calls
-
-    assert handle_tui_registry_settings_action(
-        registry_cli_loader=make_cli,
-        registry_truth_tui_payload=lambda status: ("Registry", [], []),
-        select_channel_action_tui=lambda *_args: None,
-        print_settings_error_report=lambda *_args: calls.append(("error",)),
-        print_settings_result_report=lambda *_args, **_kwargs: calls.append(("report",)),
-        registry_report_payloads=payloads,
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        localize=lambda zh, en: zh,
-    ) == {"status": "continue"}
-
-    assert handle_tui_registry_settings_action(
-        registry_cli_loader=make_cli,
-        registry_truth_tui_payload=lambda status: ("Registry", [], []),
-        select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
-        print_settings_error_report=lambda *_args: calls.append(("error",)),
-        print_settings_result_report=lambda *_args, **_kwargs: calls.append(("report",)),
-        registry_report_payloads=payloads,
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        localize=lambda zh, en: zh,
-    ) == {"status": "interrupt"}
-
-
-def test_handle_tui_guard_settings_action_runs_status_or_cancelled_accept() -> None:
-    calls = []
-    cfg = {"cfg": True}
-
-    class Console:
-        @staticmethod
-        def print(message):
-            calls.append(("print", message))
-
-    result = handle_tui_guard_settings_action(
-        cfg,
-        snapshot_guard_tui_payload=lambda: ("Guard", ["info"], [{"id": "status"}]),
-        select_channel_action_tui=lambda title, info, actions: calls.append(("select", title, info, actions)) or "status",
-        handle_guard_command=lambda args, *, bootstrap_cfg: calls.append(("guard", args, bootstrap_cfg)),
-        confirm_guard_accept_from_tui=lambda _cfg: calls.append(("confirm",)) or False,
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        console=Console(),
-    )
-
-    assert result == {"status": "continue"}
-    assert calls == [
-        ("select", "Guard", ["info"], [{"id": "status"}]),
-        ("guard", ["status"], cfg),
-        ("pause", "按 Enter 返回设置"),
-    ]
-
-    calls.clear()
-    result = handle_tui_guard_settings_action(
-        cfg,
-        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
-        select_channel_action_tui=lambda *_args: "accept",
-        handle_guard_command=lambda *_args, **_kwargs: calls.append(("guard",)),
-        confirm_guard_accept_from_tui=lambda cfg_arg: calls.append(("confirm", cfg_arg)) or False,
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        console=Console(),
-    )
-
-    assert result == {"status": "continue"}
-    assert calls == [
-        ("confirm", cfg),
-        ("print", "[yellow]已取消接受当前快照。[/yellow]"),
-        ("pause", "按 Enter 返回设置"),
-    ]
-
-
-def test_handle_tui_guard_settings_action_handles_accept_interrupt_and_back() -> None:
-    calls = []
-    cfg = {}
-
-    assert handle_tui_guard_settings_action(
-        cfg,
-        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
-        select_channel_action_tui=lambda *_args: "accept",
-        handle_guard_command=lambda args, *, bootstrap_cfg: calls.append(("guard", args, bootstrap_cfg)),
-        confirm_guard_accept_from_tui=lambda cfg_arg: calls.append(("confirm", cfg_arg)) or True,
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
-    ) == {"status": "continue"}
-
-    assert calls == [
-        ("confirm", cfg),
-        ("guard", ["accept"], cfg),
-        ("pause", "按 Enter 返回设置"),
-    ]
-
-    calls.clear()
-    assert handle_tui_guard_settings_action(
-        cfg,
-        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
-        select_channel_action_tui=lambda *_args: None,
-        handle_guard_command=lambda *_args, **_kwargs: calls.append(("guard",)),
-        confirm_guard_accept_from_tui=lambda _cfg: calls.append(("confirm",)),
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
-    ) == {"status": "continue"}
-    assert calls == []
-
-    assert handle_tui_guard_settings_action(
-        cfg,
-        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
-        select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
-        handle_guard_command=lambda *_args, **_kwargs: calls.append(("guard",)),
-        confirm_guard_accept_from_tui=lambda _cfg: calls.append(("confirm",)),
-        pause_after_tui_report=lambda message: calls.append(("pause", message)),
-        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
-    ) == {"status": "interrupt"}
-
-
 def test_handle_tui_about_settings_action_handles_back_refresh_and_upgrade() -> None:
     calls = []
     actions = iter(["refresh_versions", "upgrade_codex_cli", "back"])
@@ -2058,19 +1797,6 @@ def test_handle_tui_about_settings_action_handles_interrupt_and_none() -> None:
         pause_after_tui_report=lambda message: calls.append(("pause", message)),
         console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
     ) == {"status": "interrupt"}
-
-
-def test_handle_tui_account_mgmt_settings_action_delegates() -> None:
-    calls = []
-    cfg = {"cfg": True}
-
-    result = handle_tui_account_mgmt_settings_action(
-        cfg,
-        run_account_mgmt_tui=lambda cfg_arg: calls.append(("account_mgmt", cfg_arg)),
-    )
-
-    assert result == {"status": "continue"}
-    assert calls == [("account_mgmt", cfg)]
 
 
 def test_apply_rescue_default_fallback_action_saves_reports_and_pauses() -> None:
@@ -2211,21 +1937,13 @@ def _settings_action_deps(**overrides):
         "select_language_tui": unused,
         "select_rescue_event_tui": unused,
         "save_config": unused,
-        "routes_export_loader": unused,
-        "registry_cli_loader": unused,
-        "registry_truth_tui_payload": unused,
         "print_settings_error_report": unused,
         "print_settings_result_report": unused,
-        "registry_report_payloads": {},
         "pause_after_tui_report": unused,
         "localize": lambda zh, _en: zh,
         "about_status_snapshot": unused,
         "about_tui_payload": unused,
         "run_about_upgrade": unused,
-        "snapshot_guard_tui_payload": unused,
-        "handle_guard_command": unused,
-        "confirm_guard_accept_from_tui": unused,
-        "run_account_mgmt_tui": unused,
         "rescue_tools_loader": unused,
         "rescue_default_fallback": unused,
         "rescue_hot_fallback_enabled_cfg": unused,
