@@ -2310,6 +2310,7 @@ _registry_truth_tui_payload = partial(_command_tools.registry_truth_tui_payload,
 
 from mms_config import reports as _config_reports
 from mms_config import command_guards as _config_command_guards
+from mms_config import display_commands as _config_display_commands
 
 _model_source_status_rows = partial(_config_reports.model_source_status_rows, localize=_L)
 _model_source_status_report_payload = partial(_config_reports.model_source_status_report_payload, localize=_L)
@@ -4661,75 +4662,54 @@ def _config_root_status():
 
 
 def _display_config_root(json_output=False):
-    status = _config_root_status()
-    if json_output:
-        print(json.dumps(status, ensure_ascii=False, sort_keys=True))
-        return
-    console.print("[bold]MMS config root[/bold]")
-    console.print(f"  [cyan]command[/cyan] = {status['command']}")
-    console.print(f"  [cyan]mode[/cyan] = {status['mode']}")
-    console.print(f"  [cyan]root_source[/cyan] = {status['root_source']}")
-    console.print(f"  [cyan]config_root[/cyan] = {status['config_root']}")
-    console.print(f"  [cyan]config_path[/cyan] = {status['config_path']}")
-    console.print(f"  [cyan]credentials_path[/cyan] = {status['credentials_path']}")
-    console.print(f"  [cyan]usage_path[/cyan] = {status['usage_path']}")
-    if status["mode"] == "preview":
-        console.print("[yellow]Preview root:[/yellow] fail closed inside this root; no silent fallback to stable credentials/OAuth.")
-    else:
-        console.print("[dim]Stable root: current default MMS behavior.[/dim]")
+    return _config_display_commands.display_config_root(
+        json_output=json_output,
+        config_root_status=_config_root_status,
+        console=console,
+    )
 
 
 def _display_model_source_status(json_output=False):
-    from mms_registry.cli import _print_model_source_status, model_source_status
-
-    status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
-    if json_output:
-        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_model_source_status(status)
+    return _config_display_commands.display_model_source_status(
+        json_output=json_output,
+        config_dir=PRIMARY_CONFIG_DIR,
+        command_name=current_command(),
+    )
 
 
 def _display_consumer_bundle_status(json_output=False, strict_exit=True):
-    from mms_registry.cli import _print_consumer_bundle_status, consumer_bundle_status
-
-    summary = consumer_bundle_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config bundle")
-    if json_output:
-        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_consumer_bundle_status(summary)
-    return 0 if not strict_exit or summary.get("verified") is True else 2
+    return _config_display_commands.display_consumer_bundle_status(
+        json_output=json_output,
+        strict_exit=strict_exit,
+        config_dir=PRIMARY_CONFIG_DIR,
+        command_name=current_command(),
+    )
 
 
 def _display_registry_v2_save_plan(json_output=False):
-    from mms_registry.cli import _print_registry_v2_save_plan, registry_v2_save_plan
-
-    plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
-    if json_output:
-        print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_registry_v2_save_plan(plan)
+    return _config_display_commands.display_registry_v2_save_plan(
+        json_output=json_output,
+        config_dir=PRIMARY_CONFIG_DIR,
+        command_name=current_command(),
+    )
 
 
 def _display_preview_doctor(json_output=False, strict_exit=False):
-    from mms_registry.cli import _print_preview_doctor, preview_doctor
-
-    summary = preview_doctor(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config doctor")
-    if json_output:
-        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_preview_doctor(summary)
-    return 0 if not strict_exit or summary.get("ready") is True else 2
+    return _config_display_commands.display_preview_doctor(
+        json_output=json_output,
+        strict_exit=strict_exit,
+        config_dir=PRIMARY_CONFIG_DIR,
+        command_name=current_command(),
+    )
 
 
 def _display_preview_check(json_output=False, strict_exit=True):
-    from mms_registry.cli import _print_preview_check, preview_check
-
-    summary = preview_check(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config check")
-    if json_output:
-        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_preview_check(summary)
-    return 0 if not strict_exit or summary.get("ready") is True else 2
+    return _config_display_commands.display_preview_check(
+        json_output=json_output,
+        strict_exit=strict_exit,
+        config_dir=PRIMARY_CONFIG_DIR,
+        command_name=current_command(),
+    )
 
 
 def _display_config_v2_promotion_plan(
@@ -4740,82 +4720,31 @@ def _display_config_v2_promotion_plan(
     stable_config_dir=None,
     command_name=None,
 ):
-    from mms_registry.cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
-
-    summary = config_v2_promotion_plan(
+    return _config_display_commands.display_config_v2_promotion_plan(
+        json_output=json_output,
+        strict_exit=strict_exit,
         preview_config_dir=preview_config_dir or PRIMARY_CONFIG_DIR,
         stable_config_dir=stable_config_dir,
         command_name=command_name or f"{current_command()} config promote-plan",
     )
-    if json_output:
-        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_config_v2_promotion_plan(summary)
-    return 0 if not strict_exit or summary.get("ready_for_human_review") is True else 2
 
 
 def _display_config_v2_migration_plan(args_rest):
-    status = mms_config_root_status(command=current_command())
-    default_preview_root = (
-        status.get("config_root")
-        if status.get("mode") == "preview"
-        else status.get("preview_root")
-    ) or PRIMARY_CONFIG_DIR
-    default_stable_root = status.get("stable_root") or PRIMARY_CONFIG_DIR
-    parser = argparse.ArgumentParser(
-        prog=f"{current_command()} migrate config-v2",
-        description="Read-only config v2 migration/promotion plan; stops at the human gate.",
-    )
-    parser.add_argument("--preview-config-dir", "--config-dir", default=default_preview_root)
-    parser.add_argument("--stable-config-dir", default=default_stable_root)
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--strict-exit", action="store_true")
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="Reserved; this command remains read-only and reports apply_enabled=false.",
-    )
-    args = parser.parse_args(args_rest)
-    return _display_config_v2_promotion_plan(
-        json_output=bool(args.json),
-        strict_exit=bool(args.strict_exit),
-        preview_config_dir=args.preview_config_dir,
-        stable_config_dir=args.stable_config_dir,
-        command_name=f"{current_command()} migrate config-v2",
+    return _config_display_commands.display_config_v2_migration_plan(
+        args_rest,
+        config_root_status=lambda: mms_config_root_status(command=current_command()),
+        primary_config_dir=PRIMARY_CONFIG_DIR,
+        command_name=current_command(),
     )
 
 
 def _display_config_v2_release_readiness(args_rest):
-    status = mms_config_root_status(command=current_command())
-    default_preview_root = (
-        status.get("config_root")
-        if status.get("mode") == "preview"
-        else status.get("preview_root")
-    ) or PRIMARY_CONFIG_DIR
-    default_stable_root = status.get("stable_root") or PRIMARY_CONFIG_DIR
-    parser = argparse.ArgumentParser(
-        prog=f"{current_command()} config release-readiness",
-        description="Read-only config v2 / 4.0 readiness audit; stops at the stable human gate.",
+    return _config_display_commands.display_config_v2_release_readiness(
+        args_rest,
+        config_root_status=lambda: mms_config_root_status(command=current_command()),
+        primary_config_dir=PRIMARY_CONFIG_DIR,
+        command_name=current_command(),
     )
-    parser.add_argument("--preview-config-dir", "--config-dir", default=default_preview_root)
-    parser.add_argument("--stable-config-dir", default=default_stable_root)
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--strict-exit", action="store_true")
-    args = parser.parse_args(args_rest)
-
-    from mms_registry.cli import _print_config_v2_release_readiness, config_v2_release_readiness
-
-    summary = config_v2_release_readiness(
-        preview_config_dir=args.preview_config_dir,
-        stable_config_dir=args.stable_config_dir,
-        command_name=f"{current_command()} config release-readiness",
-    )
-    if args.json:
-        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        _print_config_v2_release_readiness(summary)
-    return 0 if not bool(args.strict_exit) or summary.get("ready_for_human_gate") is True else 2
-
 
 def _display_preferences_path():
     from mms_commands.tools import display_preferences_path
