@@ -650,48 +650,34 @@ _normalize_priority = partial(_command_tools.normalize_priority, default_priorit
 _canonical_model_family = partial(_command_tools.canonical_model_family, model_families=MODEL_FAMILIES)
 
 
-def _normalize_family_priority_overrides(value):
-    return _command_tools.normalize_family_priority_overrides(
-        value,
-        model_families=MODEL_FAMILIES,
-        default_priority=DEFAULT_PRIORITY,
-    )
-
-
-def _runtime_priority_for_family(runtime, family_name):
-    return _command_tools.runtime_priority_for_family(
-        runtime,
-        family_name,
-        canonical_model_family=_canonical_model_family,
-        normalize_priority=_normalize_priority,
-        default_priority=DEFAULT_PRIORITY,
-    )
-
-
-def _runtime_priority_for_model(runtime, model_name):
-    return _command_tools.runtime_priority_for_model(
-        runtime,
-        model_name,
-        infer_model_family=_infer_model_family,
-        runtime_priority_for_family=_runtime_priority_for_family,
-    )
-
-
-def _runtime_with_priority(runtime, *, model_name="", family_name=""):
-    return _command_tools.runtime_with_priority(
-        runtime,
-        model_name=model_name,
-        family_name=family_name,
-        canonical_model_family=_canonical_model_family,
-        infer_model_family=_infer_model_family,
-        runtime_priority_for_family=_runtime_priority_for_family,
-        normalize_priority=_normalize_priority,
-        default_priority=DEFAULT_PRIORITY,
-    )
-
-
-def _normalize_claude_1m_mode(value, default="auto"):
-    return _command_tools.normalize_claude_1m_mode(value, default=default, valid_modes=VALID_CLAUDE_1M_MODES)
+_normalize_family_priority_overrides = partial(
+    _command_tools.normalize_family_priority_overrides,
+    model_families=MODEL_FAMILIES,
+    default_priority=DEFAULT_PRIORITY,
+)
+_runtime_priority_for_family = partial(
+    _command_tools.runtime_priority_for_family,
+    canonical_model_family=_canonical_model_family,
+    normalize_priority=_normalize_priority,
+    default_priority=DEFAULT_PRIORITY,
+)
+_runtime_priority_for_model = partial(
+    _command_tools.runtime_priority_for_model,
+    infer_model_family=_infer_model_family,
+    runtime_priority_for_family=_runtime_priority_for_family,
+)
+_runtime_with_priority = partial(
+    _command_tools.runtime_with_priority,
+    canonical_model_family=_canonical_model_family,
+    infer_model_family=_infer_model_family,
+    runtime_priority_for_family=_runtime_priority_for_family,
+    normalize_priority=_normalize_priority,
+    default_priority=DEFAULT_PRIORITY,
+)
+_normalize_claude_1m_mode = partial(
+    _command_tools.normalize_claude_1m_mode,
+    valid_modes=VALID_CLAUDE_1M_MODES,
+)
 
 
 def _normalize_timezone_name(value, default=DEFAULT_ACCOUNT_TIMEZONE):
@@ -732,27 +718,18 @@ _ACCOUNT_CA_ENV_KEYS = (
 _url_matches_host_suffix = _command_tools.url_matches_host_suffix
 
 
-def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
-    from mms_commands.tools import runtime_should_disable_ambient_env
-
-    return runtime_should_disable_ambient_env(
-        runtime,
-        target_url=target_url,
-        official_hosts=_ANTHROPIC_OFFICIAL_HOSTS,
-        url_matches_host_suffix=_url_matches_host_suffix,
-    )
-
-
-def _scrub_account_command_env(env):
-    from mms_commands.tools import scrub_account_command_env
-
-    return scrub_account_command_env(
-        env,
-        prefix_blocklist=_ACCOUNT_ENV_PREFIX_BLOCKLIST,
-        proxy_env_keys=_ACCOUNT_PROXY_ENV_KEYS,
-        fake_env_keys=_ACCOUNT_FAKE_ENV_KEYS,
-        ca_env_keys=_ACCOUNT_CA_ENV_KEYS,
-    )
+_runtime_should_disable_ambient_env = partial(
+    _command_tools.runtime_should_disable_ambient_env,
+    official_hosts=_ANTHROPIC_OFFICIAL_HOSTS,
+    url_matches_host_suffix=_url_matches_host_suffix,
+)
+_scrub_account_command_env = partial(
+    _command_tools.scrub_account_command_env,
+    prefix_blocklist=_ACCOUNT_ENV_PREFIX_BLOCKLIST,
+    proxy_env_keys=_ACCOUNT_PROXY_ENV_KEYS,
+    fake_env_keys=_ACCOUNT_FAKE_ENV_KEYS,
+    ca_env_keys=_ACCOUNT_CA_ENV_KEYS,
+)
 
 
 def _runtime_httpx_kwargs(runtime, *, target_url=""):
@@ -912,15 +889,11 @@ def _normalize_provider(provider):
     )
 
 
-def _normalize_supported_clis(value, protocols=None):
-    from mms_commands.tools import normalize_supported_clis
-
-    return normalize_supported_clis(
-        value,
-        protocols=protocols,
-        cli_names=CLI_NAMES,
-        legacy_provider_cli_aliases=LEGACY_PROVIDER_CLI_ALIASES,
-    )
+_normalize_supported_clis = partial(
+    _command_tools.normalize_supported_clis,
+    cli_names=CLI_NAMES,
+    legacy_provider_cli_aliases=LEGACY_PROVIDER_CLI_ALIASES,
+)
 
 
 def _ensure_provider_config(cfg):
@@ -944,16 +917,14 @@ def _ensure_account_config(cfg):
     )
 
 
-def _normalize_preset_entry(name, preset):
-    from mms_commands.tools import normalize_preset_entry
-
-    return normalize_preset_entry(name, preset, normalize_account_id=_normalize_account_id)
-
-
-def _normalize_presets_config(cfg):
-    from mms_commands.tools import normalize_presets_config
-
-    return normalize_presets_config(cfg, normalize_preset_entry=_normalize_preset_entry)
+_normalize_preset_entry = partial(
+    _command_tools.normalize_preset_entry,
+    normalize_account_id=_normalize_account_id,
+)
+_normalize_presets_config = partial(
+    _command_tools.normalize_presets_config,
+    normalize_preset_entry=_normalize_preset_entry,
+)
 
 
 def _normalize_config_sections(cfg):
@@ -971,16 +942,15 @@ def _normalize_config_sections(cfg):
     )
 
 
-def _normalize_user_config(cfg):
-    from mms_commands.tools import normalize_user_config
-
-    return normalize_user_config(cfg, mode_all=MODE_ALL, normalize_user_role=normalize_user_role)
+_normalize_user_config = partial(
+    _command_tools.normalize_user_config,
+    mode_all=MODE_ALL,
+    normalize_user_role=normalize_user_role,
+)
 
 
 def _normalize_cache_config(cfg):
-    from mms_commands.tools import normalize_cache_config
-
-    return normalize_cache_config(
+    return _command_tools.normalize_cache_config(
         cfg,
         probe_async_refresh_after=_PROBE_ASYNC_REFRESH_AFTER,
         probe_async_min_interval=_PROBE_ASYNC_MIN_INTERVAL,
@@ -3305,16 +3275,14 @@ def fetch_models(provider):
     return fetch_models_helper(provider, probe_models=_probe_models)
 
 
-def _model_validation_findings(provider, probe):
-    from mms_commands.tools import model_validation_findings
-
-    return model_validation_findings(provider, probe, provider_label=_provider_label)
-
-
-def _build_model_recovery_actions(cfg, provider, probe):
-    from mms_commands.tools import build_model_recovery_actions
-
-    return build_model_recovery_actions(cfg, provider, probe, provider_map=_provider_map)
+_model_validation_findings = partial(
+    _command_tools.model_validation_findings,
+    provider_label=_provider_label,
+)
+_build_model_recovery_actions = partial(
+    _command_tools.build_model_recovery_actions,
+    provider_map=_provider_map,
+)
 
 
 def _print_model_probe_details(probe):

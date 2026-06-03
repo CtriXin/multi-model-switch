@@ -152,8 +152,14 @@ from mms_launcher.exec import (
     print_session_summary as _print_session_summary_impl,
 )
 from mms_launcher.export import (
+    dedupe_path_parts as _dedupe_path_parts,
+    inject_selected_model_name as _inject_selected_model_name,
     launcher_script_path as _launcher_script_path,
     real_home_wrapper_scrub_lines as _real_home_wrapper_scrub_lines_impl,
+    selected_model_name as _selected_model_name,
+    set_session_home_hint as _set_session_home_hint,
+    truthy as _truthy,
+    write_real_home_script as _write_real_home_script,
     xmem_cli_path as _xmem_cli_path_impl,
 )
 from mms_registry.provider_profiles import profile_context_window, resolve_provider_profile
@@ -570,12 +576,6 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     )
 
 
-def _truthy(value):
-    from mms_launcher.export import truthy
-
-    return truthy(value)
-
-
 def _rescue_default_fallback_config(env=None):
     from mms_launcher.export import rescue_default_fallback_config
 
@@ -682,12 +682,6 @@ def _install_host_context_env(env, *, cli, runtime=None, model_info=None, sessio
     )
 
 
-def _set_session_home_hint(env, session_home):
-    from mms_launcher.export import set_session_home_hint
-
-    return set_session_home_hint(env, session_home)
-
-
 def _set_codex_soft_home(env, session_home):
     """Keep real HOME for tools; isolate Codex config/auth in CODEX_HOME."""
     from mms_launcher.export import set_codex_home_hint, set_codex_soft_home
@@ -708,18 +702,6 @@ def _set_opencode_soft_home(env, session_home):
         real_user_path=_real_user_path,
         set_session_home_hint=_set_session_home_hint,
     )
-
-
-def _selected_model_name(*candidates, model_info=None):
-    from mms_launcher.export import selected_model_name
-
-    return selected_model_name(*candidates, model_info=model_info)
-
-
-def _inject_selected_model_name(env, *candidates, model_info=None):
-    from mms_launcher.export import inject_selected_model_name
-
-    return inject_selected_model_name(env, *candidates, model_info=model_info)
 
 
 def _install_session_packet_env(
@@ -2161,12 +2143,6 @@ def _filter_real_home_wrapper_path(path_value, *, session_home=None):
     )
 
 
-def _dedupe_path_parts(parts):
-    from mms_launcher.export import dedupe_path_parts
-
-    return dedupe_path_parts(parts)
-
-
 def _real_home_wrapper_search_path(session_home, env=None):
     from mms_launcher.export import real_home_wrapper_search_path
 
@@ -2179,12 +2155,6 @@ def _real_home_wrapper_search_path(session_home, env=None):
         dedupe_path_parts=_dedupe_path_parts,
         cli_search_dirs=cli_search_dirs,
     )
-
-
-def _write_real_home_script(path, lines):
-    from mms_launcher.export import write_real_home_script
-
-    return write_real_home_script(path, lines)
 
 
 def _install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env):
