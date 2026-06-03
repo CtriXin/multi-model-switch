@@ -22,7 +22,8 @@ SECONDS = {
     "weekly": 7 * 24 * 60 * 60,
     "manual": 10**12,
 }
-REMIND_FETCH_TIMEOUT_SEC = 3
+REMIND_FOREGROUND_WAIT_SEC = 2
+REMIND_BACKGROUND_STALE_SEC = 5 * 60
 
 
 def real_home() -> Path:
@@ -81,6 +82,13 @@ def mark_checked(args: argparse.Namespace, state: dict, payload: dict | None = N
     save_state(state)
 
 
+def update_state_entry(args: argparse.Namespace, state: dict, patch: dict) -> None:
+    key = state_key(args)
+    entry = state.get(key) if isinstance(state.get(key), dict) else {}
+    state[key] = {**entry, **patch}
+    save_state(state)
+
+
 def state_key(args: argparse.Namespace) -> str:
     root = str(Path(args.root).expanduser()) if args.root else args.public_entry or "public"
     return f"{args.command}:{args.kind}:{root}:{args.remote}:{args.branch}:{args.cadence}"
@@ -131,6 +139,132 @@ def ahead_behind(args: argparse.Namespace) -> dict:
     return {"head": head, "remote": remote, "ahead": left, "behind": right, "remote_ref": remote_ref}
 
 
+def update_check_result(args: argparse.Namespace) -> dict:
+    ok, detail = fetch_remote(args)
+    if not ok:
+        return {"error": detail}
+    return ahead_behind(args)
+
+
+def update_message(args: argparse.Namespace, result: dict) -> tuple[str, bool]:
+    if not isinstance(result, dict):
+        return "", False
+    if result.get("error"):
+        return f"· {args.command} update check skipped: {result['error']}", True
+    ahead = int(result.get("ahead") or 0)
+    behind = int(result.get("behind") or 0)
+    if behind and not ahead:
+        return (
+            f"· {args.command}/{args.branch} 有 {behind} 个远端更新；继续启动当前版本。"
+            f"要更新请运行 `{args.command} update`。",
+            False,
+        )
+    if ahead and behind:
+        return (
+            f"· {args.command}/{args.branch} 与 {args.remote}/{args.branch} 已分叉：ahead {ahead}, behind {behind}；"
+            f"继续启动当前版本，需手动整理后再更新。",
+            False,
+        )
+    if ahead:
+        return f"· {args.command}/{args.branch} 本地领先 {ahead} 个 commit；继续启动当前版本，需要同步时先 push 或手动整理。", False
+    return "", False
+
+
+def print_update_message(args: argparse.Namespace, result: dict) -> None:
+    message, is_error = update_message(args, result)
+    if message:
+        print(message, file=sys.stderr if is_error else sys.stdout)
+
+
+def take_pending_result(args: argparse.Namespace, state: dict) -> dict | None:
+    key = state_key(args)
+    entry = state.get(key) if isinstance(state.get(key), dict) else {}
+    pending = entry.pop("pending_result", None)
+    entry.pop("pending_result_at", None)
+    if pending is not None:
+        state[key] = entry
+        save_state(state)
+    return pending if isinstance(pending, dict) else None
+
+
+def store_background_result(args: argparse.Namespace, result: dict) -> None:
+    state = load_state()
+    update_state_entry(
+        args,
+        state,
+        {
+            "last_check_ts": now_ts(),
+            "last_check_at": datetime.now(timezone.utc).isoformat(),
+            "pending_result": dict(result),
+            "pending_result_at": datetime.now(timezone.utc).isoformat(),
+            "background_check_started_ts": 0,
+            "background_check_started_at": "",
+            **dict(result),
+        },
+    )
+
+
+def background_check_inflight(args: argparse.Namespace, state: dict) -> bool:
+    entry = state.get(state_key(args)) if isinstance(state.get(state_key(args)), dict) else {}
+    try:
+        started = float(entry.get("background_check_started_ts") or 0)
+    except (TypeError, ValueError):
+        started = 0
+    return bool(started and now_ts() - started < REMIND_BACKGROUND_STALE_SEC)
+
+
+def mark_background_check_started(args: argparse.Namespace) -> None:
+    state = load_state()
+    update_state_entry(
+        args,
+        state,
+        {
+            "background_check_started_ts": now_ts(),
+            "background_check_started_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+def background_check(args: argparse.Namespace) -> int:
+    store_background_result(args, update_check_result(args))
+    return 0
+
+
+def spawn_background_check(args: argparse.Namespace) -> subprocess.Popen | None:
+    mark_background_check_started(args)
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "background-check",
+        "--command",
+        args.command,
+        "--kind",
+        args.kind,
+        "--root",
+        args.root,
+        "--branch",
+        args.branch,
+        "--remote",
+        args.remote,
+        "--cadence",
+        args.cadence,
+        "--public-entry",
+        args.public_entry,
+    ]
+    try:
+        return subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        store_background_result(args, {"error": f"background check failed: {exc}"})
+    return None
+
+
 def public_remind(args: argparse.Namespace) -> int:
     state = load_state()
     if not due(args, state):
@@ -153,23 +287,24 @@ def remind(args: argparse.Namespace) -> int:
     if args.kind == "public":
         return public_remind(args)
     state = load_state()
+    pending = take_pending_result(args, state)
+    if pending:
+        print_update_message(args, pending)
+        state = load_state()
     if not due(args, state):
         return 0
-    ok, detail = fetch_remote(args, timeout=REMIND_FETCH_TIMEOUT_SEC)
-    if not ok:
-        print(f"· {args.command} update check skipped: {detail}", file=sys.stderr)
-        mark_checked(args, state, {"error": detail})
+    if background_check_inflight(args, state):
         return 0
-    info = ahead_behind(args)
-    ahead = info["ahead"]
-    behind = info["behind"]
-    if behind and not ahead:
-        print(f"· {args.command}/{args.branch} 有 {behind} 个远端更新；运行 `{args.command} update` fast-forward。")
-    elif ahead and behind:
-        print(f"· {args.command}/{args.branch} 与 {args.remote}/{args.branch} 已分叉：ahead {ahead}, behind {behind}；不会自动更新。")
-    elif ahead:
-        print(f"· {args.command}/{args.branch} 本地领先 {ahead} 个 commit；需要同步时先 push 或手动整理。")
-    mark_checked(args, state, info)
+    proc = spawn_background_check(args)
+    if proc is None:
+        return 0
+    try:
+        proc.wait(timeout=REMIND_FOREGROUND_WAIT_SEC)
+    except subprocess.TimeoutExpired:
+        return 0
+    pending = take_pending_result(args, load_state())
+    if pending:
+        print_update_message(args, pending)
     return 0
 
 
@@ -226,7 +361,7 @@ def status(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MMS local channel update helper")
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("remind", "update", "status"):
+    for name in ("remind", "update", "status", "background-check"):
         p = sub.add_parser(name)
         p.add_argument("--command", required=True)
         p.add_argument("--kind", choices=["worktree", "public"], default="worktree")
@@ -247,6 +382,8 @@ def main(argv: list[str] | None = None) -> int:
         return update(args)
     if args.action == "status":
         return status(args)
+    if args.action == "background-check":
+        return background_check(args)
     return 2
 
 
