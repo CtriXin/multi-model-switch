@@ -3827,6 +3827,11 @@ def test_config_web_capability_truth_button_and_fields_are_present():
     assert "providerPayloadForCapabilityRefresh" in html
     assert "fieldsForCapabilityRefresh" in html
     assert "field!=='tool_use'" in html
+    assert "capabilityRefreshBusy" in html
+    assert "setCapabilityRefreshBusy" in html
+    assert "aria-busy" in html
+    assert "能力刷新进行中，请稍等" in html
+    assert "button.is-loading" in html
     assert "工具（手动项）" in html
     assert "capability_touched:true" in html
     assert "有变化的草稿" in html

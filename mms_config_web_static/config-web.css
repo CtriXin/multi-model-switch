@@ -881,6 +881,20 @@
       background: color-mix(in oklch, var(--danger) 82%, black);
     }
     button:disabled, .button:disabled { opacity: .45; cursor: not-allowed; }
+    button.is-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    button.is-loading::after {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 999px;
+      animation: buttonSpin .75s linear infinite;
+    }
 
     .btns {
       display: flex;
@@ -1925,6 +1939,9 @@
     @keyframes loadingSweep {
       0% { background-position: 120% 0; }
       100% { background-position: -120% 0; }
+    }
+    @keyframes buttonSpin {
+      to { transform: rotate(360deg); }
     }
     @keyframes bootPulse {
       0%, 100% { opacity: .72; }
