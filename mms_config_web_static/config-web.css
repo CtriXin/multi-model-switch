@@ -304,6 +304,53 @@
     .module-report {
       margin-top: 14px;
     }
+    .review-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0;
+    }
+    .review-tabs button.active {
+      border-color: color-mix(in oklch, var(--accent) 38%, var(--border));
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+    .review-panel {
+      display: none;
+    }
+    .review-panel.active {
+      display: block;
+    }
+    .policy-change-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .policy-change-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: color-mix(in oklch, var(--surface) 90%, var(--bg));
+      padding: 12px;
+    }
+    .policy-change-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .policy-change-table {
+      width: 100%;
+      margin-top: 10px;
+      border-collapse: collapse;
+    }
+    .policy-change-table th,
+    .policy-change-table td {
+      border-top: 1px solid var(--border);
+      padding: 7px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
     .model-inventory-summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
