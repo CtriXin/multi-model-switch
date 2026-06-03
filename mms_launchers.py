@@ -9842,12 +9842,19 @@ def _backfill_project_store_claude_resume_files(target_projects_dir, current_cwd
     if not projects_root.is_dir():
         return
     current_cwd = os.path.realpath(current_cwd or _safe_getcwd())
+    current_path_variants = {
+        os.path.realpath(path)
+        for path in _claude_resume_project_path_variants(current_cwd)
+        if str(path or "").strip()
+    }
+    current_path_variants.add(current_cwd)
     for metadata_path in projects_root.glob("*/claude/state/metadata.json"):
         try:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if os.path.realpath(str(payload.get("canonical_path") or "")) != current_cwd:
+        canonical_path = os.path.realpath(str(payload.get("canonical_path") or ""))
+        if canonical_path not in current_path_variants:
             continue
         source_projects_dir = metadata_path.parents[1] / "raw" / "projects"
         if os.path.realpath(str(source_projects_dir)) == os.path.realpath(target_projects_dir):

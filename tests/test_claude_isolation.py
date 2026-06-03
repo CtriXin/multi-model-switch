@@ -158,12 +158,14 @@ def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monk
 
 def test_backfill_project_store_resume_files_cross_account_and_path_alias(monkeypatch, tmp_path, scoped_store):
     import mms_launchers
+    import mms_project_store
     from mms_project_store import claude_raw_entry_path, ensure_claude_project_store
 
     project_dir = tmp_path / "repo"
     work_dir = project_dir / "work"
     work_dir.mkdir(parents=True)
     monkeypatch.setattr(mms_launchers, "canonical_project_path", lambda _path=None: str(project_dir.resolve()))
+    monkeypatch.setattr(mms_project_store, "canonical_project_path", lambda _path=None: str(project_dir.resolve()))
 
     ensure_claude_project_store(str(work_dir), account_id="relay-a")
     ensure_claude_project_store(str(work_dir), account_id="relay-b")
