@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import errno
 import json
 import threading
 import traceback
@@ -239,13 +240,25 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args: Any) -> None:
         return
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+    @staticmethod
+    def _client_disconnected(exc: BaseException) -> bool:
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return True
+        return isinstance(exc, OSError) and exc.errno in {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED}
+
+    def _send(self, status: int, body: bytes, content_type: str) -> bool:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        except OSError as exc:
+            if self._client_disconnected(exc):
+                return False
+            raise
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
