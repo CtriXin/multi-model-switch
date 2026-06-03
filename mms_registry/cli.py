@@ -1521,6 +1521,7 @@ def preview_prepare(
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     root = root.expanduser()
     source_root = Path(source_config_dir).expanduser() if source_config_dir is not None else root
+    command_root = command_name.split()[0] if command_name else "mmf"
     init_summary = init_config_root(config_dir=root, create_db=True, command_name=command_name)
     pre_import_backup = backup_registry_db(config_dir=root, reason="preview-prepare") if not bool(init_summary.get("db_created")) else {"skipped": True, "reason": "new_db"}
     import_summary = import_legacy_config(
@@ -1530,11 +1531,76 @@ def preview_prepare(
         include_secrets=bool(include_secrets),
         command_name=command_name,
     )
+    route_candidates = import_summary.get("route_candidates") if isinstance(import_summary.get("route_candidates"), dict) else {}
+    secret_backend = import_summary.get("secret_backend") if isinstance(import_summary.get("secret_backend"), dict) else {}
+    import_stage = {
+        "provider_count": import_summary.get("provider_count", 0),
+        "model_count": import_summary.get("model_count", 0),
+        "conflict_count": import_summary.get("conflict_count", 0),
+        "provider_route_count": route_candidates.get("provider_route_count", 0),
+        "secret_backend_count": secret_backend.get("secret_count", 0),
+    }
+    base_stages = {
+        "init": {
+            "db_initialized": bool(init_summary.get("db_initialized")),
+            "db_created": bool(init_summary.get("db_created")),
+            "layout_dirs": len(init_summary.get("layout_dirs") or []),
+        },
+        "backup": {
+            "skipped": bool(pre_import_backup.get("skipped")),
+            "reason": str(pre_import_backup.get("reason") or ""),
+            "backup_path": str(pre_import_backup.get("backup_path") or ""),
+        },
+        "import": import_stage,
+    }
+    if int(route_candidates.get("provider_route_count") or 0) <= 0:
+        next_action = {
+            "label": "打开 preview WebUI 配置",
+            "command": f"{command_root} config web",
+        }
+        return {
+            "schema": "mms.preview_prepare.v1",
+            "ok": False,
+            "ready": False,
+            "result": "NO_ROUTE_CANDIDATES",
+            "status": "blocked",
+            "error": "source config has no enabled provider fallback_models/extra_models to import",
+            "config_root": str(root),
+            "source_config_root": str(source_root),
+            "include_secrets": bool(include_secrets),
+            "stages": {
+                **base_stages,
+                "publish": {
+                    "skipped": True,
+                    "reason": "no_route_candidates",
+                    "route_count": 0,
+                    "provider_route_count": 0,
+                    "runtime_ready": False,
+                    "missing_api_key_count": 0,
+                    "missing_base_url_count": 0,
+                },
+                "verify": {
+                    "skipped": True,
+                    "reason": "no_route_candidates",
+                    "verified": False,
+                    "file_count": 0,
+                },
+            },
+            "doctor": {
+                "status": "needs_config",
+                "next_actions": [next_action],
+            },
+            "next_action": next_action,
+            "writes": {
+                "target_preview_root": True,
+                "source_root": False,
+                "secret_backend": bool(include_secrets),
+            },
+        }
+
     publish_summary = publish_preview_bundle(config_dir=root)
     verify_summary = verify_approved_bundle(config_dir=root)
     doctor_summary = preview_doctor(config_dir=root, command_name=command_name)
-    route_candidates = import_summary.get("route_candidates") if isinstance(import_summary.get("route_candidates"), dict) else {}
-    secret_backend = import_summary.get("secret_backend") if isinstance(import_summary.get("secret_backend"), dict) else {}
     return {
         "schema": "mms.preview_prepare.v1",
         "ok": bool(verify_summary.get("verified")) and doctor_summary.get("status") in {"ready", "verified_not_runtime_ready"},
@@ -1544,23 +1610,7 @@ def preview_prepare(
         "source_config_root": str(source_root),
         "include_secrets": bool(include_secrets),
         "stages": {
-            "init": {
-                "db_initialized": bool(init_summary.get("db_initialized")),
-                "db_created": bool(init_summary.get("db_created")),
-                "layout_dirs": len(init_summary.get("layout_dirs") or []),
-            },
-            "backup": {
-                "skipped": bool(pre_import_backup.get("skipped")),
-                "reason": str(pre_import_backup.get("reason") or ""),
-                "backup_path": str(pre_import_backup.get("backup_path") or ""),
-            },
-            "import": {
-                "provider_count": import_summary.get("provider_count", 0),
-                "model_count": import_summary.get("model_count", 0),
-                "conflict_count": import_summary.get("conflict_count", 0),
-                "provider_route_count": route_candidates.get("provider_route_count", 0),
-                "secret_backend_count": secret_backend.get("secret_count", 0),
-            },
+            **base_stages,
             "publish": {
                 "route_count": publish_summary.get("route_count", 0),
                 "provider_route_count": publish_summary.get("provider_route_count", 0),
@@ -4299,6 +4349,8 @@ def _print_preview_prepare(summary: dict[str, Any]) -> None:
     print(f"result={summary.get('result')}")
     print(f"ready={summary.get('ready')}")
     print(f"ok={summary.get('ok')}")
+    if summary.get("error"):
+        print(f"error={summary.get('error')}")
     print(f"config_root={summary.get('config_root')}")
     print(f"source_config_root={summary.get('source_config_root')}")
     print(f"include_secrets={summary.get('include_secrets')}")
@@ -4665,6 +4717,8 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_preview_prepare(summary)
+        if summary.get("ok") is not True:
+            return 2
         return 0 if not bool(args.strict_exit) or summary.get("ready") is True else 2
     if args.subcommand == "init-root":
         try:

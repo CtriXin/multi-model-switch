@@ -1167,6 +1167,8 @@ def test_install_completion_hints_include_config_web_and_v2_preview_gate():
     assert "$NEXT_MMF_CMD preview prepare" in text
     assert "$NEXT_MMF_CMD config web" in text
     assert "以后需要排查时再运行:" in text
+    assert "legacy_config_has_route_candidates" in text
+    assert "没有检测到可迁移的旧模型路由" in text
 
 
 def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):
