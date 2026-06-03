@@ -30,14 +30,14 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 | 通道 | 固定关系 | Config root | 安装命令 | 适合谁 | 更新节奏 | 质量预期 |
 |---|---|---|---|---|---|---|
 | Stable | `Stable == main == MMD/mmd` | `~/.config/mms` | `--channel stable` | 普通用户、主力生产环境 | 慢，最终固定到 `main` | 纯稳定上线版本，完整 smoke 后推进 |
-| Dev | `Dev == dev branch == MMF/mmf` | `~/.config/mms-next` | `--channel dev` | 作者自己的日常工作机、需要最新修复的人 | 快，跟随 `dev` 分支 | 开发中稳定，targeted tests 通过 |
-| Canary | `Canary == canary branch == MMG/mmg` | `~/.config/mms-next` | `--channel canary` | 每天测试的实验机器 / session | 最快，可每日同步 | 小步高频 commit，允许短期破，但必须方便回滚 |
+| Dev | `Dev == dev branch == MMF/mmf` | `~/.config/mms-next` | `--channel dev` | 需要最新修复、愿意接受小幅波动的开发用户 | 快，跟随 `dev` 分支 | 开发中稳定，targeted tests 通过 |
+| Canary | `Canary == canary branch == MMG/mmg` | `~/.config/mms-next` | `--channel canary` | 专门测试新功能或验证修复的用户 | 最快，可每日同步 | 小步高频 commit，允许短期破，但必须方便回滚 |
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
 
 当前版本轨道：Stable/Main 继续 `3.x Stable`；Dev / `mmf` 是 `4.0.0-dev` / `4.0 Dev Preview`；Canary / `mmg` 是 `4.0.0-canary` / `4.0 Canary Preview`。小步迭代用 git commit hash 追踪，不为每个小 commit 递增正式 semver；`5.0` 暂不使用。
 
-当前本机维护者命令已固定：`mms` = public installed copy（`/Users/xin/.mms/mms`）；`mmd` = stable worktree（`.worktrees/stable-v3.3-no-db/mms`，root=`/Users/xin/.config/mms`）；`mmf` = dev worktree（`.worktrees/dev/mmf`，root=`/Users/xin/.config/mms-next`）；`mmg` = canary worktree（`.worktrees/canary/mms`，root=`/Users/xin/.config/mms-next`）；`mmm` = main worktree（当前 main 的 `mms`，root=`/Users/xin/.config/mms`）。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
+维护者本地开发命令矩阵：`mms` = public installed copy（`/Users/xin/.mms/mms`）；`mmd` = stable worktree（`.worktrees/stable-v3.3-no-db/mms`，root=`/Users/xin/.config/mms`）；`mmf` = dev worktree（`.worktrees/dev/mmf`，root=`/Users/xin/.config/mms-next`）；`mmg` = canary worktree（`.worktrees/canary/mms`，root=`/Users/xin/.config/mms-next`）；`mmm` = main worktree（当前 main 的 `mms`，root=`/Users/xin/.config/mms`）。普通用户不需要配置这些 worktree 命令，只需要使用安装器提供的 channel 参数；维护者重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
 ## 安装 / 升级
 
@@ -49,7 +49,7 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
 ```
 
-### Dev：推荐给你的两台工作机保持同状态
+### Dev：推荐给需要最新修复的开发用户
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
@@ -177,9 +177,9 @@ caveman_mode = "enable"
 caveman_level = "light" # light | standard | full
 ```
 
-### 另一台电脑应该装什么？
+### 多台电脑应该装什么？
 
-如果那台是你的家里工作机，建议和白天机器一样安装 `Dev`，并尽量 pin 到同一个 commit / channel。Stable 更适合给别人或生产环境；Canary 更适合专门测试。
+如果多台机器需要保持一致，建议使用同一个 channel，并在必要时用 `--ref <commit-or-tag>` 固定到同一版本。Stable 更适合生产环境；Dev 适合需要最新修复的开发环境；Canary 更适合专门测试。
 
 ## 内建能力包
 
