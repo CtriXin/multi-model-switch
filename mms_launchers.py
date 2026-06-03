@@ -6218,10 +6218,9 @@ def _load_project_scoped_claude_resume_session_id(
     resume_model="",
 ):
     normalized_project = os.path.realpath(str(project_path or "").strip())
-    normalized_account_id = str(account_id or "").strip()
-    normalized_runtime_kind = str(runtime_kind or "").strip()
-    normalized_resume_model = _claude_resume_model_name(resume_model)
-    if not normalized_project or not normalized_account_id:
+    # Native Claude resume is project-scoped. MMS should not hide a resumable
+    # conversation just because the current launch uses another model/provider.
+    if not normalized_project:
         return None
     try:
         sessions = list_indexed_sessions("claude")
@@ -6230,24 +6229,11 @@ def _load_project_scoped_claude_resume_session_id(
 
     candidates: list[tuple[str, str]] = []
     for session in sessions:
-        if str(session.get("account_id") or "").strip() != normalized_account_id:
-            continue
         session_project = os.path.realpath(
             str(session.get("project_path") or session.get("cwd") or "").strip()
         )
         if session_project != normalized_project:
             continue
-        session_runtime_kind = str(session.get("runtime_kind") or "").strip()
-        if normalized_runtime_kind and session_runtime_kind and session_runtime_kind != normalized_runtime_kind:
-            continue
-        if normalized_resume_model:
-            session_resume_model = _claude_resume_model_name(
-                session.get("resume_model"),
-                session.get("display_model"),
-                session.get("selected_model"),
-            )
-            if session_resume_model != normalized_resume_model:
-                continue
         session_id = str(session.get("session_id") or "").strip()
         if not session_id or session_id.startswith("pid-"):
             continue
@@ -9795,7 +9781,35 @@ def _claude_slot_roots_for_resume_backfill(account_id):
     normalized_account_id = _normalized_claude_slot_account(account_id)
     if normalized_account_id:
         roots.append(_real_user_path(".config", "mms", "accounts", normalized_account_id, "s"))
+    accounts_root = _real_user_path(".config", "mms", "accounts")
+    if os.path.isdir(accounts_root):
+        for name in os.listdir(accounts_root):
+            candidate = os.path.join(accounts_root, name, "s")
+            if candidate not in roots:
+                roots.append(candidate)
     return roots
+
+
+def _backfill_project_store_claude_resume_files(target_projects_dir, current_cwd):
+    try:
+        from mms_project_store import get_projects_dir
+    except Exception:
+        return
+    projects_root = get_projects_dir()
+    if not projects_root.is_dir():
+        return
+    current_cwd = os.path.realpath(current_cwd or _safe_getcwd())
+    for metadata_path in projects_root.glob("*/claude/state/metadata.json"):
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if os.path.realpath(str(payload.get("canonical_path") or "")) != current_cwd:
+            continue
+        source_projects_dir = metadata_path.parents[1] / "raw" / "projects"
+        if os.path.realpath(str(source_projects_dir)) == os.path.realpath(target_projects_dir):
+            continue
+        _copy_tree_files_if_missing(str(source_projects_dir), target_projects_dir)
 
 
 def _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd):
@@ -9828,6 +9842,7 @@ def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, acco
     expected_account = _normalized_claude_slot_account(account_id)
 
     _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
+    _backfill_project_store_claude_resume_files(target_projects_dir, current_cwd)
 
     for slots_root in _claude_slot_roots_for_resume_backfill(expected_account):
         if not os.path.isdir(slots_root):
@@ -9842,9 +9857,6 @@ def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, acco
             if not isinstance(marker, dict):
                 continue
             if os.path.realpath(str(marker.get("cwd") or "")) != current_cwd:
-                continue
-            marker_account = _normalized_claude_slot_account(marker.get("account_id"))
-            if expected_account and marker_account != expected_account:
                 continue
             source_projects_dir = os.path.join(slot_home, ".claude", "projects")
             if os.path.realpath(source_projects_dir) == os.path.realpath(target_projects_dir):
