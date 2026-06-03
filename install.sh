@@ -4583,37 +4583,50 @@ fi
 echo ""
 if [ -x "$BIN_DIR/mms" ]; then
     DID_LAUNCH=0
+    PREVIEW_CHANNEL_INSTALL=0
+    if [ "$INSTALL_CHANNEL" = "dev" ] || [ "$INSTALL_CHANNEL" = "canary" ]; then
+        PREVIEW_CHANNEL_INSTALL=1
+    fi
+    NEXT_MMF_CMD="mmf"
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+        NEXT_MMF_CMD="$BIN_DIR/mmf"
+    fi
+
     echo "===================================="
     echo "  ✅ $(t "MMS 安装完成" "MMS install completed")"
     echo "===================================="
     echo ""
-    echo "  $(t "运行" "Run") $BIN_DIR/mms $(t "开始使用 / 升级后继续使用" "to start using MMS / keep using it after upgrades")"
-    if [[ ":$PATH:" = *":$BIN_DIR:"* ]]; then
-        echo "  $(t "当前 shell 已可直接运行:" "Current shell can run directly:") mms"
+    if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
+        echo "  $(t "本次安装的是预览通道；后续用 mmf 进入 preview root。" "This installed a preview channel; use mmf for the preview root.")"
     else
-        echo "  $(t "当前 shell 还未加载 ~/.local/bin；可先运行绝对路径，或重开 Ghostty/iTerm/Terminal tab 后输入 mms。" "Current shell has not loaded ~/.local/bin yet; run the absolute path now, or reopen your Ghostty/iTerm/Terminal tab and type mms.")"
+        echo "  $(t "运行" "Run") $BIN_DIR/mms $(t "开始使用 / 升级后继续使用" "to start using MMS / keep using it after upgrades")"
+        if [[ ":$PATH:" = *":$BIN_DIR:"* ]]; then
+            echo "  $(t "当前 shell 已可直接运行:" "Current shell can run directly:") mms"
+        else
+            echo "  $(t "当前 shell 还未加载 ~/.local/bin；可先运行绝对路径，或重开 Ghostty/iTerm/Terminal tab 后输入 mms。" "Current shell has not loaded ~/.local/bin yet; run the absolute path now, or reopen your Ghostty/iTerm/Terminal tab and type mms.")"
+        fi
+        echo ""
+        echo "  $(t "常用命令:" "Common commands:")"
+        echo "    mms              $(t "打开交互启动器" "open the interactive launcher")"
+        echo "    mmf              $(t "打开 preview root 启动器" "open the preview-root launcher")"
+        echo "    mms claude       $(t "直接启动 Claude 入口" "launch the Claude entrypoint")"
+        echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
+        echo "    mms config       $(t "查看/修改配置" "view or edit config")"
+        echo "    mms config web   $(t "打开浏览器配置中心" "open the browser config center")"
+        echo "    mms --export claude  $(t "导出环境变量" "export env vars")"
+        echo ""
+        echo "  $(t "简单上手示例:" "Quick examples:")"
+        echo "    mms config web                      $(t "图形化配置通道、模型、fallback、OpenCode agents" "configure providers, models, fallback, and OpenCode agents in the WebUI")"
+        echo "    mms doctor                          $(t "先看 route / auth / protocol 通不通" "check route / auth / protocol first")"
+        echo "    mms test --provider <id> --cli claude  $(t "验证 Claude 实际链路" "verify the real Claude message path")"
+        echo "    mms test --provider <id> --cli codex   $(t "验证 Codex 实际链路" "verify the real Codex message path")"
+        echo "    mms ls                              $(t "查看可见模型" "list visible models")"
+        echo "    mmf config root                     $(t "确认 preview root" "confirm the preview root")"
+        echo "    mmf preview doctor --json           $(t "查看 config v2 preview 下一步" "show the next config v2 preview action")"
+        echo "    mms migrate config-v2 --json        $(t "只读查看 stable promotion human gate" "review the stable promotion human gate read-only")"
+        echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
+        echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     fi
-    echo ""
-    echo "  $(t "常用命令:" "Common commands:")"
-    echo "    mms              $(t "打开交互启动器" "open the interactive launcher")"
-    echo "    mmf              $(t "打开 preview root 启动器" "open the preview-root launcher")"
-    echo "    mms claude       $(t "直接启动 Claude 入口" "launch the Claude entrypoint")"
-    echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
-    echo "    mms config       $(t "查看/修改配置" "view or edit config")"
-    echo "    mms config web   $(t "打开浏览器配置中心" "open the browser config center")"
-    echo "    mms --export claude  $(t "导出环境变量" "export env vars")"
-    echo ""
-    echo "  $(t "简单上手示例:" "Quick examples:")"
-    echo "    mms config web                      $(t "图形化配置通道、模型、fallback、OpenCode agents" "configure providers, models, fallback, and OpenCode agents in the WebUI")"
-    echo "    mms doctor                          $(t "先看 route / auth / protocol 通不通" "check route / auth / protocol first")"
-    echo "    mms test --provider <id> --cli claude  $(t "验证 Claude 实际链路" "verify the real Claude message path")"
-    echo "    mms test --provider <id> --cli codex   $(t "验证 Codex 实际链路" "verify the real Codex message path")"
-    echo "    mms ls                              $(t "查看可见模型" "list visible models")"
-    echo "    mmf config root                     $(t "确认 preview root" "confirm the preview root")"
-    echo "    mmf preview doctor --json           $(t "查看 config v2 preview 下一步" "show the next config v2 preview action")"
-    echo "    mms migrate config-v2 --json        $(t "只读查看 stable promotion human gate" "review the stable promotion human gate read-only")"
-    echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
-    echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""
     if [ "$HANDOVER_CONTINUITY_INSTALL_STATUS" = "installed" ]; then
         echo "  $(t "内建：offduty/onduty（handover continuity）已安装到 Claude/Codex/OpenCode 全局 skill 目录，并已清理旧 command symlink，可在任意 session 使用。" "Built-in: offduty/onduty (handover continuity) installed into Claude/Codex/OpenCode global skill dirs, with legacy command symlinks cleaned, usable in any session.")"
@@ -4677,12 +4690,29 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo ""
     fi
 
-    if [ "$RUN_SETUP" -eq 1 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
+    if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
+        echo ""
+        if [ -f "$CONFIG_PATH" ] || [ -f "$CREDENTIALS_PATH" ]; then
+            echo "  $(t "下一步（首次 preview/mmf 只做这两行）:" "Next step (first preview/mmf run: only do these two lines):")"
+            echo "    $NEXT_MMF_CMD preview prepare"
+            echo "    $NEXT_MMF_CMD"
+            echo "  $(t "说明：prepare 只读取 ~/.config/mms，并写入 ~/.config/mms-next；不会改 stable 配置。" "Note: prepare only reads ~/.config/mms and writes ~/.config/mms-next; stable config is not modified.")"
+        else
+            echo "  $(t "下一步（全新机器先配通道）:" "Next step (fresh machine: configure providers first):")"
+            echo "    $NEXT_MMF_CMD config web"
+            echo "    $NEXT_MMF_CMD"
+            echo "  $(t "说明：没有检测到 ~/.config/mms 配置，先在 WebUI 添加 provider/API Key 并保存。" "Note: no ~/.config/mms config was detected; add providers/API keys in the WebUI first.")"
+        fi
+        echo ""
+        echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"
+    fi
+
+    if [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ] && [ "$RUN_SETUP" -eq 1 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
         echo "$(t "检测到首次使用，启动配置向导..." "First-time setup detected, launching setup wizard...")"
         echo ""
         "$BIN_DIR/mms" || true
         DID_LAUNCH=1
-    elif [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
+    elif [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
         echo "  $(t "首次配置请运行（二选一）:" "Run one of these for first-time setup:")"
         echo "    $BIN_DIR/mms"
         echo "    $BIN_DIR/mms config web"
@@ -4691,23 +4721,29 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "    bash install.sh --run-setup"
     fi
 
-    echo ""
-    if [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
-        echo "  $(t "完成配置后，建议先做预检，再正式启动 CLI:" "After setup, run these preflight checks before launching the real CLI:")"
-    else
-        echo "  $(t "正式启动 CLI 前，建议先做这组预检:" "Before launching the real CLI, run this preflight sequence:")"
+    if [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ]; then
+        echo ""
+        if [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
+            echo "  $(t "完成配置后，建议先做预检，再正式启动 CLI:" "After setup, run these preflight checks before launching the real CLI:")"
+        else
+            echo "  $(t "正式启动 CLI 前，建议先做这组预检:" "Before launching the real CLI, run this preflight sequence:")"
+        fi
+        echo "    bash install.sh --check"
+        echo "    mms doctor"
+        echo "    mms doctor full"
+        echo "    mms test --provider <id> --cli claude"
+        echo "    mms test --provider <id> --cli codex"
+        echo "  $(t "含义：--check 看安装是否落好；doctor 看 route/auth/protocol 通不通；test 看实际消息链路。" "Meaning: --check verifies install landing; doctor checks route/auth/protocol reachability; test checks the real message path.")"
     fi
-    echo "    bash install.sh --check"
-    echo "    mms doctor"
-    echo "    mms doctor full"
-    echo "    mms test --provider <id> --cli claude"
-    echo "    mms test --provider <id> --cli codex"
-    echo "  $(t "含义：--check 看安装是否落好；doctor 看 route/auth/protocol 通不通；test 看实际消息链路。" "Meaning: --check verifies install landing; doctor checks route/auth/protocol reachability; test checks the real message path.")"
 
     if [ "$LAUNCH_AFTER_INSTALL" -eq 1 ] && [ "$DID_LAUNCH" -eq 0 ]; then
         echo ""
         echo "$(t "启动 MMS..." "Launching MMS...")"
-        "$BIN_DIR/mms" || true
+        if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ] && [ -x "$BIN_DIR/mmf" ]; then
+            "$BIN_DIR/mmf" || true
+        else
+            "$BIN_DIR/mms" || true
+        fi
     fi
 else
     echo "❌ $(t "安装似乎失败了，请检查上面的错误信息" "Install appears to have failed. Please review the errors above")"

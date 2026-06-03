@@ -1079,6 +1079,10 @@ def test_install_completion_hints_include_config_web_and_v2_preview_gate():
     assert "mmf preview doctor --json" in text
     assert "mms migrate config-v2 --json" in text
     assert "stable promotion human gate" in text
+    assert "下一步（首次 preview/mmf 只做这两行）" in text
+    assert "$NEXT_MMF_CMD preview prepare" in text
+    assert "$NEXT_MMF_CMD config web" in text
+    assert "以后需要排查时再运行:" in text
 
 
 def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):
