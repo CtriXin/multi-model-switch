@@ -3172,10 +3172,7 @@ def _save_probe_file_cache(provider_id, result):
     )
 
 
-def _base_probe_result_from_cache(provider_id, file_cached):
-    from mms_commands.tools import base_probe_result_from_cache
-
-    return base_probe_result_from_cache(provider_id, file_cached)
+_base_probe_result_from_cache = _command_tools.base_probe_result_from_cache
 
 
 def _ensure_probe_async_executor():
@@ -3235,10 +3232,7 @@ def _probe_models_for_startup(cfg, provider, emit_output=True):
     )
 
 
-def _provider_supports_mimo_anthropic_selectors(provider):
-    from mms_commands.tools import provider_supports_mimo_anthropic_selectors
-
-    return provider_supports_mimo_anthropic_selectors(provider)
+_provider_supports_mimo_anthropic_selectors = _command_tools.provider_supports_mimo_anthropic_selectors
 
 
 def _derived_model_aliases(base_models, provider=None):
@@ -3745,10 +3739,7 @@ def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
     )
 
 
-def _resolve_source_default_index(options, preferred_cli):
-    from mms_commands.tools import resolve_source_default_index
-
-    return resolve_source_default_index(options, preferred_cli)
+_resolve_source_default_index = _command_tools.resolve_source_default_index
 
 
 def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
@@ -3786,10 +3777,7 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model
     )
 
 
-def _runtime_source_kind_label(runtime):
-    from mms_commands.tools import runtime_source_kind_label
-
-    return runtime_source_kind_label(runtime)
+_runtime_source_kind_label = _command_tools.runtime_source_kind_label
 
 
 def _choose_runtime_source(
@@ -3857,10 +3845,7 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
     )
 
 
-def _clean_model_info(model_info):
-    from mms_commands.tools import clean_model_info
-
-    return clean_model_info(model_info)
+_clean_model_info = _command_tools.clean_model_info
 
 
 def select_model_interactive(models_list):
@@ -3987,14 +3972,11 @@ def _select_opencode_profile(use_tui=False):
     )
 
 
-def _opencode_default_profile_from_config(cfg):
-    from mms_commands.tools import opencode_default_profile_from_config
-
-    return opencode_default_profile_from_config(
-        cfg,
-        opencode_profile_selection=_opencode_profile_selection,
-        default_profile="pro",
-    )
+_opencode_default_profile_from_config = partial(
+    _command_tools.opencode_default_profile_from_config,
+    opencode_profile_selection=_opencode_profile_selection,
+    default_profile="pro",
+)
 
 
 def _opencode_route_transport_candidates(provider, model_name):
@@ -4235,9 +4217,7 @@ _FAMILY_COLD_IDLE_DAYS = 21
 
 
 def _sort_family_entries_for_tui(families, preferred_family="", now=None):
-    from mms_commands.tools import sort_family_entries_for_tui
-
-    return sort_family_entries_for_tui(families, preferred_family=preferred_family, now=now)
+    return _command_tools.sort_family_entries_for_tui(families, preferred_family=preferred_family, now=now)
 
 
 def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferred_family=""):
@@ -5010,9 +4990,7 @@ def _display_preferences_path():
 
 
 def _display_preferences_example():
-    from mms_commands.tools import display_preferences_example
-
-    return display_preferences_example(preferences_example_toml=PREFERENCES_EXAMPLE_TOML, console=console)
+    return _command_tools.display_preferences_example(preferences_example_toml=PREFERENCES_EXAMPLE_TOML, console=console)
 
 
 def _display_human_gate_help():
@@ -5151,10 +5129,7 @@ def _handle_config_unset(cfg, args_rest):
     )
 
 
-def _handle_config_file():
-    from mms_commands.tools import handle_config_file
-
-    return handle_config_file(config_path=CONFIG_PATH, console=console)
+_handle_config_file = partial(_command_tools.handle_config_file, config_path=CONFIG_PATH, console=console)
 
 
 def _handle_config_validate(cfg):
@@ -5353,16 +5328,8 @@ def _session_gateway_roots(cli_name):
     return session_gateway_roots(cli_name, real_home=resolve_real_user_home())
 
 
-def _session_dir_size_bytes(path):
-    from mms_commands.tools import session_dir_size_bytes
-
-    return session_dir_size_bytes(path)
-
-
-def _format_bytes(size):
-    from mms_commands.tools import format_bytes
-
-    return format_bytes(size)
+_session_dir_size_bytes = _command_tools.session_dir_size_bytes
+_format_bytes = _command_tools.format_bytes
 
 
 def _list_stale_gateway_sessions(cli_name):
