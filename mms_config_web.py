@@ -3685,6 +3685,31 @@ def _build_review_summary(
             "provider_id": provider_id,
         })
 
+    def field_changes(before: dict[str, Any], after: dict[str, Any], labels: dict[str, str]) -> list[dict[str, Any]]:
+        changes: list[dict[str, Any]] = []
+        for key in labels:
+            before_value = before.get(key)
+            after_value = after.get(key)
+            if _mapping_digest({key: before_value}) == _mapping_digest({key: after_value}):
+                continue
+            changes.append({"field": key, "label": labels[key], "before": before_value, "after": after_value})
+        return changes
+
+    def display_value(value: Any) -> str:
+        if value in (None, ""):
+            return "-"
+        if isinstance(value, bool):
+            return "是" if value else "否"
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return str(value)
+
+    def change_detail(changes: list[dict[str, Any]]) -> str:
+        return "；".join(
+            f"{item['label']} `{display_value(item.get('before'))}` -> `{display_value(item.get('after'))}`"
+            for item in changes
+        )
+
     for provider_id in sorted(after_ids - before_ids):
         add_item("provider_added", "新增通道", f"`{provider_id}` 将被加入配置。", provider_id=provider_id)
     for provider_id in sorted(before_ids - after_ids):
@@ -3768,14 +3793,25 @@ def _build_review_summary(
             "timezone": _safe_text(after.get("timezone")),
             "note": _safe_text(after.get("note")),
         }
-        if provider_id in before_ids and _mapping_digest(before_meta) != _mapping_digest(after_meta):
+        meta_labels = {
+            "name": "名称",
+            "enabled": "启用",
+            "role": "角色",
+            "priority": "优先级",
+            "claude_1m_mode": "Claude 1M",
+            "timezone": "时区",
+            "note": "备注",
+        }
+        meta_changes = field_changes(before_meta, after_meta, meta_labels)
+        if provider_id in before_ids and meta_changes:
+            important_fields = {item["field"] for item in meta_changes}.intersection({"enabled", "role", "priority", "claude_1m_mode"})
             add_item(
                 "provider_metadata",
                 f"通道元数据变化：{provider_id}",
-                f"name/enabled/role/priority/claude_1m/timezone/note 将更新；priority `{before_meta['priority']}` -> `{after_meta['priority']}`。",
+                change_detail(meta_changes),
                 provider_id=provider_id,
-                level="warn",
-                meta={"before": before_meta, "after": after_meta},
+                level="warn" if important_fields else "info",
+                meta={"before": before_meta, "after": after_meta, "changes": meta_changes},
             )
         before_family = _normalize_family_priority_overrides(before.get("family_priority_overrides"))
         after_family = _normalize_family_priority_overrides(after.get("family_priority_overrides"))
@@ -3956,16 +3992,143 @@ def _build_review_summary(
             level="warn",
         )
 
-    policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
-    policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
-    if _mapping_digest({"models": policy_before_models}) != _mapping_digest({"models": policy_after_models}):
-        changed_models = sorted(set(policy_before_models) ^ set(policy_after_models))
-        common_changed = sorted(
-            model for model in (set(policy_before_models) & set(policy_after_models))
-            if _mapping_digest(policy_before_models.get(model)) != _mapping_digest(policy_after_models.get(model))
+    policy_field_labels = {
+        "visible": "显示",
+        "favorite": "置顶",
+        "capabilities.text": "文本",
+        "capabilities.vision": "看图",
+        "capabilities.tool_use": "工具",
+        "capabilities.reasoning": "推理",
+        "capabilities.thinking": "Think",
+        "capabilities.one_m_context": "1M",
+        "capabilities.long_context": "长上下文",
+        "capabilities.context_window_tokens": "上下文",
+        "capabilities.max_output_tokens": "输出上限",
+        "capabilities.cache_sensitive": "缓存",
+        "capabilities.cache_sensitive_transport": "缓存传输",
+        "capabilities.supports_thinking": "支持 Think",
+    }
+
+    def policy_value_display(value: Any) -> str:
+        if isinstance(value, int) and value >= 1000:
+            if value >= 1_000_000 and value % 1_000_000 == 0:
+                return f"{value // 1_000_000}M"
+            if value >= 100_000 and value % 1000 == 0:
+                return f"{value // 1000}K"
+        return display_value(value)
+
+    def policy_flat(entry: Any) -> dict[str, Any]:
+        if not isinstance(entry, dict):
+            return {}
+        flat: dict[str, Any] = {}
+        for key in ("visible", "favorite"):
+            if key in entry:
+                flat[key] = entry.get(key)
+        caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+        for key in sorted(caps):
+            flat[f"capabilities.{key}"] = caps.get(key)
+        for key in sorted(entry):
+            if key in {"visible", "favorite", "capabilities"}:
+                continue
+            flat[key] = entry.get(key)
+        return flat
+
+    def policy_change_rows(before_entry: Any, after_entry: Any) -> list[dict[str, Any]]:
+        before_flat = policy_flat(before_entry)
+        after_flat = policy_flat(after_entry)
+        rows: list[dict[str, Any]] = []
+        for field in sorted(set(before_flat) | set(after_flat)):
+            before_value = before_flat.get(field)
+            after_value = after_flat.get(field)
+            if _mapping_digest({field: before_value}) == _mapping_digest({field: after_value}):
+                continue
+            rows.append(
+                {
+                    "field": field,
+                    "label": policy_field_labels.get(field, field),
+                    "before": before_value,
+                    "after": after_value,
+                    "before_label": policy_value_display(before_value),
+                    "after_label": policy_value_display(after_value),
+                }
+            )
+        return rows
+
+    def build_policy_changes() -> dict[str, Any]:
+        policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
+        policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
+        rows: list[dict[str, Any]] = []
+        added = sorted(set(policy_after_models) - set(policy_before_models), key=str.lower)
+        removed = sorted(set(policy_before_models) - set(policy_after_models), key=str.lower)
+        common = sorted(set(policy_before_models) & set(policy_after_models), key=str.lower)
+        for model in added:
+            changes = policy_change_rows({}, policy_after_models.get(model))
+            rows.append(
+                {
+                    "model": model,
+                    "action": "added",
+                    "action_label": "新增",
+                    "changed_fields": [item["field"] for item in changes],
+                    "changes": changes,
+                    "summary": "；".join(f"{item['label']} `{item['after_label']}`" for item in changes[:8]) or "新增条目",
+                    "before": {},
+                    "after": _sanitize_for_output(policy_after_models.get(model)),
+                }
+            )
+        for model in removed:
+            changes = policy_change_rows(policy_before_models.get(model), {})
+            rows.append(
+                {
+                    "model": model,
+                    "action": "removed",
+                    "action_label": "移除",
+                    "changed_fields": [item["field"] for item in changes],
+                    "changes": changes,
+                    "summary": "将移除该 model-policy 条目",
+                    "before": _sanitize_for_output(policy_before_models.get(model)),
+                    "after": {},
+                }
+            )
+        for model in common:
+            changes = policy_change_rows(policy_before_models.get(model), policy_after_models.get(model))
+            if not changes:
+                continue
+            rows.append(
+                {
+                    "model": model,
+                    "action": "updated",
+                    "action_label": "修改",
+                    "changed_fields": [item["field"] for item in changes],
+                    "changes": changes,
+                    "summary": "；".join(f"{item['label']} `{item['before_label']}` -> `{item['after_label']}`" for item in changes[:8]),
+                    "before": _sanitize_for_output(policy_before_models.get(model)),
+                    "after": _sanitize_for_output(policy_after_models.get(model)),
+                }
+            )
+        rows.sort(key=lambda item: ({"updated": 0, "added": 1, "removed": 2}.get(str(item.get("action")), 9), str(item.get("model") or "").lower()))
+        return {
+            "schema": "mms.setup_web.model_policy_changes.v1",
+            "total": len(rows),
+            "added": len(added),
+            "removed": len(removed),
+            "updated": len([item for item in rows if item.get("action") == "updated"]),
+            "items": rows,
+        }
+
+    model_policy_changes = build_policy_changes()
+    if model_policy_changes["total"]:
+        add_item(
+            "model_policy",
+            "模型能力/偏好策略变化",
+            f"将更新 {model_policy_changes['total']} 个 model-policy 条目：修改 {model_policy_changes['updated']}，新增 {model_policy_changes['added']}，移除 {model_policy_changes['removed']}。",
+            meta={
+                "total": model_policy_changes["total"],
+                "updated": model_policy_changes["updated"],
+                "added": model_policy_changes["added"],
+                "removed": model_policy_changes["removed"],
+                "models": [item["model"] for item in model_policy_changes["items"][:80]],
+            },
         )
-        total = len(changed_models) + len(common_changed)
-        add_item("model_policy", "模型能力/偏好策略变化", f"将更新 {total} 个 model-policy 条目。")
 
     if not items:
         add_item("no_change", "没有配置变化", "当前草稿与已加载配置一致。")
@@ -3980,9 +4143,11 @@ def _build_review_summary(
             "hidden_added": hidden_added_total,
             "credential_updates": len(credential_updates),
             "account_changes": account_change_count,
+            "model_policy_changes": model_policy_changes["total"],
         },
         "items": items,
         "risks": risks,
+        "model_policy_changes": model_policy_changes,
     }
 
 

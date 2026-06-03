@@ -681,6 +681,53 @@ def test_config_web_context_tokens_are_saved_to_model_policy(tmp_path):
     assert caps["long_context"] is True
 
 
+def test_config_web_review_summary_includes_model_policy_detail_rows(tmp_path):
+    (tmp_path / "model-policy.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "models": {
+                    "mimo-v2.5": {
+                        "visible": True,
+                        "capabilities": {"vision": False, "context_window_tokens": 262144},
+                    }
+                },
+                "projects": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "mimo-v2.5"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "vision": True,
+        "context_window_tokens": 1_000_000,
+        "max_output_tokens": 131_072,
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    changes = plan["review_summary"]["model_policy_changes"]
+    item = changes["items"][0]
+
+    assert changes["total"] == 1
+    assert changes["updated"] == 1
+    assert item["model"] == "mimo-v2.5"
+    assert item["action"] == "updated"
+    assert "capabilities.context_window_tokens" in item["changed_fields"]
+    assert any(change["label"] == "看图" and change["after"] is True for change in item["changes"])
+    assert any(change["label"] == "输出上限" and change["after"] == 131_072 for change in item["changes"])
+
+
 def test_config_web_one_m_and_think_capabilities_are_saved_to_model_policy(tmp_path):
     payload = _large_route_draft_payload(count=1)
     row = payload["draft"]["providers"][0]["models"][0]
@@ -977,6 +1024,15 @@ def test_config_web_server_send_ignores_client_disconnect():
 
     assert header_closed._send(200, b"ok", "text/plain") is False
     assert body_closed._send(200, b"ok", "text/plain") is False
+
+
+def test_config_web_review_summary_frontend_has_policy_tabs():
+    html = _frontend_source()
+
+    assert 'data-review-tab="summary"' in html
+    assert "模型策略明细" in html
+    assert "JSON 明细" in html
+    assert "policy-change-card" in html
 
 
 def test_config_web_markdown_contains_manual_snippets(capsys):
@@ -1495,6 +1551,37 @@ def test_config_web_plan_family_priority_drafts_are_reviewed(tmp_path):
     assert any(item["kind"] == "account_metadata" for item in review["items"])
     assert "family_priority_overrides" in plan["diffs"]["config_toml"]
     assert "[load_balance]" not in plan["diffs"]["config_toml"]
+
+
+def test_config_web_review_summary_provider_metadata_lists_real_fields_only(tmp_path):
+    cfg, _ = mms_core._ensure_provider_config(
+        {
+            "provider": {"default": "demo"},
+            "providers": [
+                {
+                    "id": "demo",
+                    "name": "Demo",
+                    "enabled": True,
+                    "role": "auto",
+                    "priority": 995,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                    "models_endpoint": "manual",
+                }
+            ],
+        }
+    )
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "provider_default")}
+    draft["providers"][0]["name"] = "Demo Renamed"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+    item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "provider_metadata")
+
+    assert item["detail"] == "名称 `Demo` -> `Demo Renamed`"
+    assert item["level"] == "info"
+    assert item["meta"]["changes"][0]["field"] == "name"
+    assert "优先级 `995` -> `995`" not in item["detail"]
 
 
 def test_config_web_plan_ui_language_draft_is_reviewed(tmp_path):
