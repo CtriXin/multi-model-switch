@@ -2945,6 +2945,48 @@ def test_mmf_preview_prepare_wrapper_runs_full_preview_flow_without_secrets(tmp_
     assert "sk-prepare-secret" not in combined
 
 
+def test_mmf_preview_prepare_no_route_candidates_points_to_config_web(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "empty-provider"
+        api_key = "sk-no-route-secret"
+        """,
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 2
+    assert "result=NO_ROUTE_CANDIDATES" in result.stdout
+    assert "error=source config has no enabled provider fallback_models/extra_models to import" in result.stdout
+    assert "next_command=mmf config web" in result.stdout
+    assert "no preview route candidate found" not in combined
+    assert not (target_dir / "generated" / "model-registry.latest-approved.json").exists()
+    assert "sk-no-route-secret" not in combined
+
+
 def test_mmf_preview_prepare_include_secrets_reports_ready_without_stdout_leak(tmp_path: Path) -> None:
     source_dir = tmp_path / "mms"
     target_dir = tmp_path / "mms-next"
