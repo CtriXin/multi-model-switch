@@ -24,7 +24,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from mms_config.web_assets import _HTML_PAGE
-from mms_session_assets import build_session_assets_snapshot
+from mms_session.inventory import build_session_assets_snapshot
 from mms_config.web_settings import (
     _settings_action_cards,
     _webui_capability_coverage,

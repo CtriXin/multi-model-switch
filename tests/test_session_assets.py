@@ -1,4 +1,4 @@
-import mms_session_assets
+from mms_session import inventory as mms_session_assets
 import mms_launchers
 
 
