@@ -465,7 +465,9 @@ $('fetchModels').onclick=async()=>{const data=await runProviderModelsTest({targe
 if($('fetchAllModels'))$('fetchAllModels').onclick=refreshAllProviderModels
 loadTruthFieldConfig();
 truthFieldInputs().forEach(input=>input.onchange=saveTruthFieldConfig);
-if($('refreshCapabilityTruth'))$('refreshCapabilityTruth').onclick=async()=>{syncProvider();saveTruthFieldConfig();const target=$('modelConfigResult');if(target)target.textContent='正在读取结构化能力快照...';const data=await api('/api/model-capabilities/refresh',{provider:current(),fields:selectedTruthFields(),refresh_sources:true});showJson('modelConfigResult',data);const applied=data.ok?mergeCapabilityTruth(data):0;toast(data.ok?`已从已知快照匹配 ${data.matched_model_count||0} 个模型，更新 ${applied} 个草稿；保存预览后生效`:(data.error||'能力快照刷新失败'))}
+async function refreshCapabilitySnapshot({openrouter=false}={}){syncProvider();saveTruthFieldConfig();const target=$('modelConfigResult');if(target)target.textContent=openrouter?'正在读取 OpenRouter catalog 结构化数据...':'正在读取本地结构化能力快照...';const data=await api('/api/model-capabilities/refresh',{provider:current(),fields:selectedTruthFields(),refresh_sources:!openrouter,openrouter_catalog:openrouter});showJson('modelConfigResult',data);const applied=data.ok?mergeCapabilityTruth(data):0;const label=openrouter?'OpenRouter catalog':'本地已知快照';toast(data.ok?`已从 ${label} 匹配 ${data.matched_model_count||0} 个模型，更新 ${applied} 个草稿；保存预览后生效`:(data.error||`${label} 刷新失败`))}
+if($('refreshCapabilityTruth'))$('refreshCapabilityTruth').onclick=async()=>refreshCapabilitySnapshot({openrouter:false})
+if($('refreshOpenRouterCatalog'))$('refreshOpenRouterCatalog').onclick=async()=>refreshCapabilitySnapshot({openrouter:true})
 $('testList').onclick=async()=>{await runProviderModelsTest({targetId:'modelConfigResult',switchToTest:true})}
 $('openModelTest').onclick=()=>{renderTestSelectors();setSection('test')}
 $('testListBtn').onclick=async()=>{await runProviderModelsTest({targetId:'testResult'})}

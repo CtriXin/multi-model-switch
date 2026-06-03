@@ -21,6 +21,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
 
 from mms_config_web_assets import _HTML_PAGE
 from mms_session_assets import build_session_assets_snapshot
@@ -123,6 +124,7 @@ _CAPABILITY_TRUTH_REFRESH_FIELDS = (
     "thinking",
     "one_m_context",
 )
+_OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 
 
 def _truthy(value: Any, default: bool = False) -> bool:
@@ -895,13 +897,13 @@ def _model_capability_defaults(
 def capability_truth_refresh_fields() -> list[dict[str, str]]:
     """Fields that can be refreshed from structured capability snapshots without LLM prose parsing."""
     labels = {
-        "context_window_tokens": ("上下文", "官方/结构化 context window token 数"),
-        "max_output_tokens": ("输出上限", "官方/结构化 max output token 数"),
-        "vision": ("看图", "官方 supports_vision / input modality"),
+        "context_window_tokens": ("上下文", "结构化 context window token 数"),
+        "max_output_tokens": ("输出上限", "结构化 max output token 数"),
+        "vision": ("看图", "supports_vision / input modality"),
         "tool_use": ("工具", "结构化 supported_parameters 包含 tools/tool_choice"),
-        "reasoning": ("推理", "官方 supports_thinking 或结构化 reasoning 参数"),
-        "thinking": ("Think", "官方 supports_thinking / thinking_control"),
-        "one_m_context": ("1M", "官方 one_million_context 或 context >= 1M"),
+        "reasoning": ("推理", "supports_thinking 或结构化 reasoning 参数"),
+        "thinking": ("Think", "supports_thinking / thinking_control"),
+        "one_m_context": ("1M", "one_million_context 或 context >= 1M"),
     }
     return [
         {"key": key, "label": labels[key][0], "description": labels[key][1]}
@@ -909,11 +911,29 @@ def capability_truth_refresh_fields() -> list[dict[str, str]]:
     ]
 
 
-def _truth_model_index_key(value: Any) -> str:
+def _truth_normalize_model_key(value: Any) -> str:
     text = _safe_text(value).lower()
+    if not text:
+        return ""
+    # MMS used to encode long context in suffixes like [1m]; capability lookup
+    # should match the real model id now that context is configured explicitly.
+    text = re.sub(r"\[[^\]]+\]$", "", text).strip()
+    return text
+
+
+def _truth_model_index_key(value: Any) -> str:
+    text = _truth_normalize_model_key(value)
     if "/" in text:
         text = text.rsplit("/", 1)[-1]
     return text
+
+
+def _truth_model_index_keys(value: Any) -> list[str]:
+    text = _truth_normalize_model_key(value)
+    if not text:
+        return []
+    tail = text.rsplit("/", 1)[-1] if "/" in text else text
+    return list(dict.fromkeys([text, tail]))
 
 
 def _truth_model_ids_from_provider(provider: dict[str, Any]) -> list[str]:
@@ -978,11 +998,14 @@ def _truth_evidence_urls(row: dict[str, Any]) -> list[str]:
 
 def _truth_field_source(field: str, row: dict[str, Any], source_path: str = "") -> dict[str, Any]:
     confidence = _safe_text(row.get("confidence") or "structured")
-    layer = "official"
-    if field == "tool_use":
+    source_layer = _safe_text(row.get("source_layer")).lower()
+    source_name = _safe_text(row.get("source_name"))
+    layer = source_layer or "official"
+    if field == "tool_use" or "provider_catalog" in confidence or "openrouter" in confidence:
         layer = "provider_catalog"
     return {
         "source_layer": layer,
+        "source_name": source_name,
         "confidence": confidence,
         "source_path": source_path,
         "evidence_urls": _truth_evidence_urls(row),
@@ -1055,6 +1078,123 @@ def _truth_caps_from_row(row: dict[str, Any], *, fields: set[str], source_path: 
     return caps, sources
 
 
+def _openrouter_model_page_url(model_id: str) -> str:
+    model = _safe_text(model_id).strip("/")
+    return f"https://openrouter.ai/{model}" if model else "https://openrouter.ai/models"
+
+
+def _openrouter_catalog_to_truth_payload(
+    payload: dict[str, Any],
+    *,
+    source_path: str = _OPENROUTER_MODELS_API_URL,
+    checked_at: str = "",
+) -> dict[str, Any]:
+    """Convert OpenRouter /models records into the same structured snapshot shape."""
+    checked = checked_at or _now_iso()
+    rows: list[dict[str, Any]] = []
+    data = payload.get("data") if isinstance(payload.get("data"), list) else []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = _safe_text(item.get("id"))
+        if not model_id:
+            continue
+        architecture = item.get("architecture") if isinstance(item.get("architecture"), dict) else {}
+        top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
+        pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
+        params = [_safe_text(value) for value in item.get("supported_parameters") or [] if _safe_text(value)] if isinstance(item.get("supported_parameters"), list) else []
+        input_modalities = [_safe_text(value) for value in architecture.get("input_modalities") or [] if _safe_text(value)] if isinstance(architecture.get("input_modalities"), list) else []
+        output_modalities = [_safe_text(value) for value in architecture.get("output_modalities") or [] if _safe_text(value)] if isinstance(architecture.get("output_modalities"), list) else []
+        catalog_ref = {
+            "source": "openrouter",
+            "model_id": model_id,
+            "source_url": source_path,
+            "catalog_url": _openrouter_model_page_url(model_id),
+            "context_length": item.get("context_length"),
+            "max_completion_tokens": top_provider.get("max_completion_tokens"),
+            "top_provider": top_provider,
+            "architecture": architecture,
+            "input_modalities": input_modalities,
+            "output_modalities": output_modalities,
+            "supported_parameters": params,
+            "pricing": pricing,
+            "checked_at": checked,
+        }
+        rows.append(
+            {
+                "alias": model_id.rsplit("/", 1)[-1],
+                "model": model_id,
+                "model_id": model_id,
+                "model_name": _safe_text(item.get("name")),
+                "canonical_model_id": _safe_text(item.get("canonical_slug") or model_id),
+                "confidence": "provider_catalog_openrouter",
+                "source_layer": "provider_catalog",
+                "source_name": "OpenRouter catalog",
+                "provider_context_window_tokens": item.get("context_length"),
+                "provider_top_context_window_tokens": top_provider.get("context_length"),
+                "provider_top_max_output_tokens": top_provider.get("max_completion_tokens"),
+                "provider_supported_parameters": params,
+                "input_modalities": input_modalities,
+                "output_modalities": output_modalities,
+                "provider_catalog_references": [catalog_ref],
+                "evidence": [
+                    {"url": source_path, "source": "openrouter_models_api"},
+                    {"url": _openrouter_model_page_url(model_id), "source": "openrouter_model_page"},
+                ],
+            }
+        )
+    return {
+        "schema": "mms.model_capability.provider_catalog.openrouter.v1",
+        "source": "openrouter",
+        "source_layer": "provider_catalog",
+        "source_path": source_path,
+        "checked_at": checked,
+        "models": rows,
+    }
+
+
+def _fetch_openrouter_catalog_payload(*, url: str = _OPENROUTER_MODELS_API_URL, timeout: float = 20.0) -> dict[str, Any]:
+    request = Request(
+        url or _OPENROUTER_MODELS_API_URL,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "MMS-Config-Web/1.0 (+https://github.com/CtriXin/multi-model-switch)",
+        },
+    )
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("OpenRouter catalog payload must be a JSON object")
+    return payload
+
+
+def _latest_openrouter_catalog_payload(db: Any) -> tuple[dict[str, Any], str, str] | None:
+    try:
+        import mms_registry
+
+        row = db.execute(
+            """
+            SELECT source_path, captured_at, payload_json
+            FROM source_snapshot
+            WHERE source_kind = ?
+            ORDER BY snapshot_id DESC
+            LIMIT 1
+            """,
+            (mms_registry.OPENROUTER_MODELS_SOURCE_KIND,),
+        ).fetchone()
+    except Exception:
+        return None
+    if row is None:
+        return None
+    try:
+        payload = json.loads(str(row["payload_json"] or "{}"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload, _safe_text(row["source_path"]), _safe_text(row["captured_at"])
+
+
 def _index_truth_payload(payload: dict[str, Any], *, source_path: str = "") -> dict[str, tuple[dict[str, Any], str]]:
     indexed: dict[str, tuple[dict[str, Any], str]] = {}
 
@@ -1069,9 +1209,9 @@ def _index_truth_payload(payload: dict[str, Any], *, source_path: str = "") -> d
             fallback_key,
         ]
         for value in keys:
-            key = _truth_model_index_key(value)
-            if key and key not in indexed:
-                indexed[key] = (row, source_path)
+            for key in _truth_model_index_keys(value):
+                if key and key not in indexed:
+                    indexed[key] = (row, source_path)
 
     for row in payload.get("models") if isinstance(payload.get("models"), list) else []:
         if isinstance(row, dict):
@@ -1113,6 +1253,17 @@ def _load_capability_truth_payloads(config_path: str = "", *, refresh_sources: b
                 if built.get("models"):
                     built["_source_path"] = str(db_path)
                     payloads.append(built)
+                openrouter_snapshot = _latest_openrouter_catalog_payload(db)
+                if openrouter_snapshot:
+                    openrouter_payload, source_path, captured_at = openrouter_snapshot
+                    built_openrouter = _openrouter_catalog_to_truth_payload(
+                        openrouter_payload,
+                        source_path=source_path or _OPENROUTER_MODELS_API_URL,
+                        checked_at=captured_at,
+                    )
+                    if built_openrouter.get("models"):
+                        built_openrouter["_source_path"] = source_path or str(db_path)
+                        payloads.append(built_openrouter)
             finally:
                 db.close()
         except Exception:
@@ -1163,6 +1314,37 @@ def refresh_model_capability_truth(
         config_path,
         refresh_sources=_truthy(payload.get("refresh_sources"), True),
     )
+    catalog_sources: list[dict[str, Any]] = []
+    if _truthy(payload.get("openrouter_catalog"), False):
+        source_url = _safe_text(payload.get("openrouter_url") or _OPENROUTER_MODELS_API_URL)
+        try:
+            timeout = float(payload.get("openrouter_timeout") or 20.0)
+        except (TypeError, ValueError):
+            timeout = 20.0
+        timeout = max(1.0, min(timeout, 45.0))
+        try:
+            openrouter_payload = _fetch_openrouter_catalog_payload(url=source_url, timeout=timeout)
+            openrouter_truth = _openrouter_catalog_to_truth_payload(
+                openrouter_payload,
+                source_path=source_url,
+                checked_at=_now_iso(),
+            )
+            openrouter_truth["_source_path"] = source_url
+            truth_payloads.insert(0, openrouter_truth)
+            catalog_sources.append(
+                {
+                    "source": "openrouter",
+                    "source_layer": "provider_catalog",
+                    "transport": "network",
+                    "source_path": source_url,
+                    "model_count": len(openrouter_truth.get("models") or []),
+                    "checked_at": openrouter_truth.get("checked_at"),
+                    "confidence": "provider_catalog_openrouter",
+                    "note": "OpenRouter 是 provider catalog reference，不等于模型厂商官方真值。",
+                }
+            )
+        except Exception as exc:
+            warnings.append(f"读取 OpenRouter catalog 失败: {type(exc).__name__}: {exc}")
     truth_index: dict[str, tuple[dict[str, Any], str]] = {}
     for truth_payload in truth_payloads:
         source_path = _safe_text(truth_payload.get("_source_path"))
@@ -1180,8 +1362,8 @@ def refresh_model_capability_truth(
     }
 
     for model_id in model_ids:
-        key = _truth_model_index_key(model_id)
-        truth = truth_index.get(key)
+        keys = _truth_model_index_keys(model_id)
+        truth = next((truth_index.get(key) for key in keys if truth_index.get(key)), None)
         if not truth:
             unmatched.append(model_id)
             continue
@@ -1192,7 +1374,8 @@ def refresh_model_capability_truth(
             continue
         model_capabilities[model_id] = caps
         model_sources[model_id] = sources
-        current_caps = current_rows.get(key, {}).get("capabilities")
+        current_key = next((item_key for item_key in keys if item_key in current_rows), keys[-1] if keys else "")
+        current_caps = current_rows.get(current_key, {}).get("capabilities")
         current_caps = current_caps if isinstance(current_caps, dict) else {}
         for field, value in caps.items():
             if field == "long_context":
@@ -1203,9 +1386,10 @@ def refresh_model_capability_truth(
 
     return {
         "ok": True,
-        "schema": "mms.config_web.model_capability_truth_refresh.v1",
+        "schema": "mms.config_web.model_capability_snapshot_refresh.v1",
         "provider_id": provider.get("id"),
         "mode": "draft_only",
+        "source_mode": "openrouter_catalog" if catalog_sources else "known_snapshots",
         "fields": [field for field in _CAPABILITY_TRUTH_REFRESH_FIELDS if field in fields],
         "field_config": capability_truth_refresh_fields(),
         "model_count": len(model_ids),
@@ -1217,7 +1401,8 @@ def refresh_model_capability_truth(
         "unmatched_models": unmatched[:80],
         "warnings": warnings,
         "refresh_reports": refresh_reports,
-        "note": "只使用 MMS 已收录/已导入的结构化 source snapshot、approved capabilities 和 provider catalog 字段；不会实时读取官方原文，结果只进入页面草稿，保存发布后才生效。",
+        "catalog_sources": catalog_sources,
+        "note": "只使用结构化 source snapshot、approved capabilities 或 provider catalog 字段；OpenRouter 是快速结构化参考源，不是厂商官方真值；结果只进入页面草稿，保存发布后才生效。",
     }
 
 

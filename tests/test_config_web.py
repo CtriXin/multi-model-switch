@@ -3451,15 +3451,80 @@ def test_config_web_capability_truth_refresh_uses_structured_source(monkeypatch,
     assert result["model_sources"]["mimo-v2.5"]["vision"]["source_layer"] == "official"
 
 
+def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, tmp_path):
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [
+                {"id": "minimax-m3[1m]", "visible": True, "capabilities": {"vision": False}},
+            ],
+        },
+        "fields": ["context_window_tokens", "max_output_tokens", "vision", "tool_use", "reasoning", "one_m_context"],
+        "refresh_sources": False,
+        "openrouter_catalog": True,
+    }
+
+    monkeypatch.setattr(
+        mms_config_web,
+        "_load_capability_truth_payloads",
+        lambda *_args, **_kwargs: ([], [], []),
+    )
+    monkeypatch.setattr(
+        mms_config_web,
+        "_fetch_openrouter_catalog_payload",
+        lambda **_kwargs: {
+            "data": [
+                {
+                    "id": "minimax/minimax-m3",
+                    "name": "MiniMax M3",
+                    "context_length": 1048576,
+                    "architecture": {
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                    },
+                    "top_provider": {
+                        "context_length": 524288,
+                        "max_completion_tokens": 512000,
+                    },
+                    "supported_parameters": ["tools", "tool_choice", "reasoning", "include_reasoning", "max_tokens"],
+                }
+            ]
+        },
+    )
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["source_mode"] == "openrouter_catalog"
+    assert result["matched_model_count"] == 1
+    caps = result["model_capabilities"]["minimax-m3[1m]"]
+    assert caps["context_window_tokens"] == 1048576
+    assert caps["max_output_tokens"] == 512000
+    assert caps["vision"] is True
+    assert caps["tool_use"] is True
+    assert caps["reasoning"] is True
+    assert caps["one_m_context"] is True
+    assert result["model_sources"]["minimax-m3[1m]"]["context_window_tokens"]["source_layer"] == "provider_catalog"
+    assert result["catalog_sources"][0]["source"] == "openrouter"
+    assert "不是厂商官方真值" in result["note"]
+
+
 def test_config_web_capability_truth_button_and_fields_are_present():
     html = _frontend_source()
 
     assert "refreshCapabilityTruth" in html
+    assert "refreshOpenRouterCatalog" in html
     assert "/api/model-capabilities/refresh" in html
     assert "data-truth-field=\"context_window_tokens\"" in html
     assert "data-truth-field=\"vision\"" in html
     assert "已知能力快照" in html
-    assert "不实时读取官方原文" in html
+    assert "OpenRouter catalog" in html
+    assert "不是厂商官方真值" in html
+    assert "openrouter_catalog:openrouter" in html
 
 
 def test_config_web_max_output_tokens_are_saved_to_model_policy(tmp_path):
