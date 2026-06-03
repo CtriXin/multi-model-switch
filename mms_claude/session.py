@@ -78,11 +78,28 @@ def claude_resume_scope_is_model_shared(scope_id):
     return str(scope_id or "").strip().lower().startswith("api-key-model-")
 
 
+def claude_resume_project_path_variants(project_path):
+    import mms_launchers as _launchers
+
+    variants = []
+    raw = os.path.realpath(str(project_path or "").strip())
+    if raw:
+        variants.append(raw)
+    try:
+        canonical = os.path.realpath(_launchers.canonical_project_path(raw or None))
+        if canonical and canonical not in variants:
+            variants.append(canonical)
+    except Exception:
+        pass
+    return variants
+
+
 def claude_project_resume_dir_names(project_path):
-    paths = {
-        os.path.abspath(os.path.expanduser(str(project_path or ""))),
-        os.path.realpath(os.path.expanduser(str(project_path or ""))),
-    }
+    paths = set(claude_resume_project_path_variants(project_path))
+    raw = os.path.expanduser(str(project_path or ""))
+    if raw:
+        paths.add(os.path.abspath(raw))
+        paths.add(os.path.realpath(raw))
     names = set()
     for path in paths:
         if not path:
@@ -100,7 +117,34 @@ def claude_slot_roots_for_resume_backfill(account_id):
     normalized_account_id = normalized_claude_slot_account(account_id)
     if normalized_account_id:
         roots.append(_launchers._real_user_path(".config", "mms", "accounts", normalized_account_id, "s"))
+    accounts_root = _launchers._real_user_path(".config", "mms", "accounts")
+    if os.path.isdir(accounts_root):
+        for name in os.listdir(accounts_root):
+            candidate = os.path.join(accounts_root, name, "s")
+            if candidate not in roots:
+                roots.append(candidate)
     return roots
+
+
+def mirror_claude_project_resume_dir_aliases(projects_dir, current_cwd):
+    import mms_launchers as _launchers
+
+    projects_dir = os.path.abspath(os.path.expanduser(str(projects_dir or "")))
+    if not os.path.isdir(projects_dir):
+        return
+    aliases = [
+        os.path.join(projects_dir, dirname)
+        for dirname in _launchers._claude_project_resume_dir_names(current_cwd)
+    ]
+    aliases = [path for path in dict.fromkeys(aliases)]
+    existing = [path for path in aliases if os.path.isdir(path)]
+    if not existing:
+        return
+    for source in existing:
+        for target in aliases:
+            if os.path.realpath(source) == os.path.realpath(target):
+                continue
+            _launchers._copy_tree_files_if_missing(source, target)
 
 
 def backfill_real_claude_project_resume_files(target_projects_dir, current_cwd):
@@ -130,12 +174,19 @@ def backfill_project_store_claude_resume_files(target_projects_dir, current_cwd)
     if not projects_root.is_dir():
         return
     current_cwd = os.path.realpath(current_cwd or _launchers._safe_getcwd())
+    current_path_variants = {
+        os.path.realpath(path)
+        for path in _launchers._claude_resume_project_path_variants(current_cwd)
+        if str(path or "").strip()
+    }
+    current_path_variants.add(current_cwd)
     for metadata_path in projects_root.glob("*/claude/state/metadata.json"):
         try:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if os.path.realpath(str(payload.get("canonical_path") or "")) != current_cwd:
+        canonical_path = os.path.realpath(str(payload.get("canonical_path") or ""))
+        if canonical_path not in current_path_variants:
             continue
         source_projects_dir = metadata_path.parents[1] / "raw" / "projects"
         if os.path.realpath(str(source_projects_dir)) == os.path.realpath(target_projects_dir):
@@ -195,6 +246,7 @@ def backfill_claude_project_resume_files(
             if os.path.realpath(source_projects_dir) == os.path.realpath(target_projects_dir):
                 continue
             _launchers._copy_tree_files_if_missing(source_projects_dir, target_projects_dir)
+    _launchers._mirror_claude_project_resume_dir_aliases(target_projects_dir, current_cwd)
 
 
 def load_project_scoped_claude_resume_session_id(
@@ -206,10 +258,10 @@ def load_project_scoped_claude_resume_session_id(
 ):
     import mms_launchers as _launchers
 
-    normalized_project = os.path.realpath(str(project_path or "").strip())
+    normalized_projects = set(_launchers._claude_resume_project_path_variants(project_path))
     # Native Claude resume is project-scoped. MMS should not hide a resumable
     # conversation just because the current launch uses another model/provider.
-    if not normalized_project:
+    if not normalized_projects:
         return None
     try:
         sessions = _launchers.list_indexed_sessions("claude")
@@ -221,7 +273,8 @@ def load_project_scoped_claude_resume_session_id(
         session_project = os.path.realpath(
             str(session.get("project_path") or session.get("cwd") or "").strip()
         )
-        if session_project != normalized_project:
+        session_cwd = os.path.realpath(str(session.get("cwd") or "").strip())
+        if session_project not in normalized_projects and session_cwd not in normalized_projects:
             continue
         session_id = str(session.get("session_id") or "").strip()
         if not session_id or session_id.startswith("pid-"):
@@ -246,11 +299,11 @@ def overlay_project_scoped_claude_resume_state(
     import mms_launchers as _launchers
 
     payload = dict(data) if isinstance(data, dict) else {}
-    normalized_project = os.path.realpath(str(project_path or "").strip())
-    if not normalized_project:
+    normalized_projects = _launchers._claude_resume_project_path_variants(project_path)
+    if not normalized_projects:
         return payload
     session_id = _launchers._load_project_scoped_claude_resume_session_id(
-        normalized_project,
+        normalized_projects[0],
         account_id=account_id,
         runtime_kind=runtime_kind,
         resume_model=resume_model,
@@ -261,10 +314,11 @@ def overlay_project_scoped_claude_resume_state(
     projects = payload.get("projects")
     if not isinstance(projects, dict):
         projects = {}
-    entry = projects.get(normalized_project)
-    next_entry = dict(entry) if isinstance(entry, dict) else {}
-    next_entry["lastSessionId"] = session_id
-    projects[normalized_project] = next_entry
+    for normalized_project in normalized_projects:
+        entry = projects.get(normalized_project)
+        next_entry = dict(entry) if isinstance(entry, dict) else {}
+        next_entry["lastSessionId"] = session_id
+        projects[normalized_project] = next_entry
     payload["projects"] = projects
     return payload
 

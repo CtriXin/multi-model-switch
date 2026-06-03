@@ -144,7 +144,14 @@ from mms_claude import endpoint as _claude_endpoint
 from mms_claude.launch import launch_claude_runtime as launch_claude
 from mms_claude import model as _claude_model
 from mms_claude import session as _claude_session
-from mms_claude.project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_claude.project_store import (
+    CLAUDE_PERSISTENT_ENTRIES,
+    canonical_project_path,
+    claude_raw_entry_path,
+    ensure_claude_project_store,
+    read_slot_marker,
+    write_slot_marker,
+)
 from mms_codex.launch import launch_codex_runtime as launch_codex
 from mms_display.launch import (
     emit_dns_guard_hint as _emit_dns_guard_hint_impl,
@@ -2157,6 +2164,7 @@ _pick_gateway_model = _claude_endpoint.pick_gateway_model
 
 _cleanup_stale_sessions = _claude_session.cleanup_stale_sessions
 _copy_tree_files_if_missing = _claude_session.copy_tree_files_if_missing
+_claude_resume_project_path_variants = _claude_session.claude_resume_project_path_variants
 _claude_project_resume_dir_names = _claude_session.claude_project_resume_dir_names
 _claude_resume_scope_id = _claude_session.claude_resume_scope_id
 _claude_resume_scope_is_model_shared = _claude_session.claude_resume_scope_is_model_shared
@@ -2164,6 +2172,7 @@ _claude_slot_roots_for_resume_backfill = _claude_session.claude_slot_roots_for_r
 _backfill_real_claude_project_resume_files = _claude_session.backfill_real_claude_project_resume_files
 _backfill_project_store_claude_resume_files = _claude_session.backfill_project_store_claude_resume_files
 _backfill_claude_project_resume_files = _claude_session.backfill_claude_project_resume_files
+_mirror_claude_project_resume_dir_aliases = _claude_session.mirror_claude_project_resume_dir_aliases
 _link_claude_persistent_entry = _claude_session.link_claude_persistent_entry
 _prepare_claude_session_tree = _claude_session.prepare_claude_session_tree
 _sync_claude_session_state_to_account_home = _claude_session.sync_claude_session_state_to_account_home
