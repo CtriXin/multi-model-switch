@@ -72,10 +72,6 @@ def _apply_account_draft(*args: Any, **kwargs: Any) -> None:
     _call_backend("_apply_account_draft", *args, **kwargs)
 
 
-def _normalize_load_balance_draft(value: Any, *, errors: list[str]) -> dict[str, Any]:
-    return _call_backend("_normalize_load_balance_draft", value, errors=errors)
-
-
 def _normalize_agent_model_overrides(value: Any) -> dict[str, Any]:
     return _call_backend("_normalize_agent_model_overrides", value)
 
@@ -447,13 +443,6 @@ def build_config_plan(
             next_cfg["rescue"] = rescue
         else:
             next_cfg.pop("rescue", None)
-
-    if isinstance(draft.get("load_balance"), dict):
-        load_balance = _normalize_load_balance_draft(draft.get("load_balance"), errors=errors)
-        if load_balance:
-            next_cfg["load_balance"] = load_balance
-        else:
-            next_cfg.pop("load_balance", None)
 
     vision_payload = draft.get("vision_sidecar") if isinstance(draft.get("vision_sidecar"), dict) else {}
     if vision_payload:

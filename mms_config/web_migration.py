@@ -499,10 +499,6 @@ def _migration_config_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
 def _migration_payload_config_from_cfg(cfg: dict[str, Any], *, config_path: str = "", preferences_path: str = "", command_name: str = "mms") -> dict[str, Any]:
     snapshot = build_config_snapshot(cfg, config_path=config_path, preferences_path=preferences_path, command_name=command_name)
     exported = _migration_config_from_snapshot(snapshot)
-    for key in ("load_balance",):
-        value = cfg.get(key) if isinstance(cfg.get(key), dict) else {}
-        if value:
-            exported[key] = _sanitize_for_output(value)
     return exported
 
 
@@ -973,7 +969,7 @@ def _migration_draft_from_bundle(current_cfg: dict[str, Any], bundle: dict[str, 
     provider_default = _safe_text((config.get("provider") if isinstance(config.get("provider"), dict) else {}).get("default"))
     if provider_default:
         draft["provider_default"] = provider_default
-    for key in ("rescue", "vision_sidecar", "ui", "opencode", "load_balance"):
+    for key in ("rescue", "vision_sidecar", "ui", "opencode"):
         value = config.get(key) if isinstance(config.get(key), dict) else {}
         if value:
             draft[key] = value

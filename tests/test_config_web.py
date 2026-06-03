@@ -86,16 +86,6 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
             "api_key": "sk-vision-secret",
         },
         "rescue": {"fallback_model": "deepseek-v4-flash", "hot_fallback_enabled": False},
-        "load_balance": {
-            "default": "daily",
-            "profiles": {
-                "daily": {
-                    "heavy": {"model": "gpt-5.5", "provider_id": "webui-test-direct-qwen"},
-                    "medium": "qwen3.6-plus",
-                    "light": "deepseek-v4-flash",
-                }
-            },
-        },
     }
 
     snapshot = mms_config_web.build_config_snapshot(
@@ -210,8 +200,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert not any(str(item["id"]).startswith("load_balance.") for item in mapping)
     assert snapshot["ui"]["language"] == "zh"
     assert "Qwen" in snapshot["model_families"]
-    assert snapshot["load_balance"]["default_profile"] == "daily"
-    assert snapshot["load_balance"]["profiles"][0]["slots"]["heavy"]["provider_id"] == "webui-test-direct-qwen"
+    assert "load_balance" not in snapshot
     assert "vision_sidecar" in snapshot["snippets"]
     assert [step["id"] for step in snapshot["setup_flow"]] == [
         "channel",

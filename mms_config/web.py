@@ -258,9 +258,7 @@ _DELEGATE_TARGETS = {
         ('_build_review_summary', 'build_review_summary'),
     ),
     'mms_config.web_snapshot': (
-        '_load_balance_summary',
         '_normalize_agent_model_overrides',
-        '_normalize_load_balance_draft',
         '_normalize_opencode_agent_roster',
         '_opencode_agent_catalog',
         '_opencode_agent_preset',

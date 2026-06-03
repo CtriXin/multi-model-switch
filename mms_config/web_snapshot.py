@@ -392,90 +392,6 @@ def _sanitized_mapping(payload: Any) -> dict[str, Any]:
     return result
 
 
-def _load_balance_summary(cfg: dict[str, Any] | None) -> dict[str, Any]:
-    section = (cfg or {}).get("load_balance") if isinstance(cfg, dict) else {}
-    section = section if isinstance(section, dict) else {}
-    profiles = section.get("profiles") if isinstance(section.get("profiles"), dict) else {}
-    rows: list[dict[str, Any]] = []
-    for name, profile in profiles.items():
-        if not isinstance(profile, dict):
-            continue
-        profile_name = _safe_text(name)
-        slots: dict[str, dict[str, str]] = {}
-        for slot_name in ("heavy", "medium", "light"):
-            raw_slot = profile.get(slot_name)
-            if isinstance(raw_slot, dict):
-                slots[slot_name] = {
-                    "model": _safe_text(raw_slot.get("model") or raw_slot.get("model_id")),
-                    "provider_id": _safe_text(raw_slot.get("provider_id") or raw_slot.get("provider")),
-                }
-            else:
-                slots[slot_name] = {"model": _safe_text(raw_slot), "provider_id": ""}
-        rows.append(
-            {
-                "name": profile_name,
-                "label": _safe_text(profile.get("label") or profile_name),
-                "is_default": profile_name == _safe_text(section.get("default")),
-                "slots": slots,
-            }
-        )
-    rows.sort(key=lambda item: (not bool(item.get("is_default")), str(item.get("name") or "")))
-    return {
-        "schema": "mms.setup_web.load_balance_summary.v1",
-        "default_profile": _safe_text(section.get("default")),
-        "profile_count": len(rows),
-        "profiles": rows,
-        "write_policy": "deprecated_read_only_compat",
-        "history_write_policy": "deprecated_no_webui_iteration",
-        "note": "load_balance 已下线；WebUI 仅保留旧配置只读摘要，不再提供编辑入口。",
-    }
-
-
-def _normalize_load_balance_draft(value: Any, *, errors: list[str] | None = None) -> dict[str, Any]:
-    payload = value if isinstance(value, dict) else {}
-    raw_profiles = payload.get("profiles") if isinstance(payload.get("profiles"), list) else []
-    profiles: dict[str, Any] = {}
-    for item in raw_profiles:
-        if not isinstance(item, dict):
-            continue
-        name = _slug(item.get("name") or item.get("label"), "")
-        if not name:
-            if errors is not None:
-                errors.append("load_balance profile 缺少 name。")
-            continue
-        if name in profiles:
-            if errors is not None:
-                errors.append(f"load_balance profile 重复: {name}")
-            continue
-        profile: dict[str, Any] = {"label": _safe_text(item.get("label") or name), "slots": ["heavy", "medium", "light"]}
-        slots = item.get("slots") if isinstance(item.get("slots"), dict) else {}
-        for slot_name in ("heavy", "medium", "light"):
-            slot = slots.get(slot_name) if isinstance(slots, dict) else {}
-            if not isinstance(slot, dict):
-                slot = {"model": slot}
-            model = _safe_text(slot.get("model") or slot.get("model_id"))
-            provider_id = _safe_text(slot.get("provider_id") or slot.get("provider"))
-            if not model:
-                continue
-            slot_payload = {"model": model}
-            if provider_id:
-                slot_payload["provider"] = provider_id
-            profile[slot_name] = slot_payload
-        if "heavy" not in profile:
-            if errors is not None:
-                errors.append(f"load_balance profile `{name}` 缺少 heavy model。")
-            continue
-        profiles[name] = profile
-    default_name = _slug(payload.get("default_profile") or payload.get("default"), "")
-    if default_name and default_name not in profiles:
-        if errors is not None:
-            errors.append(f"load_balance.default `{default_name}` 不存在。")
-        default_name = ""
-    if not default_name and profiles:
-        default_name = next(iter(profiles))
-    return {"default": default_name, "profiles": profiles} if profiles else {}
-
-
 def _normalize_agent_model_overrides(value: Any) -> dict[str, dict[str, str]]:
     raw = value if isinstance(value, dict) else {}
     result: dict[str, dict[str, str]] = {}
@@ -711,7 +627,6 @@ def build_config_snapshot(
         "webui_capability_coverage": _webui_capability_coverage(),
         "tui_webui_mapping": tui_webui_mapping,
         "tui_webui_mapping_summary": _tui_webui_mapping_summary(tui_webui_mapping),
-        "load_balance": _load_balance_summary(cfg),
         "vision_sidecar": _sanitized_mapping(vision_sidecar),
         "rescue": _sanitized_mapping(rescue),
         "ui": {"language": _safe_text(ui_cfg.get("language") or "zh") or "zh"},
