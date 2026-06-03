@@ -118,6 +118,7 @@ from mms_session import assets as _session_assets
 from mms_session import hook_commands as _session_hook_commands
 from mms_session import mcp as _session_mcp
 from mms_session import overlays as _session_overlays
+from mms_session import plugin_inventory as _plugin_inventory
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
@@ -1731,117 +1732,36 @@ _default_session_mcp_servers = _claude_settings.default_session_mcp_servers
 
 
 def _installed_claude_plugin_paths():
-    plugins_root = _real_user_path(".claude", "plugins")
-    installed_path = os.path.join(plugins_root, "installed_plugins.json")
-    loaded = _load_json_dict_unlocked(installed_path)
-    plugins = loaded.get("plugins") if isinstance(loaded, dict) else {}
-    if not isinstance(plugins, dict):
-        return []
-
-    resolved_paths = []
-    seen = set()
-    for records in plugins.values():
-        if not isinstance(records, list):
-            continue
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            install_path = os.path.abspath(
-                os.path.expanduser(str(record.get("installPath") or "").strip())
-            )
-            if not install_path or install_path in seen:
-                continue
-            if not os.path.isdir(install_path):
-                continue
-            if not _path_under(install_path, plugins_root):
-                continue
-            seen.add(install_path)
-            resolved_paths.append(install_path)
-    return resolved_paths
+    return _plugin_inventory.installed_claude_plugin_paths(
+        real_user_path=_real_user_path,
+        load_json_dict_unlocked=_load_json_dict_unlocked,
+        path_under=_path_under,
+    )
 
 
 def _installed_claude_plugin_mcp_manifest_paths(install_path):
-    install_root = os.path.abspath(os.path.expanduser(str(install_path or "").strip()))
-    if not install_root:
-        return []
-
-    candidates = []
-    metadata_paths = (
-        os.path.join(install_root, ".cursor-plugin", "plugin.json"),
-        os.path.join(install_root, ".claude-plugin", "plugin.json"),
+    return _plugin_inventory.installed_claude_plugin_mcp_manifest_paths(
+        install_path,
+        load_json_dict_unlocked=_load_json_dict_unlocked,
+        path_under=_path_under,
     )
-    for metadata_path in metadata_paths:
-        metadata = _load_json_dict_unlocked(metadata_path)
-        manifest_rel = metadata.get("mcpServers")
-        if not isinstance(manifest_rel, str) or not manifest_rel.strip():
-            continue
-        manifest_path = os.path.abspath(os.path.join(install_root, manifest_rel.strip()))
-        if _path_under(manifest_path, install_root):
-            candidates.append(manifest_path)
-
-    candidates.append(os.path.join(install_root, ".mcp.json"))
-
-    manifests = []
-    seen = set()
-    for candidate in candidates:
-        normalized = os.path.abspath(os.path.expanduser(str(candidate or "").strip()))
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        if os.path.isfile(normalized):
-            manifests.append(normalized)
-    return manifests
 
 
 def _installed_claude_plugin_mcp_servers():
-    servers = {}
-    for install_path in _installed_claude_plugin_paths():
-        for manifest_path in _installed_claude_plugin_mcp_manifest_paths(install_path):
-            payload = _load_json_dict_unlocked(manifest_path)
-            plugin_servers = payload.get("mcpServers") if isinstance(payload, dict) else {}
-            if not isinstance(plugin_servers, dict):
-                continue
-            for name, spec in plugin_servers.items():
-                key = str(name or "").strip()
-                if not key or key in servers or not _mcp_server_spec_has_entrypoint(spec):
-                    continue
-                servers[key] = copy.deepcopy(spec)
-    return servers
+    return _plugin_inventory.installed_claude_plugin_mcp_servers(
+        installed_claude_plugin_paths=_installed_claude_plugin_paths,
+        installed_claude_plugin_mcp_manifest_paths=_installed_claude_plugin_mcp_manifest_paths,
+        load_json_dict_unlocked=_load_json_dict_unlocked,
+        mcp_server_spec_has_entrypoint=_mcp_server_spec_has_entrypoint,
+        copy_deepcopy=copy.deepcopy,
+    )
 
 
 def _enabled_real_codex_plugin_names():
-    import re
-
-    config_path = _real_user_path(".codex", "config.toml")
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            text = f.read()
-    except Exception:
-        return set()
-
-    header_pattern = re.compile(
-        r'^\[plugins\."((?:\\.|[^"\\])*)"\]\s*$',
-        flags=re.MULTILINE,
+    return _plugin_inventory.enabled_real_codex_plugin_names(
+        real_user_path=_real_user_path,
+        decode_toml_basic_key=_decode_toml_basic_key,
     )
-    matches = list(header_pattern.finditer(text))
-    enabled = set()
-    for index, match in enumerate(matches):
-        plugin_id = _decode_toml_basic_key(match.group(1))
-        block_start = match.end()
-        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        block = text[block_start:block_end]
-        enabled_match = re.search(
-            r'^\s*enabled\s*=\s*(true|false)\s*$',
-            block,
-            flags=re.MULTILINE | re.IGNORECASE,
-        )
-        if not enabled_match or enabled_match.group(1).lower() != "true":
-            continue
-        plugin_name = str(plugin_id or "").split("@", 1)[0].strip().lower()
-        if plugin_name:
-            enabled.add(plugin_name)
-    return enabled
-
 
 _resolve_hive_root = _session_mcp.resolve_hive_root
 _default_hive_session_mcp_server = _session_mcp.default_hive_session_mcp_server
