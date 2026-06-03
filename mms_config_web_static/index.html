@@ -75,6 +75,7 @@
               <p class="muted">这里直接改 MMS 启动会读取的模型能力。`文本显示` 决定普通模型列表，`1M` 会写入 `context_window_tokens=1000000`；上下文输入请用 `200k`、`262144` 或 `1m`，不要填 `200` 这种容易误解的小数字。</p>
               <div class="model-inventory-summary" id="modelInventorySummary"></div>
               <div class="card model-controls-card">
+                <p class="muted model-fetch-note">模型拉取可以在本页自助完成，不需要 agent 代跑命令；拉取结果会先进入页面草稿，生成保存预览并发布后才会写入配置。</p>
                 <div class="btns">
                   <button id="fetchModels">拉取当前通道模型</button>
                   <button id="fetchAllModels" class="secondary">拉取全部通道模型</button>
@@ -470,17 +471,22 @@
           <textarea id="migrationText" placeholder="粘贴 mms-config-migration-*.json 内容"></textarea>
           <label>迁移密码（如果包里包含 API Key）</label>
           <input id="migrationImportPassword" type="password" placeholder="导出时设置的迁移密码">
-          <div class="btns">
+          <div class="btns migration-preview-actions">
             <button id="previewMigration">预览导入 diff</button>
-            <button id="applyMigration" class="danger">确认导入到当前配置根</button>
           </div>
-          <label class="check">
-            <input id="confirmMigration" type="checkbox"><span>我已检查导入预览，同意写入当前配置根</span>
-          </label>
-          <label>确认文字</label>
-          <input id="migrationConfirmPhrase" placeholder="导入配置">
-          <label>导入原因 / audit reason</label>
-          <input id="migrationReason" value="setup-web-ui:migration-import">
+          <div class="migration-confirm-block">
+            <p class="muted">确认写入前，请先完成 diff 预览；导入只写当前配置根，不会写 OAuth、Keychain 或原生 CLI 登录态。</p>
+            <label class="check migration-confirm-check">
+              <input id="confirmMigration" type="checkbox"><span>我已检查导入预览，同意写入当前配置根</span>
+            </label>
+            <label>确认文字</label>
+            <input id="migrationConfirmPhrase" placeholder="导入配置">
+            <label>导入原因 / audit reason</label>
+            <input id="migrationReason" value="setup-web-ui:migration-import">
+            <div class="btns migration-apply-actions">
+              <button id="applyMigration" class="danger">确认导入到当前配置根</button>
+            </div>
+          </div>
         </div>
         <div class="card span12">
           <h3>导入预览 / 结果</h3>

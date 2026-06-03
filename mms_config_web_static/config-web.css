@@ -1672,6 +1672,32 @@
     .migration-grid .card {
       align-content: start;
     }
+    .migration-preview-actions {
+      margin-top: 14px;
+    }
+    .migration-confirm-block {
+      display: grid;
+      gap: 12px;
+      margin-top: 20px;
+      padding: 16px;
+      border: 1.5px solid color-mix(in oklch, var(--danger) 28%, var(--border));
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--danger) 7%, transparent), transparent 42%),
+        color-mix(in oklch, var(--surface) 92%, var(--bg));
+    }
+    .migration-confirm-block p,
+    .migration-confirm-block label,
+    .migration-confirm-block .btns {
+      margin-top: 0;
+    }
+    .migration-confirm-check {
+      justify-self: start;
+      border-color: color-mix(in oklch, var(--danger) 32%, var(--border));
+    }
+    .migration-apply-actions {
+      padding-top: 2px;
+    }
     #migrationText {
       min-height: 150px;
     }
@@ -2692,11 +2718,15 @@
         linear-gradient(180deg, oklch(98.5% 0.006 230), oklch(95.8% 0.01 230));
       border-color: color-mix(in oklch, var(--border) 86%, var(--muted));
     }
+    .model-fetch-note {
+      margin: 0 0 12px;
+      max-width: 860px;
+    }
     .model-controls-card .btns {
       gap: 8px;
       margin-top: 10px;
     }
-    .model-controls-card .btns:first-child {
+    .model-controls-card .btns:first-of-type {
       align-items: center;
     }
     .model-controls-card button,
