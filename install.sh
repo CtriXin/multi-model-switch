@@ -4454,6 +4454,8 @@ cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
+copy_dir_safely "$SOURCE_DIR/assets" "$MMS_HOME/assets" "assets 目录" "assets directory"
+copy_dir_safely "$SOURCE_DIR/mms_config_web_static" "$MMS_HOME/mms_config_web_static" "WebUI 静态资源目录" "WebUI static assets directory"
 copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor" "vendor 目录" "vendor directory"
 copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scripts directory"
 if [ -f "$SOURCE_DIR/docs/LLM_OPERATION_GUIDE.md" ]; then
