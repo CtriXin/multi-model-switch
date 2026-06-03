@@ -351,6 +351,18 @@
       text-align: left;
       vertical-align: top;
     }
+    .model-source-stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .capability-source-tag {
+      max-width: 190px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .model-inventory-summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));

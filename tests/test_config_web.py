@@ -709,6 +709,26 @@ def test_config_web_review_summary_includes_model_policy_detail_rows(tmp_path):
         "context_window_tokens": 1_000_000,
         "max_output_tokens": 131_072,
     }
+    row["capability_sources"] = {
+        "vision": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+            "source_path": "https://openrouter.ai/api/v1/models",
+        },
+        "context_window_tokens": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+            "source_path": "https://openrouter.ai/api/v1/models",
+        },
+        "max_output_tokens": {
+            "source_layer": "provider_catalog",
+            "source_name": "OpenRouter catalog",
+            "confidence": "provider_catalog_openrouter",
+            "source_path": "https://openrouter.ai/api/v1/models",
+        },
+    }
 
     plan = mms_config_web.build_config_plan(
         {"providers": []},
@@ -726,6 +746,8 @@ def test_config_web_review_summary_includes_model_policy_detail_rows(tmp_path):
     assert "capabilities.context_window_tokens" in item["changed_fields"]
     assert any(change["label"] == "看图" and change["after"] is True for change in item["changes"])
     assert any(change["label"] == "输出上限" and change["after"] == 131_072 for change in item["changes"])
+    assert plan["model_policy"]["models"]["mimo-v2.5"]["capability_sources"]["vision"]["source_name"] == "OpenRouter catalog"
+    assert any(change["label"] == "看图" and change["source_label"] == "OpenRouter catalog" for change in item["changes"])
 
 
 def test_config_web_one_m_and_think_capabilities_are_saved_to_model_policy(tmp_path):
@@ -1033,6 +1055,9 @@ def test_config_web_review_summary_frontend_has_policy_tabs():
     assert "模型策略明细" in html
     assert "JSON 明细" in html
     assert "policy-change-card" in html
+    assert "capabilitySourceBadges" in html
+    assert "OpenRouter catalog" in html
+    assert "<th>来源</th>" in html
 
 
 def test_config_web_markdown_contains_manual_snippets(capsys):
