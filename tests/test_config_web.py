@@ -1505,7 +1505,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "maintenanceActions" not in html
     assert "/api/settings/report" in html
     assert "人工确认" in html
-    assert "报告 / 人工确认" in html
+    assert "操作结果" in html
+    assert "报告 / 人工确认" not in html
     assert "版本：" in html
     assert "当前配置 Root" in html
     assert "要试预览 DB 请用 mmf config web" in html
@@ -1521,6 +1522,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "usage-detail" in html
     assert "CLI 明细（按需展开）" in html
     assert "模型</th><th>来源</th><th>显示状态</th><th>启动次数" in html
+    assert "<th>使用次数</th>" in html
+    assert "modelUsageSummary" in html
+    assert "refreshModelUsage" in html
+    assert "function refreshCurrentModelUsage" in html
+    assert "provider_id:p.id" in html
     assert "function copyGateCommand" in html
     assert "data-copy-gate-command" in html
     assert "blocked_auto_execute" in html
@@ -1552,11 +1558,15 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "Think on/off" in html
     assert "1M 上下文" in html
     assert "拉取全部通道模型" in html
+    assert "刷新使用次数" in html
+    assert "模型使用次数" in html
+    assert "model-usage-cell" in html
     assert "refreshAllProviderModels" in html
     assert "保存后不需要 [1m] 后缀" in html
     assert "刷新能力证据入口" not in html
     assert "打开通道 1M 设置" not in html
-    assert "不要填 `200`" in html
+    assert "使用次数用于判断默认模型、priority 和能力参数" in html
+    assert "不要填 `200`" not in html
     assert "手动添加当前通道模型（extra_models" in html
     assert "添加为手动模型" in html
     assert "restoreModelPatch" in html

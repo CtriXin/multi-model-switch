@@ -391,6 +391,29 @@
       line-height: 1;
       font-variant-numeric: tabular-nums;
     }
+    .model-usage-summary {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 100% 0, color-mix(in oklch, var(--ok) 10%, transparent), transparent 38%),
+        var(--surface);
+      padding: 12px 14px;
+    }
+    .usage-inline-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+    .usage-inline-head strong {
+      font-size: 15px;
+    }
+    .usage-top-models .model-chip strong {
+      margin-left: 6px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
 
     /* ===== Settings mission control ===== */
     .settings-command {
@@ -900,40 +923,6 @@
     }
     .provider-advanced summary::marker { color: var(--muted); }
     .provider-advanced[open] { border-color: color-mix(in oklch, var(--accent) 35%, var(--border)); }
-    .provider-action-grid {
-      display: grid;
-      grid-template-columns: repeat(12, minmax(0, 1fr));
-      gap: 10px;
-    }
-    .explain-card {
-      display: flex;
-      flex-direction: column;
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface);
-      padding: 13px;
-      box-shadow: var(--shadow-sm);
-      min-height: 170px;
-    }
-    .explain-card h4 {
-      margin-bottom: 6px;
-      font-size: 14px;
-      line-height: 1.35;
-    }
-    .explain-card p {
-      color: var(--muted);
-      font-size: 12.5px;
-      line-height: 1.55;
-      white-space: normal;
-      margin-bottom: 10px;
-    }
-    .explain-card button {
-      align-self: flex-start;
-      margin-top: auto;
-      padding: 7px 12px;
-      font-size: 12.5px;
-      border-radius: 13px;
-    }
     .provider-editor-actions {
       border-top: 1px solid var(--border);
       padding-top: 14px;
@@ -1227,7 +1216,8 @@
 	    .model-capability-table {
 	      --model-visible-col: 86px;
 	      --model-name-col: 280px;
-	      min-width: 1120px;
+	      --model-usage-col: 124px;
+	      min-width: 1260px;
 	      border-collapse: separate;
 	      border-spacing: 0;
 	      table-layout: fixed;
@@ -1259,21 +1249,26 @@
 	    }
 	    .model-capability-table th:nth-child(3),
 	    .model-capability-table td:nth-child(3) {
-	      width: 460px;
-	      min-width: 460px;
+	      width: var(--model-usage-col);
+	      min-width: var(--model-usage-col);
 	    }
 	    .model-capability-table th:nth-child(4),
 	    .model-capability-table td:nth-child(4) {
-	      width: 150px;
-	      min-width: 150px;
+	      width: 460px;
+	      min-width: 460px;
 	    }
 	    .model-capability-table th:nth-child(5),
 	    .model-capability-table td:nth-child(5) {
-	      width: 134px;
-	      min-width: 134px;
+	      width: 150px;
+	      min-width: 150px;
 	    }
 	    .model-capability-table th:nth-child(6),
 	    .model-capability-table td:nth-child(6) {
+	      width: 134px;
+	      min-width: 134px;
+	    }
+	    .model-capability-table th:nth-child(7),
+	    .model-capability-table td:nth-child(7) {
 	      width: 72px;
 	      min-width: 72px;
 	      text-align: center;
@@ -1312,6 +1307,23 @@
 	      white-space: nowrap;
 	      font-weight: 650;
 	      overflow: hidden;
+	    }
+	    .model-usage-cell {
+	      display: grid;
+	      gap: 2px;
+	      min-width: 0;
+	    }
+	    .model-usage-cell strong {
+	      font-family: var(--font-mono);
+	      font-size: 16px;
+	      font-variant-numeric: tabular-nums;
+	    }
+	    .model-usage-cell span {
+	      color: var(--muted);
+	      font-size: 11px;
+	      white-space: nowrap;
+	      overflow: hidden;
+	      text-overflow: ellipsis;
 	    }
 	    .model-name-text {
 	      display: block;

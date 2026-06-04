@@ -30,7 +30,7 @@
   <main class="content">
     <section class="panel ui-advanced-only" data-section="source">
       <h2>配置源状态</h2>
-      <p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；registry 的 报告 / 人工确认操作也在这里，不再藏到 设置总表。</p>
+      <p>查看当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态；需要写入的 Registry 操作仍走人工确认。</p>
       <div class="module-actions">
         <button class="ghost" data-settings-action="model_source_status" data-report-target="sourceReport">模型配置源状态</button>
         <button class="ghost" data-settings-action="consumer_bundle_status" data-report-target="sourceReport">消费端 Bundle</button>
@@ -47,14 +47,14 @@
           <div class="loading-lines" aria-hidden="true"><span></span><span></span><span></span></div>
         </div>
       </div>
-      <div class="result module-report" id="sourceReport">本地 snapshot 读取中，完成后这里会显示可执行的只读报告和人工确认入口。</div>
+      <div class="result module-report" id="sourceReport">本地 snapshot 读取中，完成后这里会显示状态和可执行操作。</div>
     </section>
 
 
     <!-- 通道配置 -->
     <section class="panel" data-section="channel">
       <h2>通道配置</h2>
-      <p>先建通道：基础信息、连接凭据、策略高级项和报告确认分在编辑器 Tab 中；Key 只会通过 POST 发送，不会回显。</p>
+      <p>先建通道：基础信息、连接凭据和策略项在通道配置；模型能力、使用次数、隐藏/补充模型在模型配置。Key 只会通过 POST 发送，不会回显。</p>
       <div class="channel-layout">
         <div class="channel-sidebar">
           <div class="provider-list" id="providerList"></div>
@@ -73,10 +73,11 @@
           </div>
           <div class="tab-panel" data-tab-panel="models">
             <div class="model-section">
-              <p class="muted">这里直接改 MMS 启动会读取的模型能力。`文本显示` 决定普通模型列表，`1M` 会写入 `context_window_tokens=1000000`；上下文输入请用 `200k`、`262144` 或 `1m`，不要填 `200` 这种容易误解的小数字。</p>
+              <p class="muted">这里直接改 MMS 启动会读取的模型能力。`文本显示` 决定普通模型列表，`1M` 会写入 `context_window_tokens=1000000`；使用次数用于判断默认模型、priority 和能力参数。</p>
               <div class="model-inventory-summary" id="modelInventorySummary"></div>
+              <div class="model-usage-summary" id="modelUsageSummary"></div>
               <div class="card model-controls-card">
-                <p class="muted model-fetch-note">模型拉取可以在本页自助完成，不需要 agent 代跑命令；拉取结果会先进入页面草稿，生成保存预览并发布后才会写入配置。</p>
+                <p class="muted model-fetch-note">模型拉取会先进入页面草稿；使用次数刷新只更新本页统计，不写配置。</p>
                 <div class="truth-refresh-box">
                   <strong>已知能力快照</strong>
                   <p class="muted">本地快照不联网；OpenRouter catalog 会联网读取结构化字段，但它是 provider catalog 参考，不是厂商官方真值。结果都只进草稿，保存预览后才生效。</p>
@@ -97,6 +98,7 @@
                 <div class="btns">
                   <button id="fetchModels">拉取当前通道模型</button>
                   <button id="fetchAllModels" class="secondary">拉取全部通道模型</button>
+                  <button id="refreshModelUsage" class="secondary">刷新使用次数</button>
                   <button id="testList" class="secondary">测试当前通道列表接口</button>
                   <button id="openModelTest" class="ghost">去 Ping / Chat 测试</button>
                   <label class="check ui-advanced-only"><input id="autoStaleCleanupOnFetch" type="checkbox"><span>高级：拉取后把缺失旧 route 标记为待清理</span></label>
@@ -193,7 +195,7 @@
           </div>
         </div>
         <div class="card span12 ui-advanced-only">
-          <h3>Fallback 报告 / 人工确认</h3>
+          <h3>Fallback 操作结果</h3>
           <div class="result" id="fallbackReport">选择 fallback 动作查看结果。</div>
         </div>
       </div>
@@ -394,7 +396,7 @@
         </div>
 
         <div class="setting-edit-card settings-report-card ui-advanced-only">
-          <h3>报告 / 人工确认</h3>
+          <h3>操作结果</h3>
           <div class="result" id="settingsReport">选择一个设置动作查看结果</div>
         </div>
       </div>
