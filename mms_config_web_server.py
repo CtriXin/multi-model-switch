@@ -14,6 +14,7 @@ import json
 import threading
 import traceback
 import webbrowser
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -111,10 +112,10 @@ def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str =
         cli = "all"
     query = " ".join(str(payload.get("query") or "").split())
     try:
-        limit = int(payload.get("limit") or 160)
+        limit = int(payload.get("limit") or 3000)
     except (TypeError, ValueError):
-        limit = 160
-    limit = min(max(limit, 1), 500)
+        limit = 3000
+    limit = min(max(limit, 1), 5000)
 
     all_rows = list_session_records(cli="all", query=query, limit=None)
     counts = {
@@ -123,6 +124,7 @@ def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str =
         "codex": sum(1 for row in all_rows if str(row.get("cli") or "") == "codex"),
     }
     rows = all_rows if cli == "all" else [row for row in all_rows if str(row.get("cli") or "") == cli]
+    total_before_limit = len(rows)
     rows = rows[:limit]
     for row in rows:
         row["resume_command"] = f"{command_name} resume {row.get('cli')}:{row.get('session_id')}"
@@ -134,6 +136,10 @@ def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str =
         "limit": limit,
         "counts": counts,
         "rows": rows,
+        "row_count": len(rows),
+        "total_before_limit": total_before_limit,
+        "truncated": total_before_limit > len(rows),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "command_name": command_name,
         "read_only": True,
     }

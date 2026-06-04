@@ -1070,6 +1070,10 @@ def test_config_web_frontend_assets_are_external_files():
     assert "/api/migration/export" in js_body.decode("utf-8")
     assert "/api/migration/start" in js_body.decode("utf-8")
     assert "/api/session/catalog" in js_body.decode("utf-8")
+    assert "filteredSessionRows" in js_body.decode("utf-8")
+    assert "limit:3000" in js_body.decode("utf-8")
+    assert "搜索/切换使用本页缓存" in js_body.decode("utf-8")
+    assert "重新扫描" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
     assert "会话历史" in html
     assert "导入后开工" in html
