@@ -155,7 +155,7 @@
     <!-- Fallback -->
     <section class="panel" data-section="fallback">
       <h2>Fallback 设置</h2>
-      <p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。已下线的负载均衡不在本轮 WebUI 迭代范围。</p>
+      <p>配置 rescue fallback 和 vision sidecar；preview root 保存为 DB candidate 并随 latest-approved bundle 发布，stable legacy 仍走 audited writer。</p>
       <div class="grid">
         <div class="card span6">
           <h3>Rescue fallback</h3>
@@ -255,7 +255,7 @@
         <div class="settings-actionbar">
           <div>
             <strong>默认模式只放常用设置</strong>
-            <span>这里是配置总入口；真正编辑发生在下方模块卡片或左侧导航，路径和 DB 证据切到高级模式再看。</span>
+            <span>常用配置从这里进入；路径、DB、兼容诊断切到高级模式再看。</span>
           </div>
           <div class="settings-actionbar-actions">
             <button class="secondary" data-section-jump="save">生成保存预览</button>
@@ -322,8 +322,8 @@
                 <button id="saveUiLanguage" class="ghost">暂存语言修改</button>
               </div>
             </div>
-            <div class="setting-edit-card span4">
-              <h3>TUI 收缩策略 <span class="tag">WebUI-first</span></h3>
+            <div class="setting-edit-card span4 ui-advanced-only">
+              <h3>TUI / 应急边界 <span class="tag">WebUI-first</span></h3>
               <p class="muted">TUI 只保留通道 role/priority 快调、语言、rescue 和高级/应急入口；账号、Registry、Snapshot、路由导出默认回到 WebUI 或人工确认。</p>
               <div class="btns">
                 <button class="ghost" data-section-jump="channel">通道配置</button>

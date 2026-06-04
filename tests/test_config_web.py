@@ -1407,8 +1407,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "写入预览DB" in html
     assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
-    assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
-    assert "已下线的负载均衡不在本轮 WebUI 迭代范围" in html
+    assert "stable legacy 仍走 audited writer" in html
+    assert "配置 rescue fallback 和 vision sidecar" in html
+    assert "已下线的负载均衡不在本轮 WebUI 迭代范围" not in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
     assert "stable 写 credentials.sh；preview 写 secret backend" in html
     assert "这里会写入 config.toml 的 [rescue]" not in html
@@ -1423,8 +1424,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "WebUI 是新的主配置面" in html
     assert "settings-module-grid" in html
     assert "TUI 只保留启动时必须的轻量快调" in html
-    assert "TUI 收缩策略" in html
+    assert "TUI / 应急边界" in html
+    assert 'setting-edit-card span4 ui-advanced-only' in html
     assert "默认模式只放常用设置" in html
+    assert "常用配置从这里进入" in html
     assert "settings-actionbar" in html
     assert "settings-priority-grid" not in html
     assert "配置源 / DB root" not in html
