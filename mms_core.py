@@ -2310,6 +2310,7 @@ _registry_truth_tui_payload = partial(_command_tools.registry_truth_tui_payload,
 
 from mms_config import reports as _config_reports
 from mms_config import command_guards as _config_command_guards
+from mms_config.core_command import build_config_command_adapters as _build_config_command_adapters
 from mms_config.early_dispatch import dispatch_early_config_command as _dispatch_early_config_command
 
 _model_source_status_rows = partial(_config_reports.model_source_status_rows, localize=_L)
@@ -4209,6 +4210,40 @@ def handle_activate_command(cfg, argv):
 
 # ── Config command ─────────────────────────────────────
 
+def _config_command_adapters():
+    return _build_config_command_adapters(
+        command_name=current_command(),
+        config_path=CONFIG_PATH,
+        preferences_doc_path=PREFERENCES_DOC_PATH,
+        preference_paths=PREFERENCES_PATHS,
+        preferences_example_toml=PREFERENCES_EXAMPLE_TOML,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        default_priority=DEFAULT_PRIORITY,
+        resolve_provider_context=resolve_provider_context,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        probe_account_status=_probe_account_status,
+        load_usage_stats=_load_usage_stats,
+        usage_path=USAGE_PATH,
+        table_cls=Table,
+        top_source_companies=TOP_SOURCE_COMPANIES,
+        default_adapter_policy=DEFAULT_ADAPTER_POLICY,
+        mask_key=_mask_key,
+        active_credentials_path=_active_credentials_path,
+        active_usage_path=_active_usage_path,
+        probe_async_refresh_after=_PROBE_ASYNC_REFRESH_AFTER,
+        probe_async_min_interval=_PROBE_ASYNC_MIN_INTERVAL,
+        existing_override_paths=_existing_override_paths,
+        override_paths=OVERRIDE_PATHS,
+        existing_preferences_paths=_existing_preferences_paths,
+        coerce_config_value=_coerce_config_value,
+        normalize_config_sections=_normalize_config_sections,
+        save_config=save_config,
+        validate_config=_validate_config,
+        console=console,
+    )
+
+
 def handle_config(cfg, args_rest):
     """处理 config 子命令"""
     from mms_commands.tools import handle_config as handle_config_impl
@@ -4218,37 +4253,39 @@ def handle_config(cfg, args_rest):
 
         return run_config_web(*args, **kwargs)
 
+    config_adapters = _config_command_adapters()
+
     return handle_config_impl(
         cfg,
         args_rest,
         preferences_doc_path=PREFERENCES_DOC_PATH,
         preference_paths=PREFERENCES_PATHS,
-        display_config=_display_config,
+        display_config=config_adapters["display_config"],
         display_config_help=_display_config_help,
         handle_config_migrate=_handle_config_migrate,
-        handle_config_file=_handle_config_file,
-        handle_config_validate=_handle_config_validate,
-        display_preferences_help=_display_preferences_help,
-        display_preferences_path=_display_preferences_path,
-        display_preferences_example=_display_preferences_example,
+        handle_config_file=config_adapters["handle_config_file"],
+        handle_config_validate=config_adapters["handle_config_validate"],
+        display_preferences_help=config_adapters["display_preferences_help"],
+        display_preferences_path=config_adapters["display_preferences_path"],
+        display_preferences_example=config_adapters["display_preferences_example"],
         run_config_web=_run_config_web,
         command_name=current_command(),
         config_write_target_path=_config_write_target_path,
-        display_human_gate_help=_display_human_gate_help,
-        handle_config_get=_handle_config_get,
-        handle_config_set=_handle_config_set,
-        handle_config_unset=_handle_config_unset,
+        display_human_gate_help=config_adapters["display_human_gate_help"],
+        handle_config_get=config_adapters["handle_config_get"],
+        handle_config_set=config_adapters["handle_config_set"],
+        handle_config_unset=config_adapters["handle_config_unset"],
         run_connect_wizard=run_connect_wizard,
         handle_openrouter_extension_config=_handle_openrouter_extension_config,
-        display_adapter_registry=_display_adapter_registry,
-        display_providers=_display_providers,
+        display_adapter_registry=config_adapters["display_adapter_registry"],
+        display_providers=config_adapters["display_providers"],
         handle_provider_default_config=_handle_provider_default_config,
         handle_provider_add_config=_handle_provider_add_config,
         handle_provider_edit_config=_handle_provider_edit_config,
         handle_provider_rename_config=_handle_provider_rename_config,
         handle_provider_remove_config=_handle_provider_remove_config,
         handle_provider_credentials_config=_handle_provider_credentials_config,
-        display_accounts=_display_accounts,
+        display_accounts=config_adapters["display_accounts"],
         handle_account_default_config=_handle_account_default_config,
         handle_account_add_config=_handle_account_add_config,
         handle_account_edit_config=_handle_account_edit_config,
@@ -4256,7 +4293,7 @@ def handle_config(cfg, args_rest):
         handle_account_rename_config=_handle_account_rename_config,
         handle_account_status_config=_handle_account_status_config,
         handle_account_login_config=_handle_account_login_config,
-        display_usage_stats=_display_usage_stats,
+        display_usage_stats=config_adapters["display_usage_stats"],
         resolve_provider_context=resolve_provider_context,
         setup_provider_credentials=setup_provider_credentials,
         handle_api_config=_handle_api_config,
@@ -4500,7 +4537,7 @@ def _handle_account_status_config(cfg, args_rest):
         args_rest,
         resolve_account_context=resolve_account_context,
         probe_account_status=_probe_account_status,
-        display_accounts=_display_accounts,
+        display_accounts=_config_command_adapters()["display_accounts"],
         console=console,
     )
 
@@ -4628,123 +4665,8 @@ def _handle_config_migrate():
     )
 
 
-def _display_providers(cfg):
-    from mms_commands.tools import display_providers
-
-    return display_providers(
-        cfg,
-        default_provider_id=DEFAULT_PROVIDER_ID,
-        default_priority=DEFAULT_PRIORITY,
-        resolve_provider_context=resolve_provider_context,
-        provider_openai_base_url=_provider_openai_base_url,
-        provider_anthropic_base_url=_provider_anthropic_base_url,
-        command_name=current_command(),
-        table_cls=Table,
-        console=console,
-    )
-
-
-def _display_accounts(cfg):
-    from mms_commands.tools import display_accounts
-
-    return display_accounts(
-        cfg,
-        default_priority=DEFAULT_PRIORITY,
-        probe_account_status=_probe_account_status,
-        command_name=current_command(),
-        table_cls=Table,
-        console=console,
-    )
-
-
 def _config_root_status():
     return mms_config_root_status(command=current_command(), config_dir=PRIMARY_CONFIG_DIR)
-
-
-def _display_preferences_path():
-    from mms_commands.tools import display_preferences_path
-
-    return display_preferences_path(
-        preference_paths=PREFERENCES_PATHS,
-        preferences_doc_path=PREFERENCES_DOC_PATH,
-        console=console,
-    )
-
-
-def _display_preferences_example():
-    return _command_tools.display_preferences_example(preferences_example_toml=PREFERENCES_EXAMPLE_TOML, console=console)
-
-
-def _display_human_gate_help():
-    from mms_commands.tools import display_human_gate_help
-
-    return display_human_gate_help(
-        command_name=current_command(),
-        preferences_doc_path=PREFERENCES_DOC_PATH,
-        console=console,
-    )
-
-
-def _display_preferences_help():
-    from mms_commands.tools import display_preferences_help
-
-    return display_preferences_help(
-        command_name=current_command(),
-        preference_paths=PREFERENCES_PATHS,
-        preferences_doc_path=PREFERENCES_DOC_PATH,
-        console=console,
-    )
-
-
-
-def _display_config(cfg, prefix="", depth=0):
-    """递归显示配置，遮蔽敏感值"""
-    from mms_commands.tools import display_config
-
-    return display_config(
-        cfg,
-        prefix=prefix,
-        depth=depth,
-        resolve_provider_context=resolve_provider_context,
-        provider_openai_base_url=_provider_openai_base_url,
-        provider_anthropic_base_url=_provider_anthropic_base_url,
-        mask_key=_mask_key,
-        active_credentials_path=_active_credentials_path,
-        active_usage_path=_active_usage_path,
-        display_providers=_display_providers,
-        display_accounts=_display_accounts,
-        probe_async_refresh_after=_PROBE_ASYNC_REFRESH_AFTER,
-        probe_async_min_interval=_PROBE_ASYNC_MIN_INTERVAL,
-        existing_override_paths=_existing_override_paths,
-        override_paths=OVERRIDE_PATHS,
-        existing_preferences_paths=_existing_preferences_paths,
-        preference_paths=PREFERENCES_PATHS,
-        command_name=current_command(),
-        console=console,
-    )
-
-
-def _display_usage_stats():
-    from mms_commands.tools import display_usage_stats
-
-    return display_usage_stats(
-        load_usage_stats=_load_usage_stats,
-        usage_path=USAGE_PATH,
-        table_cls=Table,
-        console=console,
-    )
-
-
-def _display_adapter_registry():
-    from mms_commands.tools import display_adapter_registry
-
-    return display_adapter_registry(
-        top_source_companies=TOP_SOURCE_COMPANIES,
-        default_adapter_policy=DEFAULT_ADAPTER_POLICY,
-        command_name=current_command(),
-        table_cls=Table,
-        console=console,
-    )
 
 
 def _coerce_config_value(key_path, raw_value):
@@ -4776,48 +4698,6 @@ def _validate_config(cfg):
         normalize_claude_1m_mode=_normalize_claude_1m_mode,
         normalize_user_role=normalize_user_role,
     )
-
-
-def _handle_config_get(cfg, args_rest):
-    from mms_commands.tools import handle_config_get
-
-    return handle_config_get(cfg, args_rest, command_name=current_command(), console=console)
-
-
-def _handle_config_set(cfg, args_rest):
-    from mms_commands.tools import handle_config_set
-
-    return handle_config_set(
-        cfg,
-        args_rest,
-        command_name=current_command(),
-        coerce_config_value=_coerce_config_value,
-        normalize_config_sections=_normalize_config_sections,
-        save_config=save_config,
-        console=console,
-    )
-
-
-def _handle_config_unset(cfg, args_rest):
-    from mms_commands.tools import handle_config_unset
-
-    return handle_config_unset(
-        cfg,
-        args_rest,
-        command_name=current_command(),
-        normalize_config_sections=_normalize_config_sections,
-        save_config=save_config,
-        console=console,
-    )
-
-
-_handle_config_file = partial(_command_tools.handle_config_file, config_path=CONFIG_PATH, console=console)
-
-
-def _handle_config_validate(cfg):
-    from mms_commands.tools import handle_config_validate
-
-    return handle_config_validate(cfg, validate_config=_validate_config, console=console)
 
 
 # ── Main ────────────────────────────────────────────────
