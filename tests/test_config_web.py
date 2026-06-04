@@ -1071,6 +1071,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert "/api/migration/start" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
     assert "导入后开工" in html
+    assert "执行 /models、Ping 或简单对话后" in html
+    assert "原始响应在高级模式展开" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
     assert "这里直接改 MMS 启动会读取的模型能力" in html
@@ -1310,12 +1312,16 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "下载的恢复文件已脱敏，不含明文 key" in html
     assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" not in html
     assert "高级恢复工具" in html
+    assert 'class="oc-advanced ui-advanced-only" id="advancedPlanTools"' in html
     assert "高级 / 恢复：plan JSON 与 CLI fallback" not in html
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
     assert "function renderSavePreviewResult(data)" in html
     assert "function renderLegacySaveResult(data)" in html
     assert "function renderApplyResult(data)" in html
+    assert "function renderModelTestResult" in html
+    assert "renderModelTestResult(targetId,data,'/models')" in html
+    assert "原始结果" not in html
     assert "save-feedback" in html
     assert "save-metric-grid" in html
     assert "rich-result" in html
