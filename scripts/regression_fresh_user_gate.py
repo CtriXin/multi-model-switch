@@ -37,14 +37,14 @@ _SCRUB_ENV_KEYS = {
     "CLAUDE_CODE_SUBAGENT_MODEL",
 }
 
-_PY_COMPILE_TARGETS = [
-    "mms",
-    "mmf",
-    "mms_core.py",
-    "mms_launchers.py",
-    "mms_session_index.py",
-    "mms_state_io.py",
-    "mms_config_web.py",
+_PY_COMPILE_TARGET_GROUPS = [
+    ("mms",),
+    ("mmf",),
+    ("mms_core.py",),
+    ("mms_launchers.py",),
+    ("mms_session_index.py", "mms_session/index.py"),
+    ("mms_state_io.py", "mms_runtime/state_io.py"),
+    ("mms_config_web.py", "mms_config/web.py"),
 ]
 
 _PYTEST_TARGETS = [
@@ -98,6 +98,18 @@ def _pytest_command() -> list[str]:
     return [sys.executable, "-m", "pytest"]
 
 
+def _py_compile_targets() -> list[str]:
+    targets = []
+    for candidates in _PY_COMPILE_TARGET_GROUPS:
+        for candidate in candidates:
+            if (ROOT_DIR / candidate).exists():
+                targets.append(candidate)
+                break
+        else:
+            raise SystemExit(f"missing py_compile target from candidates: {candidates!r}")
+    return targets
+
+
 def _smoke_fresh_mmf_config_root() -> None:
     with tempfile.TemporaryDirectory(prefix="mms-fresh-user-") as tmp:
         home = Path(tmp) / "home"
@@ -124,7 +136,7 @@ def main() -> int:
     parser.add_argument("--quick", action="store_true", help="Run the smaller gate used during tight iteration.")
     args = parser.parse_args()
 
-    _run("py_compile", [sys.executable, "-m", "py_compile", *_PY_COMPILE_TARGETS])
+    _run("py_compile", [sys.executable, "-m", "py_compile", *_py_compile_targets()])
     _smoke_fresh_mmf_config_root()
 
     pytest_targets = _QUICK_PYTEST_TARGETS if args.quick else _PYTEST_TARGETS
