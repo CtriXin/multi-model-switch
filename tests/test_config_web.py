@@ -1070,10 +1070,14 @@ def test_config_web_frontend_assets_are_external_files():
     assert "/api/migration/export" in js_body.decode("utf-8")
     assert "/api/migration/start" in js_body.decode("utf-8")
     assert "/api/session/catalog" in js_body.decode("utf-8")
+    assert "/api/session/preview" in js_body.decode("utf-8")
     assert "filteredSessionRows" in js_body.decode("utf-8")
     assert "limit:3000" in js_body.decode("utf-8")
     assert "搜索/切换使用本页缓存" in js_body.decode("utf-8")
     assert "重新扫描" in js_body.decode("utf-8")
+    assert "预览片段" in js_body.decode("utf-8")
+    assert "会话片段" in js_body.decode("utf-8")
+    assert "搜索本会话" in js_body.decode("utf-8")
     assert "--select-model" in js_body.decode("utf-8")
     assert "选择模型后恢复" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
@@ -1201,6 +1205,62 @@ def test_config_web_session_catalog_uses_process_cache(monkeypatch):
     assert refreshed["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
 
 
+def test_config_web_session_preview_api_uses_cached_record(monkeypatch):
+    import mms_session_catalog
+
+    calls = {"list": 0, "preview": []}
+    rows = [
+        {
+            "cli": "claude",
+            "session_id": "claude-session",
+            "project_name": "repo",
+            "source_kind": "claude-jsonl",
+            "source_path": "/tmp/claude-session.jsonl",
+        }
+    ]
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        calls["list"] += 1
+        assert cli == "all"
+        return list(rows)
+
+    def fake_preview_session_record(session_ref, *, cli="all", record=None, query="", limit=18, max_lines=20000):
+        calls["preview"].append(
+            {
+                "session_ref": session_ref,
+                "cli": cli,
+                "record": record,
+                "query": query,
+                "limit": limit,
+                "max_lines": max_lines,
+            }
+        )
+        return {
+            "ok": True,
+            "schema": "mms.session_preview.v1",
+            "session_id": session_ref,
+            "cli": cli,
+            "query": query,
+            "items": [{"role": "用户", "text": "hello", "line": 3}],
+            "read_only": True,
+        }
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    monkeypatch.setattr(mms_session_catalog, "preview_session_record", fake_preview_session_record)
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+
+    payload = app.session_preview({"key": "claude:claude-session", "query": " hello ", "limit": 12})
+
+    assert calls["list"] == 1
+    assert calls["preview"][0]["record"]["session_id"] == "claude-session"
+    assert calls["preview"][0]["query"] == "hello"
+    assert calls["preview"][0]["limit"] == 12
+    assert payload["ok"] is True
+    assert payload["record"]["resume_command"] == "mmz resume claude:claude-session"
+    assert payload["record"]["select_model_command"] == "mmz resume --select-model claude:claude-session"
+    assert payload["items"][0]["text"] == "hello"
+
+
 def test_config_web_server_serves_session_catalog_endpoint(monkeypatch, tmp_path):
     import mms_session_catalog
 
@@ -1244,6 +1304,66 @@ def test_config_web_server_serves_session_catalog_endpoint(monkeypatch, tmp_path
 
     assert payload["ok"] is True
     assert payload["rows"][0]["resume_command"] == "mmz resume codex:codex-session"
+
+
+def test_config_web_server_serves_session_preview_endpoint(monkeypatch, tmp_path):
+    import mms_session_catalog
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        return [
+            {
+                "cli": "codex",
+                "session_id": "codex-session",
+                "project_path": str(tmp_path),
+                "project_name": tmp_path.name,
+                "source_kind": "codex-jsonl",
+                "source_path": str(tmp_path / "codex-session.jsonl"),
+            }
+        ]
+
+    def fake_preview_session_record(session_ref, *, cli="all", record=None, query="", limit=18, max_lines=20000):
+        assert session_ref == "codex-session"
+        assert cli == "codex"
+        assert record["project_name"] == tmp_path.name
+        return {
+            "ok": True,
+            "schema": "mms.session_preview.v1",
+            "session_id": session_ref,
+            "cli": cli,
+            "items": [{"role": "助手", "text": "预览内容", "line": 8}],
+            "read_only": True,
+        }
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    monkeypatch.setattr(mms_session_catalog, "preview_session_record", fake_preview_session_record)
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz",
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        req = Request(
+            f"{url}/api/session/preview",
+            data=json.dumps({"cli": "codex", "session_id": "codex-session"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert payload["ok"] is True
+    assert payload["items"][0]["text"] == "预览内容"
+    assert payload["record"]["resume_command"] == "mmz resume codex:codex-session"
 
 
 def test_config_web_server_skips_snapshot_for_shell_and_static_assets():

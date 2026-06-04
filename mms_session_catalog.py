@@ -455,6 +455,158 @@ def list_session_records(cli: str = "all", query: str = "", limit: int | None = 
     return merged
 
 
+def _preview_source_paths(record: dict) -> list[Path]:
+    paths = []
+    for value in list(record.get("source_paths") or []) + [record.get("source_path")]:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        path = Path(os.path.abspath(os.path.expanduser(text)))
+        if path.suffix != ".jsonl" or path.name == "session_index.jsonl":
+            continue
+        if path.is_file():
+            paths.append(path)
+    return _dedupe_paths(paths)
+
+
+def _normalized_role(value: object, fallback: str = "") -> str:
+    role = str(value or fallback or "").strip().lower()
+    return {
+        "user": "用户",
+        "assistant": "助手",
+        "system": "系统",
+        "tool": "工具",
+        "function": "工具",
+    }.get(role, role or "消息")
+
+
+def _message_preview_from_payload(payload: dict, *, cli: str, line_number: int) -> dict | None:
+    kind = str(payload.get("type") or "").strip()
+    timestamp = str(payload.get("timestamp") or "").strip()
+    uuid = str(payload.get("uuid") or payload.get("id") or "").strip()
+    role = ""
+    text = ""
+    if cli == "claude":
+        if kind not in {"user", "assistant", "system"}:
+            return None
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else payload
+        role = _normalized_role(message.get("role"), fallback=kind)
+        text = _short_text(message.get("content") or payload.get("content"), limit=2200)
+    elif cli == "codex":
+        body = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+        if kind == "response_item":
+            role = _normalized_role(body.get("role"), fallback="assistant")
+            text = _short_text(body.get("content"), limit=2200)
+        elif kind in {"user_message", "assistant_message", "system_message"}:
+            fallback = kind.split("_", 1)[0]
+            role = _normalized_role(body.get("role"), fallback=fallback)
+            text = _short_text(body.get("content") or payload.get("content"), limit=2200)
+        else:
+            return None
+    else:
+        return None
+    if not text:
+        return None
+    return {
+        "role": role,
+        "text": text,
+        "timestamp": timestamp,
+        "line": line_number,
+        "uuid": uuid,
+        "type": kind,
+    }
+
+
+def preview_session_record(
+    session_ref: str,
+    *,
+    cli: str = "all",
+    record: dict | None = None,
+    query: str = "",
+    limit: int = 18,
+    max_lines: int = 20000,
+) -> dict:
+    cli = str(cli or "all").strip().lower()
+    if record is None:
+        _resolved_id, resolved_record, error = resolve_catalog_ref(session_ref, cli=cli)
+        if error or not isinstance(resolved_record, dict):
+            return {"ok": False, "error": error or f"找不到 session: {session_ref}", "items": []}
+        record = resolved_record
+    session_id = str(record.get("session_id") or session_ref or "").strip()
+    resolved_cli = str(record.get("cli") or cli or "").strip().lower()
+    limit = min(max(int(limit or 18), 1), 80)
+    max_lines = min(max(int(max_lines or 20000), 500), 100000)
+    query_text = " ".join(str(query or "").split())
+    query_tokens = query_text.lower().split()
+    sources = _preview_source_paths(record)
+    if not sources:
+        return {
+            "ok": True,
+            "schema": "mms.session_preview.v1",
+            "session_id": session_id,
+            "cli": resolved_cli,
+            "items": [],
+            "source_paths": [],
+            "query": query_text,
+            "mode": "search" if query_text else "recent",
+            "warning": "没有找到可预览的 JSONL 原始记录",
+            "read_only": True,
+        }
+
+    scanned_lines = 0
+    scanned_messages = 0
+    matched_messages: list[dict] = []
+    recent_messages: list[dict] = []
+    truncated = False
+    used_source = sources[0]
+    try:
+        with used_source.open("r", encoding="utf-8", errors="replace") as handle:
+            for line_number, line in enumerate(handle, 1):
+                scanned_lines = line_number
+                if line_number > max_lines:
+                    truncated = True
+                    break
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                item = _message_preview_from_payload(payload, cli=resolved_cli, line_number=line_number)
+                if not item:
+                    continue
+                scanned_messages += 1
+                if query_tokens:
+                    hay = f"{item.get('role','')} {item.get('text','')}".lower()
+                    if all(token in hay for token in query_tokens):
+                        matched_messages.append(item)
+                        if len(matched_messages) >= limit:
+                            break
+                else:
+                    recent_messages.append(item)
+                    if len(recent_messages) > limit:
+                        recent_messages = recent_messages[-limit:]
+    except OSError as exc:
+        return {"ok": False, "error": str(exc), "items": [], "source_path": str(used_source)}
+
+    items = matched_messages if query_tokens else recent_messages
+    return {
+        "ok": True,
+        "schema": "mms.session_preview.v1",
+        "session_id": session_id,
+        "cli": resolved_cli,
+        "mode": "search" if query_text else "recent",
+        "query": query_text,
+        "items": items,
+        "item_count": len(items),
+        "scanned_lines": scanned_lines,
+        "scanned_messages": scanned_messages,
+        "truncated": truncated,
+        "source_path": str(used_source),
+        "source_paths": [str(path) for path in sources],
+        "read_only": True,
+    }
+
 def resolve_catalog_ref(session_ref: str, cli: str = "all") -> tuple[str | None, dict | None, str | None]:
     ref = str(session_ref or "").strip()
     if not ref:

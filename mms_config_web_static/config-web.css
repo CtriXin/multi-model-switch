@@ -3444,6 +3444,7 @@
     }
     .session-detail-grid {
       display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
     .session-command {
@@ -3451,6 +3452,79 @@
       overflow-x: auto;
       white-space: pre;
       scrollbar-width: thin;
+    }
+    .session-preview {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .session-preview-head,
+    .session-preview-toolbar,
+    .session-message-head {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .session-preview-head {
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .session-preview-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .session-preview-toolbar {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto auto auto;
+      margin-bottom: 12px;
+    }
+    .session-preview-items {
+      display: grid;
+      gap: 10px;
+      max-height: 460px;
+      overflow: auto;
+      padding-right: 4px;
+      scrollbar-width: thin;
+    }
+    .session-message {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px;
+      background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+    }
+    .session-message.is-user {
+      border-left: 4px solid var(--accent);
+    }
+    .session-message.is-assistant {
+      border-left: 4px solid color-mix(in oklch, var(--fg) 72%, var(--accent));
+    }
+    .session-message.is-system,
+    .session-message.is-tool {
+      border-left: 4px solid color-mix(in oklch, var(--muted) 75%, var(--border));
+    }
+    .session-message-role {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .08em;
+      color: var(--accent);
+    }
+    .session-message p {
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.55;
+      color: color-mix(in oklch, var(--fg) 82%, var(--muted));
+    }
+    .session-preview-source {
+      margin-top: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
     }
 
     @media (max-width: 1180px) {
@@ -3464,6 +3538,15 @@
       }
       .session-list {
         grid-template-columns: 1fr;
+      }
+      .session-detail-grid,
+      .session-preview-toolbar {
+        grid-template-columns: 1fr;
+      }
+      .session-preview-head,
+      .session-message-head {
+        align-items: flex-start;
+        flex-direction: column;
       }
       [data-section="settings"] {
         padding: 14px;
