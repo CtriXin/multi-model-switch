@@ -258,7 +258,6 @@
           <div class="settings-actionbar-actions">
             <button class="secondary" data-section-jump="save">生成保存预览</button>
             <button class="ghost" data-section-jump="test">打开模型测试</button>
-            <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
           </div>
         </div>
 
@@ -319,7 +318,6 @@
               </select>
               <div class="btns">
                 <button id="saveUiLanguage" class="ghost">暂存语言修改</button>
-                <button class="ghost ui-advanced-only" data-settings-action="language_status" data-report-target="settingsReport">语言状态</button>
               </div>
             </div>
             <div class="setting-edit-card span4">
@@ -344,7 +342,6 @@
             <h3>CLI 账号默认值 <span class="tag">草稿预览</span></h3>
             <p class="muted">这里配置已有 account 的默认选择、启用状态、priority、timezone 和 note；Claude account 仍是 human-only。OAuth / AGY 官方登录不再作为 WebUI 主流程。</p>
             <div class="btns" id="accountModuleActions">
-              <button class="ghost" data-settings-action="accounts" data-report-target="settingsReport">刷新账号状态</button>
               <button class="ghost" data-section-jump="save">保存账号草稿</button>
             </div>
             <div id="accountTable" class="account-config-grid"></div>
@@ -394,17 +391,6 @@
               </details>
             </div>
           </div>
-        </div>
-
-        <div class="settings-diagnostic-row ui-advanced-only">
-          <button class="settings-diagnostic-card" data-section-jump="source">
-            <strong>配置源 / DB root</strong>
-            <span>root、registry、bundle、latest-approved 只作为诊断证据，放在这里统一查看。</span>
-          </button>
-          <button class="settings-diagnostic-card" data-section-jump="channel">
-            <strong>模型能力缺口</strong>
-            <span>Text / Vision / Reasoning / Long context 都回到模型配置里改，不靠模型名 tag 猜。</span>
-          </button>
         </div>
 
         <div class="setting-edit-card settings-report-card ui-advanced-only">

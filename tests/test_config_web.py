@@ -1409,8 +1409,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "默认模式只放常用设置" in html
     assert "settings-actionbar" in html
     assert "settings-priority-grid" not in html
-    assert "配置源 / DB root" in html
-    assert "settings-diagnostic-row" in html
+    assert "配置源 / DB root" not in html
+    assert "settings-diagnostic-row" not in html
     assert "默认模式" in html
     assert "高级模式" in html
     assert "data-ui-mode-button" in html
@@ -1439,6 +1439,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "官方账号登录说明（OAuth）" not in html
     assert "OAuth 主流程已下线" in html
     assert "查看已下线兼容说明" in html
+    assert "刷新账号状态" not in html
+    assert "语言状态" not in html
     assert "OAuth 确认" not in html
     assert "自动排序确认" not in html
     assert "modelInventorySummary" in html
