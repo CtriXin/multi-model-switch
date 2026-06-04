@@ -2310,7 +2310,7 @@ _registry_truth_tui_payload = partial(_command_tools.registry_truth_tui_payload,
 
 from mms_config import reports as _config_reports
 from mms_config import command_guards as _config_command_guards
-from mms_config import display_commands as _config_display_commands
+from mms_config.early_dispatch import dispatch_early_config_command as _dispatch_early_config_command
 
 _model_source_status_rows = partial(_config_reports.model_source_status_rows, localize=_L)
 _model_source_status_report_payload = partial(_config_reports.model_source_status_report_payload, localize=_L)
@@ -4661,91 +4661,6 @@ def _config_root_status():
     return mms_config_root_status(command=current_command(), config_dir=PRIMARY_CONFIG_DIR)
 
 
-def _display_config_root(json_output=False):
-    return _config_display_commands.display_config_root(
-        json_output=json_output,
-        config_root_status=_config_root_status,
-        console=console,
-    )
-
-
-def _display_model_source_status(json_output=False):
-    return _config_display_commands.display_model_source_status(
-        json_output=json_output,
-        config_dir=PRIMARY_CONFIG_DIR,
-        command_name=current_command(),
-    )
-
-
-def _display_consumer_bundle_status(json_output=False, strict_exit=True):
-    return _config_display_commands.display_consumer_bundle_status(
-        json_output=json_output,
-        strict_exit=strict_exit,
-        config_dir=PRIMARY_CONFIG_DIR,
-        command_name=current_command(),
-    )
-
-
-def _display_registry_v2_save_plan(json_output=False):
-    return _config_display_commands.display_registry_v2_save_plan(
-        json_output=json_output,
-        config_dir=PRIMARY_CONFIG_DIR,
-        command_name=current_command(),
-    )
-
-
-def _display_preview_doctor(json_output=False, strict_exit=False):
-    return _config_display_commands.display_preview_doctor(
-        json_output=json_output,
-        strict_exit=strict_exit,
-        config_dir=PRIMARY_CONFIG_DIR,
-        command_name=current_command(),
-    )
-
-
-def _display_preview_check(json_output=False, strict_exit=True):
-    return _config_display_commands.display_preview_check(
-        json_output=json_output,
-        strict_exit=strict_exit,
-        config_dir=PRIMARY_CONFIG_DIR,
-        command_name=current_command(),
-    )
-
-
-def _display_config_v2_promotion_plan(
-    json_output=False,
-    strict_exit=False,
-    *,
-    preview_config_dir=None,
-    stable_config_dir=None,
-    command_name=None,
-):
-    return _config_display_commands.display_config_v2_promotion_plan(
-        json_output=json_output,
-        strict_exit=strict_exit,
-        preview_config_dir=preview_config_dir or PRIMARY_CONFIG_DIR,
-        stable_config_dir=stable_config_dir,
-        command_name=command_name or f"{current_command()} config promote-plan",
-    )
-
-
-def _display_config_v2_migration_plan(args_rest):
-    return _config_display_commands.display_config_v2_migration_plan(
-        args_rest,
-        config_root_status=lambda: mms_config_root_status(command=current_command()),
-        primary_config_dir=PRIMARY_CONFIG_DIR,
-        command_name=current_command(),
-    )
-
-
-def _display_config_v2_release_readiness(args_rest):
-    return _config_display_commands.display_config_v2_release_readiness(
-        args_rest,
-        config_root_status=lambda: mms_config_root_status(command=current_command()),
-        primary_config_dir=PRIMARY_CONFIG_DIR,
-        command_name=current_command(),
-    )
-
 def _display_preferences_path():
     from mms_commands.tools import display_preferences_path
 
@@ -5416,18 +5331,6 @@ def _guard_preview_legacy_config_mutation(args_rest):
         _exit_preview_legacy_config_disabled(args_rest)
 
 
-_is_command_alias_request = _config_command_guards.is_command_alias_request
-_is_config_root_status_request = _config_command_guards.is_config_root_status_request
-_is_config_model_source_status_request = _config_command_guards.is_config_model_source_status_request
-_is_config_consumer_bundle_status_request = _config_command_guards.is_config_consumer_bundle_status_request
-_is_config_registry_v2_save_plan_request = _config_command_guards.is_config_registry_v2_save_plan_request
-_is_config_preview_check_request = _config_command_guards.is_config_preview_check_request
-_is_config_v2_promotion_plan_request = _config_command_guards.is_config_v2_promotion_plan_request
-_is_config_v2_release_readiness_request = _config_command_guards.is_config_v2_release_readiness_request
-_is_config_v2_migration_plan_request = _config_command_guards.is_config_v2_migration_plan_request
-_is_config_registry_v2_apply_plan_request = _config_command_guards.is_config_registry_v2_apply_plan_request
-_is_config_preview_doctor_request = _config_command_guards.is_config_preview_doctor_request
-
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
     if len(argv) >= 1 and argv[0] == "registry":
@@ -5435,47 +5338,14 @@ def main():
         from mms_registry.cli import handle_registry_command
 
         raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
-    if _is_config_root_status_request(argv):
-        _display_config_root(json_output="--json" in argv[2:])
-        return
-    if _is_config_model_source_status_request(argv):
-        _display_model_source_status(json_output="--json" in argv[2:])
-        return
-    if _is_config_consumer_bundle_status_request(argv):
-        code = _display_consumer_bundle_status(json_output="--json" in argv[2:], strict_exit="--no-strict-exit" not in argv[2:])
-        if code:
-            raise SystemExit(code)
-        return
-    if _is_config_registry_v2_save_plan_request(argv):
-        _display_registry_v2_save_plan(json_output="--json" in argv[2:])
-        return
-    if _is_config_preview_check_request(argv):
-        code = _display_preview_check(json_output="--json" in argv[2:], strict_exit="--no-strict-exit" not in argv[2:])
-        if code:
-            raise SystemExit(code)
-        return
-    if _is_config_v2_promotion_plan_request(argv):
-        code = _display_config_v2_promotion_plan(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
-        if code:
-            raise SystemExit(code)
-        return
-    if _is_config_v2_release_readiness_request(argv):
-        code = _display_config_v2_release_readiness(argv[2:])
-        if code:
-            raise SystemExit(code)
-        return
-    if _is_config_v2_migration_plan_request(argv):
-        code = _display_config_v2_migration_plan(argv[2:])
-        if code:
-            raise SystemExit(code)
-        return
-    if _is_config_registry_v2_apply_plan_request(argv):
-        from mms_registry.cli import handle_registry_command
-
-        registry_args = ["apply-plan", "--config-dir", PRIMARY_CONFIG_DIR] + list(argv[2:])
-        raise SystemExit(handle_registry_command(registry_args, command_name=f"{current_command()} config"))
-    if _is_config_preview_doctor_request(argv):
-        code = _display_preview_doctor(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
+    handled, code = _dispatch_early_config_command(
+        argv,
+        command_name=current_command(),
+        primary_config_dir=PRIMARY_CONFIG_DIR,
+        config_root_status=_config_root_status,
+        console=console,
+    )
+    if handled:
         if code:
             raise SystemExit(code)
         return
