@@ -130,9 +130,9 @@ def _session_preview_options(payload: dict[str, Any] | None) -> tuple[str, str, 
         cli = "all"
     query = " ".join(str(payload.get("query") or "").split())
     try:
-        limit = int(payload.get("limit") or (24 if query else 18))
+        limit = int(payload.get("limit") or 20)
     except (TypeError, ValueError):
-        limit = 24 if query else 18
+        limit = 20
     try:
         max_lines = int(payload.get("max_lines") or 20000)
     except (TypeError, ValueError):

@@ -122,6 +122,34 @@ def test_session_catalog_previews_claude_recent_and_search(monkeypatch, tmp_path
     assert matched["items"][0]["text"] == "第一条需求"
 
 
+def test_session_catalog_preview_defaults_to_latest_20_newest_first(tmp_path):
+    import mms_session_catalog
+
+    session_path = tmp_path / "latest.jsonl"
+    session_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "type": "user",
+                    "timestamp": f"2026-06-04T01:{index:02d}:00Z",
+                    "message": {"content": [{"type": "text", "text": f"消息 {index}"}]},
+                }
+            )
+            for index in range(25)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    record = {"cli": "claude", "session_id": "latest", "source_path": str(session_path)}
+
+    preview = mms_session_catalog.preview_session_record("latest", cli="claude", record=record)
+
+    assert preview["order"] == "newest_first"
+    assert len(preview["items"]) == 20
+    assert preview["items"][0]["text"] == "消息 24"
+    assert preview["items"][-1]["text"] == "消息 5"
+
+
 def test_session_catalog_scans_codex_index_and_jsonl(monkeypatch, tmp_path):
     import mms_session_catalog
 
@@ -229,8 +257,9 @@ def test_session_catalog_previews_codex_messages(monkeypatch, tmp_path):
 
     preview = mms_session_catalog.preview_session_record(record["session_id"], cli="codex", record=record)
 
-    assert [item["role"] for item in preview["items"]] == ["用户", "助手"]
-    assert preview["items"][1]["text"] == "可以，先扫描 catalog"
+    assert preview["order"] == "newest_first"
+    assert [item["role"] for item in preview["items"]] == ["助手", "用户"]
+    assert preview["items"][0]["text"] == "可以，先扫描 catalog"
 
 
 def test_session_catalog_resolves_prefix(monkeypatch, tmp_path):

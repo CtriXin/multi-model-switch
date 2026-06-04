@@ -3583,21 +3583,10 @@
       white-space: pre;
       scrollbar-width: thin;
     }
-    details.session-preview {
+    .session-preview {
       margin-top: 14px;
       padding-top: 14px;
       border-top: 1px solid var(--border);
-    }
-    .session-preview summary {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      color: color-mix(in oklch, var(--fg) 80%, var(--muted));
-    }
-    .session-preview summary span:first-child {
-      font-weight: 800;
     }
     .session-preview-head,
     .session-preview-toolbar,

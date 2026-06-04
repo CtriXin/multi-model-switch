@@ -523,7 +523,7 @@ def preview_session_record(
     cli: str = "all",
     record: dict | None = None,
     query: str = "",
-    limit: int = 18,
+    limit: int = 20,
     max_lines: int = 20000,
 ) -> dict:
     cli = str(cli or "all").strip().lower()
@@ -534,7 +534,7 @@ def preview_session_record(
         record = resolved_record
     session_id = str(record.get("session_id") or session_ref or "").strip()
     resolved_cli = str(record.get("cli") or cli or "").strip().lower()
-    limit = min(max(int(limit or 18), 1), 80)
+    limit = min(max(int(limit or 20), 1), 80)
     max_lines = min(max(int(max_lines or 20000), 500), 100000)
     query_text = " ".join(str(query or "").split())
     query_tokens = query_text.lower().split()
@@ -580,8 +580,8 @@ def preview_session_record(
                     hay = f"{item.get('role','')} {item.get('text','')}".lower()
                     if all(token in hay for token in query_tokens):
                         matched_messages.append(item)
-                        if len(matched_messages) >= limit:
-                            break
+                        if len(matched_messages) > limit:
+                            matched_messages = matched_messages[-limit:]
                 else:
                     recent_messages.append(item)
                     if len(recent_messages) > limit:
@@ -589,7 +589,7 @@ def preview_session_record(
     except OSError as exc:
         return {"ok": False, "error": str(exc), "items": [], "source_path": str(used_source)}
 
-    items = matched_messages if query_tokens else recent_messages
+    items = list(reversed(matched_messages if query_tokens else recent_messages))
     return {
         "ok": True,
         "schema": "mms.session_preview.v1",
@@ -599,6 +599,7 @@ def preview_session_record(
         "query": query_text,
         "items": items,
         "item_count": len(items),
+        "order": "newest_first",
         "scanned_lines": scanned_lines,
         "scanned_messages": scanned_messages,
         "truncated": truncated,
