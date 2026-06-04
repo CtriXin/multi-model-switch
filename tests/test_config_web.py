@@ -1426,6 +1426,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "['settings','设置','常用入口 / 账号']" in html
     assert "['test','模型测试','连通性 / 对话']" in html
     assert "['save','保存审计','预览 / 写入']" in html
+    assert '<span class="pill ui-advanced-only">配置：${escapeHtml(state.paths.config||\'-\')}</span>' in html
     assert "ping / chat smoke" not in html
     assert "diff / backup / audit" not in html
     assert 'data-section="settings"' in html
