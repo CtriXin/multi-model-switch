@@ -1077,6 +1077,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert "重新扫描" in js_body.decode("utf-8")
     assert "按项目文件夹分组" in js_body.decode("utf-8")
     assert "session-folder" in js_body.decode("utf-8")
+    assert "session-context" in js_body.decode("utf-8")
+    assert "恢复这个会话" in js_body.decode("utf-8")
     assert "辅助：查看片段" in js_body.decode("utf-8")
     assert "会话片段" in js_body.decode("utf-8")
     assert "搜索本会话" in js_body.decode("utf-8")

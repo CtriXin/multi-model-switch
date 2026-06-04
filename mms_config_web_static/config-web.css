@@ -3336,9 +3336,12 @@
     /* ===== Session center ===== */
     .session-center {
       display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(360px, .82fr);
       gap: 14px;
+      align-items: start;
     }
     .session-toolbar {
+      grid-column: 1 / -1;
       display: grid;
       grid-template-columns: auto minmax(220px, 1fr) auto;
       gap: 10px;
@@ -3360,6 +3363,7 @@
       color: var(--surface);
     }
     .session-summary {
+      grid-column: 1 / -1;
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
@@ -3367,24 +3371,29 @@
       color: var(--muted);
     }
     .session-list {
+      grid-column: 1;
       display: grid;
       gap: 12px;
     }
     .session-folder {
       border: 1.5px solid var(--border);
-      border-radius: 22px;
+      border-radius: 20px;
       background:
-        linear-gradient(135deg, color-mix(in oklch, var(--fg) 5%, transparent), transparent 48%),
-        color-mix(in oklch, var(--surface) 92%, var(--bg));
+        linear-gradient(90deg, color-mix(in oklch, var(--accent) 9%, transparent), transparent 35%),
+        color-mix(in oklch, var(--surface) 94%, var(--bg));
       box-shadow: var(--shadow-sm);
       overflow: hidden;
+    }
+    .session-folder[open] {
+      border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+      box-shadow: var(--shadow);
     }
     .session-folder summary {
       display: flex;
       gap: 14px;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 16px;
+      padding: 13px 16px;
       cursor: pointer;
       list-style: none;
     }
@@ -3407,6 +3416,7 @@
     .session-folder-main strong {
       display: block;
       font-size: 17px;
+      line-height: 1.2;
       margin-bottom: 4px;
     }
     .session-folder-main p,
@@ -3423,19 +3433,17 @@
     }
     .session-folder-rows {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 10px;
-      padding: 0 12px 12px;
+      gap: 8px;
+      padding: 0 10px 10px;
     }
     .session-card {
       min-width: 0;
-      border: 1.5px solid var(--border);
-      border-radius: 18px;
-      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
       background:
-        radial-gradient(circle at 100% 0, color-mix(in oklch, var(--accent) 8%, transparent), transparent 40%),
+        linear-gradient(135deg, color-mix(in oklch, var(--surface) 98%, var(--fg)), transparent),
         var(--surface);
-      box-shadow: var(--shadow-sm);
       cursor: pointer;
       transition: border-color .15s ease, box-shadow .15s ease, transform .08s ease;
     }
@@ -3446,7 +3454,15 @@
     }
     .session-card.active {
       border-color: var(--accent);
-      box-shadow: 0 0 0 1px var(--accent), var(--shadow-md);
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), transparent 58%),
+        var(--surface);
+      box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+    }
+    .session-card .is-selected {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--surface);
     }
     .session-card.is-codex {
       border-left: 4px solid color-mix(in oklch, var(--fg) 70%, var(--accent));
@@ -3480,7 +3496,6 @@
       white-space: nowrap;
     }
     .session-title {
-      min-height: 38px;
       color: color-mix(in oklch, var(--fg) 72%, var(--muted));
       display: -webkit-box;
       -webkit-line-clamp: 2;
@@ -3495,8 +3510,18 @@
       color: var(--muted);
     }
     .session-detail {
+      grid-column: 2;
+      position: sticky;
+      top: 16px;
+      min-height: 320px;
       white-space: normal;
       overflow: hidden;
+      border: 1.5px solid color-mix(in oklch, var(--accent) 18%, var(--border));
+      border-radius: 22px;
+      background:
+        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 12%, transparent), transparent 36%),
+        color-mix(in oklch, var(--surface) 96%, var(--bg));
+      box-shadow: var(--shadow);
     }
     .session-detail-head {
       display: flex;
@@ -3515,9 +3540,41 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .session-detail-grid {
+    .session-detail-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .session-context {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .session-context div {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: color-mix(in oklch, var(--surface) 82%, var(--bg));
+    }
+    .session-context span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .session-context strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .session-detail-grid {
+      display: grid;
+      grid-template-columns: 1fr;
       gap: 10px;
     }
     .session-command {
@@ -3617,11 +3674,19 @@
       }
     }
     @media (max-width: 780px) {
+      .session-center {
+        grid-template-columns: 1fr;
+      }
       .session-toolbar {
         grid-template-columns: 1fr;
       }
       .session-list {
+        grid-column: 1;
         grid-template-columns: 1fr;
+      }
+      .session-detail {
+        grid-column: 1;
+        position: static;
       }
       .session-folder summary,
       .session-detail-head {
@@ -3632,6 +3697,7 @@
         grid-template-columns: 1fr;
       }
       .session-detail-grid,
+      .session-context,
       .session-preview-toolbar {
         grid-template-columns: 1fr;
       }
