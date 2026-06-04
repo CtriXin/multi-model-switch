@@ -9052,6 +9052,52 @@ def test_models_command_dispatches_selected_provider():
     assert calls == [({"providers": [{"id": "relay"}]}, "relay")]
 
 
+def test_models_and_warm_help_tolerate_lazy_text_cls():
+    import mms_commands.tools as mms_command_tools
+
+    class Console:
+        def __init__(self):
+            self.calls = []
+
+        def print(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+
+    models_console = Console()
+    mms_command_tools.handle_models_command(
+        {},
+        ["--help"],
+        command_name="mmg",
+        provider_map=lambda cfg: {},
+        select_provider_for_models=lambda cfg: None,
+        manage_provider_models=lambda cfg, provider_id: None,
+        text_cls=None,
+        console=models_console,
+    )
+
+    warm_console = Console()
+    mms_command_tools.handle_warm_command(
+        {},
+        ["--help"],
+        command_name="mmg",
+        provider_map=lambda cfg: {},
+        select_provider_for_warm=lambda cfg: None,
+        resolve_provider_context=lambda cfg, provider_id: {},
+        probe_models=lambda provider, emit_output=False: {},
+        recent_models_for_provider=lambda provider_id: [],
+        pick_manual_models=lambda models: [],
+        warm_model_request=lambda provider, model: (True, "ok"),
+        text_cls=None,
+        panel_cls=object,
+        prompt_cls=object,
+        confirm_cls=object,
+        table_cls=_FakeTable,
+        console=warm_console,
+    )
+
+    assert "mmg ls [provider_id]" in str(models_console.calls[0][0][1])
+    assert "mmg warm [provider_id]" in str(warm_console.calls[0][0][1])
+
+
 def test_select_provider_for_models_filters_providers_and_reprompts_invalid():
     import mms_commands.tools as mms_command_tools
 
