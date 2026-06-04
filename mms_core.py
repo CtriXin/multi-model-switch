@@ -86,6 +86,7 @@ def _ensure_rich():
 from mms_runtime.account_state import seed_agy_state, seed_claude_state, seed_gemini_state
 from mms_commands import tools as _command_tools
 from mms_commands import about_runtime as _about_runtime
+from mms_commands.core_handlers import build_core_command_handlers as _build_core_command_handlers
 from mms_registry.adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 from mms_runtime.broker import (
     ensure_broker_config,
@@ -5036,13 +5037,15 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     )
 
 
-def handle_cache_command(argv):
-    _ensure_rich()
-    from mms_commands.tools import handle_cache_command as handle_cache_command_impl
+def _core_command_handlers():
+    def _inspect_runtime_exposure(cli, runtime):
+        from mms_launchers import inspect_runtime_exposure
 
-    return handle_cache_command_impl(
-        argv,
+        return inspect_runtime_exposure(cli, runtime)
+
+    return _build_core_command_handlers(
         command_name=current_command(),
+        script_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"),
         load_command_config=_load_command_config,
         normalize_positive_seconds=_normalize_positive_seconds,
         ensure_provider_config=_ensure_provider_config,
@@ -5052,19 +5055,6 @@ def handle_cache_command(argv):
         save_config=save_config,
         probe_async_refresh_after=_PROBE_ASYNC_REFRESH_AFTER,
         probe_async_min_interval=_PROBE_ASYNC_MIN_INTERVAL,
-        table_cls=Table,
-        console=console,
-    )
-
-
-def handle_guard_command(argv, bootstrap_cfg=None):
-    _ensure_rich()
-    from mms_commands.tools import handle_guard_command as handle_guard_command_impl
-
-    return handle_guard_command_impl(
-        argv,
-        command_name=current_command(),
-        bootstrap_cfg=bootstrap_cfg,
         load_config=load_config,
         default_config=_default_config,
         config_write_target_path=_config_write_target_path,
@@ -5075,9 +5065,28 @@ def handle_guard_command(argv, bootstrap_cfg=None):
         iso_now=_iso_now,
         snapshot_digest=_snapshot_digest,
         write_json_snapshot=_write_json_snapshot,
+        set_fake_upstream_enabled=_set_fake_upstream_enabled,
+        fake_upstream_status_payload=_fake_upstream_status_payload,
+        fake_upstream_tail_log=_fake_upstream_tail_log,
+        config_root_for_logs=lambda: _config_guard_root_dir(_config_write_target_path()),
+        cli_names=list(CLI_NAMES),
+        ensure_provider_credentials=ensure_provider_credentials,
+        ensure_models_ready=ensure_models_ready,
+        choose_runtime_source=_choose_runtime_source,
+        inspect_runtime_exposure=_inspect_runtime_exposure,
         table_cls=Table,
         console=console,
     )
+
+
+def handle_cache_command(argv):
+    _ensure_rich()
+    return _core_command_handlers()["cache"](argv)
+
+
+def handle_guard_command(argv, bootstrap_cfg=None):
+    _ensure_rich()
+    return _core_command_handlers()["guard"](argv, bootstrap_cfg=bootstrap_cfg)
 
 
 def _confirm_guard_accept_from_tui(cfg):
@@ -5097,84 +5106,29 @@ def _confirm_guard_accept_from_tui(cfg):
 
 def handle_fake_upstream_command(argv):
     _ensure_rich()
-    from mms_commands.tools import handle_fake_upstream_command as handle_fake_upstream_command_impl
-
-    return handle_fake_upstream_command_impl(
-        argv,
-        command_name=current_command(),
-        set_enabled=_set_fake_upstream_enabled,
-        status_payload=_fake_upstream_status_payload,
-        tail_log=_fake_upstream_tail_log,
-        table_cls=Table,
-        console=console,
-    )
+    return _core_command_handlers()["fake_upstream"](argv)
 
 
 def handle_logs_command(argv):
     _ensure_rich()
-    from mms_commands.tools import handle_logs_command as handle_logs_command_impl
-
-    return handle_logs_command_impl(
-        argv,
-        command_name=current_command(),
-        fake_upstream_status_payload=_fake_upstream_status_payload,
-        config_root=_config_guard_root_dir(_config_write_target_path()),
-        table_cls=Table,
-        console=console,
-    )
+    return _core_command_handlers()["logs"](argv)
 
 
 def handle_doctor_command(argv):
-    from mms_commands.tools import handle_doctor_command as handle_doctor_command_impl
-
-    return handle_doctor_command_impl(
-        argv,
-        script_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"),
-        command_name=current_command(),
-        console=console,
-    )
+    return _core_command_handlers()["doctor"](argv)
 
 
 def handle_exposure_command(argv):
     _ensure_rich()
-    from mms_commands.tools import handle_exposure_command as handle_exposure_command_impl
-    from mms_launchers import inspect_runtime_exposure
-
-    return handle_exposure_command_impl(
-        argv,
-        command_name=current_command(),
-        cli_names=CLI_NAMES,
-        load_command_config=_load_command_config,
-        ensure_provider_credentials=ensure_provider_credentials,
-        ensure_models_ready=ensure_models_ready,
-        choose_runtime_source=_choose_runtime_source,
-        inspect_runtime_exposure=inspect_runtime_exposure,
-        table_cls=Table,
-        console=console,
-    )
+    return _core_command_handlers()["exposure"](argv)
 
 
 def handle_test_command(argv, subcommand_name="test"):
-    from mms_commands.tools import handle_test_command as handle_test_command_impl
-
-    return handle_test_command_impl(
-        argv,
-        subcommand_name=subcommand_name,
-        script_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"),
-        command_name=current_command(),
-        console=console,
-    )
+    return _core_command_handlers()["test"](argv, subcommand_name=subcommand_name)
 
 
 def handle_opencode_smoke_command(argv):
-    from mms_commands.tools import handle_opencode_smoke_command as handle_opencode_smoke_command_impl
-
-    return handle_opencode_smoke_command_impl(
-        argv,
-        script_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"),
-        command_name=current_command(),
-        console=console,
-    )
+    return _core_command_handlers()["opencode_smoke"](argv)
 
 
 _PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS = _config_command_guards.PREVIEW_LEGACY_CONFIG_MUTATING_COMMANDS
