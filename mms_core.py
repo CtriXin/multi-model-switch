@@ -13800,6 +13800,103 @@ def _session_resume_model(session_record):
     return ""
 
 
+def _config_has_provider_id(cfg, provider_id, cli_name):
+    provider_id = str(provider_id or "").strip()
+    if not provider_id:
+        return False
+    for provider in cfg.get("providers", []) if isinstance(cfg, dict) else []:
+        if not isinstance(provider, dict) or str(provider.get("id") or "").strip() != provider_id:
+            continue
+        supported = provider.get("supported_clis")
+        if not supported:
+            return True
+        return str(cli_name or "").strip() in {str(item).strip() for item in supported}
+    return False
+
+
+def _config_has_account_id(cfg, account_id, cli_name):
+    account_id = str(account_id or "").strip()
+    if not account_id:
+        return False
+    for account in cfg.get("accounts", []) if isinstance(cfg, dict) else []:
+        if not isinstance(account, dict) or str(account.get("id") or "").strip() != account_id:
+            continue
+        account_cli = str(account.get("cli") or "").strip()
+        return not account_cli or account_cli == str(cli_name or "").strip()
+    return False
+
+
+def _claude_resume_project_dir_names(project_path):
+    paths = set()
+    raw = str(project_path or "").strip()
+    for candidate in (raw, os.path.abspath(os.path.expanduser(raw)) if raw else "", os.path.realpath(raw) if raw else ""):
+        if candidate:
+            paths.add(candidate)
+    try:
+        from mms_project_store import canonical_project_path
+
+        paths.add(os.path.realpath(canonical_project_path(raw or None)))
+    except Exception:
+        pass
+    return sorted(path.replace(os.sep, "-") for path in paths if path)
+
+
+def _stage_claude_catalog_resume_files(session_record, project_path, runtime):
+    """Copy catalog-discovered Claude JSONL into the active MMS project store.
+
+    This lets mmz/mmf resume sessions found in another MMS root without reading
+    that root as a runtime fallback.
+    """
+    if not isinstance(session_record, dict) or not project_path:
+        return []
+    session_id = str(session_record.get("session_id") or "").strip()
+    if not session_id or session_record.get("_unindexed"):
+        return []
+    source_paths = list(session_record.get("source_paths") or [])
+    source_path = str(session_record.get("source_path") or "").strip()
+    if source_path:
+        source_paths.append(source_path)
+    source_paths = [path for path in dict.fromkeys(str(path or "").strip() for path in source_paths) if path]
+    if not source_paths:
+        return []
+
+    auth_mode = str((runtime or {}).get("auth_mode") or "").strip()
+    account_id = str((runtime or {}).get("id") or session_record.get("account_id") or "").strip()
+    if auth_mode == "oauth":
+        account_id = str((runtime or {}).get("id") or account_id).strip()
+
+    try:
+        from mms_project_store import claude_raw_entry_path
+    except Exception:
+        return []
+
+    target_projects_root = claude_raw_entry_path("projects", project_path, account_id=account_id)
+    dir_names = set(_claude_resume_project_dir_names(project_path))
+    staged = []
+    for raw_source in source_paths:
+        source = os.path.abspath(os.path.expanduser(raw_source))
+        if not source.endswith(".jsonl") or not os.path.isfile(source):
+            continue
+        if os.path.splitext(os.path.basename(source))[0] != session_id:
+            continue
+        parent_name = os.path.basename(os.path.dirname(source))
+        if parent_name:
+            dir_names.add(parent_name)
+        for dirname in sorted(dir_names):
+            target = os.path.join(str(target_projects_root), dirname, os.path.basename(source))
+            if os.path.realpath(source) == os.path.realpath(target):
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if os.path.exists(target):
+                continue
+            try:
+                shutil.copy2(source, target)
+            except OSError:
+                continue
+            staged.append(target)
+    return staged
+
+
 def _resolve_resume_runtime_and_model(
     cfg,
     cli,
@@ -13824,9 +13921,9 @@ def _resolve_resume_runtime_and_model(
     if cli == "claude" and not account_id and not provider_id and isinstance(session_record, dict):
         source_id = str(session_record.get("account_id") or "").strip()
         runtime_kind = str(session_record.get("runtime_kind") or "").strip()
-        if source_id and runtime_kind == "api_key":
+        if source_id and (runtime_kind == "api_key" or _config_has_provider_id(cfg, source_id, cli)):
             provider_id = source_id
-        elif source_id and runtime_kind == "oauth":
+        elif source_id and (runtime_kind == "oauth" or _config_has_account_id(cfg, source_id, cli)):
             account_id = source_id
 
     runtime = cli_models = launch_cli_name = None
@@ -13871,6 +13968,7 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     parser.add_argument("--provider", help="临时指定 provider")
     parser.add_argument("--account", help="临时指定官方账号档案")
     parser.add_argument("--model", help="临时指定恢复时使用的模型")
+    parser.add_argument("--select-model", action="store_true", help="恢复前先交互选择本次使用的模型")
     parser.add_argument("--once", action="store_true", help="以一次性会话模式启动底层 CLI")
     args = parser.parse_intermixed_args(argv)
 
@@ -13893,6 +13991,22 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
 
     default_provider = ensure_provider_credentials(cfg)
     default_provider, models_cache = ensure_models_ready(cfg, default_provider)
+    if args.select_model and not args.model:
+        aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+        if not _ensure_models_cache_available(aggregated):
+            raise SystemExit(1)
+        model, selected_provider_id = _select_custom_model(
+            aggregated,
+            cli,
+            role=MODE_ALL,
+            recommend=cfg.get("recommend", {}).get("models", []),
+            use_tui=False,
+        )
+        if not model:
+            raise SystemExit(1)
+        args.model = model
+        if selected_provider_id and not args.provider and not args.account:
+            args.provider = selected_provider_id
     runtime, _cli_models, launch_cli_name, model_info = _resolve_resume_runtime_and_model(
         cfg,
         cli,
@@ -13910,6 +14024,9 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     project_path = str((session_record or {}).get("project_path") or (session_record or {}).get("cwd") or "").strip()
     if project_path and os.path.isdir(project_path):
         os.chdir(project_path)
+    staged_resume_files = []
+    if cli == "claude":
+        staged_resume_files = _stage_claude_catalog_resume_files(session_record, project_path, runtime)
     if cli == "claude":
         extra_args = ["--resume", session_id] + list(args.prompt or [])
     else:
@@ -13921,6 +14038,8 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
         source = str((session_record or {}).get("source_kind") or "MMS index")
     console.print(f"[cyan]恢复 {cli} session:[/cyan] {session_id}")
     console.print(f"[dim]来源: {source}[/dim]")
+    if staged_resume_files:
+        console.print(f"[dim]已为当前配置 root 准备 Claude 原始记录: {len(staged_resume_files)} 个路径[/dim]")
     _launch_with_tracking(cli, model_info, runtime, once=bool(args.once), extra_args=extra_args)
 
 
