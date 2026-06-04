@@ -220,6 +220,20 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - 如果涉及配置或账号隔离：确认不会误写真实用户全局目录或破坏现有登录态
 - 如果涉及 fallback / resume / auth 恢复：确认失败路径不会静默切到 global OAuth，也不会把 global auth-bearing state 当作自动补救输入
 
+## Push 前 Fresh User Gate
+
+每个功能迭代准备 push 前，必须跑一次安装版/新用户视角的回归 gate，不能只依赖当前开发者机器的真实状态。
+
+- 默认命令：`python3 scripts/regression_fresh_user_gate.py`
+- 紧急小修可先跑：`python3 scripts/regression_fresh_user_gate.py --quick`，但 push 前仍要补全默认 gate，或在交付里明确说明未补全原因。
+- gate 必须清掉当前 session 注入的 `MMS_CONFIG_ROOT` / `REAL_HOME` / `ORIGINAL_HOME` / `MMS_REAL_HOME` / `XDG_CONFIG_HOME` 等环境变量，用临时 `HOME` 模拟 fresh installed user。
+- gate 至少覆盖：
+  - `mmf` fresh preview root 是否落到临时 `~/.config/mms-next`
+  - Claude 新启动不会消费项目旧 `lastSessionId`
+  - 显式 `mms resume <id>` 仍传递原生 resume 参数
+  - installer/path smoke 不依赖开发者 worktree 私有状态
+- 若改动触及 `mms_core.py`、`mms_launchers.py`、installer、session index、config root、resume、HOME/XDG 隔离、wrapper 或 release channel，最终 handoff 必须写明 fresh-user gate 的实际结果。
+
 ## 迭代与提交隔离
 
 为了降低多 agent 共用工作树时的污染风险：
