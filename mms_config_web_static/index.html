@@ -155,22 +155,24 @@
     <!-- Fallback -->
     <section class="panel" data-section="fallback">
       <h2>Fallback 设置</h2>
-      <p>配置 rescue fallback 和 vision sidecar；preview root 保存为 DB candidate 并随 latest-approved bundle 发布，stable legacy 仍走 audited writer。</p>
+      <p>这里配置两个独立能力：Rescue 只在失败时写 rescue packet / handoff；Vision Sidecar 只在图片请求里自动补视觉模型。</p>
       <div class="grid">
         <div class="card span6">
-          <h3>Rescue fallback</h3>
-          <label>fallback_model</label>
+          <h3>Rescue packet / handoff</h3>
+          <p class="muted" id="rescueStatusHint">Rescue 失败记录读取中。</p>
+          <label>建议接力模型</label>
           <input id="rescueModel" placeholder="deepseek-v4-flash">
-          <label>fallback_cli</label>
+          <p class="muted">发生 401/403/上游失败时，MMS 会先写 rescue packet；这里的模型只作为 handoff 建议，不会自动替换当前请求。</p>
+          <label>建议接力 CLI（可空）</label>
           <select id="rescueCli">
-            <option value="">不指定</option>
+            <option value="">不指定（恢复时手选）</option>
             <option>codex</option>
             <option>claude</option>
             <option>opencode</option>
             <option>agy</option>
           </select>
           <div class="check" style="margin-top:10px">
-            <input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span>
+            <input id="rescueHot" type="checkbox" disabled><span>热切换已暂停：只生成 rescue packet / handoff</span>
           </div>
           <div class="btns ui-advanced-only">
             <button class="ghost" data-settings-action="rescue_events" data-report-target="fallbackReport">查看 rescue 事件</button>
@@ -180,14 +182,15 @@
         </div>
         <div class="card span6">
           <h3>Vision sidecar</h3>
+          <p class="muted" id="visionStatusHint">Vision Sidecar 状态读取中。</p>
           <div class="check">
-            <input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span>
+            <input id="visionEnabled" type="checkbox"><span>启用自动 Vision Sidecar（仅图片请求）</span>
           </div>
-          <label>provider_id</label>
+          <label>vision 通道（留空自动）</label>
           <select id="visionProvider"></select>
-          <label>model</label>
+          <label>vision 模型（留空自动）</label>
           <select id="visionModel"></select>
-          <p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为「当前配置值」。</p>
+          <p class="muted">留空不是没配置；表示 MMS 按候选列表和已标记 vision/multimodal 的模型自动选择。关闭上方开关才会完全禁用。</p>
           <label>候选列表</label>
           <div id="visionCandidates" class="grid"></div>
           <div class="btns">

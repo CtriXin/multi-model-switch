@@ -1327,6 +1327,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "原始结果" not in html
     assert "save-feedback" in html
     assert "save-metric-grid" in html
+    assert ".save-metric-grid strong" in html
+    assert "overflow-wrap: anywhere" in html
+    assert "word-break: break-word" in html
     assert "rich-result" in html
     assert "function assetDraftDiff()" in html
     assert "能力草稿" in html
@@ -1412,8 +1415,23 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "写入预览DB" in html
     assert "旧版“确认保存”在 mmf 中已隐藏" in html
     assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
-    assert "stable legacy 仍走 audited writer" in html
-    assert "配置 rescue fallback 和 vision sidecar" in html
+    assert "Rescue packet / handoff" in html
+    assert "建议接力模型" in html
+    assert "建议接力 CLI（可空）" in html
+    assert "不指定（恢复时手选）" in html
+    assert "热切换已暂停：只生成 rescue packet / handoff" in html
+    assert "function renderFallbackHints" in html
+    assert "不会自动重试当前请求" in html
+    assert "hot.disabled=true" in html
+    assert "启用自动 Vision Sidecar（仅图片请求）" in html
+    assert "vision 通道（留空自动）" in html
+    assert "vision 模型（留空自动）" in html
+    assert "留空不是没配置" in html
+    assert "自动选择 vision 通道" in html
+    assert "modelOptions(provider,model,{visionFirst:true,visionOnly:true,auto:true})" in html
+    assert "Rescue 只在失败时写 rescue packet / handoff" in html
+    assert "Vision Sidecar 只在图片请求里自动补视觉模型" in html
+    assert "配置 rescue fallback 和 vision sidecar" not in html
     assert "已下线的负载均衡不在本轮 WebUI 迭代范围" not in html
     assert "preview root 走 DB candidate + latest-approved publish" in html
     assert "stable 写 credentials.sh；preview 写 secret backend" in html
