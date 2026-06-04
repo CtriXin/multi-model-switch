@@ -544,8 +544,8 @@
             <button id="saveBtn" class="danger legacy-save-action">确认保存</button>
           </div>
           <details class="oc-advanced" id="advancedPlanTools" style="margin-top:14px">
-            <summary>高级 / 恢复：plan JSON 与 CLI fallback</summary>
-            <p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；下载 JSON 不含明文 key。CLI apply 是无 WebUI 时的 fallback，不是日常主流程。</p>
+            <summary>高级恢复工具</summary>
+            <p class="muted">下载的恢复文件已脱敏，不含明文 key；CLI apply 仅用于无 WebUI 的恢复场景。</p>
             <div class="btns">
               <button id="downloadPlanJson" class="ghost">下载 plan JSON</button>
               <button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button>
@@ -561,7 +561,7 @@
           <p class="muted" id="saveCompatibilityNote">stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
         </div>
         <div class="card span7">
-          <div class="result" id="saveResult">尚未生成预览</div>
+          <div class="result rich-result" id="saveResult">尚未生成预览</div>
         </div>
         <div class="card span12">
           <h3>保存摘要</h3>

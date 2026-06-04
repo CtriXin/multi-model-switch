@@ -1208,7 +1208,8 @@ def test_config_web_review_summary_frontend_has_policy_tabs():
 
     assert 'data-review-tab="summary"' in html
     assert "模型策略明细" in html
-    assert "JSON 明细" in html
+    assert "技术明细" in html
+    assert "JSON 明细" not in html
     assert "policy-change-card" in html
     assert "capabilitySourceBadges" in html
     assert "OpenRouter catalog" in html
@@ -1306,11 +1307,18 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "applyV2Preview" in html
     assert "downloadPlanJson" in html
     assert "copyApplyCommand" in html
-    assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
-    assert "高级 / 恢复：plan JSON 与 CLI fallback" in html
+    assert "下载的恢复文件已脱敏，不含明文 key" in html
+    assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" not in html
+    assert "高级恢复工具" in html
+    assert "高级 / 恢复：plan JSON 与 CLI fallback" not in html
     assert "日常只需要“生成保存预览” → “写入预览 DB + 发布”" in html
     assert "function planJsonHint(plan)" in html
+    assert "function renderSavePreviewResult(data)" in html
+    assert "function renderLegacySaveResult(data)" in html
     assert "function renderApplyResult(data)" in html
+    assert "save-feedback" in html
+    assert "save-metric-grid" in html
+    assert "rich-result" in html
     assert "function assetDraftDiff()" in html
     assert "能力草稿" in html
     assert 'data-section="sessionAssets"' in html
