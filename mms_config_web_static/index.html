@@ -11,7 +11,7 @@
 <header>
   <div>
     <h1>MMS 控制台</h1>
-    <p class="lead">默认先进入设置和调试：配置通道、模型能力、CLI、Skill / MCP / Hook，再去保存审计。路径、DB 和 bundle 诊断只在高级模式里展开。</p>
+    <p class="lead">默认先进入设置：配置通道、模型能力、CLI、Skill / MCP / Hook，再去保存审计。路径、DB 和 bundle 诊断只在高级模式里展开。</p>
   </div>
   <div class="header-tools">
     <div class="ui-mode-toggle" id="uiModeToggle" aria-label="界面模式">
@@ -126,7 +126,7 @@
     <!-- 模型测试 -->
     <section class="panel" data-section="test">
       <h2>模型测试</h2>
-      <p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p>
+      <p>验证当前通道和模型是否可用；默认显示摘要，request path 等技术证据在高级结果里展开。</p>
       <div class="grid">
         <div class="card span5">
           <label>测试通道</label><select id="testProvider"></select>
@@ -147,7 +147,7 @@
           </div>
         </div>
         <div class="card span7">
-          <div class="result rich-result" id="testResult">执行 /models、Ping 或简单对话后，这里显示可读摘要；原始响应在高级模式展开。</div>
+          <div class="result rich-result" id="testResult">执行测试后这里显示结果摘要。</div>
         </div>
       </div>
     </section>
@@ -429,7 +429,7 @@
           <div class="asset-toolbar-row">
             <strong>类型</strong>
             <div class="filterbar" id="assetKindFilters"></div>
-            <input class="asset-search" id="assetSearch" placeholder="搜索能力名称、用途、路径">
+            <input class="asset-search" id="assetSearch" placeholder="搜索能力名称或用途">
           </div>
         </div>
         <div class="asset-list" id="assetCards"></div>

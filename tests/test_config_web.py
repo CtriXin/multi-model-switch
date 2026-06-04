@@ -1071,8 +1071,11 @@ def test_config_web_frontend_assets_are_external_files():
     assert "/api/migration/start" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
     assert "导入后开工" in html
-    assert "执行 /models、Ping 或简单对话后" in html
-    assert "原始响应在高级模式展开" in html
+    assert "执行 /models、Ping 或简单对话后" not in html
+    assert "原始响应在高级模式展开" not in html
+    assert "验证当前通道和模型是否可用" in html
+    assert "request path 等技术证据在高级结果里展开" in html
+    assert "执行测试后这里显示结果摘要" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
     assert "这里直接改 MMS 启动会读取的模型能力" in html
@@ -1342,6 +1345,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "managed_root" in html
     assert "在这里开 / 关" in html
     assert "asset-search" in html
+    assert "搜索能力名称或用途" in html
+    assert "搜索能力名称、用途、路径" not in html
     assert "asset-list" in html
     assert "assetManagedRoots" in html
     assert "function renderAssetManagedRoots()" in html
@@ -1418,7 +1423,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "saveBtn').disabled=preview" in html
     assert "document.querySelectorAll('.legacy-save-action').forEach" in html
     assert "applyV2Preview').disabled=!preview" in html
-    assert "['settings','设置','配置台 / 账号 / 安全']" in html
+    assert "['settings','设置','常用入口 / 账号']" in html
+    assert "['test','模型测试','连通性 / 对话']" in html
+    assert "['save','保存审计','预览 / 写入']" in html
+    assert "ping / chat smoke" not in html
+    assert "diff / backup / audit" not in html
     assert 'data-section="settings"' in html
     assert "<h2>设置工作台</h2>" in html
     assert "WebUI 是新的主配置面" in html
@@ -1522,6 +1531,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "保存前不会生效" in html
     assert "pendingProviderDeletes" in html
     assert "function undoProviderDeleteDraft" in html
+    assert "setSection('providers')" not in html
+    assert "setSection('channel')" in html
     assert "已保存 API Key 不会在这一步自动清理" in html
     assert "maintenanceActions" not in html
     assert "/api/settings/report" in html
