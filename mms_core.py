@@ -13303,6 +13303,9 @@ def _load_command_config():
 
 
 def _session_status_label(item):
+    status = str(item.get("status") or "").strip()
+    if status:
+        return status
     session_id = str(item.get("session_id") or "").strip()
     if not session_id:
         return "active"
@@ -13321,38 +13324,71 @@ def _session_display_id(item):
     return f"pid-{pid}" if pid is not None else "-"
 
 
-def _handle_session_ls(cli_name):
-    from mms_session_index import list_indexed_sessions
+def _session_table_id(item):
+    session_id = _session_display_id(item)
+    if len(session_id) > 18:
+        return session_id[:12]
+    return session_id
 
-    rows = list_indexed_sessions(cli_name=cli_name)
+
+def _session_project_label(item):
+    return (
+        str(item.get("project_name") or "").strip()
+        or os.path.basename(str(item.get("project_path") or item.get("cwd") or "").rstrip(os.sep))
+        or "-"
+    )
+
+
+def _session_updated_label(item):
+    return str(item.get("updated_at") or item.get("last_active_at") or item.get("started_at") or item.get("created_at") or "-")
+
+
+def _session_catalog_json(rows):
+    print(json.dumps(rows, ensure_ascii=False, indent=2))
+
+
+def _handle_session_ls(cli_name, *, query="", limit=80, json_output=False):
+    from mms_session_catalog import list_session_records
+
+    rows = list_session_records(cli=cli_name, query=query, limit=limit)
+    if json_output:
+        _session_catalog_json(rows)
+        return
     if not rows:
-        console.print(f"[yellow]当前没有已索引的 {cli_name} session[/yellow]")
+        console.print(f"[yellow]当前没有匹配的 {cli_name} session[/yellow]")
         return
 
-    table = Table(title=f"{cli_name} session 列表", show_lines=True)
-    table.add_column("ID", style="cyan")
-    table.add_column("项目", style="green")
-    table.add_column("来源", style="magenta")
-    table.add_column("状态", style="yellow")
-    table.add_column("最近活动", style="blue")
-    for item in rows:
-        project_name = os.path.basename(str(item.get("project_path", "")).rstrip(os.sep)) or "-"
-        source_label = str(item.get("account_id") or item.get("runtime_kind") or "-")
-        last_active = str(item.get("last_active_at") or item.get("started_at") or "-")
-        table.add_row(
-            _session_display_id(item),
-            project_name,
-            source_label,
-            _session_status_label(item),
-            last_active,
-        )
-    console.print(table)
+    cli_order = ["claude", "codex"] if cli_name == "all" else [cli_name]
+    for cli in cli_order:
+        cli_rows = [item for item in rows if str(item.get("cli") or "") == cli]
+        if not cli_rows:
+            continue
+        table = Table(title=f"{cli} session 历史（时间倒序）", show_lines=False)
+        table.add_column("ID 前缀", style="cyan", no_wrap=True)
+        table.add_column("项目", style="green")
+        table.add_column("最近活动", style="blue")
+        table.add_column("摘要", style="white")
+        table.add_column("来源", style="yellow")
+        for item in cli_rows:
+            source_label = str(item.get("source_kind") or "-")
+            title = str(item.get("title") or "").strip()
+            table.add_row(
+                _session_table_id(item),
+                _session_project_label(item),
+                _session_updated_label(item),
+                title[:96] if title else "-",
+                source_label,
+            )
+        console.print(table)
 
 
 def _handle_session_info(session_id, cli_name):
+    from mms_session_catalog import resolve_catalog_ref
     from mms_session_index import get_indexed_session
 
     item = get_indexed_session(session_id, cli_name=cli_name)
+    if item is None:
+        _resolved_id, item, _error = resolve_catalog_ref(session_id, cli=cli_name)
     if item is None:
         console.print(f"[red]找不到 session: {session_id}[/red]")
         sys.exit(1)
@@ -13370,8 +13406,13 @@ def _handle_session_info(session_id, cli_name):
         "cwd",
         "started_at",
         "last_active_at",
+        "updated_at",
+        "title",
         "exit_code",
         "stale_cleanup",
+        "status",
+        "source_kind",
+        "source_path",
         "slot_home",
         "_path",
     ]
@@ -13512,12 +13553,21 @@ def handle_session_command(argv):
     )
     subparsers = parser.add_subparsers(dest="subcommand")
 
-    ls_parser = subparsers.add_parser("ls", help="列出已索引 session")
-    ls_parser.add_argument("--cli", default="claude", choices=["claude"])
+    ls_parser = subparsers.add_parser("ls", help="列出可恢复 session 历史")
+    ls_parser.add_argument("--cli", default="all", choices=["claude", "codex", "all"])
+    ls_parser.add_argument("--search", default="", help="按项目、摘要或 session id 搜索")
+    ls_parser.add_argument("--limit", type=int, default=80, help="最多显示多少条")
+    ls_parser.add_argument("--json", action="store_true", help="输出 JSON，供 WebUI 使用")
+
+    search_parser = subparsers.add_parser("search", help="搜索可恢复 session 历史")
+    search_parser.add_argument("query", help="搜索关键词")
+    search_parser.add_argument("--cli", default="all", choices=["claude", "codex", "all"])
+    search_parser.add_argument("--limit", type=int, default=80, help="最多显示多少条")
+    search_parser.add_argument("--json", action="store_true", help="输出 JSON，供 WebUI 使用")
 
     info_parser = subparsers.add_parser("info", help="查看单个 session 详情")
     info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
-    info_parser.add_argument("--cli", default="claude", choices=["claude"])
+    info_parser.add_argument("--cli", default="all", choices=["claude", "codex", "all"])
 
     resume_parser = subparsers.add_parser("resume", help="恢复 legacy chat session")
     resume_parser.add_argument("session_ref", help="session id / 前缀 / 最近列表序号")
@@ -13531,7 +13581,10 @@ def handle_session_command(argv):
 
     args = parser.parse_args(argv)
     if args.subcommand == "ls":
-        _handle_session_ls(args.cli)
+        _handle_session_ls(args.cli, query=args.search, limit=args.limit, json_output=bool(args.json))
+        return
+    if args.subcommand == "search":
+        _handle_session_ls(args.cli, query=args.query, limit=args.limit, json_output=bool(args.json))
         return
     if args.subcommand == "info":
         _handle_session_info(args.session_id, args.cli)
@@ -13628,6 +13681,16 @@ def _resolve_codex_resume_ref(session_ref, *, allow_passthrough=False):
         return str(matches[0]["id"]), matches[0], None
     if len(matches) > 1:
         return None, None, f"Codex session 前缀不唯一: {ref}"
+    try:
+        from mms_session_catalog import resolve_catalog_ref
+
+        catalog_id, catalog_record, catalog_error = resolve_catalog_ref(ref, cli="codex")
+    except Exception:
+        catalog_id = catalog_record = catalog_error = None
+    if catalog_id and isinstance(catalog_record, dict):
+        return catalog_id, catalog_record, None
+    if catalog_error and "不唯一" in str(catalog_error):
+        return None, None, f"Codex {catalog_error}"
     if allow_passthrough:
         return ref, {"id": ref, "_unindexed": True}, None
     return None, None, f"找不到 Codex session: {ref}"
@@ -13657,6 +13720,16 @@ def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
         return str(matches[0].get("session_id") or "").strip(), matches[0], None
     if len(matches) > 1:
         return None, None, f"Claude session 前缀不唯一: {ref}"
+    try:
+        from mms_session_catalog import resolve_catalog_ref
+
+        catalog_id, catalog_record, catalog_error = resolve_catalog_ref(ref, cli="claude")
+    except Exception:
+        catalog_id = catalog_record = catalog_error = None
+    if catalog_id and isinstance(catalog_record, dict):
+        return catalog_id, catalog_record, None
+    if catalog_error and "不唯一" in str(catalog_error):
+        return None, None, f"Claude {catalog_error}"
     if allow_passthrough:
         return ref, {"session_id": ref, "_unindexed": True}, None
     return None, None, f"找不到 Claude session: {ref}"
@@ -13834,15 +13907,18 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     if launch_cli_name != cli:
         console.print(f"[red]resume 只支持原 CLI 恢复，当前解析为 {launch_cli_name}[/red]")
         raise SystemExit(1)
+    project_path = str((session_record or {}).get("project_path") or (session_record or {}).get("cwd") or "").strip()
+    if project_path and os.path.isdir(project_path):
+        os.chdir(project_path)
     if cli == "claude":
-        project_path = str((session_record or {}).get("project_path") or (session_record or {}).get("cwd") or "").strip()
-        if project_path and os.path.isdir(project_path):
-            os.chdir(project_path)
         extra_args = ["--resume", session_id] + list(args.prompt or [])
     else:
         extra_args = ["resume", session_id] + list(args.prompt or [])
 
-    source = "未写入 MMS index，交给 Codex 原生 resume 校验" if (session_record or {}).get("_unindexed") else "MMS index"
+    if (session_record or {}).get("_unindexed"):
+        source = "未写入 MMS index，交给原生 resume 校验"
+    else:
+        source = str((session_record or {}).get("source_kind") or "MMS index")
     console.print(f"[cyan]恢复 {cli} session:[/cyan] {session_id}")
     console.print(f"[dim]来源: {source}[/dim]")
     _launch_with_tracking(cli, model_info, runtime, once=bool(args.once), extra_args=extra_args)

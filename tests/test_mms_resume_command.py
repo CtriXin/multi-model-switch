@@ -60,6 +60,53 @@ def test_resolve_claude_resume_ref_from_index(monkeypatch):
     assert record["resume_model"] == "gpt-5.5"
 
 
+def test_resolve_claude_resume_ref_from_catalog(monkeypatch):
+    import mms_core
+    import mms_session_catalog
+    import mms_session_index
+
+    monkeypatch.setattr(mms_session_index, "list_indexed_sessions", lambda cli_name="claude": [])
+    monkeypatch.setattr(
+        mms_session_catalog,
+        "resolve_catalog_ref",
+        lambda ref, cli="all": (
+            "raw-session",
+            {"cli": "claude", "session_id": "raw-session", "source_kind": "claude-jsonl"},
+            None,
+        ),
+    )
+
+    session_id, record, error = mms_core._resolve_claude_resume_ref("raw")
+
+    assert error is None
+    assert session_id == "raw-session"
+    assert record["source_kind"] == "claude-jsonl"
+
+
+def test_resolve_codex_resume_ref_from_catalog(monkeypatch, tmp_path):
+    import mms_core
+    import mms_session_catalog
+
+    monkeypatch.delenv("MMS_CODEX_RESUME_WRITEBACK_ROOT", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(mms_core, "resolve_real_user_home", lambda env=None: str(tmp_path / "home"))
+    monkeypatch.setattr(
+        mms_session_catalog,
+        "resolve_catalog_ref",
+        lambda ref, cli="all": (
+            "019e9000-0000-7000-8000-000000000000",
+            {"cli": "codex", "session_id": "019e9000-0000-7000-8000-000000000000", "source_kind": "codex-jsonl"},
+            None,
+        ),
+    )
+
+    session_id, record, error = mms_core._resolve_codex_resume_ref("019e9000")
+
+    assert error is None
+    assert session_id == "019e9000-0000-7000-8000-000000000000"
+    assert record["source_kind"] == "codex-jsonl"
+
+
 def test_resolve_resume_target_requires_prefix_when_ambiguous(monkeypatch):
     import mms_core
 
@@ -168,6 +215,58 @@ def test_handle_resume_command_passes_codex_resume_args(monkeypatch):
     assert captured["once"] is True
     assert captured["model_info"] == {"model": "gpt-5.4"}
     assert captured["extra_args"] == ["resume", "codex-session", "continue work"]
+
+
+def test_handle_resume_command_changes_to_catalog_project_for_codex(monkeypatch, tmp_path):
+    import mms_core
+
+    captured = {}
+    project = tmp_path / "codex-project"
+    project.mkdir()
+    console = _FakeConsole()
+    monkeypatch.setattr(mms_core, "console", console)
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_resume_target",
+        lambda session_ref, cli_hint="auto": (
+            "codex",
+            "codex-session",
+            {"cli": "codex", "session_id": "codex-session", "project_path": str(project), "source_kind": "codex-jsonl"},
+            None,
+        ),
+    )
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda cfg: cfg)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda cfg=None, cli_override=None: "zh-CN")
+    monkeypatch.setattr(mms_core, "set_language", lambda language: None)
+    monkeypatch.setattr(mms_core, "ensure_provider_credentials", lambda cfg: {"id": "provider-a"})
+    monkeypatch.setattr(mms_core, "ensure_models_ready", lambda cfg, provider: (provider, ["gpt-5.5"]))
+    monkeypatch.setattr(mms_core.os, "chdir", lambda path: captured.setdefault("chdir", path))
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_resume_runtime_and_model",
+        lambda *args, **kwargs: (
+            {"id": "provider-a", "runtime_kind": "provider", "auth_mode": "api_key"},
+            ["gpt-5.5"],
+            "codex",
+            {"model": "gpt-5.5"},
+        ),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_launch_with_tracking",
+        lambda cli, model_info, runtime, once=False, extra_args=None: captured.update(
+            {"cli": cli, "extra_args": extra_args}
+        ),
+    )
+
+    mms_core.handle_resume_command(
+        ["--cli", "codex", "codex-session"],
+        preloaded_command_cfg={"recommend": {"models": ["gpt-5.5"]}},
+    )
+
+    assert captured["chdir"] == str(project)
+    assert captured["cli"] == "codex"
+    assert captured["extra_args"] == ["resume", "codex-session"]
 
 
 def test_handle_resume_command_passes_claude_resume_args_and_project(monkeypatch, tmp_path):
