@@ -103,9 +103,7 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
     return _backend().build_setup_markdown(snapshot)
 
 
-def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str = "mms") -> dict[str, Any]:
-    from mms_session_catalog import list_session_records
-
+def _session_catalog_options(payload: dict[str, Any] | None) -> tuple[str, str, int]:
     payload = payload if isinstance(payload, dict) else {}
     cli = str(payload.get("cli") or "all").strip().lower()
     if cli not in {"all", "claude", "codex"}:
@@ -116,14 +114,37 @@ def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str =
     except (TypeError, ValueError):
         limit = 3000
     limit = min(max(limit, 1), 5000)
+    return cli, query, limit
 
-    all_rows = list_session_records(cli="all", query=query, limit=None)
+
+def build_session_catalog_from_rows(
+    all_rows: list[dict[str, Any]],
+    payload: dict[str, Any] | None,
+    *,
+    command_name: str = "mms",
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    cli, query, limit = _session_catalog_options(payload)
+    rows_for_query = list(all_rows)
+    if query:
+        tokens = query.lower().split()
+        rows_for_query = [
+            row for row in rows_for_query
+            if all(
+                token in " ".join(
+                    str(row.get(field) or "").lower()
+                    for field in ("cli", "session_id", "project_path", "project_name", "cwd", "title", "model", "source_kind")
+                )
+                for token in tokens
+            )
+        ]
+
     counts = {
-        "all": len(all_rows),
-        "claude": sum(1 for row in all_rows if str(row.get("cli") or "") == "claude"),
-        "codex": sum(1 for row in all_rows if str(row.get("cli") or "") == "codex"),
+        "all": len(rows_for_query),
+        "claude": sum(1 for row in rows_for_query if str(row.get("cli") or "") == "claude"),
+        "codex": sum(1 for row in rows_for_query if str(row.get("cli") or "") == "codex"),
     }
-    rows = all_rows if cli == "all" else [row for row in all_rows if str(row.get("cli") or "") == cli]
+    rows = rows_for_query if cli == "all" else [row for row in rows_for_query if str(row.get("cli") or "") == cli]
     total_before_limit = len(rows)
     rows = rows[:limit]
     for row in rows:
@@ -139,10 +160,17 @@ def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str =
         "row_count": len(rows),
         "total_before_limit": total_before_limit,
         "truncated": total_before_limit > len(rows),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "command_name": command_name,
         "read_only": True,
     }
+
+
+def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str = "mms") -> dict[str, Any]:
+    from mms_session_catalog import list_session_records
+
+    all_rows = list_session_records(cli="all", query="", limit=None)
+    return build_session_catalog_from_rows(all_rows, payload, command_name=command_name)
 
 
 def _html_page(_snapshot: dict[str, Any]) -> bytes:
@@ -156,6 +184,7 @@ class ConfigWebApp:
         self.preferences_path = preferences_path
         self.command_name = command_name
         self.lock = threading.Lock()
+        self._session_catalog_cache: dict[str, Any] | None = None
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -277,7 +306,22 @@ class ConfigWebApp:
             )
 
     def session_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return build_session_catalog(payload, command_name=self.command_name)
+        payload = payload if isinstance(payload, dict) else {}
+        force = bool(payload.get("force"))
+        if force:
+            self._session_catalog_cache = None
+        if self._session_catalog_cache is None:
+            result = build_session_catalog({"cli": "all", "query": "", "limit": 5000}, command_name=self.command_name)
+            self._session_catalog_cache = {
+                "rows": copy.deepcopy(result.get("rows") or []),
+                "generated_at": result.get("generated_at") or datetime.now(timezone.utc).isoformat(),
+            }
+        return build_session_catalog_from_rows(
+            copy.deepcopy(self._session_catalog_cache.get("rows") or []),
+            payload,
+            command_name=self.command_name,
+            generated_at=str(self._session_catalog_cache.get("generated_at") or ""),
+        )
 
 
 class _SetupWebHandler(BaseHTTPRequestHandler):

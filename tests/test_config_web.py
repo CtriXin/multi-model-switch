@@ -1159,7 +1159,7 @@ def test_config_web_session_catalog_api(monkeypatch):
 
     def fake_list_session_records(cli="all", query="", limit=None):
         assert cli == "all"
-        assert query == "repo"
+        assert query == ""
         assert limit is None
         return list(rows)
 
@@ -1174,6 +1174,31 @@ def test_config_web_session_catalog_api(monkeypatch):
     assert payload["counts"] == {"all": 2, "claude": 1, "codex": 1}
     assert [row["session_id"] for row in payload["rows"]] == ["claude-session"]
     assert payload["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
+
+
+def test_config_web_session_catalog_uses_process_cache(monkeypatch):
+    import mms_session_catalog
+
+    calls = {"count": 0}
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        calls["count"] += 1
+        return [
+            {"cli": "claude", "session_id": "claude-session", "project_name": "repo"},
+            {"cli": "codex", "session_id": "codex-session", "project_name": "other"},
+        ]
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+
+    first = app.session_catalog({"query": "repo"})
+    second = app.session_catalog({"query": "other"})
+    refreshed = app.session_catalog({"query": "repo", "force": True})
+
+    assert calls["count"] == 2
+    assert [row["session_id"] for row in first["rows"]] == ["claude-session"]
+    assert [row["session_id"] for row in second["rows"]] == ["codex-session"]
+    assert refreshed["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
 
 
 def test_config_web_server_serves_session_catalog_endpoint(monkeypatch, tmp_path):
