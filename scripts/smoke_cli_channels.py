@@ -18,10 +18,7 @@ if ROOT_DIR not in sys.path:
 
 from mms_runtime.bridge import codex_chatcompletions_bridge, codex_responses_bridge, gateway_claude_bridge
 from mms_core import _probe_models, _provider_map, apply_local_overrides, load_runtime_config as load_config, resolve_provider_context
-from mms_runtime.fake_upstream import patch_httpx_module as _patch_fake_httpx
 from mms_launchers import _is_gpt_model, _openai_base_url, _resolve_anthropic_base_url
-
-_patch_fake_httpx(httpx)
 
 
 def _trim(text: str, limit: int = 240) -> str:

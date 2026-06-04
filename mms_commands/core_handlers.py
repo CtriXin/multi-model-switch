@@ -30,9 +30,6 @@ def build_core_command_handlers(
     iso_now: Callable[[], str],
     snapshot_digest: Callable[[dict[str, Any]], str],
     write_json_snapshot: Callable[[str, dict[str, Any]], None],
-    set_fake_upstream_enabled: Callable[[bool], None],
-    fake_upstream_status_payload: Callable[[], dict[str, Any]],
-    fake_upstream_tail_log: Callable[[int], list[dict[str, Any]]],
     config_root_for_logs: Callable[[], str],
     cli_names: list[str],
     ensure_provider_credentials: Callable[..., dict[str, Any]],
@@ -80,22 +77,10 @@ def build_core_command_handlers(
             console=console,
         )
 
-    def handle_fake_upstream_command(argv):
-        return command_tools.handle_fake_upstream_command(
-            argv,
-            command_name=command_name,
-            set_enabled=set_fake_upstream_enabled,
-            status_payload=fake_upstream_status_payload,
-            tail_log=fake_upstream_tail_log,
-            table_cls=table_cls,
-            console=console,
-        )
-
     def handle_logs_command(argv):
         return command_tools.handle_logs_command(
             argv,
             command_name=command_name,
-            fake_upstream_status_payload=fake_upstream_status_payload,
             config_root=config_root_for_logs(),
             table_cls=table_cls,
             console=console,
@@ -143,7 +128,6 @@ def build_core_command_handlers(
     return {
         "cache": handle_cache_command,
         "guard": handle_guard_command,
-        "fake_upstream": handle_fake_upstream_command,
         "logs": handle_logs_command,
         "doctor": handle_doctor_command,
         "exposure": handle_exposure_command,

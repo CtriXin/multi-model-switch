@@ -70,7 +70,6 @@ def confirm_context_lines(
     default_account_timezone,
     runtime_force_ipv4,
     snapshot_proxy_fingerprint,
-    fake_upstream_enabled,
 ):
     runtime = runtime if isinstance(runtime, dict) else {}
     lines = []
@@ -89,8 +88,6 @@ def confirm_context_lines(
         if profile_label:
             lines.append(("Profile", profile_label))
     if cli == "claude" and runtime.get("auth_mode") == "oauth":
-        if fake_upstream_enabled():
-            lines.append(("Fake", "ON"))
         lines.append(("Proxy", str(snapshot_proxy_fingerprint(runtime.get("proxy")))))
         lines.append(("TZ", str(runtime.get("timezone") or default_account_timezone)))
         lines.append(("IPv4", "on" if runtime_force_ipv4(runtime) else "auto"))
@@ -109,8 +106,6 @@ def confirm_context_lines(
         if network_guard:
             lines.append(("DNS", str(network_guard.get("dns_mode") or "-")))
             proxy_validation = str(network_guard.get("proxy_validation") or "").strip()
-            if proxy_validation == "skipped_fake":
-                lines.append(("Check", "skipped(fake)"))
             if network_guard.get("ipv4_egress") not in {"", "-"}:
                 lines.append(("IPv4Egress", str(network_guard.get("ipv4_egress") or "-")))
             if network_guard.get("ipv6_egress") not in {"", "-", "blocked"}:

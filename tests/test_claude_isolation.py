@@ -2184,7 +2184,7 @@ def test_emit_dns_guard_hint_silent_for_proxy_likely(capsys):
     assert captured.out == ""
 
 
-def test_session_required_env_from_runtime_env_keeps_fake_upstream_tls_env():
+def test_session_required_env_from_runtime_env_drops_stale_fake_upstream_env():
     from mms_launchers import _session_required_env_from_runtime_env
 
     result = _session_required_env_from_runtime_env(
@@ -2210,7 +2210,8 @@ def test_session_required_env_from_runtime_env_keeps_fake_upstream_tls_env():
     assert result["LC_ALL"] == "en_US.UTF-8"
     assert result["SSL_CERT_FILE"] == "/tmp/mms-ca.pem"
     assert result["NODE_EXTRA_CA_CERTS"] == "/tmp/mms-ca.pem"
-    assert result["MMS_FAKE_UPSTREAM_MODE"] == "upstream-proxy"
+    assert "MMS_FAKE_UPSTREAM_MODE" not in result
+    assert "MMS_FAKE_UPSTREAM_PROXY" not in result
     assert "UNRELATED" not in result
 
 
@@ -2347,8 +2348,6 @@ def test_inspect_runtime_exposure_reports_claude_oauth_env(monkeypatch, tmp_path
     from mms_launchers import inspect_runtime_exposure
 
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
-    monkeypatch.setenv("MMS_FAKE_UPSTREAM", "0")
-
     account_home = tmp_path / ".config" / "mms" / "accounts" / "claude-a"
     claude_dir = account_home / ".claude"
     claude_dir.mkdir(parents=True)

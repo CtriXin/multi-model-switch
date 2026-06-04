@@ -24,15 +24,11 @@ def path_is_within(path, root):
         return False
 
 
-def runtime_net_mode(runtime, *, fake_upstream_enabled_fn):
-    if fake_upstream_enabled_fn():
-        return "fake"
+def runtime_net_mode(runtime):
     return "proxy" if str((runtime or {}).get("proxy") or "").strip() else "direct"
 
 
-def runtime_dns_mode(runtime, *, fake_upstream_enabled_fn, proxy_dns_mode_fn):
-    if fake_upstream_enabled_fn():
-        return "fake-local"
+def runtime_dns_mode(runtime, *, proxy_dns_mode_fn):
     return proxy_dns_mode_fn((runtime or {}).get("proxy") or "")
 
 

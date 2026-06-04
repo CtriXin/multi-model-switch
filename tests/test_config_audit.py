@@ -399,12 +399,12 @@ def test_logs_command_shows_copyable_commands(monkeypatch, capsys, tmp_path):
     import mms_core
 
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
-    monkeypatch.setenv("MMS_FAKE_UPSTREAM", "1")
 
     mms_core.handle_logs_command(["--tail", "7"])
     out = capsys.readouterr().out
 
-    assert "fake-upstream log --tail 7" in out
+    assert "config_root" in out
+    assert "fake-upstream" not in out
     assert "guard status" in out
 
 
@@ -695,7 +695,6 @@ def test_exposure_command_renders_runtime_sections():
                 "proxy_fingerprint": "direct",
                 "timezone": "Asia/Singapore",
                 "locale": "zh_CN.UTF-8",
-                "fake_upstream": True,
                 "force_ipv4": True,
             },
             "home": {
@@ -734,5 +733,5 @@ def test_exposure_command_renders_runtime_sections():
     ]
     summary = console.items[0]
     assert ("cli", "codex") in [row for row, _kwargs in summary.rows]
-    assert ("fake_upstream", "on") in [row for row, _kwargs in summary.rows]
+    assert not any(row[0] == "fake_upstream" for row, _kwargs in summary.rows)
     assert any("safe" in str(item) for item in console.items)

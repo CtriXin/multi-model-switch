@@ -95,15 +95,6 @@ from mms_runtime.broker import (
     run_broker_profile_interactive,
     run_broker_profile,
 )
-from mms_runtime.fake_upstream import (
-    fake_httpx_response as _fake_httpx_response,
-    fake_proxy_probe as _fake_proxy_probe,
-    is_enabled as _fake_upstream_enabled,
-    is_local_url as _fake_upstream_is_local_url,
-    set_enabled as _set_fake_upstream_enabled,
-    status_payload as _fake_upstream_status_payload,
-    tail_log as _fake_upstream_tail_log,
-)
 from mms_runtime.i18n import normalize_language, set_language, pick as _L
 from mms_opencode.health import (
     OPENCODE_HEALTH_REL_PATH as _OPENCODE_HEALTH_REL_PATH,
@@ -717,8 +708,6 @@ def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False,
         request_kwargs["headers"] = ensure_default_user_agent(headers)
     except Exception:
         request_kwargs = kwargs
-    if _fake_upstream_enabled() and not _fake_upstream_is_local_url(url):
-        return _fake_httpx_response(httpx, method, url, **request_kwargs)
     transport = httpx.HTTPTransport(**_runtime_httpx_kwargs(runtime, target_url=url))
     with httpx.Client(transport=transport, follow_redirects=follow_redirects) as client:
         return client.request(method, url, **request_kwargs)
@@ -736,8 +725,6 @@ def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.ant
         no_proxy=no_proxy,
         target_url=target_url,
         force_ipv4=force_ipv4,
-        fake_upstream_enabled=_fake_upstream_enabled,
-        fake_proxy_probe=_fake_proxy_probe,
         http_status_is_success=_http_status_is_success,
         which=shutil.which,
         run_command=subprocess.run,
@@ -1131,10 +1118,6 @@ _CLAUDE_SESSION_ENV_KEYS = {
     "NODE_EXTRA_CA_CERTS",
     "REQUESTS_CA_BUNDLE",
     "MMS_FORCE_IPV4",
-    "MMS_FAKE_UPSTREAM_MODE",
-    "MMS_FAKE_UPSTREAM_PROXY",
-    "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
-    "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
 }
 
 
@@ -3722,7 +3705,6 @@ def _confirm_context_lines(cli, runtime):
         default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
         runtime_force_ipv4=_runtime_force_ipv4,
         snapshot_proxy_fingerprint=_snapshot_proxy_fingerprint,
-        fake_upstream_enabled=_fake_upstream_enabled,
     )
 
 
@@ -5065,9 +5047,6 @@ def _core_command_handlers():
         iso_now=_iso_now,
         snapshot_digest=_snapshot_digest,
         write_json_snapshot=_write_json_snapshot,
-        set_fake_upstream_enabled=_set_fake_upstream_enabled,
-        fake_upstream_status_payload=_fake_upstream_status_payload,
-        fake_upstream_tail_log=_fake_upstream_tail_log,
         config_root_for_logs=lambda: _config_guard_root_dir(_config_write_target_path()),
         cli_names=list(CLI_NAMES),
         ensure_provider_credentials=ensure_provider_credentials,
@@ -5102,11 +5081,6 @@ def _confirm_guard_accept_from_tui(cfg):
         confirm_startup_snapshot_drift=_confirm_startup_snapshot_drift,
         console=console,
     )
-
-
-def handle_fake_upstream_command(argv):
-    _ensure_rich()
-    return _core_command_handlers()["fake_upstream"](argv)
 
 
 def handle_logs_command(argv):
@@ -5200,9 +5174,6 @@ def main():
         if command == "logs":
             handle_logs_command(argv[1:])
             return
-        if command == "fake-upstream":
-            handle_fake_upstream_command(argv[1:])
-            return
         if command == "exposure":
             handle_exposure_command(argv[1:])
             return
@@ -5223,7 +5194,7 @@ def main():
     preloaded_command_cfg = None
     if not help_request and len(argv) >= 1:
         command = argv[0]
-        if command not in {"guard", "logs", "fake-upstream", "exposure", "registry", "opencode-smoke"}:
+        if command not in {"guard", "logs", "exposure", "registry", "opencode-smoke"}:
             preloaded_command_cfg = _load_command_config()
             _refresh_routes_export_for_hive(
                 preloaded_command_cfg,
@@ -5327,7 +5298,6 @@ def main():
             f"  {current_command()} opencode --profile omo    启动 global OMO mode\n"
             f"  {current_command()} opencode --profile raw    启动纯 OpenCode mode\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
-            f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"

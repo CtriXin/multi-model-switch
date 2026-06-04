@@ -30,7 +30,6 @@ def inspect_runtime_exposure(cli, runtime):
     runtime_id = str(runtime.get("id") or runtime.get("name") or "").strip()
     real_home = launchers._real_user_home()
     account_home = launchers._normalize_path(runtime.get("home_dir") or "")
-    fake_payload = launchers._fake_upstream_status_payload() if launchers._fake_upstream_enabled() else {}
     locale_env = launchers._runtime_locale_env(runtime)
     timezone_name = launchers._validate_timezone_or_exit(
         runtime.get("timezone") or launchers.DEFAULT_ACCOUNT_TIMEZONE,
@@ -136,22 +135,7 @@ def inspect_runtime_exposure(cli, runtime):
         process_env["MMS_FORCE_IPV4"] = "1"
     proxy_url = str(runtime.get("proxy") or "").strip()
     no_proxy = str(runtime.get("no_proxy") or "").strip()
-    if launchers._fake_upstream_enabled():
-        fake_proxy_url = str(fake_payload.get("proxy_url") or "").strip()
-        if fake_proxy_url:
-            for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-                process_env[key] = fake_proxy_url
-        for key in ("NO_PROXY", "no_proxy"):
-            process_env[key] = "127.0.0.1,localhost,::1"
-        process_env["MMS_FAKE_UPSTREAM_MODE"] = "upstream-proxy"
-        if proxy_url:
-            process_env["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] = launchers._proxy_fingerprint(proxy_url)
-        if no_proxy:
-            process_env["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] = no_proxy
-        if fake_payload.get("ca_cert_path"):
-            process_env["NODE_EXTRA_CA_CERTS"] = str(fake_payload.get("ca_cert_path") or "")
-            process_env["SSL_CERT_FILE"] = str(fake_payload.get("ca_cert_path") or "")
-    elif proxy_url:
+    if proxy_url:
         for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
             process_env[key] = proxy_url
         for key in ("NO_PROXY", "no_proxy"):
@@ -174,7 +158,6 @@ def inspect_runtime_exposure(cli, runtime):
             "timezone": timezone_name,
             "locale": locale_env.get("LANG", ""),
             "force_ipv4": bool(launchers._runtime_force_ipv4(runtime)),
-            "fake_upstream": bool(launchers._fake_upstream_enabled()),
         },
         "home": home_info,
         "process_env": process_env_rows,

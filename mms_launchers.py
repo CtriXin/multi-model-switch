@@ -133,12 +133,6 @@ from mms_core import (
     preference_asset_root,
 )
 from mms_registry.capability_resolver import resolve_model_capabilities
-from mms_runtime.fake_upstream import (
-    ensure_local_proxy as _ensure_fake_upstream_proxy,
-    fake_proxy_probe as _fake_proxy_probe,
-    is_enabled as _fake_upstream_enabled,
-    status_payload as _fake_upstream_status_payload,
-)
 from mms_runtime.host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_claude import endpoint as _claude_endpoint
 from mms_claude.launch import launch_claude_runtime as launch_claude
@@ -363,7 +357,6 @@ _runtime_network_summary = partial(
     _runtime_network_summary_impl,
     mask_proxy_url_fn=_mask_proxy_url,
     runtime_force_ipv4_fn=_runtime_force_ipv4,
-    fake_upstream_enabled_fn=_fake_upstream_enabled,
     proxy_dns_mode_fn=_proxy_dns_mode,
     runtime_locale_env_fn=_runtime_locale_env,
     default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
@@ -830,12 +823,11 @@ def _path_under(path, root):
         return False
 
 
-_runtime_net_mode = partial(_runtime_net_mode_impl, fake_upstream_enabled_fn=_fake_upstream_enabled)
+_runtime_net_mode = _runtime_net_mode_impl
 
 
 _runtime_dns_mode = partial(
     _runtime_dns_mode_impl,
-    fake_upstream_enabled_fn=_fake_upstream_enabled,
     proxy_dns_mode_fn=_proxy_dns_mode,
 )
 
@@ -902,15 +894,12 @@ def _run_proxy_probe(proxy_url, target_url, *, no_proxy="", force_ipv4=True, res
         no_proxy=no_proxy,
         force_ipv4=force_ipv4,
         resolve_ip=resolve_ip,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-        fake_proxy_probe_fn=_fake_proxy_probe,
     )
 
 
 _base_claude_network_guard = partial(
     _base_claude_network_guard_impl,
     runtime_force_ipv4_fn=_runtime_force_ipv4,
-    fake_upstream_enabled_fn=_fake_upstream_enabled,
     proxy_fingerprint_fn=_proxy_fingerprint,
     proxy_dns_mode_fn=_proxy_dns_mode,
     claude_no_proxy_conflicts_fn=_claude_no_proxy_conflicts,
@@ -931,7 +920,6 @@ _emit_dns_guard_hint = partial(
 _claude_network_guard_cache_key = partial(
     _claude_network_guard_cache_key_impl,
     runtime_force_ipv4_fn=_runtime_force_ipv4,
-    fake_upstream_enabled_fn=_fake_upstream_enabled,
 )
 get_claude_network_guard_preview = partial(
     _get_claude_network_guard_preview_impl,
@@ -954,7 +942,6 @@ def build_claude_network_guard(runtime, *, require_proxy=False):
         cache_key_fn=_claude_network_guard_cache_key,
         base_guard_fn=_base_claude_network_guard,
         runtime_force_ipv4_fn=_runtime_force_ipv4,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
         run_proxy_probe_fn=_run_proxy_probe,
         guard_targets=_CLAUDE_PROXY_GUARD_TARGETS,
     )
@@ -988,8 +975,6 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
         no_proxy,
         label=label,
         force_ipv4=force_ipv4,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-        fake_proxy_probe_fn=_fake_proxy_probe,
         console=console,
         exit_fn=sys.exit,
     )
@@ -1005,9 +990,6 @@ def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
         apply_runtime_locale_profile_fn=_apply_runtime_locale_profile,
         apply_runtime_ip_stack_profile_fn=_apply_runtime_ip_stack_profile,
         check_proxy_connectivity_or_exit_fn=_check_proxy_connectivity_or_exit,
-        fake_upstream_enabled_fn=_fake_upstream_enabled,
-        fake_upstream_status_payload_fn=_fake_upstream_status_payload,
-        proxy_fingerprint_fn=_proxy_fingerprint,
         runtime_force_ipv4_fn=_runtime_force_ipv4,
         default_account_timezone=DEFAULT_ACCOUNT_TIMEZONE,
     )
@@ -1083,10 +1065,6 @@ _CLAUDE_SESSION_ENV_KEYS = (
     "NODE_EXTRA_CA_CERTS",
     "REQUESTS_CA_BUNDLE",
     "MMS_FORCE_IPV4",
-    "MMS_FAKE_UPSTREAM_MODE",
-    "MMS_FAKE_UPSTREAM_PROXY",
-    "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
-    "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
 )
 
 _CLAUDE_SETTINGS_INHERIT_KEYS = (

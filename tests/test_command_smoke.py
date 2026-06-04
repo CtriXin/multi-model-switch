@@ -6718,23 +6718,10 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     ) == "代理地址缺少 host"
     assert mms_command_tools.test_proxy_connectivity(
         "",
-        fake_upstream_enabled=lambda: False,
-        fake_proxy_probe=lambda *args, **kwargs: {},
         http_status_is_success=lambda value: value.startswith("2"),
     ) == (True, "未配置代理，跳过检测")
     assert mms_command_tools.test_proxy_connectivity(
         "http://127.0.0.1:7890",
-        no_proxy="localhost",
-        target_url="https://api.anthropic.com",
-        force_ipv4=False,
-        fake_upstream_enabled=lambda: True,
-        fake_proxy_probe=lambda target_url, **kwargs: {"ok": True, "detail": f"{target_url}:{kwargs['no_proxy']}"},
-        http_status_is_success=lambda value: value.startswith("2"),
-    ) == (True, "https://api.anthropic.com:localhost")
-    assert mms_command_tools.test_proxy_connectivity(
-        "http://127.0.0.1:7890",
-        fake_upstream_enabled=lambda: False,
-        fake_proxy_probe=lambda *args, **kwargs: {},
         http_status_is_success=lambda value: value.startswith("2"),
         which=lambda _name: None,
     ) == (False, "当前系统没有 curl，无法测试代理连通性")
@@ -6745,8 +6732,6 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
         no_proxy="localhost",
         target_url="https://api.anthropic.com",
         force_ipv4=True,
-        fake_upstream_enabled=lambda: False,
-        fake_proxy_probe=lambda *args, **kwargs: {},
         http_status_is_success=lambda value: value.startswith("2"),
         which=lambda _name: "/usr/bin/curl",
         run_command=lambda cmd, **kwargs: run_calls.append((cmd, kwargs)) or SimpleNamespace(returncode=0, stdout="204", stderr=""),
@@ -6757,8 +6742,6 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     assert run_calls[0][0][-2:] == ["--noproxy", "localhost"]
     ok, detail = mms_command_tools.test_proxy_connectivity(
         "http://127.0.0.1:7890",
-        fake_upstream_enabled=lambda: False,
-        fake_proxy_probe=lambda *args, **kwargs: {},
         http_status_is_success=lambda value: value.startswith("2"),
         which=lambda _name: "/usr/bin/curl",
         run_command=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="404", stderr=""),

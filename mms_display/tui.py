@@ -9,7 +9,6 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from math import pow
-from mms_runtime.fake_upstream import status_payload as _fake_upstream_status_payload
 from mms_runtime.i18n import pick as _L, get_language as _get_language
 from mms_runtime.state_io import resolve_mms_config_dir
 
@@ -1866,90 +1865,6 @@ def select_rescue_event_tui(events):
                 idx = (idx + 1) % len(events)
             elif key in (10, 13, curses.KEY_ENTER) and events:
                 return events[idx]
-            elif key in (27, ord('q'), ord('Q')):
-                return None
-
-    try:
-        return curses.wrapper(_inner)
-    except curses.error:
-        return None
-
-
-def select_fake_upstream_tui():
-    options = [
-        {"id": "on", "label": _L("开启", "Enable"), "desc": _L("开发时拦截真实上游请求", "Block real upstream requests in development")},
-        {"id": "off", "label": _L("关闭", "Disable"), "desc": _L("恢复真实上游请求", "Restore real upstream requests")},
-    ]
-
-    def _inner(stdscr):
-        curses.curs_set(0)
-        curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_CYAN, -1)
-        curses.init_pair(2, curses.COLOR_WHITE, -1)
-
-        status = _fake_upstream_status_payload()
-        idx = 0 if not status.get("enabled") else 1
-
-        while True:
-            stdscr.erase()
-            max_y, max_w = stdscr.getmaxyx()
-            ac = curses.color_pair(1)
-
-            total_w = min(72, max_w - 4)
-            ph = len(options) + 7
-            px = (max_w - total_w) // 2
-            py = max(1, (max_y - ph) // 2)
-            ll = px + 2
-            rr = px + total_w - 2
-
-            row = py
-            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
-            row += 1
-            _safe_addstr(stdscr, row, ll, "Fake Upstream", curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
-            row += 1
-            _safe_addstr(
-                stdscr,
-                row,
-                ll,
-                _L("当前状态：开启" if status.get("enabled") else "当前状态：关闭",
-                   "Current: Enabled" if status.get("enabled") else "Current: Disabled"),
-                curses.A_DIM,
-                max_w=total_w - 4,
-            )
-            row += 1
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
-            row += 1
-
-            for i, item in enumerate(options):
-                y = row + i
-                is_sel = i == idx
-                if is_sel:
-                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(1) | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 14, item["desc"], curses.color_pair(1) | curses.A_DIM, max_w=total_w - 18)
-                else:
-                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(2))
-                    _safe_addstr(stdscr, y, ll + 14, item["desc"], curses.A_DIM, max_w=total_w - 18)
-
-            bot_y = row + len(options)
-            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
-            bot_y += 1
-            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 6, _L("应用", "Apply"), curses.A_DIM)
-            _safe_addstr(stdscr, bot_y, ll + 14, "Esc", curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 18, _L("返回", "Back"), curses.A_DIM)
-            bot_y += 1
-            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
-
-            stdscr.refresh()
-            key = stdscr.getch()
-            if key == curses.KEY_UP:
-                idx = (idx - 1) % len(options)
-            elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(options)
-            elif key in (10, 13, curses.KEY_ENTER):
-                return options[idx]["id"]
             elif key in (27, ord('q'), ord('Q')):
                 return None
 

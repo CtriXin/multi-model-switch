@@ -25,7 +25,7 @@ CLAUDE_NO_PROXY_TOKENS = (
 )
 PROXY_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 NO_PROXY_KEYS = ("NO_PROXY", "no_proxy")
-FAKE_STATE_KEYS = (
+STALE_FAKE_STATE_KEYS = (
     "MMS_FAKE_UPSTREAM_MODE",
     "MMS_FAKE_UPSTREAM_PROXY",
     "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
@@ -74,7 +74,6 @@ def runtime_network_summary(
     *,
     mask_proxy_url_fn,
     runtime_force_ipv4_fn,
-    fake_upstream_enabled_fn,
     proxy_dns_mode_fn,
     runtime_locale_env_fn,
     default_account_timezone,
@@ -82,7 +81,7 @@ def runtime_network_summary(
     proxy_url = mask_proxy_url_fn(runtime.get("proxy", ""))
     timezone_name = str(runtime.get("timezone") or default_account_timezone).strip() or default_account_timezone
     ipv4_label = "on" if runtime_force_ipv4_fn(runtime) else "off"
-    dns_mode = "fake-local" if fake_upstream_enabled_fn() else proxy_dns_mode_fn(runtime.get("proxy", ""))
+    dns_mode = proxy_dns_mode_fn(runtime.get("proxy", ""))
     locale_value = runtime_locale_env_fn(runtime).get("LANG", "en_US.UTF-8")
     parts = [f"DNS {dns_mode}", f"TZ {timezone_name}", f"LANG {locale_value}", f"IPv4 {ipv4_label}"]
     if proxy_url:
@@ -208,20 +207,10 @@ def run_proxy_probe(
     no_proxy="",
     force_ipv4=True,
     resolve_ip=False,
-    fake_upstream_enabled_fn,
-    fake_proxy_probe_fn,
     which_fn=shutil.which,
     subprocess_run=subprocess.run,
 ):
     proxy_url = str(proxy_url or "").strip()
-    if fake_upstream_enabled_fn():
-        return fake_proxy_probe_fn(
-            target_url,
-            proxy_url=proxy_url,
-            no_proxy=no_proxy,
-            force_ipv4=force_ipv4,
-            resolve_ip=resolve_ip,
-        )
     curl_bin = which_fn("curl")
     if not curl_bin:
         return {"ok": False, "detail": "curl missing", "http_code": "", "body": ""}
@@ -265,7 +254,6 @@ def base_claude_network_guard(
     *,
     require_proxy=False,
     runtime_force_ipv4_fn,
-    fake_upstream_enabled_fn,
     proxy_fingerprint_fn,
     proxy_dns_mode_fn,
     claude_no_proxy_conflicts_fn,
@@ -275,12 +263,11 @@ def base_claude_network_guard(
     no_proxy = str(runtime.get("no_proxy") or "").strip()
     force_ipv4 = bool(runtime_force_ipv4_fn(runtime))
     dns_mode = proxy_dns_mode_fn(proxy_url)
-    fake_enabled = bool(fake_upstream_enabled_fn())
     return {
         "proxy_required": bool(require_proxy),
         "proxy_present": bool(proxy_url),
         "proxy_fingerprint": proxy_fingerprint_fn(proxy_url),
-        "dns_mode": "fake-local" if fake_enabled else dns_mode,
+        "dns_mode": dns_mode,
         "force_ipv4": force_ipv4,
         "no_proxy": no_proxy,
         "no_proxy_conflicts": claude_no_proxy_conflicts_fn(no_proxy),
@@ -289,12 +276,11 @@ def base_claude_network_guard(
         "ipv6_egress": "blocked" if force_ipv4 else "unknown",
         "status": "ok",
         "block_reason": "",
-        "fake_upstream": fake_enabled,
-        "proxy_validation": "skipped_fake" if fake_enabled else "pending",
+        "proxy_validation": "pending",
     }
 
 
-def claude_network_guard_cache_key(runtime, require_proxy, *, runtime_force_ipv4_fn, fake_upstream_enabled_fn):
+def claude_network_guard_cache_key(runtime, require_proxy, *, runtime_force_ipv4_fn):
     runtime = dict(runtime or {})
     return (
         str(runtime.get("id") or runtime.get("name") or "").strip(),
@@ -302,7 +288,6 @@ def claude_network_guard_cache_key(runtime, require_proxy, *, runtime_force_ipv4
         str(runtime.get("no_proxy") or "").strip(),
         bool(runtime_force_ipv4_fn(runtime)),
         bool(require_proxy),
-        bool(fake_upstream_enabled_fn()),
     )
 
 
@@ -334,7 +319,6 @@ def build_claude_network_guard(
     cache_key_fn,
     base_guard_fn,
     runtime_force_ipv4_fn,
-    fake_upstream_enabled_fn,
     run_proxy_probe_fn,
     guard_targets=CLAUDE_PROXY_GUARD_TARGETS,
 ):
@@ -363,11 +347,6 @@ def build_claude_network_guard(
         cache[cache_key] = {"ts": now, "guard": dict(guard)}
         return guard
     if not proxy_url:
-        cache[cache_key] = {"ts": now, "guard": dict(guard)}
-        return guard
-    if fake_upstream_enabled_fn():
-        guard["proxy_validation"] = "skipped_fake"
-        guard["block_reason"] = "fake upstream 模式下已跳过真实 proxy / egress 校验"
         cache[cache_key] = {"ts": now, "guard": dict(guard)}
         return guard
 
@@ -457,8 +436,6 @@ def check_proxy_connectivity_or_exit(
     *,
     label="account",
     force_ipv4=True,
-    fake_upstream_enabled_fn,
-    fake_proxy_probe_fn,
     console,
     which_fn=shutil.which,
     subprocess_run=subprocess.run,
@@ -467,22 +444,6 @@ def check_proxy_connectivity_or_exit(
     proxy_url = str(proxy_url or "").strip()
     if not proxy_url:
         return
-    if fake_upstream_enabled_fn():
-        probe = fake_proxy_probe_fn(
-            "https://api.anthropic.com",
-            proxy_url=proxy_url,
-            no_proxy=no_proxy,
-            force_ipv4=force_ipv4,
-            resolve_ip=False,
-        )
-        if probe.get("ok"):
-            return
-        detail = str(probe.get("detail") or probe.get("http_code") or "fake upstream")
-        console.print(
-            f"[red]{label} 配置的 proxy 不可用，已阻止启动[/red]"
-            + (f"\n[dim]{detail}[/dim]" if detail else "")
-        )
-        exit_fn(1)
     curl_bin = which_fn("curl")
     if not curl_bin:
         console.print(f"[red]{label} 要求强制 proxy，但当前系统没有 curl，无法做启动前连通性检查[/red]")
@@ -530,9 +491,6 @@ def apply_runtime_network_profile(
     apply_runtime_locale_profile_fn,
     apply_runtime_ip_stack_profile_fn,
     check_proxy_connectivity_or_exit_fn,
-    fake_upstream_enabled_fn,
-    fake_upstream_status_payload_fn,
-    proxy_fingerprint_fn,
     runtime_force_ipv4_fn,
     default_account_timezone,
 ):
@@ -563,37 +521,7 @@ def apply_runtime_network_profile(
             force_ipv4=bool(runtime_force_ipv4_fn(runtime)),
         )
 
-    if fake_upstream_enabled_fn():
-        fake_payload = fake_upstream_status_payload_fn()
-        fake_proxy_url = str(fake_payload.get("proxy_url") or "").strip()
-        if fake_proxy_url:
-            for key in PROXY_KEYS:
-                env[key] = fake_proxy_url
-            env["MMS_FAKE_UPSTREAM_PROXY"] = fake_proxy_url
-        else:
-            for key in PROXY_KEYS:
-                env.pop(key, None)
-            env.pop("MMS_FAKE_UPSTREAM_PROXY", None)
-        env["MMS_FAKE_UPSTREAM_MODE"] = "upstream-proxy"
-        for key in NO_PROXY_KEYS:
-            env[key] = "127.0.0.1,localhost,::1"
-        if proxy_url:
-            env["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] = proxy_fingerprint_fn(proxy_url)
-        else:
-            env.pop("MMS_FAKE_UPSTREAM_ORIGINAL_PROXY", None)
-        if no_proxy:
-            env["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] = no_proxy
-        else:
-            env.pop("MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY", None)
-        ca_cert_path = str(fake_payload.get("ca_cert_path") or "").strip()
-        for key in CA_KEYS:
-            if ca_cert_path:
-                env[key] = ca_cert_path
-            else:
-                env.pop(key, None)
-        return env
-
-    for key in FAKE_STATE_KEYS:
+    for key in STALE_FAKE_STATE_KEYS:
         env.pop(key, None)
     for key in CA_KEYS:
         env.pop(key, None)

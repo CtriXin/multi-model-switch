@@ -27,7 +27,6 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from mms_runtime.bridge import gateway_claude_bridge
-from mms_runtime.fake_upstream import patch_httpx_module as _patch_fake_httpx
 from mms_core import (
     _account_map,
     _probe_account_status,
@@ -40,7 +39,6 @@ from mms_core import (
 )
 from mms_registry.provider_profiles import ensure_default_user_agent
 
-_patch_fake_httpx(httpx)
 from mms_launchers import _anthropic_base_url, _claude_gateway_env, _openai_base_url
 
 console = Console()

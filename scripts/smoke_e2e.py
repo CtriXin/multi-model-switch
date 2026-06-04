@@ -35,11 +35,8 @@ from mms_core import (
     load_runtime_config as load_config,
     resolve_provider_context,
 )
-from mms_runtime.fake_upstream import patch_httpx_module as _patch_fake_httpx
 from mms_launchers import _is_gpt_model, _openai_base_url, _resolve_anthropic_base_url
 from mms_registry.provider_profiles import ensure_default_user_agent
-
-_patch_fake_httpx(httpx)
 
 TIMEOUT = 30
 
