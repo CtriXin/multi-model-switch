@@ -173,7 +173,11 @@ def test_write_fallback_handover_is_file_only_and_context_aware(tmp_path):
     latest_path = repo / ".mms" / "rescue" / "latest-fallback-handover.md"
     assert md_path.exists()
     assert latest_path.exists()
-    assert "fallback-model" in md_path.read_text(encoding="utf-8")
+    handover_markdown = md_path.read_text(encoding="utf-8")
+    assert "fallback-model" in handover_markdown
+    assert "Read these files in order" in handover_markdown
+    assert str(latest_path) in handover_markdown
+    assert str(repo / ".mms" / "rescue" / "latest.md") in handover_markdown
 
     auto_handover = write_fallback_handover(
         source_payload,

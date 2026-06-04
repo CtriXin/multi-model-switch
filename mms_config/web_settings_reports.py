@@ -129,6 +129,58 @@ def _extract_continue_prompt(markdown: str) -> str:
     return section.strip()
 
 
+def _rescue_copy_prompt(repo_root: Path, handover: dict[str, Any], markdown: str) -> str:
+    if not handover and not markdown:
+        return ""
+    failed = handover.get("failed") if isinstance(handover.get("failed"), dict) else {}
+    fallback = handover.get("fallback") if isinstance(handover.get("fallback"), dict) else {}
+    source = handover.get("source_artifacts") if isinstance(handover.get("source_artifacts"), dict) else {}
+    artifacts = handover.get("artifacts") if isinstance(handover.get("artifacts"), dict) else {}
+    handover_md = _safe_text(artifacts.get("latest_markdown") or artifacts.get("markdown"))
+    handover_json = _safe_text(artifacts.get("latest_json") or artifacts.get("json"))
+    rescue_md = _safe_text(source.get("markdown") or repo_root / ".mms" / "rescue" / "latest.md")
+    rescue_json = _safe_text(source.get("json") or repo_root / ".mms" / "rescue" / "latest.json")
+    latest_rescue_md = str(repo_root / ".mms" / "rescue" / "latest.md")
+    latest_rescue_json = str(repo_root / ".mms" / "rescue" / "latest.json")
+    summary_md = ""
+    event_handover_md = _safe_text(artifacts.get("markdown"))
+    if event_handover_md:
+        summary = Path(event_handover_md).expanduser().parent / "summary.md"
+        summary_md = str(summary)
+    return "\n".join(
+        [
+            "Continue from this MMS Rescue handoff.",
+            f"Repo: {_safe_text(handover.get('repo_path') or repo_root)}",
+            (
+                "Failed route: "
+                f"model={_safe_text(failed.get('model') or 'unknown')} "
+                f"provider={_safe_text(failed.get('provider_id') or 'unknown')} "
+                f"status={_safe_text(failed.get('status_code') or 'unknown')} "
+                f"kind={_safe_text(failed.get('failure_kind') or failed.get('error_type') or 'unknown')}"
+            ),
+            f"Fallback target: cli={_safe_text(fallback.get('cli') or 'select in MMS')} model={_safe_text(fallback.get('model') or 'manual-select')}",
+            "",
+            "Read these files in order:",
+            f"1. Handoff: {handover_md or '-'}",
+            f"2. Rescue packet: {rescue_md or '-'}",
+            f"3. Optional generated summary: {summary_md or '-'}",
+            "",
+            "Stable latest aliases:",
+            f"- Latest handoff: {handover_md or '-'}",
+            f"- Latest rescue packet: {latest_rescue_md}",
+            "",
+            "Machine-readable files if needed:",
+            f"- Handoff JSON: {handover_json or '-'}",
+            f"- Rescue JSON: {rescue_json or '-'}",
+            f"- Latest rescue JSON: {latest_rescue_json}",
+            "",
+            "First summarize what failed and what state is recoverable from the files. Then continue only the smallest safe next step.",
+            "Do not assume MMS switched the live request; Rescue is file-only unless the user explicitly starts this new session.",
+            "Do not replay unrelated transcript. If context_policy is compact_first, create a concise checkpoint before continuing work.",
+        ]
+    )
+
+
 def _rescue_summary_path(latest: dict[str, Any] | None) -> str:
     latest = latest if isinstance(latest, dict) else {}
     artifact_json = _safe_text(latest.get("artifact_json"))
@@ -151,6 +203,7 @@ def _latest_rescue_handover(repo_root: Path) -> dict[str, Any]:
         "json_path": str(handover_json_path) if handover_json_path.exists() else "",
         "markdown": markdown,
         "continue_prompt": _extract_continue_prompt(markdown),
+        "copy_prompt": _rescue_copy_prompt(repo_root, payload, markdown),
         "source_event_id": _safe_text(payload.get("source_event_id")),
         "fallback_model": _safe_text(fallback.get("model")),
         "fallback_cli": _safe_text(fallback.get("cli")),

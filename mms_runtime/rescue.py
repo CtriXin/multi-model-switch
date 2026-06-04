@@ -327,7 +327,18 @@ def _fallback_handover_markdown(payload: Mapping[str, Any]) -> str:
     fallback = payload.get("fallback") if isinstance(payload.get("fallback"), Mapping) else {}
     context_policy = payload.get("context_policy") if isinstance(payload.get("context_policy"), Mapping) else {}
     source_artifacts = payload.get("source_artifacts") if isinstance(payload.get("source_artifacts"), Mapping) else {}
+    handover_artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), Mapping) else {}
     automatic_model_call = bool((payload.get("fallback") or {}).get("automatic_model_call"))
+    handover_md = str(handover_artifacts.get("latest_markdown") or handover_artifacts.get("markdown") or "").strip()
+    handover_json = str(handover_artifacts.get("latest_json") or handover_artifacts.get("json") or "").strip()
+    rescue_md = str(source_artifacts.get("markdown") or "").strip()
+    rescue_json = str(source_artifacts.get("json") or "").strip()
+    repo_rescue_dir = Path(str(payload.get("repo_path") or "")) / ".mms" / "rescue"
+    latest_rescue_md = str(repo_rescue_dir / "latest.md")
+    latest_rescue_json = str(repo_rescue_dir / "latest.json")
+    summary_md = str(Path(handover_artifacts.get("markdown") or "").expanduser().parent / "summary.md") if handover_artifacts.get("markdown") else ""
+    fallback_cli = str(fallback.get("cli") or "select in MMS").strip()
+    fallback_model = str(fallback.get("model") or "manual-select").strip()
     lines = [
         "# MMS Rescue Fallback Handover",
         "",
@@ -359,14 +370,28 @@ def _fallback_handover_markdown(payload: Mapping[str, Any]) -> str:
         "## Continue Prompt",
         "",
         "```text",
-        "Continue from this MMS rescue handover.",
+        "Continue from this MMS Rescue handoff.",
         f"Repo: {payload.get('repo_path') or 'unknown'}",
-        f"Previous failed model: {failed.get('model') or 'unknown'}",
-        f"Failure: {failed.get('failure_kind') or failed.get('error_type') or 'unknown'} / {failed.get('status_code') or 'unknown'}",
-        f"Fallback target: {fallback.get('model') or 'manual-select'}",
+        f"Failed route: model={failed.get('model') or 'unknown'} provider={failed.get('provider_id') or 'unknown'} status={failed.get('status_code') or 'unknown'} kind={failed.get('failure_kind') or failed.get('error_type') or 'unknown'}",
+        f"Fallback target: cli={fallback_cli} model={fallback_model}",
         "",
-        "Read the rescue packet first, summarize the needed state, then finish only the smallest safe next step.",
-        "Do not replay unrelated transcript. If context_policy is compact_first, create a concise checkpoint before continuing.",
+        "Read these files in order:",
+        f"1. Handoff: {handover_md or '-'}",
+        f"2. Rescue packet: {rescue_md or '-'}",
+        f"3. Optional generated summary: {summary_md or '-'}",
+        "",
+        "Stable latest aliases:",
+        f"- Latest handoff: {handover_md or '-'}",
+        f"- Latest rescue packet: {latest_rescue_md}",
+        "",
+        "Machine-readable files if needed:",
+        f"- Handoff JSON: {handover_json or '-'}",
+        f"- Rescue JSON: {rescue_json or '-'}",
+        f"- Latest rescue JSON: {latest_rescue_json}",
+        "",
+        "First summarize what failed and what state is recoverable from the files. Then continue only the smallest safe next step.",
+        "Do not assume MMS switched the live request; Rescue is file-only unless the user explicitly starts this new session.",
+        "Do not replay unrelated transcript. If context_policy is compact_first, create a concise checkpoint before continuing work.",
         "```",
         "",
         "## Source Artifacts",

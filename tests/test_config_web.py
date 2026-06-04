@@ -499,7 +499,9 @@ def test_config_web_rescue_report_surfaces_latest_handoff(monkeypatch, tmp_path)
     assert report["latest"]["status_code"] == 429
     assert report["handover"]["exists"] is True
     assert report["handover"]["fallback_model"] == "deepseek-v4-flash"
-    assert "Continue from this MMS rescue handover" in report["handover"]["continue_prompt"]
+    assert "Continue from this MMS Rescue handoff" in report["handover"]["continue_prompt"]
+    assert "Read these files in order" in report["handover"]["copy_prompt"]
+    assert "latest.md" in report["handover"]["copy_prompt"]
     assert report["latest_paths"]["fallback_handover_markdown"].endswith("latest-fallback-handover.md")
 
 
@@ -1473,6 +1475,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "保持当前 session 不重启" in html
     assert "function renderRescueEventsReport" in html
     assert "复制续接 Prompt" in html
+    assert "handover.copy_prompt" in html
     assert "function renderFallbackHints" in html
     assert "不会自动重试当前请求" in html
     assert "hot.disabled=true" in html
