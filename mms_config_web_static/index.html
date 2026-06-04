@@ -254,7 +254,6 @@
           <div>
             <strong>默认模式只放常用设置</strong>
             <span>这里是配置总入口；真正编辑发生在下方模块卡片或左侧导航，路径和 DB 证据切到高级模式再看。</span>
-            <div id="settingsGapSummary" class="chips ui-advanced-only"></div>
           </div>
           <div class="settings-actionbar-actions">
             <button class="secondary" data-section-jump="save">生成保存预览</button>
@@ -268,7 +267,6 @@
           <button class="settings-tab" data-settings-tab="accounts"><strong>账号默认值</strong><span>default / priority / note</span></button>
           <button class="settings-tab ui-advanced-only" data-settings-tab="guard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
           <button class="settings-tab ui-advanced-only" data-settings-tab="about"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
-          <button class="settings-tab ui-advanced-only" data-settings-tab="audit"><strong>验收辅助</strong><span>折叠的 TUI 对照</span></button>
         </div>
 
         <div class="settings-tab-panel" data-settings-panel="basics">
@@ -396,26 +394,6 @@
               </details>
             </div>
           </div>
-        </div>
-
-        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="audit">
-          <details class="setting-edit-card" open>
-            <summary>开发验收辅助，不作为用户设置入口</summary>
-            <p class="muted">这些表只用于核对 TUI 功能迁移，不再占据设置主页面。</p>
-            <div class="table-wrap"><table id="settingsCoverage"></table></div>
-          </details>
-          <details class="setting-edit-card mapping-card" id="mappingAuditDetails">
-            <summary>验收辅助：TUI ↔ WebUI 对照表</summary>
-            <div class="mapping-head">
-              <div>
-                <h3>TUI ↔ WebUI 对照表</h3>
-                <p class="muted">功能入口应在通道、模型测试、配置源、Fallback、Runtime 或设置对应 tab 里；这里仅做验收证据。</p>
-              </div>
-              <div id="mappingFilters" class="filterbar compact"></div>
-            </div>
-            <div id="acceptancePanel" class="acceptance-panel"></div>
-            <div class="table-wrap"><table id="tuiMappingTable"></table></div>
-          </details>
         </div>
 
         <div class="settings-diagnostic-row ui-advanced-only">

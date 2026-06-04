@@ -1455,9 +1455,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "account_defaults:state.account_defaults" in html
     assert "uiLanguage" in html
     assert "saveUiLanguage" in html
-    assert "settingsGapSummary" in html
+    assert "settingsGapSummary" not in html
     assert "ui:state.ui" in html
-    assert "settingsCoverage" in html
+    assert "settingsCoverage" not in html
     assert "主屏 O/P/L/S 入口覆盖" not in html
     assert "entryAudit" not in html
     assert "function renderEntryAudit" not in html
@@ -1477,19 +1477,19 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "data-account-claude-1m" in html
     assert "data-account-timezone" in html
     assert "data-account-note" in html
-    assert "TUI ↔ WebUI 对照表" in html
-    assert "tuiMappingTable" in html
-    assert "mappingFilters" in html
-    assert "acceptancePanel" in html
-    assert "逐项验收清单" in html
-    assert "mapCheckProgress" in html
-    assert "data-map-check" in html
-    assert "function renderAcceptancePanel" in html
-    assert "function copyAcceptanceReport" in html
-    assert "function acceptanceReportText" in html
-    assert "点击证据" in html
-    assert "function renderTuiMapping" in html
-    assert "data-map-filter" in html
+    assert "TUI ↔ WebUI 对照表" not in html
+    assert "tuiMappingTable" not in html
+    assert "mappingFilters" not in html
+    assert "acceptancePanel" not in html
+    assert "逐项验收清单" not in html
+    assert "mapCheckProgress" not in html
+    assert "data-map-check" not in html
+    assert "function renderAcceptancePanel" not in html
+    assert "function copyAcceptanceReport" not in html
+    assert "function acceptanceReportText" not in html
+    assert "点击证据" not in html
+    assert "function renderTuiMapping" not in html
+    assert "data-map-filter" not in html
     assert "data-section-jump" in html
     assert "pDeleteConfirm" in html
     assert "deleteProvider" in html

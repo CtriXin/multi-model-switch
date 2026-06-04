@@ -537,18 +537,6 @@
       color: var(--muted);
       line-height: 1.45;
     }
-    .mapping-card {
-      background:
-        radial-gradient(circle at top right, color-mix(in oklch, var(--accent) 10%, transparent), transparent 32%),
-        var(--bg);
-    }
-    .mapping-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 14px;
-      align-items: end;
-      margin-bottom: 12px;
-    }
     .filterbar.compact {
       margin: 0;
       justify-content: flex-end;
@@ -560,64 +548,6 @@
       font-size: 11px;
       letter-spacing: .04em;
       text-transform: uppercase;
-    }
-    .acceptance-panel {
-      border: 1.5px solid color-mix(in oklch, var(--accent) 35%, var(--border));
-      background:
-        linear-gradient(135deg, color-mix(in oklch, var(--accent) 9%, transparent), transparent 38%),
-        color-mix(in oklch, var(--surface) 92%, var(--accent-soft));
-      border-radius: var(--radius);
-      padding: 14px;
-      margin-bottom: 14px;
-    }
-    .acceptance-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: start;
-      margin-bottom: 10px;
-    }
-    .acceptance-head h4 {
-      font-size: 18px;
-      line-height: 1.05;
-      letter-spacing: -.03em;
-      text-transform: uppercase;
-    }
-    .acceptance-progress {
-      font-family: var(--font-mono);
-      font-size: 24px;
-      line-height: 1;
-      font-variant-numeric: tabular-nums;
-      color: var(--accent);
-      white-space: nowrap;
-    }
-    .mapping-check {
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-    .mapping-check input {
-      width: auto;
-      accent-color: var(--accent);
-      cursor: pointer;
-    }
-    .check-evidence {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: color-mix(in oklch, var(--fg) 72%, var(--muted));
-    }
-    .status-native { background: var(--ok-soft); color: var(--ok); }
-    .status-report { background: var(--warn-soft); color: color-mix(in oklch, var(--warn) 72%, black); }
-    .status-draft_review { background: var(--accent-soft); color: var(--accent); }
-    .status-human_gate { background: var(--danger-soft); color: var(--danger); }
-    .status-missing {
-      background: var(--fg-soft);
-      color: var(--muted);
-      border: 1px dashed color-mix(in oklch, var(--fg) 18%, var(--border));
     }
     .delete-zone {
       border: 1.5px dashed color-mix(in oklch, var(--danger) 42%, var(--border));
@@ -1805,7 +1735,7 @@
       .provider-form-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .provider-form-tab { justify-content: flex-start; }
       .oc-summary, .model-inventory-summary, .settings-tabs, .account-config-grid { grid-template-columns: 1fr 1fr; }
-      .settings-actionbar, .settings-command-head, .settings-metrics, .settings-route, .entry-audit, .mapping-head, .acceptance-head { grid-template-columns: 1fr; }
+      .settings-actionbar, .settings-command-head, .settings-metrics, .settings-route, .entry-audit { grid-template-columns: 1fr; }
       .settings-actionbar-actions { justify-content: flex-start; }
       .filterbar.compact { justify-content: flex-start; }
       .settings-command h3 { font-size: clamp(26px, 11vw, 44px); }
