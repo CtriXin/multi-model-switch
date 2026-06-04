@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from mms_commands.tools import (
+from mms_commands.about_handlers import (
     about_status_snapshot as build_about_status_snapshot,
     cli_version_status,
     compare_semver_text,
