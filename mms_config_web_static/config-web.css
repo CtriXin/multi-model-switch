@@ -132,9 +132,7 @@
       display: none;
     }
     body[data-ui-mode="default"] [data-provider-form-tab="advanced"],
-    body[data-ui-mode="default"] [data-provider-form-tab="reports"],
     body[data-ui-mode="default"] [data-provider-form-panel="advanced"],
-    body[data-ui-mode="default"] [data-provider-form-panel="reports"],
     body[data-ui-mode="default"] .account-advanced,
     body[data-ui-mode="default"] .provider-advanced,
     body[data-ui-mode="default"] .asset-control-card:nth-child(n+2),

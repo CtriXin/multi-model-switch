@@ -27,7 +27,7 @@ function applyUiMode(nextMode){
   if(uiMode==='default'){
     const activeSection=document.querySelector('[data-section]:not(.hide)')?.dataset.section;
     if(['source','refs'].includes(activeSection))setSection('settings');
-    if(['advanced','reports'].includes(activeProviderFormTab))switchProviderFormTab('basic');
+    if(activeProviderFormTab==='advanced')switchProviderFormTab('basic');
     if(['guard','about','audit'].includes(settingsActiveTab))switchSettingsTab('basics');
   }
 }
@@ -106,7 +106,7 @@ function renderProviderForm(){
   if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return}
   const pendingKey=!!p.api_key;
   const keyPlaceholder=pendingKey?'已输入新 key，保存前会保留（不回显）':(p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...');
-  const activeTabs=new Set(['basic','connect','advanced','reports']);
+  const activeTabs=new Set(['basic','connect','advanced']);
   if(!activeTabs.has(activeProviderFormTab))activeProviderFormTab='basic';
   const familyOverrides=p.family_priority_overrides||{};
   const familyOverrideCount=Object.keys(familyOverrides).filter(k=>familyOverrides[k]).length;
@@ -118,7 +118,6 @@ function renderProviderForm(){
       ${tabButton('basic','基础信息','ID / 默认 / priority')}
       ${tabButton('connect','连接与协议','Base URL / Key')}
       ${tabButton('advanced','策略与高级','Claude / Family / 删除')}
-      ${tabButton('reports','报告与确认','统计 / 人工确认')}
     </div>
     <div class="${panelClass('basic')}" data-provider-form-panel="basic">
       <div class="grid">
@@ -146,7 +145,7 @@ function renderProviderForm(){
       <div class="grid">
         <div class="span4"><label>Claude 1M 策略</label><select id="pClaude1m">${['auto','enable','disable'].map(v=>`<option value="${v}" ${(p.claude_1m_mode||'auto')===v?'selected':''}>${enumLabel(v)}</option>`).join('')}</select></div>
         <div class="span4"><label>timezone（时区）</label><input id="pTimezone" value="${escapeHtml(p.timezone||'')}" placeholder="Asia/Singapore"></div>
-        <div class="span4"><label>网络策略</label><p class="muted">proxy ${p.proxy_configured?'已配置':'未配置'} · no_proxy ${p.no_proxy_configured?'已配置':'未配置'} · 明文走人工确认</p><button type="button" class="ghost" data-settings-action="provider_network_gate" data-report-target="channelReport">查看网络配置人工确认</button></div>
+        <div class="span4"><label>网络策略</label><p class="muted">proxy ${p.proxy_configured?'已配置':'未配置'} · no_proxy ${p.no_proxy_configured?'已配置':'未配置'} · 明文走人工确认</p><button type="button" class="ghost" data-settings-action="provider_network_gate" data-report-target="settingsReport">查看网络配置人工确认</button></div>
         <div class="span12"><label>备注 note</label><input id="pNote" value="${escapeHtml(p.note||'')}" placeholder="用途、限制或路由说明"></div>
         <div class="span12">
           <details class="provider-advanced">
@@ -156,14 +155,6 @@ function renderProviderForm(){
           </details>
         </div>
         <div class="span12 delete-zone"><label>删除这个通道</label><p class="muted">这里不会立刻写配置，只是把当前通道标记为待删除；保存前刷新页面会恢复。</p><input id="pDeleteConfirm" placeholder="输入通道 ID 确认删除：${escapeHtml(p.id)}"><p class="muted">保存后，mmz/mmf 下次启动不再显示这个通道。已保存 API Key 不会在这一步自动清理。</p><div class="btns"><button type="button" id="deleteProvider" class="danger">标记删除</button><button type="button" class="ghost" data-section-jump="save">去保存审计</button></div></div>
-      </div>
-    </div>
-    <div class="${panelClass('reports')}" data-provider-form-panel="reports">
-      <div class="provider-action-grid">
-        <div class="explain-card span4"><h4>使用统计</h4><p>读取当前通道的 usage 明细，并按这个通道内的模型展开启动次数；不会把其他通道混进来。</p><button type="button" class="ghost" data-settings-action="provider_usage_summary" data-report-target="channelReport">查看当前通道使用统计</button></div>
-        <div class="explain-card span4"><h4>保存审计入口</h4><p>这里改的是持久通道配置。填完 Base URL、API Key、protocol、模型补丁后，统一到保存页生成 diff 和审计摘要。</p><button type="button" class="ghost" data-section-jump="save">去生成保存预览</button></div>
-        <div class="explain-card span4"><h4>高级人工确认</h4><p>网络策略、自动排序这类会影响路由或本机边界的动作，不再放主路径；需要时只看说明，不自动执行。</p><button type="button" class="ghost" data-settings-action="provider_network_gate" data-report-target="channelReport">查看网络配置人工确认</button></div>
-        <div class="span12"><div class="result module-report" id="channelReport">选择上方动作查看表格报告或人工确认说明。</div></div>
       </div>
     </div>
     <div class="btns provider-editor-actions"><button type="button" id="saveProviderForm">保存通道修改</button></div>
@@ -273,7 +264,7 @@ function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function accountLocked(a){return !!a.is_claude_human_only}
 function syncAccounts(){if(!state.accounts)return;state.account_defaults=state.account_defaults||{};document.querySelectorAll('[data-account-id]').forEach(tr=>{const id=tr.dataset.accountId;const acc=(state.accounts||[]).find(a=>a.id===id);if(!acc||accountLocked(acc))return;const nameEl=tr.querySelector('[data-account-name]');const enabledEl=tr.querySelector('[data-account-enabled]');const priorityEl=tr.querySelector('[data-account-priority]');const familyEl=tr.querySelector('[data-account-family]');const claude1mEl=tr.querySelector('[data-account-claude-1m]');const timezoneEl=tr.querySelector('[data-account-timezone]');const noteEl=tr.querySelector('[data-account-note]');if(nameEl)acc.name=nameEl.value;if(enabledEl)acc.enabled=enabledEl.checked;if(priorityEl)acc.priority=Number(priorityEl.value||100);if(familyEl)acc.family_priority_overrides=parseFamilyOverrides(familyEl.value);if(claude1mEl)acc.claude_1m_mode=claude1mEl.value;if(timezoneEl)acc.timezone=timezoneEl.value.trim();if(noteEl)acc.note=noteEl.value.trim()});document.querySelectorAll('[data-account-default]:checked').forEach(el=>{if(!el.disabled&&el.dataset.accountCli)state.account_defaults[el.dataset.accountCli]=el.value})}
-function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;const targetId=btn.dataset.reportTarget||'settingsReport';const target=$(targetId)||$('settingsReport');if(target)target.textContent='读取中...';const payload={action};if(btn.dataset.accountId)payload.account_id=btn.dataset.accountId;if(btn.dataset.providerId)payload.provider_id=btn.dataset.providerId;if(action==='provider_usage_summary'&&targetId==='channelReport'&&current()?.id)payload.provider_id=current().id;const data=await api('/api/settings/report',payload);renderSettingsReport(data,targetId);if(targetId==='channelReport')switchProviderFormTab('reports');toast(data.ok?`${btn.textContent} 已刷新`:`${btn.textContent} 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
+function bindSettingsActionButtons(){document.querySelectorAll('[data-settings-action]').forEach(btn=>{btn.onclick=async()=>{const action=btn.dataset.settingsAction;const targetId=btn.dataset.reportTarget||'settingsReport';const target=$(targetId)||$('settingsReport');if(target)target.textContent='读取中...';const payload={action};if(btn.dataset.accountId)payload.account_id=btn.dataset.accountId;if(btn.dataset.providerId)payload.provider_id=btn.dataset.providerId;const data=await api('/api/settings/report',payload);renderSettingsReport(data,targetId);toast(data.ok?`${btn.textContent} 已刷新`:`${btn.textContent} 失败`)}});document.querySelectorAll('[data-section-jump]').forEach(btn=>{btn.onclick=()=>{setSection(btn.dataset.sectionJump);toast(`已打开 ${btn.dataset.sectionJump} 对应 WebUI 区域`)}})}
 function syncUiSettings(){state.ui=state.ui||{};state.ui.language=$('uiLanguage')?.value||'zh'}
 function renderUiSettings(){state.ui=state.ui||{language:'zh'};const lang=state.ui.language||'zh';if($('uiLanguage')){$('uiLanguage').value=['zh','en'].includes(lang)?lang:'zh';$('uiLanguage').onchange=()=>{syncUiSettings();toast('界面语言已暂存，生成保存预览后再写入')}}const save=$('saveUiLanguage');if(save)save.onclick=()=>{syncUiSettings();setSection('save');toast('界面语言修改已暂存，生成保存预览后再写入')}}
 function switchSettingsTab(tab){

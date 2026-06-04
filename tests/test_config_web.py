@@ -1424,17 +1424,17 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "accountActionButtons" in html
     assert "account-config-grid" in html
     assert "sourceReport" in html
-    assert "channelReport" in html
+    assert "channelReport" not in html
     assert "data-provider-form-tab" in html
     assert "function switchProviderFormTab" in html
     assert "基础信息" in html
     assert "连接与协议" in html
     assert "策略与高级" in html
-    assert "报告与确认" in html
+    assert "报告与确认" not in html
     assert "Family 权重覆盖（不常用）" in html
     assert "默认继承 priority" in html
     assert "provider-advanced" in html
-    assert "保存审计入口" in html
+    assert "保存审计入口" not in html
     assert "自动排序用途说明" not in html
     assert "官方账号登录说明（OAuth）" not in html
     assert "OAuth 主流程已下线" in html
@@ -1512,11 +1512,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function renderGateReport" in html
     assert "function renderProviderUsageReport" in html
     assert "function providerModelUsageRows" in html
-    assert "当前通道使用统计" in html
-    assert "查看当前通道使用统计" in html
-    assert "payload.provider_id=current().id" in html
-    assert "不会把其他通道混进来" in html
-    assert "暂无通道使用统计" in html
+    assert "当前通道使用统计" not in html
+    assert "查看当前通道使用统计" not in html
+    assert "payload.provider_id=current().id" not in html
+    assert "不会把其他通道混进来" not in html
+    assert "暂无通道使用统计" not in html
     assert "usage-model-table" in html
     assert "usage-detail" in html
     assert "CLI 明细（按需展开）" in html
