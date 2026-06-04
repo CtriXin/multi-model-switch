@@ -1073,15 +1073,18 @@ def test_config_web_frontend_assets_are_external_files():
     assert "/api/session/preview" in js_body.decode("utf-8")
     assert "filteredSessionRows" in js_body.decode("utf-8")
     assert "limit:3000" in js_body.decode("utf-8")
-    assert "搜索/切换使用本页缓存" in js_body.decode("utf-8")
+    assert "搜索不会重复扫描" in js_body.decode("utf-8")
     assert "重新扫描" in js_body.decode("utf-8")
-    assert "预览片段" in js_body.decode("utf-8")
+    assert "按项目文件夹分组" in js_body.decode("utf-8")
+    assert "session-folder" in js_body.decode("utf-8")
+    assert "辅助：查看片段" in js_body.decode("utf-8")
     assert "会话片段" in js_body.decode("utf-8")
     assert "搜索本会话" in js_body.decode("utf-8")
     assert "--select-model" in js_body.decode("utf-8")
     assert "选择模型后恢复" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
     assert "会话历史" in html
+    assert "按项目文件夹查看" in html
     assert "导入后开工" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
