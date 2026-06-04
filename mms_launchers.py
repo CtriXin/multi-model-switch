@@ -10221,13 +10221,8 @@ def _claude_gateway_env(
         project_state=current_project_state,
         disabled_session_surfaces=disabled_session_surfaces,
     )
-    data = _overlay_project_scoped_claude_resume_state(
-        data,
-        current_project,
-        account_id=str(runtime.get("id", "")),
-        runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
-        resume_model=resume_model,
-    )
+    # Normal launch must start from the selected model, not from Claude Code's
+    # previous project pointer. Explicit `mms resume <id>` passes --resume.
     with locked_state_file(gw_json):
         atomic_write_json(gw_json, data, mode=0o600)
     if isinstance(_timings, list):
