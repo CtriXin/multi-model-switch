@@ -8012,6 +8012,8 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
         聚合模式: (model_name, provider_id) 或 (None, None)
         旧模式（List[str]）: model_name 或 None（兼容）
     """
+    if not use_tui:
+        _ensure_rich()
     is_aggregated = models and isinstance(models[0], dict)
 
     if is_aggregated:

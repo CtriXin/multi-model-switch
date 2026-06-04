@@ -224,6 +224,37 @@ def test_stage_claude_catalog_resume_files_copies_jsonl_to_active_root(monkeypat
     assert any("sessionId" in open(path, encoding="utf-8").read() for path in staged)
 
 
+def test_select_custom_model_loads_rich_for_plain_cli(monkeypatch):
+    import mms_core
+
+    class FakeTable:
+        def __init__(self, *args, **kwargs):
+            self.rows = []
+
+        def add_column(self, *args, **kwargs):
+            return None
+
+        def add_row(self, *args, **kwargs):
+            self.rows.append(args)
+
+    calls = {"ensure": 0}
+
+    def fake_ensure_rich():
+        calls["ensure"] += 1
+        monkeypatch.setattr(mms_core, "Table", FakeTable)
+        monkeypatch.setattr(mms_core, "IntPrompt", SimpleNamespace(ask=lambda _prompt: 1))
+
+    monkeypatch.setattr(mms_core, "Table", None)
+    monkeypatch.setattr(mms_core, "IntPrompt", None)
+    monkeypatch.setattr(mms_core, "_ensure_rich", fake_ensure_rich)
+    monkeypatch.setattr(mms_core, "console", _FakeConsole())
+
+    selected = mms_core._select_custom_model(["gpt-5.5"], "claude", use_tui=False)
+
+    assert selected == "gpt-5.5"
+    assert calls["ensure"] == 1
+
+
 def test_handle_resume_command_passes_codex_resume_args(monkeypatch):
     import mms_core
 
