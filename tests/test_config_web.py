@@ -1,7 +1,7 @@
 import json
 import threading
 from http.server import ThreadingHTTPServer
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -1069,7 +1069,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert "读取本地配置中" in html
     assert "/api/migration/export" in js_body.decode("utf-8")
     assert "/api/migration/start" in js_body.decode("utf-8")
+    assert "/api/session/catalog" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
+    assert "会话历史" in html
     assert "导入后开工" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
@@ -1090,6 +1092,7 @@ def test_config_web_frontend_assets_are_external_files():
     assert b"body.booting" in css_body
     assert b"CAPABILITY_META" in js_body
     assert b"function renderAll" in js_body
+    assert b"function renderSessions" in js_body
     assert b"setBootMessage" in js_body
     assert "MMS 自动别名".encode("utf-8") in js_body
     assert "能力配置".encode("utf-8") in js_body
@@ -1124,6 +1127,92 @@ def test_config_web_server_serves_external_static_assets(tmp_path):
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
     assert b"function renderAll" in js_body
+
+
+def test_config_web_session_catalog_api(monkeypatch):
+    import mms_session_catalog
+
+    rows = [
+        {
+            "cli": "claude",
+            "session_id": "claude-session",
+            "project_path": "/tmp/repo",
+            "project_name": "repo",
+            "updated_at": "2026-06-04T01:00:00+00:00",
+            "source_kind": "claude-jsonl",
+        },
+        {
+            "cli": "codex",
+            "session_id": "codex-session",
+            "project_path": "/tmp/repo",
+            "project_name": "repo",
+            "updated_at": "2026-06-04T00:00:00+00:00",
+            "source_kind": "codex-jsonl",
+        },
+    ]
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        assert cli == "all"
+        assert query == "repo"
+        assert limit is None
+        return list(rows)
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+    payload = app.session_catalog({"cli": "claude", "query": " repo ", "limit": 50})
+
+    assert payload["ok"] is True
+    assert payload["schema"] == "mms.session_catalog.v1"
+    assert payload["read_only"] is True
+    assert payload["counts"] == {"all": 2, "claude": 1, "codex": 1}
+    assert [row["session_id"] for row in payload["rows"]] == ["claude-session"]
+    assert payload["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
+
+
+def test_config_web_server_serves_session_catalog_endpoint(monkeypatch, tmp_path):
+    import mms_session_catalog
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        return [
+            {
+                "cli": "codex",
+                "session_id": "codex-session",
+                "project_path": str(tmp_path),
+                "project_name": tmp_path.name,
+                "updated_at": "2026-06-04T01:00:00+00:00",
+                "source_kind": "codex-jsonl",
+            }
+        ]
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz",
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        req = Request(
+            f"{url}/api/session/catalog",
+            data=json.dumps({"cli": "codex"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert payload["ok"] is True
+    assert payload["rows"][0]["resume_command"] == "mmz resume codex:codex-session"
 
 
 def test_config_web_server_skips_snapshot_for_shell_and_static_assets():

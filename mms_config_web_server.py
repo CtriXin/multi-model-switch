@@ -102,6 +102,43 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
     return _backend().build_setup_markdown(snapshot)
 
 
+def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str = "mms") -> dict[str, Any]:
+    from mms_session_catalog import list_session_records
+
+    payload = payload if isinstance(payload, dict) else {}
+    cli = str(payload.get("cli") or "all").strip().lower()
+    if cli not in {"all", "claude", "codex"}:
+        cli = "all"
+    query = " ".join(str(payload.get("query") or "").split())
+    try:
+        limit = int(payload.get("limit") or 160)
+    except (TypeError, ValueError):
+        limit = 160
+    limit = min(max(limit, 1), 500)
+
+    all_rows = list_session_records(cli="all", query=query, limit=None)
+    counts = {
+        "all": len(all_rows),
+        "claude": sum(1 for row in all_rows if str(row.get("cli") or "") == "claude"),
+        "codex": sum(1 for row in all_rows if str(row.get("cli") or "") == "codex"),
+    }
+    rows = all_rows if cli == "all" else [row for row in all_rows if str(row.get("cli") or "") == cli]
+    rows = rows[:limit]
+    for row in rows:
+        row["resume_command"] = f"{command_name} resume {row.get('cli')}:{row.get('session_id')}"
+    return {
+        "ok": True,
+        "schema": "mms.session_catalog.v1",
+        "cli": cli,
+        "query": query,
+        "limit": limit,
+        "counts": counts,
+        "rows": rows,
+        "command_name": command_name,
+        "read_only": True,
+    }
+
+
 def _html_page(_snapshot: dict[str, Any]) -> bytes:
     return read_index_html().encode("utf-8")
 
@@ -233,6 +270,9 @@ class ConfigWebApp:
                 command_name=self.command_name,
             )
 
+    def session_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return build_session_catalog(payload, command_name=self.command_name)
+
 
 class _SetupWebHandler(BaseHTTPRequestHandler):
     app: ConfigWebApp | None = None
@@ -322,6 +362,9 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/settings/report":
                 self._send(*_json_response(app.settings_report(payload)))
+                return
+            if path == "/api/session/catalog":
+                self._send(*_json_response(app.session_catalog(payload)))
                 return
             if path == "/api/plan":
                 self._send(*_json_response(app.plan(payload)))
