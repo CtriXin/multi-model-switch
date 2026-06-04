@@ -6959,112 +6959,27 @@ def handle_account_rename_config(
     )
 
 
-def session_status_label(item):
-    from mms_commands.session_handlers import session_status_label as _impl
-
-    return _impl(item)
-
-
-def session_display_id(item):
-    from mms_commands.session_handlers import session_display_id as _impl
-
-    return _impl(item)
-
-
-def handle_session_ls(cli_name, *, list_indexed_sessions, table_cls, console):
-    from mms_commands.session_handlers import handle_session_ls as _impl
-
-    return _impl(
-        cli_name,
-        list_indexed_sessions=list_indexed_sessions,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def handle_session_info(session_id, cli_name, *, get_indexed_session, table_cls, console):
-    from mms_commands.session_handlers import handle_session_info as _impl
-
-    return _impl(
-        session_id,
-        cli_name,
-        get_indexed_session=get_indexed_session,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def session_gateway_roots(cli_name, *, real_home):
-    from mms_commands.session_handlers import session_gateway_roots as _impl
-
-    return _impl(cli_name, real_home=real_home)
-
-
-def session_dir_size_bytes(path):
-    from mms_commands.session_handlers import session_dir_size_bytes as _impl
-
-    return _impl(path)
-
-
-def format_bytes(size):
-    from mms_commands.session_handlers import format_bytes as _impl
-
-    return _impl(size)
-
-
-def list_stale_gateway_sessions(
-    cli_name,
-    *,
+from mms_commands.session_handlers import (
+    session_status_label,
+    session_display_id,
+    handle_session_ls,
+    handle_session_info,
     session_gateway_roots,
-    session_home_is_active,
     session_dir_size_bytes,
-):
-    from mms_commands.session_handlers import list_stale_gateway_sessions as _impl
-
-    return _impl(
-        cli_name,
-        session_gateway_roots=session_gateway_roots,
-        session_home_is_active=session_home_is_active,
-        session_dir_size_bytes=session_dir_size_bytes,
-    )
-
-
-def split_cli_prefixed_resume_ref(session_ref):
-    from mms_commands.session_handlers import split_cli_prefixed_resume_ref as _impl
-
-    return _impl(session_ref)
-
-
-def codex_resume_roots(env, *, real_home):
-    from mms_commands.session_handlers import codex_resume_roots as _impl
-
-    return _impl(env, real_home=real_home)
-
-
-def iter_codex_index_records(roots):
-    from mms_commands.session_handlers import iter_codex_index_records as _impl
-
-    yield from _impl(roots)
-
-
-def resolve_codex_resume_ref(session_ref, *, iter_codex_index_records, allow_passthrough=False):
-    from mms_commands.session_handlers import resolve_codex_resume_ref as _impl
-
-    return _impl(
-        session_ref,
-        iter_codex_index_records=iter_codex_index_records,
-        allow_passthrough=allow_passthrough,
-    )
-
-
-def resolve_claude_resume_ref(session_ref, *, list_indexed_sessions, allow_passthrough=False):
-    from mms_commands.session_handlers import resolve_claude_resume_ref as _impl
-
-    return _impl(
-        session_ref,
-        list_indexed_sessions=list_indexed_sessions,
-        allow_passthrough=allow_passthrough,
-    )
+    format_bytes,
+    list_stale_gateway_sessions,
+    split_cli_prefixed_resume_ref,
+    codex_resume_roots,
+    iter_codex_index_records,
+    resolve_codex_resume_ref,
+    resolve_claude_resume_ref,
+    uuid_resume_cli_hint,
+    resume_resolution_diagnostics,
+    first_resume_model,
+    session_resume_model,
+    handle_resume_command,
+    handle_session_prune,
+)
 
 
 def resolve_resume_target(
@@ -7086,30 +7001,6 @@ def resolve_resume_target(
         resolve_claude_resume_ref=resolve_claude_resume_ref,
         uuid_resume_cli_hint=uuid_resume_cli_hint,
     )
-
-
-def uuid_resume_cli_hint(session_ref):
-    from mms_commands.session_handlers import uuid_resume_cli_hint as _impl
-
-    return _impl(session_ref)
-
-
-def resume_resolution_diagnostics(session_ref, cli_hint="auto", *, command_name="mms"):
-    from mms_commands.session_handlers import resume_resolution_diagnostics as _impl
-
-    return _impl(session_ref, cli_hint, command_name=command_name)
-
-
-def first_resume_model(cli_models, default_models, recommend=None):
-    from mms_commands.session_handlers import first_resume_model as _impl
-
-    return _impl(cli_models, default_models, recommend)
-
-
-def session_resume_model(session_record):
-    from mms_commands.session_handlers import session_resume_model as _impl
-
-    return _impl(session_record)
 
 
 def resolve_resume_runtime_and_model(
@@ -7151,78 +7042,6 @@ def resolve_resume_runtime_and_model(
     )
 
 
-def handle_resume_command(
-    argv,
-    preloaded_command_cfg=None,
-    bootstrap_cfg=None,
-    lang_override=None,
-    *,
-    command_name,
-    resolve_resume_target,
-    load_config,
-    setup_wizard,
-    resolve_ui_language,
-    apply_local_overrides,
-    set_language,
-    ensure_provider_credentials,
-    ensure_models_ready,
-    resolve_resume_runtime_and_model,
-    launch_with_tracking,
-    path_isdir=os.path.isdir,
-    chdir=os.chdir,
-    console,
-):
-    from mms_commands.session_handlers import handle_resume_command as _impl
-
-    return _impl(
-        argv,
-        preloaded_command_cfg=preloaded_command_cfg,
-        bootstrap_cfg=bootstrap_cfg,
-        lang_override=lang_override,
-        command_name=command_name,
-        resolve_resume_target=resolve_resume_target,
-        load_config=load_config,
-        setup_wizard=setup_wizard,
-        resolve_ui_language=resolve_ui_language,
-        apply_local_overrides=apply_local_overrides,
-        set_language=set_language,
-        ensure_provider_credentials=ensure_provider_credentials,
-        ensure_models_ready=ensure_models_ready,
-        resolve_resume_runtime_and_model=resolve_resume_runtime_and_model,
-        launch_with_tracking=launch_with_tracking,
-        path_isdir=path_isdir,
-        chdir=chdir,
-        console=console,
-    )
-
-
-def handle_session_prune(
-    cli_name,
-    *,
-    apply=False,
-    yes=False,
-    list_stale_gateway_sessions,
-    finalize_claude_slot,
-    remove_tree,
-    format_bytes,
-    table_cls,
-    console,
-):
-    from mms_commands.session_handlers import handle_session_prune as _impl
-
-    return _impl(
-        cli_name,
-        apply=apply,
-        yes=yes,
-        list_stale_gateway_sessions=list_stale_gateway_sessions,
-        finalize_claude_slot=finalize_claude_slot,
-        remove_tree=remove_tree,
-        format_bytes=format_bytes,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
 def is_config_help_request(args_rest):
     if not args_rest:
         return False
@@ -7259,264 +7078,23 @@ def is_session_prune_dry_run(argv):
     return "--apply" not in argv
 
 
-def handle_logs_command(
-    argv,
-    *,
-    command_name,
-    config_root,
-    table_cls,
-    console,
-):
-    from mms_commands.standalone_handlers import handle_logs_command as _impl
-
-    return _impl(
-        argv,
-        command_name=command_name,
-        config_root=config_root,
-        table_cls=table_cls,
-        console=console,
-    )
+from mms_commands.standalone_handlers import (
+    handle_logs_command,
+    handle_exposure_command,
+    handle_cache_command,
+    handle_guard_command,
+)
 
 
-def handle_exposure_command(
-    argv,
-    *,
-    command_name,
-    cli_names,
-    load_command_config,
-    ensure_provider_credentials,
-    ensure_models_ready,
-    choose_runtime_source,
-    inspect_runtime_exposure,
-    table_cls,
-    console,
-):
-    from mms_commands.standalone_handlers import handle_exposure_command as _impl
-
-    return _impl(
-        argv,
-        command_name=command_name,
-        cli_names=cli_names,
-        load_command_config=load_command_config,
-        ensure_provider_credentials=ensure_provider_credentials,
-        ensure_models_ready=ensure_models_ready,
-        choose_runtime_source=choose_runtime_source,
-        inspect_runtime_exposure=inspect_runtime_exposure,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def handle_cache_command(
-    argv,
-    *,
-    command_name,
-    load_command_config,
-    normalize_positive_seconds,
-    ensure_provider_config,
-    ensure_account_config,
-    normalize_user_config,
-    normalize_cache_config,
-    save_config,
-    probe_async_refresh_after,
-    probe_async_min_interval,
-    table_cls,
-    console,
-):
-    from mms_commands.standalone_handlers import handle_cache_command as _impl
-
-    return _impl(
-        argv,
-        command_name=command_name,
-        load_command_config=load_command_config,
-        normalize_positive_seconds=normalize_positive_seconds,
-        ensure_provider_config=ensure_provider_config,
-        ensure_account_config=ensure_account_config,
-        normalize_user_config=normalize_user_config,
-        normalize_cache_config=normalize_cache_config,
-        save_config=save_config,
-        probe_async_refresh_after=probe_async_refresh_after,
-        probe_async_min_interval=probe_async_min_interval,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def handle_guard_command(
-    argv,
-    *,
-    command_name,
-    bootstrap_cfg,
-    load_config,
-    default_config,
-    config_write_target_path,
-    build_config_guard_snapshot,
-    config_snapshot_path,
-    load_json_snapshot,
-    snapshot_diff_lines,
-    iso_now,
-    snapshot_digest,
-    write_json_snapshot,
-    table_cls,
-    console,
-):
-    from mms_commands.standalone_handlers import handle_guard_command as _impl
-
-    return _impl(
-        argv,
-        command_name=command_name,
-        bootstrap_cfg=bootstrap_cfg,
-        load_config=load_config,
-        default_config=default_config,
-        config_write_target_path=config_write_target_path,
-        build_config_guard_snapshot=build_config_guard_snapshot,
-        config_snapshot_path=config_snapshot_path,
-        load_json_snapshot=load_json_snapshot,
-        snapshot_diff_lines=snapshot_diff_lines,
-        iso_now=iso_now,
-        snapshot_digest=snapshot_digest,
-        write_json_snapshot=write_json_snapshot,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def handle_session_command(
-    argv,
-    *,
-    command_name,
-    handle_session_ls,
-    handle_session_info,
-    handle_session_prune,
-):
-    from mms_commands.launcher_handlers import handle_session_command as _impl
-
-    return _impl(
-        argv,
-        command_name=command_name,
-        handle_session_ls=handle_session_ls,
-        handle_session_info=handle_session_info,
-        handle_session_prune=handle_session_prune,
-    )
-
-
-def handle_env_command(
-    cfg,
-    argv,
-    *,
-    command_name,
-    resolve_named_preset,
-    resolve_preset_export_runtime,
-    env_dir,
-    preset_env_file_path,
-    display_title,
-    console,
-):
-    from mms_commands.launcher_handlers import handle_env_command as _impl
-
-    return _impl(
-        cfg,
-        argv,
-        command_name=command_name,
-        resolve_named_preset=resolve_named_preset,
-        resolve_preset_export_runtime=resolve_preset_export_runtime,
-        env_dir=env_dir,
-        preset_env_file_path=preset_env_file_path,
-        display_title=display_title,
-        console=console,
-    )
-
-
-def handle_activate_command(
-    cfg,
-    argv,
-    *,
-    command_name,
-    resolve_named_preset,
-    resolve_preset_export_runtime,
-):
-    from mms_commands.launcher_handlers import handle_activate_command as _impl
-
-    return _impl(
-        cfg,
-        argv,
-        command_name=command_name,
-        resolve_named_preset=resolve_named_preset,
-        resolve_preset_export_runtime=resolve_preset_export_runtime,
-    )
-
-
-def handle_models_command(
-    cfg,
-    argv,
-    *,
-    command_name,
-    provider_map,
+from mms_commands.launcher_handlers import (
+    handle_session_command,
+    handle_env_command,
+    handle_activate_command,
+    handle_models_command,
     select_provider_for_models,
-    manage_provider_models,
-    text_cls,
-    console,
-):
-    from mms_commands.launcher_handlers import handle_models_command as _impl
-
-    return _impl(
-        cfg,
-        argv,
-        command_name=command_name,
-        provider_map=provider_map,
-        select_provider_for_models=select_provider_for_models,
-        manage_provider_models=manage_provider_models,
-        text_cls=text_cls,
-        console=console,
-    )
-
-
-def select_provider_for_models(
-    cfg,
-    *,
-    list_manage_targets,
-    table_cls,
-    prompt_cls,
-    console,
-):
-    from mms_commands.launcher_handlers import select_provider_for_models as _impl
-
-    return _impl(
-        cfg,
-        list_manage_targets=list_manage_targets,
-        table_cls=table_cls,
-        prompt_cls=prompt_cls,
-        console=console,
-    )
-
-
-def pick_manual_models(models, *, table_cls, prompt_cls, console):
-    from mms_commands.launcher_handlers import pick_manual_models as _impl
-
-    return _impl(models, table_cls=table_cls, prompt_cls=prompt_cls, console=console)
-
-
-def warm_model_request(
-    provider,
-    model_name,
-    *,
-    ensure_httpx,
-    get_httpx,
-    resolve_anthropic_base_url,
-    runtime_httpx_request,
-    provider_openai_base_url,
-):
-    from mms_commands.launcher_handlers import warm_model_request as _impl
-
-    return _impl(
-        provider,
-        model_name,
-        ensure_httpx=ensure_httpx,
-        get_httpx=get_httpx,
-        resolve_anthropic_base_url=resolve_anthropic_base_url,
-        runtime_httpx_request=runtime_httpx_request,
-        provider_openai_base_url=provider_openai_base_url,
-    )
+    pick_manual_models,
+    warm_model_request,
+)
 
 
 def detect_working_base_url(
@@ -7562,469 +7140,42 @@ def detect_working_base_url(
     return None
 
 
-def handle_warm_command(
-    cfg,
-    argv,
-    *,
-    command_name,
-    provider_map,
-    select_provider_for_warm,
-    resolve_provider_context,
-    probe_models,
-    recent_models_for_provider,
-    pick_manual_models,
-    warm_model_request,
-    text_cls,
-    panel_cls,
-    prompt_cls,
-    confirm_cls,
-    table_cls,
-    console,
-):
-    from mms_commands.launcher_handlers import handle_warm_command as _impl
-
-    return _impl(
-        cfg,
-        argv,
-        command_name=command_name,
-        provider_map=provider_map,
-        select_provider_for_warm=select_provider_for_warm,
-        resolve_provider_context=resolve_provider_context,
-        probe_models=probe_models,
-        recent_models_for_provider=recent_models_for_provider,
-        pick_manual_models=pick_manual_models,
-        warm_model_request=warm_model_request,
-        text_cls=text_cls,
-        panel_cls=panel_cls,
-        prompt_cls=prompt_cls,
-        confirm_cls=confirm_cls,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def handle_export(
-    cli_name,
-    provider,
-    *,
-    apply=False,
-    cli_names,
-    get_export_env,
-    env_dir,
-    env_file_path,
-    display_title,
-    export_command_hint,
-    console,
-):
-    from mms_commands.launcher_handlers import handle_export as _impl
-
-    return _impl(
-        cli_name,
-        provider,
-        apply=apply,
-        cli_names=cli_names,
-        get_export_env=get_export_env,
-        env_dir=env_dir,
-        env_file_path=env_file_path,
-        display_title=display_title,
-        export_command_hint=export_command_hint,
-        console=console,
-    )
-
-
-def emit_preset_error(message, *, stderr_only=False, console):
-    from mms_commands.launcher_handlers import emit_preset_error as _impl
-
-    return _impl(message, stderr_only=stderr_only, console=console)
-
-
-def preset_env_file_path(preset_name, *, env_dir):
-    from mms_commands.launcher_handlers import preset_env_file_path as _impl
-
-    return _impl(preset_name, env_dir=env_dir)
-
-
-def resolve_named_preset(
-    cfg,
-    preset_name,
-    *,
-    normalize_preset_entry,
+from mms_commands.launcher_handlers import (
+    handle_warm_command,
+    handle_export,
     emit_preset_error,
-    stderr_only=False,
-):
-    from mms_commands.launcher_handlers import resolve_named_preset as _impl
-
-    return _impl(
-        cfg,
-        preset_name,
-        normalize_preset_entry=normalize_preset_entry,
-        emit_preset_error=emit_preset_error,
-        stderr_only=stderr_only,
-    )
-
-
-def infer_preset_auth_mode(preset):
-    from mms_commands.launcher_handlers import infer_preset_auth_mode as _impl
-
-    return _impl(preset)
-
-
-def resolve_preset_export_runtime(
-    cfg,
-    preset,
-    provider_override=None,
-    *,
-    stderr_only=False,
+    preset_env_file_path,
+    resolve_named_preset,
     infer_preset_auth_mode,
-    emit_preset_error,
-    ensure_provider_credentials,
-    validate_provider_for_cli,
-    get_export_env,
-    preset_model_info=None,
-):
-    from mms_commands.launcher_handlers import resolve_preset_export_runtime as _impl
-
-    return _impl(
-        cfg,
-        preset,
-        provider_override=provider_override,
-        stderr_only=stderr_only,
-        infer_preset_auth_mode=infer_preset_auth_mode,
-        emit_preset_error=emit_preset_error,
-        ensure_provider_credentials=ensure_provider_credentials,
-        validate_provider_for_cli=validate_provider_for_cli,
-        get_export_env=get_export_env,
-        preset_model_info=preset_model_info,
-    )
+    resolve_preset_export_runtime,
+    handle_presets_command,
+)
 
 
-def handle_presets_command(
-    cfg,
-    *,
-    preset_has_visible_model_options,
-    preset_cli_enabled=None,
-    infer_preset_auth_mode,
-    default_provider_id,
-    table_cls,
-    console,
-):
-    from mms_commands.launcher_handlers import handle_presets_command as _impl
-
-    return _impl(
-        cfg,
-        preset_has_visible_model_options=preset_has_visible_model_options,
-        preset_cli_enabled=preset_cli_enabled,
-        infer_preset_auth_mode=infer_preset_auth_mode,
-        default_provider_id=default_provider_id,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def display_config_help(*, command_name, console):
-    from mms_commands.display_handlers import display_config_help as _impl
-
-    return _impl(command_name=command_name, console=console)
-
-
-def display_preferences_path(*, preference_paths, preferences_doc_path, console):
-    from mms_commands.display_handlers import display_preferences_path as _impl
-
-    return _impl(
-        preference_paths=preference_paths,
-        preferences_doc_path=preferences_doc_path,
-        console=console,
-    )
-
-
-def display_preferences_example(*, preferences_example_toml, console):
-    from mms_commands.display_handlers import display_preferences_example as _impl
-
-    return _impl(preferences_example_toml=preferences_example_toml, console=console)
-
-
-def display_human_gate_help(*, command_name, preferences_doc_path, console):
-    from mms_commands.display_handlers import display_human_gate_help as _impl
-
-    return _impl(command_name=command_name, preferences_doc_path=preferences_doc_path, console=console)
-
-
-def display_preferences_help(*, command_name, preference_paths, preferences_doc_path, console):
-    from mms_commands.display_handlers import display_preferences_help as _impl
-
-    return _impl(
-        command_name=command_name,
-        preference_paths=preference_paths,
-        preferences_doc_path=preferences_doc_path,
-        console=console,
-    )
-
-
-def display_usage_stats(*, load_usage_stats, usage_path, table_cls, console):
-    from mms_commands.display_handlers import display_usage_stats as _impl
-
-    return _impl(
-        load_usage_stats=load_usage_stats,
-        usage_path=usage_path,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def display_adapter_registry(*, top_source_companies, default_adapter_policy, command_name, table_cls, console):
-    from mms_commands.display_handlers import display_adapter_registry as _impl
-
-    return _impl(
-        top_source_companies=top_source_companies,
-        default_adapter_policy=default_adapter_policy,
-        command_name=command_name,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def display_providers(
-    cfg,
-    *,
-    default_provider_id,
-    default_priority,
-    resolve_provider_context,
-    provider_openai_base_url,
-    provider_anthropic_base_url,
-    command_name,
-    table_cls,
-    console,
-):
-    from mms_commands.display_handlers import display_providers as _impl
-
-    return _impl(
-        cfg,
-        default_provider_id=default_provider_id,
-        default_priority=default_priority,
-        resolve_provider_context=resolve_provider_context,
-        provider_openai_base_url=provider_openai_base_url,
-        provider_anthropic_base_url=provider_anthropic_base_url,
-        command_name=command_name,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def display_accounts(
-    cfg,
-    *,
-    default_priority,
-    probe_account_status,
-    command_name,
-    table_cls,
-    console,
-):
-    from mms_commands.display_handlers import display_accounts as _impl
-
-    return _impl(
-        cfg,
-        default_priority=default_priority,
-        probe_account_status=probe_account_status,
-        command_name=command_name,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def recent_models_for_provider(provider_id, *, usage_rows_for_runtime):
-    from mms_commands.display_handlers import recent_models_for_provider as _impl
-
-    return _impl(provider_id, usage_rows_for_runtime=usage_rows_for_runtime)
-
-
-def display_runtime_usage(
-    runtime_kind,
-    runtime_id,
-    title,
-    *,
-    use_tui,
-    clear_console,
-    usage_rows_for_runtime,
-    active_usage_path,
-    pause_after_tui_report,
-    table_cls,
-    console,
-):
-    from mms_commands.display_handlers import display_runtime_usage as _impl
-
-    return _impl(
-        runtime_kind,
-        runtime_id,
-        title,
-        use_tui=use_tui,
-        clear_console=clear_console,
-        usage_rows_for_runtime=usage_rows_for_runtime,
-        active_usage_path=active_usage_path,
-        pause_after_tui_report=pause_after_tui_report,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def display_provider_model_table(
-    provider,
-    probe,
-    *,
-    get_speed_entry,
-    infer_model_family,
-    model_capability_summary,
-    model_cli_summary,
-    model_source_label,
-    ttfb_label,
-    tps_label,
-    table_cls,
-    console,
-):
-    from mms_commands.display_handlers import display_provider_model_table as _impl
-
-    return _impl(
-        provider,
-        probe,
-        get_speed_entry=get_speed_entry,
-        infer_model_family=infer_model_family,
-        model_capability_summary=model_capability_summary,
-        model_cli_summary=model_cli_summary,
-        model_source_label=model_source_label,
-        ttfb_label=ttfb_label,
-        tps_label=tps_label,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def display_openrouter_extension_help(command_name, *, console):
-    from mms_commands.display_handlers import display_openrouter_extension_help as _impl
-
-    return _impl(command_name, console=console)
-
-
-def display_openrouter_model_rows(title, rows, *, limit, table_cls, console):
-    from mms_commands.display_handlers import display_openrouter_model_rows as _impl
-
-    return _impl(title, rows, limit=limit, table_cls=table_cls, console=console)
-
-
-def display_openrouter_video_rows(rows, *, limit, table_cls, console):
-    from mms_commands.display_handlers import display_openrouter_video_rows as _impl
-
-    return _impl(rows, limit=limit, table_cls=table_cls, console=console)
-
-
-def display_openrouter_extension_summary(
-    summary,
-    *,
-    provider_label="",
-    limit=12,
-    show_models=False,
-    table_cls,
-    console,
-):
-    from mms_commands.display_handlers import display_openrouter_extension_summary as _impl
-
-    return _impl(
-        summary,
-        provider_label=provider_label,
-        limit=limit,
-        show_models=show_models,
-        table_cls=table_cls,
-        console=console,
-    )
-
-
-def display_config(
-    cfg,
-    *,
-    prefix="",
-    depth=0,
-    resolve_provider_context,
-    provider_openai_base_url,
-    provider_anthropic_base_url,
-    mask_key,
-    active_credentials_path,
-    active_usage_path,
+from mms_commands.display_handlers import (
+    display_config_help,
+    display_preferences_path,
+    display_preferences_example,
+    display_human_gate_help,
+    display_preferences_help,
+    display_usage_stats,
+    display_adapter_registry,
     display_providers,
     display_accounts,
-    probe_async_refresh_after,
-    probe_async_min_interval,
-    existing_override_paths,
-    override_paths,
-    existing_preferences_paths,
-    preference_paths,
-    command_name,
-    console,
-):
-    from mms_commands.display_handlers import display_config as _impl
-
-    return _impl(
-        cfg,
-        prefix=prefix,
-        depth=depth,
-        resolve_provider_context=resolve_provider_context,
-        provider_openai_base_url=provider_openai_base_url,
-        provider_anthropic_base_url=provider_anthropic_base_url,
-        mask_key=mask_key,
-        active_credentials_path=active_credentials_path,
-        active_usage_path=active_usage_path,
-        display_providers=display_providers,
-        display_accounts=display_accounts,
-        probe_async_refresh_after=probe_async_refresh_after,
-        probe_async_min_interval=probe_async_min_interval,
-        existing_override_paths=existing_override_paths,
-        override_paths=override_paths,
-        existing_preferences_paths=existing_preferences_paths,
-        preference_paths=preference_paths,
-        command_name=command_name,
-        console=console,
-    )
+    recent_models_for_provider,
+    display_runtime_usage,
+    display_provider_model_table,
+    display_openrouter_extension_help,
+    display_openrouter_model_rows,
+    display_openrouter_video_rows,
+    display_openrouter_extension_summary,
+    display_config,
+)
 
 
-def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
-    from mms_commands.standalone_handlers import run_script_subcommand as _impl
-
-    return _impl(
-        script_name,
-        argv,
-        subcommand_name,
-        script_dir=script_dir,
-        command_name=command_name,
-        console=console,
-    )
-
-
-def handle_doctor_command(argv, *, script_dir, command_name, console):
-    from mms_commands.standalone_handlers import handle_doctor_command as _impl
-
-    return _impl(
-        argv,
-        script_dir=script_dir,
-        command_name=command_name,
-        console=console,
-    )
-
-
-def handle_test_command(argv, *, subcommand_name, script_dir, command_name, console):
-    from mms_commands.standalone_handlers import handle_test_command as _impl
-
-    return _impl(
-        argv,
-        subcommand_name=subcommand_name,
-        script_dir=script_dir,
-        command_name=command_name,
-        console=console,
-    )
-
-
-def handle_opencode_smoke_command(argv, *, script_dir, command_name, console):
-    from mms_commands.standalone_handlers import handle_opencode_smoke_command as _impl
-
-    return _impl(
-        argv,
-        script_dir=script_dir,
-        command_name=command_name,
-        console=console,
-    )
+from mms_commands.standalone_handlers import (
+    run_script_subcommand,
+    handle_doctor_command,
+    handle_test_command,
+    handle_opencode_smoke_command,
+)
