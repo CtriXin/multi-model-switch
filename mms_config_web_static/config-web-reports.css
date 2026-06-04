@@ -125,26 +125,114 @@
     }
 
     .result .usage-report,
-    .result .account-report {
+    .result .account-report,
+    .result .rescue-report {
       font-family: var(--font-body);
       white-space: normal;
       font-size: 13px;
       line-height: 1.55;
     }
     .result .usage-report h4,
-    .result .account-report h4 {
+    .result .account-report h4,
+    .result .rescue-report h4 {
       font-size: 16px;
       margin-bottom: 6px;
     }
     .result .usage-report p,
-    .result .account-report p { color: var(--muted); }
+    .result .account-report p,
+    .result .rescue-report p { color: var(--muted); }
     .result .usage-report table,
-    .result .account-report table {
+    .result .account-report table,
+    .result .rescue-report table {
       font-family: var(--font-body);
       min-width: 760px;
     }
     .result .usage-report .table-wrap,
-    .result .account-report .table-wrap { margin-top: 10px; }
+    .result .account-report .table-wrap,
+    .result .rescue-report .table-wrap { margin-top: 10px; }
+    .rescue-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 14px;
+      border: 1px solid color-mix(in oklch, var(--accent) 20%, var(--border));
+      border-radius: 16px;
+      background:
+        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 12%, transparent), transparent 34%),
+        linear-gradient(135deg, oklch(100% 0 0), oklch(97.5% 0.008 214));
+    }
+    .rescue-count {
+      width: 50px;
+      height: 50px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--fg);
+      color: var(--surface);
+      font-family: var(--font-mono);
+      font-weight: 800;
+    }
+    .rescue-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .rescue-metrics div {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: oklch(99.4% 0.004 230);
+      padding: 10px 11px;
+    }
+    .rescue-metrics span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    .rescue-metrics strong {
+      display: block;
+      overflow-wrap: anywhere;
+      line-height: 1.15;
+    }
+    .rescue-next-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+      padding: 14px;
+      border: 1px dashed color-mix(in oklch, var(--fg) 20%, var(--border));
+      border-radius: 16px;
+      background: color-mix(in oklch, var(--bg) 72%, var(--surface));
+    }
+    .rescue-next-card.ready {
+      border-style: solid;
+      border-color: color-mix(in oklch, var(--ok) 34%, var(--border));
+      background: color-mix(in oklch, var(--ok) 7%, var(--surface));
+    }
+    .rescue-next-card h5 {
+      margin: 6px 0 3px;
+      font-size: 15px;
+    }
+    .rescue-table-wrap table {
+      min-width: 680px;
+    }
+    .rescue-copy-fallback {
+      margin-bottom: 10px;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      padding: 10px;
+      background: var(--bg);
+    }
+    .rescue-copy-fallback pre {
+      max-height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+      margin-top: 8px;
+    }
     .usage-report .chips {
       gap: 5px;
       margin: 8px 0 12px;
@@ -217,8 +305,13 @@
 
 @media (max-width: 780px) {
   .gate-head,
-  .gate-command-row {
+  .gate-command-row,
+  .rescue-hero,
+  .rescue-next-card {
     grid-template-columns: 1fr;
+  }
+  .rescue-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .gate-risk,
   .copy-gate-command {

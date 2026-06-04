@@ -455,6 +455,54 @@ def test_config_web_usage_reports_include_tui_detail_rows(monkeypatch, tmp_path)
     assert account_rows[0]["id"] == "codex-main"
 
 
+def test_config_web_rescue_report_surfaces_latest_handoff(monkeypatch, tmp_path):
+    from mms_runtime.rescue import write_fallback_handover, write_file_only_rescue
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config_root = tmp_path / "mms-next"
+    monkeypatch.chdir(repo)
+
+    rescue_event = write_file_only_rescue(
+        {
+            "failed": {
+                "model": "gpt-5.5",
+                "provider_id": "demo",
+                "status_code": 429,
+                "error_type": "rate_limit",
+                "error_summary": "rate limited",
+            },
+            "next_action": "Open .mms/rescue/latest.md and resume with an explicitly selected compatible runtime.",
+        },
+        repo_root=repo,
+        config_root=config_root,
+        created_at="2026-06-04T12:00:00+08:00",
+    )
+    write_fallback_handover(
+        rescue_event,
+        fallback_model="deepseek-v4-flash",
+        fallback_cli="codex",
+        created_at="2026-06-04T12:00:01+08:00",
+    )
+
+    report = mms_config_web.build_settings_report(
+        {},
+        {"action": "rescue_events"},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmg",
+    )
+
+    assert report["ok"] is True
+    assert report["write_policy"] == "read_only"
+    assert report["repo_path"] == str(repo)
+    assert report["latest"]["failed_model"] == "gpt-5.5"
+    assert report["latest"]["status_code"] == 429
+    assert report["handover"]["exists"] is True
+    assert report["handover"]["fallback_model"] == "deepseek-v4-flash"
+    assert "Continue from this MMS rescue handover" in report["handover"]["continue_prompt"]
+    assert report["latest_paths"]["fallback_handover_markdown"].endswith("latest-fallback-handover.md")
+
+
 def test_config_web_verify_approved_report_is_read_only(monkeypatch, tmp_path):
     import mms_registry.cli as mms_registry_cli
 
@@ -1420,6 +1468,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "建议接力 CLI（可空）" in html
     assert "不指定（恢复时手选）" in html
     assert "热切换已暂停：只生成 rescue packet / handoff" in html
+    assert "Rescue Inbox" in html
+    assert "刷新 Rescue Inbox" in html
+    assert "保持当前 session 不重启" in html
+    assert "function renderRescueEventsReport" in html
+    assert "复制续接 Prompt" in html
     assert "function renderFallbackHints" in html
     assert "不会自动重试当前请求" in html
     assert "hot.disabled=true" in html
@@ -1429,7 +1482,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "留空不是没配置" in html
     assert "自动选择 vision 通道" in html
     assert "modelOptions(provider,model,{visionFirst:true,visionOnly:true,auto:true})" in html
-    assert "Rescue 只在失败时写 rescue packet / handoff" in html
+    assert "Rescue 保持当前 session 不重启" in html
     assert "Vision Sidecar 只在图片请求里自动补视觉模型" in html
     assert "配置 rescue fallback 和 vision sidecar" not in html
     assert "已下线的负载均衡不在本轮 WebUI 迭代范围" not in html

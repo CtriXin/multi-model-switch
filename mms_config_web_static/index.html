@@ -155,7 +155,7 @@
     <!-- Fallback -->
     <section class="panel" data-section="fallback">
       <h2>Fallback 设置</h2>
-      <p>这里配置两个独立能力：Rescue 只在失败时写 rescue packet / handoff；Vision Sidecar 只在图片请求里自动补视觉模型。</p>
+      <p>这里配置两个独立能力：Rescue 保持当前 session 不重启，只把失败和接力提示写成 packet；Vision Sidecar 只在图片请求里自动补视觉模型。</p>
       <div class="grid">
         <div class="card span6">
           <h3>Rescue packet / handoff</h3>
@@ -174,10 +174,10 @@
           <div class="check" style="margin-top:10px">
             <input id="rescueHot" type="checkbox" disabled><span>热切换已暂停：只生成 rescue packet / handoff</span>
           </div>
-          <div class="btns ui-advanced-only">
-            <button class="ghost" data-settings-action="rescue_events" data-report-target="fallbackReport">查看 rescue 事件</button>
-            <button class="ghost" data-settings-action="rescue_handover_gate" data-report-target="fallbackReport">交接确认</button>
-            <button class="ghost" data-settings-action="rescue_create_demo_gate" data-report-target="fallbackReport">Demo packet 确认</button>
+          <div class="btns">
+            <button class="ghost" data-settings-action="rescue_events" data-report-target="fallbackReport">刷新 Rescue Inbox</button>
+            <button class="ghost ui-advanced-only" data-settings-action="rescue_handover_gate" data-report-target="fallbackReport">交接确认</button>
+            <button class="ghost ui-advanced-only" data-settings-action="rescue_create_demo_gate" data-report-target="fallbackReport">Demo packet 确认</button>
           </div>
         </div>
         <div class="card span6">
@@ -197,9 +197,9 @@
             <button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button>
           </div>
         </div>
-        <div class="card span12 ui-advanced-only">
-          <h3>Fallback 操作结果</h3>
-          <div class="result" id="fallbackReport">选择 fallback 动作查看结果。</div>
+        <div class="card span12">
+          <h3>Rescue Inbox</h3>
+          <div class="result" id="fallbackReport">最近 rescue packet 和续接 prompt 会显示在这里。</div>
         </div>
       </div>
     </section>

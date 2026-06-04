@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any
 
 from mms_config.web_settings_catalog import (
@@ -97,6 +99,62 @@ def _snapshot_guard_status_report(cfg: dict[str, Any], *, config_path: str = "",
             "mapping": mapping_rows,
             "note": "读取 Snapshot 快照状态 失败；未执行 accept 或任何写入。",
         }
+
+
+def _read_rescue_text(path: Path, *, max_chars: int = 20000) -> str:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return text[:max_chars]
+
+
+def _read_rescue_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _extract_continue_prompt(markdown: str) -> str:
+    marker = "## Continue Prompt"
+    if marker not in markdown:
+        return markdown.strip()
+    section = markdown.split(marker, 1)[1]
+    fence = "```text"
+    if fence in section:
+        section = section.split(fence, 1)[1]
+        section = section.split("```", 1)[0]
+    return section.strip()
+
+
+def _rescue_summary_path(latest: dict[str, Any] | None) -> str:
+    latest = latest if isinstance(latest, dict) else {}
+    artifact_json = _safe_text(latest.get("artifact_json"))
+    if not artifact_json:
+        return ""
+    summary_path = Path(artifact_json).expanduser().parent / "summary.md"
+    return str(summary_path) if summary_path.exists() else ""
+
+
+def _latest_rescue_handover(repo_root: Path) -> dict[str, Any]:
+    rescue_dir = repo_root / ".mms" / "rescue"
+    handover_md_path = rescue_dir / "latest-fallback-handover.md"
+    handover_json_path = rescue_dir / "latest-fallback-handover.json"
+    markdown = _read_rescue_text(handover_md_path) if handover_md_path.exists() else ""
+    payload = _read_rescue_json(handover_json_path) if handover_json_path.exists() else {}
+    fallback = payload.get("fallback") if isinstance(payload.get("fallback"), dict) else {}
+    return {
+        "exists": bool(markdown or payload),
+        "markdown_path": str(handover_md_path) if handover_md_path.exists() else "",
+        "json_path": str(handover_json_path) if handover_json_path.exists() else "",
+        "markdown": markdown,
+        "continue_prompt": _extract_continue_prompt(markdown),
+        "source_event_id": _safe_text(payload.get("source_event_id")),
+        "fallback_model": _safe_text(fallback.get("model")),
+        "fallback_cli": _safe_text(fallback.get("cli")),
+    }
 
 
 def build_settings_report(
@@ -314,8 +372,30 @@ def build_settings_report(
         try:
             from mms_runtime.rescue import list_rescue_events
 
-            events = list_rescue_events(repo_root=os.getcwd(), limit=20)
-            return {"ok": True, "schema": "mms.setup_web.settings_report.v1", "action": action, "write_policy": "read_only", "events": _sanitize_for_output(events)}
+            repo_root = Path(os.getcwd()).expanduser().resolve()
+            config_root = _config_root_for_snapshot(config_path)
+            events = list_rescue_events(repo_root=repo_root, config_root=config_root, limit=20)
+            latest = events[0] if events else None
+            repo_rescue = repo_root / ".mms" / "rescue"
+            return {
+                "ok": True,
+                "schema": "mms.setup_web.settings_report.v1",
+                "action": action,
+                "write_policy": "read_only",
+                "repo_path": str(repo_root),
+                "events": _sanitize_for_output(events),
+                "latest": _sanitize_for_output(latest or {}),
+                "handover": _sanitize_for_output(_latest_rescue_handover(repo_root)),
+                "latest_paths": _sanitize_for_output(
+                    {
+                        "rescue_markdown": str(repo_rescue / "latest.md") if (repo_rescue / "latest.md").exists() else "",
+                        "rescue_json": str(repo_rescue / "latest.json") if (repo_rescue / "latest.json").exists() else "",
+                        "fallback_handover_markdown": str(repo_rescue / "latest-fallback-handover.md") if (repo_rescue / "latest-fallback-handover.md").exists() else "",
+                        "summary_markdown": _rescue_summary_path(latest),
+                    }
+                ),
+                "note": "Rescue 保持当前 session 不重启，只写 repo-local packet / handoff，供新 session 显式接力。",
+            }
         except Exception as exc:
             return {"ok": False, "schema": "mms.setup_web.settings_report.v1", "action": action, "error": f"{type(exc).__name__}: {exc}"}
     if action == "connect_official_gate":

@@ -1,5 +1,6 @@
 // Report renderers live outside the main WebUI controller to keep config-web.js focused on state and event wiring.
 var lastGateCommands=[];
+var lastRescueHandoffPrompt='';
 
 function gateArray(items){return Array.isArray(items)?items.filter(x=>String(x??'').trim()).map(x=>String(x)) : []}
 function gateList(items,empty='-'){const rows=gateArray(items);return rows.length?`<ol class="gate-list">${rows.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ol>`:`<p class="muted">${escapeHtml(empty)}</p>`}
@@ -37,8 +38,28 @@ function renderAccountStatusReport(data,targetId='settingsReport'){
   const rows=accounts.length?accounts.map(a=>{const cli=String(a.cli||'').toLowerCase();const isDefault=defaults[cli]===a.id;return `<tr><td class="mono">${escapeHtml(a.id||'-')}</td><td>${escapeHtml(a.name||'-')}</td><td>${escapeHtml((a.cli||'-').toUpperCase())}</td><td>${isDefault?'是':'否'}</td><td>${a.enabled?'<span class="tag">启用</span>':'<span class="tag off">禁用</span>'}</td><td>${Number(a.priority||0)}</td><td>${escapeHtml(formatFamilyOverrides(a.family_priority_overrides||{})||'-')}</td><td>${escapeHtml(a.auth_mode||'-')}</td><td>${Number((a.usage||{}).launches||0)}</td><td>${escapeHtml((a.usage||{}).last_used_at||'-')}</td><td>${escapeHtml(reportTopModels(a.usage_rows||[]))}</td><td>${a.is_claude_human_only?'<span class="tag off">Claude 人工锁定</span>':`<span class="tag">${writePolicyLabel(a.webui_write_policy||'draft_review')}</span>`}</td></tr>`}).join(''):'<tr><td colspan="12" class="empty-row">暂无账号状态</td></tr>';
   target.innerHTML=`<div class="account-report"><h4>账号状态</h4><p>${escapeHtml(data.note||'按账号汇总默认状态、priority、启动次数和写入边界；OAuth / AGY 新登录主流程已下线。')}</p><div class="table-wrap"><table><thead><tr><th>ID</th><th>名称</th><th>CLI</th><th>默认</th><th>状态</th><th>priority</th><th>Family</th><th>auth</th><th>启动</th><th>最近</th><th>常用模型</th><th>写入边界</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
+async function copyRescueHandoffPrompt(){if(!lastRescueHandoffPrompt){toast('还没有可复制的 handoff prompt');return}try{await navigator.clipboard.writeText(lastRescueHandoffPrompt);toast('已复制 Rescue handoff prompt')}catch(_err){const target=$('fallbackReport')||$('settingsReport');if(target)target.insertAdjacentHTML('afterbegin',`<div class="rescue-copy-fallback"><strong>剪贴板不可用，手动复制：</strong><pre>${escapeHtml(lastRescueHandoffPrompt)}</pre></div>`);toast('无法访问剪贴板，prompt 已显示')}}
+function bindRescueButtons(){document.querySelectorAll('[data-copy-rescue-handoff]').forEach(btn=>{btn.onclick=copyRescueHandoffPrompt})}
+function renderRescueEventsReport(data,targetId='fallbackReport'){
+  const target=$(targetId)||$('fallbackReport')||$('settingsReport');if(!target)return;
+  const events=Array.isArray(data.events)?data.events:[];
+  const latest=data.latest&&Object.keys(data.latest).length?data.latest:(events[0]||{});
+  const handover=data.handover||{};
+  const paths=data.latest_paths||{};
+  const prompt=String(handover.continue_prompt||handover.markdown||'').trim();
+  lastRescueHandoffPrompt=prompt;
+  const hasEvents=events.length>0;
+  const latestStatus=latest.status_code||latest.failure_kind?`${latest.status_code||'-'} / ${latest.failure_kind||'-'}`:'-';
+  const eventRows=events.slice(0,6).map(ev=>`<tr><td>${escapeHtml(ev.created_at||'-')}</td><td class="mono">${escapeHtml(ev.failed_model||'-')}</td><td>${escapeHtml(ev.failed_provider_id||'-')}</td><td>${escapeHtml(ev.status_code||'-')}</td><td>${escapeHtml(ev.failure_kind||'-')}</td></tr>`).join('')||'<tr><td colspan="5" class="empty-row">还没有 rescue packet</td></tr>';
+  const handoffBox=handover.exists?`<div class="rescue-next-card ready"><div><span class="tag">可接力</span><h5>新开 session 继续</h5><p>复制 prompt 后，开一个新 CLI session 粘贴；当前 session 不会被重启或切换。</p></div><button class="secondary" data-copy-rescue-handoff>复制续接 Prompt</button></div>`:`<div class="rescue-next-card"><div><span class="tag off">未生成 handoff</span><h5>下一次失败自动生成</h5><p>上方填写建议接力模型并保存后，失败时会同时写 latest-fallback-handover.md。</p></div></div>`;
+  const pathChips=[paths.rescue_markdown&&`rescue.md: ${paths.rescue_markdown}`,paths.fallback_handover_markdown&&`handover.md: ${paths.fallback_handover_markdown}`,paths.summary_markdown&&`summary.md: ${paths.summary_markdown}`].filter(Boolean).map(x=>`<span class="chip mono">${escapeHtml(x)}</span>`).join('');
+  const debug={...data,handover:{...handover,markdown:handover.markdown?`<${handover.markdown.length} chars>`:''}};
+  target.innerHTML=`<div class="rescue-report"><div class="rescue-hero"><div><h4>Rescue Inbox</h4><p>${escapeHtml(data.note||'失败后这里显示 repo-local packet 和 handoff。')}</p></div><div class="rescue-count">${events.length}</div></div><div class="rescue-metrics"><div><span>最新模型</span><strong>${escapeHtml(latest.failed_model||'-')}</strong></div><div><span>Provider</span><strong>${escapeHtml(latest.failed_provider_id||'-')}</strong></div><div><span>失败</span><strong>${escapeHtml(latestStatus)}</strong></div><div><span>Handoff</span><strong>${handover.exists?'ready':'pending'}</strong></div></div>${handoffBox}<div class="table-wrap rescue-table-wrap"><table><thead><tr><th>时间</th><th>模型</th><th>Provider</th><th>Status</th><th>类型</th></tr></thead><tbody>${eventRows}</tbody></table></div>${!hasEvents?'<p class="muted">触发 429 / 5xx / auth blocking failure 后，MMS 会写 .mms/rescue/latest.md；不需要重启当前 session。</p>':''}<details class="tech-details ui-advanced-only"><summary>路径 / JSON</summary><div class="chips">${pathChips||'<span class="chip">暂无路径</span>'}</div><pre class="mono">${escapeHtml(JSON.stringify(debug,null,2))}</pre></details></div>`;
+  bindRescueButtons();
+}
 function renderSettingsReport(data,targetId='settingsReport'){
   const target=$(targetId)||$('settingsReport');if(!target)return;
+  if(data&&data.action==='rescue_events'){renderRescueEventsReport(data,targetId);return}
   if(data&&data.action==='provider_usage_summary'){renderProviderUsageReport(data,targetId);return}
   if(data&&(data.action==='accounts'||data.action==='account_status')){renderAccountStatusReport(data,targetId);return}
   if(data&&(data.blocked_auto_execute||data.requires_human_confirmation||data.status==='human_gate')){renderGateReport(data,targetId);return}
