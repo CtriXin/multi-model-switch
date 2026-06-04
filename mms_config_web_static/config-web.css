@@ -3514,8 +3514,10 @@
       position: sticky;
       top: 16px;
       min-height: 320px;
+      max-height: calc(100dvh - 32px);
       white-space: normal;
-      overflow: hidden;
+      overflow: auto;
+      scrollbar-width: thin;
       border: 1.5px solid color-mix(in oklch, var(--accent) 18%, var(--border));
       border-radius: 22px;
       background:
@@ -3584,9 +3586,8 @@
       scrollbar-width: thin;
     }
     .session-preview {
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
+      margin-top: 10px;
+      padding-top: 0;
     }
     .session-preview-head,
     .session-preview-toolbar,
@@ -3614,7 +3615,7 @@
     .session-preview-items {
       display: grid;
       gap: 10px;
-      max-height: 460px;
+      max-height: min(48dvh, 520px);
       overflow: auto;
       padding-right: 4px;
       scrollbar-width: thin;
