@@ -143,6 +143,46 @@ def test_command_tools_handle_resume_command_preserves_parse_and_launch_flow():
     assert any("恢复 codex session" in item for item in console.items)
 
 
+def test_command_tools_handle_resume_command_reports_resolution_diagnostics():
+    import mms_commands.tools as mms_command_tools
+
+    console = _FakeConsole()
+
+    try:
+        mms_command_tools.handle_resume_command(
+            ["abc123"],
+            preloaded_command_cfg={},
+            command_name="mmg",
+            resolve_resume_target=lambda session_ref, cli_hint="auto": (
+                None,
+                None,
+                None,
+                f"找不到 session: {session_ref}",
+            ),
+            load_config=lambda: {},
+            setup_wizard=lambda language: {},
+            resolve_ui_language=lambda cfg=None, cli_override=None: "zh-CN",
+            apply_local_overrides=lambda cfg: cfg,
+            set_language=lambda language: None,
+            ensure_provider_credentials=lambda cfg: {},
+            ensure_models_ready=lambda cfg, provider: (provider, []),
+            resolve_resume_runtime_and_model=lambda *args, **kwargs: (None, [], "", {}),
+            launch_with_tracking=lambda *args, **kwargs: None,
+            console=console,
+        )
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("expected SystemExit")
+
+    output = "\n".join(str(item) for item in console.items)
+    assert "找不到 session: abc123" in output
+    assert "恢复失败诊断" in output
+    assert "try: mmg resume codex:abc123" in output
+    assert "try: mmg resume claude:abc123" in output
+    assert "Codex index roots" in output
+
+
 def test_command_tools_resolve_resume_runtime_preserves_last_used_and_session_source_paths():
     import mms_commands.tools as mms_command_tools
 

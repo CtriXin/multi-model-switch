@@ -10591,6 +10591,30 @@ def uuid_resume_cli_hint(session_ref):
     return ""
 
 
+def resume_resolution_diagnostics(session_ref, cli_hint="auto", *, command_name="mms"):
+    prefix_cli, ref = split_cli_prefixed_resume_ref(session_ref)
+    effective_cli = prefix_cli or str(cli_hint or "auto").strip().lower() or "auto"
+    ref_shape = "uuid" if uuid_resume_cli_hint(ref) else ("short-ref" if ref else "empty")
+    suggestions = [
+        "恢复失败诊断:",
+        f"  ref: {ref or '-'}",
+        f"  cli: {effective_cli}",
+        f"  shape: {ref_shape}",
+    ]
+    if effective_cli == "auto":
+        suggestions.extend([
+            f"  try: {command_name} resume codex:{ref}",
+            f"  try: {command_name} resume claude:{ref}",
+        ])
+    elif effective_cli in {"codex", "claude"}:
+        suggestions.append(f"  try: {command_name} resume {effective_cli}:{ref}")
+    suggestions.extend([
+        f"  list Claude index: {command_name} session ls --cli claude",
+        "  Codex index roots: MMS_CODEX_RESUME_WRITEBACK_ROOT, CODEX_HOME, ~/.config/mms/codex-gateway/.codex, ~/.codex",
+    ])
+    return "\n".join(suggestions)
+
+
 def first_resume_model(cli_models, default_models, recommend=None):
     names = []
     for item in list(cli_models or []) + list(default_models or []):
@@ -10724,9 +10748,11 @@ def handle_resume_command(
     cli, session_id, session_record, error = resolve_resume_target(args.session_ref, args.cli)
     if error:
         console.print(f"[red]{error}[/red]")
+        console.print(f"[dim]{resume_resolution_diagnostics(args.session_ref, args.cli, command_name=command_name)}[/dim]")
         raise SystemExit(1)
     if cli not in {"codex", "claude"} or not session_id:
         console.print(f"[red]无法识别 session: {args.session_ref}[/red]")
+        console.print(f"[dim]{resume_resolution_diagnostics(args.session_ref, args.cli, command_name=command_name)}[/dim]")
         raise SystemExit(1)
 
     user_cfg = preloaded_command_cfg or bootstrap_cfg or load_config()
