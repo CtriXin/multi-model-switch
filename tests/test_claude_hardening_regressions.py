@@ -5147,7 +5147,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     assert "lastSessionId" not in project_state
 
 
-def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, tmp_path):
+def test_claude_gateway_env_does_not_restore_project_scoped_resume_pointer_on_new_launch(monkeypatch, tmp_path):
     import mms_launchers
 
     session_home = tmp_path / "gateway-session"
@@ -5233,7 +5233,7 @@ def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, 
 
     session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
     project_state = session_state["projects"][str(repo_dir.resolve())]
-    assert project_state["lastSessionId"] == "session-match"
+    assert "lastSessionId" not in project_state
 
 
 def test_claude_gateway_env_uses_model_shared_resume_scope_for_api_key(monkeypatch, tmp_path):
@@ -5298,10 +5298,10 @@ def test_claude_gateway_env_uses_model_shared_resume_scope_for_api_key(monkeypat
     assert captured_prepare["legacy_resume_scope_ids"] == ["newapi-tokyo"]
     session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
     project_state = session_state["projects"][str(repo_dir.resolve())]
-    assert project_state["lastSessionId"] == "session-direct"
+    assert "lastSessionId" not in project_state
 
 
-def test_claude_gateway_env_restores_cross_model_resume_pointer(monkeypatch, tmp_path):
+def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer_on_new_launch(monkeypatch, tmp_path):
     import mms_launchers
 
     session_home = tmp_path / "gateway-session"
@@ -5366,7 +5366,7 @@ def test_claude_gateway_env_restores_cross_model_resume_pointer(monkeypatch, tmp
     assert env["MMS_MODEL_NAME"] == "gpt-5.4"
     session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
     project_state = session_state["projects"][str(repo_dir.resolve())]
-    assert project_state["lastSessionId"] == "session-qwen"
+    assert "lastSessionId" not in project_state
 
 
 def test_build_broker_env_scrubs_inherited_claude_auth_env(monkeypatch):

@@ -72,7 +72,6 @@ def build_claude_gateway_env(
         _overlay_codegraph_session_entries,
         _overlay_ecc_session_entries,
         _overlay_omc_session_entries,
-        _overlay_project_scoped_claude_resume_state,
         _overlay_token_saver_session_entries,
         _overlay_toon_session_entries,
         _overlay_web_access_session_entries,
@@ -188,13 +187,8 @@ def build_claude_gateway_env(
         project_state=current_project_state,
         disabled_session_surfaces=disabled_session_surfaces,
     )
-    data = _overlay_project_scoped_claude_resume_state(
-        data,
-        current_project,
-        account_id=resume_scope_id,
-        runtime_kind=runtime_kind_value,
-        resume_model=resume_model,
-    )
+    # Normal launch must start from the selected model, not Claude Code's
+    # previous project pointer. Explicit `mms resume <id>` passes --resume.
     with locked_state_file(gw_json):
         atomic_write_json(gw_json, data, mode=0o600)
     if isinstance(_timings, list):
