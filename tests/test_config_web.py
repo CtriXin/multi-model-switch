@@ -1347,8 +1347,11 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert ".asset-toolbar .filterbar button.active" in html
     assert 'aria-pressed="${active?' in html
     assert "function assetDisableSupported(row)" in html
-    assert "全局 Skill 当前只读展示" in html
-    assert "不可在此关闭" in html
+    assert "全局 Skill 当前只读展示" not in html
+    assert "不可在此关闭" not in html
+    assert "默认只显示可配置项" in html
+    assert "function assetDefaultVisible" in html
+    assert "高级查看" in html
     assert "function renderAssetRows(rows)" in html
     assert "assetGroupOpenState" in html
     assert "data-asset-group-details" in html
@@ -1388,7 +1391,8 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function assetPathButtons" in html
     assert "全局继承" in html
     assert "MMS 动态注入" in html
-    assert "高级信息：路径、触发和 key" in html
+    assert "高级信息：路径、触发和 key" not in html
+    assert "路径 / 触发 / key" in html
     assert "已发布，但 runtime 未就绪" in html
     assert "mmf 会读到这次保存后的最新 bundle" in html
     assert "missing key/base URL" in html
