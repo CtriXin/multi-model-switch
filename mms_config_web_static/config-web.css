@@ -3518,12 +3518,10 @@
       top: 20px;
       align-self: start;
       min-height: 320px;
-      max-height: calc(100dvh - 40px);
+      max-height: none;
       white-space: normal;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      scrollbar-width: thin;
+      overflow: visible;
+      display: block;
       border: 1.5px solid color-mix(in oklch, var(--accent) 18%, var(--border));
       border-radius: 22px;
       background:
@@ -3748,13 +3746,10 @@
       scrollbar-width: thin;
     }
     .session-preview {
-      flex: 1 1 auto;
-      min-height: 0;
-      display: flex;
-      flex-direction: column;
+      display: block;
       margin-top: 0;
       padding-top: 0;
-      overflow: hidden;
+      overflow: visible;
     }
     .session-preview-head,
     .session-preview-toolbar,
@@ -3795,8 +3790,7 @@
       align-content: start;
       gap: 10px;
       max-height: none;
-      min-height: 0;
-      overflow: auto;
+      overflow: visible;
       padding-right: 4px;
       scrollbar-width: thin;
     }
@@ -3806,9 +3800,8 @@
       overflow: visible;
     }
     .session-preview-items.is-expanded {
-      flex: 1 1 auto;
-      min-height: 180px;
-      overflow: auto;
+      min-height: auto;
+      overflow: visible;
     }
     .session-preview-items.is-compact .session-message p {
       display: -webkit-box;
