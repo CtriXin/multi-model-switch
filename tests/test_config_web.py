@@ -1083,16 +1083,26 @@ def test_config_web_frontend_assets_are_external_files():
     assert "session-context" in js_body.decode("utf-8")
     assert "查看会话内容" in js_body.decode("utf-8")
     assert "查看内容" in js_body.decode("utf-8")
+    assert "sessionModelFilter" in js_body.decode("utf-8")
+    assert "有上次模型" in js_body.decode("utf-8")
+    assert "模型未记录" in html
     assert "session-selected-summary" in js_body.decode("utf-8")
     assert "session-detail-pinned" in js_body.decode("utf-8")
     assert "这条历史没有摘要" in js_body.decode("utf-8")
     assert "renderSessionResumePanel" in js_body.decode("utf-8")
     assert "恢复信息" in js_body.decode("utf-8")
+    assert "默认恢复：按 MMS 当前恢复逻辑启动" in js_body.decode("utf-8")
+    assert "按上次模型恢复" in js_body.decode("utf-8")
+    assert "打开原始记录位置" in js_body.decode("utf-8")
+    assert "sessionLastModelCommand" in js_body.decode("utf-8")
+    assert "/api/path/reveal" in js_body.decode("utf-8")
     assert "session-cli-badge" in js_body.decode("utf-8")
     assert "上次模型" in js_body.decode("utf-8")
     assert "模型来源" in js_body.decode("utf-8")
     assert "session-summary-meta" in js_body.decode("utf-8")
     assert "最近内容" in js_body.decode("utf-8")
+    assert "紧凑" in js_body.decode("utf-8")
+    assert "展开全部" in js_body.decode("utf-8")
     assert "自动读取最近内容" in js_body.decode("utf-8")
     assert "搜索本会话" in js_body.decode("utf-8")
     assert "--select-model" in js_body.decode("utf-8")
@@ -1124,6 +1134,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert b"flex-direction: column" in css_body
     assert b".session-summary-meta" in css_body
     assert b".session-resume-panel" in css_body
+    assert b".session-resume-hints" in css_body
+    assert b".session-model-filters" in css_body
+    assert b".session-preview-items.is-compact" in css_body
     assert b".session-cli-badge" in css_body
     assert b".session-preview-actions" in css_body
     assert b"white-space: pre-wrap" in css_body

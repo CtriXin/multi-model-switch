@@ -3343,7 +3343,7 @@
     .session-toolbar {
       grid-column: 1 / -1;
       display: grid;
-      grid-template-columns: auto minmax(220px, 1fr) auto;
+      grid-template-columns: auto auto minmax(220px, 1fr) auto;
       gap: 10px;
       align-items: center;
       padding: 12px;
@@ -3356,6 +3356,9 @@
     .session-toolbar .filterbar {
       margin: 0;
       gap: 6px;
+    }
+    .session-model-filters button {
+      font-size: 12px;
     }
     .session-toolbar button.active {
       border-color: var(--fg);
@@ -3586,14 +3589,31 @@
       margin: 12px 0 14px;
     }
     .session-resume-actions {
-      display: flex;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
       align-items: center;
     }
     .session-resume-actions button {
       min-width: 0;
-      white-space: nowrap;
+      min-height: 38px;
+      white-space: normal;
+      line-height: 1.18;
+    }
+    .session-resume-hints {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 5px;
+      padding: 10px 12px;
+      border: 1px dashed color-mix(in oklch, var(--accent) 22%, var(--border));
+      border-radius: 14px;
+      background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .session-resume-hints span {
+      overflow-wrap: anywhere;
     }
     .session-resume-details {
       border: 1px solid var(--border);
@@ -3761,12 +3781,13 @@
     }
     .session-preview-actions {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
       gap: 8px;
     }
     .session-preview-actions button {
       min-width: 0;
-      white-space: nowrap;
+      white-space: normal;
+      line-height: 1.2;
     }
     .session-preview-items {
       display: grid;
@@ -3777,6 +3798,12 @@
       overflow: auto;
       padding-right: 4px;
       scrollbar-width: thin;
+    }
+    .session-preview-items.is-compact .session-message p {
+      display: -webkit-box;
+      -webkit-line-clamp: 5;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .session-message {
       border: 1px solid var(--border);
@@ -3861,6 +3888,7 @@
       .session-detail-grid,
       .session-context,
       .session-preview-toolbar,
+      .session-resume-actions,
       .session-preview-actions {
         grid-template-columns: 1fr;
       }

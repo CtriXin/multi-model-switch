@@ -473,6 +473,11 @@
             <button data-session-cli="claude" type="button">Claude</button>
             <button data-session-cli="codex" type="button">Codex</button>
           </div>
+          <div class="filterbar session-model-filters" id="sessionModelFilters">
+            <button class="active" data-session-model="all" type="button">全部模型</button>
+            <button data-session-model="with" type="button">有上次模型</button>
+            <button data-session-model="missing" type="button">模型未记录</button>
+          </div>
           <input id="sessionSearch" placeholder="搜索项目、摘要、session id">
           <button id="refreshSessions" class="secondary" type="button">刷新会话</button>
         </div>
