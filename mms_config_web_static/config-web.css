@@ -3511,12 +3511,12 @@
     }
     .session-detail {
       grid-column: 2;
-      position: sticky;
-      top: 16px;
+      position: relative;
+      top: auto;
       min-height: 320px;
-      max-height: calc(100dvh - 32px);
+      max-height: none;
       white-space: normal;
-      overflow: auto;
+      overflow: visible;
       scrollbar-width: thin;
       border: 1.5px solid color-mix(in oklch, var(--accent) 18%, var(--border));
       border-radius: 22px;
@@ -3662,9 +3662,9 @@
     .session-preview-items {
       display: grid;
       gap: 10px;
-      max-height: min(48dvh, 520px);
-      overflow: auto;
-      padding-right: 4px;
+      max-height: none;
+      overflow: visible;
+      padding-right: 0;
       scrollbar-width: thin;
     }
     .session-message {

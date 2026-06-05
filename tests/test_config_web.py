@@ -1111,6 +1111,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert b".session-selected-summary" in css_body
     assert b".session-preview-actions" in css_body
     assert b"white-space: pre-wrap" in css_body
+    assert b"max-height: none" in css_body
+    assert b"overflow: visible" in css_body
     assert b"model-table-wrap" in css_body
     assert b"cap-toggle-grid" in css_body
     assert b"body.booting" in css_body
