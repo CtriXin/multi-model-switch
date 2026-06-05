@@ -8,12 +8,10 @@ import inspect
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
 
 
 CONFIG_HELP_TOPICS = {
@@ -221,175 +219,23 @@ from mms_config.preferences import (
 )
 
 
-def iso_now(*, now_func=None):
-    now = now_func() if now_func is not None else datetime.now(timezone.utc)
-    return now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def local_now_slug(*, now_func=None):
-    now = now_func() if now_func is not None else datetime.now()
-    return now.strftime("%Y%m%d-%H%M%S")
-
-
-def load_usage_stats_from_path(usage_path, *, path_exists=os.path.exists):
-    if not path_exists(usage_path):
-        return {"sources": {}}
-    try:
-        with open(usage_path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        if isinstance(data, dict):
-            data.setdefault("sources", {})
-            return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {"sources": {}}
-
-
-def write_usage_stats_locked(
-    usage_path,
-    data,
-    *,
-    ensure_mms_config_guard_files,
-    config_write_target_path,
-    makedirs=os.makedirs,
-    replace=os.replace,
-    chmod=os.chmod,
-):
-    ensure_mms_config_guard_files(config_write_target_path())
-    makedirs(os.path.dirname(usage_path), exist_ok=True)
-    tmp_path = usage_path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-    replace(tmp_path, usage_path)
-    chmod(usage_path, 0o600)
-
-
-def load_usage_stats(*, active_usage_path, load_usage_stats_from_path):
-    return load_usage_stats_from_path(active_usage_path())
-
-
-def save_usage_stats(
-    data,
-    *,
-    active_usage_path,
-    locked_state_file,
-    write_usage_stats_locked,
-    trigger_routes_export_after_usage_write,
-):
-    usage_path = active_usage_path()
-    with locked_state_file(usage_path):
-        write_usage_stats_locked(usage_path, data)
-    trigger_routes_export_after_usage_write()
-
-
-def update_usage_stats(
-    mutator,
-    *,
-    active_usage_path,
-    locked_state_file,
+from mms_commands.state_helpers import (
+    iso_now,
+    local_now_slug,
     load_usage_stats_from_path,
     write_usage_stats_locked,
+    load_usage_stats,
+    save_usage_stats,
+    update_usage_stats,
+)
+
+
+from mms_commands.route_export_helpers import (
     trigger_routes_export_after_usage_write,
-):
-    usage_path = active_usage_path()
-    with locked_state_file(usage_path):
-        stats = load_usage_stats_from_path(usage_path)
-        result = mutator(stats)
-        write_usage_stats_locked(usage_path, stats)
-    trigger_routes_export_after_usage_write()
-    return result
-
-
-def trigger_routes_export_after_usage_write(
-    *,
-    lock,
-    is_running,
-    set_running,
-    get_last_started_at,
-    set_last_started_at,
-    min_interval_sec,
+    backup_config_tree,
     refresh_routes_export_for_hive,
-    thread_cls,
-    monotonic,
-):
-    now = monotonic()
-    with lock:
-        if is_running():
-            return
-        if now - get_last_started_at() < min_interval_sec:
-            return
-        set_running(True)
-        set_last_started_at(now)
-
-    def _run():
-        try:
-            refresh_routes_export_for_hive(force=True, quiet=True)
-        except Exception:
-            pass
-        finally:
-            with lock:
-                set_running(False)
-
-    thread_cls(
-        target=_run,
-        daemon=True,
-        name="mms-usage-routes-export",
-    ).start()
-
-
-def backup_config_tree(
-    label,
-    *,
-    resolve_real_user_home,
-    primary_config_dir,
-    local_now_slug,
-    makedirs=os.makedirs,
-    path_exists=os.path.exists,
-    copytree=shutil.copytree,
-):
-    backup_root = os.path.join(resolve_real_user_home(), ".config", "mms-backups")
-    makedirs(backup_root, exist_ok=True)
-    backup_dir = os.path.join(backup_root, f"{label}-{local_now_slug()}")
-    makedirs(backup_dir, exist_ok=True)
-    if path_exists(primary_config_dir):
-        copytree(
-            primary_config_dir,
-            os.path.join(backup_dir, os.path.basename(primary_config_dir)),
-            symlinks=True,
-            ignore_dangling_symlinks=True,
-        )
-    return backup_dir
-
-
-def refresh_routes_export_for_hive(
-    cfg=None,
-    *,
-    force=True,
-    quiet=False,
-    startup_safe=False,
-    load_config,
-    apply_local_overrides,
-    export_model_routes,
-    console,
-):
-    try:
-        current_cfg = cfg
-        if current_cfg is None:
-            current_cfg = load_config()
-            if current_cfg is None:
-                return False
-            current_cfg = apply_local_overrides(current_cfg)
-        export_model_routes(current_cfg, force=force, startup_safe=startup_safe)
-        return True
-    except Exception as exc:
-        if not quiet:
-            console.print(f"[yellow]⚠ Hive routes export 刷新失败: {exc}[/yellow]")
-        return False
-
-
-def trigger_routes_export_after_credentials_write(*, refresh_routes_export_for_hive):
-    refresh_routes_export_for_hive(force=True, quiet=True)
+    trigger_routes_export_after_credentials_write,
+)
 
 
 def confirm_guard_accept_from_tui(
