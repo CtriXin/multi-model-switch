@@ -3440,8 +3440,10 @@
       padding: 0 10px 10px;
     }
     .session-card {
+      --session-cli-color: var(--accent);
       min-width: 0;
-      border: 1px solid var(--border);
+      border: 1.5px solid var(--session-cli-color);
+      border-left: 5px solid var(--session-cli-color);
       border-radius: 14px;
       padding: 12px;
       background:
@@ -3451,16 +3453,16 @@
       transition: border-color .15s ease, box-shadow .15s ease, transform .08s ease;
     }
     .session-card:hover {
-      border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+      border-color: var(--session-cli-color);
       box-shadow: var(--shadow);
       transform: translateY(-1px);
     }
     .session-card.active {
-      border-color: var(--accent);
+      border-color: var(--session-cli-color);
       background:
-        linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), transparent 58%),
+        linear-gradient(135deg, color-mix(in oklch, var(--session-cli-color) 10%, transparent), transparent 58%),
         var(--surface);
-      box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+      box-shadow: 0 0 0 1px var(--session-cli-color), var(--shadow);
     }
     .session-inline-panel {
       margin-top: 12px;
@@ -3490,15 +3492,18 @@
       line-height: 1.18;
     }
     .session-card .is-selected {
-      border-color: var(--accent);
-      background: var(--accent);
+      border-color: var(--session-cli-color);
+      background: var(--session-cli-color);
       color: var(--surface);
     }
+    .session-card .is-collapse {
+      box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--surface) 45%, transparent);
+    }
     .session-card.is-codex {
-      border-left: 4px solid color-mix(in oklch, var(--fg) 70%, var(--accent));
+      --session-cli-color: #183a68;
     }
     .session-card.is-claude {
-      border-left: 4px solid var(--accent);
+      --session-cli-color: #bd3f35;
     }
     .session-card-head,
     .session-meta {
@@ -3517,7 +3522,7 @@
       font-weight: 800;
       letter-spacing: .08em;
       text-transform: uppercase;
-      color: var(--accent);
+      color: var(--session-cli-color);
     }
     .session-card h3 {
       margin-bottom: 6px;
@@ -3817,7 +3822,7 @@
     .session-preview-items {
       display: grid;
       align-content: start;
-      gap: 10px;
+      gap: 12px;
       max-height: none;
       overflow: visible;
       padding-right: 4px;
@@ -3839,27 +3844,52 @@
       overflow: hidden;
     }
     .session-message {
+      max-width: min(82%, 680px);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 12px;
+      border-radius: 18px;
+      padding: 11px 13px;
       background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+      box-shadow: 0 8px 18px color-mix(in oklch, var(--bg) 55%, transparent);
     }
     .session-message.is-user {
-      border-left: 4px solid var(--accent);
+      justify-self: end;
+      border-color: color-mix(in oklch, #15895e 46%, var(--border));
+      border-right: 4px solid #15895e;
+      border-radius: 18px 18px 5px 18px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, #15895e 13%, transparent), transparent 62%),
+        color-mix(in oklch, #15895e 8%, var(--surface));
     }
     .session-message.is-assistant {
-      border-left: 4px solid color-mix(in oklch, var(--fg) 72%, var(--accent));
+      justify-self: start;
+      border-color: color-mix(in oklch, #2563c8 44%, var(--border));
+      border-left: 4px solid #2563c8;
+      border-radius: 18px 18px 18px 5px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, #2563c8 12%, transparent), transparent 62%),
+        color-mix(in oklch, #2563c8 7%, var(--surface));
     }
     .session-message.is-system,
     .session-message.is-tool {
+      justify-self: start;
       border-left: 4px solid color-mix(in oklch, var(--muted) 75%, var(--border));
+      max-width: min(92%, 760px);
     }
     .session-message-role {
       font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 900;
       letter-spacing: .08em;
-      color: var(--accent);
+      color: color-mix(in oklch, var(--fg) 72%, var(--accent));
+    }
+    .session-message.is-user .session-message-head {
+      text-align: right;
+    }
+    .session-message.is-user .session-message-role {
+      color: #15895e;
+    }
+    .session-message.is-assistant .session-message-role {
+      color: #2563c8;
     }
     .session-message p {
       margin: 8px 0 0;

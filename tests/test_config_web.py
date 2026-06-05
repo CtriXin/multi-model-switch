@@ -1084,6 +1084,10 @@ def test_config_web_frontend_assets_are_external_files():
     assert "当前选择" in js_body.decode("utf-8")
     assert "当前会话" in js_body.decode("utf-8")
     assert "查看内容" in js_body.decode("utf-8")
+    assert "收起" in js_body.decode("utf-8")
+    assert "collapseSessionRow" in js_body.decode("utf-8")
+    assert "已收起当前会话" in js_body.decode("utf-8")
+    assert "aria-expanded" in js_body.decode("utf-8")
     assert "sessionModelFilter" in js_body.decode("utf-8")
     assert "有上次模型" in js_body.decode("utf-8")
     assert "模型未记录" in html
@@ -1145,9 +1149,19 @@ def test_config_web_frontend_assets_are_external_files():
     assert b".session-model-filters" in css_body
     assert b".session-inline-panel" in css_body
     assert b".session-inline-actions" in css_body
+    assert b".session-card.is-claude" in css_body
+    assert b"#bd3f35" in css_body
+    assert b".session-card.is-codex" in css_body
+    assert b"#183a68" in css_body
+    assert b".session-card .is-collapse" in css_body
     assert b".session-preview-items.is-compact" in css_body
     assert b"flex: 0 0 auto" in css_body
     assert b".session-preview-source summary" in css_body
+    assert b".session-message.is-user" in css_body
+    assert b"justify-self: end" in css_body
+    assert b"#15895e" in css_body
+    assert b".session-message.is-assistant" in css_body
+    assert b"#2563c8" in css_body
     assert b".session-cli-badge" in css_body
     assert b".session-preview-actions" in css_body
     assert b"white-space: pre-wrap" in css_body
