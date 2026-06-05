@@ -1081,7 +1081,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert "按项目文件夹分组" in js_body.decode("utf-8")
     assert "session-folder" in js_body.decode("utf-8")
     assert "session-context" in js_body.decode("utf-8")
-    assert "查看会话内容" in js_body.decode("utf-8")
+    assert "当前选择" in js_body.decode("utf-8")
+    assert "当前会话" in js_body.decode("utf-8")
     assert "查看内容" in js_body.decode("utf-8")
     assert "sessionModelFilter" in js_body.decode("utf-8")
     assert "有上次模型" in js_body.decode("utf-8")
@@ -1091,6 +1092,10 @@ def test_config_web_frontend_assets_are_external_files():
     assert "这条历史没有摘要" in js_body.decode("utf-8")
     assert "renderSessionResumePanel" in js_body.decode("utf-8")
     assert "恢复信息" in js_body.decode("utf-8")
+    assert "session-inline-panel" in js_body.decode("utf-8")
+    assert "查看、复制和搜索都在这条记录下方完成" in js_body.decode("utf-8")
+    assert "block:'center'" in js_body.decode("utf-8")
+    assert "最近内容和搜索面板已经展开在左侧选中的会话记录下方" in js_body.decode("utf-8")
     assert "默认恢复：按 MMS 当前恢复逻辑启动" in js_body.decode("utf-8")
     assert "按上次模型恢复" in js_body.decode("utf-8")
     assert "打开原始记录位置" in js_body.decode("utf-8")
@@ -1128,7 +1133,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert b".panel" in css_body
     assert b".session-selected-summary" in css_body
     assert b".session-detail-pinned" in css_body
-    assert b"position: sticky" in css_body
+    assert b".session-detail {\n      grid-column: 2;\n      position: sticky;" in css_body
+    assert b".session-detail-pinned {\n      position: relative;" in css_body
     assert b"max-height: calc(100dvh - 40px)" not in css_body
     assert b"max-height: none" in css_body
     assert b"overflow: visible" in css_body
@@ -1137,6 +1143,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert b".session-resume-panel" in css_body
     assert b".session-resume-hints" in css_body
     assert b".session-model-filters" in css_body
+    assert b".session-inline-panel" in css_body
+    assert b".session-inline-actions" in css_body
     assert b".session-preview-items.is-compact" in css_body
     assert b"flex: 0 0 auto" in css_body
     assert b".session-preview-source summary" in css_body

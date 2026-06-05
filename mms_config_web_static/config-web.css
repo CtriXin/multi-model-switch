@@ -3462,6 +3462,33 @@
         var(--surface);
       box-shadow: 0 0 0 1px var(--accent), var(--shadow);
     }
+    .session-inline-panel {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+    }
+    .session-inline-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .session-inline-head p {
+      margin-top: 3px;
+    }
+    .session-inline-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .session-inline-actions button {
+      min-width: 0;
+      min-height: 36px;
+      white-space: normal;
+      line-height: 1.18;
+    }
     .session-card .is-selected {
       border-color: var(--accent);
       background: var(--accent);
@@ -3514,7 +3541,8 @@
     }
     .session-detail {
       grid-column: 2;
-      position: relative;
+      position: sticky;
+      top: 20px;
       align-self: start;
       min-height: 320px;
       max-height: none;
@@ -3583,6 +3611,9 @@
       display: grid;
       gap: 10px;
       margin: 12px 0 14px;
+    }
+    .session-detail-note {
+      margin-top: 10px;
     }
     .session-resume-actions {
       display: grid;
@@ -3899,6 +3930,7 @@
       .session-detail-grid,
       .session-context,
       .session-preview-toolbar,
+      .session-inline-actions,
       .session-resume-actions,
       .session-preview-actions {
         grid-template-columns: 1fr;
