@@ -3514,8 +3514,7 @@
     }
     .session-detail {
       grid-column: 2;
-      position: sticky;
-      top: 20px;
+      position: relative;
       align-self: start;
       min-height: 320px;
       max-height: none;
@@ -3532,7 +3531,6 @@
     .session-detail-pinned {
       position: relative;
       top: auto;
-      flex: 0 0 auto;
       z-index: 8;
       margin: -1px -1px 14px;
       padding: 1px 1px 12px;
