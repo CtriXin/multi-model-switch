@@ -3525,6 +3525,27 @@
         color-mix(in oklch, var(--surface) 96%, var(--bg));
       box-shadow: var(--shadow);
     }
+    .session-detail-pinned {
+      position: sticky;
+      top: 20px;
+      z-index: 8;
+      margin: -1px -1px 14px;
+      padding: 1px 1px 12px;
+      border-radius: 22px 22px 18px 18px;
+      background:
+        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 14%, transparent), transparent 38%),
+        color-mix(in oklch, var(--surface) 97%, var(--bg));
+      box-shadow: 0 16px 28px color-mix(in oklch, var(--bg) 70%, transparent);
+    }
+    .session-detail-pinned::after {
+      content: "";
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 0;
+      height: 1px;
+      background: var(--border);
+    }
     .session-detail-head {
       display: flex;
       justify-content: space-between;
@@ -3804,6 +3825,12 @@
       .session-detail {
         grid-column: 1;
         position: static;
+      }
+      .session-detail-pinned {
+        position: static;
+        top: auto;
+        margin: 0 0 14px;
+        box-shadow: none;
       }
       .session-folder summary,
       .session-detail-head {

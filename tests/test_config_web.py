@@ -1084,6 +1084,7 @@ def test_config_web_frontend_assets_are_external_files():
     assert "查看会话内容" in js_body.decode("utf-8")
     assert "查看内容" in js_body.decode("utf-8")
     assert "session-selected-summary" in js_body.decode("utf-8")
+    assert "session-detail-pinned" in js_body.decode("utf-8")
     assert "这条历史没有摘要" in js_body.decode("utf-8")
     assert "renderSessionResumePanel" in js_body.decode("utf-8")
     assert "恢复信息" in js_body.decode("utf-8")
@@ -1115,6 +1116,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
     assert b".session-selected-summary" in css_body
+    assert b".session-detail-pinned" in css_body
+    assert b"position: sticky" in css_body
     assert b".session-summary-meta" in css_body
     assert b".session-resume-panel" in css_body
     assert b".session-cli-badge" in css_body
