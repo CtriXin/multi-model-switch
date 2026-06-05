@@ -1085,6 +1085,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert "查看内容" in js_body.decode("utf-8")
     assert "session-selected-summary" in js_body.decode("utf-8")
     assert "这条历史没有摘要" in js_body.decode("utf-8")
+    assert "renderSessionResumePanel" in js_body.decode("utf-8")
+    assert "恢复信息" in js_body.decode("utf-8")
+    assert "session-cli-badge" in js_body.decode("utf-8")
     assert "最近内容" in js_body.decode("utf-8")
     assert "自动读取最近内容" in js_body.decode("utf-8")
     assert "搜索本会话" in js_body.decode("utf-8")
@@ -1109,6 +1112,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
     assert b".session-selected-summary" in css_body
+    assert b".session-resume-panel" in css_body
+    assert b".session-cli-badge" in css_body
     assert b".session-preview-actions" in css_body
     assert b"white-space: pre-wrap" in css_body
     assert b"max-height: none" in css_body

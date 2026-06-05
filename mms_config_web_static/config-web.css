@@ -3528,6 +3528,7 @@
     .session-detail-head {
       display: flex;
       justify-content: space-between;
+      align-items: flex-start;
       gap: 12px;
       padding-bottom: 12px;
       margin-bottom: 12px;
@@ -3542,11 +3543,72 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .session-cli-badge {
+      flex: 0 0 auto;
+      align-self: flex-start;
+      white-space: nowrap;
+      line-height: 1.2;
+    }
     .session-detail-actions {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin: 12px 0;
+    }
+    .session-resume-panel {
+      display: grid;
+      gap: 10px;
+      margin: 12px 0 14px;
+    }
+    .session-resume-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .session-resume-actions button {
+      min-width: 0;
+      white-space: nowrap;
+    }
+    .session-resume-details {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+      overflow: hidden;
+    }
+    .session-resume-details summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      cursor: pointer;
+      list-style: none;
+      color: var(--muted);
+    }
+    .session-resume-details summary::-webkit-details-marker {
+      display: none;
+    }
+    .session-resume-details summary::before {
+      content: "▸";
+      font-family: var(--font-mono);
+      color: var(--accent);
+      transition: transform .15s ease;
+    }
+    .session-resume-details[open] summary::before {
+      transform: rotate(90deg);
+    }
+    .session-resume-details summary span {
+      font-weight: 800;
+      color: var(--fg);
+    }
+    .session-resume-details summary strong {
+      font-size: 12px;
+      font-weight: 600;
+      text-align: right;
+    }
+    .session-resume-details .session-context,
+    .session-resume-details .session-detail-grid {
+      padding: 0 12px 12px;
     }
     .session-context {
       display: grid;
