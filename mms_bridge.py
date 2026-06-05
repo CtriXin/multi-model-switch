@@ -4266,7 +4266,7 @@ def _responses_reasoning_item_text(item):
     return "\n\n".join(parts).strip()
 
 
-def _responses_input_to_messages(instructions, input_items, model_name=""):
+def _responses_input_to_messages(instructions, input_items, model_name="", *, session_reasoning_content=""):
     """Convert Responses API 'input' array to Chat Completions 'messages'."""
     messages = []
     if instructions:
@@ -4375,7 +4375,7 @@ def _responses_input_to_messages(instructions, input_items, model_name=""):
         messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
 
     if requires_roundtrip:
-        last_reasoning_content = ""
+        last_reasoning_content = str(session_reasoning_content or "").strip()
         for message in messages:
             if not isinstance(message, dict):
                 continue
@@ -4388,8 +4388,6 @@ def _responses_input_to_messages(instructions, input_items, model_name=""):
                 if last_reasoning_content and isinstance(message.get("tool_calls"), list) and message["tool_calls"]:
                     message["reasoning_content"] = last_reasoning_content
                     continue
-            if role == "user":
-                last_reasoning_content = ""
 
     return messages
 
@@ -5420,6 +5418,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             payload.get("instructions", ""),
             payload.get("input", []),
             model_name,
+            session_reasoning_content=getattr(self.server, "_last_reasoning_content", ""),
         )
         chat_payload = {
             "model": model_name,
@@ -5534,6 +5533,9 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 except json.JSONDecodeError:
                                     continue
                                 for event_name, event_payload in translator.process_chunk(chunk):
+                                    current_reasoning = translator._normalized_reasoning_content()
+                                    if current_reasoning:
+                                        self.server._last_reasoning_content = current_reasoning
                                     extracted = _extract_output_tokens(event_payload)
                                     if extracted is not None:
                                         output_tokens = extracted
@@ -5826,6 +5828,7 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
             payload.get("instructions", ""),
             payload.get("input", []),
             model_name,
+            session_reasoning_content=getattr(self.server, "_last_reasoning_content", ""),
         )
         chat_payload = {
             "model": model_name,
@@ -5944,6 +5947,9 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
                         except json.JSONDecodeError:
                             continue
                         for event_name, event_payload in translator.process_chunk(chunk):
+                            current_reasoning = translator._normalized_reasoning_content()
+                            if current_reasoning:
+                                self.server._last_reasoning_content = current_reasoning
                             extracted = _extract_output_tokens(event_payload)
                             if extracted is not None:
                                 output_tokens = extracted
@@ -6002,6 +6008,7 @@ def codex_chatcompletions_bridge(
     server.provider_profile = str(provider_profile or "")
     server.reasoning_enabled = bool(reasoning_enabled)
     server.reasoning_effort = reasoning_effort
+    server._last_reasoning_content = ""
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
     _configure_bridge_rescue(server)
@@ -6069,6 +6076,7 @@ def codex_responses_bridge(
     server.provider_profile = str(provider_profile or "")
     server.reasoning_enabled = bool(reasoning_enabled)
     server.reasoning_effort = reasoning_effort
+    server._last_reasoning_content = ""
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])

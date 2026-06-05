@@ -5973,6 +5973,41 @@ def test_responses_input_to_messages_carries_kimi_reasoning_across_multiple_tool
     assert messages[4]["reasoning_content"] == "carry this forward"
 
 
+def test_responses_input_to_messages_restores_kimi_tool_reasoning_from_session():
+    import mms_bridge
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "I will call tools now."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "Bash",
+                "arguments": "{\"command\":\"pwd\"}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "/tmp",
+            },
+        ],
+        "kimi-k2.6",
+        session_reasoning_content="carry this forward",
+    )
+
+    assert messages[0]["role"] == "assistant"
+    assert "reasoning_content" not in messages[0]
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "Bash"
+    assert messages[1]["reasoning_content"] == "carry this forward"
+
+
 def test_responses_payload_to_anthropic_messages_payload_preserves_kimi_reasoning():
     import mms_bridge
 
@@ -6335,6 +6370,147 @@ def test_codex_chat_bridge_preserves_kimi_reasoning_across_real_tool_roundtrip()
                     "instructions": "",
                     "input": list(completed_output)
                     + [{"type": "function_call_output", "call_id": "call_1", "output": "phase: INTAKE"}],
+                    "stream": True,
+                },
+                timeout=10,
+            )
+            assert response.status_code == 200
+
+        second_request = FakeUpstreamHandler.requests[1]
+        assistant_tool_message = next(
+            message
+            for message in second_request["messages"]
+            if message.get("role") == "assistant" and message.get("tool_calls")
+        )
+        assert assistant_tool_message["reasoning_content"] == "carry this forward"
+        assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "Bash"
+    finally:
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join(timeout=2)
+
+
+def test_codex_chat_bridge_restores_kimi_reasoning_when_client_drops_reasoning_item():
+    import importlib
+    import mms_bridge
+
+    mms_bridge = importlib.reload(mms_bridge)
+
+    class FakeUpstreamHandler(BaseHTTPRequestHandler):
+        requests = []
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):
+            length = int(self.headers.get("content-length") or 0)
+            body = self.rfile.read(length) if length else b"{}"
+            payload = json.loads(body.decode("utf-8"))
+            type(self).requests.append(payload)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+
+            if len(type(self).requests) == 1:
+                events = [
+                    {"choices": [{"delta": {"reasoning_content": "carry this forward"}, "finish_reason": None}]},
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "function": {
+                                                "name": "Bash",
+                                                "arguments": "{\"command\":\"python3 work_runner.py init\"}",
+                                            },
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+                ]
+            else:
+                events = [
+                    {"choices": [{"delta": {"content": "ok"}, "finish_reason": None}]},
+                    {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+                ]
+
+            for item in events:
+                self.wfile.write(f"data: {json.dumps(item)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+
+    upstream = HTTPServer(("127.0.0.1", 0), FakeUpstreamHandler)
+    upstream_port = upstream.server_address[1]
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+
+    try:
+        mms_bridge._ensure_httpx()
+        client = mms_bridge.httpx
+        assert client is not None
+
+        with mms_bridge.codex_chatcompletions_bridge(
+            f"http://127.0.0.1:{upstream_port}",
+            "gateway-key",
+            model_name="kimi-k2.6",
+            advertised_models=["kimi-k2.6"],
+            provider_id="kimi",
+            provider_profile="kimi-code",
+            reasoning_enabled=True,
+            reasoning_effort="high",
+        ) as bridge:
+            headers = {
+                "Authorization": f"Bearer {bridge['api_key']}",
+                "User-Agent": "codex_cli_rs/0.38.0",
+                "originator": "codex_cli_rs",
+                "openai-beta": "responses=v1",
+            }
+
+            response = client.post(
+                f"{bridge['base_url']}/v1/responses",
+                headers=headers,
+                json={
+                    "model": "kimi-k2.6",
+                    "instructions": "",
+                    "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+                    "stream": True,
+                },
+                timeout=10,
+            )
+            assert response.status_code == 200
+
+            response = client.post(
+                f"{bridge['base_url']}/v1/responses",
+                headers=headers,
+                json={
+                    "model": "kimi-k2.6",
+                    "instructions": "",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "I will call tools now."}],
+                        },
+                        {
+                            "type": "function_call",
+                            "id": "fc_1",
+                            "call_id": "call_1",
+                            "name": "Bash",
+                            "arguments": "{\"command\":\"python3 work_runner.py init\"}",
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_1",
+                            "output": "phase: INTAKE",
+                        },
+                    ],
                     "stream": True,
                 },
                 timeout=10,
