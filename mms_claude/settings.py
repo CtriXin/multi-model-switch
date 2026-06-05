@@ -868,9 +868,6 @@ def configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
     if not enable_nsr or not _launchers._nsr_available_for_cli("claude"):
         return hooks_data
     for event_name, matcher in (
-        ("PermissionRequest", "*"),
-        ("PreToolUse", "*"),
-        ("PostToolUse", "*"),
         ("PreCompact", ""),
         ("PostCompact", ""),
         ("Stop", ""),
