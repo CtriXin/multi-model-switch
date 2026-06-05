@@ -1088,6 +1088,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert "renderSessionResumePanel" in js_body.decode("utf-8")
     assert "恢复信息" in js_body.decode("utf-8")
     assert "session-cli-badge" in js_body.decode("utf-8")
+    assert "上次模型" in js_body.decode("utf-8")
+    assert "模型来源" in js_body.decode("utf-8")
+    assert "session-summary-meta" in js_body.decode("utf-8")
     assert "最近内容" in js_body.decode("utf-8")
     assert "自动读取最近内容" in js_body.decode("utf-8")
     assert "搜索本会话" in js_body.decode("utf-8")
@@ -1112,6 +1115,7 @@ def test_config_web_frontend_assets_are_external_files():
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
     assert b".session-selected-summary" in css_body
+    assert b".session-summary-meta" in css_body
     assert b".session-resume-panel" in css_body
     assert b".session-cli-badge" in css_body
     assert b".session-preview-actions" in css_body

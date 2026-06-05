@@ -3638,6 +3638,24 @@
       overflow-wrap: anywhere;
       line-height: 1.45;
     }
+    .session-summary-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .session-summary-meta em {
+      display: inline-flex;
+      max-width: 100%;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: color-mix(in oklch, var(--accent) 10%, var(--surface));
+      color: var(--accent);
+      font-style: normal;
+      font-size: 12px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
     .session-selected-summary p {
       margin-top: 6px;
     }

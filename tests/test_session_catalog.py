@@ -30,6 +30,7 @@ def test_session_catalog_scans_claude_index_and_raw_jsonl(monkeypatch, tmp_path)
                 "project_path": str(tmp_path / "repo"),
                 "account_id": "provider-a",
                 "runtime_kind": "api_key",
+                "resume_model": "mimo-v2.5",
                 "started_at": "2026-06-04T01:00:00+00:00",
                 "last_active_at": "2026-06-04T02:00:00+00:00",
             }
@@ -47,6 +48,18 @@ def test_session_catalog_scans_claude_index_and_raw_jsonl(monkeypatch, tmp_path)
                         "cwd": str(tmp_path / "repo"),
                         "sessionId": "22222222-2222-4222-8222-222222222222",
                         "message": {"content": [{"type": "text", "text": "继续做 session center"}]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "timestamp": "2026-06-04T03:01:00.000Z",
+                        "cwd": str(tmp_path / "repo"),
+                        "sessionId": "22222222-2222-4222-8222-222222222222",
+                        "message": {
+                            "model": "qwen3.7-max",
+                            "content": [{"type": "text", "text": "好的"}],
+                        },
                     }
                 ),
             ]
@@ -68,6 +81,10 @@ def test_session_catalog_scans_claude_index_and_raw_jsonl(monkeypatch, tmp_path)
     ]
     assert rows[0]["title"] == "继续做 session center"
     assert rows[0]["account_id"] == "provider-a"
+    assert rows[0]["model"] == "qwen3.7-max"
+    assert rows[0]["model_source"] == "Claude 原始记录"
+    assert rows[1]["model"] == "mimo-v2.5"
+    assert rows[1]["model_source"] == "MMS 启动记录"
     assert all(not row["session_id"].startswith("agent-") for row in rows)
 
 
@@ -177,6 +194,13 @@ def test_session_catalog_scans_codex_index_and_jsonl(monkeypatch, tmp_path):
                 ),
                 json.dumps(
                     {
+                        "timestamp": "2026-06-04T02:00:30Z",
+                        "type": "turn_context",
+                        "payload": {"model": "gpt-5.5"},
+                    }
+                ),
+                json.dumps(
+                    {
                         "timestamp": "2026-06-04T02:01:00Z",
                         "type": "response_item",
                         "payload": {
@@ -202,6 +226,8 @@ def test_session_catalog_scans_codex_index_and_jsonl(monkeypatch, tmp_path):
     ]
     assert rows[0]["project_name"] == "codex-project"
     assert rows[0]["title"] == "恢复 Codex 会话"
+    assert rows[0]["model"] == "gpt-5.5"
+    assert rows[0]["model_source"] == "Codex 原始记录"
 
 
 def test_session_catalog_previews_codex_messages(monkeypatch, tmp_path):

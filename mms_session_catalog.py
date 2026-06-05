@@ -131,6 +131,15 @@ def _short_text(value: object, limit: int = 120) -> str:
     return text[:limit]
 
 
+def _model_value(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.lower() in {"custom", "default", "unknown", "openai", "anthropic"}:
+        return ""
+    return text
+
+
 def _title_candidate(value: object, limit: int = 120) -> str:
     text = _short_text(value, limit=limit)
     lowered = text.lower()
@@ -183,7 +192,7 @@ def _merge_records(records: Iterable[dict]) -> list[dict]:
         for path in next_record.get("source_paths") or []:
             if path and path not in current.setdefault("source_paths", []):
                 current["source_paths"].append(path)
-        for field in ("title", "cwd", "project_path", "project_name", "updated_at", "created_at"):
+        for field in ("title", "cwd", "project_path", "project_name", "updated_at", "created_at", "model", "model_source"):
             if not current.get(field) and next_record.get(field):
                 current[field] = next_record[field]
         replace = (
@@ -196,7 +205,7 @@ def _merge_records(records: Iterable[dict]) -> list[dict]:
         if replace:
             source_paths = current.get("source_paths") or []
             for field, value in current.items():
-                if field not in next_record and value:
+                if (field not in next_record or not next_record.get(field)) and value:
                     next_record[field] = value
             next_record["source_paths"] = source_paths
             merged[key] = next_record
@@ -216,6 +225,7 @@ def _claude_state_records(projects_root: Path) -> Iterable[dict]:
             continue
         metadata = _read_json(session_path.parents[1] / "metadata.json")
         project_path = str(payload.get("project_path") or metadata.get("canonical_path") or payload.get("cwd") or "")
+        model = _model_value(payload.get("resume_model"))
         yield {
             "cli": "claude",
             "session_id": session_id,
@@ -224,7 +234,8 @@ def _claude_state_records(projects_root: Path) -> Iterable[dict]:
             "cwd": str(payload.get("cwd") or project_path),
             "account_id": str(payload.get("account_id") or metadata.get("account_id") or ""),
             "runtime_kind": str(payload.get("runtime_kind") or ""),
-            "model": str(payload.get("resume_model") or ""),
+            "model": model,
+            "model_source": "MMS 启动记录" if model else "",
             "created_at": str(payload.get("started_at") or ""),
             "updated_at": str(payload.get("last_active_at") or payload.get("started_at") or ""),
             "status": "active" if payload.get("exit_code") is None else f"exit:{payload.get('exit_code')}",
@@ -239,6 +250,7 @@ def _claude_jsonl_summary(path: Path) -> dict:
     created_at = ""
     updated_at = _mtime_iso(path)
     title = ""
+    model = ""
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             for index, line in enumerate(handle):
@@ -259,6 +271,9 @@ def _claude_jsonl_summary(path: Path) -> dict:
                 if not title and payload.get("type") == "user":
                     message = payload.get("message") if isinstance(payload.get("message"), dict) else payload
                     title = _title_candidate(message.get("content"), limit=120)
+                if payload.get("type") == "assistant":
+                    message = payload.get("message") if isinstance(payload.get("message"), dict) else payload
+                    model = _model_value(message.get("model") or payload.get("model")) or model
     except OSError:
         pass
     return {
@@ -267,6 +282,7 @@ def _claude_jsonl_summary(path: Path) -> dict:
         "created_at": created_at or updated_at,
         "updated_at": updated_at,
         "title": title,
+        "model": model,
     }
 
 
@@ -286,6 +302,7 @@ def _claude_raw_records(projects_root: Path) -> Iterable[dict]:
             if not session_id:
                 continue
             cwd = str(summary.get("cwd") or project_path)
+            model = str(summary.get("model") or "")
             yield {
                 "cli": "claude",
                 "session_id": session_id,
@@ -294,7 +311,8 @@ def _claude_raw_records(projects_root: Path) -> Iterable[dict]:
                 "cwd": cwd,
                 "account_id": account_id,
                 "runtime_kind": "api_key" if account_id else "",
-                "model": "",
+                "model": model,
+                "model_source": "Claude 原始记录" if model else "",
                 "created_at": str(summary.get("created_at") or ""),
                 "updated_at": str(summary.get("updated_at") or ""),
                 "title": str(summary.get("title") or ""),
@@ -323,13 +341,15 @@ def _codex_index_records(root: Path) -> Iterable[dict]:
             session_id = str(payload.get("id") or "").strip()
             if not session_id:
                 continue
+            model = _model_value(payload.get("model"))
             yield {
                 "cli": "codex",
                 "session_id": session_id,
                 "project_path": str(payload.get("cwd") or ""),
                 "project_name": _project_name(payload.get("cwd")),
                 "cwd": str(payload.get("cwd") or ""),
-                "model": str(payload.get("model") or ""),
+                "model": model,
+                "model_source": "Codex 索引" if model else "",
                 "created_at": str(payload.get("created_at") or payload.get("timestamp") or ""),
                 "updated_at": str(payload.get("updated_at") or payload.get("created_at") or ""),
                 "title": _short_text(payload.get("thread_name") or payload.get("title"), limit=120),
@@ -367,8 +387,10 @@ def _codex_jsonl_summary(path: Path) -> dict:
                 if kind == "session_meta":
                     session_id = session_id or str(body.get("id") or "").strip()
                     cwd = cwd or str(body.get("cwd") or "").strip()
-                    model = model or str(body.get("model") or body.get("model_provider") or "").strip()
+                    model = _model_value(body.get("model")) or model
                     created_at = created_at or str(body.get("timestamp") or "")
+                if kind == "turn_context":
+                    model = _model_value(body.get("model")) or model
                 if not title and kind == "response_item":
                     role = str(body.get("role") or "").strip()
                     if role == "user":
@@ -399,13 +421,15 @@ def _codex_jsonl_records(root: Path) -> Iterable[dict]:
             if not session_id:
                 continue
             cwd = str(summary.get("cwd") or "")
+            model = str(summary.get("model") or "")
             yield {
                 "cli": "codex",
                 "session_id": session_id,
                 "project_path": cwd,
                 "project_name": _project_name(cwd),
                 "cwd": cwd,
-                "model": str(summary.get("model") or ""),
+                "model": model,
+                "model_source": "Codex 原始记录" if model else "",
                 "created_at": str(summary.get("created_at") or ""),
                 "updated_at": str(summary.get("updated_at") or ""),
                 "title": str(summary.get("title") or ""),
