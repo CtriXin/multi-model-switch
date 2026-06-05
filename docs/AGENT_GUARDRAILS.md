@@ -226,11 +226,19 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 
 - 默认命令：`python3 scripts/regression_fresh_user_gate.py`
 - 紧急小修可先跑：`python3 scripts/regression_fresh_user_gate.py --quick`，但 push 前仍要补全默认 gate，或在交付里明确说明未补全原因。
+- 查看当前完整用户路径矩阵：`python3 scripts/regression_fresh_user_gate.py --list-scenarios`
+- 每次新增能力、修复 bug、改变默认行为或改变安装/session/config/hook/resume/bridge 路径时，都必须新增或扩展回归覆盖；不能只说“手工测过”。
+- 回归覆盖必须尽量模拟完整用户路径，而不是只测 helper 函数。至少要明确覆盖哪些用户状态：fresh install、已有安装覆盖、重新安装、legacy `ccs` / dirty gateway session、旧配置残留、真实 HOME 隔离、session hook 注入、explicit resume、默认新启动。
+- 已经修过的问题必须能一一复现：如果一个 bug 来自旧状态组合（例如 `ccs` 残留、覆盖安装、hook trust、NSR `PostToolUse` 噪音、隐式 resume），修复时要把该状态组合写进 `scripts/regression_fresh_user_gate.py` 的 scenario matrix，或加入该 gate 会执行的 pytest target。
 - gate 必须清掉当前 session 注入的 `MMS_CONFIG_ROOT` / `REAL_HOME` / `ORIGINAL_HOME` / `MMS_REAL_HOME` / `XDG_CONFIG_HOME` 等环境变量，用临时 `HOME` 模拟 fresh installed user。
 - gate 至少覆盖：
   - `mmf` fresh preview root 是否落到临时 `~/.config/mms-next`
+  - legacy dirty install / gateway session 泄漏 / retired `ccs`、`mmc` 清理
+  - 重置后可重新安装，且 `install.sh --dry-run` 重复执行不写文件
+  - NSR 只挂低频 continuation hooks，不再挂 `PermissionRequest` / `PreToolUse` / `PostToolUse`
   - Claude 新启动不会消费项目旧 `lastSessionId`
   - 显式 `mms resume <id>` 仍传递原生 resume 参数
+  - Codex hook trust 不重复弹确认，bounded resume/history 能安全回填
   - installer/path smoke 不依赖开发者 worktree 私有状态
 - 若改动触及 `mms_core.py`、`mms_launchers.py`、installer、session index、config root、resume、HOME/XDG 隔离、wrapper 或 release channel，最终 handoff 必须写明 fresh-user gate 的实际结果。
 

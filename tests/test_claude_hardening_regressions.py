@@ -1179,6 +1179,12 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
         for group in enabled_hooks.get("UserPromptSubmit", [])
         for item in group.get("hooks", [])
     ]
+    for noisy_event in ("PermissionRequest", "PreToolUse", "PostToolUse"):
+        assert mms_launchers._NSR_CLAUDE_HOOK not in [
+            item["command"]
+            for group in enabled_hooks.get(noisy_event, [])
+            for item in group.get("hooks", [])
+        ]
     assert not any("/tmp/nsr-claude-hook.sh" == command or "looop" in command for command in enabled_commands)
 
 
@@ -1235,6 +1241,12 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
         for group in enabled_hooks.get("UserPromptSubmit", [])
         for item in group.get("hooks", [])
     ]
+    for noisy_event in ("PermissionRequest", "PreToolUse", "PostToolUse"):
+        assert mms_launchers._NSR_CODEX_HOOK not in [
+            item["command"]
+            for group in enabled_hooks.get(noisy_event, [])
+            for item in group.get("hooks", [])
+        ]
     assert not any("/tmp/nsr-codex-hook.sh" == command or "bugloop" in command for command in enabled_commands)
 
 
