@@ -1103,6 +1103,7 @@ def test_config_web_frontend_assets_are_external_files():
     assert "最近内容" in js_body.decode("utf-8")
     assert "紧凑" in js_body.decode("utf-8")
     assert "展开全部" in js_body.decode("utf-8")
+    assert "原始记录路径" in js_body.decode("utf-8")
     assert "自动读取最近内容" in js_body.decode("utf-8")
     assert "搜索本会话" in js_body.decode("utf-8")
     assert "--select-model" in js_body.decode("utf-8")
@@ -1137,6 +1138,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert b".session-resume-hints" in css_body
     assert b".session-model-filters" in css_body
     assert b".session-preview-items.is-compact" in css_body
+    assert b"flex: 0 0 auto" in css_body
+    assert b".session-preview-source summary" in css_body
     assert b".session-cli-badge" in css_body
     assert b".session-preview-actions" in css_body
     assert b"white-space: pre-wrap" in css_body
