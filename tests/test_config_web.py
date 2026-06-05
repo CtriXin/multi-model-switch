@@ -1118,6 +1118,10 @@ def test_config_web_frontend_assets_are_external_files():
     assert b".session-selected-summary" in css_body
     assert b".session-detail-pinned" in css_body
     assert b"position: sticky" in css_body
+    assert b"max-height: calc(100dvh - 40px)" in css_body
+    assert b"overflow: hidden" in css_body
+    assert b"overflow: auto" in css_body
+    assert b"flex-direction: column" in css_body
     assert b".session-summary-meta" in css_body
     assert b".session-resume-panel" in css_body
     assert b".session-cli-badge" in css_body
