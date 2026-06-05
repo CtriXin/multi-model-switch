@@ -1071,6 +1071,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert "/api/migration/start" in js_body.decode("utf-8")
     assert "/api/session/catalog" in js_body.decode("utf-8")
     assert "/api/session/preview" in js_body.decode("utf-8")
+    assert "parseApiResponse" in js_body.decode("utf-8")
+    assert "JSON.parse" in js_body.decode("utf-8")
+    assert "接口不存在或服务未刷新" in js_body.decode("utf-8")
     assert "filteredSessionRows" in js_body.decode("utf-8")
     assert "limit:3000" in js_body.decode("utf-8")
     assert "搜索不会重复扫描" in js_body.decode("utf-8")
@@ -1080,6 +1083,8 @@ def test_config_web_frontend_assets_are_external_files():
     assert "session-context" in js_body.decode("utf-8")
     assert "查看会话内容" in js_body.decode("utf-8")
     assert "查看内容" in js_body.decode("utf-8")
+    assert "session-selected-summary" in js_body.decode("utf-8")
+    assert "这条历史没有摘要" in js_body.decode("utf-8")
     assert "最近内容" in js_body.decode("utf-8")
     assert "自动读取最近内容" in js_body.decode("utf-8")
     assert "搜索本会话" in js_body.decode("utf-8")
@@ -1103,6 +1108,9 @@ def test_config_web_frontend_assets_are_external_files():
     assert css_type.startswith("text/css")
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
+    assert b".session-selected-summary" in css_body
+    assert b".session-preview-actions" in css_body
+    assert b"white-space: pre-wrap" in css_body
     assert b"model-table-wrap" in css_body
     assert b"cap-toggle-grid" in css_body
     assert b"body.booting" in css_body

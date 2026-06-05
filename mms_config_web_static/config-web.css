@@ -3554,6 +3554,31 @@
       gap: 8px;
       margin: 12px 0;
     }
+    .session-selected-summary {
+      margin: 10px 0 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+      border-radius: 16px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), transparent 58%),
+        color-mix(in oklch, var(--surface) 92%, var(--bg));
+    }
+    .session-selected-summary span {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    .session-selected-summary strong {
+      display: block;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+    }
+    .session-selected-summary p {
+      margin-top: 6px;
+    }
     .session-context div {
       min-width: 0;
       padding: 10px;
@@ -3579,10 +3604,22 @@
       grid-template-columns: 1fr;
       gap: 10px;
     }
+    .session-detail-grid > div {
+      min-width: 0;
+    }
+    .session-detail-grid .mono,
+    .session-detail .mono {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
     .session-command {
       margin-top: 6px;
-      overflow-x: auto;
-      white-space: pre;
+      max-width: 100%;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
       scrollbar-width: thin;
     }
     .session-preview {
@@ -3609,8 +3646,18 @@
     }
     .session-preview-toolbar {
       display: grid;
-      grid-template-columns: minmax(180px, 1fr) auto auto auto;
+      grid-template-columns: 1fr;
+      gap: 8px;
       margin-bottom: 12px;
+    }
+    .session-preview-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .session-preview-actions button {
+      min-width: 0;
+      white-space: nowrap;
     }
     .session-preview-items {
       display: grid;
@@ -3652,9 +3699,9 @@
     }
     .session-preview-source {
       margin-top: 10px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
       color: var(--muted);
     }
 
@@ -3688,7 +3735,8 @@
       }
       .session-detail-grid,
       .session-context,
-      .session-preview-toolbar {
+      .session-preview-toolbar,
+      .session-preview-actions {
         grid-template-columns: 1fr;
       }
       .session-preview-head,
