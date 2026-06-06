@@ -357,6 +357,22 @@ def test_runtime_with_vision_sidecar_auto_uses_direct_kimi(monkeypatch):
     assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://api.kimi.com/coding"
 
 
+def test_runtime_with_vision_sidecar_skips_ui_vision_capable_model():
+    import mms_core
+
+    runtime = mms_core._runtime_with_vision_sidecar(
+        {"providers": []},
+        {
+            "id": "minimax",
+            "auth_mode": "api_key",
+            "model_capabilities": {"MiniMax-M3": {"vision": True}},
+        },
+        "MiniMax-M3",
+    )
+
+    assert "vision_sidecar" not in runtime
+
+
 def test_runtime_with_vision_sidecar_prefers_direct_mimo_before_kimi(monkeypatch):
     import mms_core
 

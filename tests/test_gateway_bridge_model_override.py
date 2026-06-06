@@ -15,6 +15,7 @@ def _run_gateway_bridge_once(
     messages: list[dict] | None = None,
     system: str | list[dict] | None = None,
     vision_sidecar: dict | None = None,
+    model_capabilities: dict | None = None,
 ) -> dict:
     import mms_bridge
 
@@ -84,6 +85,7 @@ def _run_gateway_bridge_once(
         minimal_claude_header_passthrough=False,
         strip_upstream_user_agent=False,
         vision_sidecar=vision_sidecar or {},
+        model_capabilities=model_capabilities or {},
     )
     handler.send_response = lambda code: captured.setdefault("status", code)
     handler.send_header = lambda *args, **kwargs: None
@@ -340,6 +342,50 @@ def test_gateway_bridge_uses_vision_sidecar_for_text_only_model_image_input(monk
     assert captured["json"]["model"] == "mimo-v2.5-pro"
     assert "red square" in json.dumps(captured["json"], ensure_ascii=False)
     assert not any(
+        isinstance(block, dict) and block.get("type") == "image"
+        for message in captured["json"]["messages"]
+        for block in (message.get("content") if isinstance(message.get("content"), list) else [])
+    )
+
+
+def test_gateway_bridge_honors_ui_vision_capability_without_sidecar(monkeypatch):
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="MiniMax-M3",
+        messages=image_messages,
+        vision_sidecar={
+            "enabled": True,
+            "provider_id": "direct-kimi",
+            "provider_profile": "kimi-code",
+            "model": "K2.6",
+            "anthropic_base_url": "https://vision.example.com",
+            "api_key": "sk-vision",
+        },
+        model_capabilities={"MiniMax-M3": {"vision": True}},
+    )
+
+    assert captured["status"] == 200
+    assert len(captured["post_calls"]) == 1
+    assert captured["json"]["model"] == "MiniMax-M3"
+    assert any(
         isinstance(block, dict) and block.get("type") == "image"
         for message in captured["json"]["messages"]
         for block in (message.get("content") if isinstance(message.get("content"), list) else [])

@@ -3485,6 +3485,7 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
             "auth_mode": "api_key",
             "api_key": "sk-runtime",
             "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+            "model_capabilities": {"mimo-v2.5-pro": {"vision": False}},
             "vision_sidecar": {
                 "enabled": True,
                 "provider_id": "mimo-direct-anthropic",
@@ -3498,6 +3499,7 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
 
     assert captured["gateway_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1"
     assert captured["bridge_kwargs"]["heavy_model"] == "mimo-v2.5-pro"
+    assert captured["bridge_kwargs"]["model_capabilities"]["mimo-v2.5-pro"]["vision"] is False
     assert captured["bridge_kwargs"]["vision_sidecar"]["model"] == "mimo-v2.5"
     assert captured["prepare_kwargs"]["auth_token"] == "bridge-token"
     assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"

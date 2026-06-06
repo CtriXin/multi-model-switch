@@ -530,6 +530,28 @@ def _selector_base_model_name(model_name):
     return normalized
 
 
+def _model_capability_entry(model_capabilities, model_name):
+    if not isinstance(model_capabilities, dict):
+        return {}
+    target = _selector_base_model_name(model_name)
+    if not target:
+        return {}
+    for key, value in model_capabilities.items():
+        if _selector_base_model_name(key) == target and isinstance(value, dict):
+            return value
+    return {}
+
+
+def _model_image_input_override(model_name, model_capabilities):
+    caps = _model_capability_entry(model_capabilities, model_name)
+    nested = caps.get("capabilities") if isinstance(caps.get("capabilities"), dict) else {}
+    for source in (caps, nested):
+        for key in ("vision", "supports_vision"):
+            if isinstance(source.get(key), bool):
+                return bool(source[key])
+    return None
+
+
 def _is_image_content_block(value):
     if not isinstance(value, dict):
         return False
@@ -551,10 +573,13 @@ def _payload_has_image_input(value):
     return _count_image_blocks_recursive(value) > 0
 
 
-def _model_rejects_image_input(model_name):
+def _model_rejects_image_input(model_name, model_capabilities=None):
     normalized = _selector_base_model_name(model_name)
     if not normalized:
         return True
+    image_override = _model_image_input_override(normalized, model_capabilities or {})
+    if image_override is not None:
+        return not image_override
     if normalized in _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES:
         return False
     if normalized.startswith(_KNOWN_IMAGE_INPUT_SUPPORTED_PREFIXES):
@@ -3555,7 +3580,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         _strip_anthropic_billing_system_header(payload)
 
         resolved_model_for_guard = str(payload.get("model") or "")
-        if _payload_has_image_input(payload.get("messages")) and _model_rejects_image_input(resolved_model_for_guard):
+        if _payload_has_image_input(payload.get("messages")) and _model_rejects_image_input(
+            resolved_model_for_guard,
+            getattr(self.server, "model_capabilities", {}) or {},
+        ):
             sidecar_payload, sidecar_error = _apply_vision_sidecar(
                 payload,
                 getattr(self.server, "vision_sidecar", {}) or {},
@@ -6127,6 +6155,7 @@ def gateway_claude_bridge(
     no_proxy="",
     native_fallback_routes=None,
     vision_sidecar=None,
+    model_capabilities=None,
     rescue_fallback_model="",
     rescue_fallback_cli="",
     rescue_hot_fallback_enabled=None,
@@ -6174,6 +6203,7 @@ def gateway_claude_bridge(
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])
     server.vision_sidecar = dict(vision_sidecar or {})
+    server.model_capabilities = dict(model_capabilities or {})
     _configure_bridge_rescue(server)
     if rescue_fallback_model:
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()

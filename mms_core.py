@@ -2329,6 +2329,47 @@ def _model_supports_vision(model_name):
     return any(hint in model_id for hint in _VISION_CAPABLE_MODEL_HINTS)
 
 
+def _capability_model_key(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    if normalized.endswith("[1m]"):
+        normalized = normalized[:-4]
+    return normalized
+
+
+def _model_capability_entry(model_capabilities, model_name):
+    if not isinstance(model_capabilities, dict):
+        return {}
+    target = _capability_model_key(model_name)
+    if not target:
+        return {}
+    for key, value in model_capabilities.items():
+        if _capability_model_key(key) == target and isinstance(value, dict):
+            return value
+    return {}
+
+
+def _runtime_model_vision_override(runtime, model_name):
+    caps = _model_capability_entry(
+        (runtime or {}).get("model_capabilities") if isinstance(runtime, dict) else {},
+        model_name,
+    )
+    nested = caps.get("capabilities") if isinstance(caps.get("capabilities"), dict) else {}
+    for source in (caps, nested):
+        for key in ("vision", "supports_vision"):
+            if isinstance(source.get(key), bool):
+                return bool(source[key])
+    return None
+
+
+def _runtime_model_supports_vision(runtime, model_name):
+    override = _runtime_model_vision_override(runtime, model_name)
+    if override is not None:
+        return override
+    return _model_supports_vision(model_name)
+
+
 def _model_cli_modes(model_name):
     native = set(_native_clis_for_model(model_name))
     bridge = set(_bridge_clis_for_model(model_name))
@@ -4094,7 +4135,7 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=
         cli_name,
     )
     if cli_name == "claude":
-        runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime)
+        runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime, _resolve_model_name(model_info))
     if _trace_enabled:
         _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
@@ -4449,8 +4490,14 @@ def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", exp
     return pairs
 
 
-def _runtime_with_vision_sidecar(cfg, runtime):
-    if not isinstance(runtime, dict) or runtime.get("vision_sidecar"):
+def _runtime_with_vision_sidecar(cfg, runtime, selected_model=""):
+    if not isinstance(runtime, dict):
+        return runtime
+    if selected_model and _runtime_model_supports_vision(runtime, selected_model):
+        updated = dict(runtime)
+        updated.pop("vision_sidecar", None)
+        return updated
+    if runtime.get("vision_sidecar"):
         return runtime
     raw = cfg.get("vision_sidecar") if isinstance(cfg, dict) else {}
     raw = raw if isinstance(raw, dict) else {}
@@ -11308,7 +11355,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 continue
         runtime_runtime = _runtime_with_launch_preferences(current_cfg, runtime_runtime, cli)
         if cli == "claude":
-            runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)
+            runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime, _resolve_model_name(model_info))
 
         clean_model_info = _clean_model_info(model_info)
         try:

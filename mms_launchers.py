@@ -3345,6 +3345,13 @@ def _runtime_vision_sidecar(runtime):
     return dict(sidecar)
 
 
+def _runtime_model_capabilities(runtime):
+    capabilities = (runtime or {}).get("model_capabilities")
+    if not isinstance(capabilities, dict):
+        return {}
+    return dict(capabilities)
+
+
 def _resolve_native_fallback_routes(runtime, model_name):
     try:
         from mms_native_fallback import resolve_native_fallback_routes
@@ -9192,6 +9199,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
         if _gpt_openai_url and _is_gpt_model(probe_model):
             console.print(f"[dim]thinking: {'on' if _thinking_enabled else 'off'} · effort: {_reasoning_effort}[/dim]")
         _vision_sidecar = _runtime_vision_sidecar(runtime)
+        _model_capabilities = _runtime_model_capabilities(runtime)
         if _vision_sidecar:
             console.print(
                 f"[dim]vision sidecar: {_vision_sidecar.get('provider_id', '-')} / {_vision_sidecar.get('model', '-')}[/dim]"
@@ -9241,6 +9249,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     reasoning_effort=_reasoning_effort,
                                                     native_fallback_routes=native_fallback_routes,
                                                     vision_sidecar=_vision_sidecar,
+                                                    model_capabilities=_model_capabilities,
                                                     **_bridge_context_kwargs,
                                                     **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -9282,6 +9291,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    model_capabilities=_model_capabilities,
                     **_bridge_context_kwargs,
                     **rescue_bridge_kwargs,
                 )
@@ -9343,6 +9353,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 reasoning_enabled=_thinking_enabled,
                                                 reasoning_effort=_reasoning_effort,
                                                 vision_sidecar=_vision_sidecar,
+                                                model_capabilities=_model_capabilities,
                                                 **_bridge_context_kwargs,
                                                 **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
@@ -9381,6 +9392,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                 vision_sidecar=_vision_sidecar,
+                                                model_capabilities=_model_capabilities,
                                                 **_bridge_context_kwargs,
                                                 **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
@@ -9426,6 +9438,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                     vision_sidecar=_vision_sidecar,
+                                                    model_capabilities=_model_capabilities,
                                                     **_bridge_context_kwargs,
                                                     **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -9482,6 +9495,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    model_capabilities=_model_capabilities,
                     **_bridge_context_kwargs,
                     **rescue_bridge_kwargs,
                 )
