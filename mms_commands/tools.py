@@ -13,28 +13,13 @@ import tempfile
 from contextlib import contextmanager
 
 
-CONFIG_HELP_TOPICS = {
-    "-h",
-    "--help",
-    "help",
-    "preferences",
-    "preferences.help",
-    "preference.help",
-    "preferences.path",
-    "preference.path",
-    "preferences.example",
-    "preference.example",
-    "preferences.doc",
-    "preference.doc",
-    "web",
-    "webui",
-    "setup.web",
-    "setup-web",
-    "gates",
-    "human-gate",
-    "humangate",
-    "human-gates",
-}
+from mms_commands.command_predicates import (
+    CONFIG_HELP_TOPICS,
+    is_config_help_request,
+    is_help_request,
+    is_setup_web_request,
+    is_session_prune_dry_run,
+)
 
 
 def normalize_ui_config(cfg, *, normalize_language, default_language="zh"):
@@ -373,6 +358,8 @@ from mms_commands.model_probe import (
     provider_models_for_cli,
     provider_supports_cli_name,
     provider_supports_model_for_cli,
+    ensure_probe_async_executor,
+    schedule_probe_refresh,
     probe_file_cache_path,
     invalidate_probe_cache,
     probe_cache_age,
@@ -500,6 +487,7 @@ from mms_commands.network_helpers import (
     url_matches_host_suffix,
     runtime_should_disable_ambient_env,
     runtime_httpx_kwargs,
+    detect_working_base_url,
     validate_proxy_url,
     test_proxy_connectivity,
     prompt_validated_proxy_fields,
@@ -562,52 +550,6 @@ from mms_commands.runtime_source_helpers import (
 )
 
 
-def ensure_probe_async_executor(current_executor, *, set_executor, executor_factory):
-    if current_executor is None:
-        current_executor = executor_factory()
-        set_executor(current_executor)
-    return current_executor
-
-
-def schedule_probe_refresh(
-    provider,
-    cfg=None,
-    *,
-    reason="stale",
-    default_provider_id,
-    probe_async_min_interval,
-    lock,
-    inflight,
-    last_started,
-    probe_models,
-    ensure_probe_async_executor,
-    time_func,
-):
-    provider_id = provider.get("id", default_provider_id)
-    min_interval = probe_async_min_interval(cfg)
-
-    with lock:
-        if provider_id in inflight:
-            return False
-        last_at = last_started.get(provider_id, 0)
-        if time_func() - last_at < min_interval:
-            return False
-        inflight.add(provider_id)
-        last_started[provider_id] = time_func()
-
-    def _runner():
-        try:
-            probe_models(provider, emit_output=False, skip_cache=True)
-        except Exception:
-            pass
-        finally:
-            with lock:
-                inflight.discard(provider_id)
-
-    ensure_probe_async_executor().submit(_runner)
-    return True
-
-
 def normalize_user_role(role, *, mode_all, mode_recommended):
     value = str(role or "").strip()
     if value in {"dev", "all", mode_all}:
@@ -652,163 +594,19 @@ from mms_commands.launch_selection import (
 )
 
 
-def available_broker_profiles_for_cli(_cfg, _cli_name):
-    return []
-
-
-def broker_enabled_by_cli(cfg, cli_names, *, available_broker_profiles_for_cli=available_broker_profiles_for_cli):
-    return {
-        cli_name: bool(available_broker_profiles_for_cli(cfg, cli_name))
-        for cli_name in (cli_names or [])
-    }
-
-
-def select_broker_profile_interactive(
-    cfg,
-    cli_name,
-    *,
+from mms_commands.broker_helpers import (
     available_broker_profiles_for_cli,
-    ensure_rich,
-    table_cls,
-    prompt_ask,
-    console,
-):
-    profiles = available_broker_profiles_for_cli(cfg, cli_name)
-    if not profiles:
-        return None
-    if len(profiles) == 1:
-        return profiles[0]
-
-    ensure_rich()
-    table = table_cls(title="Broker Experiment", show_lines=True)
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("ID", style="green")
-    table.add_column("设备/工作区", style="yellow")
-    table.add_column("Broker", style="blue")
-    table.add_column("Remote", style="magenta")
-    for idx, profile in enumerate(profiles, 1):
-        table.add_row(
-            str(idx),
-            str(profile.get("id", "")),
-            f"{profile.get('device_id', '-')}/{profile.get('workspace_id', '-')}",
-            str(profile.get("broker_base_url") or "-"),
-            str(profile.get("remote_service_label") or profile.get("remote_service_base_url") or "-"),
-        )
-    console.print(table)
-
-    while True:
-        raw = prompt_ask("选择 broker profile，直接回车取消", default="").strip()
-        if not raw:
-            return None
-        if raw.isdigit():
-            picked = int(raw)
-            if 1 <= picked <= len(profiles):
-                return profiles[picked - 1]
-        console.print("[yellow]请输入有效编号[/yellow]")
-
-
-def launch_broker_experiment_interactive(
-    cfg,
-    cli_name,
-    *,
+    broker_enabled_by_cli,
     select_broker_profile_interactive,
-    run_broker_profile_interactive,
-    console,
-):
-    profile = select_broker_profile_interactive(cfg, cli_name)
-    if profile is None:
-        return False
-
-    console.print(
-        f"[cyan]Broker experiment[/cyan] -> {profile['name']} "
-        f"[dim]({profile['device_id']}/{profile['workspace_id']})[/dim]"
-    )
-    console.print("[dim]支持续最近 / 新开 / 切换旧会话；默认直接回车续最近。[/dim]")
-    exit_code = run_broker_profile_interactive(cfg, profile["id"])
-    if exit_code != 0:
-        console.print(f"[red]broker experiment 启动失败，退出码 {exit_code}[/red]")
-    return True
+    launch_broker_experiment_interactive,
+)
 
 
-def opencode_default_profile_from_config(cfg, *, opencode_profile_selection, default_profile=None):
-    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
-    return opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile") or default_profile)
-
-
-def build_opencode_resolver_deps(
-    *,
-    resolver_deps_cls,
-    provider_candidates,
-    provider_effective_models,
-    provider_supports_cli_name,
-    provider_supports_model_for_cli,
-    provider_label,
-    provider_openai_base_url,
-    provider_anthropic_base_url,
-    infer_model_family,
-    normalize_role,
-    runtime_priority_for_model,
-    runtime_with_priority,
-    mms_model_visible,
-    load_route_health_latest,
-    route_health_for_route,
-    route_health_allows_route,
-    route_health_sort_key,
-    apply_profile,
-    apply_entrypoint,
-    role_weights,
-    default_priority,
-    default_provider_id,
-):
-    return resolver_deps_cls(
-        provider_candidates=provider_candidates,
-        provider_effective_models=provider_effective_models,
-        provider_supports_cli_name=provider_supports_cli_name,
-        provider_supports_model_for_cli=provider_supports_model_for_cli,
-        provider_label=provider_label,
-        provider_openai_base_url=provider_openai_base_url,
-        provider_anthropic_base_url=provider_anthropic_base_url,
-        infer_model_family=infer_model_family,
-        normalize_role=normalize_role,
-        runtime_priority_for_model=runtime_priority_for_model,
-        runtime_with_priority=runtime_with_priority,
-        mms_model_visible=mms_model_visible,
-        load_route_health_latest=load_route_health_latest,
-        route_health_for_route=route_health_for_route,
-        route_health_allows_route=route_health_allows_route,
-        route_health_sort_key=route_health_sort_key,
-        apply_profile=apply_profile,
-        apply_entrypoint=apply_entrypoint,
-        role_weights=role_weights,
-        default_priority=default_priority,
-        default_provider_id=default_provider_id,
-    )
-
-
-def find_opencode_model_route(
-    cfg,
-    default_provider,
-    default_models,
-    model_names,
-    *,
-    opencode_resolver_deps,
-    find_opencode_model_route_impl,
-    route_key="route",
-    route_policy="",
-    profile_id="agent",
-    provider_id="",
-):
-    return find_opencode_model_route_impl(
-        cfg,
-        default_provider,
-        default_models,
-        model_names,
-        deps=opencode_resolver_deps(),
-        route_key=route_key,
-        route_policy=route_policy,
-        profile_id=profile_id,
-        provider_id=provider_id,
-    )
+from mms_commands.opencode_helpers import (
+    opencode_default_profile_from_config,
+    build_opencode_resolver_deps,
+    find_opencode_model_route,
+)
 
 
 from mms_commands.launch_trace import (
@@ -1016,42 +814,6 @@ def resolve_resume_runtime_and_model(
     )
 
 
-def is_config_help_request(args_rest):
-    if not args_rest:
-        return False
-    key_path = str(args_rest[0] or "").strip()
-    return key_path in CONFIG_HELP_TOPICS
-
-
-def is_help_request(argv):
-    if not argv:
-        return False
-    if argv[0] == "help":
-        return True
-    if argv[0] == "config" and is_config_help_request(argv[1:]):
-        return True
-    return any(str(arg).strip() in {"-h", "--help"} for arg in argv)
-
-
-def is_setup_web_request(argv):
-    if not argv:
-        return False
-    command = str(argv[0] or "").strip()
-    if command in {"setup", "setup-web", "web-setup"}:
-        return True
-    if command != "config" or len(argv) < 2:
-        return False
-    return str(argv[1] or "").strip() in {"web", "webui", "setup.web", "setup-web"}
-
-
-def is_session_prune_dry_run(argv):
-    if len(argv) < 2:
-        return False
-    if argv[0] != "session" or argv[1] != "prune":
-        return False
-    return "--apply" not in argv
-
-
 from mms_commands.standalone_handlers import (
     handle_logs_command,
     handle_exposure_command,
@@ -1069,49 +831,6 @@ from mms_commands.launcher_handlers import (
     pick_manual_models,
     warm_model_request,
 )
-
-
-def detect_working_base_url(
-    configured_url,
-    path,
-    headers,
-    body=None,
-    timeout=5,
-    runtime=None,
-    *,
-    ensure_httpx,
-    get_httpx,
-    runtime_httpx_request,
-):
-    ensure_httpx()
-    if get_httpx() is None:
-        return None
-    url = configured_url.rstrip("/")
-    candidates = [url[:-3], url] if url.endswith("/v1") else [url, url + "/v1"]
-    for candidate in candidates:
-        try:
-            if body is not None:
-                resp = runtime_httpx_request(
-                    "POST",
-                    f"{candidate}{path}",
-                    runtime=runtime,
-                    headers=headers,
-                    content=body,
-                    timeout=timeout,
-                )
-            else:
-                resp = runtime_httpx_request(
-                    "GET",
-                    f"{candidate}{path}",
-                    runtime=runtime,
-                    headers=headers,
-                    timeout=timeout,
-                )
-            if resp.status_code == 200:
-                return candidate
-        except Exception:
-            continue
-    return None
 
 
 from mms_commands.launcher_handlers import (

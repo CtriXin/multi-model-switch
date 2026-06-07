@@ -415,6 +415,52 @@ def provider_supports_model_for_cli(
     return False
 
 
+def ensure_probe_async_executor(current_executor, *, set_executor, executor_factory):
+    if current_executor is None:
+        current_executor = executor_factory()
+        set_executor(current_executor)
+    return current_executor
+
+
+def schedule_probe_refresh(
+    provider,
+    cfg=None,
+    *,
+    reason="stale",
+    default_provider_id,
+    probe_async_min_interval,
+    lock,
+    inflight,
+    last_started,
+    probe_models,
+    ensure_probe_async_executor,
+    time_func,
+):
+    provider_id = provider.get("id", default_provider_id)
+    min_interval = probe_async_min_interval(cfg)
+
+    with lock:
+        if provider_id in inflight:
+            return False
+        last_at = last_started.get(provider_id, 0)
+        if time_func() - last_at < min_interval:
+            return False
+        inflight.add(provider_id)
+        last_started[provider_id] = time_func()
+
+    def _runner():
+        try:
+            probe_models(provider, emit_output=False, skip_cache=True)
+        except Exception:
+            pass
+        finally:
+            with lock:
+                inflight.discard(provider_id)
+
+    ensure_probe_async_executor().submit(_runner)
+    return True
+
+
 def probe_file_cache_path(provider_id, *, probe_file_cache_dir):
     return os.path.join(probe_file_cache_dir, f"models_{provider_id}.json")
 
