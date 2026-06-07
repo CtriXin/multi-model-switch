@@ -42,14 +42,14 @@ async function api(path,body){
 }
 function current(){return state.providers[activeProvider]}
 function touchProvider(id){if(id)touchedProviders.add(id)}
-function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id));if(id==='sessions'&&!sessionCatalog.loaded&&!sessionCatalog.loading)loadSessionCatalog()}
-function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
-function switchProviderFormTab(tab){activeProviderFormTab=tab||'basic';document.querySelectorAll('[data-provider-form-tab]').forEach(b=>b.classList.toggle('active',b.dataset.providerFormTab===activeProviderFormTab));document.querySelectorAll('[data-provider-form-panel]').forEach(p=>p.classList.toggle('active',p.dataset.providerFormPanel===activeProviderFormTab))}
+function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>{const isActive=el.dataset.id===id;el.classList.toggle('active',isActive);if(isActive)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')});if(id==='sessions'&&!sessionCatalog.loaded&&!sessionCatalog.loading)loadSessionCatalog()}
+function switchProviderTab(tab){activeProviderTab=tab;document.querySelectorAll('.provider-tabs .tab-btn').forEach(b=>{const isActive=b.dataset.tab===tab;b.classList.toggle('active',isActive);b.setAttribute('aria-selected',isActive?'true':'false')});document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.dataset.tabPanel===tab))}
+function switchProviderFormTab(tab){activeProviderFormTab=tab||'basic';document.querySelectorAll('[data-provider-form-tab]').forEach(b=>{const isActive=b.dataset.providerFormTab===activeProviderFormTab;b.classList.toggle('active',isActive);b.setAttribute('aria-selected',isActive?'true':'false')});document.querySelectorAll('[data-provider-form-panel]').forEach(p=>p.classList.toggle('active',p.dataset.providerFormPanel===activeProviderFormTab))}
 function applyUiMode(nextMode){
   uiMode=nextMode==='advanced'?'advanced':'default';
   localStorage.setItem('mmsConfigWebUiMode',uiMode);
   document.body.dataset.uiMode=uiMode;
-  document.querySelectorAll('[data-ui-mode-button]').forEach(btn=>btn.classList.toggle('active',btn.dataset.uiModeButton===uiMode));
+  document.querySelectorAll('[data-ui-mode-button]').forEach(btn=>{const isActive=btn.dataset.uiModeButton===uiMode;btn.classList.toggle('active',isActive);btn.setAttribute('aria-checked',isActive?'true':'false')});
   if(uiMode==='default'){
     const activeSection=document.querySelector('[data-section]:not(.hide)')?.dataset.section;
     if(['source','refs'].includes(activeSection))setSection('settings');
@@ -368,7 +368,7 @@ function switchSettingsTab(tab){
   settingsActiveTab=tab||'basics';
   const panels=[...document.querySelectorAll('[data-settings-panel]')];
   if(!panels.some(p=>p.dataset.settingsPanel===settingsActiveTab))settingsActiveTab='basics';
-  document.querySelectorAll('[data-settings-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsTab===settingsActiveTab));
+  document.querySelectorAll('[data-settings-tab]').forEach(btn=>{const isActive=btn.dataset.settingsTab===settingsActiveTab;btn.classList.toggle('active',isActive);btn.setAttribute('aria-selected',isActive?'true':'false')});
   panels.forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===settingsActiveTab));
 }
 function bindSettingsTabs(){document.querySelectorAll('[data-settings-tab]').forEach(btn=>{btn.onclick=()=>switchSettingsTab(btn.dataset.settingsTab)})}

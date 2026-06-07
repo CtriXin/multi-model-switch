@@ -13,15 +13,15 @@
     <p class="lead">默认先进入设置和调试：配置通道、模型能力、CLI、Skill / MCP / Hook，再去保存审计。路径、DB 和 bundle 诊断只在高级模式里展开。</p>
   </div>
   <div class="header-tools">
-    <div class="ui-mode-toggle" id="uiModeToggle" aria-label="界面模式">
-      <button class="active" data-ui-mode-button="default" type="button">默认模式</button>
-      <button data-ui-mode-button="advanced" type="button">高级模式</button>
+    <div class="ui-mode-toggle" id="uiModeToggle" role="radiogroup" aria-label="界面模式">
+      <button class="active" data-ui-mode-button="default" type="button" role="radio" aria-checked="true">默认模式</button>
+      <button data-ui-mode-button="advanced" type="button" role="radio" aria-checked="false">高级模式</button>
     </div>
     <div class="statusbar" id="statusbar"><span class="pill warn boot-pulse">读取本地配置中</span></div>
   </div>
 </header>
 <div class="shell">
-  <aside class="side boot-nav" id="nav" aria-busy="true">
+  <aside class="side boot-nav" id="nav" aria-busy="true" aria-label="主导航">
     <button class="navbtn active" disabled>设置<small>读取后进入配置台</small></button>
     <button class="navbtn" disabled>通道配置<small>URL / Key / 模型</small></button>
     <button class="navbtn" disabled>能力面板<small>CLI / Skill / MCP</small></button>
@@ -63,14 +63,14 @@
           </div>
         </div>
         <div class="channel-main">
-          <div class="provider-tabs">
-            <button class="tab-btn active" data-tab="config" onclick="switchProviderTab('config')">通道配置</button>
-            <button class="tab-btn" data-tab="models" onclick="switchProviderTab('models')">模型配置</button>
+          <div class="provider-tabs" role="tablist" aria-label="通道 / 模型切换">
+            <button class="tab-btn active" data-tab="config" role="tab" aria-selected="true" aria-controls="tabPanelConfig" onclick="switchProviderTab('config')">通道配置</button>
+            <button class="tab-btn" data-tab="models" role="tab" aria-selected="false" aria-controls="tabPanelModels" onclick="switchProviderTab('models')">模型配置</button>
           </div>
-          <div class="tab-panel active" data-tab-panel="config">
+          <div class="tab-panel active" data-tab-panel="config" id="tabPanelConfig" role="tabpanel">
             <div class="card provider-editor" id="providerForm"></div>
           </div>
-          <div class="tab-panel" data-tab-panel="models">
+          <div class="tab-panel" data-tab-panel="models" id="tabPanelModels" role="tabpanel">
             <div class="model-section">
               <p class="muted">这里直接改 MMS 启动会读取的模型能力。`文本显示` 决定普通模型列表，`1M` 会写入 `context_window_tokens=1000000`；上下文输入请用 `200k`、`262144` 或 `1m`，不要填 `200` 这种容易误解的小数字。</p>
               <div class="model-inventory-summary" id="modelInventorySummary"></div>
@@ -262,15 +262,15 @@
           </div>
         </div>
 
-        <div class="settings-tabs" id="settingsTabs">
-          <button class="settings-tab" data-settings-tab="basics"><strong>常用设置</strong><span>语言 / 保存入口</span></button>
-          <button class="settings-tab" data-settings-tab="accounts"><strong>账号默认值</strong><span>default / priority / note</span></button>
-          <button class="settings-tab ui-advanced-only" data-settings-tab="guard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
-          <button class="settings-tab ui-advanced-only" data-settings-tab="about"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
-          <button class="settings-tab ui-advanced-only" data-settings-tab="audit"><strong>验收辅助</strong><span>折叠的 TUI 对照</span></button>
+        <div class="settings-tabs" id="settingsTabs" role="tablist" aria-label="设置分组">
+          <button class="settings-tab" data-settings-tab="basics" role="tab" aria-selected="true" aria-controls="settingsPanelBasics"><strong>常用设置</strong><span>语言 / 保存入口</span></button>
+          <button class="settings-tab" data-settings-tab="accounts" role="tab" aria-selected="false" aria-controls="settingsPanelAccounts"><strong>账号默认值</strong><span>default / priority / note</span></button>
+          <button class="settings-tab ui-advanced-only" data-settings-tab="guard" role="tab" aria-selected="false" aria-controls="settingsPanelGuard"><strong>安全确认</strong><span>Snapshot / 迁移</span></button>
+          <button class="settings-tab ui-advanced-only" data-settings-tab="about" role="tab" aria-selected="false" aria-controls="settingsPanelAbout"><strong>维护关于</strong><span>版本 / 升级 gate</span></button>
+          <button class="settings-tab ui-advanced-only" data-settings-tab="audit" role="tab" aria-selected="false" aria-controls="settingsPanelAudit"><strong>验收辅助</strong><span>折叠的 TUI 对照</span></button>
         </div>
 
-        <div class="settings-tab-panel" data-settings-panel="basics">
+        <div class="settings-tab-panel" data-settings-panel="basics" id="settingsPanelBasics" role="tabpanel">
           <div class="settings-panel-grid">
             <div class="setting-edit-card span5">
               <h3>界面语言 <span class="tag">可配置</span></h3>
@@ -303,7 +303,7 @@
           </div>
         </div>
 
-        <div class="settings-tab-panel" data-settings-panel="accounts">
+        <div class="settings-tab-panel" data-settings-panel="accounts" id="settingsPanelAccounts" role="tabpanel">
           <div class="setting-edit-card">
             <h3>CLI 账号默认值 <span class="tag">草稿预览</span></h3>
             <p class="muted">这里配置已有 account 的默认选择、启用状态、priority、timezone 和 note；Claude account 仍是 human-only。OAuth / AGY 官方登录不再作为 WebUI 主流程。</p>
@@ -315,7 +315,7 @@
           </div>
         </div>
 
-        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="guard">
+        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="guard" id="settingsPanelGuard" role="tabpanel">
           <div class="settings-panel-grid">
             <div class="setting-edit-card span6">
               <h3>启动快照守卫（Snapshot Guard）</h3>
@@ -336,7 +336,7 @@
           </div>
         </div>
 
-        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="about">
+        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="about" id="settingsPanelAbout" role="tabpanel">
           <div class="settings-panel-grid">
             <div class="setting-edit-card span6">
               <h3>关于 / 版本</h3>
@@ -360,7 +360,7 @@
           </div>
         </div>
 
-        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="audit">
+        <div class="settings-tab-panel ui-advanced-only" data-settings-panel="audit" id="settingsPanelAudit" role="tabpanel">
           <details class="setting-edit-card" open>
             <summary>开发验收辅助，不作为用户设置入口</summary>
             <p class="muted">这些表只用于核对 TUI 功能迁移，不再占据设置主页面。</p>
@@ -499,7 +499,8 @@
             <input id="migrationIncludeKeys" type="checkbox"><span>包含 API Key（加密）</span>
           </label>
           <label>迁移密码</label>
-          <input id="migrationExportPassword" type="password" placeholder="至少 8 位；只用于加密包">
+          <input id="migrationExportPassword" type="password" placeholder="至少 8 位；只用于加密包" aria-required="true" aria-describedby="migrationExportPasswordHint" minlength="8">
+          <small id="migrationExportPasswordHint" class="muted">导出包会按此密码加密；导入时用相同密码解锁。至少 8 位。</small>
           <div class="btns">
             <button id="exportMigration" class="secondary">导出迁移包</button>
           </div>
@@ -576,7 +577,7 @@
             <input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span>
           </div>
           <label id="confirmPhraseLabel" style="margin-top:12px">输入确认文字</label>
-          <input id="confirmPhrase" placeholder="保存配置 或 写入预览DB">
+          <input id="confirmPhrase" placeholder="保存配置 或 写入预览DB" aria-required="true" aria-describedby="confirmPhraseLabel">
           <label>保存原因 / audit reason</label>
           <input id="saveReason" value="setup-web-ui:interactive-save">
           <p class="muted" id="saveCompatibilityNote">stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p>
@@ -605,7 +606,7 @@
     </section>
   </main>
 </div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <div class="asset-pending-bar" id="assetPendingBar"></div>
 <script src="/static/config-web.js"></script>
 </body>
