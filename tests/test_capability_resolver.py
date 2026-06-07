@@ -156,6 +156,42 @@ def test_model_policy_one_m_and_thinking_aliases_drive_capabilities() -> None:
     assert caps["sources"]["supports_thinking"] == "model_policy"
 
 
+def test_model_policy_vision_alias_drives_capability() -> None:
+    caps = resolve_model_capabilities(
+        "MiniMax-M3",
+        approved_facts={},
+        model_policy={
+            "models": {
+                "MiniMax-M3": {
+                    "capabilities": {
+                        "vision": True,
+                    }
+                }
+            }
+        },
+    )
+
+    assert caps["supports_vision"] is True
+    assert caps["sources"]["supports_vision"] == "model_policy"
+
+
+def test_approved_facts_vision_drives_capability() -> None:
+    caps = resolve_model_capabilities(
+        "MiniMax-M3",
+        approved_facts={
+            "models": [
+                {
+                    "alias": "MiniMax-M3",
+                    "supports_vision": True,
+                }
+            ]
+        },
+    )
+
+    assert caps["supports_vision"] is True
+    assert caps["sources"]["supports_vision"] == "approved_facts"
+
+
 def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_alias(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
     import mms_provider_profiles

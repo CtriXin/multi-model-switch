@@ -215,6 +215,7 @@ def test_model_capability_summary_marks_known_vision_models():
 
     assert "vision" in mms_core._model_capability_tags("K2.6-code-preview")
     assert "vision" in mms_core._model_capability_tags("mimo-v2.5")
+    assert "vision" in mms_core._model_capability_tags("MiniMax-M3")
     assert "vision" in mms_core._model_capability_tags("qwen3.6-plus")
     assert "vision" in mms_core._model_capability_tags("qwen3.6-flash")
     assert "vision" not in mms_core._model_capability_tags("qwen3.7-max")
@@ -366,6 +367,74 @@ def test_runtime_with_vision_sidecar_skips_ui_vision_capable_model():
             "id": "minimax",
             "auth_mode": "api_key",
             "model_capabilities": {"MiniMax-M3": {"vision": True}},
+        },
+        "MiniMax-M3",
+    )
+
+    assert "vision_sidecar" not in runtime
+
+
+def test_runtime_with_vision_sidecar_skips_policy_vision_capable_model(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": True,
+            "sources": {"supports_vision": "model_policy"},
+        },
+    )
+
+    runtime = mms_core._runtime_with_vision_sidecar(
+        {
+            "providers": [
+                {
+                    "id": "direct-kimi",
+                    "enabled": True,
+                    "api_key": "sk-kimi",
+                    "anthropic_base_url": "https://api.kimi.com/coding/",
+                    "fallback_models": ["K2.6"],
+                }
+            ]
+        },
+        {"id": "minimax", "auth_mode": "api_key"},
+        "MiniMax-M3",
+    )
+
+    assert "vision_sidecar" not in runtime
+
+
+def test_runtime_with_vision_sidecar_policy_beats_stale_runtime_capability(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": True,
+            "sources": {"supports_vision": "model_policy"},
+        },
+    )
+
+    runtime = mms_core._runtime_with_vision_sidecar(
+        {
+            "providers": [
+                {
+                    "id": "direct-kimi",
+                    "enabled": True,
+                    "api_key": "sk-kimi",
+                    "anthropic_base_url": "https://api.kimi.com/coding/",
+                    "fallback_models": ["K2.6"],
+                }
+            ]
+        },
+        {
+            "id": "minimax",
+            "auth_mode": "api_key",
+            "model_capabilities": {"minimax-m3": {"vision": False}},
         },
         "MiniMax-M3",
     )

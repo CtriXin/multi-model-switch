@@ -278,6 +278,11 @@ the model from normal launch lists, `vision=true` makes it eligible for vision
 surfaces, `reasoning=true` maps to the TUI Reasoning Effort affordance, and
 `thinking=true` / `supports_thinking=true` maps to the TUI Think on/off affordance
 and bridge thinking controls when the route supports them.
+Claude bridge launchers and image-input guards must honor `vision` /
+`supports_vision` from effective Policy and approved capability facts before
+falling back to a vision sidecar; known direct vision models such as
+`MiniMax-M3` keep image blocks on the primary model instead of routing them
+through sidecar OCR.
 
 Validation treats stale `hidden_models` / `disabled_models` entries as benign:
 they can intentionally suppress retired aliases if those aliases return later.

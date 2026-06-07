@@ -3507,6 +3507,107 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
     assert captured["exec_kwargs"]["bridge_info"]["base_url"] == "http://127.0.0.1:4567/v1"
 
 
+def test_launch_claude_policy_vision_model_suppresses_sidecar(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    captured = {}
+
+    class FakeBridge:
+        def __enter__(self):
+            return {"base_url": "http://127.0.0.1:4567/v1", "api_key": "bridge-token"}
+
+        def __exit__(self, *_args):
+            return None
+
+    def fake_bridge(gateway_url, gateway_key, **kwargs):
+        captured["gateway_url"] = gateway_url
+        captured["gateway_key"] = gateway_key
+        captured["bridge_kwargs"] = kwargs
+        return FakeBridge()
+
+    def fake_prepare(runtime, **kwargs):
+        captured["prepare_kwargs"] = kwargs
+        return {"HOME": str(tmp_path / "session"), "PATH": "/usr/bin"}
+
+    def fake_exec(cmd, env, once, **kwargs):
+        captured["exec_kwargs"] = kwargs
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda _runtime: {})
+    monkeypatch.setattr(mms_launchers, "_health_check_due", lambda _provider_id: False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda *_args, **_kwargs: {"models": ["MiniMax-M3"], "base_source": "test"},
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_anthropic_base_url", lambda *_args, **_kwargs: (None, "failed"))
+    monkeypatch.setattr(mms_launchers, "_resolve_native_fallback_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_launchers, "_gateway_claude_bridge_context", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_env_with_status", fake_prepare)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+    monkeypatch.setattr(mms_launchers, "_finalize_claude_slot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": False,
+            "sources": {"supports_vision": "conservative_fallback"},
+        },
+    )
+
+    mms_launchers.launch_claude(
+        {"model": "MiniMax-M3"},
+        {
+            "id": "minimax",
+            "auth_mode": "api_key",
+            "api_key": "sk-runtime",
+            "anthropic_base_url": "https://minimax.example.com/anthropic",
+            "vision_sidecar": {
+                "enabled": True,
+                "provider_id": "direct-qwen",
+                "model": "qwen3.6-plus",
+                "anthropic_base_url": "https://qwen.example.com/anthropic",
+                "api_key": "sk-vision",
+            },
+        },
+        once=True,
+    )
+
+    assert captured["gateway_url"] == "https://minimax.example.com/anthropic/v1"
+    assert captured["bridge_kwargs"]["heavy_model"] == "MiniMax-M3"
+    assert captured["bridge_kwargs"]["model_capabilities"]["MiniMax-M3"]["vision"] is True
+    assert captured["bridge_kwargs"]["vision_sidecar"] == {}
+    assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
+    assert captured["prepare_kwargs"]["display_model"] == "MiniMax-M3"
+
+
+def test_runtime_model_capabilities_updates_stale_normalized_vision_key(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "resolve_model_capabilities",
+        lambda *_args, **_kwargs: {
+            "supports_vision": False,
+            "sources": {"supports_vision": "conservative_fallback"},
+        },
+    )
+
+    capabilities = mms_launchers._runtime_model_capabilities(
+        {"model_capabilities": {"minimax-m3": {"vision": False}}},
+        "MiniMax-M3",
+    )
+
+    assert capabilities["minimax-m3"]["vision"] is True
+    assert capabilities["minimax-m3"]["supports_vision"] is True
+    assert mms_launchers._model_capabilities_support_vision(capabilities, "MiniMax-M3") is True
+
+
 def test_load_probe_file_cache_marks_stale_and_preserves_error(monkeypatch, tmp_path):
     import mms_core
 

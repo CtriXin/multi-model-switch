@@ -25,6 +25,7 @@ class CapabilityBundleError(RuntimeError):
 CONSERVATIVE_CAPABILITY_FALLBACK: dict[str, Any] = {
     "context_window_tokens": 8_192,
     "max_output_tokens": 4_096,
+    "supports_vision": False,
     "supports_thinking": False,
     "thinking_control": {
         "supported": False,
@@ -48,6 +49,7 @@ CONSERVATIVE_CAPABILITY_FALLBACK: dict[str, Any] = {
 _CAPABILITY_FIELDS = (
     "context_window_tokens",
     "max_output_tokens",
+    "supports_vision",
     "supports_thinking",
     "thinking_control",
     "expected_protocol",
@@ -75,6 +77,13 @@ _THINKING_KEYS = (
     "thinking_supported",
     "thinking",
     "think",
+)
+
+_VISION_KEYS = (
+    "supports_vision",
+    "vision",
+    "image_input",
+    "multimodal",
 )
 
 _PROTOCOL_KEYS = (
@@ -227,7 +236,7 @@ def _apply_source(result: dict[str, Any], candidate: Mapping[str, Any], source: 
 def _value_present(field: str, value: Any) -> bool:
     if field in {"context_window_tokens", "max_output_tokens"}:
         return isinstance(value, int) and value > 0
-    if field == "supports_thinking":
+    if field in {"supports_thinking", "supports_vision"}:
         return isinstance(value, bool)
     if field == "expected_protocol":
         return bool(_clean(value))
@@ -309,6 +318,10 @@ def _normalize_capability_payload(payload: Mapping[str, Any], *, model_name: str
     supports_thinking = _first_bool(payload, _THINKING_KEYS)
     if supports_thinking is not None:
         normalized["supports_thinking"] = supports_thinking
+
+    supports_vision = _first_bool(payload, _VISION_KEYS)
+    if supports_vision is not None:
+        normalized["supports_vision"] = supports_vision
 
     thinking_control = payload.get("thinking_control")
     if isinstance(thinking_control, Mapping):
@@ -509,7 +522,7 @@ def _policy_capabilities(model_name: str, model_policy: Mapping[str, Any]) -> di
     capabilities = entry.get("capabilities")
     if isinstance(capabilities, Mapping):
         payload.update(dict(capabilities))
-    for key in _CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _PROTOCOL_KEYS:
+    for key in _CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _VISION_KEYS + _PROTOCOL_KEYS:
         if key in entry:
             payload[key] = entry[key]
     if isinstance(entry.get("protocol_hints"), Mapping):
@@ -553,7 +566,7 @@ def _lookup_approved_fact(model_name: str, payload: Mapping[str, Any]) -> dict[s
 
 
 def _looks_like_capability_fact(payload: Mapping[str, Any]) -> bool:
-    known = set(_CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _PROTOCOL_KEYS + ("one_m_context",))
+    known = set(_CONTEXT_KEYS + _MAX_OUTPUT_KEYS + _THINKING_KEYS + _VISION_KEYS + _PROTOCOL_KEYS + ("one_m_context",))
     return bool(known.intersection(payload.keys()))
 
 

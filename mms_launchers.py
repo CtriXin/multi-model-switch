@@ -3345,11 +3345,88 @@ def _runtime_vision_sidecar(runtime):
     return dict(sidecar)
 
 
-def _runtime_model_capabilities(runtime):
+def _capability_model_key(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    if normalized.endswith("[1m]"):
+        normalized = normalized[:-4]
+    return normalized
+
+
+def _model_capability_entry(model_capabilities, model_name):
+    if not isinstance(model_capabilities, dict):
+        return {}
+    target = _capability_model_key(model_name)
+    if not target:
+        return {}
+    for key, value in model_capabilities.items():
+        if _capability_model_key(key) == target and isinstance(value, dict):
+            return value
+    return {}
+
+
+def _set_model_capability_entry(model_capabilities, model_name, entry):
+    target = _capability_model_key(model_name)
+    if not target:
+        return
+    updated = False
+    for key, value in list(model_capabilities.items()):
+        if _capability_model_key(key) == target and isinstance(value, dict):
+            merged = dict(value)
+            merged.update(entry)
+            model_capabilities[key] = merged
+            updated = True
+    if not updated:
+        model_capabilities[model_name] = dict(entry)
+
+
+def _model_capabilities_support_vision(model_capabilities, model_name):
+    caps = _model_capability_entry(model_capabilities, model_name)
+    nested = caps.get("capabilities") if isinstance(caps.get("capabilities"), dict) else {}
+    for source in (caps, nested):
+        for key in ("vision", "supports_vision"):
+            if isinstance(source.get(key), bool):
+                return bool(source[key])
+    return None
+
+
+def _runtime_model_capabilities(runtime, model_name=""):
     capabilities = (runtime or {}).get("model_capabilities")
     if not isinstance(capabilities, dict):
-        return {}
-    return dict(capabilities)
+        capabilities = {}
+    result = dict(capabilities)
+    model_name = str(model_name or "").strip()
+    if not model_name:
+        return result
+    existing = dict(_model_capability_entry(result, model_name))
+    resolved_vision = None
+    try:
+        runtime_dict = runtime if isinstance(runtime, dict) else {}
+        resolved = resolve_model_capabilities(
+            model_name,
+            runtime=runtime_dict,
+            provider_id=str(runtime_dict.get("id") or runtime_dict.get("provider_id") or ""),
+            base_url=str(
+                runtime_dict.get("anthropic_base_url")
+                or runtime_dict.get("openai_base_url")
+                or runtime_dict.get("base_url")
+                or ""
+            ),
+            profile_id=str(runtime_dict.get("profile") or runtime_dict.get("provider_profile") or ""),
+        )
+        source = (resolved.get("sources") or {}).get("supports_vision") if isinstance(resolved, dict) else ""
+        if source and source != "conservative_fallback" and isinstance(resolved.get("supports_vision"), bool):
+            resolved_vision = bool(resolved["supports_vision"])
+    except Exception:
+        pass
+    if resolved_vision is None and _model_supports_vision(model_name):
+        resolved_vision = True
+    if resolved_vision is not None:
+        existing["vision"] = resolved_vision
+        existing["supports_vision"] = resolved_vision
+        _set_model_capability_entry(result, model_name, existing)
+    return result
 
 
 def _resolve_native_fallback_routes(runtime, model_name):
@@ -9198,8 +9275,10 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
             _reasoning_effort = "high"
         if _gpt_openai_url and _is_gpt_model(probe_model):
             console.print(f"[dim]thinking: {'on' if _thinking_enabled else 'off'} · effort: {_reasoning_effort}[/dim]")
+        _model_capabilities = _runtime_model_capabilities(runtime, probe_model)
         _vision_sidecar = _runtime_vision_sidecar(runtime)
-        _model_capabilities = _runtime_model_capabilities(runtime)
+        if _model_capabilities_support_vision(_model_capabilities, probe_model) is True:
+            _vision_sidecar = {}
         if _vision_sidecar:
             console.print(
                 f"[dim]vision sidecar: {_vision_sidecar.get('provider_id', '-')} / {_vision_sidecar.get('model', '-')}[/dim]"

@@ -1153,6 +1153,8 @@ _VISION_CAPABLE_MODEL_NAMES = {
     "kimi-k2.6",
     "qwen3.6-flash",
     "qwen3.6-plus",
+    "minimax-m2.7",
+    "minimax-m3",
     "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite-preview",
@@ -2351,6 +2353,27 @@ def _model_capability_entry(model_capabilities, model_name):
 
 
 def _runtime_model_vision_override(runtime, model_name):
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        runtime_dict = runtime if isinstance(runtime, dict) else {}
+        resolved = resolve_model_capabilities(
+            model_name,
+            runtime=runtime_dict,
+            provider_id=str(runtime_dict.get("id") or runtime_dict.get("provider_id") or ""),
+            base_url=str(
+                runtime_dict.get("anthropic_base_url")
+                or runtime_dict.get("openai_base_url")
+                or runtime_dict.get("base_url")
+                or ""
+            ),
+            profile_id=str(runtime_dict.get("profile") or runtime_dict.get("provider_profile") or ""),
+        )
+        source = (resolved.get("sources") or {}).get("supports_vision") if isinstance(resolved, dict) else ""
+        if source and source != "conservative_fallback" and isinstance(resolved.get("supports_vision"), bool):
+            return bool(resolved["supports_vision"])
+    except Exception:
+        pass
     caps = _model_capability_entry(
         (runtime or {}).get("model_capabilities") if isinstance(runtime, dict) else {},
         model_name,
@@ -2358,8 +2381,8 @@ def _runtime_model_vision_override(runtime, model_name):
     nested = caps.get("capabilities") if isinstance(caps.get("capabilities"), dict) else {}
     for source in (caps, nested):
         for key in ("vision", "supports_vision"):
-            if isinstance(source.get(key), bool):
-                return bool(source[key])
+            if source.get(key) is True:
+                return True
     return None
 
 
