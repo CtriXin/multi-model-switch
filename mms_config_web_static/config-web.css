@@ -1073,7 +1073,7 @@
       color: var(--surface);
       background: var(--fg);
       border-color: var(--fg);
-      box-shadow: 0 8px 20px rgba(15, 23, 42, .12);
+      box-shadow: 0 8px 20px oklch(0% 0 0 / 0.12);
     }
     .provider-form-tab.active .muted { color: var(--fg-on-accent); opacity: .72; }
     .provider-form-panel { display: none; }
@@ -1500,8 +1500,8 @@
 	    }
 	    .model-capability-table {
 	      --model-visible-col: 86px;
-	      --model-name-col: 280px;
-	      min-width: 1120px;
+	      --model-name-col: 240px;
+	      min-width: 1030px;
 	      border-collapse: separate;
 	      border-spacing: 0;
 	      table-layout: fixed;
@@ -1533,8 +1533,8 @@
 	    }
 	    .model-capability-table th:nth-child(3),
 	    .model-capability-table td:nth-child(3) {
-	      width: 460px;
-	      min-width: 460px;
+	      width: 400px;
+	      min-width: 400px;
 	    }
 	    .model-capability-table th:nth-child(4),
 	    .model-capability-table td:nth-child(4) {
@@ -1569,7 +1569,7 @@
 	    .model-capability-table td:nth-child(2) {
 	      left: var(--model-visible-col);
 	      z-index: 31;
-	      box-shadow: 1px 0 0 var(--border), 14px 0 18px rgba(17, 24, 39, 0.08);
+	      box-shadow: 1px 0 0 var(--border), 14px 0 18px oklch(0% 0 0 / 0.08);
 	    }
 	    .model-capability-table thead th:first-child,
 	    .model-capability-table thead th:nth-child(2) {
@@ -4055,6 +4055,18 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
+    }
+
+    /* ===== Touch targets: bump small chips on coarse pointers ===== */
+    @media (pointer: coarse) {
+      .ui-mode-toggle button { min-height: 36px; padding: 7px 14px; }
+      .cap-pill { min-height: 32px; padding: 6px 12px; }
+      .chip { min-height: 32px; padding: 7px 13px; }
+      .pill { min-height: 32px; padding: 7px 13px; }
+      .asset-mini-action { min-height: 36px; padding: 7px 12px; }
+      .tag { min-height: 24px; padding: 4px 10px; }
+      .check { min-height: 36px; padding: 8px 14px; }
+      .filterbar button { min-height: 36px; padding: 8px 14px; }
     }
 
     /* ===== Reduced motion ===== */
