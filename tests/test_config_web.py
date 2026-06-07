@@ -1,7 +1,7 @@
 import json
 import threading
 from http.server import ThreadingHTTPServer
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -1069,7 +1069,57 @@ def test_config_web_frontend_assets_are_external_files():
     assert "读取本地配置中" in html
     assert "/api/migration/export" in js_body.decode("utf-8")
     assert "/api/migration/start" in js_body.decode("utf-8")
+    assert "/api/session/catalog" in js_body.decode("utf-8")
+    assert "/api/session/preview" in js_body.decode("utf-8")
+    assert "parseApiResponse" in js_body.decode("utf-8")
+    assert "JSON.parse" in js_body.decode("utf-8")
+    assert "接口不存在或服务未刷新" in js_body.decode("utf-8")
+    assert "filteredSessionRows" in js_body.decode("utf-8")
+    assert "limit:3000" in js_body.decode("utf-8")
+    assert "搜索不会重复扫描" in js_body.decode("utf-8")
+    assert "重新扫描" in js_body.decode("utf-8")
+    assert "按项目文件夹分组" in js_body.decode("utf-8")
+    assert "session-folder" in js_body.decode("utf-8")
+    assert "session-context" in js_body.decode("utf-8")
+    assert "当前选择" in js_body.decode("utf-8")
+    assert "当前会话" in js_body.decode("utf-8")
+    assert "查看内容" in js_body.decode("utf-8")
+    assert "收起" in js_body.decode("utf-8")
+    assert "collapseSessionRow" in js_body.decode("utf-8")
+    assert "已收起当前会话" in js_body.decode("utf-8")
+    assert "aria-expanded" in js_body.decode("utf-8")
+    assert "sessionModelFilter" in js_body.decode("utf-8")
+    assert "有上次模型" in js_body.decode("utf-8")
+    assert "模型未记录" in html
+    assert "session-selected-summary" in js_body.decode("utf-8")
+    assert "session-detail-pinned" in js_body.decode("utf-8")
+    assert "这条历史没有摘要" in js_body.decode("utf-8")
+    assert "renderSessionResumePanel" in js_body.decode("utf-8")
+    assert "恢复信息" in js_body.decode("utf-8")
+    assert "session-inline-panel" in js_body.decode("utf-8")
+    assert "查看、复制和搜索都在这条记录下方完成" in js_body.decode("utf-8")
+    assert "block:'center'" in js_body.decode("utf-8")
+    assert "最近内容和搜索面板已经展开在左侧选中的会话记录下方" in js_body.decode("utf-8")
+    assert "默认恢复：按 MMS 当前恢复逻辑启动" in js_body.decode("utf-8")
+    assert "按上次模型恢复" in js_body.decode("utf-8")
+    assert "打开原始记录位置" in js_body.decode("utf-8")
+    assert "sessionLastModelCommand" in js_body.decode("utf-8")
+    assert "/api/path/reveal" in js_body.decode("utf-8")
+    assert "session-cli-badge" in js_body.decode("utf-8")
+    assert "上次模型" in js_body.decode("utf-8")
+    assert "模型来源" in js_body.decode("utf-8")
+    assert "session-summary-meta" in js_body.decode("utf-8")
+    assert "最近内容" in js_body.decode("utf-8")
+    assert "紧凑" in js_body.decode("utf-8")
+    assert "展开全部" in js_body.decode("utf-8")
+    assert "原始记录路径" in js_body.decode("utf-8")
+    assert "自动读取最近内容" in js_body.decode("utf-8")
+    assert "搜索本会话" in js_body.decode("utf-8")
+    assert "--select-model" in js_body.decode("utf-8")
+    assert "选择模型后恢复" in js_body.decode("utf-8")
     assert "迁移 / 分享" in html
+    assert "会话历史" in html
+    assert "按项目文件夹查看" in html
     assert "导入后开工" in html
     assert "<style>" not in html
     assert "刷新能力证据入口" not in html
@@ -1085,11 +1135,44 @@ def test_config_web_frontend_assets_are_external_files():
     assert css_type.startswith("text/css")
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
+    assert b".session-selected-summary" in css_body
+    assert b".session-detail-pinned" in css_body
+    assert b".session-detail {\n      grid-column: 2;\n      position: sticky;" in css_body
+    assert b".session-detail-pinned {\n      position: relative;" in css_body
+    assert b"max-height: calc(100dvh - 40px)" not in css_body
+    assert b"max-height: none" in css_body
+    assert b"overflow: visible" in css_body
+    assert b"display: block" in css_body
+    assert b".session-summary-meta" in css_body
+    assert b".session-resume-panel" in css_body
+    assert b".session-resume-hints" in css_body
+    assert b".session-model-filters" in css_body
+    assert b".session-inline-panel" in css_body
+    assert b".session-inline-actions" in css_body
+    assert b".session-card.is-claude" in css_body
+    assert b"#bd3f35" in css_body
+    assert b".session-card.is-codex" in css_body
+    assert b"#183a68" in css_body
+    assert b".session-card .is-collapse" in css_body
+    assert b".session-preview-items.is-compact" in css_body
+    assert b"flex: 0 0 auto" in css_body
+    assert b".session-preview-source summary" in css_body
+    assert b".session-message.is-user" in css_body
+    assert b"justify-self: end" in css_body
+    assert b"#15895e" in css_body
+    assert b".session-message.is-assistant" in css_body
+    assert b"#2563c8" in css_body
+    assert b".session-cli-badge" in css_body
+    assert b".session-preview-actions" in css_body
+    assert b"white-space: pre-wrap" in css_body
+    assert b"max-height: none" in css_body
+    assert b"overflow: visible" in css_body
     assert b"model-table-wrap" in css_body
     assert b"cap-toggle-grid" in css_body
     assert b"body.booting" in css_body
     assert b"CAPABILITY_META" in js_body
     assert b"function renderAll" in js_body
+    assert b"function renderSessions" in js_body
     assert b"setBootMessage" in js_body
     assert "MMS 自动别名".encode("utf-8") in js_body
     assert "能力配置".encode("utf-8") in js_body
@@ -1124,6 +1207,233 @@ def test_config_web_server_serves_external_static_assets(tmp_path):
     assert js_type.startswith("application/javascript")
     assert b".panel" in css_body
     assert b"function renderAll" in js_body
+
+
+def test_config_web_session_catalog_api(monkeypatch):
+    import mms_session_catalog
+
+    rows = [
+        {
+            "cli": "claude",
+            "session_id": "claude-session",
+            "project_path": "/tmp/repo",
+            "project_name": "repo",
+            "updated_at": "2026-06-04T01:00:00+00:00",
+            "source_kind": "claude-jsonl",
+        },
+        {
+            "cli": "codex",
+            "session_id": "codex-session",
+            "project_path": "/tmp/repo",
+            "project_name": "repo",
+            "updated_at": "2026-06-04T00:00:00+00:00",
+            "source_kind": "codex-jsonl",
+        },
+    ]
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        assert cli == "all"
+        assert query == ""
+        assert limit is None
+        return list(rows)
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+    payload = app.session_catalog({"cli": "claude", "query": " repo ", "limit": 50})
+
+    assert payload["ok"] is True
+    assert payload["schema"] == "mms.session_catalog.v1"
+    assert payload["read_only"] is True
+    assert payload["counts"] == {"all": 2, "claude": 1, "codex": 1}
+    assert [row["session_id"] for row in payload["rows"]] == ["claude-session"]
+    assert payload["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
+
+
+def test_config_web_session_catalog_uses_process_cache(monkeypatch):
+    import mms_session_catalog
+
+    calls = {"count": 0}
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        calls["count"] += 1
+        return [
+            {"cli": "claude", "session_id": "claude-session", "project_name": "repo"},
+            {"cli": "codex", "session_id": "codex-session", "project_name": "other"},
+        ]
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+
+    first = app.session_catalog({"query": "repo"})
+    second = app.session_catalog({"query": "other"})
+    refreshed = app.session_catalog({"query": "repo", "force": True})
+
+    assert calls["count"] == 2
+    assert [row["session_id"] for row in first["rows"]] == ["claude-session"]
+    assert [row["session_id"] for row in second["rows"]] == ["codex-session"]
+    assert refreshed["rows"][0]["resume_command"] == "mmz resume claude:claude-session"
+
+
+def test_config_web_session_preview_api_uses_cached_record(monkeypatch):
+    import mms_session_catalog
+
+    calls = {"list": 0, "preview": []}
+    rows = [
+        {
+            "cli": "claude",
+            "session_id": "claude-session",
+            "project_name": "repo",
+            "source_kind": "claude-jsonl",
+            "source_path": "/tmp/claude-session.jsonl",
+        }
+    ]
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        calls["list"] += 1
+        assert cli == "all"
+        return list(rows)
+
+    def fake_preview_session_record(session_ref, *, cli="all", record=None, query="", limit=18, max_lines=20000):
+        calls["preview"].append(
+            {
+                "session_ref": session_ref,
+                "cli": cli,
+                "record": record,
+                "query": query,
+                "limit": limit,
+                "max_lines": max_lines,
+            }
+        )
+        return {
+            "ok": True,
+            "schema": "mms.session_preview.v1",
+            "session_id": session_ref,
+            "cli": cli,
+            "query": query,
+            "items": [{"role": "用户", "text": "hello", "line": 3}],
+            "read_only": True,
+        }
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    monkeypatch.setattr(mms_session_catalog, "preview_session_record", fake_preview_session_record)
+    app = mms_config_web.ConfigWebApp({}, command_name="mmz")
+
+    payload = app.session_preview({"key": "claude:claude-session", "query": " hello ", "limit": 12})
+
+    assert calls["list"] == 1
+    assert calls["preview"][0]["record"]["session_id"] == "claude-session"
+    assert calls["preview"][0]["query"] == "hello"
+    assert calls["preview"][0]["limit"] == 12
+    assert payload["ok"] is True
+    assert payload["record"]["resume_command"] == "mmz resume claude:claude-session"
+    assert payload["record"]["select_model_command"] == "mmz resume --select-model claude:claude-session"
+    assert payload["items"][0]["text"] == "hello"
+
+
+def test_config_web_server_serves_session_catalog_endpoint(monkeypatch, tmp_path):
+    import mms_session_catalog
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        return [
+            {
+                "cli": "codex",
+                "session_id": "codex-session",
+                "project_path": str(tmp_path),
+                "project_name": tmp_path.name,
+                "updated_at": "2026-06-04T01:00:00+00:00",
+                "source_kind": "codex-jsonl",
+            }
+        ]
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz",
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        req = Request(
+            f"{url}/api/session/catalog",
+            data=json.dumps({"cli": "codex"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert payload["ok"] is True
+    assert payload["rows"][0]["resume_command"] == "mmz resume codex:codex-session"
+
+
+def test_config_web_server_serves_session_preview_endpoint(monkeypatch, tmp_path):
+    import mms_session_catalog
+
+    def fake_list_session_records(cli="all", query="", limit=None):
+        return [
+            {
+                "cli": "codex",
+                "session_id": "codex-session",
+                "project_path": str(tmp_path),
+                "project_name": tmp_path.name,
+                "source_kind": "codex-jsonl",
+                "source_path": str(tmp_path / "codex-session.jsonl"),
+            }
+        ]
+
+    def fake_preview_session_record(session_ref, *, cli="all", record=None, query="", limit=18, max_lines=20000):
+        assert session_ref == "codex-session"
+        assert cli == "codex"
+        assert record["project_name"] == tmp_path.name
+        return {
+            "ok": True,
+            "schema": "mms.session_preview.v1",
+            "session_id": session_ref,
+            "cli": cli,
+            "items": [{"role": "助手", "text": "预览内容", "line": 8}],
+            "read_only": True,
+        }
+
+    monkeypatch.setattr(mms_session_catalog, "list_session_records", fake_list_session_records)
+    monkeypatch.setattr(mms_session_catalog, "preview_session_record", fake_preview_session_record)
+    app = mms_config_web.ConfigWebApp(
+        {"providers": []},
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+        command_name="mmz",
+    )
+    handler = type("TestSetupWebHandler", (mms_config_web_server._SetupWebHandler,), {"app": app})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        req = Request(
+            f"{url}/api/session/preview",
+            data=json.dumps({"cli": "codex", "session_id": "codex-session"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert payload["ok"] is True
+    assert payload["items"][0]["text"] == "预览内容"
+    assert payload["record"]["resume_command"] == "mmz resume codex:codex-session"
 
 
 def test_config_web_server_skips_snapshot_for_shell_and_static_assets():

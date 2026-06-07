@@ -14,6 +14,7 @@ import json
 import threading
 import traceback
 import webbrowser
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -102,6 +103,158 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
     return _backend().build_setup_markdown(snapshot)
 
 
+def _session_catalog_options(payload: dict[str, Any] | None) -> tuple[str, str, int]:
+    payload = payload if isinstance(payload, dict) else {}
+    cli = str(payload.get("cli") or "all").strip().lower()
+    if cli not in {"all", "claude", "codex"}:
+        cli = "all"
+    query = " ".join(str(payload.get("query") or "").split())
+    try:
+        limit = int(payload.get("limit") or 3000)
+    except (TypeError, ValueError):
+        limit = 3000
+    limit = min(max(limit, 1), 5000)
+    return cli, query, limit
+
+
+def _session_preview_options(payload: dict[str, Any] | None) -> tuple[str, str, str, int, int]:
+    payload = payload if isinstance(payload, dict) else {}
+    cli = str(payload.get("cli") or "all").strip().lower()
+    ref = str(payload.get("session_ref") or payload.get("session_id") or payload.get("key") or "").strip()
+    if ":" in ref:
+        maybe_cli, maybe_ref = ref.split(":", 1)
+        if maybe_cli.strip().lower() in {"claude", "codex"}:
+            cli = maybe_cli.strip().lower()
+            ref = maybe_ref.strip()
+    if cli not in {"all", "claude", "codex"}:
+        cli = "all"
+    query = " ".join(str(payload.get("query") or "").split())
+    try:
+        limit = int(payload.get("limit") or 20)
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        max_lines = int(payload.get("max_lines") or 20000)
+    except (TypeError, ValueError):
+        max_lines = 20000
+    return cli, ref, query, min(max(limit, 1), 80), min(max(max_lines, 500), 100000)
+
+
+def _find_session_record(rows: list[dict[str, Any]], session_ref: str, cli: str) -> dict[str, Any] | None:
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None
+    candidates = [
+        row for row in rows
+        if cli == "all" or str(row.get("cli") or "").strip().lower() == cli
+    ]
+    exact = [row for row in candidates if str(row.get("session_id") or "") == ref]
+    if exact:
+        return exact[0]
+    prefix = [row for row in candidates if str(row.get("session_id") or "").startswith(ref)]
+    return prefix[0] if len(prefix) == 1 else None
+
+
+def build_session_catalog_from_rows(
+    all_rows: list[dict[str, Any]],
+    payload: dict[str, Any] | None,
+    *,
+    command_name: str = "mms",
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    cli, query, limit = _session_catalog_options(payload)
+    rows_for_query = list(all_rows)
+    if query:
+        tokens = query.lower().split()
+        rows_for_query = [
+            row for row in rows_for_query
+            if all(
+                token in " ".join(
+                    str(row.get(field) or "").lower()
+                    for field in ("cli", "session_id", "project_path", "project_name", "cwd", "title", "model", "source_kind")
+                )
+                for token in tokens
+            )
+        ]
+
+    counts = {
+        "all": len(rows_for_query),
+        "claude": sum(1 for row in rows_for_query if str(row.get("cli") or "") == "claude"),
+        "codex": sum(1 for row in rows_for_query if str(row.get("cli") or "") == "codex"),
+    }
+    rows = rows_for_query if cli == "all" else [row for row in rows_for_query if str(row.get("cli") or "") == cli]
+    total_before_limit = len(rows)
+    rows = rows[:limit]
+    for row in rows:
+        row["resume_command"] = f"{command_name} resume {row.get('cli')}:{row.get('session_id')}"
+    return {
+        "ok": True,
+        "schema": "mms.session_catalog.v1",
+        "cli": cli,
+        "query": query,
+        "limit": limit,
+        "counts": counts,
+        "rows": rows,
+        "row_count": len(rows),
+        "total_before_limit": total_before_limit,
+        "truncated": total_before_limit > len(rows),
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
+        "command_name": command_name,
+        "read_only": True,
+    }
+
+
+def build_session_catalog(payload: dict[str, Any] | None, *, command_name: str = "mms") -> dict[str, Any]:
+    from mms_session_catalog import list_session_records
+
+    all_rows = list_session_records(cli="all", query="", limit=None)
+    return build_session_catalog_from_rows(all_rows, payload, command_name=command_name)
+
+
+def build_session_preview_from_rows(
+    all_rows: list[dict[str, Any]],
+    payload: dict[str, Any] | None,
+    *,
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    from mms_session_catalog import preview_session_record
+
+    cli, session_ref, query, limit, max_lines = _session_preview_options(payload)
+    if not session_ref:
+        return {
+            "ok": False,
+            "schema": "mms.session_preview.v1",
+            "error": "session id 不能为空",
+            "items": [],
+            "read_only": True,
+        }
+    record = _find_session_record(all_rows, session_ref, cli)
+    preview = preview_session_record(
+        session_ref,
+        cli=cli,
+        record=copy.deepcopy(record) if isinstance(record, dict) else None,
+        query=query,
+        limit=limit,
+        max_lines=max_lines,
+    )
+    if isinstance(record, dict):
+        row = copy.deepcopy(record)
+        row["resume_command"] = f"{command_name} resume {row.get('cli')}:{row.get('session_id')}"
+        row["select_model_command"] = f"{command_name} resume --select-model {row.get('cli')}:{row.get('session_id')}"
+        preview["record"] = row
+    preview.setdefault("schema", "mms.session_preview.v1")
+    preview.setdefault("read_only", True)
+    preview["command_name"] = command_name
+    return preview
+
+
+def build_session_preview(payload: dict[str, Any] | None, *, command_name: str = "mms") -> dict[str, Any]:
+    from mms_session_catalog import list_session_records
+
+    all_rows = list_session_records(cli="all", query="", limit=None)
+    return build_session_preview_from_rows(all_rows, payload, command_name=command_name)
+
+
 def _html_page(_snapshot: dict[str, Any]) -> bytes:
     return read_index_html().encode("utf-8")
 
@@ -113,6 +266,7 @@ class ConfigWebApp:
         self.preferences_path = preferences_path
         self.command_name = command_name
         self.lock = threading.Lock()
+        self._session_catalog_cache: dict[str, Any] | None = None
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -233,6 +387,39 @@ class ConfigWebApp:
                 command_name=self.command_name,
             )
 
+    def _ensure_session_catalog_cache(self) -> None:
+        if self._session_catalog_cache is not None:
+            return
+        result = build_session_catalog({"cli": "all", "query": "", "limit": 5000}, command_name=self.command_name)
+        self._session_catalog_cache = {
+            "rows": copy.deepcopy(result.get("rows") or []),
+            "generated_at": result.get("generated_at") or datetime.now(timezone.utc).isoformat(),
+        }
+
+    def session_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            payload = payload if isinstance(payload, dict) else {}
+            force = bool(payload.get("force"))
+            if force:
+                self._session_catalog_cache = None
+            self._ensure_session_catalog_cache()
+            return build_session_catalog_from_rows(
+                copy.deepcopy(self._session_catalog_cache.get("rows") or []),
+                payload,
+                command_name=self.command_name,
+                generated_at=str(self._session_catalog_cache.get("generated_at") or ""),
+            )
+
+    def session_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            payload = payload if isinstance(payload, dict) else {}
+            self._ensure_session_catalog_cache()
+            return build_session_preview_from_rows(
+                copy.deepcopy(self._session_catalog_cache.get("rows") or []),
+                payload,
+                command_name=self.command_name,
+            )
+
 
 class _SetupWebHandler(BaseHTTPRequestHandler):
     app: ConfigWebApp | None = None
@@ -322,6 +509,12 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/settings/report":
                 self._send(*_json_response(app.settings_report(payload)))
+                return
+            if path == "/api/session/catalog":
+                self._send(*_json_response(app.session_catalog(payload)))
+                return
+            if path == "/api/session/preview":
+                self._send(*_json_response(app.session_preview(payload)))
                 return
             if path == "/api/plan":
                 self._send(*_json_response(app.plan(payload)))

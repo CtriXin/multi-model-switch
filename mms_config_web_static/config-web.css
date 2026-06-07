@@ -3333,12 +3333,643 @@
       color: oklch(90% 0.018 180);
     }
 
+    /* ===== Session center ===== */
+    .session-center {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(360px, .82fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .session-toolbar {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: auto auto minmax(220px, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--accent) 7%, transparent), transparent 42%),
+        color-mix(in oklch, var(--surface) 84%, var(--bg));
+    }
+    .session-toolbar .filterbar {
+      margin: 0;
+      gap: 6px;
+    }
+    .session-model-filters button {
+      font-size: 12px;
+    }
+    .session-toolbar button.active {
+      border-color: var(--fg);
+      background: var(--fg);
+      color: var(--surface);
+    }
+    .session-summary {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+    }
+    .session-list {
+      grid-column: 1;
+      display: grid;
+      gap: 12px;
+    }
+    .session-folder {
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      background:
+        linear-gradient(90deg, color-mix(in oklch, var(--accent) 9%, transparent), transparent 35%),
+        color-mix(in oklch, var(--surface) 94%, var(--bg));
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+    .session-folder[open] {
+      border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+      box-shadow: var(--shadow);
+    }
+    .session-folder summary {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 16px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .session-folder summary::-webkit-details-marker {
+      display: none;
+    }
+    .session-folder summary::before {
+      content: "▸";
+      font-family: var(--font-mono);
+      color: var(--accent);
+      transition: transform .15s ease;
+    }
+    .session-folder[open] summary::before {
+      transform: rotate(90deg);
+    }
+    .session-folder-main {
+      min-width: 0;
+      flex: 1;
+    }
+    .session-folder-main strong {
+      display: block;
+      font-size: 17px;
+      line-height: 1.2;
+      margin-bottom: 4px;
+    }
+    .session-folder-main p,
+    .session-folder-meta {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-folder-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .session-folder-rows {
+      display: grid;
+      gap: 8px;
+      padding: 0 10px 10px;
+    }
+    .session-card {
+      --session-cli-color: var(--accent);
+      min-width: 0;
+      border: 1.5px solid var(--session-cli-color);
+      border-left: 5px solid var(--session-cli-color);
+      border-radius: 14px;
+      padding: 12px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--surface) 98%, var(--fg)), transparent),
+        var(--surface);
+      cursor: pointer;
+      transition: border-color .15s ease, box-shadow .15s ease, transform .08s ease;
+    }
+    .session-card:hover {
+      border-color: var(--session-cli-color);
+      box-shadow: var(--shadow);
+      transform: translateY(-1px);
+    }
+    .session-card.active {
+      border-color: var(--session-cli-color);
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--session-cli-color) 10%, transparent), transparent 58%),
+        var(--surface);
+      box-shadow: 0 0 0 1px var(--session-cli-color), var(--shadow);
+    }
+    .session-inline-panel {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+    }
+    .session-inline-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .session-inline-head p {
+      margin-top: 3px;
+    }
+    .session-inline-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .session-inline-actions button {
+      min-width: 0;
+      min-height: 36px;
+      white-space: normal;
+      line-height: 1.18;
+    }
+    .session-card .is-selected {
+      border-color: var(--session-cli-color);
+      background: var(--session-cli-color);
+      color: var(--surface);
+    }
+    .session-card .is-collapse {
+      box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--surface) 45%, transparent);
+    }
+    .session-card.is-codex {
+      --session-cli-color: #183a68;
+    }
+    .session-card.is-claude {
+      --session-cli-color: #bd3f35;
+    }
+    .session-card-head,
+    .session-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .session-card-head {
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .session-cli {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--session-cli-color);
+    }
+    .session-card h3 {
+      margin-bottom: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-title {
+      color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .session-id {
+      margin-top: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+    }
+    .session-detail {
+      grid-column: 2;
+      position: sticky;
+      top: 20px;
+      align-self: start;
+      min-height: 320px;
+      max-height: none;
+      white-space: normal;
+      overflow: visible;
+      display: block;
+      border: 1.5px solid color-mix(in oklch, var(--accent) 18%, var(--border));
+      border-radius: 22px;
+      background:
+        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 12%, transparent), transparent 36%),
+        color-mix(in oklch, var(--surface) 96%, var(--bg));
+      box-shadow: var(--shadow);
+    }
+    .session-detail-pinned {
+      position: relative;
+      top: auto;
+      z-index: 8;
+      margin: -1px -1px 14px;
+      padding: 1px 1px 12px;
+      border-radius: 22px 22px 18px 18px;
+      background:
+        radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 14%, transparent), transparent 38%),
+        color-mix(in oklch, var(--surface) 97%, var(--bg));
+      box-shadow: 0 16px 28px color-mix(in oklch, var(--bg) 70%, transparent);
+    }
+    .session-detail-pinned::after {
+      content: "";
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 0;
+      height: 1px;
+      background: var(--border);
+    }
+    .session-detail-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .session-detail-head div {
+      min-width: 0;
+    }
+    .session-detail-head p {
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-cli-badge {
+      flex: 0 0 auto;
+      align-self: flex-start;
+      white-space: nowrap;
+      line-height: 1.2;
+    }
+    .session-detail-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .session-resume-panel {
+      display: grid;
+      gap: 10px;
+      margin: 12px 0 14px;
+    }
+    .session-detail-note {
+      margin-top: 10px;
+    }
+    .session-resume-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      align-items: center;
+    }
+    .session-resume-actions button {
+      min-width: 0;
+      min-height: 38px;
+      white-space: normal;
+      line-height: 1.18;
+    }
+    .session-resume-hints {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 5px;
+      padding: 10px 12px;
+      border: 1px dashed color-mix(in oklch, var(--accent) 22%, var(--border));
+      border-radius: 14px;
+      background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .session-resume-hints span {
+      overflow-wrap: anywhere;
+    }
+    .session-resume-details {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+      overflow: hidden;
+    }
+    .session-resume-details summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      cursor: pointer;
+      list-style: none;
+      color: var(--muted);
+    }
+    .session-resume-details summary::-webkit-details-marker {
+      display: none;
+    }
+    .session-resume-details summary::before {
+      content: "▸";
+      font-family: var(--font-mono);
+      color: var(--accent);
+      transition: transform .15s ease;
+    }
+    .session-resume-details[open] summary::before {
+      transform: rotate(90deg);
+    }
+    .session-resume-details summary span {
+      font-weight: 800;
+      color: var(--fg);
+    }
+    .session-resume-details summary strong {
+      font-size: 12px;
+      font-weight: 600;
+      text-align: right;
+    }
+    .session-resume-details .session-context,
+    .session-resume-details .session-detail-grid {
+      padding: 0 12px 12px;
+    }
+    .session-context {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .session-selected-summary {
+      margin: 10px 0 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+      border-radius: 16px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), transparent 58%),
+        color-mix(in oklch, var(--surface) 92%, var(--bg));
+    }
+    .session-selected-summary span {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    .session-selected-summary strong {
+      display: block;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+    }
+    .session-summary-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .session-summary-meta em {
+      display: inline-flex;
+      max-width: 100%;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: color-mix(in oklch, var(--accent) 10%, var(--surface));
+      color: var(--accent);
+      font-style: normal;
+      font-size: 12px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .session-selected-summary p {
+      margin-top: 6px;
+    }
+    .session-context div {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: color-mix(in oklch, var(--surface) 82%, var(--bg));
+    }
+    .session-context span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .session-context strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .session-detail-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .session-detail-grid > div {
+      min-width: 0;
+    }
+    .session-detail-grid .mono,
+    .session-detail .mono {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .session-command {
+      margin-top: 6px;
+      max-width: 100%;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      scrollbar-width: thin;
+    }
+    .session-preview {
+      display: block;
+      margin-top: 0;
+      padding-top: 0;
+      overflow: visible;
+    }
+    .session-preview-head,
+    .session-preview-toolbar,
+    .session-message-head {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .session-preview-head {
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .session-preview-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .session-preview-toolbar {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .session-preview-actions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+      gap: 8px;
+    }
+    .session-preview-actions button {
+      min-width: 0;
+      white-space: normal;
+      line-height: 1.2;
+    }
+    .session-preview-items {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      max-height: none;
+      overflow: visible;
+      padding-right: 4px;
+      scrollbar-width: thin;
+    }
+    .session-preview-items.is-compact {
+      flex: 0 0 auto;
+      min-height: auto;
+      overflow: visible;
+    }
+    .session-preview-items.is-expanded {
+      min-height: auto;
+      overflow: visible;
+    }
+    .session-preview-items.is-compact .session-message p {
+      display: -webkit-box;
+      -webkit-line-clamp: 5;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .session-message {
+      max-width: min(82%, 680px);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 11px 13px;
+      background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+      box-shadow: 0 8px 18px color-mix(in oklch, var(--bg) 55%, transparent);
+    }
+    .session-message.is-user {
+      justify-self: end;
+      border-color: color-mix(in oklch, #15895e 46%, var(--border));
+      border-right: 4px solid #15895e;
+      border-radius: 18px 18px 5px 18px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, #15895e 13%, transparent), transparent 62%),
+        color-mix(in oklch, #15895e 8%, var(--surface));
+    }
+    .session-message.is-assistant {
+      justify-self: start;
+      border-color: color-mix(in oklch, #2563c8 44%, var(--border));
+      border-left: 4px solid #2563c8;
+      border-radius: 18px 18px 18px 5px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, #2563c8 12%, transparent), transparent 62%),
+        color-mix(in oklch, #2563c8 7%, var(--surface));
+    }
+    .session-message.is-system,
+    .session-message.is-tool {
+      justify-self: start;
+      border-left: 4px solid color-mix(in oklch, var(--muted) 75%, var(--border));
+      max-width: min(92%, 760px);
+    }
+    .session-message-role {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .08em;
+      color: color-mix(in oklch, var(--fg) 72%, var(--accent));
+    }
+    .session-message.is-user .session-message-head {
+      text-align: right;
+    }
+    .session-message.is-user .session-message-role {
+      color: #15895e;
+    }
+    .session-message.is-assistant .session-message-role {
+      color: #2563c8;
+    }
+    .session-message p {
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.55;
+      color: color-mix(in oklch, var(--fg) 82%, var(--muted));
+    }
+    .session-preview-source {
+      flex: 0 0 auto;
+      margin-top: 10px;
+      color: var(--muted);
+    }
+    .session-preview-source summary {
+      cursor: pointer;
+      font-weight: 750;
+      color: var(--muted);
+    }
+    .session-preview-source p {
+      margin-top: 6px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+    }
+
     @media (max-width: 1180px) {
       .settings-tabs {
         grid-template-columns: repeat(3, minmax(160px, 1fr));
       }
     }
     @media (max-width: 780px) {
+      .session-center {
+        grid-template-columns: 1fr;
+      }
+      .session-toolbar {
+        grid-template-columns: 1fr;
+      }
+      .session-list {
+        grid-column: 1;
+        grid-template-columns: 1fr;
+      }
+      .session-detail {
+        grid-column: 1;
+        position: static;
+        max-height: none;
+        overflow: visible;
+        display: block;
+      }
+      .session-detail-pinned {
+        position: static;
+        top: auto;
+        margin: 0 0 14px;
+        box-shadow: none;
+      }
+      .session-preview,
+      .session-preview-items {
+        display: grid;
+        overflow: visible;
+      }
+      .session-folder summary,
+      .session-detail-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .session-folder-rows {
+        grid-template-columns: 1fr;
+      }
+      .session-detail-grid,
+      .session-context,
+      .session-preview-toolbar,
+      .session-inline-actions,
+      .session-resume-actions,
+      .session-preview-actions {
+        grid-template-columns: 1fr;
+      }
+      .session-preview-head,
+      .session-message-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
       [data-section="settings"] {
         padding: 14px;
       }

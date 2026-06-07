@@ -462,6 +462,31 @@
       </div>
     </section>
 
+    <!-- 会话历史 -->
+    <section class="panel" data-section="sessions">
+      <h2>会话历史</h2>
+      <p>按项目文件夹查看已经存在的 Claude / Codex resume 历史；这里是只读检索，不会切换账号、模型或启动 CLI。</p>
+      <div class="session-center">
+        <div class="session-toolbar">
+          <div class="filterbar" id="sessionCliFilters">
+            <button class="active" data-session-cli="all" type="button">全部</button>
+            <button data-session-cli="claude" type="button">Claude</button>
+            <button data-session-cli="codex" type="button">Codex</button>
+          </div>
+          <div class="filterbar session-model-filters" id="sessionModelFilters">
+            <button class="active" data-session-model="all" type="button">全部模型</button>
+            <button data-session-model="with" type="button">有上次模型</button>
+            <button data-session-model="missing" type="button">模型未记录</button>
+          </div>
+          <input id="sessionSearch" placeholder="搜索项目、摘要、session id">
+          <button id="refreshSessions" class="secondary" type="button">刷新会话</button>
+        </div>
+        <div class="session-summary" id="sessionSummary">打开本页后会扫描本机已有会话，按最近活动时间倒序展示。</div>
+        <div class="session-list" id="sessionList"></div>
+        <div class="session-detail result" id="sessionDetail">选择一条会话查看恢复命令。</div>
+      </div>
+    </section>
+
     <!-- 配置迁移 -->
     <section class="panel" data-section="migration">
       <h2>迁移 / 分享</h2>
