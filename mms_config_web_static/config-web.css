@@ -30,6 +30,8 @@
       --radius-lg: 14px;
       --radius-xl: 18px;
 
+      --spinner-size: 12px;
+
       --gap-xs: 6px;
       --gap-sm: 10px;
       --gap-md: 16px;
@@ -680,13 +682,6 @@
       padding: 12px;
       min-width: 0;
     }
-    .gate-box h5 {
-      margin: 0 0 8px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-    }
     .gate-list {
       margin: 0;
       padding-left: 18px;
@@ -702,7 +697,7 @@
       padding: 8px;
       border: 1px solid color-mix(in oklch, var(--fg) 16%, var(--border));
       background: var(--surface);
-      border-radius: 8px;
+      border-radius: var(--radius);
     }
     .gate-command-row code {
       font-family: var(--font-mono);
@@ -830,7 +825,7 @@
       line-height: 1.55;
     }
     select { cursor: pointer; }
-    input[type="password"] { font-family: var(--font-mono); }
+    input[type="password"] { font-family: var(--font-mono); letter-spacing: 0.1em; }
 
     /* ===== Checkbox groups ===== */
     .checks {
@@ -914,8 +909,8 @@
     }
     button.is-loading::after {
       content: "";
-      width: 12px;
-      height: 12px;
+      width: var(--spinner-size);
+      height: var(--spinner-size);
       border: 2px solid currentColor;
       border-right-color: transparent;
       border-radius: 999px;
@@ -1058,7 +1053,7 @@
       border: 1px solid transparent;
       box-shadow: none;
       padding: 7px 10px;
-      border-radius: 13px;
+      border-radius: var(--radius-lg);
       font-size: 12.5px;
       font-weight: 700;
       line-height: 1.2;
@@ -1131,7 +1126,7 @@
       margin-top: auto;
       padding: 7px 12px;
       font-size: 12.5px;
-      border-radius: 13px;
+      border-radius: var(--radius-lg);
     }
     .provider-editor-actions {
       border-top: 1px solid var(--border);
@@ -1214,7 +1209,7 @@
       gap: 12px;
       padding: 12px 14px;
       border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border));
-      border-radius: 16px;
+      border-radius: var(--radius-xl);
       background: oklch(100% 0 0 / .86);
       box-shadow: 0 8px 20px oklch(18% 0.02 230 / .045);
     }
@@ -1584,7 +1579,7 @@
 	    }
 	    .model-name-cell {
 	      white-space: nowrap;
-	      font-weight: 650;
+	      font-weight: 600;
 	      overflow: hidden;
 	    }
 	    .model-name-text {
@@ -1646,7 +1641,7 @@
 	      background: var(--surface);
 	      color: var(--muted);
 	      font-size: 12px;
-	      font-weight: 650;
+	      font-weight: 600;
 	      line-height: 1;
 	      cursor: pointer;
 	      user-select: none;
@@ -1757,7 +1752,7 @@
     }
     .model-advanced-cleanup summary {
       cursor: pointer;
-      font-weight: 650;
+      font-weight: 600;
       color: var(--fg);
     }
 
@@ -2053,7 +2048,7 @@
       display: grid;
       gap: 6px;
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: var(--radius-xl);
       padding: 11px;
       background: oklch(100% 0 0 / .78);
     }
@@ -2109,7 +2104,7 @@
       display: block;
       font-size: 30px;
       line-height: 1;
-      font-weight: 750;
+      font-weight: 700;
       letter-spacing: -0.04em;
       margin-bottom: 6px;
     }
@@ -2170,7 +2165,7 @@
       gap: 12px;
       align-items: center;
       border: 1px solid color-mix(in oklch, var(--accent) 42%, var(--border));
-      border-radius: 22px;
+      border-radius: var(--radius-xl);
       padding: 12px 14px;
       background:
         linear-gradient(135deg, oklch(100% 0 0 / .96), oklch(97.5% 0.018 155 / .96));
@@ -2404,7 +2399,7 @@
     .asset-cli-label {
       color: var(--muted);
       font-size: 11px;
-      font-weight: 750;
+      font-weight: 700;
       letter-spacing: 0.08em;
     }
     .asset-cli-source {
@@ -2417,7 +2412,7 @@
     }
     .asset-cli-source strong {
       color: var(--fg);
-      font-weight: 650;
+      font-weight: 600;
     }
     .asset-cli-sample,
     .asset-cli-note {
@@ -2428,7 +2423,7 @@
     }
     .asset-cli-note {
       padding: 9px 10px;
-      border-radius: 12px;
+      border-radius: var(--radius-lg);
       background: var(--fg-soft);
     }
     .asset-cli-action {
@@ -2475,7 +2470,7 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-weight: 650;
+      font-weight: 600;
       box-shadow: 0 1px 0 oklch(100% 0 0 / 0.7) inset;
     }
     .asset-toolbar .filterbar button:hover {
@@ -2603,7 +2598,7 @@
     }
     .asset-title {
       font-size: 16px;
-      font-weight: 750;
+      font-weight: 700;
       line-height: 1.25;
       overflow-wrap: anywhere;
       letter-spacing: -0.015em;
@@ -2714,7 +2709,7 @@
     }
     .asset-config-card summary {
       cursor: pointer;
-      font-weight: 650;
+      font-weight: 600;
     }
     .asset-roots {
       display: grid;
@@ -3225,7 +3220,7 @@
       gap: 12px;
       padding: 12px 14px;
       border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border));
-      border-radius: 16px;
+      border-radius: var(--radius-xl);
       background: oklch(100% 0 0 / .86);
       box-shadow: 0 8px 20px oklch(18% 0.02 230 / .045);
     }
@@ -3275,7 +3270,7 @@
       gap: 3px;
       min-height: 54px;
       border: 1px solid transparent;
-      border-radius: 13px;
+      border-radius: var(--radius-lg);
       padding: 9px 10px;
       background: transparent;
       color: var(--muted);
@@ -3311,7 +3306,7 @@
     .settings-tab-panel.active {
       padding: 14px;
       border: 1px solid color-mix(in oklch, var(--fg) 10%, var(--border));
-      border-radius: 20px;
+      border-radius: var(--radius-xl);
       background: oklch(100% 0 0 / .92);
       box-shadow: 0 10px 26px oklch(18% 0.02 230 / .05);
     }
@@ -3324,7 +3319,7 @@
     .settings-next-step,
     .settings-compat-note {
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: var(--radius-xl);
       background: linear-gradient(180deg, oklch(100% 0 0), oklch(98.5% 0.006 220));
       box-shadow: var(--shadow-sm);
     }
@@ -3346,7 +3341,7 @@
       display: grid;
       gap: 6px;
       border: 1px dashed color-mix(in oklch, var(--fg) 20%, var(--border));
-      border-radius: 16px;
+      border-radius: var(--radius-xl);
       padding: 14px;
       background: color-mix(in oklch, var(--surface) 76%, var(--bg));
       color: var(--fg);
@@ -3428,7 +3423,7 @@
     }
     .session-folder {
       border: 1.5px solid var(--border);
-      border-radius: 20px;
+      border-radius: var(--radius-xl);
       background:
         linear-gradient(90deg, color-mix(in oklch, var(--accent) 9%, transparent), transparent 35%),
         color-mix(in oklch, var(--surface) 94%, var(--bg));
@@ -3603,7 +3598,7 @@
       overflow: visible;
       display: block;
       border: 1.5px solid color-mix(in oklch, var(--accent) 18%, var(--border));
-      border-radius: 22px;
+      border-radius: var(--radius-xl);
       background:
         radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 12%, transparent), transparent 36%),
         color-mix(in oklch, var(--surface) 96%, var(--bg));
@@ -3615,7 +3610,7 @@
       z-index: 8;
       margin: -1px -1px 14px;
       padding: 1px 1px 12px;
-      border-radius: 22px 22px 18px 18px;
+      border-radius: 18px;
       background:
         radial-gradient(circle at 0 0, color-mix(in oklch, var(--accent) 14%, transparent), transparent 38%),
         color-mix(in oklch, var(--surface) 97%, var(--bg));
@@ -3697,7 +3692,7 @@
     }
     .session-resume-details {
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: var(--radius-xl);
       background: color-mix(in oklch, var(--surface) 88%, var(--bg));
       overflow: hidden;
     }
@@ -3745,7 +3740,7 @@
       margin: 10px 0 12px;
       padding: 12px;
       border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
-      border-radius: 16px;
+      border-radius: var(--radius-xl);
       background:
         linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), transparent 58%),
         color-mix(in oklch, var(--surface) 92%, var(--bg));
@@ -3953,7 +3948,7 @@
     }
     .session-preview-source summary {
       cursor: pointer;
-      font-weight: 750;
+      font-weight: 700;
       color: var(--muted);
     }
     .session-preview-source p {
