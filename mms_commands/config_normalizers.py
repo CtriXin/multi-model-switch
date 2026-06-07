@@ -5,6 +5,25 @@ from __future__ import annotations
 from mms_commands.provider_config import normalize_account_id, normalize_positive_seconds
 
 
+def normalize_ui_config(cfg, *, normalize_language, default_language="zh"):
+    cfg = dict(cfg)
+    raw_ui = cfg.get("ui")
+    current = raw_ui if isinstance(raw_ui, dict) else {}
+    lang = normalize_language(current.get("language", "")) or default_language
+    new_cfg = dict(cfg)
+    new_cfg["ui"] = {"language": lang}
+    return new_cfg, new_cfg != cfg
+
+
+def normalize_user_role(role, *, mode_all, mode_recommended):
+    value = str(role or "").strip()
+    if value in {"dev", "all", mode_all}:
+        return mode_all
+    if value in {"ops", "recommended", mode_recommended}:
+        return mode_recommended
+    return mode_all
+
+
 def normalize_preset_entry(name, preset, *, normalize_account_id=normalize_account_id):
     if isinstance(preset, str):
         preset = {"cli": "claude", "model": preset}
@@ -122,6 +141,34 @@ def normalize_cache_config(
     new_cfg = dict(cfg)
     new_cfg["cache"] = normalized
     return new_cfg, True
+
+
+def normalize_config_sections(
+    cfg,
+    *,
+    ensure_provider_config,
+    ensure_account_config,
+    ensure_broker_config,
+    normalize_ui_config,
+    normalize_presets_config,
+    normalize_user_config,
+    normalize_cache_config,
+):
+    cfg, _ = ensure_provider_config(cfg)
+    cfg, _ = ensure_account_config(cfg)
+    cfg, _ = ensure_broker_config(cfg)
+    cfg, _ = normalize_ui_config(cfg)
+    cfg, _ = normalize_presets_config(cfg)
+    cfg, _ = normalize_user_config(cfg)
+    cfg, _ = normalize_cache_config(cfg)
+    return cfg
+
+
+def load_runtime_config(*, load_config, apply_local_overrides):
+    cfg = load_config()
+    if cfg is None:
+        return None
+    return apply_local_overrides(cfg)
 
 
 def probe_async_refresh_after(cfg, *, default, normalize_positive_seconds=normalize_positive_seconds):

@@ -2,16 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
-import hashlib
-import inspect
-import os
-import re
-import subprocess
-import sys
-import tempfile
-from contextlib import contextmanager
-
 
 from mms_commands.command_predicates import (
     CONFIG_HELP_TOPICS,
@@ -22,109 +12,12 @@ from mms_commands.command_predicates import (
 )
 
 
-def normalize_ui_config(cfg, *, normalize_language, default_language="zh"):
-    cfg = dict(cfg)
-    raw_ui = cfg.get("ui")
-    current = raw_ui if isinstance(raw_ui, dict) else {}
-    lang = normalize_language(current.get("language", "")) or default_language
-    new_cfg = dict(cfg)
-    new_cfg["ui"] = {"language": lang}
-    return new_cfg, new_cfg != cfg
-
-
-def resolve_ui_language(
-    cfg=None,
-    cli_override=None,
-    *,
-    normalize_language,
-    load_version_meta,
-    environ=None,
-    default_language="zh",
-):
-    environ = os.environ if environ is None else environ
-    cli_lang = normalize_language(cli_override)
-    if cli_lang:
-        return cli_lang
-    env_lang = normalize_language(environ.get("MMS_LANG", ""))
-    if env_lang:
-        return env_lang
-    if isinstance(cfg, dict):
-        ui_lang = normalize_language((cfg.get("ui") or {}).get("language", ""))
-        if ui_lang:
-            return ui_lang
-    locale_lang = normalize_language(environ.get("LC_ALL", "") or environ.get("LANG", ""))
-    if locale_lang:
-        return locale_lang
-    version_meta = load_version_meta()
-    version_lang = normalize_language(
-        version_meta.get("preferred_language", "") if isinstance(version_meta, dict) else ""
-    )
-    if version_lang:
-        return version_lang
-    return default_language
-
-
-def extract_global_lang(argv, *, normalize_language):
-    cleaned = []
-    lang = ""
-    idx = 0
-    while idx < len(argv):
-        item = argv[idx]
-        if item == "--lang" and idx + 1 < len(argv):
-            candidate = normalize_language(argv[idx + 1])
-            if candidate:
-                lang = candidate
-                idx += 2
-                continue
-        cleaned.append(item)
-        idx += 1
-    return cleaned, lang
-
-
-def current_command(*, primary_command, environ=None, argv0=None):
-    environ = {} if environ is None else environ
-    explicit = str(environ.get("MMS_COMMAND_NAME") or "").strip()
-    invoked = os.path.basename(str(argv0 if argv0 is not None else (sys.argv[0] if sys.argv else ""))).strip()
-    known_entrypoints = {"mms", "mmd", "mmf", "mmg", "mmm"}
-    if explicit and (explicit in known_entrypoints or invoked == explicit):
-        return explicit
-    if invoked in known_entrypoints:
-        return invoked
-    return primary_command
-
-
-def display_title(title="MMS", *, current_command_fn=None):
-    if current_command_fn is not None and current_command_fn() == "mmf":
-        return "MMF"
-    return title
-
-
-def normalize_config_sections(
-    cfg,
-    *,
-    ensure_provider_config,
-    ensure_account_config,
-    ensure_broker_config,
-    normalize_ui_config,
-    normalize_presets_config,
-    normalize_user_config,
-    normalize_cache_config,
-):
-    cfg, _ = ensure_provider_config(cfg)
-    cfg, _ = ensure_account_config(cfg)
-    cfg, _ = ensure_broker_config(cfg)
-    cfg, _ = normalize_ui_config(cfg)
-    cfg, _ = normalize_presets_config(cfg)
-    cfg, _ = normalize_user_config(cfg)
-    cfg, _ = normalize_cache_config(cfg)
-    return cfg
-
-
-def load_runtime_config(*, load_config, apply_local_overrides):
-    cfg = load_config()
-    if cfg is None:
-        return None
-    return apply_local_overrides(cfg)
+from mms_commands.command_metadata import (
+    resolve_ui_language,
+    extract_global_lang,
+    current_command,
+    display_title,
+)
 
 
 from mms_config.snapshot_guard import (
@@ -488,6 +381,7 @@ from mms_commands.network_helpers import (
     runtime_should_disable_ambient_env,
     runtime_httpx_kwargs,
     detect_working_base_url,
+    http_status_is_success,
     validate_proxy_url,
     test_proxy_connectivity,
     prompt_validated_proxy_fields,
@@ -496,10 +390,14 @@ from mms_commands.network_helpers import (
 
 
 from mms_commands.config_normalizers import (
+    normalize_ui_config,
+    normalize_user_role,
     normalize_preset_entry,
     normalize_presets_config,
     normalize_user_config,
     normalize_cache_config,
+    normalize_config_sections,
+    load_runtime_config,
     probe_async_refresh_after,
     probe_async_min_interval,
 )
@@ -548,15 +446,6 @@ from mms_commands.runtime_source_helpers import (
     list_runtime_sources,
     choose_runtime_source,
 )
-
-
-def normalize_user_role(role, *, mode_all, mode_recommended):
-    value = str(role or "").strip()
-    if value in {"dev", "all", mode_all}:
-        return mode_all
-    if value in {"ops", "recommended", mode_recommended}:
-        return mode_recommended
-    return mode_all
 
 
 from mms_commands.launch_selection import (
@@ -616,14 +505,6 @@ from mms_commands.launch_trace import (
     runtime_source_kind_label,
     trace_runtime_choice,
 )
-
-
-def http_status_is_success(value):
-    try:
-        status_code = int(str(value or "").strip())
-    except (TypeError, ValueError):
-        return False
-    return 200 <= status_code < 300
 
 
 from mms_commands.config_handlers import (

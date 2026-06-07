@@ -103,6 +103,14 @@ def detect_working_base_url(
     return None
 
 
+def http_status_is_success(value):
+    try:
+        status_code = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return False
+    return 200 <= status_code < 300
+
+
 def validate_proxy_url(proxy_url, *, supported_proxy_schemes):
     proxy_url = str(proxy_url or "").strip()
     if not proxy_url:
