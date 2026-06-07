@@ -35,6 +35,11 @@
       --gap-md: 16px;
       --gap-lg: 24px;
       --gap-xl: 32px;
+
+      /* Foreground colors that sit on saturated active backgrounds.
+         Pinned to white for now; centralize so dark-mode flips one place. */
+      --fg-on-accent: #ffffff;
+      --fg-on-warn: #1a1a1a;
     }
 
     *, *::before, *::after { box-sizing: border-box; }
@@ -201,7 +206,7 @@
       color: var(--fg);
       font-size: 14px;
       font-weight: 500;
-      transition: all .15s ease;
+      transition: background .15s ease, color .15s ease, box-shadow .15s ease;
       display: flex;
       flex-direction: column;
       gap: 1px;
@@ -211,7 +216,7 @@
     }
     .navbtn.active {
       background: var(--accent);
-      color: #fff;
+      color: var(--fg-on-accent);
       box-shadow: var(--shadow-sm);
     }
     .navbtn small {
@@ -221,7 +226,7 @@
       color: var(--muted);
       margin-top: 1px;
     }
-    .navbtn.active small { color: rgba(255,255,255,0.82); }
+    .navbtn.active small { color: var(--fg-on-accent); opacity: .82; }
 
     /* ===== Panels ===== */
     .panel {
@@ -791,9 +796,30 @@
     input:hover, select:hover, textarea:hover {
       border-color: color-mix(in oklch, var(--fg) 25%, var(--border));
     }
-    input:focus, select:focus, textarea:focus {
+    input:focus-visible, select:focus-visible, textarea:focus-visible,
+    button:focus-visible, .button:focus-visible,
+    .navbtn:focus-visible, .tab-btn:focus-visible, .provider-form-tab:focus-visible,
+    .settings-tab:focus-visible, .provider-item:focus-visible, .ui-mode-toggle button:focus-visible,
+    .chip:focus-visible, .cap-pill:focus-visible, .tag:focus-visible, .check:focus-visible,
+    .pill:focus-visible, .filterbar button:focus-visible, .settings-diagnostic-card:focus-visible,
+    .asset-mini-action:focus-visible, .gate-risk:focus-visible, .copy-gate-command:focus-visible,
+    summary:focus-visible, .session-card:focus-visible, .asset-card:focus-visible {
       outline: none;
       border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    /* Buttons/chips keep their own bg in active; only swap border/shadow on keyboard focus */
+    button:focus-visible, .button:focus-visible {
+      background: var(--accent);
+    }
+    .navbtn:focus-visible {
+      background: var(--fg-soft);
+    }
+    .tab-btn:focus-visible, .provider-form-tab:focus-visible, .settings-tab:focus-visible {
+      color: var(--fg);
+    }
+    /* Card containers: outline on keyboard focus only (cards have no border by default) */
+    .session-card:focus-visible, .asset-card:focus-visible, .settings-diagnostic-card:focus-visible {
       box-shadow: 0 0 0 3px var(--accent-soft);
     }
     textarea {
@@ -842,7 +868,7 @@
       border-radius: 999px;
       padding: 9px 17px;
       background: var(--accent);
-      color: #fff;
+      color: var(--fg-on-accent);
       font-weight: 600;
       cursor: pointer;
       text-decoration: none;
@@ -913,7 +939,7 @@
       background: var(--surface);
       cursor: pointer;
       font-size: 13px;
-      transition: all .15s ease;
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
     }
     .provider-item:hover {
       border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
@@ -983,7 +1009,7 @@
       font-weight: 500;
       color: var(--muted);
       cursor: pointer;
-      transition: all .15s ease;
+      transition: color .15s ease, background .15s ease, border-color .15s ease;
       border-radius: var(--radius) var(--radius) 0 0;
       box-shadow: none;
       margin-bottom: -1.5px;
@@ -1049,7 +1075,7 @@
       border-color: var(--fg);
       box-shadow: 0 8px 20px rgba(15, 23, 42, .12);
     }
-    .provider-form-tab.active .muted { color: rgba(255,255,255,.72); }
+    .provider-form-tab.active .muted { color: var(--fg-on-accent); opacity: .72; }
     .provider-form-panel { display: none; }
     .provider-form-panel.active {
       display: block;
@@ -1269,7 +1295,7 @@
       border-color: var(--fg);
       color: var(--surface);
     }
-    .settings-tab.active span { color: rgba(255,255,255,.74); }
+    .settings-tab.active span { color: var(--fg-on-accent); opacity: .74; }
     .settings-tab-panel { display: none; }
     .settings-tab-panel.active {
       display: block;
@@ -1348,11 +1374,21 @@
     }
     .account-advanced summary::marker { color: var(--muted); }
     .settings-compat-note {
-      border-left: 3px solid var(--warn);
-      background: color-mix(in oklch, var(--warn) 10%, transparent);
+      border-left: 1px solid color-mix(in oklch, var(--warn) 50%, transparent);
+      background: var(--warn-soft);
       padding: 10px 12px;
       border-radius: var(--radius);
       color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+    }
+    .settings-compat-note strong {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: color-mix(in oklch, var(--warn) 70%, var(--fg));
+      margin-bottom: 4px;
     }
 
     .model-section {
@@ -1840,7 +1876,7 @@
     .oc-advanced summary::marker { color: var(--muted); }
 
     .oc-order-note {
-      border-left: 3px solid var(--accent);
+      border-left: 1px solid color-mix(in oklch, var(--accent) 50%, transparent);
       background: var(--accent-soft);
       border-radius: 0 var(--radius) var(--radius) 0;
       padding: 12px 16px;
@@ -1848,6 +1884,17 @@
       color: var(--fg);
       font-size: 13px;
       line-height: 1.6;
+    }
+    .oc-order-note::before {
+      content: "INFO";
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: color-mix(in oklch, var(--accent) 70%, var(--fg));
+      margin-right: 8px;
+      vertical-align: 1px;
     }
     .oc-enabled {
       width: auto;
@@ -1872,7 +1919,7 @@
     }
     .filterbar button.active {
       background: var(--accent);
-      color: #fff;
+      color: var(--fg-on-accent);
       box-shadow: var(--shadow-sm);
     }
 
@@ -3258,7 +3305,8 @@
       box-shadow: 0 8px 18px oklch(18% 0.018 240 / .12);
     }
     .settings-tab.active span {
-      color: rgba(255,255,255,.72);
+      color: var(--fg-on-accent);
+      opacity: .72;
     }
     .settings-tab-panel.active {
       padding: 14px;
@@ -4006,5 +4054,15 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+    }
+
+    /* ===== Reduced motion ===== */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
       }
     }
