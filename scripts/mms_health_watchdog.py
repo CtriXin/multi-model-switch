@@ -654,6 +654,8 @@ def endpoint_checks(
         provider_id = str(route.get("provider_id") or "").strip()
         if not provider_id:
             continue
+        if not (providers.get(provider_id) or {}).get("enabled", True):
+            continue
         if role == "primary":
             primary_providers.add(provider_id)
         endpoint = provider_models_endpoint(provider_id, route, providers)
@@ -685,6 +687,8 @@ def model_presence_checks(
         if allowed and model not in allowed:
             continue
         provider_id = str(route.get("provider_id") or "").strip()
+        if not (providers.get(provider_id) or {}).get("enabled", True):
+            continue
         endpoint = provider_models_endpoint(provider_id, route, providers)
         if not endpoint:
             continue
