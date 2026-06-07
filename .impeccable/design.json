@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-07T00:00:00Z",
+  "title": "Design System: MMS Config Center",
+  "extensions": {
+    "colorMeta": {
+      "bg":          { "role": "neutral", "displayName": "Paper Cool",     "canonical": "oklch(96.5% 0.007 230)" },
+      "surface":     { "role": "neutral", "displayName": "Surface White",  "canonical": "oklch(100% 0 0)" },
+      "fg":          { "role": "neutral", "displayName": "Cool Ink",       "canonical": "oklch(16% 0.015 250)" },
+      "muted":       { "role": "neutral", "displayName": "Slate Mute",     "canonical": "oklch(49% 0.018 245)" },
+      "border":      { "role": "neutral", "displayName": "Hairline",       "canonical": "oklch(87% 0.011 235)" },
+      "accent":      { "role": "primary", "displayName": "Signal Green",   "canonical": "oklch(52% 0.17 154)" },
+      "accent-hover":{ "role": "primary", "displayName": "Hover Signal",   "canonical": "oklch(42% 0.17 154)" },
+      "ok":          { "role": "semantic","displayName": "Pass Green",     "canonical": "oklch(55% 0.14 145)" },
+      "warn":        { "role": "semantic","displayName": "Warn Amber",     "canonical": "oklch(68% 0.11 80)" },
+      "danger":      { "role": "semantic","displayName": "Fail Red",       "canonical": "oklch(55% 0.18 25)" }
+    },
+    "typographyMeta": {
+      "display":     { "displayName": "Display",  "purpose": "Page h1 only; clamp 26-42px, weight 700, letter-spacing -0.025em, text-wrap balance." },
+      "body":        { "displayName": "Body",     "purpose": "Default sans body 14px / 1.55, max 75ch, text-wrap pretty." },
+      "mono":        { "displayName": "Mono",     "purpose": "Code, command, capability key, inline API key, textarea, table of numbers." },
+      "mono-label":  { "displayName": "Mono Kicker", "purpose": "Uppercase + letter-spacing label, machine-style. Only legitimate use of uppercase in the system." }
+    },
+    "shadows": [
+      { "name": "shadow-sm", "value": "0 1px 2px oklch(0% 0 0 / 0.04)", "purpose": "Default hover lift on card / pill / tab / chip / button." },
+      { "name": "shadow",    "value": "0 1px 3px oklch(0% 0 0 / 0.06), 0 1px 2px oklch(0% 0 0 / 0.04)", "purpose": "Active state: navbtn.active, panel:hover, session-card:hover." },
+      { "name": "shadow-md", "value": "0 4px 6px -1px oklch(0% 0 0 / 0.05), 0 2px 4px -2px oklch(0% 0 0 / 0.04)", "purpose": "Modal / popover / asset-pending-inner lift." },
+      { "name": "shadow-lg", "value": "0 10px 15px -3px oklch(0% 0 0 / 0.05), 0 4px 6px -4px oklch(0% 0 0 / 0.03)", "purpose": "Reserved for hero overlays (onboarding, full-bleed dialog). Currently unused." }
+    ],
+    "motion": [
+      { "name": "ease-out-quick",  "value": "ease 0.15s",            "purpose": "Default hover / color / border-color transitions." },
+      { "name": "ease-out-press",  "value": "ease 0.06s",            "purpose": "Button transform translateY(-1px) on hover." },
+      { "name": "ease-toast",      "value": "cubic-bezier(.4,0,.2,1) 0.35s", "purpose": "Toast and panel settle in/out." },
+      { "name": "ease-cap",        "value": "cubic-bezier(.32,.72,0,1) 0.18s","purpose": "Cap pill / chip state change." }
+    ],
+    "breakpoints": [
+      { "name": "narrow",  "value": "640px"  },
+      { "name": "default", "value": "1024px" },
+      { "name": "wide",    "value": "1440px" }
+    ],
+    "exceptions": {
+      "border-stripe-allowed": [
+        { "selector": ".session-card", "size": "5px", "purpose": "Per-CLI identifier stripe (codex / claude / others)." },
+        { "selector": ".session-message.is-user", "size": "4px right", "purpose": "Per-role chat stripe (user role)." },
+        { "selector": ".session-message.is-assistant", "size": "4px left", "purpose": "Per-role chat stripe (assistant role)." },
+        { "selector": ".session-message.is-system, .is-tool", "size": "4px left", "purpose": "Per-role chat stripe (system / tool role); muted-mix color." },
+        { "selector": ".settings-route-card", "size": "3px", "purpose": "Per-state status stripe (locked / ready / report / default)." }
+      ],
+      "backdrop-blur-allowed": [
+        { "selector": "header", "value": "blur(12px)", "purpose": "Sticky top header." },
+        { "selector": ".side", "value": "blur(10px)", "purpose": "Sticky sidebar." },
+        { "selector": ".asset-pending-inner", "value": "blur(14px)", "purpose": "Fixed-bottom pending bar." }
+      ],
+      "hex-escape-tokens": [
+        { "selector": ".session-card.is-codex", "value": "#183a68", "purpose": "Codex CLI brand identifier." },
+        { "selector": ".session-card.is-claude", "value": "#bd3f35", "purpose": "Claude CLI brand identifier." },
+        { "selector": ".session-message.is-user", "value": "#15895e", "purpose": "User role stripe + kicker." },
+        { "selector": ".session-message.is-assistant", "value": "#2563c8", "purpose": "Assistant role stripe + kicker." }
+      ]
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Default CTA, Signal Green pill.",
+      "html": "<button class=\"button primary\" type=\"button\">Save plan</button>",
+      "css": ".button.primary { background: oklch(52% 0.17 154); color: #fff; border: 0; border-radius: 999px; padding: 9px 17px; font-weight: 600; font-size: 14px; transition: background 0.15s ease, transform 0.06s ease, box-shadow 0.15s ease; } .button.primary:hover { background: oklch(42% 0.17 154); transform: translateY(-1px); } .button.primary:focus-visible { outline: none; box-shadow: 0 0 0 3px oklch(52% 0.17 154 / 0.10); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Tonal secondary action, fg-ghost bg.",
+      "html": "<button class=\"button secondary\" type=\"button\">Revert</button>",
+      "css": ".button.secondary { background: oklch(16% 0.015 250 / 0.08); color: oklch(16% 0.015 250); border: 0; border-radius: 999px; padding: 9px 17px; font-weight: 600; font-size: 14px; transition: background 0.15s ease; } .button.secondary:hover { background: oklch(16% 0.015 250 / 0.12); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-emphasis action; transparent + 1px border.",
+      "html": "<button class=\"button ghost\" type=\"button\">Cancel</button>",
+      "css": ".button.ghost { background: transparent; color: oklch(16% 0.015 250); border: 1px solid oklch(87% 0.011 235); border-radius: 999px; padding: 9px 17px; font-weight: 600; font-size: 14px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action; only for irreversible operations.",
+      "html": "<button class=\"button danger\" type=\"button\">Delete provider</button>",
+      "css": ".button.danger { background: oklch(55% 0.18 25); color: #fff; border: 0; border-radius: 999px; padding: 9px 17px; font-weight: 600; font-size: 14px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Form field; surface bg, 1px hairline, accent focus ring.",
+      "html": "<input class=\"input\" type=\"text\" placeholder=\"Provider name\" />",
+      "css": ".input { background: oklch(100% 0 0); color: oklch(16% 0.015 250); border: 1px solid oklch(87% 0.011 235); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 14px; } .input:focus { outline: none; border-color: oklch(52% 0.17 154); box-shadow: 0 0 0 3px oklch(52% 0.17 154 / 0.10); }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Section container; flat at rest, shadow on hover.",
+      "html": "<section class=\"panel\"><h2>Section title</h2><p>Body content.</p></section>",
+      "css": ".panel { background: oklch(100% 0 0); color: oklch(16% 0.015 250); border: 1px solid oklch(87% 0.011 235); border-radius: 14px; padding: 28px; transition: box-shadow 0.2s ease; } .panel:hover { box-shadow: 0 1px 3px oklch(0% 0 0 / 0.06), 0 1px 2px oklch(0% 0 0 / 0.04); } .panel h2 { font-size: 18px; font-weight: 700; margin: 0 0 12px; }"
+    },
+    {
+      "name": "Nav Button",
+      "kind": "nav",
+      "refersTo": "navbtn",
+      "description": "Sidebar nav row; title + sub, full width.",
+      "html": "<button class=\"navbtn active\" type=\"button\"><div class=\"t\">Channel</div><div class=\"s\">Providers &amp; routes</div></button>",
+      "css": ".navbtn { width: 100%; text-align: left; background: transparent; color: oklch(16% 0.015 250); border: 0; border-radius: 10px; padding: 10px 12px; transition: all 0.15s ease; } .navbtn:hover { background: oklch(16% 0.015 250 / 0.05); } .navbtn.active { background: oklch(16% 0.015 250 / 0.08); box-shadow: 0 1px 3px oklch(0% 0 0 / 0.06), 0 1px 2px oklch(0% 0 0 / 0.04); } .navbtn .t { font-size: 14px; font-weight: 500; } .navbtn .s { font-size: 11.5px; font-weight: 400; color: oklch(49% 0.018 245); }"
+    },
+    {
+      "name": "Capability Pill",
+      "kind": "chip",
+      "refersTo": "cap-pill",
+      "description": "Model capability tag, mono font.",
+      "html": "<span class=\"cap-pill active\">VISION</span>",
+      "css": ".cap-pill { display: inline-block; background: oklch(16% 0.015 250 / 0.05); color: oklch(16% 0.015 250); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; font-weight: 650; padding: 5px 10px; border-radius: 999px; transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease; } .cap-pill.active { background: oklch(52% 0.17 154 / 0.10); color: oklch(42% 0.17 154); }"
+    },
+    {
+      "name": "Status Pill (ok / warn)",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Status badge; ok uses Pass Green soft, warn uses Warn Amber soft.",
+      "html": "<span class=\"pill ok\">OK</span><span class=\"pill warn\">STALE</span>",
+      "css": ".pill { display: inline-block; font-size: 12px; padding: 5px 11px; border-radius: 999px; } .pill.ok { background: oklch(55% 0.14 145 / 0.12); color: oklch(35% 0.14 145); } .pill.warn { background: oklch(68% 0.11 80 / 0.12); color: oklch(45% 0.11 80); }"
+    },
+    {
+      "name": "Session Card",
+      "kind": "card",
+      "refersTo": null,
+      "description": "Per-CLI session summary; 5px left stripe is the per-CLI identifier exception.",
+      "html": "<article class=\"session-card is-codex\"><header><span class=\"session-cli\">CODEX</span><time>12:04</time></header><h3>Refactor routing table</h3></article>",
+      "css": ".session-card { background: oklch(100% 0 0); border: 1px solid oklch(87% 0.011 235); border-left: 5px solid #183a68; border-radius: 10px; padding: 14px 16px; transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease; } .session-card:hover { box-shadow: 0 1px 3px oklch(0% 0 0 / 0.06), 0 1px 2px oklch(0% 0 0 / 0.04); } .session-card.is-claude { border-left-color: #bd3f35; } .session-cli { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #183a68; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Console Probe",
+    "overview": "MMS 的 Web 配置表面是控制台，不是仪表板。它面向的是一个已经知道自己在干什么的用户——他不需要被教育、不需要被哄、不需要被一层'漂亮玻璃'挡住。设计的态度是：把诊断字段、路由参数、CLI 状态、session 摘要按密度平铺出来，绿色高亮像示波器上的脉冲，告诉用户'这里是活的'，其他地方安静地退到冷灰里。失败也要讲清楚哪个字段、什么值、为什么非法。",
+    "keyCharacteristics": [
+      "Cool neutrals only; accent is OKLCH 52% 0.17 154 (cool green), not emerald, not warm",
+      "Shadow is state-only: flat at rest, raised only on hover/active/focus/pending",
+      "Backdrop-blur limited to header / sidebar / pending bar; cards never",
+      "Color is never the only signal: status always pairs with mono kicker text or position",
+      "Three font families ceiling: sans body + mono labels + display (sans + weight)",
+      "All panel-level numbers use font-variant-numeric: tabular-nums",
+      "Uppercase + letter-spacing only on mono machine labels; never on body or titles"
+    ],
+    "rules": [
+      { "name": "The Cool-Only Rule",     "section": "colors",      "body": "All custom hues must fall within hue 140-250. The single exception is --warn (hue 80). No warm cream / sand / paper / parchment / bone / linen / wheat / biscuit / ivory / flour." },
+      { "name": "The One-Aid Rule",        "section": "colors",      "body": "Primary brand accent (Signal Green) is used on <=15% of any visible surface. Rarity is the point." },
+      { "name": "The Double-Signal Rule",  "section": "colors",      "body": "Any ok / warn / danger state must pair color with mono kicker text (e.g. 'WARN: stale config') or position marker. Color is never the only signal." },
+      { "name": "The Uppercase-Mono Rule", "section": "typography",  "body": "uppercase + letter-spacing only on mono font labels. Body, headlines, card titles forbid uppercase." },
+      { "name": "The Three-Family Ceiling","section": "typography",  "body": "Never exceed three font families. Display = body + weight. Never introduce a serif or humanist secondary." },
+      { "name": "The Tabular-Numbers Rule","section": "typography",  "body": "Any panel-level number must use font-variant-numeric: tabular-nums." },
+      { "name": "The Flat-At-Rest Rule",   "section": "elevation",   "body": "Resting surfaces have zero shadow. Use 1px hairline border + 0.005-0.015 chroma surface tint, not shadow, for depth." },
+      { "name": "The State-Only-Shadow Rule","section": "elevation", "body": "Shadows serve interaction states only (hover, active, focus, modal lift). Never use shadow for ambient depth on resting cards." }
+    ],
+    "dos": [
+      "Do use OKLCH throughout; no HSL / RGB-as-design-token / scattered #hex (except the four documented per-CLI and per-role hex escape tokens).",
+      "Do pair color with mono kicker text. 'WARN: stale config' beats a lone amber dot.",
+      "Do use font-variant-numeric: tabular-nums on any panel-level number.",
+      "Do use text-wrap: balance on h1-h3 and text-wrap: pretty on long prose.",
+      "Do keep body line length <=75ch and body padding above 16px.",
+      "Do keep h1 to one per page; if you need a second hero, you've already failed.",
+      "Do use 1px hairline borders for separation, not 2-3px colored stripes on neutral cards.",
+      "Do use --shadow-sm and --shadow for hover/active state response, not for ambient depth.",
+      "Do cap body font-size at 14px and section title at 18px. Display max 56px (only in .settings-command semantic block).",
+      "Do expose route / provider / protocol / cache in the default state, not behind a 'Show details' toggle."
+    ],
+    "donts": [
+      "Don't use border-left or border-right greater than 1px as a colored accent on neutral cards, list items, callouts, or alerts. Two known exceptions (.session-card 5px, .session-message 4px) are per-CLI / per-role semantic stripes and stay; new violations are a hard fail.",
+      "Don't use background-clip: text + gradient background for emphasis. Use single solid color or weight.",
+      "Don't use backdrop-filter: blur decoratively on cards. Three known exceptions (header, .side, .asset-pending-inner) stay; new uses on cards / panels are a hard fail.",
+      "Don't use uppercase + letter-spacing on body text, headlines, or card titles. The mono-kicker uppercase pattern is the only allowed location.",
+      "Don't add '01 / 02 / 03' numbered section markers as a reflex. Use them only when the section is genuinely a sequence.",
+      "Don't add a SaaS-style eyebrow (ABOUT / PROCESS / PRICING all-caps, wide tracking) above every section. .settings-kicker is mono-machine, not decorative eyebrow.",
+      "Don't ship animations without a prefers-reduced-motion: reduce fallback. Current code is missing this (P1 audit item).",
+      "Don't ship interactive elements without :focus-visible styles. Currently only inputs have :focus rules; buttons / navbtns / chips / tabs are missing (P1 audit item).",
+      "Don't use box-shadow for ambient depth on resting cards. Use border + bg tint.",
+      "Don't use warm cream / sand / paper / parchment / bone / linen / wheat / biscuit / ivory / flour background hues.",
+      "Don't use the marketing-buzzword family: streamline / empower / supercharge / leverage / unleash / seamless / world-class / enterprise-grade / next-generation / cutting-edge / game-changer / mission-critical.",
+      "Don't use em dashes (—) or -- in body copy. Use commas, colons, semicolons, periods, or parentheses.",
+      "Don't use the 'big number, small label, gradient accent' hero-metric template.",
+      "Don't repeat the section title in the section body.",
+      "Don't default to dark mode; the cool-light baseline is the spec."
+    ]
+  }
+}
