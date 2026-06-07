@@ -280,8 +280,9 @@ def resolve_resume_target(
     split_cli_prefixed_resume_ref=split_cli_prefixed_resume_ref,
     resolve_codex_resume_ref,
     resolve_claude_resume_ref,
-    uuid_resume_cli_hint,
+    uuid_resume_cli_hint=None,
 ):
+    uuid_resume_cli_hint = uuid_resume_cli_hint or globals()["uuid_resume_cli_hint"]
     prefix_cli, ref = split_cli_prefixed_resume_ref(session_ref)
     cli_hint = prefix_cli or str(cli_hint or "auto").strip().lower()
     if cli_hint not in {"auto", "codex", "claude"}:
@@ -578,4 +579,3 @@ def handle_session_prune(
         remove_tree(session_home, ignore_errors=True)
         removed += 1
     console.print(f"[green]已删除 {removed} 个 stale MMS session[/green]")
-

@@ -518,83 +518,9 @@ from mms_commands.config_handlers import (
     handle_config_migrate,
     handle_provider_default_config,
     handle_provider_add_config,
-)
-
-
-def update_provider_model_overrides(
-    cfg,
-    provider_id,
-    *,
-    extra_models=None,
-    hidden_models=None,
-    models_endpoint=None,
-    normalize_model_id_list=normalize_model_id_list,
-    normalize_models_endpoint=normalize_models_endpoint,
-    normalize_provider,
-    save_config,
-    invalidate_probe_cache,
-    load_config,
-):
-    from mms_commands.config_handlers import update_provider_model_overrides as _impl
-
-    return _impl(
-        cfg,
-        provider_id,
-        extra_models=extra_models,
-        hidden_models=hidden_models,
-        models_endpoint=models_endpoint,
-        normalize_model_id_list=normalize_model_id_list,
-        normalize_models_endpoint=normalize_models_endpoint,
-        normalize_provider=normalize_provider,
-        save_config=save_config,
-        invalidate_probe_cache=invalidate_probe_cache,
-        load_config=load_config,
-    )
-
-
-def manage_provider_models(
-    cfg,
-    provider_id,
-    *,
-    ensure_rich,
-    resolve_provider_context,
-    probe_models,
-    model_source_label,
-    use_tui,
-    select_channel_action_tui,
-    clear_console,
-    display_provider_model_table,
-    pause_after_tui_report,
-    prompt_ask,
     update_provider_model_overrides,
-    panel_cls,
-    console,
-    normalize_model_id_list=normalize_model_id_list,
-    normalize_models_endpoint=normalize_models_endpoint,
-    refresh_all_provider_model_defaults=None,
-):
-    from mms_commands.config_handlers import manage_provider_models as _impl
-
-    return _impl(
-        cfg,
-        provider_id,
-        ensure_rich=ensure_rich,
-        resolve_provider_context=resolve_provider_context,
-        probe_models=probe_models,
-        model_source_label=model_source_label,
-        use_tui=use_tui,
-        select_channel_action_tui=select_channel_action_tui,
-        clear_console=clear_console,
-        display_provider_model_table=display_provider_model_table,
-        pause_after_tui_report=pause_after_tui_report,
-        prompt_ask=prompt_ask,
-        update_provider_model_overrides=update_provider_model_overrides,
-        panel_cls=panel_cls,
-        console=console,
-        normalize_model_id_list=normalize_model_id_list,
-        normalize_models_endpoint=normalize_models_endpoint,
-        refresh_all_provider_model_defaults=refresh_all_provider_model_defaults,
-    )
+    manage_provider_models,
+)
 
 
 from mms_commands.config_handlers import (
@@ -626,73 +552,15 @@ from mms_commands.session_handlers import (
     iter_codex_index_records,
     resolve_codex_resume_ref,
     resolve_claude_resume_ref,
+    resolve_resume_target,
     uuid_resume_cli_hint,
     resume_resolution_diagnostics,
     first_resume_model,
     session_resume_model,
+    resolve_resume_runtime_and_model,
     handle_resume_command,
     handle_session_prune,
 )
-
-
-def resolve_resume_target(
-    session_ref,
-    cli_hint="auto",
-    *,
-    split_cli_prefixed_resume_ref=split_cli_prefixed_resume_ref,
-    resolve_codex_resume_ref,
-    resolve_claude_resume_ref,
-    uuid_resume_cli_hint,
-):
-    from mms_commands.session_handlers import resolve_resume_target as _impl
-
-    return _impl(
-        session_ref,
-        cli_hint,
-        split_cli_prefixed_resume_ref=split_cli_prefixed_resume_ref,
-        resolve_codex_resume_ref=resolve_codex_resume_ref,
-        resolve_claude_resume_ref=resolve_claude_resume_ref,
-        uuid_resume_cli_hint=uuid_resume_cli_hint,
-    )
-
-
-def resolve_resume_runtime_and_model(
-    cfg,
-    cli,
-    args,
-    default_provider,
-    default_models,
-    session_record,
-    *,
-    get_scene_usage,
-    session_resume_model=session_resume_model,
-    resolve_last_used_runtime,
-    trace_runtime_choice,
-    choose_runtime_source,
-    resolve_model_name=resolve_model_name,
-    first_resume_model=first_resume_model,
-    uses_managed_entry,
-    runtime_with_launch_preferences,
-):
-    from mms_commands.session_handlers import resolve_resume_runtime_and_model as _impl
-
-    return _impl(
-        cfg,
-        cli,
-        args,
-        default_provider,
-        default_models,
-        session_record,
-        get_scene_usage=get_scene_usage,
-        session_resume_model=session_resume_model,
-        resolve_last_used_runtime=resolve_last_used_runtime,
-        trace_runtime_choice=trace_runtime_choice,
-        choose_runtime_source=choose_runtime_source,
-        resolve_model_name=resolve_model_name,
-        first_resume_model=first_resume_model,
-        uses_managed_entry=uses_managed_entry,
-        runtime_with_launch_preferences=runtime_with_launch_preferences,
-    )
 
 
 from mms_commands.standalone_handlers import (
