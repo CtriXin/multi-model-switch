@@ -9569,6 +9569,39 @@ def _link_claude_persistent_entry(session_claude_dir, entry, target):
     os.symlink(target, dst)
 
 
+def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entry_set):
+    """Merge entries from ~/.agents/{skills,commands} into the session .claude tree.
+
+    When ``~/.claude/skills/`` is a real directory (not a symlink), the existing
+    symlink-creation logic in ``_prepare_claude_session_tree`` skips it.  Skills
+    installed via ``install_global_commands.py`` live under ``~/.agents/skills/``
+    and would therefore never reach the overlay chain.  This helper symlinks
+    individual entries from ``~/.agents/{skills,commands}`` into the session
+    ``.claude/{skills,commands}`` directories so that they are picked up.
+    """
+    if not os.path.isdir(agents_dir):
+        return
+    for sub in ("skills", "commands"):
+        if sub not in allowed_entry_set:
+            continue
+        agents_sub = os.path.join(agents_dir, sub)
+        if not os.path.isdir(agents_sub):
+            continue
+        session_sub = os.path.join(session_claude_dir, sub)
+        if os.path.islink(session_sub):
+            continue
+        os.makedirs(session_sub, exist_ok=True)
+        for item in os.listdir(agents_sub):
+            dst = os.path.join(session_sub, item)
+            if os.path.exists(dst) or os.path.islink(dst):
+                continue
+            src = os.path.join(agents_sub, item)
+            try:
+                os.symlink(src, dst)
+            except OSError:
+                pass
+
+
 def _prepare_claude_session_tree(
     session_home,
     session_claude_dir,
@@ -9596,6 +9629,7 @@ def _prepare_claude_session_tree(
     ]
     allowed_source_entry_set = set(allowed_source_entries)
     scoped_claude_dir = source_claude_dir or _real_user_path(".claude")
+    agents_dir = _real_user_path(".agents")
     if os.path.islink(session_claude_dir):
         os.unlink(session_claude_dir)
     os.makedirs(session_claude_dir, exist_ok=True)
@@ -9617,6 +9651,7 @@ def _prepare_claude_session_tree(
             if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
                 continue
             os.symlink(src, dst)
+    _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_source_entry_set)
     for entry in CLAUDE_PERSISTENT_ENTRIES:
         dst = os.path.join(session_claude_dir, entry)
         target = str(
