@@ -4229,59 +4229,9 @@ def _config_command_adapters():
 
 def handle_config(cfg, args_rest):
     """处理 config 子命令"""
-    from mms_commands.tools import handle_config as handle_config_impl
+    from mms_config.core_command import handle_core_config_from_module
 
-    def _run_config_web(*args, **kwargs):
-        from mms_config.web import run_config_web
-
-        return run_config_web(*args, **kwargs)
-
-    config_adapters = _config_command_adapters()
-
-    return handle_config_impl(
-        cfg,
-        args_rest,
-        preferences_doc_path=PREFERENCES_DOC_PATH,
-        preference_paths=PREFERENCES_PATHS,
-        display_config=config_adapters["display_config"],
-        display_config_help=_display_config_help,
-        handle_config_migrate=_handle_config_migrate,
-        handle_config_file=config_adapters["handle_config_file"],
-        handle_config_validate=config_adapters["handle_config_validate"],
-        display_preferences_help=config_adapters["display_preferences_help"],
-        display_preferences_path=config_adapters["display_preferences_path"],
-        display_preferences_example=config_adapters["display_preferences_example"],
-        run_config_web=_run_config_web,
-        command_name=current_command(),
-        config_write_target_path=_config_write_target_path,
-        display_human_gate_help=config_adapters["display_human_gate_help"],
-        handle_config_get=config_adapters["handle_config_get"],
-        handle_config_set=config_adapters["handle_config_set"],
-        handle_config_unset=config_adapters["handle_config_unset"],
-        run_connect_wizard=run_connect_wizard,
-        handle_openrouter_extension_config=_handle_openrouter_extension_config,
-        display_adapter_registry=config_adapters["display_adapter_registry"],
-        display_providers=config_adapters["display_providers"],
-        handle_provider_default_config=_handle_provider_default_config,
-        handle_provider_add_config=_handle_provider_add_config,
-        handle_provider_edit_config=_handle_provider_edit_config,
-        handle_provider_rename_config=_handle_provider_rename_config,
-        handle_provider_remove_config=_handle_provider_remove_config,
-        handle_provider_credentials_config=_handle_provider_credentials_config,
-        display_accounts=config_adapters["display_accounts"],
-        handle_account_default_config=_handle_account_default_config,
-        handle_account_add_config=_handle_account_add_config,
-        handle_account_edit_config=_handle_account_edit_config,
-        handle_account_remove_config=_handle_account_remove_config,
-        handle_account_rename_config=_handle_account_rename_config,
-        handle_account_status_config=_handle_account_status_config,
-        handle_account_login_config=_handle_account_login_config,
-        display_usage_stats=config_adapters["display_usage_stats"],
-        resolve_provider_context=resolve_provider_context,
-        setup_provider_credentials=setup_provider_credentials,
-        handle_api_config=_handle_api_config,
-        console=console,
-    )
+    return handle_core_config_from_module(sys.modules[__name__], cfg, args_rest)
 
 
 def _handle_api_config(key_path, args_rest):

@@ -178,4 +178,59 @@ def build_config_command_adapters(
     }
 
 
-__all__ = ["build_config_command_adapters"]
+def handle_core_config_from_module(core, cfg, args_rest):
+    """Dispatch the legacy config command while preserving mms_core monkeypatch hooks."""
+    def _run_config_web(*args, **kwargs):
+        from mms_config.web import run_config_web
+
+        return run_config_web(*args, **kwargs)
+
+    config_adapters = core._config_command_adapters()
+
+    return command_tools.handle_config(
+        cfg,
+        args_rest,
+        preferences_doc_path=core.PREFERENCES_DOC_PATH,
+        preference_paths=core.PREFERENCES_PATHS,
+        display_config=config_adapters["display_config"],
+        display_config_help=core._display_config_help,
+        handle_config_migrate=core._handle_config_migrate,
+        handle_config_file=config_adapters["handle_config_file"],
+        handle_config_validate=config_adapters["handle_config_validate"],
+        display_preferences_help=config_adapters["display_preferences_help"],
+        display_preferences_path=config_adapters["display_preferences_path"],
+        display_preferences_example=config_adapters["display_preferences_example"],
+        run_config_web=_run_config_web,
+        command_name=core.current_command(),
+        config_write_target_path=core._config_write_target_path,
+        display_human_gate_help=config_adapters["display_human_gate_help"],
+        handle_config_get=config_adapters["handle_config_get"],
+        handle_config_set=config_adapters["handle_config_set"],
+        handle_config_unset=config_adapters["handle_config_unset"],
+        run_connect_wizard=core.run_connect_wizard,
+        handle_openrouter_extension_config=core._handle_openrouter_extension_config,
+        display_adapter_registry=config_adapters["display_adapter_registry"],
+        display_providers=config_adapters["display_providers"],
+        handle_provider_default_config=core._handle_provider_default_config,
+        handle_provider_add_config=core._handle_provider_add_config,
+        handle_provider_edit_config=core._handle_provider_edit_config,
+        handle_provider_rename_config=core._handle_provider_rename_config,
+        handle_provider_remove_config=core._handle_provider_remove_config,
+        handle_provider_credentials_config=core._handle_provider_credentials_config,
+        display_accounts=config_adapters["display_accounts"],
+        handle_account_default_config=core._handle_account_default_config,
+        handle_account_add_config=core._handle_account_add_config,
+        handle_account_edit_config=core._handle_account_edit_config,
+        handle_account_remove_config=core._handle_account_remove_config,
+        handle_account_rename_config=core._handle_account_rename_config,
+        handle_account_status_config=core._handle_account_status_config,
+        handle_account_login_config=core._handle_account_login_config,
+        display_usage_stats=config_adapters["display_usage_stats"],
+        resolve_provider_context=core.resolve_provider_context,
+        setup_provider_credentials=core.setup_provider_credentials,
+        handle_api_config=core._handle_api_config,
+        console=core.console,
+    )
+
+
+__all__ = ["build_config_command_adapters", "handle_core_config_from_module"]
