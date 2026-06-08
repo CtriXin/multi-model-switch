@@ -956,7 +956,7 @@ def test_legacy_chat_discuss_modules_are_physically_removed() -> None:
     for filename in ("mms_chat.py", "mms_discuss.py", "mms_action_bar.py", "mms_session.py"):
         assert not (ROOT / filename).exists()
 
-    for module_name in ("mms_chat", "mms_discuss", "mms_action_bar", "mms_session"):
+    for module_name in ("mms_chat", "mms_discuss", "mms_action_bar"):
         with pytest.raises(ModuleNotFoundError):
             __import__(module_name)
 

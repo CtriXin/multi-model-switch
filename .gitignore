@@ -86,6 +86,12 @@ apps/*/task_plan.md
 .ai/cache/
 .antigravitycli/
 .codegraph/
+.agents/
+.cursor/
+.gemini/
+.kiro/
+.opencode/
+.qoder/
 .sparkring/
 .worktrees/
 
