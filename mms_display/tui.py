@@ -9,6 +9,11 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from math import pow
+from mms_display.submodel_state import (
+    SubmodelProviderState,
+    format_age as _format_submodel_age,
+    format_ttfb as _format_submodel_ttfb,
+)
 from mms_runtime.i18n import pick as _L, get_language as _get_language
 from mms_runtime.state_io import resolve_mms_config_dir
 
@@ -799,317 +804,14 @@ def select_submodel_tui(
         return None
 
     sorted_models = _sort_model_entries_for_tui(models, family_name)
-    provider_options_cache = dict(provider_options or {})
-    try:
-        from mms_runtime.speed_stats import get_speed_entry as _get_speed_entry
-    except Exception:
-        _get_speed_entry = None
+    provider_state = SubmodelProviderState(
+        sorted_models,
+        provider_options=provider_options,
+        provider_options_loader=provider_options_loader,
+    )
 
-    # 当前每个模型的 provider 覆盖 (model_name -> provider info)
-    provider_overrides = {}
-    # provider priority 变更记录 (provider_id 或 provider_id||family -> new_priority)
-    priority_changes = {}
-
-    def _priority_change_key(opt):
-        if not isinstance(opt, dict):
-            return ""
-        pid = str(opt.get("provider_id", "")).strip()
-        if not pid:
-            return ""
-        family = str(
-            opt.get("priority_family")
-            or (opt.get("provider_ctx") or {}).get("priority_family")
-            or ""
-        ).strip()
-        return f"{pid}||{family}" if family else pid
-
-    def _effective_priority(opt):
-        change_key = _priority_change_key(opt)
-        if change_key and change_key in priority_changes:
-            return int(priority_changes[change_key])
-        return int((opt.get("provider_ctx") or {}).get("priority", 100) or 100)
-
-    def _provider_options_for_model(model_name):
-        model_key = str(model_name or "").strip()
-        if not model_key:
-            return []
-        if model_key in provider_options_cache:
-            return provider_options_cache[model_key]
-        if callable(provider_options_loader):
-            try:
-                provider_options_cache[model_key] = list(provider_options_loader(model_key) or [])
-            except Exception:
-                provider_options_cache[model_key] = []
-        else:
-            provider_options_cache[model_key] = []
-        return provider_options_cache[model_key]
-
-    def _provider_choices(m):
-        choices = []
-        seen = set()
-
-        current = {
-            "provider_name": m.get("provider_name", ""),
-            "provider_id": m.get("provider_id", ""),
-            "provider_ctx": m.get("provider_ctx", {}),
-        }
-        current_id = current.get("provider_id")
-        if current_id:
-            choices.append(current)
-            seen.add(current_id)
-
-        for opt in _provider_options_for_model(m["model"]):
-            pid = opt.get("provider_id", "")
-            if not pid or pid in seen:
-                continue
-            choices.append(opt)
-            seen.add(pid)
-
-        choices.sort(
-            key=lambda opt: (
-                -_effective_priority(opt),
-                opt.get("provider_name", ""),
-            )
-        )
-        return choices
-
-    def _active_provider_choice(m):
-        override = provider_overrides.get(m["model"])
-        if override:
-            return override
-        choices = _provider_choices(m)
-        if choices:
-            return choices[0]
-        return {
-            "provider_name": m.get("provider_name", ""),
-            "provider_id": m.get("provider_id", ""),
-            "provider_ctx": m.get("provider_ctx", {}),
-        }
-
-    def _get_provider_info(m):
-        """返回当前生效的 (provider_name, provider_id, priority)"""
-        active = _active_provider_choice(m)
-        ctx = active.get("provider_ctx", {})
-        name = active.get("provider_name", "")
-        pid = active.get("provider_id", "")
-        pri = _effective_priority(active)
-        return name, pid, pri
-
-    def _get_result(m):
-        active = _active_provider_choice(m)
-        result = {
-            **m,
-            "provider_name": active.get("provider_name", ""),
-            "provider_id": active.get("provider_id", ""),
-            "provider_ctx": {
-                **(active.get("provider_ctx", {}) or {}),
-                "priority": _effective_priority(active),
-            },
-        }
-        if priority_changes:
-            result["priority_changes"] = dict(priority_changes)
-        return result
-
-    def _record_priority_swap(m, chosen):
-        new_pid = chosen.get("provider_id", "")
-        orig_pid = m.get("provider_id", "")
-        if not new_pid or not orig_pid or new_pid == orig_pid:
-            return
-
-        orig_pri = _effective_priority({
-            "provider_id": orig_pid,
-            "provider_ctx": m.get("provider_ctx", {}),
-        })
-        new_base = _effective_priority(chosen)
-
-        # 当前系统语义是数字越大越优先；手动选中的 provider 应提升到默认前面。
-        # 若用户已经用 +/- 显式调过任一通道，保留用户值，不在确认时覆盖。
-        new_key = _priority_change_key(chosen)
-        orig_key = _priority_change_key({
-            "provider_id": orig_pid,
-            "provider_ctx": m.get("provider_ctx", {}),
-        })
-        if new_key:
-            priority_changes.setdefault(new_key, min(200, max(new_base, orig_pri) + 5))
-        if orig_key:
-            priority_changes.setdefault(orig_key, max(0, min(orig_pri, new_base) - 5))
-
-    def _adjust_provider_priority(opt, delta):
-        change_key = _priority_change_key(opt)
-        if not change_key:
-            return
-        current = _effective_priority(opt)
-        priority_changes[change_key] = max(0, min(200, current + delta))
-
-    def _format_ttfb(value):
-        if isinstance(value, (int, float)):
-            return f"{value:.0f}ms"
-        return "-"
-
-    def _format_age(seconds):
-        if not isinstance(seconds, (int, float)):
-            return "-"
-        if seconds < 3600:
-            minutes = max(1, int(seconds // 60) or 1)
-            return f"{minutes}m"
-        if seconds < 86400:
-            return f"{int(seconds // 3600)}h"
-        return f"{int(seconds // 86400)}d"
-
-    def _build_family_autosort_plan():
-        if not callable(_get_speed_entry):
-            return {
-                "items": [],
-                "changes": {},
-                "can_apply": False,
-                "summary": _L("本地测速模块不可用", "Local speed stats unavailable"),
-            }
-
-        aggregated = {}
-        for m in sorted_models:
-            model_name = str(m.get("model") or "").strip()
-            if not model_name:
-                continue
-            seen = set()
-            for opt in _provider_choices(m):
-                change_key = _priority_change_key(opt)
-                if not change_key or change_key in seen:
-                    continue
-                seen.add(change_key)
-                entry = aggregated.setdefault(
-                    change_key,
-                    {
-                        "change_key": change_key,
-                        "provider_id": opt.get("provider_id", ""),
-                        "provider_name": opt.get("provider_name", ""),
-                        "provider_ctx": dict(opt.get("provider_ctx") or {}),
-                        "current_priority": _effective_priority(opt),
-                        "available_models": 0,
-                        "fresh_samples": 0,
-                        "fresh_ttfb_sum": 0.0,
-                        "fresh_models": 0,
-                        "stale_samples": 0,
-                        "stale_ttfb_sum": 0.0,
-                        "stale_models": 0,
-                        "warming_models": 0,
-                        "best_age_seconds": None,
-                    },
-                )
-                entry["available_models"] += 1
-                speed = _get_speed_entry(model_name, provider=opt.get("provider_ctx"))
-                if not isinstance(speed, dict):
-                    continue
-                ttfb = speed.get("ttfb_avg_ms")
-                samples = int(speed.get("samples") or 0)
-                age_seconds = speed.get("age_seconds")
-                if isinstance(age_seconds, (int, float)):
-                    best_age = entry.get("best_age_seconds")
-                    if best_age is None or age_seconds < best_age:
-                        entry["best_age_seconds"] = float(age_seconds)
-                if speed.get("warming_up"):
-                    entry["warming_models"] += 1
-                if not isinstance(ttfb, (int, float)) or samples <= 0:
-                    continue
-                if speed.get("is_stale"):
-                    entry["stale_samples"] += samples
-                    entry["stale_ttfb_sum"] += float(ttfb) * samples
-                    entry["stale_models"] += 1
-                else:
-                    entry["fresh_samples"] += samples
-                    entry["fresh_ttfb_sum"] += float(ttfb) * samples
-                    entry["fresh_models"] += 1
-
-        items = []
-        for entry in aggregated.values():
-            fresh_avg = (
-                round(entry["fresh_ttfb_sum"] / entry["fresh_samples"], 2)
-                if entry["fresh_samples"] > 0
-                else None
-            )
-            stale_avg = (
-                round(entry["stale_ttfb_sum"] / entry["stale_samples"], 2)
-                if entry["stale_samples"] > 0
-                else None
-            )
-            if fresh_avg is not None:
-                state = "fresh"
-                effective_ttfb = fresh_avg
-                samples = entry["fresh_samples"]
-            elif stale_avg is not None:
-                state = "stale"
-                effective_ttfb = stale_avg
-                samples = entry["stale_samples"]
-            else:
-                state = "none"
-                effective_ttfb = None
-                samples = 0
-            measured_models = int(entry["fresh_models"] + entry["stale_models"])
-            item = dict(entry)
-            item.update(
-                {
-                    "state": state,
-                    "effective_ttfb_ms": effective_ttfb,
-                    "samples": samples,
-                    "measured_models": measured_models,
-                    "sort_key": (
-                        {"fresh": 0, "stale": 1, "none": 2}.get(state, 2),
-                        float(effective_ttfb) if isinstance(effective_ttfb, (int, float)) else float("inf"),
-                        -measured_models,
-                        -samples,
-                        str(entry.get("provider_name") or ""),
-                        str(entry.get("provider_id") or ""),
-                    ),
-                }
-            )
-            items.append(item)
-
-        items.sort(key=lambda item: item["sort_key"])
-        base_priority = max((int(item.get("current_priority", 100) or 100) for item in items), default=100)
-        changes = {}
-        measured_count = 0
-        for idx, item in enumerate(items):
-            suggested = max(0, min(200, base_priority - idx * 5))
-            item["suggested_priority"] = suggested
-            item["priority_diff"] = suggested - int(item.get("current_priority", 100) or 100)
-            if item.get("state") != "none":
-                measured_count += 1
-            if suggested != int(item.get("current_priority", 100) or 100):
-                changes[item["change_key"]] = suggested
-
-        if not items:
-            summary = _L("当前 family 没有可排序的通道", "No sortable channels in this family")
-        elif measured_count < 2:
-            summary = _L(
-                "测速数据不足：至少需要 2 条通道有有效样本",
-                "Not enough speed samples: need at least two measured channels",
-            )
-        elif not changes:
-            summary = _L("当前顺序已经和测速结果一致", "Current order already matches speed stats")
-        else:
-            summary = _L(
-                "规则：fresh 优先，其次 stale；同状态按 TTFB 更快优先；无数据放最后",
-                "Rule: fresh first, then stale; faster TTFB wins; no-data goes last",
-            )
-
-        return {
-            "items": items,
-            "changes": changes,
-            "can_apply": measured_count >= 2 and bool(changes),
-            "summary": summary,
-            "measured_count": measured_count,
-        }
-
-    def _apply_family_autosort():
-        plan = _build_family_autosort_plan()
-        if plan.get("can_apply"):
-            priority_changes.update(plan.get("changes") or {})
-            for model_entry in sorted_models:
-                active = _active_provider_choice(model_entry)
-                _sync_provider_cursor(model_entry, active.get("provider_id", ""))
-        return plan
-
-    def _show_family_autosort_modal(stdscr):
-        plan = _build_family_autosort_plan()
+    def _show_family_autosort_modal(stdscr, sync_provider_cursor=None):
+        plan = provider_state.build_family_autosort_plan()
         items = list(plan.get("items") or [])
         selected_idx = 0
         scroll = 0
@@ -1193,11 +895,11 @@ def select_submodel_tui(
                     if item.get("available_models"):
                         provider_text += f" ({item['measured_models']}/{item['available_models']})"
                     pri_text = f"{int(item.get('current_priority', 0) or 0)}->{int(item.get('suggested_priority', 0) or 0)}"
-                    age_text = _format_age(item.get("best_age_seconds"))
+                    age_text = _format_submodel_age(item.get("best_age_seconds"))
 
                     _safe_addstr(stdscr, y, px + 2, provider_text, attr, max_w=30)
                     _safe_addstr(stdscr, y, px + 34, state_text, state_attr | attr, max_w=10)
-                    _safe_addstr(stdscr, y, px + 46, _format_ttfb(item.get("effective_ttfb_ms")), attr, max_w=8)
+                    _safe_addstr(stdscr, y, px + 46, _format_submodel_ttfb(item.get("effective_ttfb_ms")), attr, max_w=8)
                     _safe_addstr(stdscr, y, px + 56, str(item.get("samples", 0) or 0), attr, max_w=8)
                     _safe_addstr(stdscr, y, px + 64, age_text, curses.A_DIM | attr, max_w=4)
                     pri_attr = (curses.color_pair(5) if item.get("priority_diff", 0) > 0 else curses.color_pair(4)) | attr
@@ -1224,7 +926,7 @@ def select_submodel_tui(
                 selected_idx = (selected_idx + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER):
                 if plan.get("can_apply"):
-                    return _apply_family_autosort()
+                    return provider_state.apply_family_autosort(sync_provider_cursor)
             elif key in (27, ord('q'), ord('Q'), curses.KEY_LEFT):
                 return None
 
@@ -1253,7 +955,7 @@ def select_submodel_tui(
         def _sync_provider_cursor(m, pid):
             if not m or not pid:
                 return
-            choices = _provider_choices(m)
+            choices = provider_state.provider_choices(m)
             for i, opt in enumerate(choices):
                 if opt.get("provider_id") == pid:
                     provider_idx_map[m["model"]] = i
@@ -1297,7 +999,7 @@ def select_submodel_tui(
                 _safe_addstr(stdscr, row, px, "-" * total_w, fc)
                 row += 1
 
-                has_changes = bool(provider_overrides or priority_changes)
+                has_changes = provider_state.has_changes
                 title = f"{family_name}" + (" *" if has_changes else "")
                 _safe_addstr(stdscr, row, ll, title, fc | curses.A_BOLD)
                 cnt_info = f"{len(filtered)}/{len(sorted_models)}" if search_query else str(len(sorted_models))
@@ -1328,8 +1030,8 @@ def select_submodel_tui(
                     scroll = idx - visible + 1
 
                 current_model = filtered[idx] if filtered else None
-                current_choices = _provider_choices(current_model) if current_model else []
-                active_provider_id = _get_provider_info(current_model)[1] if current_model else ""
+                current_choices = provider_state.provider_choices(current_model) if current_model else []
+                active_provider_id = provider_state.get_provider_info(current_model)[1] if current_model else ""
                 if current_model:
                     model_name = current_model["model"]
                     if model_name not in provider_idx_map:
@@ -1389,7 +1091,7 @@ def select_submodel_tui(
                         and provider_idx_map.get(current_model["model"], 0) == opt_index
                     )
                     opt_name = opt.get("provider_name", "")
-                    opt_pri = _effective_priority(opt)
+                    opt_pri = provider_state.effective_priority(opt)
                     tag_text = f"{opt_name} P:{opt_pri}"
                     if opt.get("provider_id") == active_provider_id:
                         tag_text += " *"
@@ -1472,27 +1174,27 @@ def select_submodel_tui(
                 elif key in (ord('+'), ord('=')) and not search_query:
                     if focus == "provider" and current_model and current_choices:
                         chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
-                        _adjust_provider_priority(chosen, +5)
+                        provider_state.adjust_provider_priority(chosen, +5)
                         _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
                 elif key in (ord('-'), ord('_')) and not search_query:
                     if focus == "provider" and current_model and current_choices:
                         chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
-                        _adjust_provider_priority(chosen, -5)
+                        provider_state.adjust_provider_priority(chosen, -5)
                         _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
                 elif key in (ord('a'), ord('A')) and not search_query:
-                    _show_family_autosort_modal(stdscr)
+                    _show_family_autosort_modal(stdscr, _sync_provider_cursor)
                 elif key in (10, 13, curses.KEY_ENTER):
                     if filtered:
                         m = filtered[idx]
                         if focus == "provider" and current_choices:
                             chosen = current_choices[provider_idx_map.get(m["model"], 0)]
-                            provider_overrides[m["model"]] = chosen
-                            _record_priority_swap(m, chosen)
+                            provider_state.provider_overrides[m["model"]] = chosen
+                            provider_state.record_priority_swap(m, chosen)
                         else:
-                            override = provider_overrides.get(m["model"])
+                            override = provider_state.provider_overrides.get(m["model"])
                             if override:
-                                _record_priority_swap(m, override)
-                        return _get_result(m)
+                                provider_state.record_priority_swap(m, override)
+                        return provider_state.get_result(m)
                 elif key == 27:
                     if search_query:
                         search_query = ""
