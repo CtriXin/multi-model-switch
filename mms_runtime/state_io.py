@@ -27,7 +27,8 @@ def utc_now_z(*, now_fn=None):
 
 
 def resolve_real_user_home(env=None):
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
         raw = str(env.get(key) or "").strip()
         if raw:
@@ -60,7 +61,8 @@ def _path_from_env_value(raw):
 
 def resolve_current_workdir(env=None, fallback=None):
     """Resolve project/workspace cwd without silently trusting real HOME."""
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     try:
         cwd = os.getcwd()
         if cwd:
@@ -90,7 +92,8 @@ def resolve_current_workdir(env=None, fallback=None):
 
 
 def resolve_mms_config_dir(env=None):
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     explicit_root = str(env.get("MMS_CONFIG_ROOT") or "").strip()
     if explicit_root:
         return _path_from_env_value(explicit_root)
@@ -115,7 +118,8 @@ def resolve_mms_config_dir(env=None):
 
 
 def mms_config_root_source(env=None):
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     if str(env.get("MMS_CONFIG_ROOT") or "").strip():
         return "MMS_CONFIG_ROOT"
     if str(env.get("MMS_CONFIG_DIR") or "").strip():
@@ -126,12 +130,14 @@ def mms_config_root_source(env=None):
 
 
 def mms_config_root_is_explicit(env=None):
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     return bool(str(env.get("MMS_CONFIG_ROOT") or env.get("MMS_CONFIG_DIR") or "").strip())
 
 
 def mms_config_root_mode(config_dir=None, env=None):
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     marker = str(env.get("MMS_PREVIEW_MODE") or env.get("MMS_COMMAND_NAME") or "").strip().lower()
     root = os.path.normpath(str(config_dir or resolve_mms_config_dir(env)))
     if marker == "mmf" or os.path.basename(root) == "mms-next":
@@ -142,7 +148,8 @@ def mms_config_root_mode(config_dir=None, env=None):
 
 
 def mms_config_root_status(command=None, config_dir=None, env=None):
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     root = os.path.normpath(str(config_dir or resolve_mms_config_dir(env)))
     real_home = resolve_real_user_home(env)
     return {

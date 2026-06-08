@@ -451,7 +451,7 @@ def rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", 
     try:
         from mms_runtime.state_io import mms_config_root_status
 
-        if mms_config_root_status(config_dir=root).get("mode") == "preview":
+        if mms_config_root_status(config_dir=root, env={}).get("mode") == "preview":
             return []
     except Exception:
         pass

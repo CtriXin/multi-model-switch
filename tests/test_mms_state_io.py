@@ -30,3 +30,16 @@ def test_xdg_config_home_is_not_explicit_preview_root(tmp_path: Path) -> None:
     assert status["mode"] == "stable"
     assert status["explicit_root"] is False
     assert status["config_root"] == str(tmp_path / "xdg" / "mms")
+
+
+def test_empty_env_does_not_inherit_preview_root(tmp_path: Path) -> None:
+    from mms_runtime.state_io import mms_config_root_status
+
+    config_root = tmp_path / "stable-root"
+
+    status = mms_config_root_status(config_dir=config_root, env={})
+
+    assert status["mode"] == "stable"
+    assert status["root_source"] == "real_home"
+    assert status["explicit_root"] is False
+    assert status["config_root"] == str(config_root)
