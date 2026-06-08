@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Callable
 
 from mms_commands import tools as command_tools
@@ -136,4 +137,44 @@ def build_core_command_handlers(
     }
 
 
-__all__ = ["build_core_command_handlers"]
+def build_core_command_handlers_from_module(core) -> dict[str, Callable[..., Any]]:
+    """Build standalone command handlers from the mms_core module facade."""
+    def _inspect_runtime_exposure(cli, runtime):
+        from mms_launchers import inspect_runtime_exposure
+
+        return inspect_runtime_exposure(cli, runtime)
+
+    return build_core_command_handlers(
+        command_name=core.current_command(),
+        script_dir=os.path.join(os.path.dirname(os.path.abspath(core.__file__)), "scripts"),
+        load_command_config=core._load_command_config,
+        normalize_positive_seconds=core._normalize_positive_seconds,
+        ensure_provider_config=core._ensure_provider_config,
+        ensure_account_config=core._ensure_account_config,
+        normalize_user_config=core._normalize_user_config,
+        normalize_cache_config=core._normalize_cache_config,
+        save_config=core.save_config,
+        probe_async_refresh_after=core._PROBE_ASYNC_REFRESH_AFTER,
+        probe_async_min_interval=core._PROBE_ASYNC_MIN_INTERVAL,
+        load_config=core.load_config,
+        default_config=core._default_config,
+        config_write_target_path=core._config_write_target_path,
+        build_config_guard_snapshot=core._build_config_guard_snapshot,
+        config_snapshot_path=core._config_snapshot_path,
+        load_json_snapshot=core._load_json_snapshot,
+        snapshot_diff_lines=core._snapshot_diff_lines,
+        iso_now=core._iso_now,
+        snapshot_digest=core._snapshot_digest,
+        write_json_snapshot=core._write_json_snapshot,
+        config_root_for_logs=lambda: core._config_guard_root_dir(core._config_write_target_path()),
+        cli_names=list(core.CLI_NAMES),
+        ensure_provider_credentials=core.ensure_provider_credentials,
+        ensure_models_ready=core.ensure_models_ready,
+        choose_runtime_source=core._choose_runtime_source,
+        inspect_runtime_exposure=_inspect_runtime_exposure,
+        table_cls=core.Table,
+        console=core.console,
+    )
+
+
+__all__ = ["build_core_command_handlers", "build_core_command_handlers_from_module"]
