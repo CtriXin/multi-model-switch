@@ -522,6 +522,36 @@ def handle_resume_command(
     launch_with_tracking(cli, model_info, runtime, once=bool(args.once), extra_args=extra_args)
 
 
+def handle_core_resume_command_from_module(
+    core,
+    argv,
+    preloaded_command_cfg=None,
+    bootstrap_cfg=None,
+    lang_override=None,
+):
+    """Dispatch `mms resume` using live mms_core wrapper hooks."""
+    return handle_resume_command(
+        argv,
+        preloaded_command_cfg=preloaded_command_cfg,
+        bootstrap_cfg=bootstrap_cfg,
+        lang_override=lang_override,
+        command_name=core.current_command(),
+        resolve_resume_target=core._resolve_resume_target,
+        load_config=core.load_config,
+        setup_wizard=core.setup_wizard,
+        resolve_ui_language=core._resolve_ui_language,
+        apply_local_overrides=core.apply_local_overrides,
+        set_language=core.set_language,
+        ensure_provider_credentials=core.ensure_provider_credentials,
+        ensure_models_ready=core.ensure_models_ready,
+        resolve_resume_runtime_and_model=core._resolve_resume_runtime_and_model,
+        launch_with_tracking=core._launch_with_tracking,
+        path_isdir=core.os.path.isdir,
+        chdir=core.os.chdir,
+        console=core.console,
+    )
+
+
 def handle_session_prune(
     cli_name,
     *,

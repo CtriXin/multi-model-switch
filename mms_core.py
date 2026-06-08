@@ -4818,27 +4818,14 @@ def _resolve_resume_runtime_and_model(
 
 
 def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, lang_override=None):
-    from mms_commands.tools import handle_resume_command as handle_resume_command_impl
+    from mms_commands.session_handlers import handle_core_resume_command_from_module
 
-    return handle_resume_command_impl(
+    return handle_core_resume_command_from_module(
+        sys.modules[__name__],
         argv,
         preloaded_command_cfg=preloaded_command_cfg,
         bootstrap_cfg=bootstrap_cfg,
         lang_override=lang_override,
-        command_name=current_command(),
-        resolve_resume_target=_resolve_resume_target,
-        load_config=load_config,
-        setup_wizard=setup_wizard,
-        resolve_ui_language=_resolve_ui_language,
-        apply_local_overrides=apply_local_overrides,
-        set_language=set_language,
-        ensure_provider_credentials=ensure_provider_credentials,
-        ensure_models_ready=ensure_models_ready,
-        resolve_resume_runtime_and_model=_resolve_resume_runtime_and_model,
-        launch_with_tracking=_launch_with_tracking,
-        path_isdir=os.path.isdir,
-        chdir=os.chdir,
-        console=console,
     )
 
 
