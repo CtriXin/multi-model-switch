@@ -9,6 +9,19 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from math import pow
+from mms_display.confirm_state import (
+    agent_pack_text as _confirm_agent_pack_text,
+    build_confirm_detail_lines as _build_confirm_detail_lines,
+    caveman_level_text as _confirm_caveman_level_text,
+    collect_preview_items as _collect_confirm_preview_items,
+    confirm_label as _confirm_label,
+    confirm_model_display as _confirm_model_display,
+    confirm_panel_empty_message as _confirm_panel_empty_message,
+    confirm_panel_title as _confirm_panel_title,
+    initial_disabled_surfaces as _confirm_initial_disabled_surfaces,
+    normalize_caveman_level as _normalize_confirm_caveman_level,
+    supports_claude_1m_toggle as _supports_claude_1m_toggle,
+)
 from mms_display.submodel_state import (
     SubmodelProviderState,
     format_age as _format_submodel_age,
@@ -2157,277 +2170,11 @@ def confirm_tui(
     thinking_enabled: bool，仅 GPT / 已验证 domestic thinking 路径有效
     reasoning_effort: str，仅 GPT / 支持 effort 的路径有效
     """
-    def _model_tokens(info):
-        values = []
-        if isinstance(info, dict):
-            values.extend(str(v or "") for k, v in info.items() if k != "subagent")
-        else:
-            values.append(str(info or ""))
-        normalized = []
-        for item in values:
-            value = str(item or "").strip().lower()
-            if "/" in value:
-                value = value.rsplit("/", 1)[-1]
-            if value:
-                normalized.append(value)
-        return normalized
-
-    def _is_gpt_like_token(token):
-        return token.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-"))
-
-    def _supports_domestic_thinking_token(token):
-        if token.startswith(("glm", "kimi", "k2.5", "k2.6", "minimax", "deepseek")):
-            return True
-        if token.startswith(("mimo", "qwen-coder", "qwen3-coder")):
-            return False
-        if token.startswith("qwen"):
-            return token.startswith(("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max"))
-        return False
-
-    def _supports_domestic_effort_token(token):
-        return token.startswith("deepseek")
-
-    def _normalize_caveman_level(value):
-        raw = str(value or "").strip().lower().replace("_", "-")
-        if raw in {"light", "lite", "low"}:
-            return "light"
-        if raw in {"standard", "normal", "medium"}:
-            return "standard"
-        if raw in {"full", "ultra", "high"}:
-            return "full"
-        return "light"
-
-    def _caveman_level_text(value):
-        value = str(value or "").strip().lower()
-        if value == "disable":
-            return _L("关闭", "Off")
-        if value == "standard":
-            return "Standard"
-        if value == "full":
-            return "Full"
-        return "Light"
-
-    def _supports_claude_1m_toggle(info):
-        values = []
-        if isinstance(info, dict):
-            values.extend(str(v or "") for k, v in info.items() if k != "subagent")
-        else:
-            values.append(str(info or ""))
-        for item in values:
-            lower = item.strip().lower()
-            if lower.startswith("claude-") and "haiku" not in lower and ("opus" in lower or "sonnet" in lower):
-                return True
-        return False
-
-    def _confirm_label(label):
-        mapping = {
-            "CLI": _L("客户端", "CLI"),
-            "Model": _L("模型", "Model"),
-            "Launch": _L("启动", "Launch"),
-            "Bypass": _L("绕过审批", "Bypass"),
-            "Caveman": "Caveman",
-            "NSR": "NSR",
-            "Thinking": _L("思考", "Thinking"),
-            "Effort": _L("强度", "Effort"),
-            "Agent Pack": _L("能力包", "Agent Pack"),
-            "ECC": "ECC",
-            "OMC": "OMC",
-            "URL": _L("地址", "URL"),
-            "Key": _L("密钥", "Key"),
-            "Active": _L("激活", "Active"),
-            "Preset": _L("预设", "Preset"),
-            "CLI source": _L("CLI 来源", "CLI source"),
-            "Source": _L("来源", "Source"),
-            "Proxy": _L("代理", "Proxy"),
-            "TZ": "TZ",
-            "IPv4": "IPv4",
-            "Slot": _L("槽位", "Slot"),
-            "Session": _L("会话", "Session"),
-            "Email": _L("邮箱", "Email"),
-            "UserID": _L("用户 ID", "User ID"),
-            "OrgID": _L("组织 ID", "Org ID"),
-            "DNS": "DNS",
-            "Check": _L("检查", "Check"),
-            "IPv4Egress": _L("IPv4 出口", "IPv4 egress"),
-            "IPv6Egress": _L("IPv6 出口", "IPv6 egress"),
-            "Reach": _L("目标", "Reach"),
-            "Leak": _L("泄漏", "Leak"),
-            "Score": _L("评分", "Score"),
-            "Sessions": _L("会话数", "Sessions"),
-            "Profile": _L("画像", "Profile"),
-            "Fake": _L("伪上游", "Fake"),
-        }
-        return mapping.get(str(label or ""), str(label or ""))
-
-    def _confirm_panel_title(panel_key):
-        mapping = {
-            "summary": _L("摘要", "Summary"),
-            "mcp": "MCP",
-            "skills": _L("技能", "Skills"),
-            "hooks": _L("钩子", "Hooks"),
-        }
-        return mapping.get(str(panel_key or ""), str(panel_key or ""))
-
-    def _confirm_panel_empty_message(panel_key):
-        allow_execution_surfaces = True
-        if isinstance(preview_catalog, dict):
-            allow_execution_surfaces = bool(preview_catalog.get("allow_execution_surfaces", True))
-        if not allow_execution_surfaces:
-            mapping = {
-                "mcp": _L("当前启动路径不会注入托管 MCP。", "This launch path does not inject managed MCP."),
-                "skills": _L("当前启动路径不会注入托管技能。", "This launch path does not inject managed skills."),
-                "hooks": _L("当前启动路径不会注入托管钩子。", "This launch path does not inject managed hooks."),
-            }
-            return mapping.get(str(panel_key or ""), _L("当前面板没有可展示内容。", "No managed content for this panel."))
-        mapping = {
-            "mcp": _L("当前没有可预览的 MCP。", "No managed MCP to preview."),
-            "skills": _L("当前没有可预览的技能。", "No managed skills to preview."),
-            "hooks": _L("当前没有可预览的钩子。", "No managed hooks to preview."),
-        }
-        return mapping.get(str(panel_key or ""), _L("当前面板没有可展示内容。", "Nothing to show on this panel."))
-
-    def _collect_preview_items(panel_key, *, caveman_enabled=False, nsr_enabled=False, agent_pack="none"):
-        panel_key = str(panel_key or "").strip()
-        if not isinstance(preview_catalog, dict):
-            return []
-        sections = preview_catalog.get(panel_key)
-        if not isinstance(sections, dict):
-            return []
-        items = []
-        seen = set()
-        for scope in ("always",):
-            for item in sections.get(scope) or []:
-                if not isinstance(item, dict):
-                    if not isinstance(item, (list, tuple)) or len(item) < 2:
-                        continue
-                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
-                title = str(item.get("title") or "").strip()
-                summary = str(item.get("summary") or "").strip()
-                details = []
-                for detail in item.get("details") or []:
-                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
-                        continue
-                    label = str(detail[0] or "").strip()
-                    value = str(detail[1] or "").strip()
-                    if label and value:
-                        details.append((label, value))
-                signature = (title, summary, tuple(details))
-                disable_key = str(item.get("disable_key") or title).strip()
-                if title and signature not in seen:
-                    seen.add(signature)
-                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
-        if caveman_enabled:
-            for item in sections.get("caveman") or []:
-                if not isinstance(item, dict):
-                    if not isinstance(item, (list, tuple)) or len(item) < 2:
-                        continue
-                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
-                title = str(item.get("title") or "").strip()
-                summary = str(item.get("summary") or "").strip()
-                details = []
-                for detail in item.get("details") or []:
-                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
-                        continue
-                    label = str(detail[0] or "").strip()
-                    value = str(detail[1] or "").strip()
-                    if label and value:
-                        details.append((label, value))
-                signature = (title, summary, tuple(details))
-                disable_key = str(item.get("disable_key") or title).strip()
-                if title and signature not in seen:
-                    seen.add(signature)
-                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
-        if nsr_enabled:
-            for item in sections.get("nsr") or []:
-                if not isinstance(item, dict):
-                    if not isinstance(item, (list, tuple)) or len(item) < 2:
-                        continue
-                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
-                title = str(item.get("title") or "").strip()
-                summary = str(item.get("summary") or "").strip()
-                details = []
-                for detail in item.get("details") or []:
-                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
-                        continue
-                    label = str(detail[0] or "").strip()
-                    value = str(detail[1] or "").strip()
-                    if label and value:
-                        details.append((label, value))
-                signature = (title, summary, tuple(details))
-                disable_key = str(item.get("disable_key") or title).strip()
-                if title and signature not in seen:
-                    seen.add(signature)
-                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
-        pack_key = str(agent_pack or "none").strip().lower()
-        if pack_key in {"ecc", "omc"}:
-            for item in sections.get(pack_key) or []:
-                if not isinstance(item, dict):
-                    if not isinstance(item, (list, tuple)) or len(item) < 2:
-                        continue
-                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
-                title = str(item.get("title") or "").strip()
-                summary = str(item.get("summary") or "").strip()
-                details = []
-                for detail in item.get("details") or []:
-                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
-                        continue
-                    label = str(detail[0] or "").strip()
-                    value = str(detail[1] or "").strip()
-                    if label and value:
-                        details.append((label, value))
-                signature = (title, summary, tuple(details))
-                disable_key = str(item.get("disable_key") or title).strip()
-                if title and signature not in seen:
-                    seen.add(signature)
-                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
-        return items
-
-    if isinstance(model_info, dict):
-        model_display = ", ".join(f"{k}={v}" for k, v in model_info.items()
-                                  if k != "subagent")
-    else:
-        model_display = str(model_info)
-
-    detail_lines = []
-    if env_vars:
-        preferred_keys = [
-            ("ANTHROPIC_BASE_URL", "URL"),
-            ("OPENAI_BASE_URL", "URL"),
-            ("ANTHROPIC_AUTH_TOKEN", "Key"),
-            ("OPENAI_API_KEY", "Key"),
-            ("GEMINI_API_KEY", "Key"),
-            ("MMS_ACTIVE_MODEL", "Active"),
-            ("MMS_ACTIVE_PRESET", "Preset"),
-            ("MMS_ACTIVE_CLI", "CLI source"),
-        ]
-        seen = set()
-        for env_key, label in preferred_keys:
-            if env_key in env_vars:
-                value = env_vars.get(env_key, "")
-                if "key" in env_key.lower() or "token" in env_key.lower() or "auth" in env_key.lower():
-                    value = value[:4] + "****" + value[-4:] if len(value) > 8 else "****"
-                detail_lines.append((_confirm_label(label), value, "detail"))
-                seen.add(env_key)
-        for env_key, value in env_vars.items():
-            if env_key in seen:
-                continue
-            upper_key = env_key.upper()
-            if any(token in upper_key for token in ("BASE_URL", "API_KEY", "AUTH_TOKEN", "ACTIVE_", "MODEL")):
-                if "key" in env_key.lower() or "token" in env_key.lower() or "auth" in env_key.lower():
-                    value = value[:4] + "****" + value[-4:] if len(value) > 8 else "****"
-                label = env_key[:6] + "…" if len(env_key) > 7 else env_key
-                detail_lines.append((label, value, "detail"))
-        detail_lines = detail_lines[:4]
-    if context_lines:
-        for item in context_lines:
-            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                continue
-            raw_label = str(item[0])
-            detail_lines.append((_confirm_label(raw_label), str(item[1]), "fake" if raw_label == "Fake" else "detail"))
-    detail_lines = detail_lines[:10]
+    model_display = _confirm_model_display(model_info)
+    detail_lines = _build_confirm_detail_lines(env_vars, context_lines)
 
     profile_caps = _confirm_profile_capabilities(model_info, runtime=runtime)
-    model_tokens = profile_caps["tokens"] or _model_tokens(model_info)
+    model_tokens = profile_caps["tokens"] or _confirm_model_tokens(model_info)
     has_bypass = cli in ("codex", "claude", "opencode", "agy")
     has_reasoning_controls = cli in ("codex", "claude")
     has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
@@ -2457,44 +2204,9 @@ def confirm_tui(
     has_agent_pack = len(pack_options) > 1
     pack_key = _ECC_TOGGLE_KEY
     caveman_options = ["disable", "light", "standard", "full"]
-    initial_caveman_level = _normalize_caveman_level(caveman_level_default)
+    initial_caveman_level = _normalize_confirm_caveman_level(caveman_level_default)
     if not (has_caveman and caveman_enabled_default):
         initial_caveman_level = "disable"
-
-    def _agent_pack_text(value):
-        value = str(value or "none").strip().lower()
-        if value == "ecc":
-            return _L("ECC · 工程 workflow / rules / quality hooks", "ECC · engineering workflow / rules / quality hooks")
-        if value == "omc":
-            return _L("OMC · orchestration runtime / team / verify loop", "OMC · orchestration runtime / team / verify loop")
-        return _L("关闭", "Off")
-
-    def _initial_disabled_surfaces():
-        payload = (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else {}
-        payload = payload if isinstance(payload, dict) else {}
-        result = {"mcp": set(), "skills": set(), "hooks": set()}
-        aliases = {
-            "mcp": "mcp",
-            "mcps": "mcp",
-            "mcp_servers": "mcp",
-            "skills": "skills",
-            "skill": "skills",
-            "hooks": "hooks",
-            "hook": "hooks",
-        }
-        for raw_key, raw_values in payload.items():
-            key = aliases.get(str(raw_key or "").strip().lower())
-            if key not in result:
-                continue
-            if isinstance(raw_values, str):
-                raw_values = [raw_values]
-            if not isinstance(raw_values, (list, tuple, set)):
-                continue
-            for item in raw_values:
-                value = str(item or "").strip()
-                if value:
-                    result[key].add(value)
-        return result
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -2515,7 +2227,7 @@ def confirm_tui(
         effort_mode = effort_default
         panel_index = 0
         preview_selection = {"mcp": 0, "skills": 0, "hooks": 0}
-        preview_disabled = _initial_disabled_surfaces()
+        preview_disabled = _confirm_initial_disabled_surfaces(runtime)
         disable_mode = False
 
         def _disabled_payload():
@@ -2560,7 +2272,7 @@ def confirm_tui(
                 one_m_text = _L("开启", "On") if claude_1m_mode else _L("关闭", "Off")
                 info_lines.append(("1M", f"[M] {one_m_text}", "one_m"))
             if has_caveman:
-                caveman_text = _caveman_level_text(caveman_level)
+                caveman_text = _confirm_caveman_level_text(caveman_level)
                 info_lines.append((_confirm_label("Caveman"), f"[C] {caveman_text}", "caveman"))
             if has_nsr:
                 nsr_text = _L("开启", "On") if nsr_mode else _L("关闭", "Off")
@@ -2571,7 +2283,7 @@ def confirm_tui(
             if has_effort:
                 info_lines.append((_confirm_label("Effort"), f"[E] {effort_mode.upper()}", "effort"))
             if has_agent_pack:
-                info_lines.append((_confirm_label("Agent Pack"), f"[{pack_key}] {_agent_pack_text(agent_pack)}", "agent_pack"))
+                info_lines.append((_confirm_label("Agent Pack"), f"[{pack_key}] {_confirm_agent_pack_text(agent_pack)}", "agent_pack"))
 
             panels = [
                 {
@@ -2583,7 +2295,8 @@ def confirm_tui(
             ]
             if isinstance(preview_catalog, dict):
                 for panel_key in ("mcp", "skills", "hooks"):
-                    preview_items = _collect_preview_items(
+                    preview_items = _collect_confirm_preview_items(
+                        preview_catalog,
                         panel_key,
                         caveman_enabled=_caveman_enabled(),
                         nsr_enabled=nsr_mode,
@@ -2595,7 +2308,7 @@ def confirm_tui(
                             "title": _confirm_panel_title(panel_key),
                             "mode": "list",
                             "items": preview_items,
-                            "empty_message": _confirm_panel_empty_message(panel_key),
+                            "empty_message": _confirm_panel_empty_message(panel_key, preview_catalog),
                         }
                     )
 
@@ -2800,7 +2513,7 @@ def confirm_tui(
                     effort_mode,
                     _disabled_payload(),
                     nsr_mode,
-                    _normalize_caveman_level(caveman_level),
+                    _normalize_confirm_caveman_level(caveman_level),
                 )
             elif key in (ord('b'), ord('B')):
                 return ("b", False, False, False, "none", True, effort_default, {}, False)
