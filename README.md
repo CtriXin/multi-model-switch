@@ -33,7 +33,7 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
 
-当前版本轨道：Stable/Main 继续 `3.x Stable`；Dev / `mmf` 是 `4.0.0-dev` / `4.0 Dev Preview`；Canary / `mmg` 是 `4.0.0-canary` / `4.0 Canary Preview`。小步迭代用 git commit hash 追踪，不为每个小 commit 递增正式 semver；`5.0` 暂不使用。
+当前版本轨道：Stable/Main 是 `3.4.z`；Dev / `mmf` 是 `3.5.z`；Canary / `mmg` 是 `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
 
 维护者本地开发命令矩阵：`mms` 是公开安装副本；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。普通用户不需要配置这些 worktree 命令，只需要使用安装器提供的 channel 参数。
 
@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ### 固定到某个 release 或分支
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.3.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.4.0
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 ```
 

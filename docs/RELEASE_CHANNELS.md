@@ -27,15 +27,17 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 
 ## 版本轨道
 
-当前版本语义按 channel track 表达，不要求每个小步 commit 都改正式 semver：
+当前版本语义按 channel track 表达。正式 tag/release 使用固定分支轨道：
 
 | Channel | Version track | 说明 |
 |---|---|---|
-| Stable / Main | `3.x Stable` | 公开稳定安装线；继续用正式 `v3.x.y` tag / release 表达可安装版本。 |
-| Dev / `mmf` | `4.0.0-dev` / `4.0 Dev Preview` | 4.0 预览开发线；承载 WebUI-first、preview DB/config v2、launcher 瘦身等能力。 |
-| Canary / `mmg` | `4.0.0-canary` / `4.0 Canary Preview` | 4.0 金丝雀实验线；比 Dev 更激进，仍以小 commit + git hash 支持回滚。 |
+| Stable / Main | `3.4.z` | 公开稳定安装线；继续用正式 `v3.4.z` tag / release 表达可安装版本。 |
+| Dev / `mmf` | `3.5.z` | 开发中稳定线；承载 WebUI-first、preview DB/config v2、launcher 瘦身等能力。 |
+| Canary / `mmg` | `3.6.z` | 金丝雀实验线；比 Dev 更激进，仍以小 commit + git hash 支持回滚。 |
 
-不要把当前 Canary 叫 `5.0`。`5.0` 留给未来真正的大破坏边界，例如 4.0 稳定迁移完成后再重构 launcher/runtime 公共 API。
+`z` 是每个 channel 自己的 release 计数：如果 release 只覆盖一个 commit，就按该 commit `z+1`；如果 release 覆盖一组已验证 commits，就作为一次复合 release 只 `z+1` 一次。未 tag 的日常小步 commit 仍用 git hash 追踪，不单独占用正式 release 号。
+
+不要把当前 Canary 叫 `5.0`。`5.0` 留给未来真正的大破坏边界，例如 3.6 金丝雀线验证完成后再重构 launcher/runtime 公共 API。
 
 ## 当前过渡策略
 
@@ -100,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 精确 pin：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.3.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.4.0
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref dev
 ```
 

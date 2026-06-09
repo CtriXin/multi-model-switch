@@ -25,7 +25,13 @@ It helps you:
 
 ## Current Version
 
-Current stable release: `v3.3.1`
+Current branch release tracks:
+
+- Stable / `main`: `3.4.z` (current stable branch tag: `v3.4.0`)
+- Dev / `mmf`: `3.5.z`
+- Canary / `mmg`: `3.6.z`
+
+Patch `z` is channel-local. A single-commit release increments `z` once; a composite release covering multiple validated commits also increments `z` once.
 
 Stable target branch: `main` after the current catch-up window.
 
@@ -87,7 +93,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Exact pin when needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.3.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.4.0
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
 ```
 
