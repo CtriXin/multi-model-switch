@@ -39,6 +39,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
 DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 12
 DEFAULT_REMIND_SECONDS = 1800
+_SKIP_WATCHDOG_HOSTS = frozenset({"chat.adsconflux.xyz"})
 WATCHDOG_DIR_NAME = "health-watchdog"
 STATE_FILE_NAME = "state.json"
 LATEST_FILE_NAME = "latest.json"
@@ -660,6 +661,8 @@ def endpoint_checks(
             primary_providers.add(provider_id)
         endpoint = provider_models_endpoint(provider_id, route, providers)
         if not endpoint:
+            continue
+        if urllib.parse.urlsplit(endpoint).hostname in _SKIP_WATCHDOG_HOSTS:
             continue
         seen.setdefault((provider_id, endpoint), (route, endpoint))
 
