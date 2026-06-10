@@ -712,7 +712,7 @@ def _strip_image_blocks(value, *, parent_key=""):
         if changed and parent_key == "content" and not cleaned:
             cleaned.append({
                 "type": "text",
-                "text": "[MMS removed image input; see vision sidecar summary appended to this request.]",
+                "text": _VISION_SIDECAR_REMOVED_IMAGE_TEXT,
             })
         return cleaned, changed
     return value, False
@@ -725,6 +725,111 @@ def _messages_without_images(messages):
             continue
         next_message, _ = _strip_image_blocks(copy.deepcopy(message))
         cleaned.append(next_message)
+    return cleaned
+
+
+_VISION_SIDECAR_REMOVED_IMAGE_TEXT = "[MMS removed image input; see vision sidecar summary appended to this request.]"
+_VISION_SIDECAR_NOTE_PREFIX = "[MMS vision sidecar by "
+
+
+def _strip_vision_sidecar_text(text):
+    if not isinstance(text, str):
+        return text, False
+    cleaned = text
+    changed = False
+    if _VISION_SIDECAR_REMOVED_IMAGE_TEXT in cleaned:
+        cleaned = cleaned.replace(_VISION_SIDECAR_REMOVED_IMAGE_TEXT, "")
+        changed = True
+    marker = cleaned.find(_VISION_SIDECAR_NOTE_PREFIX)
+    if marker != -1:
+        cleaned = cleaned[:marker]
+        changed = True
+    if changed:
+        cleaned = cleaned.rstrip()
+    return cleaned, changed
+
+
+def _strip_vision_sidecar_artifacts(value, *, parent_key=""):
+    if isinstance(value, dict):
+        if value.get("type") == "text":
+            cleaned_text, changed = _strip_vision_sidecar_text(str(value.get("text") or ""))
+            if changed and not cleaned_text.strip():
+                return None, True
+            if changed:
+                updated = copy.deepcopy(value)
+                updated["text"] = cleaned_text
+                return updated, True
+            return copy.deepcopy(value), False
+        changed = False
+        cleaned = {}
+        for key, child in value.items():
+            next_child, child_changed = _strip_vision_sidecar_artifacts(child, parent_key=str(key))
+            changed = changed or child_changed
+            if child_changed and next_child is None:
+                continue
+            cleaned[key] = next_child
+        if value.get("type") == "tool_result" and "content" not in cleaned:
+            return None, True
+        return cleaned, changed
+    if isinstance(value, list):
+        changed = False
+        cleaned = []
+        for item in value:
+            next_item, item_changed = _strip_vision_sidecar_artifacts(item, parent_key=parent_key)
+            changed = changed or item_changed
+            if item_changed and next_item is None:
+                continue
+            cleaned.append(next_item)
+        if parent_key == "content" and not cleaned:
+            return None, True
+        return cleaned, changed
+    cleaned_text, changed = _strip_vision_sidecar_text(value)
+    if changed and isinstance(cleaned_text, str) and not cleaned_text.strip():
+        return None, True
+    return cleaned_text, changed
+
+
+def _messages_without_vision_sidecar_artifacts(messages):
+    cleaned = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        next_message, changed = _strip_vision_sidecar_artifacts(copy.deepcopy(message))
+        if changed and next_message is None:
+            continue
+        cleaned.append(next_message)
+    return cleaned
+
+
+def _sanitize_historical_multimodal_message(message):
+    next_message, _ = _strip_image_blocks(copy.deepcopy(message))
+    next_message, changed = _strip_vision_sidecar_artifacts(next_message)
+    if changed and next_message is None:
+        return None
+    if isinstance(next_message, dict):
+        role = str(next_message.get("role") or "").strip().lower()
+        if role in {"user", "assistant"} and "content" not in next_message:
+            return None
+    return next_message
+
+
+def _sanitize_historical_multimodal_messages(messages):
+    if not isinstance(messages, list):
+        return messages
+    last_assistant_index = -1
+    for idx, message in enumerate(messages):
+        if isinstance(message, dict) and str(message.get("role") or "").strip().lower() == "assistant":
+            last_assistant_index = idx
+    if last_assistant_index < 0:
+        return copy.deepcopy(messages)
+    cleaned = []
+    for message in messages[: last_assistant_index + 1]:
+        next_message = _sanitize_historical_multimodal_message(message)
+        if next_message is None:
+            continue
+        cleaned.append(next_message)
+    for message in messages[last_assistant_index + 1 :]:
+        cleaned.append(copy.deepcopy(message))
     return cleaned
 
 
@@ -3577,9 +3682,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
             return
 
-        _strip_anthropic_billing_system_header(payload)
-
         resolved_model_for_guard = str(payload.get("model") or "")
+        _strip_anthropic_billing_system_header(payload)
+        if isinstance(payload.get("messages"), list):
+            payload["messages"] = _messages_without_vision_sidecar_artifacts(payload.get("messages"))
+            if _model_rejects_image_input(
+                resolved_model_for_guard,
+                getattr(self.server, "model_capabilities", {}) or {},
+            ):
+                payload["messages"] = _sanitize_historical_multimodal_messages(payload.get("messages"))
+
         if _payload_has_image_input(payload.get("messages")) and _model_rejects_image_input(
             resolved_model_for_guard,
             getattr(self.server, "model_capabilities", {}) or {},

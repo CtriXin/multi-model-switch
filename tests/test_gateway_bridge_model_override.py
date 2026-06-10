@@ -348,6 +348,89 @@ def test_gateway_bridge_uses_vision_sidecar_for_text_only_model_image_input(monk
     )
 
 
+def test_gateway_bridge_strips_stale_vision_sidecar_history_from_follow_up_turn(monkeypatch):
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "请描述图片"},
+                {"type": "text", "text": "[MMS removed image input; see vision sidecar summary appended to this request.]"},
+                {
+                    "type": "text",
+                    "text": (
+                        "\n\n[MMS vision sidecar by K2.6]\n"
+                        "当前主模型不支持 image input；MMS 已先用 vision sidecar 读取用户图片。\n"
+                        "图片内容如下：\n"
+                        "一只红色方块"
+                    ),
+                },
+            ],
+        },
+        {"role": "assistant", "content": [{"type": "text", "text": "这是一个红色方块。"}]},
+        {"role": "user", "content": [{"type": "text", "text": "它大概是什么材质？"}]},
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=messages,
+    )
+
+    assert captured["status"] == 200
+    forwarded_messages = captured["json"]["messages"]
+    assert forwarded_messages[0]["content"] == [{"type": "text", "text": "请描述图片"}]
+    forwarded_dump = json.dumps(forwarded_messages, ensure_ascii=False)
+    assert "[MMS vision sidecar by" not in forwarded_dump
+    assert "MMS removed image input" not in forwarded_dump
+    assert "一只红色方块" not in forwarded_dump
+
+
+def test_gateway_bridge_does_not_reprocess_historical_image_on_follow_up_no_image_turn(monkeypatch):
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "请描述这张图"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        },
+        {"role": "assistant", "content": [{"type": "text", "text": "这是一个红色方块。"}]},
+        {"role": "user", "content": [{"type": "text", "text": "顺便帮我写个标题"}]},
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=messages,
+        vision_sidecar={
+            "enabled": True,
+            "provider_id": "direct-kimi",
+            "provider_profile": "kimi-code",
+            "model": "K2.6",
+            "anthropic_base_url": "https://vision.example.com",
+            "api_key": "sk-vision",
+        },
+    )
+
+    assert captured["status"] == 200
+    assert len(captured["post_calls"]) == 1
+    forwarded_dump = json.dumps(captured["json"]["messages"], ensure_ascii=False)
+    assert "[MMS vision sidecar by" not in forwarded_dump
+    assert "MMS removed image input" not in forwarded_dump
+    assert '"type": "image"' not in forwarded_dump
+    assert "请描述这张图" in forwarded_dump
+    assert "顺便帮我写个标题" in forwarded_dump
+
+
 def test_gateway_bridge_honors_ui_vision_capability_without_sidecar(monkeypatch):
     image_messages = [
         {
