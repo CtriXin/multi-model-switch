@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 OPENCODE_AGENT_PROFILE_ID = "lite_pro_orchestrated"
+OPENCODE_REVIEW_PROFILE_ID = "review_hub"
 OPENCODE_DEFAULT_PROFILE_ID = "agent"
 
 OPENCODE_PROFILE_OPTIONS = [
@@ -12,6 +13,13 @@ OPENCODE_PROFILE_OPTIONS = [
         "label": "Agent",
         "badge": "默认",
         "summary": "默认推荐：session-local agent roster；GPT 总控/规格/执行/修复/终审；国产模型只做 explore、bug-hunt、vision/context checks 等轻量只读辅助。",
+    },
+    {
+        "id": "review",
+        "profile_id": OPENCODE_REVIEW_PROFILE_ID,
+        "label": "Review",
+        "badge": "审核",
+        "summary": "审核专用：MMS 先解析/保存 reviewer 模型，再进入 OpenCode TUI，由 GPT-5.4 优先的 review host 派发；配合 review-hub request root 使用。",
     },
     {
         "id": "omo",
@@ -50,7 +58,7 @@ OPENCODE_LITE_PRO_SPECS = (
     {"key": "vision_qwen", "agent": "mobius-vision-qwen", "models": ("qwen3.6-plus", "qwen3.6-flash"), "gpt_fallback": False},
     {"key": "reviewer_primary", "agent": "mobius-reviewer-gpt55", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
     {"key": "reviewer_fallback", "agent": "mobius-reviewer-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
-    {"key": "reviewer_mimo", "agent": "mobius-reviewer-mimo", "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"), "route_policy": "mimo_direct", "gpt_fallback": False},
+    {"key": "reviewer_mimo", "agent": "mobius-reviewer-mimo", "models": ("mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro"), "route_policy": "mimo_direct", "gpt_fallback": False},
     {"key": "bughunt_deepseek", "agent": "mobius-bughunt-deepseek", "models": ("deepseek-v4-pro", "deepseek-v4-flash")},
     {"key": "bughunt_glm", "agent": "mobius-bughunt-glm", "models": ("glm-5.1", "glm-5-turbo", "glm-5")},
     {"key": "fixer_gpt54", "agent": "mobius-fixer-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
@@ -60,6 +68,17 @@ OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
     {"key": "explore_qwen", "agent": "mobius-explore-qwen", "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash")},
     {"key": "bughunt_qwen", "agent": "mobius-bughunt-qwen", "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3-coder-plus")},
     {"key": "executor_gpt54", "agent": "mobius-executor-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
+)
+
+OPENCODE_REVIEW_HUB_SPECS = (
+    {"key": "builder_primary", "agent": "review-hub-host", "models": ("glm-5-turbo", "kimi-k2.6", "qwen3.6-flash", "gpt-5.4")},
+    {"key": "builder_fallback", "agent": "review-hub-host-stable", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.5")},
+    {"key": "review_qwen", "agent": "review-qwen", "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3-coder-plus")},
+    {"key": "review_kimi", "agent": "review-kimi", "models": ("kimi-k2.6", "K2.6", "kimi-for-coding", "kimi-k2.5")},
+    {"key": "review_glm", "agent": "review-glm", "models": ("glm-5.1", "glm-5-turbo", "glm-5")},
+    {"key": "review_deepseek", "agent": "review-deepseek", "models": ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2")},
+    {"key": "review_mimo", "agent": "review-mimo", "models": ("mimo-v2.5", "mimo-v2-pro"), "route_policy": "mimo_direct", "gpt_fallback": False},
+    {"key": "review_mimo_pro", "agent": "review-mimo-pro", "models": ("mimo-v2.5-pro", "mimo-v2.5"), "route_policy": "mimo_direct", "gpt_fallback": False},
 )
 
 
@@ -79,6 +98,13 @@ def normalize_opencode_profile_id(value):
         "lite_multi_agent": OPENCODE_AGENT_PROFILE_ID,
         "5_5_multi_agent": OPENCODE_AGENT_PROFILE_ID,
         "lite_pro_orchestrated": OPENCODE_AGENT_PROFILE_ID,
+        "review": OPENCODE_REVIEW_PROFILE_ID,
+        "reviews": OPENCODE_REVIEW_PROFILE_ID,
+        "review_hub": OPENCODE_REVIEW_PROFILE_ID,
+        "reviewhub": OPENCODE_REVIEW_PROFILE_ID,
+        "reviewer": OPENCODE_REVIEW_PROFILE_ID,
+        "multi_review": OPENCODE_REVIEW_PROFILE_ID,
+        "multi_reviewer": OPENCODE_REVIEW_PROFILE_ID,
         # Legacy pro spellings now fold into the single Agent profile.
         "pro": OPENCODE_AGENT_PROFILE_ID,
         "pro_solo": OPENCODE_AGENT_PROFILE_ID,
@@ -133,11 +159,15 @@ def opencode_profile_selection(value):
         "multi_agent_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
         "openspec_multi_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
         "lite_pro_orchestrated_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
+        "review_backend": (OPENCODE_REVIEW_PROFILE_ID, "serve"),
+        "review_hub_backend": (OPENCODE_REVIEW_PROFILE_ID, "serve"),
         "acp_multi": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "multi_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "multi_agent_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "openspec_multi_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "lite_pro_orchestrated_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
+        "review_acp": (OPENCODE_REVIEW_PROFILE_ID, "acp"),
+        "review_hub_acp": (OPENCODE_REVIEW_PROFILE_ID, "acp"),
     }
     if normalized in aliases:
         return aliases[normalized]
@@ -159,6 +189,8 @@ def apply_opencode_entrypoint(runtime, entrypoint):
 
 
 def opencode_lite_pro_specs(profile_id=OPENCODE_AGENT_PROFILE_ID):
+    if normalize_opencode_profile_id(profile_id) == OPENCODE_REVIEW_PROFILE_ID:
+        return OPENCODE_REVIEW_HUB_SPECS
     specs = list(OPENCODE_LITE_PRO_SPECS)
     if normalize_opencode_profile_id(profile_id) == "lite_pro_orchestrated":
         insert_at = next(
@@ -211,6 +243,22 @@ def apply_opencode_profile(runtime, profile_id):
             "builder_primary": "mobius-builder-pro",
             "builder_fallback": "mobius-builder-stable",
         }
+    elif profile_id == OPENCODE_REVIEW_PROFILE_ID:
+        runtime["opencode_use_global_config"] = False
+        runtime["opencode_pure"] = True
+        runtime["opencode_lite_agents"] = True
+        runtime["opencode_agent"] = "review-hub-host"
+        runtime["opencode_default_agent"] = "review-hub-host"
+        runtime["opencode_roster"] = profile_id
+        runtime["opencode_contract_workflow"] = "review-hub"
+        runtime["opencode_backend_agent_capable"] = True
+        runtime["opencode_acp_capable"] = True
+        runtime["opencode_launch_preflight"] = False
+        runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
+        runtime["opencode_launch_fallback_agents"] = {
+            "builder_primary": "review-hub-host",
+            "builder_fallback": "review-hub-host-stable",
+        }
     else:
         runtime["opencode_use_global_config"] = False
         runtime["opencode_pure"] = True
@@ -229,6 +277,8 @@ __all__ = [
     "OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS",
     "OPENCODE_LITE_PRO_SPECS",
     "OPENCODE_PROFILE_OPTIONS",
+    "OPENCODE_REVIEW_HUB_SPECS",
+    "OPENCODE_REVIEW_PROFILE_ID",
     "apply_opencode_entrypoint",
     "apply_opencode_profile",
     "normalize_opencode_entrypoint",

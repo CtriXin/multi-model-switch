@@ -128,6 +128,9 @@ def opencode_agent_roster_overrides(cfg):
             payload["provider_id"] = provider_id
         if model:
             payload["model"] = model
+        route_policy = str(entry.get("route_policy") or "").strip()
+        if route_policy:
+            payload["route_policy"] = route_policy
         try:
             priority = int(entry.get("priority"))
         except (TypeError, ValueError):

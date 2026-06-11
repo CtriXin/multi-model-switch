@@ -10,6 +10,7 @@ from mms_opencode_agents import (
     opencode_apply_agent_bypass_permissions,
     opencode_lite_agent_configs,
     opencode_lite_pro_agent_configs,
+    opencode_review_hub_agent_configs,
 )
 
 OPENCODE_PROVIDER_ID = "mms"
@@ -468,7 +469,12 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
                 runtime.get("opencode_default_agent") or OPENCODE_LITE_DEFAULT_AGENT
             ).strip() or OPENCODE_LITE_DEFAULT_AGENT
             roster = str(runtime.get("opencode_roster") or "").strip()
-            if roster in {"lite_pro", "lite_pro_orchestrated"}:
+            if roster == "review_hub":
+                payload["agent"] = opencode_review_hub_agent_configs(
+                    opencode_agent_model_refs(runtime, routes),
+                    roster_config=runtime.get("opencode_agent_roster"),
+                )
+            elif roster in {"lite_pro", "lite_pro_orchestrated"}:
                 payload["agent"] = opencode_lite_pro_agent_configs(
                     opencode_agent_model_refs(runtime, routes),
                     orchestrated=roster == "lite_pro_orchestrated",

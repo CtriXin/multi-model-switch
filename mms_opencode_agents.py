@@ -603,6 +603,165 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
     return agents
 
 
+def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
+    """Return a Review Hub-focused OpenCode roster."""
+    agent_models = agent_models if isinstance(agent_models, dict) else {}
+    roster_config = roster_config if isinstance(roster_config, dict) else {}
+    host_model = (
+        agent_models.get("review-hub-host")
+        or agent_models.get("review-hub-host-stable")
+        or next(iter(agent_models.values()), "")
+    )
+    if not host_model:
+        return {}
+
+    safe_read_bash = {
+        "*": "ask",
+        "pwd": "allow",
+        "ls *": "allow",
+        "rg *": "allow",
+        "git status*": "allow",
+        "git diff*": "allow",
+        "git log*": "allow",
+        "review-hub *": "allow",
+        "node */review-hub.js *": "allow",
+    }
+    artifact_bash = {
+        **safe_read_bash,
+        "mkdir *": "ask",
+        "cat *": "ask",
+        "python*": "ask",
+        "node *": "ask",
+    }
+    common_permissions = {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+    }
+    reviewer_names = sorted(
+        name for name in agent_models
+        if str(name).startswith("review-") and name not in {"review-hub-host", "review-hub-host-stable"}
+    )
+    available_reviewers = [
+        name for name in reviewer_names
+        if name in agent_models
+    ]
+    reviewer_list_text = ", ".join(available_reviewers) or "no review-* subagents"
+
+    def _agent_model(name, fallback=host_model):
+        return str(agent_models.get(name) or fallback or host_model)
+
+    def _reviewer_prompt(label):
+        return (
+            f"You are the {label} Review Hub reviewer. When given a request root, "
+            "run `review-hub reviewer <request-root>` with your model identity when "
+            "needed, read the returned PROMPT.md and manifest.json, then execute that "
+            "prompt. Do environment preflight first. If required MCP/tools/skills/auth "
+            "are missing, write the blocked preflight artifact and stop. Do not edit "
+            "source files; write review artifacts only inside your assigned slot_root. "
+            "Lead with concrete findings, evidence, uncertainty, and missing tests."
+        )
+
+    host_task_permission = {"*": "deny"}
+    for name in available_reviewers:
+        host_task_permission[name] = "allow" if name != "review-hub-host-stable" else "ask"
+
+    agents = {
+        "review-hub-host": {
+            "description": "Review Hub host that asks for reviewer models and fans out independent reviews",
+            "mode": "primary",
+            "model": _agent_model("review-hub-host"),
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": {
+                **common_permissions,
+                "edit": "ask",
+                "bash": artifact_bash,
+                "task": host_task_permission,
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "ask",
+            },
+            "prompt": (
+                "You are a Review Hub execution host, not the original dispatcher. "
+                "Default host route prefers fast domestic GLM/Kimi/Qwen and falls back through MMS route "
+                "resolution. Start by asking the user for a Review Hub request root "
+                "or short command such as `/review-hub <request-root>` if it was not "
+                "already provided. Use the preloaded reviewer agents in this session "
+                f"unless the user narrows them: {reviewer_list_text}. If the user "
+                "does ask to narrow, only use agents already available in this "
+                "session; do not invent new model aliases inside OpenCode. Send every "
+                "selected reviewer the same request-root task, including its model name. "
+                "Each reviewer must hydrate its own slot with `review-hub reviewer`, "
+                "read PROMPT.md, run preflight first, and write only inside slot_root. "
+                "MCP and skills are session-local runner capabilities; do not claim a "
+                "tool exists unless the reviewer preflight confirms it. After reviewers "
+                "finish, run `review-hub aggregate --request <request-root>` when "
+                "available, then report blockers, consensus findings, disagreements, "
+                "and the aggregate path. Do not edit product/source files."
+            ),
+        },
+        "review-hub-host-stable": {
+            "description": "Stable fallback Review Hub host",
+            "mode": "primary",
+            "model": _agent_model("review-hub-host-stable"),
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": {
+                **common_permissions,
+                "edit": "ask",
+                "bash": artifact_bash,
+                "task": host_task_permission,
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "ask",
+            },
+            "prompt": (
+                "Fallback Review Hub host. Continue only if the primary host is "
+                "unavailable or low-confidence. Preserve the same request root, model "
+                "selection, preflight-first behavior, and slot-only write boundary."
+            ),
+        },
+    }
+
+    default_reviewer_descriptions = {
+        "review-qwen": "Qwen long-context independent reviewer",
+        "review-kimi": "Kimi independent reviewer",
+        "review-glm": "GLM independent reviewer",
+        "review-deepseek": "DeepSeek independent reviewer",
+        "review-mimo": "MiMo multimodal reviewer",
+        "review-mimo-pro": "MiMo Pro large-project/product critique reviewer",
+    }
+    for name in available_reviewers:
+        if name not in agent_models:
+            continue
+        roster_entry = roster_config.get(name) if isinstance(roster_config.get(name), dict) else {}
+        description = (
+            str(roster_entry.get("description") or "").strip()
+            or default_reviewer_descriptions.get(name)
+            or f"Review Hub reviewer {name}"
+        )
+        agents[name] = {
+            "description": description,
+            "mode": "subagent",
+            "model": _agent_model(name),
+            "temperature": 0.1,
+            "steps": 24,
+            "permission": {
+                **common_permissions,
+                "edit": "ask",
+                "bash": artifact_bash,
+                "task": "deny",
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "ask",
+            },
+            "prompt": _reviewer_prompt(description),
+        }
+    return agents
+
+
 def opencode_permission_bypass_value(value):
     if isinstance(value, dict):
         return {
@@ -637,4 +796,5 @@ __all__ = [
     "opencode_lite_agent_configs",
     "opencode_lite_pro_agent_configs",
     "opencode_permission_bypass_value",
+    "opencode_review_hub_agent_configs",
 ]

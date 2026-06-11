@@ -118,12 +118,21 @@ def _record_trace_event(repo_root: Path, trace_id: str, status: str, data: dict[
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
 
-def _resolve_profile(profile: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _resolve_profile(profile: str, review_models: list[str] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     cfg = mms_core.load_runtime_config()
     if cfg is None:
         raise RuntimeError("未找到 MMS config")
     provider = mms_core.ensure_provider_credentials(cfg)
     default_models = mms_core._probe_models(provider, emit_output=False).get("models")
+    canonical_profile, _entrypoint = mms_core._opencode_profile_selection(profile)
+    if canonical_profile == mms_core._OPENCODE_REVIEW_PROFILE_ID and review_models:
+        cfg, _selection = mms_core._prepare_opencode_review_profile_config(
+            cfg,
+            provider,
+            default_models,
+            model_tokens=review_models,
+            interactive=False,
+        )
     model_info, runtime = mms_core._resolve_opencode_profile_runtime(cfg, provider, default_models, profile)
     if runtime is None:
         raise RuntimeError(f"无法解析 OpenCode profile: {profile}")
@@ -616,6 +625,7 @@ def main() -> int:
     )
     parser.add_argument("--live", action="store_true", help="Run real opencode run calls for each selected agent")
     parser.add_argument("--agent", action="append", help="Agent to live-smoke. Repeatable. Default: all profile agents")
+    parser.add_argument("--review-models", nargs="+", help="Review profile dynamic reviewer tokens/models")
     parser.add_argument("--timeout", type=int, default=90, help="Timeout per opencode command")
     parser.add_argument("--json", action="store_true", help="Print JSON only")
     parser.add_argument("--health-summary", action="store_true", help="Include repo-local route health summary from latest.json")
@@ -643,7 +653,7 @@ def main() -> int:
     }
 
     try:
-        model_info, runtime = _resolve_profile(args.profile)
+        model_info, runtime = _resolve_profile(args.profile, review_models=args.review_models)
         runtime_profile = str(runtime.get("opencode_profile") or args.profile)
         result["model_info"] = model_info
         result["runtime"] = {

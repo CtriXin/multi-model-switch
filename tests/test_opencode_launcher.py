@@ -482,6 +482,7 @@ def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
     assert captured["env"]["XDG_CONFIG_HOME"] == str(real_home / ".config")
     assert "OPENCODE_CONFIG" not in captured["env"]
     assert captured["env"]["OPENCODE_CLIENT"] == "mms"
+    assert captured["env"]["MMS_MODEL_NAME"] == "deepseek-chat"
     assert captured["env"]["MMS_OPENCODE_PROFILE"] == "heavy_omo"
     assert captured["env"]["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
     assert captured["env"]["MMS_OPENCODE_BYPASS"] == "1"
@@ -557,6 +558,7 @@ def test_get_export_env_for_heavy_omo_does_not_write_session_config(monkeypatch,
     exports = mms_launchers.get_export_env("opencode", runtime)
 
     assert exports == {
+        "MMS_MODEL_NAME": "deepseek-chat",
         "OPENCODE_CLIENT": "mms",
         "OPENCODE_PERMISSION": mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV,
         "MMS_OPENCODE_BYPASS": "1",
@@ -639,12 +641,16 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert mms_core._normalize_opencode_profile_id("agent") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("orchestrated") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("openspec-multi") == "lite_pro_orchestrated"
+    assert mms_core._normalize_opencode_profile_id("review") == "review_hub"
+    assert mms_core._normalize_opencode_profile_id("multi-review") == "review_hub"
     assert mms_core._normalize_opencode_profile_id("omo") == "heavy_omo"
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_backend") == ("lite_pro_orchestrated", "serve")
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_acp") == ("lite_pro_orchestrated", "acp")
+    assert mms_core._opencode_profile_selection("review_backend") == ("review_hub", "serve")
 
     lite = mms_core._apply_opencode_profile(_runtime(), "lite")
     agent = mms_core._apply_opencode_profile(_runtime(), "agent")
+    review = mms_core._apply_opencode_profile(_runtime(), "review")
     backend_multi = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated_backend")
     heavy = mms_core._apply_opencode_profile(_runtime(), "omo")
     raw = mms_core._apply_opencode_profile(_runtime(), "raw")
@@ -659,6 +665,10 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert orchestrated["opencode_agent"] == "mobius-builder-pro"
     assert orchestrated["opencode_roster"] == "lite_pro_orchestrated"
     assert orchestrated["opencode_profile_label"] == "Agent"
+    assert review["opencode_agent"] == "review-hub-host"
+    assert review["opencode_roster"] == "review_hub"
+    assert review["opencode_profile_label"] == "Review"
+    assert review["opencode_launch_fallback_agents"]["builder_fallback"] == "review-hub-host-stable"
     assert backend_multi["opencode_profile"] == "lite_pro_orchestrated"
     assert backend_multi["opencode_entrypoint"] == "serve"
     assert heavy["opencode_use_global_config"] is True
@@ -889,6 +899,96 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert qwen_route["protocol"] == "anthropic_messages"
     vision_qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_qwen")
     assert vision_qwen_route["protocol"] == "anthropic_messages"
+
+
+def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "qwen3.7-max",
+        "kimi-k2.6",
+        "kimi-k2.5",
+        "MiniMax-M2.7",
+        "glm-5.1",
+        "glm-5-turbo",
+        "deepseek-v4-pro",
+    ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        models,
+        "review",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "glm-5-turbo", "profile": "review_hub"}
+    assert runtime["opencode_agent"] == "review-hub-host"
+    assert runtime["opencode_roster"] == "review_hub"
+    assert payload["default_agent"] == "review-hub-host"
+    assert payload["model"].endswith("/glm-5-turbo")
+    assert payload["agent"]["review-hub-host"]["mode"] == "primary"
+    assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-qwen"] == "allow"
+    assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-kimi"] == "allow"
+    assert payload["agent"]["review-qwen"]["model"].endswith("/qwen3.7-max")
+    assert payload["agent"]["review-kimi"]["model"].endswith("/kimi-k2.6")
+    assert payload["agent"]["review-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["review-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["review-mimo"]["model"].endswith("/mimo-v2.5")
+    assert payload["agent"]["review-mimo-pro"]["model"].endswith("/mimo-v2.5-pro")
+    assert "review-hub aggregate" in payload["agent"]["review-hub-host"]["prompt"]
+    assert payload["agent"]["review-qwen"]["permission"]["edit"] == "allow"
+    review_mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "review_mimo")
+    assert review_mimo_route["provider_id"] == "mimo-direct-anthropic"
+
+    review_cfg, selection = mms_core._prepare_opencode_review_profile_config(
+        cfg,
+        provider,
+        models,
+        model_tokens=["kimi2.5", "minimax2.7", "glm5-turbo"],
+        interactive=False,
+    )
+    assert [item["model"] for item in selection["selected"]] == [
+        "kimi-k2.5",
+        "MiniMax-M2.7",
+        "glm-5-turbo",
+    ]
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        review_cfg,
+        provider,
+        models,
+        "review",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert "review-kimi" not in payload["agent"]
+    assert payload["agent"]["review-kimi-k2-5"]["model"].endswith("/kimi-k2.5")
+    assert payload["agent"]["review-minimax-m2-7"]["model"].lower().endswith("/minimax-m2.7")
+    assert payload["agent"]["review-glm-5-turbo"]["model"].endswith("/glm-5-turbo")
+    assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-kimi-k2-5"] == "allow"
 
 
 def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):

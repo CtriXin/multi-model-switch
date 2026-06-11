@@ -133,9 +133,12 @@ mms                         # 交互式启动器
 mms claude                  # 启动 Claude
 mms codex                   # 启动 Codex
 mms opencode --profile agent
+mms opencode --profile review
 mms --provider <id> codex
 mms --account <id> claude
 ```
+
+OpenCode Review 推荐直接走 `mms` TUI：选 `OpenCode` -> `Review`，在 reviewer 模型页用 Space 勾选、Enter 启动；这次选择会自动写入 `[opencode.review].models`，下次自动预选。`--review-models` 仍保留给脚本/高级用户。
 
 只导出环境变量，不立即启动：
 

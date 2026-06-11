@@ -45,7 +45,7 @@ Key changes in this generation:
 - Claude resume persistence through `.claude/projects`
 - Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
 - Codex resume write-back across isolated MMS-managed launches
-- OpenCode modes: `Agent`, `OMO`, and `Raw` with repo-local health feedback
+- OpenCode modes: `Agent`, `Review`, `OMO`, and `Raw` with repo-local health feedback
 - OpenCode Agent contract lane: `mobius-spec-writer` writes an OpenSpec/SpecBridge-style task contract, and `mobius-spec-compliance-reviewer` checks diff + validation against it before release-gate review
 - OpenCode Agent work split: GPT handles coordination, specs, implementation/fix work, and final review; DeepSeek/MiMo/Qwen/GLM/Kimi default to lightweight read-only exploration, bug-hunt, vision, and context checks
 - OpenCode Agent mixed routes: GPT via OpenAI-compatible Responses/Chat, direct MiMo via OpenAI-compatible `/v1`, other domestic models via Anthropic `/v1/messages`
@@ -183,12 +183,15 @@ mms claude
 mms codex
 mms opencode
 mms opencode --profile agent
+mms opencode --profile review
 mms opencode --profile omo
 mms opencode --profile raw
 mms --provider <provider-id> codex
 mms --provider <provider-id> opencode
 mms --account <account-id> claude
 ```
+
+For OpenCode Review, prefer the `mms` TUI: choose `OpenCode` -> `Review`, Space-select reviewer models, then Enter to launch and remember the selection under `[opencode.review].models`. `--review-models` remains available for scripts and advanced users.
 
 Export environment variables instead of launching:
 

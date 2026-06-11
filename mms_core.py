@@ -7,6 +7,8 @@ import shlex
 import subprocess
 import json
 import shutil
+import copy
+import difflib
 import logging
 import threading
 import time
@@ -126,6 +128,7 @@ from mms_opencode_profiles import (
     OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS as _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS,
     OPENCODE_LITE_PRO_SPECS as _OPENCODE_LITE_PRO_SPECS,
     OPENCODE_PROFILE_OPTIONS as _OPENCODE_PROFILE_OPTIONS,
+    OPENCODE_REVIEW_PROFILE_ID as _OPENCODE_REVIEW_PROFILE_ID,
     apply_opencode_entrypoint as _apply_opencode_entrypoint,
     apply_opencode_profile as _apply_opencode_profile,
     normalize_opencode_entrypoint as _normalize_opencode_entrypoint,
@@ -10098,6 +10101,484 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
     )
 
 
+_OPENCODE_REVIEW_DEFAULT_TOKENS = ("qwen", "kimi", "glm", "deepseek", "mimo")
+_OPENCODE_REVIEW_DOMESTIC_TOKENS = ("qwen", "kimi", "glm", "minimax", "deepseek", "mimo")
+_OPENCODE_REVIEW_BASE_REVIEWER_AGENTS = (
+    "review-qwen",
+    "review-kimi",
+    "review-glm",
+    "review-deepseek",
+    "review-mimo",
+    "review-mimo-pro",
+)
+_OPENCODE_REVIEW_FAMILY_ALIASES = {
+    "qwen": "Qwen",
+    "tongyi": "Qwen",
+    "kimi": "Kimi",
+    "moonshot": "Kimi",
+    "minimax": "MiniMax",
+    "mini": "MiniMax",
+    "glm": "GLM",
+    "zhipu": "GLM",
+    "deepseek": "DeepSeek",
+    "ds": "DeepSeek",
+    "mimo": "Mimo",
+    "xiaomi": "Mimo",
+}
+_OPENCODE_REVIEW_FAMILY_ORDER = {
+    "Qwen": 0,
+    "Kimi": 1,
+    "GLM": 2,
+    "MiniMax": 3,
+    "DeepSeek": 4,
+    "Mimo": 5,
+}
+
+
+def _split_opencode_review_model_tokens(values):
+    if values is None:
+        return []
+    raw_items = values
+    if isinstance(values, str):
+        raw_items = [values]
+    tokens = []
+    seen = set()
+    for item in raw_items or []:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        for chunk in re.split(r"[\s,，;；]+", text):
+            token = chunk.strip()
+            if not token:
+                continue
+            key = token.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tokens.append(token)
+    return tokens
+
+
+def _opencode_review_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    review = opencode.get("review") if isinstance(opencode.get("review"), dict) else {}
+    return review
+
+
+def _opencode_review_saved_model_tokens(cfg):
+    review = _opencode_review_config(cfg)
+    for key in ("models", "model_tokens", "selected_models"):
+        tokens = _split_opencode_review_model_tokens(review.get(key))
+        if tokens:
+            return tokens
+    return []
+
+
+def _opencode_review_compact(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _opencode_review_slug(value):
+    text = str(value or "").strip().lower()
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return slug or "model"
+
+
+def _opencode_review_model_keys(model_name):
+    raw = str(model_name or "").strip()
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    compact = _opencode_review_compact(raw)
+    keys = {compact} if compact else set()
+    family, _category = _infer_model_family(raw)
+    family_key = _opencode_review_compact(family)
+    if family_key and compact.startswith(family_key):
+        rest = compact[len(family_key):]
+        if rest:
+            for marker in ("k", "m", "v"):
+                if rest.startswith(marker) and len(rest) > 1 and rest[1].isdigit():
+                    keys.add(f"{family_key}{rest[1:]}")
+        if "pro" in compact:
+            keys.add(f"{family_key}pro")
+        if "turbo" in compact:
+            keys.add(f"{family_key}turbo")
+        if "max" in compact:
+            keys.add(f"{family_key}max")
+    return {key for key in keys if key}
+
+
+def _opencode_review_token_family(token):
+    compact = _opencode_review_compact(str(token or "").removeprefix("review-"))
+    return _OPENCODE_REVIEW_FAMILY_ALIASES.get(compact, "")
+
+
+def _opencode_review_family_rank(family, model_name):
+    lower = str(model_name or "").strip().lower()
+    compact = _opencode_review_compact(lower)
+    if family == "Qwen":
+        if "max" in lower:
+            return 0
+        if "plus" in lower:
+            return 1
+        if "coder" in lower:
+            return 2
+        if "flash" in lower:
+            return 4
+        return 3
+    if family == "Kimi":
+        if "k2.6" in lower or "k26" in compact:
+            return 0
+        if "for-coding" in lower or "coding" in lower:
+            return 1
+        if "k2.5" in lower or "k25" in compact:
+            return 2
+        return 3
+    if family == "MiniMax":
+        if "m2.7" in lower or "m27" in compact:
+            return 0
+        if "m2.6" in lower or "m26" in compact:
+            return 1
+        return 2
+    if family == "GLM":
+        if "5.1" in lower or "51" in compact:
+            return 0
+        if "turbo" in lower:
+            return 1
+        return 2
+    if family == "DeepSeek":
+        if "v4" in lower and "pro" in lower:
+            return 0
+        if "v4" in lower:
+            return 1
+        if "v3.2" in lower or "v32" in compact:
+            return 2
+        if "flash" in lower:
+            return 4
+        return 3
+    if family == "Mimo":
+        if ("v2.5" in lower or "v25" in compact) and "pro" not in lower:
+            return 0
+        if ("v2.5" in lower or "v25" in compact) and "pro" in lower:
+            return 1
+        if "pro" in lower:
+            return 2
+        return 3
+    return 10
+
+
+def _opencode_review_pool(cfg, default_provider, default_models):
+    pool = []
+    seen = set()
+    for entry in _aggregate_provider_models(cfg, "opencode", default_provider, default_models):
+        model_name = str(entry.get("model") or "").strip()
+        if not model_name:
+            continue
+        model_key = model_name.lower()
+        if model_key in seen:
+            continue
+        family, category = _infer_model_family(model_name)
+        if family == "GPT":
+            continue
+        seen.add(model_key)
+        item = dict(entry)
+        item["family"] = family
+        item["category"] = category
+        item["keys"] = _opencode_review_model_keys(model_name)
+        pool.append(item)
+    return pool
+
+
+def _opencode_review_model_sort_key(item):
+    family = str(item.get("family") or "")
+    model = str(item.get("model") or "")
+    return (
+        _opencode_review_family_rank(family, model),
+        _opencode_default_model_rank(model),
+        model.lower(),
+    )
+
+
+def _opencode_review_item_is_domestic(item):
+    family = str(item.get("family") or "")
+    model = str(item.get("model") or "").lower()
+    return family in DOMESTIC_MODEL_FAMILIES or any(keyword in model for keyword in DOMESTIC_MODEL_KEYWORDS)
+
+
+def _opencode_review_resolve_token(pool, token):
+    clean_token = str(token or "").strip()
+    if clean_token.lower().startswith("review-"):
+        clean_token = clean_token[7:]
+    family = _opencode_review_token_family(clean_token)
+    if family:
+        candidates = [item for item in pool if item.get("family") == family]
+        if candidates:
+            return sorted(candidates, key=_opencode_review_model_sort_key)[0]
+        return None
+
+    query_keys = _opencode_review_model_keys(clean_token) or {_opencode_review_compact(clean_token)}
+    scored = []
+    for item in pool:
+        model_keys = item.get("keys") or set()
+        score = None
+        if query_keys & model_keys:
+            score = 0
+        elif any(any(key.startswith(query) for key in model_keys) for query in query_keys):
+            score = 1
+        elif any(any(query in key for key in model_keys) for query in query_keys):
+            score = 2
+        elif any(any(key in query for key in model_keys) for query in query_keys):
+            score = 3
+        if score is not None:
+            scored.append((score, _opencode_review_model_sort_key(item), item))
+    if scored:
+        scored.sort(key=lambda row: (row[0], row[1]))
+        return scored[0][2]
+
+    key_to_item = {}
+    for item in pool:
+        for key in item.get("keys") or ():
+            key_to_item.setdefault(key, item)
+    close = difflib.get_close_matches(next(iter(query_keys), ""), list(key_to_item), n=1, cutoff=0.82)
+    if close:
+        return key_to_item[close[0]]
+    return None
+
+
+def _resolve_opencode_review_models(cfg, default_provider, default_models, tokens):
+    pool = _opencode_review_pool(cfg, default_provider, default_models)
+    selected = []
+    unresolved = []
+    seen_models = set()
+    for token in tokens:
+        compact = _opencode_review_compact(token)
+        raw_lower = str(token or "").strip().lower()
+        if compact in {"all", "allmodels", "domesticall", "allcn", "cnall"}:
+            expanded = sorted(
+                [item for item in pool if _opencode_review_item_is_domestic(item)],
+                key=lambda item: (str(item.get("family") or ""), _opencode_review_model_sort_key(item)),
+            )
+        elif compact in {"domestic", "cn", "china", "guochan"} or raw_lower == "国产":
+            expanded = [
+                _opencode_review_resolve_token(pool, item)
+                for item in _OPENCODE_REVIEW_DOMESTIC_TOKENS
+            ]
+            expanded = [item for item in expanded if item]
+        else:
+            expanded = [_opencode_review_resolve_token(pool, token)]
+        if not expanded or not expanded[0]:
+            unresolved.append(token)
+            continue
+        for item in expanded:
+            model_key = str(item.get("model") or "").strip().lower()
+            if not model_key or model_key in seen_models:
+                continue
+            seen_models.add(model_key)
+            selected.append({
+                "token": token,
+                "model": str(item.get("model") or "").strip(),
+                "family": str(item.get("family") or ""),
+            })
+    return selected, unresolved
+
+
+def _opencode_review_agent_id_for_model(model_name, existing):
+    base = f"review-{_opencode_review_slug(model_name)}"
+    agent_id = base
+    suffix = 2
+    while agent_id in existing:
+        agent_id = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(agent_id)
+    return agent_id
+
+
+def _inject_opencode_review_roster(cfg, selected_models, tokens):
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    roster = opencode.setdefault("agent_roster", {})
+    if not isinstance(roster, dict):
+        roster = {}
+        opencode["agent_roster"] = roster
+    for agent_id in _OPENCODE_REVIEW_BASE_REVIEWER_AGENTS:
+        entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
+        entry = dict(entry)
+        entry["enabled"] = False
+        roster[agent_id] = entry
+
+    existing = set(roster)
+    selected_agents = []
+    resolved_models = []
+    for index, item in enumerate(selected_models):
+        model_name = str(item.get("model") or "").strip()
+        if not model_name:
+            continue
+        agent_id = _opencode_review_agent_id_for_model(model_name, existing)
+        lower = model_name.lower()
+        entry = {
+            "enabled": True,
+            "custom": True,
+            "preset": "reviewer",
+            "model": model_name,
+            "priority": 200 + index,
+            "description": f"Review Hub dynamic reviewer for {model_name}",
+        }
+        if lower.startswith("mimo-"):
+            entry["route_policy"] = "mimo_direct"
+        roster[agent_id] = entry
+        selected_agents.append(agent_id)
+        resolved_models.append(model_name)
+
+    review = opencode.setdefault("review", {})
+    if not isinstance(review, dict):
+        review = {}
+        opencode["review"] = review
+    review["models"] = list(tokens)
+    review["selected_agents"] = selected_agents
+    review["resolved_models"] = resolved_models
+    return next_cfg
+
+
+def _opencode_review_available_summary(cfg, default_provider, default_models):
+    pool = _opencode_review_pool(cfg, default_provider, default_models)
+    by_family = {}
+    for item in pool:
+        family = str(item.get("family") or "其他")
+        by_family.setdefault(family, []).append(str(item.get("model") or ""))
+    parts = []
+    for family in ("Qwen", "Kimi", "GLM", "MiniMax", "DeepSeek", "Mimo"):
+        models = [item for item in by_family.get(family, []) if item]
+        if not models:
+            continue
+        models = sorted(models, key=lambda model: _opencode_review_family_rank(family, model))
+        preview = ", ".join(models[:3])
+        if len(models) > 3:
+            preview += f", +{len(models) - 3}"
+        parts.append(f"{family}: {preview}")
+    return " | ".join(parts)
+
+
+def _opencode_review_tui_options(cfg, default_provider, default_models):
+    pool = [
+        item for item in _opencode_review_pool(cfg, default_provider, default_models)
+        if _opencode_review_item_is_domestic(item)
+    ]
+    pool.sort(
+        key=lambda item: (
+            _OPENCODE_REVIEW_FAMILY_ORDER.get(str(item.get("family") or ""), 99),
+            _opencode_review_model_sort_key(item),
+            str(item.get("provider_name") or ""),
+        )
+    )
+    return [
+        {
+            "model": str(item.get("model") or ""),
+            "family": str(item.get("family") or ""),
+            "provider_name": str(item.get("provider_name") or ""),
+        }
+        for item in pool
+        if str(item.get("model") or "").strip()
+    ]
+
+
+def _select_opencode_review_models_tui(cfg, default_provider, default_models):
+    options = _opencode_review_tui_options(cfg, default_provider, default_models)
+    if not options:
+        console.print("[yellow]没有可用于 OpenCode review 的模型池；将使用 review profile 默认 roster。[/yellow]")
+        return []
+    saved_tokens = _opencode_review_saved_model_tokens(cfg)
+    default_tokens = saved_tokens or list(_OPENCODE_REVIEW_DEFAULT_TOKENS)
+    selected, _unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, default_tokens)
+    selected_models = [item["model"] for item in selected]
+    try:
+        from mms_tui import select_review_models_tui
+    except Exception:
+        return selected_models
+    return select_review_models_tui(
+        options,
+        selected_models=selected_models,
+        title="OpenCode Review reviewers",
+    )
+
+
+def _save_opencode_review_model_tokens(cfg, tokens):
+    base_cfg = cfg
+    if _preview_root_mode():
+        try:
+            loaded_cfg = _load_toml_file(_config_write_target_path())
+        except Exception:
+            loaded_cfg = None
+        if isinstance(loaded_cfg, dict):
+            base_cfg = loaded_cfg
+    next_cfg = copy.deepcopy(base_cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    review = opencode.setdefault("review", {})
+    if not isinstance(review, dict):
+        review = {}
+        opencode["review"] = review
+    review["models"] = list(tokens)
+    save_config(next_cfg, reason="opencode:save_review_models")
+    return next_cfg
+
+
+def _prepare_opencode_review_profile_config(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    model_tokens=None,
+    interactive=False,
+    save_selected=False,
+    save_cfg=None,
+    ask_to_save=False,
+):
+    explicit_tokens = _split_opencode_review_model_tokens(model_tokens)
+    saved_tokens = _opencode_review_saved_model_tokens(cfg)
+    tokens = explicit_tokens or saved_tokens
+    source = "cli" if explicit_tokens else ("saved" if saved_tokens else "")
+
+    if not tokens and interactive:
+        _ensure_rich()
+        summary = _opencode_review_available_summary(cfg, default_provider, default_models)
+        if summary:
+            console.print(f"[dim]Review 可用模型: {summary}[/dim]")
+        default_text = " ".join(_OPENCODE_REVIEW_DEFAULT_TOKENS)
+        answer = Prompt.ask(
+            "Review models（空格/逗号分隔；支持 qwen、kimi2.5、minimax2.7、glm5-turbo、domestic、all）",
+            default=default_text,
+        )
+        tokens = _split_opencode_review_model_tokens(answer)
+        source = "prompt"
+
+    if not tokens:
+        return cfg, {"tokens": [], "selected": [], "unresolved": [], "source": source}
+
+    selected, unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, tokens)
+    if unresolved:
+        console.print(f"[yellow]Review models 未解析: {', '.join(unresolved)}[/yellow]")
+    if not selected:
+        return cfg, {"tokens": tokens, "selected": [], "unresolved": unresolved, "source": source}
+
+    if save_selected:
+        _save_opencode_review_model_tokens(save_cfg or cfg, tokens)
+    elif ask_to_save and source == "prompt":
+        _ensure_rich()
+        if Confirm.ask("保存这次 Review models 为下次默认？", default=False):
+            _save_opencode_review_model_tokens(save_cfg or cfg, tokens)
+
+    next_cfg = _inject_opencode_review_roster(cfg, selected, tokens)
+    selected_text = ", ".join(f"{item['model']} -> review-{_opencode_review_slug(item['model'])}" for item in selected)
+    console.print(f"[green]Review reviewers:[/green] {selected_text}")
+    return next_cfg, {"tokens": tokens, "selected": selected, "unresolved": unresolved, "source": source}
+
+
 def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
     if not isinstance(runtime, dict):
         return runtime
@@ -10620,8 +11101,27 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── OpenCode profile ──
         if action_type == "profile" and cli == "opencode":
+            profile_cfg = current_cfg
+            canonical_profile, _profile_entrypoint = _opencode_profile_selection(action_data)
+            if canonical_profile == _OPENCODE_REVIEW_PROFILE_ID:
+                selected_review_models = _select_opencode_review_models_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_review_models is None:
+                    continue
+                profile_cfg, _review_selection = _prepare_opencode_review_profile_config(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    model_tokens=selected_review_models,
+                    interactive=False,
+                    save_selected=bool(selected_review_models),
+                    save_cfg=current_cfg,
+                )
             model_info, runtime_runtime = _resolve_opencode_profile_runtime(
-                current_cfg,
+                profile_cfg,
                 current_provider,
                 default_models,
                 action_data,
@@ -13358,9 +13858,41 @@ def _load_preview_runtime_config_from_latest_bundle():
     }
 
 
+def _merge_preview_local_launch_preferences(cfg):
+    """Preview bundle owns routes; local config keeps user launch preferences."""
+    if not isinstance(cfg, dict):
+        return cfg
+    try:
+        local_cfg = load_config(persist=False)
+    except Exception:
+        local_cfg = None
+    if not isinstance(local_cfg, dict):
+        return cfg
+
+    local_opencode = local_cfg.get("opencode") if isinstance(local_cfg.get("opencode"), dict) else {}
+    local_review = local_opencode.get("review") if isinstance(local_opencode.get("review"), dict) else {}
+    local_opencode_defaults = {
+        key: local_opencode.get(key)
+        for key in ("default_profile", "profile")
+        if str(local_opencode.get(key) or "").strip()
+    }
+    if not local_review and not local_opencode_defaults:
+        return cfg
+
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    opencode.update(local_opencode_defaults)
+    if local_review:
+        opencode["review"] = copy.deepcopy(local_review)
+    return next_cfg
+
+
 def _load_config_or_preview_bundle():
     if _preview_root_mode():
-        return _load_preview_runtime_config_from_latest_bundle()
+        return _merge_preview_local_launch_preferences(_load_preview_runtime_config_from_latest_bundle())
     return load_config()
 
 
@@ -14928,9 +15460,10 @@ def main():
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
-            f"  {current_command()} opencode --profile agent  启动默认 Agent mode\n"
-            f"  {current_command()} opencode --profile omo    启动 global OMO mode\n"
-            f"  {current_command()} opencode --profile raw    启动纯 OpenCode mode\n"
+            f"  {current_command()} opencode --profile agent   启动默认 Agent mode\n"
+            f"  {current_command()} opencode --profile review  启动 Review Hub host mode\n"
+            f"  {current_command()} opencode --profile omo     启动 global OMO mode\n"
+            f"  {current_command()} opencode --profile raw     启动纯 OpenCode mode\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
@@ -14958,7 +15491,18 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / omo / raw")
+    parser.add_argument(
+        "--review-models",
+        nargs="+",
+        help="OpenCode review profile 使用的 reviewer 模型/家族，支持模糊输入：qwen kimi2.5 minimax2.7 glm5-turbo domestic all",
+    )
+    parser.add_argument(
+        "--save-review-models",
+        "--review-save",
+        action="store_true",
+        help="把本次 --review-models 或交互选择保存为下次 review profile 默认",
+    )
     parser.add_argument(
         "--opencode-entrypoint",
         choices=["tui", "backend", "backend-agent", "serve", "headless", "acp"],
@@ -15005,6 +15549,8 @@ def main():
     if args.opencode_profile and not requested_opencode_profile:
         valid_profiles = ", ".join(_opencode_profile_selection_ids())
         parser.error(f"--profile 仅支持 OpenCode mode：{valid_profiles}")
+    if (args.review_models or args.save_review_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_REVIEW_PROFILE_ID:
+        parser.error("--review-models / --save-review-models 仅支持 --profile review")
     if requested_opencode_profile and args.account:
         parser.error("--profile 是 OpenCode 专用参数，不支持同时使用 --account")
     requested_opencode_entrypoints = []
@@ -15146,6 +15692,8 @@ def main():
             profile_to_launch, configured_entrypoint = _opencode_default_profile_from_config(cfg)
             if not entrypoint_to_launch:
                 entrypoint_to_launch = configured_entrypoint
+            if not profile_to_launch and (args.review_models or args.save_review_models):
+                profile_to_launch = _OPENCODE_REVIEW_PROFILE_ID
 
         if target == "opencode" and profile_to_launch:
             cli = "opencode"
@@ -15154,8 +15702,22 @@ def main():
             profile_models = models_cache
             if args.provider:
                 profile_models = _probe_models(profile_provider, emit_output=False).get("models")
+            profile_cfg = cfg
+            if profile_to_launch == _OPENCODE_REVIEW_PROFILE_ID:
+                profile_cfg, _review_selection = _prepare_opencode_review_profile_config(
+                    cfg,
+                    profile_provider,
+                    profile_models,
+                    model_tokens=args.review_models,
+                    interactive=sys.stdin.isatty(),
+                    save_selected=bool(args.save_review_models),
+                    save_cfg=user_cfg,
+                    ask_to_save=not bool(args.review_models),
+                )
+            elif args.review_models or args.save_review_models:
+                parser.error("--review-models / --save-review-models 仅支持 --profile review")
             model_info, runtime = _resolve_opencode_profile_runtime(
-                cfg,
+                profile_cfg,
                 profile_provider,
                 profile_models,
                 profile_to_launch,

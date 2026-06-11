@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES,
+    OPENCODE_REVIEW_PROFILE_ID,
     opencode_lite_pro_specs,
     opencode_profile_label,
     opencode_profile_selection,
@@ -217,7 +218,7 @@ def resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pro
     for _priority, agent_id, entry in sorted(custom_items, key=lambda item: (item[0], item[1])):
         route_key = opencode_custom_route_key(agent_id)
         model_names = (entry["model"],) if entry.get("model") else opencode_roster_preset_models(entry.get("preset"))
-        route_policy = ""
+        route_policy = str(entry.get("route_policy") or "").strip()
         if entry.get("preset") == "vision" and str(entry.get("model") or "").lower().startswith("mimo-"):
             route_policy = "mimo_direct"
         route = find_opencode_model_route(
@@ -284,7 +285,7 @@ def resolve_opencode_profile_runtime(cfg, default_provider, default_models, prof
         }
         runtime = deps.apply_profile(runtime, profile_id)
         return {"model": "global-omo"}, deps.apply_entrypoint(runtime, selection_entrypoint)
-    if profile_id == OPENCODE_AGENT_PROFILE_ID:
+    if profile_id in {OPENCODE_AGENT_PROFILE_ID, OPENCODE_REVIEW_PROFILE_ID}:
         model_info, runtime = resolve_opencode_lite_pro_runtime(
             cfg,
             default_provider,

@@ -1544,6 +1544,174 @@ def select_submodel_tui(
         return None
 
 
+def select_review_models_tui(options, selected_models=None, title=None):
+    """Review profile multi-select: Space toggles reviewers, Enter confirms."""
+    options = [opt for opt in (options or []) if isinstance(opt, dict) and opt.get("model")]
+    if not options:
+        return None
+
+    selected = {
+        str(model or "").strip().lower()
+        for model in (selected_models or [])
+        if str(model or "").strip()
+    }
+
+    def _option_key(opt):
+        return str(opt.get("model") or "").strip().lower()
+
+    def _selected_models_in_option_order():
+        return [
+            str(opt.get("model") or "").strip()
+            for opt in options
+            if _option_key(opt) in selected and str(opt.get("model") or "").strip()
+        ]
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        scroll = 0
+        search = ""
+        status_text = ""
+
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            query = search.lower().strip()
+            if query:
+                filtered = [
+                    opt for opt in options
+                    if query in str(opt.get("model") or "").lower()
+                    or query in str(opt.get("family") or "").lower()
+                    or query in str(opt.get("provider_name") or "").lower()
+                ]
+            else:
+                filtered = list(options)
+            if not filtered:
+                filtered = list(options)
+            idx = max(0, min(idx, len(filtered) - 1))
+
+            total_w = min(82, max_w - 4)
+            visible = max(1, min(len(filtered), max_y - 9))
+            ph = visible + 7 + (1 if search else 0) + (1 if status_text else 0)
+            px = max(0, (max_w - total_w) // 2)
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.color_pair(1))
+            row += 1
+            header = title or _L("Review 模型多选", "Review Model Multi-select")
+            _safe_addstr(stdscr, row, ll, header, curses.color_pair(1) | curses.A_BOLD)
+            count_text = f"{len(selected)} selected"
+            _safe_addstr(stdscr, row, rr - len(count_text), count_text, curses.color_pair(5) | curses.A_BOLD)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+            if search:
+                _safe_addstr(stdscr, row, ll, f"/ {search}_", curses.color_pair(4) | curses.A_BOLD)
+                row += 1
+
+            if idx < scroll:
+                scroll = idx
+            elif idx >= scroll + visible:
+                scroll = idx - visible + 1
+
+            content_y = row
+            for i in range(scroll, min(scroll + visible, len(filtered))):
+                y = content_y + i - scroll
+                opt = filtered[i]
+                model = str(opt.get("model") or "").strip()
+                family = str(opt.get("family") or "").strip()
+                provider = str(opt.get("provider_name") or "").strip()
+                is_selected = _option_key(opt) in selected
+                is_cursor = i == idx
+                mark = "[x]" if is_selected else "[ ]"
+                left = f"{mark} {model}"
+                right = " / ".join(part for part in (family, provider) if part)
+                attr = curses.color_pair(1) | curses.A_REVERSE if is_cursor else curses.color_pair(2)
+                if is_selected and not is_cursor:
+                    attr = curses.color_pair(5) | curses.A_BOLD
+                _safe_addstr(stdscr, y, ll, " " * max(1, total_w - 4), attr if is_cursor else 0)
+                _safe_addstr(stdscr, y, ll, left, attr, max_w=max(10, total_w - 30))
+                if right:
+                    _safe_addstr(stdscr, y, rr - min(26, _display_width(right)), right, curses.A_DIM, max_w=26)
+
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            if status_text:
+                _safe_addstr(stdscr, bot_y, ll, status_text, curses.color_pair(4) | curses.A_DIM, max_w=total_w - 4)
+                bot_y += 1
+            if search:
+                _safe_addstr(stdscr, bot_y, ll, _L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 20, _L("Space 勾选", "Space Toggle"), curses.color_pair(5) | curses.A_DIM)
+            else:
+                footer = "Space 勾选  Enter 启动并记住  A 全选  C 清空  直接输入搜索  Esc 返回"
+                _safe_addstr(stdscr, bot_y, ll, footer, curses.A_DIM, max_w=total_w - 4)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.color_pair(1))
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            status_text = ""
+
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(filtered)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(filtered)
+            elif key == ord(" "):
+                if filtered:
+                    key_name = _option_key(filtered[idx])
+                    if key_name in selected:
+                        selected.remove(key_name)
+                    else:
+                        selected.add(key_name)
+            elif key in (10, 13, curses.KEY_ENTER):
+                if not selected and filtered:
+                    selected.add(_option_key(filtered[idx]))
+                chosen = _selected_models_in_option_order()
+                if chosen:
+                    return chosen
+                status_text = _L("至少选择一个模型", "Select at least one model")
+            elif key in (ord("a"), ord("A")) and not search:
+                for opt in filtered:
+                    selected.add(_option_key(opt))
+            elif key in (ord("c"), ord("C")) and not search:
+                selected.clear()
+            elif key == 27:
+                if search:
+                    search = ""
+                    idx = 0
+                    scroll = 0
+                else:
+                    return None
+            elif key in (ord("q"), ord("Q")) and not search:
+                return None
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if search:
+                    search = search[:-1]
+                    idx = 0
+                    scroll = 0
+            elif 32 <= key <= 126:
+                if key != ord(" "):
+                    search += chr(key)
+                    idx = 0
+                    scroll = 0
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
 # ── 旧版兼容入口（保留签名，内部不再使用）──────────────────
 
 def select_scene_tui(scenes, cli_names, source_choices=None, last_used=None, scene_counts=None):
@@ -3292,9 +3460,9 @@ def confirm_tui(
 
     返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled, caveman_level)。
     action: "" = 启动, "b" = 返回, "q" = 取消
-    bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow / run bypass
+        bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
-    caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
+        caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
     caveman_level: "light" / "standard" / "full"，仅 Caveman 开启时有效
     nsr_enabled: bool，仅 claude/codex 且 NSR hook 可用时有效，True 时本次会话开启 NSR hooks
     agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
