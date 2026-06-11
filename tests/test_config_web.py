@@ -1903,6 +1903,7 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
 
     assert "OpenCode 默认 profile" in html
     assert "OpenCode Review Host" in html
+    assert "重新启动 OpenCode 后才生效" in html
     assert "opencodeReviewHostPrimarySelect" in html
     assert "opencodeReviewHostFallbackSelect" in html
     assert "加入 primary" in html
