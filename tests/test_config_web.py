@@ -2483,6 +2483,11 @@ def test_config_web_snapshot_and_plan_persist_opencode_review_host(tmp_path):
     assert host["fallback_models"] == ["kimi-k2.6", "gpt-5.4"]
     assert item["meta"]["primary_models"] == ["qwen3.7-max", "glm-5-turbo"]
 
+    import mms_registry_cli
+
+    profile_payload = mms_registry_cli._registry_v2_profile_payload(plan["config"])
+    assert profile_payload["runtime_config"]["opencode"]["review"]["host"] == host
+
 
 def test_config_web_plan_persists_opencode_agent_roster_delta(tmp_path):
     cfg = {"opencode": {"default_profile": "lite_pro_orchestrated"}}
@@ -3135,6 +3140,12 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     config_path = config_root / "config.toml"
     credentials_path = config_root / "credentials.sh"
     payload = _draft_payload()
+    payload["draft"]["opencode"]["review"] = {
+        "host": {
+            "primary_models": ["mimo-v2.5"],
+            "fallback_models": ["glm-5-turbo"],
+        }
+    }
     payload["confirm_v2_preview"] = True
     payload["confirm_phrase"] = "写入预览DB"
 
@@ -3145,9 +3156,11 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     )
     encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
     router_path = config_root / "generated" / "model-routes.json"
+    profile_path = config_root / "generated" / "provider-profiles.generated.json"
     manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
     secret_path = config_root / "secrets" / "webui-secrets.json"
     router = json.loads(router_path.read_text(encoding="utf-8"))
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
 
     assert result["ok"] is True
     assert result["schema"] == "mms.setup_web.registry_v2_apply_result.v1"
@@ -3160,6 +3173,12 @@ def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_p
     assert router["source"] == "registry-preview-v2-save-candidate"
     assert router["routes"]["gpt-5.5"]["primary"]["secret_ref"] == "pending-webui:demo:api_key"
     assert router["routes"]["gpt-5.5"]["primary"]["api_key"] == "sk-super-secret-value"
+    assert profile["runtime_config"]["opencode"]["review"]["host"] == {
+        "primary_models": ["mimo-v2.5"],
+        "fallback_models": ["glm-5-turbo"],
+    }
+    snapshot = mms_config_web.build_config_snapshot({}, config_path=str(config_path), command_name="mmf")
+    assert snapshot["opencode"]["review"]["host"] == profile["runtime_config"]["opencode"]["review"]["host"]
     assert manifest_path.exists()
     assert secret_path.exists()
     assert "sk-super-secret-value" in secret_path.read_text(encoding="utf-8")

@@ -1034,6 +1034,62 @@ def test_core_opencode_review_host_models_are_configurable(monkeypatch):
     assert payload["agent"]["review-hub-host-stable"]["model"].endswith("/kimi-k2.6")
 
 
+def test_core_preview_bundle_restores_opencode_review_host(monkeypatch):
+    import mms_core
+    import mms_registry
+
+    bundle = {
+        "manifest": {"bundle_revision": "bundle-test"},
+        "payloads": {
+            "profile": {
+                "provider": {"default": "demo"},
+                "profiles": {
+                    "demo": {
+                        "name": "Demo",
+                        "role": "primary",
+                        "priority": 100,
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["opencode"],
+                        "models_endpoint": "manual",
+                    }
+                },
+                "runtime_config": {
+                    "opencode": {
+                        "review": {
+                            "host": {
+                                "primary_models": ["mimo-v2.5"],
+                                "fallback_models": ["glm-5-turbo"],
+                            }
+                        }
+                    }
+                },
+            },
+            "router": {
+                "routes": {
+                    "mimo-v2.5": {
+                        "primary": {
+                            "provider_id": "demo",
+                            "model": "mimo-v2.5",
+                            "openai_base_url": "https://demo.example/v1",
+                            "api_key": "plain-test-key",
+                        },
+                        "fallbacks": [],
+                    }
+                }
+            },
+        },
+    }
+    monkeypatch.setattr(mms_core, "_preview_root_mode", lambda: True)
+    monkeypatch.setattr(mms_registry, "load_latest_approved_bundle", lambda **_kwargs: bundle)
+
+    cfg = mms_core._load_preview_runtime_config_from_latest_bundle()
+
+    assert cfg["opencode"]["review"]["host"] == {
+        "primary_models": ["mimo-v2.5"],
+        "fallback_models": ["glm-5-turbo"],
+    }
+
+
 def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):
     import mms_core
     import mms_launchers

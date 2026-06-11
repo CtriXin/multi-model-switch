@@ -620,7 +620,12 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
     explicit_default = _safe_text(provider_cfg.get("default") or profiles_payload.get("default_provider"))
     provider_ids = {_safe_text(item.get("id")) for item in providers}
     provider_default = explicit_default if explicit_default in provider_ids else (providers[0]["id"] if providers else "")
-    return {"providers": providers, "provider": {"default": provider_default}}
+    result: dict[str, Any] = {"providers": providers, "provider": {"default": provider_default}}
+    runtime_config = profiles_payload.get("runtime_config") if isinstance(profiles_payload.get("runtime_config"), dict) else {}
+    runtime_opencode = runtime_config.get("opencode") if isinstance(runtime_config.get("opencode"), dict) else {}
+    if runtime_opencode:
+        result["opencode"] = copy.deepcopy(runtime_opencode)
+    return result
 
 
 def _hydrate_preview_config_from_latest_bundle(
@@ -663,10 +668,14 @@ def _hydrate_preview_config_from_latest_bundle(
         if missing:
             result["providers"] = list(result.get("providers") or []) + missing
             result["_preview_bundle_profile_merged"] = True
+        if isinstance(hydrated.get("opencode"), dict):
+            result["opencode"] = copy.deepcopy(hydrated["opencode"])
         return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
     result = copy.deepcopy(cfg)
     result["providers"] = hydrated["providers"]
     result["provider"] = hydrated["provider"]
+    if isinstance(hydrated.get("opencode"), dict):
+        result["opencode"] = copy.deepcopy(hydrated["opencode"])
     result["_preview_bundle_hydrated"] = True
     return _attach_preview_secret_refs(result, config_path=config_path, command_name=command_name)
 

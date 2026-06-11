@@ -1499,6 +1499,9 @@ def _build_preview_bundle_payloads_from_route_revision(
         }
         if not effective_profile_payload["provider"] and str(profile_payload.get("default_provider") or "").strip():
             effective_profile_payload["provider"] = {"default": str(profile_payload.get("default_provider") or "").strip()}
+        runtime_config = profile_payload.get("runtime_config") if isinstance(profile_payload.get("runtime_config"), Mapping) else {}
+        if runtime_config:
+            effective_profile_payload["runtime_config"] = json.loads(json.dumps(runtime_config, ensure_ascii=False))
     else:
         effective_profile_payload = {
             "schema_version": 1,

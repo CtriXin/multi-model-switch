@@ -13865,7 +13865,7 @@ def _load_preview_runtime_config_from_latest_bundle():
     if not providers:
         return None
     default_provider_id = _bundle_runtime_default_provider_id(profile_payload, providers)
-    return {
+    result = {
         "ui": {"language": "zh"},
         "user": {"role": MODE_ALL},
         "cache": {
@@ -13881,6 +13881,11 @@ def _load_preview_runtime_config_from_latest_bundle():
         "_mms_config_source": "latest-approved-bundle",
         "_mms_bundle_revision": manifest.get("bundle_revision") or "",
     }
+    runtime_config = profile_payload.get("runtime_config") if isinstance(profile_payload.get("runtime_config"), dict) else {}
+    runtime_opencode = runtime_config.get("opencode") if isinstance(runtime_config.get("opencode"), dict) else {}
+    if runtime_opencode:
+        result["opencode"] = copy.deepcopy(runtime_opencode)
+    return result
 
 
 def _merge_preview_local_launch_preferences(cfg):
@@ -13909,8 +13914,9 @@ def _merge_preview_local_launch_preferences(cfg):
     if not isinstance(opencode, dict):
         opencode = {}
         next_cfg["opencode"] = opencode
-    opencode.update(local_opencode_defaults)
-    if local_review:
+    for key, value in local_opencode_defaults.items():
+        opencode.setdefault(key, value)
+    if local_review and "review" not in opencode:
         opencode["review"] = copy.deepcopy(local_review)
     return next_cfg
 

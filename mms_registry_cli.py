@@ -1783,6 +1783,80 @@ def _provider_route_secret_ref(provider: Mapping[str, Any], credential_provider_
     return "", ""
 
 
+def _registry_v2_opencode_agent_models_payload(value: Any) -> dict[str, dict[str, str]]:
+    raw = value if isinstance(value, Mapping) else {}
+    result: dict[str, dict[str, str]] = {}
+    for raw_agent, raw_entry in raw.items():
+        agent_id = str(raw_agent or "").strip()
+        if not agent_id:
+            continue
+        entry = raw_entry if isinstance(raw_entry, Mapping) else {}
+        model = str(entry.get("model") or entry.get("model_id") or (raw_entry if not isinstance(raw_entry, Mapping) else "")).strip()
+        provider_id = str(entry.get("provider_id") or entry.get("provider") or "").strip()
+        if not model:
+            continue
+        payload = {"model": model}
+        if provider_id:
+            payload["provider_id"] = provider_id
+        result[agent_id] = payload
+    return result
+
+
+def _registry_v2_opencode_agent_roster_payload(value: Any) -> dict[str, dict[str, Any]]:
+    raw = value if isinstance(value, Mapping) else {}
+    result: dict[str, dict[str, Any]] = {}
+    for raw_agent, raw_entry in raw.items():
+        agent_id = str(raw_agent or "").strip()
+        entry = raw_entry if isinstance(raw_entry, Mapping) else {}
+        if not agent_id or not entry:
+            continue
+        payload: dict[str, Any] = {}
+        for key in ("preset", "category", "label", "provider_id", "provider", "model", "model_id"):
+            text = str(entry.get(key) or "").strip()
+            if text:
+                payload[key] = text
+        for key in ("enabled", "custom"):
+            if key in entry:
+                payload[key] = entry.get(key) is not False
+        if "priority" in entry:
+            try:
+                payload["priority"] = int(entry.get("priority") or 0)
+            except (TypeError, ValueError):
+                pass
+        if payload:
+            result[agent_id] = payload
+    return result
+
+
+def _registry_v2_runtime_opencode_payload(value: Any) -> dict[str, Any]:
+    opencode = value if isinstance(value, Mapping) else {}
+    payload: dict[str, Any] = {}
+    for key in ("default_profile", "profile"):
+        text = str(opencode.get(key) or "").strip()
+        if text:
+            payload[key] = text
+
+    review = opencode.get("review") if isinstance(opencode.get("review"), Mapping) else {}
+    review_host = review.get("host") if isinstance(review.get("host"), Mapping) else {}
+    if not review_host and isinstance(opencode.get("review_host"), Mapping):
+        review_host = opencode.get("review_host")
+    host_payload = {
+        key: models
+        for key in ("primary_models", "fallback_models")
+        if (models := _as_string_list(review_host.get(key) if isinstance(review_host, Mapping) else []))
+    }
+    if host_payload:
+        payload["review"] = {"host": host_payload}
+
+    agent_models = _registry_v2_opencode_agent_models_payload(opencode.get("agent_models") or opencode.get("agent_model_overrides"))
+    if agent_models:
+        payload["agent_models"] = agent_models
+    agent_roster = _registry_v2_opencode_agent_roster_payload(opencode.get("agent_roster"))
+    if agent_roster:
+        payload["agent_roster"] = agent_roster
+    return payload
+
+
 def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str, Any]:
     providers = [item for item in (config_payload.get("providers") or []) if isinstance(item, Mapping)]
     provider_cfg = config_payload.get("provider") if isinstance(config_payload.get("provider"), Mapping) else {}
@@ -1808,6 +1882,9 @@ def _registry_v2_profile_payload(config_payload: Mapping[str, Any]) -> dict[str,
         "provider": {"default": provider_default} if provider_default else {},
         "profiles": profiles,
     }
+    opencode_payload = _registry_v2_runtime_opencode_payload(config_payload.get("opencode"))
+    if opencode_payload:
+        payload["runtime_config"] = {"opencode": opencode_payload}
     mms_registry.validate_non_secret_payload(payload, context="registry_v2_profile_candidate")
     return payload
 
