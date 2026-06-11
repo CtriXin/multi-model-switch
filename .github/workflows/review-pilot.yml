@@ -48,7 +48,7 @@ jobs:
           eval "$(ssh-agent -s)"
           ssh-add - <<< "$REVIEW_PILOT_DEPLOY_KEY"
 
-          npm install --global "git+ssh://git@github.com/CtriXin/review-pilot.git#cf5040fcd65e985b96b650aa2eb43028064f1639"
+          npm install --global "git+ssh://git@github.com/CtriXin/review-pilot.git#90d3c75c68ea9aef892114d379c4e6cf15ada1d6"
 
       - name: Run review-pilot
         env:
@@ -61,6 +61,7 @@ jobs:
             review-pilot ci github \
               --checkout "$GITHUB_WORKSPACE" \
               --dry-run \
+              --baseline-aware \
               --fail-on-validation \
               --llm mms \
               --mms-reviewer "$REVIEW_PILOT_MMS_REVIEWER"
@@ -68,6 +69,7 @@ jobs:
             review-pilot ci github \
               --checkout "$GITHUB_WORKSPACE" \
               --dry-run \
+              --baseline-aware \
               --fail-on-validation
           fi
 
