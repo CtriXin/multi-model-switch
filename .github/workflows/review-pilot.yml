@@ -1,0 +1,71 @@
+name: Review Pilot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review-pilot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable package managers
+        run: corepack enable
+
+      - name: Install review-pilot
+        env:
+          REVIEW_PILOT_DEPLOY_KEY: ${{ secrets.REVIEW_PILOT_DEPLOY_KEY }}
+        run: |
+          if [ -z "$REVIEW_PILOT_DEPLOY_KEY" ]; then
+            echo "Missing REVIEW_PILOT_DEPLOY_KEY secret."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$REVIEW_PILOT_DEPLOY_KEY"
+
+          npm install --global "git+ssh://git@github.com/CtriXin/review-pilot.git#cf5040fcd65e985b96b650aa2eb43028064f1639"
+
+      - name: Run review-pilot
+        env:
+          REVIEW_PILOT_BASE: ${{ github.event.pull_request.base.sha }}
+          REVIEW_PILOT_HEAD: ${{ github.event.pull_request.head.sha }}
+          REVIEW_PILOT_MMS_COMMAND: ${{ secrets.REVIEW_PILOT_MMS_COMMAND }}
+          REVIEW_PILOT_MMS_REVIEWER: minimax-m2.7
+        run: |
+          if [ -n "$REVIEW_PILOT_MMS_COMMAND" ]; then
+            review-pilot ci github \
+              --checkout "$GITHUB_WORKSPACE" \
+              --dry-run \
+              --fail-on-validation \
+              --llm mms \
+              --mms-reviewer "$REVIEW_PILOT_MMS_REVIEWER"
+          else
+            review-pilot ci github \
+              --checkout "$GITHUB_WORKSPACE" \
+              --dry-run \
+              --fail-on-validation
+          fi
+
+      - name: Upload review packet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-pilot
+          path: .review-pilot/runs
