@@ -3507,6 +3507,129 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
     assert captured["exec_kwargs"]["bridge_info"]["base_url"] == "http://127.0.0.1:4567/v1"
 
 
+def test_launch_claude_mimo_1m_shell_model_keeps_compact_window(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    captured = {}
+
+    class FakeBridge:
+        def __enter__(self):
+            return {"base_url": "http://127.0.0.1:4567/v1", "api_key": "bridge-token"}
+
+        def __exit__(self, *_args):
+            return None
+
+    def fake_bridge(gateway_url, gateway_key, **kwargs):
+        captured["gateway_url"] = gateway_url
+        captured["gateway_key"] = gateway_key
+        captured["bridge_kwargs"] = kwargs
+        return FakeBridge()
+
+    def fake_prepare(runtime, **kwargs):
+        captured["prepare_kwargs"] = kwargs
+        return {
+            "HOME": str(tmp_path / "session"),
+            "PATH": "/usr/bin",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4-6",
+        }
+
+    def fake_exec(cmd, env, once, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["exec_kwargs"] = kwargs
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda _runtime: {})
+    monkeypatch.setattr(mms_launchers, "_health_check_due", lambda _provider_id: False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda *_args, **_kwargs: {"models": ["mimo-v2.5"], "base_source": "test"},
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_anthropic_base_url", lambda *_args, **_kwargs: (None, "failed"))
+    monkeypatch.setattr(mms_launchers, "_resolve_native_fallback_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_launchers, "_gateway_claude_bridge_context", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_env_with_status", fake_prepare)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_effective_context_window",
+        lambda *models, **_kwargs: 1_048_576 if "mimo-v2.5" in models else 200_000,
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+    monkeypatch.setattr(mms_launchers, "_finalize_claude_slot", lambda *_args, **_kwargs: None)
+
+    mms_launchers.launch_claude(
+        {"model": "mimo-v2.5"},
+        {
+            "id": "mimo-direct-anthropic",
+            "auth_mode": "api_key",
+            "api_key": "sk-runtime",
+            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+            "model_capabilities": {"mimo-v2.5": {"vision": True}},
+        },
+        once=True,
+    )
+
+    assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
+    assert captured["prepare_kwargs"]["display_model"] == "mimo-v2.5"
+    assert captured["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1048576"
+    assert captured["env"]["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "1045576"
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert captured["env"][key] == "claude-sonnet-4-6[1m]"
+
+
+def test_claude_shell_context_slots_cover_260k_routed_models():
+    import mms_launchers
+
+    env = {
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+        "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4-6",
+    }
+
+    shell_model = mms_launchers._apply_claude_shell_context_slots(
+        env,
+        context_window=262_144,
+        fallback_model="claude-sonnet-4-6",
+        enable_1m=True,
+        provider_id="kimi-direct",
+    )
+
+    assert shell_model == "claude-sonnet-4-6[1m]"
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert env[key] == "claude-sonnet-4-6[1m]"
+
+    base_env = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6"}
+    assert (
+        mms_launchers._apply_claude_shell_context_slots(
+            base_env,
+            context_window=200_000,
+            fallback_model="claude-sonnet-4-6",
+            enable_1m=True,
+            provider_id="kimi-direct",
+        )
+        == ""
+    )
+    assert base_env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "claude-sonnet-4-6"
+
+
 def test_launch_claude_policy_vision_model_suppresses_sidecar(monkeypatch, tmp_path):
     import mms_launchers
 

@@ -9140,6 +9140,35 @@ def _apply_claude_visible_model_overrides(target, model_name, *, fallback_model=
     return visible_model
 
 
+def _apply_claude_shell_context_slots(target, *, context_window, fallback_model="", enable_1m=True, provider_id=None):
+    """Keep Claude Code's shell model cap from shrinking larger routed contexts."""
+    window = _coerce_context_window(context_window)
+    if window is None or window <= _DEFAULT_CONTEXT_WINDOW:
+        return ""
+    shell_model = _normalized_model_name(
+        target.get("ANTHROPIC_MODEL")
+        or target.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        or target.get("ANTHROPIC_REASONING_MODEL")
+        or fallback_model
+        or "claude-sonnet-4-6"
+    )
+    if not _is_claude_family_model_name(shell_model):
+        shell_model = "claude-sonnet-4-6"
+    shell_model = _with_1m_suffix(shell_model, enable_1m=enable_1m, provider_id=provider_id)
+    if _ONE_M_CONTEXT_SUFFIX not in shell_model.lower():
+        return ""
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        target[key] = shell_model
+    target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = _strip_one_m_context_suffix(shell_model)
+    return shell_model
+
+
 def _claude_resume_model_name(*candidates):
     for candidate in candidates:
         normalized = _normalized_model_name(candidate)
@@ -9712,6 +9741,15 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
     )
     env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
     env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
+    _apply_claude_shell_context_slots(
+        env,
+        context_window=ctx_window,
+        fallback_model=env.get("ANTHROPIC_MODEL")
+        or env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        or "claude-sonnet-4-6",
+        enable_1m=enable_claude_1m,
+        provider_id=(runtime or {}).get("id"),
+    )
 
     claude_bin = _resolve_real_home_command_path("claude", env) or "claude"
     cmd = [claude_bin]
