@@ -19,10 +19,18 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Enable package managers
         run: corepack enable
+
+      - name: Install Python test tools
+        run: python3 -m pip install pytest
 
       - name: Install review-pilot
         env:
