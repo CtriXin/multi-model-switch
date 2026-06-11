@@ -82,6 +82,60 @@ OPENCODE_REVIEW_HUB_SPECS = (
 )
 
 
+def _opencode_model_list(value):
+    if isinstance(value, str):
+        raw_items = value.replace(",", "\n").splitlines()
+        items = []
+        for raw in raw_items:
+            items.extend(str(raw or "").split())
+    elif isinstance(value, (list, tuple)):
+        items = value
+    else:
+        items = []
+    result = []
+    seen = set()
+    for item in items:
+        model = str(item or "").strip()
+        key = model.lower()
+        if not model or key in seen:
+            continue
+        seen.add(key)
+        result.append(model)
+    return tuple(result)
+
+
+def opencode_review_host_config(cfg):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
+    review = opencode.get("review") if isinstance(opencode.get("review"), dict) else {}
+    host = review.get("host") if isinstance(review.get("host"), dict) else {}
+    if not host and isinstance(opencode.get("review_host"), dict):
+        host = opencode.get("review_host")
+    primary_models = _opencode_model_list(host.get("primary_models") or host.get("models"))
+    fallback_models = _opencode_model_list(host.get("fallback_models") or host.get("fallback"))
+    result = {}
+    if primary_models:
+        result["primary_models"] = primary_models
+    if fallback_models:
+        result["fallback_models"] = fallback_models
+    return result
+
+
+def opencode_lite_pro_specs_for_config(cfg, profile_id=OPENCODE_AGENT_PROFILE_ID):
+    specs = [dict(spec) for spec in opencode_lite_pro_specs(profile_id)]
+    if normalize_opencode_profile_id(profile_id) != OPENCODE_REVIEW_PROFILE_ID:
+        return tuple(specs)
+    host = opencode_review_host_config(cfg)
+    if not host:
+        return tuple(specs)
+    for spec in specs:
+        if spec.get("key") == "builder_primary" and host.get("primary_models"):
+            spec["models"] = tuple(host["primary_models"])
+        elif spec.get("key") == "builder_fallback" and host.get("fallback_models"):
+            spec["models"] = tuple(host["fallback_models"])
+    return tuple(specs)
+
+
 def normalize_opencode_profile_id(value):
     raw = str(value or "").strip()
     if not raw:
@@ -284,7 +338,9 @@ __all__ = [
     "normalize_opencode_entrypoint",
     "normalize_opencode_profile_id",
     "opencode_lite_pro_specs",
+    "opencode_lite_pro_specs_for_config",
     "opencode_profile_label",
     "opencode_profile_selection",
     "opencode_profile_selection_ids",
+    "opencode_review_host_config",
 ]

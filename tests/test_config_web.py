@@ -1902,6 +1902,9 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     html = _frontend_source()
 
     assert "OpenCode 默认 profile" in html
+    assert "OpenCode Review Host" in html
+    assert "opencodeReviewHostPrimary" in html
+    assert "opencodeReviewHostFallback" in html
     assert "OpenCode Agent 名单" in html
     assert "顺序表示 priority/fallback 顺序，不是 round-robin" in html
     assert "Agent 覆盖" in html
@@ -2434,6 +2437,48 @@ def test_config_web_plan_clears_empty_opencode_agent_overrides(tmp_path):
 
     assert "agent_models" not in plan["config"]["opencode"]
     assert any(item["kind"] == "opencode_agent_models" for item in plan["review_summary"]["items"])
+
+
+def test_config_web_snapshot_and_plan_persist_opencode_review_host(tmp_path):
+    cfg = {
+        "opencode": {
+            "review": {
+                "host": {
+                    "primary_models": ["glm-5-turbo"],
+                    "fallback_models": ["gpt-5.4"],
+                }
+            }
+        }
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+
+    assert snapshot["opencode"]["profiles"] == ["agent", "review", "omo", "raw"]
+    assert snapshot["opencode"]["review"]["host"] == {
+        "primary_models": ["glm-5-turbo"],
+        "fallback_models": ["gpt-5.4"],
+    }
+    assert snapshot["opencode"]["review_host_defaults"]["primary_models"][0] == "glm-5-turbo"
+
+    payload = {
+        "draft": {
+            "opencode": {
+                "default_profile": "agent",
+                "review": {
+                    "host": {
+                        "primary_models": ["qwen3.7-max", "glm-5-turbo"],
+                        "fallback_models": ["kimi-k2.6", "gpt-5.4"],
+                    }
+                },
+            }
+        }
+    }
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+    host = plan["config"]["opencode"]["review"]["host"]
+    item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "opencode_review_host")
+
+    assert host["primary_models"] == ["qwen3.7-max", "glm-5-turbo"]
+    assert host["fallback_models"] == ["kimi-k2.6", "gpt-5.4"]
+    assert item["meta"]["primary_models"] == ["qwen3.7-max", "glm-5-turbo"]
 
 
 def test_config_web_plan_persists_opencode_agent_roster_delta(tmp_path):

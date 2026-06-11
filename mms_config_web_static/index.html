@@ -218,10 +218,26 @@
           <label>OpenCode 默认 profile</label>
           <select id="opencodeProfile">
             <option>agent</option>
+            <option>review</option>
             <option>omo</option>
             <option>raw</option>
           </select>
           <p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p>
+        </div>
+        <div class="card span12">
+          <h3>OpenCode Review Host</h3>
+          <p class="muted">写入 [opencode.review.host]；只影响 Review profile 的 host / fallback，不改变 reviewer 模型 Space 选择。</p>
+          <div class="grid">
+            <div class="span6">
+              <label>primary models（空格 / 逗号分隔）</label>
+              <input id="opencodeReviewHostPrimary" placeholder="glm-5-turbo kimi-k2.6 qwen3.6-flash gpt-5.4">
+            </div>
+            <div class="span6">
+              <label>fallback models（空格 / 逗号分隔）</label>
+              <input id="opencodeReviewHostFallback" placeholder="gpt-5.4 gpt-5.3-codex gpt-5.2-codex">
+            </div>
+          </div>
+          <p class="muted" id="opencodeReviewHostHint"></p>
         </div>
         <div class="card span12 ui-advanced-only">
           <h3>OpenCode Agent 名单</h3>

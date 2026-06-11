@@ -991,6 +991,49 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-kimi-k2-5"] == "allow"
 
 
+def test_core_opencode_review_host_models_are_configurable(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {
+            "review": {
+                "host": {
+                    "primary_models": ["qwen3.7-max", "glm-5-turbo"],
+                    "fallback_models": ["kimi-k2.6", "gpt-5.4"],
+                }
+            }
+        },
+    }
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    models = ["gpt-5.4", "qwen3.7-max", "kimi-k2.6", "glm-5-turbo", "glm-5.1"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, models)])
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        models,
+        "review",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+    builder_route = next(route for route in runtime["opencode_routes"] if route["id"] == "builder_primary")
+    fallback_route = next(route for route in runtime["opencode_routes"] if route["id"] == "builder_fallback")
+
+    assert model_info == {"model": "qwen3.7-max", "profile": "review_hub"}
+    assert builder_route["model"] == "qwen3.7-max"
+    assert fallback_route["model"] == "kimi-k2.6"
+    assert payload["model"].endswith("/qwen3.7-max")
+    assert payload["agent"]["review-hub-host-stable"]["model"].endswith("/kimi-k2.6")
+
+
 def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):
     import mms_core
     import mms_launchers

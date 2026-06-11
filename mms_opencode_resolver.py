@@ -8,7 +8,7 @@ from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES,
     OPENCODE_REVIEW_PROFILE_ID,
-    opencode_lite_pro_specs,
+    opencode_lite_pro_specs_for_config,
     opencode_profile_label,
     opencode_profile_selection,
 )
@@ -162,7 +162,7 @@ def resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pro
         profile_id=profile_id,
     )
 
-    default_specs = list(opencode_lite_pro_specs(profile_id))
+    default_specs = list(opencode_lite_pro_specs_for_config(cfg, profile_id))
     default_agents = {str(spec.get("agent") or "").strip() for spec in default_specs}
     default_keys = {str(spec.get("key") or "").strip() for spec in default_specs}
 

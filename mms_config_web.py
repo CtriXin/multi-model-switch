@@ -39,6 +39,11 @@ from mms_config_web_server import (
     run_config_web,
     serve_config_web,
 )
+from mms_opencode_profiles import (
+    OPENCODE_REVIEW_PROFILE_ID,
+    opencode_lite_pro_specs,
+    opencode_review_host_config,
+)
 
 
 _SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key", "token", "secret", "authorization", "password", "passphrase"}
@@ -1953,6 +1958,30 @@ def _normalize_agent_model_overrides(value: Any) -> dict[str, dict[str, str]]:
     return result
 
 
+def _normalize_opencode_review_host(value: Any) -> dict[str, list[str]]:
+    if isinstance(value, dict) and "opencode" in value:
+        cfg = value
+    elif isinstance(value, dict) and ("review" in value or "review_host" in value):
+        cfg = {"opencode": value}
+    elif isinstance(value, dict):
+        cfg = {"opencode": {"review": {"host": value}}}
+    else:
+        cfg = {}
+    normalized = opencode_review_host_config(cfg)
+    return {
+        "primary_models": list(normalized.get("primary_models") or []),
+        "fallback_models": list(normalized.get("fallback_models") or []),
+    }
+
+
+def _opencode_review_host_defaults() -> dict[str, list[str]]:
+    specs = {str(spec.get("key") or ""): spec for spec in opencode_lite_pro_specs(OPENCODE_REVIEW_PROFILE_ID)}
+    return {
+        "primary_models": list(specs.get("builder_primary", {}).get("models") or []),
+        "fallback_models": list(specs.get("builder_fallback", {}).get("models") or []),
+    }
+
+
 def _opencode_agent_preset(agent_id: str, category: str = "") -> str:
     text = _safe_text(agent_id).lower()
     category = _safe_text(category).lower()
@@ -2120,7 +2149,9 @@ def build_config_snapshot(
     opencode = {
         "default_profile": opencode_profile,
         "recommended_profile": "agent",
-        "profiles": ["agent", "omo", "raw"],
+        "profiles": ["agent", "review", "omo", "raw"],
+        "review": {"host": _normalize_opencode_review_host(opencode_cfg)},
+        "review_host_defaults": _opencode_review_host_defaults(),
         "agent_models": opencode_agent_models,
         "agent_roster": _normalize_opencode_agent_roster(opencode_cfg.get("agent_roster"), profile_id="agent"),
         "agent_catalog": opencode_agent_catalog,
@@ -4037,6 +4068,20 @@ def _build_review_summary(
     opencode_after = next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {}
     if _safe_text(opencode_before.get("default_profile")) != _safe_text(opencode_after.get("default_profile")):
         add_item("opencode_profile", "OpenCode profile 变化", f"`{_safe_text(opencode_before.get('default_profile')) or '-'}` -> `{_safe_text(opencode_after.get('default_profile')) or '-'}`")
+    before_review_host = _normalize_opencode_review_host(opencode_before)
+    after_review_host = _normalize_opencode_review_host(opencode_after)
+    if _mapping_digest(before_review_host) != _mapping_digest(after_review_host):
+        primary = after_review_host.get("primary_models") or []
+        fallback = after_review_host.get("fallback_models") or []
+        add_item(
+            "opencode_review_host",
+            "OpenCode Review host 变化",
+            f"primary `{', '.join(primary) or '-'}`；fallback `{', '.join(fallback) or '-'}`",
+            meta={
+                "primary_models": primary,
+                "fallback_models": fallback,
+            },
+        )
     before_agents = _normalize_agent_model_overrides(opencode_before.get("agent_models") or opencode_before.get("agent_model_overrides"))
     after_agents = _normalize_agent_model_overrides(opencode_after.get("agent_models") or opencode_after.get("agent_model_overrides"))
     if _mapping_digest(before_agents) != _mapping_digest(after_agents):
@@ -4523,13 +4568,35 @@ def build_config_plan(
 
     opencode_payload = draft.get("opencode") if isinstance(draft.get("opencode"), dict) else {}
     default_profile = _safe_text(opencode_payload.get("default_profile"))
+    review_host = _normalize_opencode_review_host(opencode_payload)
     agent_model_overrides = _normalize_agent_model_overrides(opencode_payload.get("agent_models") or opencode_payload.get("agent_model_overrides"))
     agent_roster = _normalize_opencode_agent_roster(opencode_payload.get("agent_roster"), profile_id="agent")
-    if default_profile or "agent_models" in opencode_payload or "agent_model_overrides" in opencode_payload or "agent_roster" in opencode_payload:
+    opencode_payload_touched = (
+        default_profile
+        or "agent_models" in opencode_payload
+        or "agent_model_overrides" in opencode_payload
+        or "agent_roster" in opencode_payload
+        or "review" in opencode_payload
+        or "review_host" in opencode_payload
+    )
+    if opencode_payload_touched:
         opencode_cfg = dict(next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {})
         current_default_profile = _safe_text(opencode_cfg.get("default_profile"))
         if default_profile and (current_default_profile or default_profile != "agent"):
             opencode_cfg["default_profile"] = default_profile
+        if review_host["primary_models"] or review_host["fallback_models"]:
+            review_cfg = dict(opencode_cfg.get("review") if isinstance(opencode_cfg.get("review"), dict) else {})
+            review_cfg["host"] = {key: models for key, models in review_host.items() if models}
+            opencode_cfg["review"] = review_cfg
+            opencode_cfg.pop("review_host", None)
+        elif "review" in opencode_payload or "review_host" in opencode_payload:
+            review_cfg = dict(opencode_cfg.get("review") if isinstance(opencode_cfg.get("review"), dict) else {})
+            review_cfg.pop("host", None)
+            if review_cfg:
+                opencode_cfg["review"] = review_cfg
+            else:
+                opencode_cfg.pop("review", None)
+            opencode_cfg.pop("review_host", None)
         if agent_model_overrides:
             opencode_cfg["agent_models"] = agent_model_overrides
             opencode_cfg.pop("agent_model_overrides", None)
