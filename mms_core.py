@@ -3566,6 +3566,88 @@ def managed_assets_root():
     return os.path.join(resolve_real_user_home(), ".local", "share", "mms", "assets")
 
 
+def _normalize_skill_import_name(raw_name):
+    name = str(raw_name or "").strip()
+    if not name:
+        raise ValueError("skill name is required")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise ValueError("skill name must match [A-Za-z0-9._-]+")
+    return name
+
+
+def _read_skill_declared_name(skill_root):
+    skill_md = os.path.join(skill_root, "SKILL.md")
+    if not os.path.isfile(skill_md):
+        return ""
+    try:
+        text = open(skill_md, "r", encoding="utf-8").read()
+    except OSError:
+        return ""
+    match = re.search(r"(?im)^name:\s*([A-Za-z0-9._-]+)\s*$", text)
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def _resolve_skill_import_source(raw_path):
+    source = os.path.abspath(os.path.expanduser(str(raw_path or "").strip()))
+    if not source:
+        raise ValueError("source path is required")
+    if os.path.isfile(source):
+        if os.path.basename(source) != "SKILL.md":
+            raise ValueError("source file must be SKILL.md")
+        source = os.path.dirname(source)
+    if not os.path.isdir(source):
+        raise ValueError(f"skill source not found: {source}")
+    if not os.path.isfile(os.path.join(source, "SKILL.md")):
+        raise ValueError(f"SKILL.md not found under: {source}")
+    return source
+
+
+def import_managed_skill(source_path, *, skill_name="", replace=False, copy_mode=False, dry_run=False):
+    source_root = _resolve_skill_import_source(source_path)
+    resolved_name = _normalize_skill_import_name(skill_name or _read_skill_declared_name(source_root) or os.path.basename(source_root))
+    target_root = os.path.join(managed_assets_root(), "skills", resolved_name)
+    parent_dir = os.path.dirname(target_root)
+    target_exists = os.path.lexists(target_root)
+    same_target = False
+    if target_exists:
+        try:
+            same_target = os.path.samefile(source_root, target_root)
+        except OSError:
+            same_target = False
+    result = {
+        "ok": True,
+        "mode": "copy" if copy_mode else "symlink",
+        "source_root": source_root,
+        "target_root": target_root,
+        "skill_name": resolved_name,
+        "managed_root": managed_assets_root(),
+        "changed": False,
+        "status": "noop" if same_target else "planned",
+        "dry_run": bool(dry_run),
+    }
+    if same_target:
+        result["status"] = "already_imported"
+        return result
+    if target_exists and not replace:
+        raise ValueError(f"target already exists: {target_root} (use --replace to overwrite)")
+    if dry_run:
+        result["status"] = "would_replace" if target_exists else "would_import"
+        return result
+    os.makedirs(parent_dir, exist_ok=True)
+    if target_exists:
+        if os.path.islink(target_root) or os.path.isfile(target_root):
+            os.unlink(target_root)
+        else:
+            shutil.rmtree(target_root)
+    if copy_mode:
+        shutil.copytree(source_root, target_root, symlinks=True)
+    else:
+        os.symlink(source_root, target_root)
+    result["changed"] = True
+    result["status"] = "replaced" if target_exists else "imported"
+    return result
+
+
 def _preference_disabled_clis(prefs):
     prefs = prefs if isinstance(prefs, dict) else {}
     launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
@@ -9098,6 +9180,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             _resolve_weber_root,
             _resolve_web_access_root,
             _resolve_xmem_root,
+            _managed_dynamic_skill_entries,
             _sanitize_claude_inherited_settings_payload,
             _session_managed_mcp_servers,
             _strip_agent_im_hooks,
@@ -9711,6 +9794,20 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
                     }
                 ],
                 _L("会话技能", "Session skill"),
+            )
+        managed_dynamic_skills = [
+            {
+                "name": str(entry.get("name") or "").strip(),
+                "path": _skill_path(str(entry.get("root") or "").strip()),
+            }
+            for entry in (_managed_dynamic_skill_entries() or [])
+            if str((entry or {}).get("name") or "").strip()
+        ]
+        if managed_dynamic_skills:
+            _append_skill_entries(
+                "always",
+                managed_dynamic_skills,
+                _L("MMS 动态导入", "MMS managed import"),
             )
 
         caveman_root = _resolve_caveman_root() if has_caveman else ""
@@ -12272,6 +12369,9 @@ def handle_config(cfg, args_rest):
     if key_path in {"preferences.doc", "preference.doc"}:
         console.print(PREFERENCES_DOC_PATH)
         return
+    if key_path in {"assets.import-skill", "asset.import-skill", "skill.import"}:
+        _handle_assets_import_skill(args_rest[1:])
+        return
     if key_path in {"web", "webui", "setup.web", "setup-web"}:
         from mms_config_web import run_config_web
 
@@ -12384,6 +12484,58 @@ def handle_config(cfg, args_rest):
     if len(args_rest) == 2:
         _handle_config_set(cfg, [key_path, args_rest[1]])
         return
+
+
+def _handle_assets_import_skill(args_rest):
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} config assets.import-skill",
+        description="把本地 skill root 导入到 MMS managed assets，供后续 session 动态加载。",
+    )
+    parser.add_argument("source", help="skill 根目录，或指向该 skill 的 SKILL.md")
+    parser.add_argument("--name", dest="skill_name", help="覆盖导入后的 skill 名称")
+    parser.add_argument("--replace", action="store_true", help="目标已存在时覆盖")
+    parser.add_argument("--copy", action="store_true", help="默认 symlink；加上后改为 copy")
+    parser.add_argument("--dry-run", action="store_true", help="只预览导入结果，不落盘")
+    parser.add_argument("--json", action="store_true", help="输出 JSON 结果")
+    args = parser.parse_args(args_rest)
+
+    try:
+        result = import_managed_skill(
+            args.source,
+            skill_name=args.skill_name or "",
+            replace=bool(args.replace),
+            copy_mode=bool(args.copy),
+            dry_run=bool(args.dry_run),
+        )
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1)
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+
+    status = str(result.get("status") or "").strip()
+    skill_name = str(result.get("skill_name") or "").strip() or "-"
+    mode = str(result.get("mode") or "").strip() or "symlink"
+    source_root = str(result.get("source_root") or "").strip()
+    target_root = str(result.get("target_root") or "").strip()
+
+    if status == "already_imported":
+        console.print(f"[green]✓ 已导入: {skill_name}[/green]")
+    elif bool(result.get("dry_run")):
+        console.print(f"[yellow]dry-run[/yellow] {skill_name} -> {target_root}")
+    elif status == "replaced":
+        console.print(f"[green]✓ 已替换导入: {skill_name}[/green]")
+    else:
+        console.print(f"[green]✓ 已导入 skill: {skill_name}[/green]")
+    console.print(f"[dim]模式: {mode}[/dim]")
+    console.print(f"[dim]来源: {source_root}[/dim]")
+    console.print(f"[dim]目标: {target_root}[/dim]")
+    console.print("[dim]新的 MMS session 会自动加载该 skill；已启动的旧 session 不会自动回填。[/dim]")
 
 
 def _handle_api_config(key_path, args_rest):
@@ -13133,6 +13285,7 @@ def _display_config_help():
     console.print(f"  {command} config unset <dot.path>")
     console.print(f"  {command} config connect")
     console.print(f"  {command} config web [--no-open]")
+    console.print(f"  {command} config assets.import-skill <path> [--name <skill>] [--replace] [--copy] [--dry-run] [--json]")
     console.print(f"  {command} config preferences.help")
     console.print(f"  {command} config human-gate")
     console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")

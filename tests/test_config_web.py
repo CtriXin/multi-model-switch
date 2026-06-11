@@ -225,6 +225,13 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert {item["id"] for item in snapshot["test_contracts"]} >= {"models_endpoint", "model_ping", "simple_chat"}
     assert snapshot["save_contract"]["requires_confirm_save"] is True
     assert snapshot["session_assets"]["schema"] == "mms.session_assets.snapshot.v1"
+    assert [item["id"] for item in snapshot["session_assets"]["cli_visibility"]["items"]] == [
+        "claude",
+        "codex",
+        "opencode",
+        "pi",
+        "agy",
+    ]
     assert "preference_snippet" in snapshot["session_assets"]
 
 

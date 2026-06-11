@@ -3509,6 +3509,56 @@ def _managed_asset_root_candidates(surface, *names):
     return _asset_root_candidates_from_root(root, surface, *names)
 
 
+_BUILTIN_MANAGED_SESSION_SKILLS = {
+    "web-access",
+    "weber",
+    "agent-browser",
+    "codegraph",
+    "toon",
+    "token-saver",
+    "xmem",
+    "auto-github-contributor",
+}
+
+
+def _managed_dynamic_skill_entries(*, exclude_names=None):
+    try:
+        if not managed_assets_enabled():
+            return []
+        root = str(managed_assets_root() or "").strip()
+    except Exception:
+        return []
+    if not root:
+        return []
+
+    normalized_exclude = {
+        str(item or "").strip()
+        for item in (_BUILTIN_MANAGED_SESSION_SKILLS | set(exclude_names or ()))
+        if str(item or "").strip()
+    }
+    entries = []
+    seen = set()
+    parent = os.path.join(root, "skills")
+    if not os.path.isdir(parent):
+        return []
+    try:
+        names = sorted(os.listdir(parent))
+    except OSError:
+        return []
+    for name in names:
+        name = str(name or "").strip()
+        if not name or name in normalized_exclude or name in seen:
+            continue
+        skill_root = os.path.join(parent, name)
+        if not os.path.isdir(skill_root):
+            continue
+        if not os.path.isfile(os.path.join(skill_root, "SKILL.md")):
+            continue
+        entries.append({"name": name, "root": skill_root})
+        seen.add(name)
+    return entries
+
+
 def _bundled_assets_root():
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "session-assets")
     return root if os.path.isdir(root) else ""
@@ -5405,6 +5455,20 @@ def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_s
     _overlay_session_entry_dir(parent_dir, overlay_root, "commands", token_saver_root)
 
 
+def _overlay_managed_dynamic_skill_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    entries = _managed_dynamic_skill_entries()
+    if not entries:
+        return
+    overlay_root = os.path.join(session_home, ".mms-managed-dynamic-skills-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    for entry in entries:
+        name = str(entry.get("name") or "").strip()
+        root = str(entry.get("root") or "").strip()
+        if not name or not root:
+            continue
+        _overlay_session_skill_dir(parent_dir, overlay_root, name, root, disabled_session_surfaces=disabled_session_surfaces)
+
+
 def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     auto_gh_root = _resolve_auto_github_contributor_root()
     if not auto_gh_root:
@@ -5548,6 +5612,7 @@ def _overlay_agy_session_assets(
     _overlay_codegraph_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_managed_dynamic_skill_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_xmem_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
@@ -5566,6 +5631,7 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_codegraph_session_entries=_overlay_codegraph_session_entries,
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
+        overlay_managed_dynamic_skill_entries=_overlay_managed_dynamic_skill_entries,
         overlay_xmem_session_entries=_overlay_xmem_session_entries,
         overlay_opencode_xmem_plugin=_overlay_opencode_xmem_plugin,
     )
@@ -7331,6 +7397,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 disabled_session_surfaces=disabled_session_surfaces,
             )
             _overlay_token_saver_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
+            _overlay_managed_dynamic_skill_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
@@ -10520,6 +10591,7 @@ def _claude_gateway_env(
         _overlay_codegraph_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_managed_dynamic_skill_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_xmem_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
 
@@ -10965,6 +11037,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_codegraph_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_managed_dynamic_skill_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_xmem_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
