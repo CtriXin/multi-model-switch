@@ -1,11 +1,11 @@
-name: Review Pilot
+name: Digger
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
-  review-pilot:
+  digger:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,12 +32,12 @@ jobs:
       - name: Install Python test tools
         run: python3 -m pip install pytest httpx rich
 
-      - name: Install review-pilot
+      - name: Install digger
         env:
-          REVIEW_PILOT_DEPLOY_KEY: ${{ secrets.REVIEW_PILOT_DEPLOY_KEY }}
+          DIGGER_DEPLOY_KEY: ${{ secrets.DIGGER_DEPLOY_KEY }}
         run: |
-          if [ -z "$REVIEW_PILOT_DEPLOY_KEY" ]; then
-            echo "Missing REVIEW_PILOT_DEPLOY_KEY secret."
+          if [ -z "$DIGGER_DEPLOY_KEY" ]; then
+            echo "Missing DIGGER_DEPLOY_KEY secret."
             exit 1
           fi
 
@@ -46,27 +46,27 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
           eval "$(ssh-agent -s)"
-          ssh-add - <<< "$REVIEW_PILOT_DEPLOY_KEY"
+          ssh-add - <<< "$DIGGER_DEPLOY_KEY"
 
-          npm install --global "git+ssh://git@github.com/CtriXin/review-pilot.git#codex/baseline-aware-validation"
+          npm install --global "git+ssh://git@github.com/CtriXin/digger.git#codex/baseline-aware-validation"
 
-      - name: Run review-pilot
+      - name: Run digger
         env:
-          REVIEW_PILOT_BASE: ${{ github.event.pull_request.base.sha }}
-          REVIEW_PILOT_HEAD: ${{ github.event.pull_request.head.sha }}
-          REVIEW_PILOT_MMS_COMMAND: ${{ secrets.REVIEW_PILOT_MMS_COMMAND }}
-          REVIEW_PILOT_MMS_REVIEWER: minimax-m2.7
+          DIGGER_BASE: ${{ github.event.pull_request.base.sha }}
+          DIGGER_HEAD: ${{ github.event.pull_request.head.sha }}
+          DIGGER_MMS_COMMAND: ${{ secrets.DIGGER_MMS_COMMAND }}
+          DIGGER_MMS_REVIEWER: minimax-m2.7
         run: |
-          if [ -n "$REVIEW_PILOT_MMS_COMMAND" ]; then
-            review-pilot ci github \
+          if [ -n "$DIGGER_MMS_COMMAND" ]; then
+            digger ci github \
               --checkout "$GITHUB_WORKSPACE" \
               --dry-run \
               --baseline-aware \
               --fail-on-validation \
               --llm mms \
-              --mms-reviewer "$REVIEW_PILOT_MMS_REVIEWER"
+              --mms-reviewer "$DIGGER_MMS_REVIEWER"
           else
-            review-pilot ci github \
+            digger ci github \
               --checkout "$GITHUB_WORKSPACE" \
               --dry-run \
               --baseline-aware \
@@ -77,5 +77,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: review-pilot
-          path: .review-pilot/runs
+          name: digger
+          path: .digger/runs
