@@ -57,6 +57,7 @@ jobs:
           DIGGER_HEAD: ${{ github.event.pull_request.head.sha }}
           DIGGER_MMS_COMMAND: ${{ secrets.DIGGER_MMS_COMMAND }}
           DIGGER_MMS_REVIEWER: minimax-m2.7
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ -n "$DIGGER_MMS_COMMAND" ]; then
             digger ci github \
