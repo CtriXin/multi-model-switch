@@ -107,6 +107,7 @@ def overlay_opencode_session_assets(
     overlay_xmem_session_entries,
     overlay_opencode_xmem_plugin,
     overlay_codegraph_session_entries=None,
+    overlay_review_hub_session_entries=None,
 ):
     if not config_dir or not session_home:
         return
@@ -124,6 +125,8 @@ def overlay_opencode_session_assets(
     overlay_weber_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     if overlay_codegraph_session_entries is not None:
         overlay_codegraph_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    if overlay_review_hub_session_entries is not None:
+        overlay_review_hub_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     overlay_toon_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     overlay_token_saver_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     overlay_xmem_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
