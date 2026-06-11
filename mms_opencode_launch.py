@@ -103,6 +103,7 @@ def launch_opencode(
     selected_entrypoint = entrypoint(runtime)
     if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
         env = global_omo_env(runtime)
+        inject_selected_model_name(env, resolve_model(model_info), model_info=model_info)
         env["MMS_OPENCODE_ENTRYPOINT"] = selected_entrypoint
         cmd = global_command(runtime, selected_entrypoint)
         exec_or_run(cmd, env, once)

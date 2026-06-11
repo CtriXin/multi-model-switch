@@ -11445,7 +11445,7 @@ def _opencode_gateway_env(runtime, model_info=None):
 
 
 def _opencode_global_omo_env(runtime):
-    return _opencode_global_omo_env_impl(
+    env = _opencode_global_omo_env_impl(
         runtime,
         clear_opencode_config_env=_clear_opencode_config_env,
         inject_real_home_hints=_inject_real_home_hints,
@@ -11455,6 +11455,7 @@ def _opencode_global_omo_env(runtime):
         apply_runtime_locale_profile=_apply_runtime_locale_profile,
         apply_runtime_ip_stack_profile=_apply_runtime_ip_stack_profile,
     )
+    return _inject_selected_model_name(env, _resolve_model(runtime), model_info=runtime)
 
 
 def _opencode_global_command(runtime, entrypoint):
@@ -11653,10 +11654,11 @@ def _is_opencode_global_profile_runtime(cli, runtime):
 
 
 def _opencode_global_export_env(runtime):
-    return _opencode_global_export_env_impl(
+    exports = _opencode_global_export_env_impl(
         runtime,
         apply_bypass_env=_opencode_apply_bypass_env,
     )
+    return _inject_selected_model_name(exports, _resolve_model(runtime), model_info=runtime)
 
 
 def _opencode_provider_export_env(runtime, model):
@@ -11740,7 +11742,7 @@ def get_export_env(cli, runtime, model_info=None):
         first_script = toon_script or context_script or mms_gain_script or token_saver_script or token_gain_script or xmem_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
-    return exports
+    return _inject_selected_model_name(exports, _resolve_model(runtime), model_info=runtime)
 
 
 def _show_launch_info(cli, runtime, auth_mode):
