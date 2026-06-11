@@ -359,6 +359,60 @@ def _sort_model_entries_for_tui(models, family_name="", now=None):
     return sorted(list(models or []), key=_key)
 
 
+def _normalize_profile_token(value):
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _last_profile_id(last_item):
+    if not isinstance(last_item, dict):
+        return ""
+    for key in ("opencode_profile", "profile", "profile_id"):
+        value = str(last_item.get(key) or "").strip()
+        if value:
+            return value
+    for nested_key in ("model_info", "runtime_hint"):
+        nested = last_item.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in ("opencode_profile", "profile", "profile_id"):
+            value = str(nested.get(key) or "").strip()
+            if value:
+                return value
+    model_name = ""
+    model_info = last_item.get("model_info")
+    if isinstance(model_info, dict):
+        model_name = str(model_info.get("model") or "").strip()
+    model_name = model_name or str(last_item.get("model") or "").strip()
+    if _normalize_profile_token(model_name) == "global_omo":
+        return "heavy_omo"
+    return ""
+
+
+def _profile_option_matches(option, profile_id):
+    target = _normalize_profile_token(profile_id)
+    if not target or not isinstance(option, dict):
+        return False
+    candidates = (
+        option.get("id"),
+        option.get("profile_id"),
+        option.get("canonical_profile_id"),
+        option.get("opencode_profile"),
+        option.get("label"),
+    )
+    return target in {_normalize_profile_token(candidate) for candidate in candidates if candidate}
+
+
+def _sort_profile_options_for_tui(profile_options, last_used=None):
+    """Keep the last-used OpenCode profile at the top without mutating config order."""
+    options = list(profile_options or [])
+    profile_id = _last_profile_id(last_used)
+    if not profile_id:
+        return options
+    indexed = list(enumerate(options))
+    indexed.sort(key=lambda item: (0 if _profile_option_matches(item[1], profile_id) else 1, item[0]))
+    return [option for _index, option in indexed]
+
+
 def select_family_tui(
     families_by_cli,
     cli_names,
@@ -422,11 +476,14 @@ def select_family_tui(
             detail = families_detail.get(cli, {})
             provider_options_map = (provider_options_by_cli or {}).get(cli, {})
             provider_options_loader = (provider_options_loader_by_cli or {}).get(cli)
-            profile_options = list((profile_options_by_cli or {}).get(cli) or [])
             broker_available = False
 
             # 上次使用
             cli_last = (last_used or {}).get(cli)
+            profile_options = _sort_profile_options_for_tui(
+                (profile_options_by_cli or {}).get(cli) or [],
+                cli_last,
+            )
             use_profile_menu = bool(profile_options)
             has_last = cli_last and cli_last.get("model") and not search_query and not use_profile_menu
 

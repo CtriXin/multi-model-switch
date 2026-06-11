@@ -3865,12 +3865,18 @@ def _runtime_hint_from_runtime(runtime):
     provider_id = _trace_runtime_provider_id(runtime)
     account_id = _trace_runtime_account_id(runtime)
     runtime_id = str(runtime.get("id") or "").strip()
+    opencode_profile = str(runtime.get("opencode_profile") or "").strip()
+    opencode_entrypoint = str(runtime.get("opencode_entrypoint") or "").strip()
     if provider_id:
         hint["provider_id"] = provider_id
     if account_id:
         hint["account_id"] = account_id
     if runtime_id:
         hint["runtime_id"] = runtime_id
+    if opencode_profile:
+        hint["opencode_profile"] = opencode_profile
+    if opencode_entrypoint:
+        hint["opencode_entrypoint"] = opencode_entrypoint
     return {k: v for k, v in hint.items() if v}
 
 
@@ -3879,6 +3885,11 @@ def _record_usage(runtime, cli_name, model_info):
         sources = stats.setdefault("sources", {})
         key = _runtime_usage_key(runtime, cli_name)
         model_name = _resolve_model_name(model_info)
+        model_profile = ""
+        if isinstance(model_info, dict):
+            model_profile = str(model_info.get("opencode_profile") or model_info.get("profile") or "").strip()
+        opencode_profile = str(runtime.get("opencode_profile") or model_profile).strip()
+        opencode_profile_label = str(runtime.get("opencode_profile_label") or "").strip()
         now = _iso_now()
         entry = sources.setdefault(key, {
             "runtime_kind": runtime.get("runtime_kind", "provider"),
@@ -3898,14 +3909,27 @@ def _record_usage(runtime, cli_name, model_info):
         models[model_name] = int(models.get(model_name, 0)) + 1
         model_last_used_at = entry.setdefault("model_last_used_at", {})
         model_last_used_at[model_name] = now
+        if cli_name == "opencode" and opencode_profile:
+            entry["opencode_profile"] = opencode_profile
+            if opencode_profile_label:
+                entry["opencode_profile_label"] = opencode_profile_label
+        else:
+            entry.pop("opencode_profile", None)
+            entry.pop("opencode_profile_label", None)
         last_by_cli = stats.setdefault("last_by_cli", {})
-        last_by_cli[cli_name] = {
+        last_payload = {
             "cli": cli_name,
             "model": model_name,
             "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
             "runtime_hint": _runtime_hint_from_runtime(runtime),
             "last_used_at": now,
         }
+        if cli_name == "opencode" and opencode_profile:
+            last_payload["opencode_profile"] = opencode_profile
+            last_payload["profile"] = opencode_profile
+            if opencode_profile_label:
+                last_payload["opencode_profile_label"] = opencode_profile_label
+        last_by_cli[cli_name] = last_payload
 
     _update_usage_stats(_mutate)
 
@@ -9854,6 +9878,7 @@ def _opencode_profile_menu_options():
             summary = f"{summary} {lite_pro_health}"
         options.append({
             "id": option["id"],
+            "profile_id": profile_id,
             "label": option["label"],
             "summary": summary,
             "badge": option.get("badge", ""),

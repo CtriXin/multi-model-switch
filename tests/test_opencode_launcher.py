@@ -1468,8 +1468,14 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
 
     assert mms_core._handle_tui_launcher_selection(cfg, provider, False, ["opencode"]) is True
-    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "omo", "raw"]
-    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "OMO", "Raw"]
+    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "review", "omo", "raw"]
+    assert [item["profile_id"] for item in captured["profile_options"]["opencode"]] == [
+        "lite_pro_orchestrated",
+        "review_hub",
+        "heavy_omo",
+        "raw",
+    ]
+    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "Review", "OMO", "Raw"]
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.4", "profile": "lite_pro_orchestrated"}
     assert captured["runtime"]["id"] == "dual-protocol"
@@ -1901,7 +1907,8 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     options = mms_core._opencode_profile_menu_options()
     agent = next(option for option in options if option["id"] == "agent")
 
-    assert [option["id"] for option in options] == ["agent", "omo", "raw"]
+    assert [option["id"] for option in options] == ["agent", "review", "omo", "raw"]
+    assert next(option for option in options if option["id"] == "review")["profile_id"] == "review_hub"
     assert agent["label"] == "Agent"
     assert agent["badge"] == "默认"
     assert "health: 1/18 healthy" in agent["summary"]

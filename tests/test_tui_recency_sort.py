@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from mms_tui import _sort_cli_names_by_last_used, _sort_model_entries_for_tui
+from mms_tui import (
+    _sort_cli_names_by_last_used,
+    _sort_model_entries_for_tui,
+    _sort_profile_options_for_tui,
+)
 from mms_core import _sort_family_entries_for_tui
 
 
@@ -28,6 +32,34 @@ def test_cli_tabs_keep_original_order_when_no_recent_usage() -> None:
         "codex",
         "opencode",
     ]
+
+
+def test_profile_sort_uses_last_opencode_profile_id() -> None:
+    options = [
+        {"id": "agent", "profile_id": "lite_pro_orchestrated"},
+        {"id": "review", "profile_id": "review_hub"},
+        {"id": "omo", "profile_id": "heavy_omo"},
+        {"id": "raw", "profile_id": "raw"},
+    ]
+
+    ordered = _sort_profile_options_for_tui(options, {"opencode_profile": "review_hub"})
+
+    assert [item["id"] for item in ordered] == ["review", "agent", "omo", "raw"]
+
+
+def test_profile_sort_reads_legacy_model_info_profile() -> None:
+    options = [
+        {"id": "agent", "profile_id": "lite_pro_orchestrated"},
+        {"id": "review", "profile_id": "review_hub"},
+        {"id": "omo", "profile_id": "heavy_omo"},
+    ]
+
+    ordered = _sort_profile_options_for_tui(
+        options,
+        {"model_info": {"model": "glm-5-turbo", "profile": "review_hub"}},
+    )
+
+    assert [item["id"] for item in ordered] == ["review", "agent", "omo"]
 
 
 def test_model_sort_uses_last_used_only_before_name() -> None:
