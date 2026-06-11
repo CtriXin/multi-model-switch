@@ -229,12 +229,22 @@
           <p class="muted">写入 [opencode.review.host]；只影响 Review profile 的 host / fallback，不改变 reviewer 模型 Space 选择。</p>
           <div class="grid">
             <div class="span6">
-              <label>primary models（空格 / 逗号分隔）</label>
-              <input id="opencodeReviewHostPrimary" placeholder="glm-5-turbo kimi-k2.6 qwen3.6-flash gpt-5.4">
+              <label>primary models</label>
+              <div class="btns">
+                <select id="opencodeReviewHostPrimarySelect"></select>
+                <button class="secondary" id="opencodeReviewHostPrimaryAdd" type="button">加入 primary</button>
+                <button class="ghost" data-review-host-reset="primary" type="button">使用默认</button>
+              </div>
+              <div class="chips" id="opencodeReviewHostPrimaryChips"></div>
             </div>
             <div class="span6">
-              <label>fallback models（空格 / 逗号分隔）</label>
-              <input id="opencodeReviewHostFallback" placeholder="gpt-5.4 gpt-5.3-codex gpt-5.2-codex">
+              <label>fallback models</label>
+              <div class="btns">
+                <select id="opencodeReviewHostFallbackSelect"></select>
+                <button class="secondary" id="opencodeReviewHostFallbackAdd" type="button">加入 fallback</button>
+                <button class="ghost" data-review-host-reset="fallback" type="button">使用默认</button>
+              </div>
+              <div class="chips" id="opencodeReviewHostFallbackChips"></div>
             </div>
           </div>
           <p class="muted" id="opencodeReviewHostHint"></p>

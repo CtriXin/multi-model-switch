@@ -1903,8 +1903,10 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
 
     assert "OpenCode 默认 profile" in html
     assert "OpenCode Review Host" in html
-    assert "opencodeReviewHostPrimary" in html
-    assert "opencodeReviewHostFallback" in html
+    assert "opencodeReviewHostPrimarySelect" in html
+    assert "opencodeReviewHostFallbackSelect" in html
+    assert "加入 primary" in html
+    assert "data-review-host-reset" in html
     assert "OpenCode Agent 名单" in html
     assert "顺序表示 priority/fallback 顺序，不是 round-robin" in html
     assert "Agent 覆盖" in html
