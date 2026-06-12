@@ -13,7 +13,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 
-def _mission_root(tmp_path: Path, *, state: str = "ready-for-agent") -> Path:
+def _mission_root(
+    tmp_path: Path,
+    *,
+    state: str = "ready-for-agent",
+    brief: str = "# Agent Brief\n",
+    prd: str = "# Mission PRD\n",
+    check_description: str = "review dispatch",
+) -> Path:
     root = tmp_path / "mission-root"
     (root / ".mission").mkdir(parents=True)
     (root / ".work-gate" / "state").mkdir(parents=True)
@@ -21,10 +28,10 @@ def _mission_root(tmp_path: Path, *, state: str = "ready-for-agent") -> Path:
         json.dumps({"state": state}) + "\n",
         encoding="utf-8",
     )
-    (root / ".mission" / "agent-brief.md").write_text("# Agent Brief\n", encoding="utf-8")
-    (root / ".mission" / "mission-prd.md").write_text("# Mission PRD\n", encoding="utf-8")
+    (root / ".mission" / "agent-brief.md").write_text(brief, encoding="utf-8")
+    (root / ".mission" / "mission-prd.md").write_text(prd, encoding="utf-8")
     (root / ".work-gate" / "state" / "check-spec.json").write_text(
-        json.dumps({"checks": [{"id": "WD-1", "description": "review dispatch"}]}) + "\n",
+        json.dumps({"checks": [{"id": "WD-1", "description": check_description}]}) + "\n",
         encoding="utf-8",
     )
     return root
@@ -55,6 +62,8 @@ def test_review_dispatch_dry_run_is_codex_claude_callable(tmp_path, capsys):
     assert payload["ok"] is True
     assert payload["dry_run"] is True
     assert payload["models"] == ["gpt-5.4", "qwen3.7-max"]
+    assert payload["model_selection_source"] == "explicit"
+    assert payload["model_selection_profile"] == "explicit"
     assert payload["opencode_profile"] == "review"
     assert payload["opencode_launch_command"][:5] == [
         sys.executable,
@@ -77,6 +86,146 @@ def test_review_dispatch_blocks_unready_mission_root(tmp_path, capsys):
     assert code == 2
     assert payload["ok"] is False
     assert "readiness state blocks dispatch: needs-info" in payload["errors"]
+
+
+def test_review_dispatch_auto_selects_code_review_default(tmp_path, capsys):
+    from mms_review_dispatch import REVIEW_MODEL_PRESETS, handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    code = handle_review_dispatch_command(
+        ["--root", str(root), "--request-id", "auto-code-review", "--dry-run", "--json"],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["model_selection_source"] == "auto"
+    assert payload["model_selection_profile"] == "code_review"
+    assert payload["models"] == REVIEW_MODEL_PRESETS["code_review"]
+    assert not any("claude" in model.lower() for model in payload["models"])
+    assert "gpt-5.5" not in payload["models"]
+
+
+def test_review_dispatch_auto_selects_design_visual_for_ui_artifacts(tmp_path, capsys):
+    from mms_review_dispatch import REVIEW_MODEL_PRESETS, handle_review_dispatch_command
+
+    root = _mission_root(
+        tmp_path,
+        brief="# Agent Brief\nReview the Figma screenshot, UI layout, image states, and visual polish.\n",
+    )
+    code = handle_review_dispatch_command(
+        ["--root", str(root), "--request-id", "auto-design-review", "--dry-run", "--json"],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["model_selection_source"] == "auto"
+    assert payload["model_selection_profile"] == "design_visual"
+    assert payload["models"] == REVIEW_MODEL_PRESETS["design_visual"]
+
+
+def test_review_dispatch_auto_selects_large_arch_for_high_risk_work(tmp_path, capsys):
+    from mms_review_dispatch import REVIEW_MODEL_PRESETS, handle_review_dispatch_command
+
+    root = _mission_root(
+        tmp_path,
+        prd="# Mission PRD\nHigh-risk architecture migration touching routing, bridge, config, and cache.\n",
+    )
+    code = handle_review_dispatch_command(
+        ["--root", str(root), "--request-id", "auto-arch-review", "--dry-run", "--json"],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["model_selection_source"] == "auto"
+    assert payload["model_selection_profile"] == "large_arch"
+    assert payload["models"] == REVIEW_MODEL_PRESETS["large_arch"]
+
+
+def test_review_dispatch_model_preset_selects_fast_cheap(tmp_path, capsys):
+    from mms_review_dispatch import REVIEW_MODEL_PRESETS, handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "preset-fast-review",
+            "--model-preset",
+            "quick",
+            "--dry-run",
+            "--json",
+        ],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["model_selection_source"] == "preset"
+    assert payload["model_selection_profile"] == "fast_cheap"
+    assert payload["models"] == REVIEW_MODEL_PRESETS["fast_cheap"]
+
+
+def test_review_dispatch_explicit_models_normalize_aliases_and_override_auto(tmp_path, capsys):
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(
+        tmp_path,
+        brief="# Agent Brief\nThis screenshot UI review would auto-select design models.\n",
+    )
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "alias-review",
+            "--model",
+            "minimax-m3",
+            "--model",
+            "mimo-2.5",
+            "--model",
+            "kimi-2.6",
+            "--model",
+            "glm5-turbo",
+            "--dry-run",
+            "--json",
+        ],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["model_selection_source"] == "explicit"
+    assert payload["model_selection_profile"] == "explicit"
+    assert payload["models"] == ["MiniMax-M3", "mimo-v2.5", "kimi-k2.6", "glm-5-turbo"]
+
+
+def test_review_dispatch_rejects_claude_review_models(tmp_path, capsys):
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "claude-review",
+            "--model",
+            "claude-sonnet-4.5",
+            "--dry-run",
+            "--json",
+        ],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert payload["ok"] is False
+    assert "Claude models are not allowed" in payload["errors"][0]
 
 
 def test_mms_review_dispatch_entrypoint_works_for_codex_claude(tmp_path):

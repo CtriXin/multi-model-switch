@@ -13,8 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mms_opencode_profiles import OPENCODE_REVIEW_HUB_SPECS
-
 
 REVIEW_DISPATCH_SCHEMA = "mms.review_dispatch.v1"
 BLOCKED_READINESS_STATES = {
@@ -23,6 +21,131 @@ BLOCKED_READINESS_STATES = {
     "out-of-scope-review",
     "ready-for-human",
 }
+REVIEW_MODEL_PRESETS: dict[str, list[str]] = {
+    "code_review": ["MiniMax-M3", "qwen3.7-max", "kimi-k2.6", "mimo-v2.5"],
+    "large_arch": ["gpt-5.4", "deepseek-v4-pro", "qwen3.7-max", "glm-5.1"],
+    "design_visual": ["mimo-v2.5", "kimi-k2.6", "qwen3.6-flash"],
+    "domestic_cross": ["qwen3.7-max", "kimi-k2.6", "glm-5-turbo", "deepseek-v4-flash"],
+    "fast_cheap": ["mimo-v2.5", "qwen3.6-flash", "deepseek-v4-flash"],
+}
+REVIEW_MODEL_PRESET_ALIASES = {
+    "code": "code_review",
+    "normal": "code_review",
+    "ordinary": "code_review",
+    "ordinary-code": "code_review",
+    "default": "code_review",
+    "large": "large_arch",
+    "arch": "large_arch",
+    "architecture": "large_arch",
+    "high-risk": "large_arch",
+    "risk": "large_arch",
+    "design": "design_visual",
+    "ui": "design_visual",
+    "visual": "design_visual",
+    "image": "design_visual",
+    "screenshot": "design_visual",
+    "domestic": "domestic_cross",
+    "cn": "domestic_cross",
+    "china": "domestic_cross",
+    "cross": "domestic_cross",
+    "quick": "fast_cheap",
+    "fast": "fast_cheap",
+    "cheap": "fast_cheap",
+    "smoke": "fast_cheap",
+}
+REVIEW_MODEL_ALIASES = {
+    "mimo-2.5": "mimo-v2.5",
+    "mimo-v2.5": "mimo-v2.5",
+    "kimi-2.6": "kimi-k2.6",
+    "kimi-k2.6": "kimi-k2.6",
+    "qwen3.6": "qwen3.6-flash",
+    "qwen3.6-flash": "qwen3.6-flash",
+    "glm5-turbo": "glm-5-turbo",
+    "glm-5-turbo": "glm-5-turbo",
+    "minimax-m3": "MiniMax-M3",
+}
+REVIEW_AUTO_KEYWORDS = {
+    "large_arch": [
+        "architecture",
+        "arch",
+        "high risk",
+        "high-risk",
+        "large",
+        "migration",
+        "routing",
+        "route",
+        "bridge",
+        "config",
+        "cache",
+        "schema",
+        "provider",
+        "oauth",
+        "auth",
+        "security",
+        "release",
+        "rollback",
+        "架构",
+        "高风险",
+        "大任务",
+        "迁移",
+        "路由",
+        "桥接",
+        "配置",
+        "缓存",
+        "账号",
+        "发布",
+    ],
+    "design_visual": [
+        "design",
+        "ui",
+        "ux",
+        "visual",
+        "image",
+        "screenshot",
+        "figma",
+        "mockup",
+        "prototype",
+        "layout",
+        "css",
+        "frontend",
+        "pixel",
+        "设计",
+        "界面",
+        "视觉",
+        "图像",
+        "截图",
+        "前端",
+    ],
+    "domestic_cross": [
+        "domestic",
+        "china",
+        "cn",
+        "cross",
+        "cross-review",
+        "qwen",
+        "kimi",
+        "glm",
+        "deepseek",
+        "国内",
+        "国产",
+        "交叉审查",
+        "交叉",
+    ],
+    "fast_cheap": [
+        "quick",
+        "fast",
+        "cheap",
+        "smoke",
+        "light",
+        "low cost",
+        "low-cost",
+        "快速",
+        "便宜",
+        "低成本",
+        "复核",
+    ],
+}
+REVIEW_AUTO_TIE_BREAK = ["large_arch", "design_visual", "domestic_cross", "fast_cheap"]
 
 
 def _now_stamp() -> str:
@@ -93,22 +216,146 @@ def _mission_context(root: Path) -> dict[str, Any]:
     }
 
 
-def _default_review_models() -> list[str]:
-    models: list[str] = []
+def _alias_key(value: str) -> str:
+    return re.sub(r"[\s_]+", "-", str(value or "").strip().lower())
+
+
+def _normalize_review_model(model: str) -> str:
+    value = str(model or "").strip()
+    return REVIEW_MODEL_ALIASES.get(_alias_key(value), value)
+
+
+def _normalize_review_models(models: list[str]) -> list[str]:
+    normalized: list[str] = []
     seen: set[str] = set()
-    for spec in OPENCODE_REVIEW_HUB_SPECS:
-        if not isinstance(spec, dict):
-            continue
-        agent = str(spec.get("agent") or "").strip()
-        if not agent.startswith("review-"):
-            continue
-        for model in spec.get("models") or ():
-            model_name = str(model or "").strip()
-            if model_name and model_name not in seen:
-                seen.add(model_name)
-                models.append(model_name)
-                break
-    return models or ["gpt-5.4", "qwen3.7-max", "kimi-k2.6"]
+    for model in models:
+        model_name = _normalize_review_model(model)
+        seen_key = model_name.lower()
+        if model_name and seen_key not in seen:
+            normalized.append(model_name)
+            seen.add(seen_key)
+    return normalized
+
+
+def _claude_review_models(models: list[str]) -> list[str]:
+    return [model for model in models if "claude" in model.lower()]
+
+
+def _review_model_preset_key(value: str) -> str:
+    key = _alias_key(value).replace("-", "_")
+    if key in REVIEW_MODEL_PRESETS:
+        return key
+    alias = REVIEW_MODEL_PRESET_ALIASES.get(_alias_key(value)) or REVIEW_MODEL_PRESET_ALIASES.get(key)
+    if alias:
+        return alias
+    allowed = ", ".join(sorted(REVIEW_MODEL_PRESETS))
+    raise ValueError(f"unknown review model preset: {value}; expected one of: {allowed}")
+
+
+def _preset_review_models(preset: str) -> list[str]:
+    return _normalize_review_models(REVIEW_MODEL_PRESETS[_review_model_preset_key(preset)])
+
+
+def _read_context_snippet(path_value: str, *, limit: int = 6000) -> str:
+    if not path_value:
+        return ""
+    try:
+        return Path(path_value).read_text(encoding="utf-8", errors="replace")[:limit]
+    except OSError:
+        return ""
+
+
+def _review_selection_text(
+    *,
+    title: str,
+    summary: str,
+    phase: str,
+    focus: list[str],
+    context: dict[str, Any],
+) -> str:
+    parts = [
+        title,
+        summary,
+        phase,
+        " ".join(focus),
+        str(context.get("readiness_state") or ""),
+    ]
+    for path_key in ("agent_brief_path", "mission_prd_path", "check_spec_path"):
+        parts.append(_read_context_snippet(str(context.get(path_key) or "")))
+    return "\n".join(part for part in parts if part).lower()
+
+
+def _keyword_matched(text: str, keyword: str) -> bool:
+    lowered = keyword.lower()
+    if lowered.isascii() and len(lowered) <= 3:
+        return re.search(rf"\b{re.escape(lowered)}\b", text) is not None
+    return lowered in text
+
+
+def _auto_review_model_selection(
+    *,
+    title: str,
+    summary: str,
+    phase: str,
+    focus: list[str],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    text = _review_selection_text(title=title, summary=summary, phase=phase, focus=focus, context=context)
+    matches: dict[str, list[str]] = {}
+    for preset, keywords in REVIEW_AUTO_KEYWORDS.items():
+        matched = [keyword for keyword in keywords if _keyword_matched(text, keyword)]
+        if matched:
+            matches[preset] = matched
+    if matches:
+        profile = max(
+            matches,
+            key=lambda item: (len(matches[item]), -REVIEW_AUTO_TIE_BREAK.index(item)),
+        )
+        reason = "matched review keywords: " + ", ".join(matches[profile][:6])
+    else:
+        profile = "code_review"
+        reason = "default code review preset; no specialized review keywords matched"
+    return {
+        "models": _preset_review_models(profile),
+        "source": "auto",
+        "profile": profile,
+        "reason": reason,
+    }
+
+
+def _select_review_models(
+    *,
+    models: list[str],
+    model_preset: str | None,
+    title: str,
+    summary: str,
+    phase: str,
+    focus: list[str],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    explicit_models = _normalize_review_models(models)
+    if explicit_models:
+        return {
+            "models": explicit_models,
+            "source": "explicit",
+            "profile": "explicit",
+            "reason": "explicit --model values",
+        }
+    if model_preset:
+        profile = _review_model_preset_key(model_preset)
+        return {
+            "models": _preset_review_models(profile),
+            "source": "preset",
+            "profile": profile,
+            "reason": f"explicit --model-preset {model_preset}",
+        }
+    return _auto_review_model_selection(
+        title=title,
+        summary=summary,
+        phase=phase,
+        focus=focus,
+        context=context,
+    )
 
 
 def _review_hub_binary() -> str:
@@ -261,6 +508,7 @@ def build_review_dispatch(
     dry_run: bool,
     launch: bool,
     allow_incomplete: bool,
+    model_preset: str | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     if not root.exists():
@@ -276,9 +524,34 @@ def build_review_dispatch(
     if errors:
         return {"ok": False, "root": str(root), "context": context, "errors": errors}
 
-    models = [str(model).strip() for model in models if str(model).strip()]
-    if not models:
-        models = _default_review_models()
+    try:
+        selection = _select_review_models(
+            models=models,
+            model_preset=model_preset,
+            title=title,
+            summary=summary,
+            phase=phase,
+            focus=focus,
+            context=context,
+        )
+    except ValueError as exc:
+        return {"ok": False, "root": str(root), "context": context, "errors": [str(exc)]}
+    models = selection["models"]
+    blocked_models = _claude_review_models(models)
+    if blocked_models:
+        return {
+            "ok": False,
+            "root": str(root),
+            "context": context,
+            "model_selection_source": selection["source"],
+            "model_selection_profile": selection["profile"],
+            "model_selection_reason": selection["reason"],
+            "models": models,
+            "errors": [
+                "Claude models are not allowed in review-dispatch reviewer slots: "
+                + ", ".join(blocked_models)
+            ],
+        }
     request_id = request_id or f"{_now_stamp()}-{_slugify(title)}"
     request_root = (
         out_dir.resolve()
@@ -309,6 +582,9 @@ def build_review_dispatch(
         "request_root": str(request_root),
         "phase": phase,
         "models": models,
+        "model_selection_source": selection["source"],
+        "model_selection_profile": selection["profile"],
+        "model_selection_reason": selection["reason"],
         "context": context,
         "review_hub_request_command": [_review_hub_binary()] + request_args if shutil.which("review-hub") else request_args,
         "review_hub_worker_plan_command": [_review_hub_binary()] + worker_args if shutil.which("review-hub") else worker_args,
@@ -360,6 +636,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
     parser.add_argument("--adapter", default="mms-opencode")
     parser.add_argument("--focus", action="append", default=["code", "verification"])
     parser.add_argument("--model", action="append", default=[], help="Reviewer model; repeat for multiple models")
+    parser.add_argument("--model-preset", help="Reviewer model preset; defaults to automatic dispatch-time selection")
     parser.add_argument("--out-dir", help="Override Review Hub request root")
     parser.add_argument("--request-id", help="Stable request id")
     parser.add_argument("--allow-incomplete", action="store_true", help="Do not fail on missing Mission Control artifacts")
@@ -384,6 +661,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
             dry_run=args.dry_run,
             launch=args.launch,
             allow_incomplete=args.allow_incomplete,
+            model_preset=args.model_preset,
         )
     except Exception as exc:  # noqa: BLE001 - CLI boundary should return a structured error
         payload = {"schema": REVIEW_DISPATCH_SCHEMA, "ok": False, "errors": [str(exc)]}
@@ -406,6 +684,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
 
 __all__ = [
     "REVIEW_DISPATCH_SCHEMA",
+    "REVIEW_MODEL_PRESETS",
     "build_review_dispatch",
     "handle_review_dispatch_command",
 ]
