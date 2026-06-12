@@ -7,6 +7,11 @@ import sys
 ROOT = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, ROOT)
 
+if len(sys.argv) > 1 and sys.argv[1] == "review-dispatch":
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    sys.exit(handle_review_dispatch_command(sys.argv[2:], command_name="mms"))
+
 
 def _resolve_real_home_for_venv():
     for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):

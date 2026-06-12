@@ -927,6 +927,7 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
         "kimi-k2.6",
         "kimi-k2.5",
         "MiniMax-M2.7",
+        "MiniMax-M3",
         "glm-5.1",
         "glm-5-turbo",
         "deepseek-v4-pro",
@@ -989,6 +990,15 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     assert payload["agent"]["review-minimax-m2-7"]["model"].lower().endswith("/minimax-m2.7")
     assert payload["agent"]["review-glm-5-turbo"]["model"].endswith("/glm-5-turbo")
     assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-kimi-k2-5"] == "allow"
+
+    _review_cfg, selection = mms_core._prepare_opencode_review_profile_config(
+        cfg,
+        provider,
+        models,
+        model_tokens=["minimaxm3"],
+        interactive=False,
+    )
+    assert [item["model"] for item in selection["selected"]] == ["MiniMax-M3"]
 
 
 def test_core_opencode_review_host_models_are_configurable(monkeypatch):
