@@ -172,8 +172,6 @@ _CLAUDE_PROXY_EXIT_IP_URLS = (
 _HOOK_DEPENDENCY_TOOL_NAMES = ("jq", "rtk")
 _ALLOWED_SESSION_HOOK_FILES = (
     ("PreToolUse", "Bash", "rtk-rewrite.sh", ""),
-    ("PreToolUse", "Read", "read-once-hook.sh", "READ_ONCE_DIFF=1 "),
-    ("PostCompact", "", "read-once-compact.sh", ""),
 )
 _SESSION_PID_STAMP_NAME = ".mmc_pid.json"
 _DEFAULT_LAUNCH_ENV = {

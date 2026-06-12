@@ -9345,10 +9345,6 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
         if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":
             return "RTK Bash 改写", _L("压缩高 token Bash 命令", "Rewrite token-heavy Bash commands")
-        if basename == "hook.sh" and "read-once" in (lower_target or lower_command):
-            return _L("Read-once 读取拦截", "Read-once read hook"), _L("避免重复全文读取", "Avoid redundant full-file rereads")
-        if basename == "compact.sh" and "read-once" in (lower_target or lower_command):
-            return _L("Read-once 压缩整理", "Read-once compact"), _L("编辑后优先回看 diff", "Prefer diff after edits")
         if "hive-compact-hook" in lower_target or basename == "hive-compact-hook.sh":
             return _L("Hive 压缩整理", "Hive compact"), _L("compact 前后整理上下文", "Summarize context before and after compact")
         if "caveman-activate" in lower_target or basename == "caveman-activate.js":
