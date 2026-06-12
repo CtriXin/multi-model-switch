@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
@@ -163,6 +165,7 @@ REVIEW_AUTO_KEYWORDS = {
     ],
 }
 REVIEW_AUTO_TIE_BREAK = ["large_arch", "design_visual", "domestic_cross", "fast_cheap"]
+_MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _now_stamp() -> str:
@@ -241,8 +244,107 @@ def _compact_alias_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower()).replace("turobo", "turbo")
 
 
+def _selected_config_root() -> Path:
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return Path(value).expanduser()
+    return Path.home() / ".config" / "mms"
+
+
+def _manifest_payload_path(config_root: Path, manifest: dict[str, Any], file_key: str) -> Path | None:
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        return None
+    entry = files.get(file_key)
+    if not isinstance(entry, dict):
+        return None
+    rel_path = str(entry.get("canonical_path") or "").strip()
+    if not rel_path:
+        return None
+    return config_root / rel_path
+
+
+def _manifest_payload_hash(manifest: dict[str, Any], file_key: str) -> str:
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        return ""
+    entry = files.get(file_key)
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("sha256") or "").strip().lower()
+
+
+def _read_verified_manifest_payload(config_root: Path, file_key: str) -> dict[str, Any]:
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    payload_path = _manifest_payload_path(config_root, manifest, file_key)
+    if payload_path is None:
+        return {}
+    expected_hash = _manifest_payload_hash(manifest, file_key)
+    try:
+        payload_bytes = payload_path.read_bytes()
+    except OSError:
+        return {}
+    if expected_hash and hashlib.sha256(payload_bytes).hexdigest().lower() != expected_hash:
+        return {}
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _selector_variants(model_name: str) -> list[str]:
+    variants = {_alias_key(model_name), _compact_alias_key(model_name)}
+    lowered = str(model_name or "").strip().lower()
+    short = re.sub(r"^(kimi)-k(?=\d)", r"\1", lowered)
+    short = re.sub(r"^(mimo)-v(?=\d)", r"\1", short)
+    variants.add(_alias_key(short))
+    variants.add(_compact_alias_key(short))
+    return [variant for variant in variants if variant]
+
+
+def _review_model_catalog() -> dict[str, Any]:
+    config_root = _selected_config_root().resolve()
+    cache_key = str(config_root)
+    cached = _MODEL_CATALOG_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    lineup = _read_verified_manifest_payload(config_root, "lineup")
+    routes = lineup.get("routes")
+    if not isinstance(routes, dict):
+        catalog = {"config_root": str(config_root), "models": {}, "available": False}
+        _MODEL_CATALOG_CACHE[cache_key] = catalog
+        return catalog
+    models: dict[str, str] = {}
+    for model_name in routes:
+        canonical = str(model_name or "").strip()
+        if not canonical:
+            continue
+        for selector in _selector_variants(canonical):
+            models.setdefault(selector, canonical)
+    catalog = {
+        "config_root": str(config_root),
+        "models": models,
+        "available": True,
+        "model_count": len(routes),
+        "source": str(config_root / "generated" / "model-routes.lineup.json"),
+    }
+    _MODEL_CATALOG_CACHE[cache_key] = catalog
+    return catalog
+
+
 def _normalize_review_model(model: str) -> str:
     value = str(model or "").strip()
+    catalog_models = _review_model_catalog().get("models")
+    if isinstance(catalog_models, dict):
+        canonical = catalog_models.get(_alias_key(value)) or catalog_models.get(_compact_alias_key(value))
+        if canonical:
+            return str(canonical)
     return REVIEW_MODEL_ALIASES.get(_alias_key(value)) or REVIEW_MODEL_ALIASES.get(_compact_alias_key(value), value)
 
 
@@ -251,7 +353,7 @@ def _model_text_tokens(value: str) -> list[str]:
     if not text:
         return []
     text = re.sub(r"\b(and|with|using|use)\b", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"(用|和|与|以及|加上|还有|模型|reviewer|reviewers)", " ", text)
+    text = re.sub(r"(使用|用|和|与|以及|加上|还有|模型|reviewer|reviewers)", " ", text)
     raw_tokens = re.split(r"[\s,，、;+|/]+", text)
     tokens: list[str] = []
     for token in raw_tokens:
@@ -698,6 +800,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
     parser.add_argument("--fake-run", action="store_true", help="Write fake per-model reviewer outputs and aggregate them")
     parser.add_argument("--launch", action="store_true", help="Launch MMS OpenCode review profile after writing request artifacts")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    parser.add_argument("model_phrase", nargs="*", help="Free-form reviewer phrase, e.g. 使用 kimi2.5 minimaxm3")
     args = parser.parse_args(argv)
 
     try:
@@ -707,7 +810,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
             summary=args.summary,
             phase=args.phase,
             models=args.model,
-            model_text=args.model_text,
+            model_text=[*args.model_text, " ".join(args.model_phrase)] if args.model_phrase else args.model_text,
             out_dir=Path(args.out_dir) if args.out_dir else None,
             request_id=args.request_id,
             adapter=args.adapter,

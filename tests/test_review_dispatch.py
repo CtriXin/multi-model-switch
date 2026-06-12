@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -11,6 +13,34 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
+
+
+def _write_model_bundle(config_root: Path, models: list[str]) -> None:
+    generated = config_root / "generated"
+    generated.mkdir(parents=True)
+    lineup_path = generated / "model-routes.lineup.json"
+    lineup_payload = {
+        "version": 1,
+        "generated_at": "2026-06-12T00:00:00Z",
+        "routes": {model: {"primary": {"model_id": model}} for model in models},
+    }
+    lineup_path.write_text(json.dumps(lineup_payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    lineup_hash = hashlib.sha256(lineup_path.read_bytes()).hexdigest()
+    manifest = {
+        "schema": "mms.model_registry.latest_approved.v1",
+        "generated_at": "2026-06-12T00:00:00Z",
+        "files": {
+            "lineup": {
+                "canonical_path": "generated/model-routes.lineup.json",
+                "sha256": lineup_hash,
+                "sensitivity": "non-secret",
+            }
+        },
+    }
+    (generated / "model-registry.latest-approved.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _mission_root(
@@ -250,6 +280,72 @@ def test_review_dispatch_model_text_accepts_freeform_host_instruction(tmp_path, 
     assert code == 0
     assert payload["model_selection_source"] == "explicit"
     assert payload["models"] == ["glm-5-turbo", "kimi-k2.6", "MiniMax-M3"]
+
+
+def test_review_dispatch_resolves_fuzzy_models_from_selected_bundle(tmp_path, monkeypatch, capsys):
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    config_root = tmp_path / "mms-next"
+    _write_model_bundle(config_root, ["kimi-k2.5", "MiniMax-M3"])
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(config_root))
+    root = _mission_root(tmp_path)
+
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "bundle-model-review",
+            "--dry-run",
+            "--json",
+            "使用",
+            "kimi2.5",
+            "minimaxm3",
+        ],
+        command_name="mmf",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["model_selection_source"] == "explicit"
+    assert payload["models"] == ["kimi-k2.5", "MiniMax-M3"]
+
+
+def test_mmf_review_dispatch_entrypoint_uses_preview_bundle(tmp_path, monkeypatch):
+    config_root = tmp_path / "mms-next"
+    _write_model_bundle(config_root, ["kimi-k2.5", "MiniMax-M3"])
+    root = _mission_root(tmp_path)
+    env = {
+        **os.environ,
+        "MMS_CONFIG_ROOT": str(config_root),
+        "MMS_SKIP_VENV_REEXEC": "1",
+        "PYTHONPATH": str(REPO_ROOT),
+    }
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "mmf"),
+            "review-dispatch",
+            "--root",
+            str(root),
+            "--request-id",
+            "mmf-bundle-review",
+            "--dry-run",
+            "--json",
+            "使用",
+            "kimi2.5",
+            "minimaxm3",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
+    assert payload["models"] == ["kimi-k2.5", "MiniMax-M3"]
 
 
 def test_review_dispatch_rejects_claude_review_models(tmp_path, capsys):
