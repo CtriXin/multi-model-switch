@@ -56,13 +56,30 @@ REVIEW_MODEL_PRESET_ALIASES = {
 REVIEW_MODEL_ALIASES = {
     "mimo-2.5": "mimo-v2.5",
     "mimo-v2.5": "mimo-v2.5",
+    "mimo2.5": "mimo-v2.5",
+    "mimo25": "mimo-v2.5",
     "kimi-2.6": "kimi-k2.6",
     "kimi-k2.6": "kimi-k2.6",
+    "kimi2.6": "kimi-k2.6",
+    "kimi26": "kimi-k2.6",
     "qwen3.6": "qwen3.6-flash",
     "qwen3.6-flash": "qwen3.6-flash",
+    "qwen36": "qwen3.6-flash",
+    "qwen3.7": "qwen3.7-max",
+    "qwen3.7max": "qwen3.7-max",
+    "qwen37max": "qwen3.7-max",
     "glm5-turbo": "glm-5-turbo",
     "glm-5-turbo": "glm-5-turbo",
+    "glm5turbo": "glm-5-turbo",
+    "glm5turobo": "glm-5-turbo",
+    "glm51": "glm-5.1",
+    "glm5.1": "glm-5.1",
     "minimax-m3": "MiniMax-M3",
+    "minimaxm3": "MiniMax-M3",
+    "deepseekv4pro": "deepseek-v4-pro",
+    "deepseekv4flash": "deepseek-v4-flash",
+    "gpt54": "gpt-5.4",
+    "gpt5.4": "gpt-5.4",
 }
 REVIEW_AUTO_KEYWORDS = {
     "large_arch": [
@@ -220,9 +237,42 @@ def _alias_key(value: str) -> str:
     return re.sub(r"[\s_]+", "-", str(value or "").strip().lower())
 
 
+def _compact_alias_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower()).replace("turobo", "turbo")
+
+
 def _normalize_review_model(model: str) -> str:
     value = str(model or "").strip()
-    return REVIEW_MODEL_ALIASES.get(_alias_key(value), value)
+    return REVIEW_MODEL_ALIASES.get(_alias_key(value)) or REVIEW_MODEL_ALIASES.get(_compact_alias_key(value), value)
+
+
+def _model_text_tokens(value: str) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    text = re.sub(r"\b(and|with|using|use)\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(用|和|与|以及|加上|还有|模型|reviewer|reviewers)", " ", text)
+    raw_tokens = re.split(r"[\s,，、;+|/]+", text)
+    tokens: list[str] = []
+    for token in raw_tokens:
+        cleaned = token.strip(" \t\r\n'\"`[](){}<>")
+        if not cleaned:
+            continue
+        alias_hit = _normalize_review_model(cleaned) != cleaned
+        looks_model_like = any(char.isdigit() for char in cleaned) or "-" in cleaned or "." in cleaned
+        if alias_hit or looks_model_like:
+            tokens.append(cleaned)
+    return tokens
+
+
+def _expand_review_model_values(models: list[str], model_text: list[str] | None = None) -> list[str]:
+    expanded: list[str] = []
+    for model in models:
+        tokens = _model_text_tokens(model)
+        expanded.extend(tokens or [model])
+    for text in model_text or []:
+        expanded.extend(_model_text_tokens(text))
+    return expanded
 
 
 def _normalize_review_models(models: list[str]) -> list[str]:
@@ -326,6 +376,7 @@ def _auto_review_model_selection(
 def _select_review_models(
     *,
     models: list[str],
+    model_text: list[str] | None,
     model_preset: str | None,
     title: str,
     summary: str,
@@ -333,7 +384,7 @@ def _select_review_models(
     focus: list[str],
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    explicit_models = _normalize_review_models(models)
+    explicit_models = _normalize_review_models(_expand_review_model_values(models, model_text))
     if explicit_models:
         return {
             "models": explicit_models,
@@ -509,6 +560,7 @@ def build_review_dispatch(
     launch: bool,
     allow_incomplete: bool,
     model_preset: str | None = None,
+    model_text: list[str] | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     if not root.exists():
@@ -527,6 +579,7 @@ def build_review_dispatch(
     try:
         selection = _select_review_models(
             models=models,
+            model_text=model_text,
             model_preset=model_preset,
             title=title,
             summary=summary,
@@ -636,6 +689,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
     parser.add_argument("--adapter", default="mms-opencode")
     parser.add_argument("--focus", action="append", default=["code", "verification"])
     parser.add_argument("--model", action="append", default=[], help="Reviewer model; repeat for multiple models")
+    parser.add_argument("--model-text", action="append", default=[], help="Free-form reviewer model phrase; repeat for more text")
     parser.add_argument("--model-preset", help="Reviewer model preset; defaults to automatic dispatch-time selection")
     parser.add_argument("--out-dir", help="Override Review Hub request root")
     parser.add_argument("--request-id", help="Stable request id")
@@ -653,6 +707,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
             summary=args.summary,
             phase=args.phase,
             models=args.model,
+            model_text=args.model_text,
             out_dir=Path(args.out_dir) if args.out_dir else None,
             request_id=args.request_id,
             adapter=args.adapter,

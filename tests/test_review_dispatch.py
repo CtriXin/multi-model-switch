@@ -204,6 +204,54 @@ def test_review_dispatch_explicit_models_normalize_aliases_and_override_auto(tmp
     assert payload["models"] == ["MiniMax-M3", "mimo-v2.5", "kimi-k2.6", "glm-5-turbo"]
 
 
+def test_review_dispatch_explicit_model_value_can_be_fuzzy_phrase(tmp_path, capsys):
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "fuzzy-model-review",
+            "--model",
+            "glm5turobo kimi2.6",
+            "--dry-run",
+            "--json",
+        ],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["model_selection_source"] == "explicit"
+    assert payload["models"] == ["glm-5-turbo", "kimi-k2.6"]
+
+
+def test_review_dispatch_model_text_accepts_freeform_host_instruction(tmp_path, capsys):
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "freeform-model-review",
+            "--model-text",
+            "这次用 glm5turobo 和 kimi2.6，再加 minimaxm3",
+            "--dry-run",
+            "--json",
+        ],
+        command_name="mms",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["model_selection_source"] == "explicit"
+    assert payload["models"] == ["glm-5-turbo", "kimi-k2.6", "MiniMax-M3"]
+
+
 def test_review_dispatch_rejects_claude_review_models(tmp_path, capsys):
     from mms_review_dispatch import handle_review_dispatch_command
 
