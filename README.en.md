@@ -177,6 +177,7 @@ mms claude
 mms codex
 mms opencode
 mms opencode --profile agent
+mms opencode --profile review
 mms opencode --profile omo
 mms opencode --profile raw
 mms --provider <provider-id> codex
@@ -313,7 +314,6 @@ bash install.sh --install-rtk
 bash install.sh --install-brainkeeper-context
 bash install.sh --install-map
 bash install.sh --install-codegraph
-bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-toon
 bash install.sh --install-xmem
@@ -328,7 +328,7 @@ Add `--dry-run` to preview the install plan without writing files, for example `
 
 `--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS also injects a passive CodeGraph-first skill so agents prefer graph discovery before broad file reads. MMS no longer adds a default SessionStart auto-register hook for CodeGraph; run indexing explicitly when a repo needs it. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
 
-`--install-read-once` installs Claude Read token-saving hooks. Within one session it warns on repeated reads of unchanged files and prefers diffs after edits. It works automatically; users do not need to remember a command.
+> `--install-read-once` **REMOVED 2026-06-12** — the optional Read token-saver pack (PreToolUse Read hook + PostCompact compact hook) was retired because a stale hook binary could leak control characters into the API payload and trigger 400 `invalid character` errors. See `installed-skills/AGENTS.md` → Removed Packs for the full audit trail. If you need Read token saving, use the `--install-token-saver` pack plus RTK's read interception.
 
 `--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. `token-gain` / `mms-gain` / `token-saver gain` show estimated saved chars and gain percentage for stored refs, and a normal shell falls back to the most recent non-empty MMS session store when the current repo store is empty. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
 

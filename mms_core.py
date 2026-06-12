@@ -8916,10 +8916,6 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
             return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
         if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":
             return "RTK Bash 改写", _L("压缩高 token Bash 命令", "Rewrite token-heavy Bash commands")
-        if basename == "hook.sh" and "read-once" in (lower_target or lower_command):
-            return _L("Read-once 读取拦截", "Read-once read hook"), _L("避免重复全文读取", "Avoid redundant full-file rereads")
-        if basename == "compact.sh" and "read-once" in (lower_target or lower_command):
-            return _L("Read-once 压缩整理", "Read-once compact"), _L("编辑后优先回看 diff", "Prefer diff after edits")
         if "hive-compact-hook" in lower_target or basename == "hive-compact-hook.sh":
             return _L("Hive 压缩整理", "Hive compact"), _L("compact 前后整理上下文", "Summarize context before and after compact")
         if "caveman-activate" in lower_target or basename == "caveman-activate.js":
@@ -14413,6 +14409,7 @@ def main():
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
             f"  {current_command()} opencode --profile agent  启动默认 Agent mode\n"
+            f"  {current_command()} opencode --profile review 启动 Review Hub host mode\n"
             f"  {current_command()} opencode --profile omo    启动 global OMO mode\n"
             f"  {current_command()} opencode --profile raw    启动纯 OpenCode mode\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
@@ -14442,7 +14439,7 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / omo / raw")
     parser.add_argument(
         "--opencode-entrypoint",
         choices=["tui", "backend", "backend-agent", "serve", "headless", "acp"],

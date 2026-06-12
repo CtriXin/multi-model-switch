@@ -68,8 +68,7 @@ INSTALL_MAP=0
 INSTALL_MAP_EXPLICIT=0
 INSTALL_CODEGRAPH=0
 INSTALL_CODEGRAPH_EXPLICIT=0
-INSTALL_READ_ONCE=0
-INSTALL_READ_ONCE_EXPLICIT=0
+# read-once pack removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
 INSTALL_OPS_ENV_SAFE=0
 INSTALL_OPS_ENV_SAFE_EXPLICIT=0
 INSTALL_TOKEN_SAVER=0
@@ -234,11 +233,6 @@ optional_map_installed() {
 
 optional_codegraph_installed() {
     find_cli_binary codegraph >/dev/null 2>&1
-}
-
-optional_read_once_installed() {
-    [ -x "$REAL_HOME/.claude/read-once/hook.sh" ] \
-        && [ -x "$REAL_HOME/.claude/read-once/compact.sh" ]
 }
 
 optional_ops_env_safe_installed() {
@@ -417,7 +411,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--channel stable|dev|canary] [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-xmem] [--xmem-ref <tag-or-branch>] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
+  bash install.sh [--channel stable|dev|canary] [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-token-saver] [--install-toon] [--install-xmem] [--xmem-ref <tag-or-branch>] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --stable
   bash install.sh --dev
@@ -444,7 +438,7 @@ $(t "说明:" "Notes:")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
   - $(t "--install-codegraph 会通过 npm 安装 CodeGraph CLI/MCP，用于 symbol/call graph 代码索引；MMS session hook 会在 git repo 中自动 init/index，已有索引则 sync" "--install-codegraph installs the CodeGraph CLI/MCP via npm for symbol/call-graph code indexing; MMS session hooks auto init/index git repos and sync existing indexes")
   - $(t "--codegraph-package 可覆盖 npm 包规格，例如 @colbymchenry/codegraph@0.7.6" "--codegraph-package overrides the npm package spec, for example @colbymchenry/codegraph@0.7.6")
-  - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read 省 token hooks：同一 session 避免重复全文读文件，改动后优先提示 diff" "--install-read-once installs read-once and enables Claude Read token-saving hooks: avoid repeated full-file rereads in a session and prefer diffs after edits")
+  # --install-read-once removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
   - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令，用于长日志/测试输出/diff 的 ref+snippet 收纳" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command for long logs/test output/diff refs and snippets")
   - $(t "--install-toon 会安装 Codex/Claude 共用 TOON skill 和本机 mms-toon 命令，用于结构化 JSON/status/handoff 压缩；MMS session 内仍默认内建 TOON" "--install-toon installs the shared Codex/Claude TOON skill plus the local mms-toon command for structured JSON/status/handoff compression; MMS sessions still bundle TOON by default")
   - $(t "--install-xmem 会安装通用 xmem CLI/skill，并执行轻量 setup：创建 ~/.xmem、注册 HOME 下浅层 git roots，不写 repo-local .xmem" "--install-xmem installs the generic xmem CLI/skill and runs lightweight setup: create ~/.xmem and register shallow HOME git roots without writing repo-local .xmem")
@@ -656,32 +650,6 @@ prompt_optional_install_choices() {
             echo "  它使用 npm；必要时会临时用 MMS-managed nvm Node.js 22，不会修改你的默认 Node。"
             if confirm_from_tty "是否安装 CodeGraph CLI？[y/N]: " "n"; then
                 INSTALL_CODEGRAPH=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_READ_ONCE_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_read_once_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional Claude hook"
-            else
-                echo "可选 Claude hook"
-            fi
-            note_optional_pack_detected " read-once" "read-once"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional Claude hook"
-            echo "  Read token saver (read-once) avoids redundant full-file rereads and prefers diffs after edits."
-            echo "  It works automatically for Claude Read; you do not need to remember a command."
-            if confirm_from_tty "Install read-once for Claude Read token saving? [y/N]: " "n"; then
-                INSTALL_READ_ONCE=1
-            fi
-        else
-            echo "可选 Claude hook"
-            echo "  Read 省 token 工具（read-once）会避免重复全文读取文件，并在改动后优先提供 diff。"
-            echo "  它会自动作用于 Claude Read，不需要你记命令。"
-            if confirm_from_tty "是否安装 Claude 的 read-once 读文件省 token hook？[y/N]: " "n"; then
-                INSTALL_READ_ONCE=1
             fi
         fi
     fi
@@ -1826,23 +1794,7 @@ def is_legacy_global_nsr(command):
     )
 
 
-def read_once_target(command):
-    text = normalize(command)
-    lower = text.lower()
-    if "/.claude/read-once/hook.sh" in lower:
-        return "read-once-hook"
-    if "/.claude/read-once/compact.sh" in lower:
-        return "read-once-compact"
-    return ""
-
-
-def read_once_rank(command):
-    text = normalize(command)
-    if "/bin/bash " in text:
-        return 0
-    if " bash " in f" {text} ":
-        return 1
-    return 2
+# read-once dedup removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
 
 
 def cleanup_file(path):
@@ -1872,9 +1824,7 @@ def cleanup_file(path):
                 cleaned_groups.append(group)
                 continue
             matcher = str(group.get("matcher") or "").strip()
-            candidates = []
             kept_hooks = []
-            read_once_seen = {}
             for hook in hook_items:
                 if not isinstance(hook, dict):
                     kept_hooks.append(hook)
@@ -1883,21 +1833,7 @@ def cleanup_file(path):
                 if is_legacy_global_nsr(command):
                     removed += 1
                     continue
-                ro_target = read_once_target(command)
-                if ro_target:
-                    candidates.append((ro_target, hook))
-                    continue
                 kept_hooks.append(hook)
-            for ro_target, hook in candidates:
-                key = (event_name, matcher, ro_target)
-                current = read_once_seen.get(key)
-                if current is None:
-                    read_once_seen[key] = hook
-                    continue
-                if read_once_rank(hook.get("command")) < read_once_rank(current.get("command")):
-                    read_once_seen[key] = hook
-                removed += 1
-            kept_hooks.extend(read_once_seen.values())
             if kept_hooks:
                 cleaned = dict(group)
                 cleaned["hooks"] = kept_hooks
@@ -3335,59 +3271,6 @@ print_codegraph_init_hint() {
     fi
 }
 
-install_optional_read_once() {
-    local claude_dir="$REAL_HOME/.claude"
-    local install_dir="$claude_dir/read-once"
-    local hook_source="$SOURCE_DIR/hooks/read-once-hook.sh"
-    local compact_source="$SOURCE_DIR/hooks/read-once-compact.sh"
-    local hook_target="$install_dir/hook.sh"
-    local compact_target="$install_dir/compact.sh"
-
-    echo ""
-    echo "$(t "正在安装 read-once..." "Installing read-once...")"
-    echo "⚠ $(t "这个可选包会修改 ~/.claude/settings.json 和 ~/.claude/read-once/；若缺少 jq 会尝试安装。" "This optional pack updates ~/.claude/settings.json and ~/.claude/read-once/; it also attempts to install jq if missing.")"
-
-    ensure_brew_package "jq" "jq" "jq" || true
-
-    if [ ! -f "$hook_source" ] || [ ! -f "$compact_source" ]; then
-        echo "⚠ $(t "找不到 read-once hook 模板，跳过" "read-once hook templates not found, skipping")"
-        return 1
-    fi
-
-    mkdir -p "$install_dir"
-    cp "$hook_source" "$hook_target"
-    cp "$compact_source" "$compact_target"
-    chmod +x "$hook_target" "$compact_target"
-
-    append_claude_hook_command \
-        "$claude_dir/settings.json" \
-        "PreToolUse" \
-        "Read" \
-        "READ_ONCE_DIFF=1 /bin/bash $hook_target" \
-        "$hook_target" \
-        "bash $hook_target" \
-        "/bin/bash $hook_target" \
-        "READ_ONCE_DIFF=1 $hook_target" \
-        "READ_ONCE_DIFF=1 bash $hook_target" \
-        "READ_ONCE_DIFF=1 /bin/bash $hook_target"
-
-    append_claude_hook_command \
-        "$claude_dir/settings.json" \
-        "PostCompact" \
-        "" \
-        "/bin/bash $compact_target" \
-        "$compact_target" \
-        "bash $compact_target" \
-        "/bin/bash $compact_target"
-
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "⚠ $(t "未检测到 jq，read-once hook 已安装但会保持静默，直到 jq 可用" "jq not found; read-once is installed but remains inactive until jq is available")"
-    fi
-
-    echo "✓ $(t "已启用 Claude read-once hooks" "Claude read-once hooks enabled")"
-    return 0
-}
-
 write_ops_env_safe_config() {
     local template_path="$SOURCE_DIR/config/ops-env-safe.template.toml"
     local target_path="$REAL_HOME/.config/mms/ops-env-safe.toml"
@@ -3942,7 +3825,6 @@ print_dry_run_plan() {
     [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
     [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map auto-index" "would install Map auto-index"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
     [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
-    [ "$INSTALL_READ_ONCE" -eq 1 ] && echo "• $(t "会安装 read-once Claude hook" "would install read-once Claude hook")"
     [ "$INSTALL_TOKEN_SAVER" -eq 1 ] && echo "• $(t "会安装 Token Saver skill/命令" "would install Token Saver skill/commands")"
     [ "$INSTALL_TOON" -eq 1 ] && echo "• $(t "会安装 TOON skill/命令" "would install TOON skill/command")"
 
@@ -4184,10 +4066,6 @@ while [[ $# -gt 0 ]]; do
             fi
             CODEGRAPH_PACKAGE_SPEC="$1"
             ;;
-        --install-read-once)
-            INSTALL_READ_ONCE=1
-            INSTALL_READ_ONCE_EXPLICIT=1
-            ;;
         --install-token-saver)
             INSTALL_TOKEN_SAVER=1
             INSTALL_TOKEN_SAVER_EXPLICIT=1
@@ -4372,11 +4250,6 @@ if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
     echo "  $(t "CodeGraph npm 包" "CodeGraph npm package"): $CODEGRAPH_PACKAGE_SPEC"
 fi
 
-if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
-    echo "• $(t "附带安装 read-once" "Optional read-once"): on"
-    echo "  $(t "会写入 Claude 的 Read token saver hooks。" "This writes the Claude Read token saver hooks.")"
-fi
-
 if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
     echo "• $(t "附带安装 Token Saver" "Optional Token Saver"): on"
     echo "  $(t "会写入 Codex/Claude skill 和 ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude skills and ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon, without writing ~/.config/mms.")"
@@ -4502,9 +4375,6 @@ if [ "$INSTALL_MAP" -eq 1 ]; then
 fi
 if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
     install_optional_codegraph || true
-fi
-if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
-    install_optional_read_once || true
 fi
 if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
     install_optional_token_saver || true
