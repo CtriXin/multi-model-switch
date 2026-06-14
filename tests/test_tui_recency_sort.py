@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from mms_tui import (
+    _build_review_model_rows,
     _sort_cli_names_by_last_used,
     _sort_model_entries_for_tui,
     _sort_profile_options_for_tui,
@@ -84,6 +85,32 @@ def test_model_sort_falls_back_to_name_without_recency() -> None:
     sorted_names = [item["model"] for item in _sort_model_entries_for_tui(models, "Qwen", now=NOW)]
 
     assert sorted_names == ["qwen-a", "qwen-b", "qwen-c"]
+
+
+def test_review_model_rows_restore_saved_selection_first_and_channels() -> None:
+    options = [
+        {"model": "gpt-5.4", "family": "GPT", "provider_id": "company", "provider_name": "company", "priority": 10},
+        {"model": "qwen3.7-max", "family": "Qwen", "provider_id": "company", "provider_name": "company", "priority": 10},
+        {"model": "gpt-5.4", "family": "GPT", "provider_id": "tokyo", "provider_name": "tokyo", "priority": 190},
+        {"model": "qwen3.7-max", "family": "Qwen", "provider_id": "direct", "provider_name": "direct", "priority": 200},
+        {"model": "kimi-for-coding", "family": "Kimi", "provider_id": "tokyo", "provider_name": "tokyo", "priority": 190},
+    ]
+
+    rows, selected, provider_idx = _build_review_model_rows(
+        options,
+        selected_models=[
+            {"model": "qwen3.7-max", "provider_id": "direct"},
+            {"model": "kimi-for-coding", "provider_id": "direct-kimi"},
+            {"model": "hidden-model", "provider_id": "hidden-channel"},
+        ],
+    )
+
+    assert [row["model"] for row in rows[:2]] == ["qwen3.7-max", "kimi-for-coding"]
+    assert selected == {"qwen3.7-max", "kimi-for-coding"}
+    qwen_row = rows[0]
+    assert qwen_row["providers"][provider_idx["qwen3.7-max"]]["provider_id"] == "direct"
+    kimi_row = rows[1]
+    assert kimi_row["providers"][provider_idx["kimi-for-coding"]]["provider_id"] == "tokyo"
 
 
 def test_family_sort_uses_last_used_before_default_family() -> None:

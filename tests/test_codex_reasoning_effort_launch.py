@@ -10,6 +10,8 @@ def test_runtime_reasoning_helpers_normalize_values():
     assert mms_launchers._runtime_thinking_enabled({"thinking_mode": "enable"}) is True
     assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "xhigh"}) == "xhigh"
     assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "weird"}) == "high"
+    assert mms_launchers._claude_code_effort_env_value("glm-5.2", {"reasoning_effort": "xhigh"}) == "max"
+    assert mms_launchers._claude_code_effort_env_value("gpt-5.4", {"reasoning_effort": "xhigh"}) == ""
 
 
 def test_default_gpt_reasoning_effort_uses_xhigh_for_source_checkout(monkeypatch):
@@ -29,11 +31,26 @@ def test_default_gpt_reasoning_effort_keeps_high_for_installed_layout(monkeypatc
 
 
 def test_mms_core_prefers_xhigh_for_gpt_in_source_checkout(monkeypatch):
+    import mms_capability_resolver
     import mms_core
 
     monkeypatch.setattr(mms_core, "resolve_real_user_home", lambda env=None: "/tmp/real-home")
+    monkeypatch.setattr(mms_capability_resolver, "load_default_model_policy", lambda: {})
 
     assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-5.4"}) == "xhigh"
+
+
+def test_mms_core_uses_model_policy_reasoning_effort(monkeypatch):
+    import mms_capability_resolver
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {"models": {"glm-5.2": {"capabilities": {"reasoning_effort": "max"}}}},
+    )
+
+    assert mms_core._default_reasoning_effort_for_model_info({"model": "glm-5.2"}) == "xhigh"
 
 
 def test_mms_core_keeps_high_for_installed_layout(monkeypatch):

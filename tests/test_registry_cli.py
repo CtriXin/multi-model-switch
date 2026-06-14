@@ -887,6 +887,36 @@ def _registry_v2_candidate_config() -> dict:
     }
 
 
+def test_registry_v2_profile_payload_preserves_opencode_review_and_committee_selection() -> None:
+    cfg = _registry_v2_candidate_config()
+    cfg["opencode"] = {
+        "default_profile": "committee",
+        "review": {
+            "models": ["kimi-k2.7-code", "glm-5.2"],
+            "host": {
+                "primary_models": ["gpt-5.4"],
+                "fallback_models": ["gpt-5.5"],
+            },
+        },
+        "committee": {
+            "models": ["gpt-5.4", "deepseek-v4-flash"],
+            "host": {"model": "mimo-v2.5", "provider_id": "mimo-direct"},
+        },
+    }
+
+    payload = mms_registry_cli._registry_v2_profile_payload(cfg)
+    opencode = payload["runtime_config"]["opencode"]
+
+    assert opencode["default_profile"] == "committee"
+    assert opencode["review"]["models"] == ["kimi-k2.7-code", "glm-5.2"]
+    assert opencode["review"]["host"] == {
+        "primary_models": ["gpt-5.4"],
+        "fallback_models": ["gpt-5.5"],
+    }
+    assert opencode["committee"]["models"] == ["gpt-5.4", "deepseek-v4-flash"]
+    assert opencode["committee"]["host"] == {"model": "mimo-v2.5", "provider_id": "mimo-direct"}
+
+
 def test_registry_v2_save_candidate_writes_preview_db_without_secrets(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     cfg = _registry_v2_candidate_config()

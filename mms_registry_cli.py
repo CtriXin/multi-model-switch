@@ -1840,13 +1840,46 @@ def _registry_v2_runtime_opencode_payload(value: Any) -> dict[str, Any]:
     review_host = review.get("host") if isinstance(review.get("host"), Mapping) else {}
     if not review_host and isinstance(opencode.get("review_host"), Mapping):
         review_host = opencode.get("review_host")
+    review_payload: dict[str, Any] = {}
+    review_model_value = []
+    if isinstance(review, Mapping):
+        review_model_value = review.get("models") or review.get("model_tokens") or review.get("selected_models")
+    review_models = _as_string_list(review_model_value)
+    if review_models:
+        review_payload["models"] = review_models
     host_payload = {
         key: models
         for key in ("primary_models", "fallback_models")
         if (models := _as_string_list(review_host.get(key) if isinstance(review_host, Mapping) else []))
     }
     if host_payload:
-        payload["review"] = {"host": host_payload}
+        review_payload["host"] = host_payload
+    if review_payload:
+        payload["review"] = review_payload
+
+    committee = opencode.get("committee") if isinstance(opencode.get("committee"), Mapping) else {}
+    committee_model_value = []
+    committee_payload: dict[str, Any] = {}
+    if isinstance(committee, Mapping):
+        committee_model_value = committee.get("models") or committee.get("model_tokens") or committee.get("selected_models")
+        committee_host = committee.get("host") if isinstance(committee.get("host"), Mapping) else {}
+        for value in (
+            committee_host.get("model") if isinstance(committee_host, Mapping) else "",
+            committee_host.get("primary_model") if isinstance(committee_host, Mapping) else "",
+            committee.get("host_model"),
+        ):
+            host_model = str(value or "").strip()
+            if host_model:
+                host_payload = {"model": host_model}
+                provider_id = str(committee_host.get("provider_id") or committee.get("host_provider_id") or "").strip() if isinstance(committee_host, Mapping) else ""
+                if provider_id:
+                    host_payload["provider_id"] = provider_id
+                committee_payload["host"] = host_payload
+                break
+    if committee_models := _as_string_list(committee_model_value or opencode.get("committee_models")):
+        committee_payload["models"] = committee_models
+    if committee_payload:
+        payload["committee"] = committee_payload
 
     agent_models = _registry_v2_opencode_agent_models_payload(opencode.get("agent_models") or opencode.get("agent_model_overrides"))
     if agent_models:

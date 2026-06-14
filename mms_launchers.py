@@ -467,6 +467,29 @@ def _capability_context_window(model_name, *, provider_id=None, accepted_sources
     return _coerce_context_window(caps.get("context_window_tokens"))
 
 
+def _capability_max_output_tokens(model_name, *, provider_id=None, accepted_sources=None):
+    try:
+        caps = resolve_model_capabilities(str(model_name or "").strip(), provider_id=provider_id or "")
+    except Exception:
+        if accepted_sources is None or "model_policy" not in set(accepted_sources):
+            return None
+        try:
+            from mms_capability_resolver import load_default_model_policy
+
+            caps = resolve_model_capabilities(
+                str(model_name or "").strip(),
+                provider_id=provider_id or "",
+                approved_facts={},
+                model_policy=load_default_model_policy(),
+            )
+        except Exception:
+            return None
+    source = caps.get("sources", {}).get("max_output_tokens")
+    if accepted_sources is not None and source not in set(accepted_sources):
+        return None
+    return _coerce_context_window(caps.get("max_output_tokens"))
+
+
 def _model_context_overrides_path():
     try:
         config_root = _resolve_mms_config_dir()
@@ -3334,6 +3357,18 @@ def _normalize_reasoning_effort(value, default="high"):
 
 def _runtime_reasoning_effort(runtime, default="high"):
     return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
+
+
+def _claude_code_effort_env_value(model_name, runtime):
+    model = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    if not model.startswith("glm"):
+        return ""
+    raw = str((runtime or {}).get("reasoning_effort") or "").strip().lower()
+    if raw in {"xhigh", "max", "ultracode"}:
+        return "max"
+    if raw in {"low", "medium", "high"}:
+        return "high"
+    return ""
 
 
 def _runtime_vision_sidecar(runtime):
@@ -9698,6 +9733,9 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
     env["CLAUDE_CODE_ATTRIBUTION_HEADER"] = "0"
     env["API_TIMEOUT_MS"] = "3000000"
     env["MMS_RESUME_COMMAND_NAME"] = _mms_resume_command_name()
+    effort_env = _claude_code_effort_env_value(probe_model, runtime)
+    if effort_env:
+        env["CLAUDE_CODE_EFFORT_LEVEL"] = effort_env
 
     # bridge 模式下跳过 model slot：Claude Code 用默认 claude-* 模型名通过校验，
     # bridge 在转发时替换成真实模型名（heavy_model / medium_model / light_model）。
@@ -11327,6 +11365,11 @@ def _opencode_model_config(runtime, model_name):
         runtime,
         model_name,
         context_window_resolver=_effective_context_window,
+        output_limit_resolver=lambda model, provider_id=None: _capability_max_output_tokens(
+            model,
+            provider_id=provider_id,
+            accepted_sources={"model_policy", "manual_override", "approved_facts"},
+        ),
     )
 
 
@@ -11380,6 +11423,11 @@ def _build_opencode_config_payload(runtime, model_name=""):
         runtime,
         model_name,
         context_window_resolver=_effective_context_window,
+        output_limit_resolver=lambda model, provider_id=None: _capability_max_output_tokens(
+            model,
+            provider_id=provider_id,
+            accepted_sources={"model_policy", "manual_override", "approved_facts"},
+        ),
     )
 
 
@@ -11388,6 +11436,11 @@ def _build_opencode_config_content(runtime, model_name=""):
         runtime,
         model_name,
         context_window_resolver=_effective_context_window,
+        output_limit_resolver=lambda model, provider_id=None: _capability_max_output_tokens(
+            model,
+            provider_id=provider_id,
+            accepted_sources={"model_policy", "manual_override", "approved_facts"},
+        ),
     )
 
 
@@ -11702,6 +11755,9 @@ def get_export_env(cli, runtime, model_info=None):
         exports["ANTHROPIC_AUTH_TOKEN"] = api_key
         exports["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         exports["API_TIMEOUT_MS"] = "3000000"
+        effort_env = _claude_code_effort_env_value(_resolve_model(model_info or runtime), runtime)
+        if effort_env:
+            exports["CLAUDE_CODE_EFFORT_LEVEL"] = effort_env
     elif cli == "codex":
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)

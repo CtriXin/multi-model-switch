@@ -292,6 +292,7 @@ def test_opencode_agent_variant_is_data_driven(monkeypatch):
 
 
 def test_opencode_model_limit_uses_shared_model_policy(monkeypatch):
+    import mms_capability_resolver
     import mms_launchers
 
     def fake_capabilities(model_name, **_kwargs):
@@ -305,11 +306,12 @@ def test_opencode_model_limit_uses_shared_model_policy(monkeypatch):
             },
         }
 
+    monkeypatch.setattr(mms_capability_resolver, "resolve_model_capabilities", fake_capabilities)
     monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", fake_capabilities)
 
     config = mms_launchers._opencode_model_config(_runtime(id="policy-provider"), "unit-policy-model")
 
-    assert config["limit"] == {"context": 512_000, "output": 8192}
+    assert config["limit"] == {"context": 512_000, "output": 65_536}
 
 
 def test_opencode_model_config_uses_runtime_model_capabilities_for_limits_and_vision():
@@ -990,11 +992,8 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
     vision_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_primary")
     assert vision_route["provider_id"] == "mimo-direct-anthropic"
-    assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["attachment"] is True
-    assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["modalities"] == {
-        "input": ["text", "image"],
-        "output": ["text"],
-    }
+    assert "attachment" not in payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]
+    assert "modalities" not in payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     reviewer_route = next(route for route in runtime["opencode_routes"] if route["id"] == "reviewer_primary")
     assert reviewer_route["provider_id"] == "mixed"
