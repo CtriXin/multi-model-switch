@@ -4,6 +4,7 @@ from __future__ import annotations
 
 OPENCODE_AGENT_PROFILE_ID = "lite_pro_orchestrated"
 OPENCODE_REVIEW_PROFILE_ID = "review_hub"
+OPENCODE_COMMITTEE_PROFILE_ID = "committee"
 OPENCODE_DEFAULT_PROFILE_ID = "agent"
 
 OPENCODE_PROFILE_OPTIONS = [
@@ -20,6 +21,13 @@ OPENCODE_PROFILE_OPTIONS = [
         "label": "Review",
         "badge": "审核",
         "summary": "审核专用：MMS 先解析/保存 reviewer 模型，再进入 OpenCode TUI，由 GPT-5.4 优先的 review host 派发；配合 review-hub request root 使用。",
+    },
+    {
+        "id": "committee",
+        "profile_id": OPENCODE_COMMITTEE_PROFILE_ID,
+        "label": "Committee",
+        "badge": "委员会",
+        "summary": "通用委员会：GPT-5.4 host 默认派发给所选 subagent，最后汇总共识/分歧；默认只选 GPT-5.4，可加 GPT-5.5、DeepSeek、GLM、MiMo、Kimi、MiniMax。",
     },
     {
         "id": "omo",
@@ -58,7 +66,7 @@ OPENCODE_LITE_PRO_SPECS = (
     {"key": "vision_qwen", "agent": "mobius-vision-qwen", "models": ("qwen3.6-plus", "qwen3.6-flash"), "gpt_fallback": False},
     {"key": "reviewer_primary", "agent": "mobius-reviewer-gpt55", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
     {"key": "reviewer_fallback", "agent": "mobius-reviewer-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
-    {"key": "reviewer_mimo", "agent": "mobius-reviewer-mimo", "models": ("mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro"), "route_policy": "mimo_direct", "gpt_fallback": False},
+    {"key": "reviewer_mimo", "agent": "mobius-reviewer-mimo", "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"), "route_policy": "mimo_direct", "gpt_fallback": False},
     {"key": "bughunt_deepseek", "agent": "mobius-bughunt-deepseek", "models": ("deepseek-v4-pro", "deepseek-v4-flash")},
     {"key": "bughunt_glm", "agent": "mobius-bughunt-glm", "models": ("glm-5.1", "glm-5-turbo", "glm-5")},
     {"key": "fixer_gpt54", "agent": "mobius-fixer-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
@@ -79,6 +87,11 @@ OPENCODE_REVIEW_HUB_SPECS = (
     {"key": "review_deepseek", "agent": "review-deepseek", "models": ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2")},
     {"key": "review_mimo", "agent": "review-mimo", "models": ("mimo-v2.5", "mimo-v2-pro"), "route_policy": "mimo_direct", "gpt_fallback": False},
     {"key": "review_mimo_pro", "agent": "review-mimo-pro", "models": ("mimo-v2.5-pro", "mimo-v2.5"), "route_policy": "mimo_direct", "gpt_fallback": False},
+)
+
+OPENCODE_COMMITTEE_SPECS = (
+    {"key": "builder_primary", "agent": "committee-host", "models": ("gpt-5.4", "gpt-5.5", "gpt-5.3-codex")},
+    {"key": "builder_fallback", "agent": "committee-host-pro", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
 )
 
 
@@ -121,11 +134,35 @@ def opencode_review_host_config(cfg):
     return result
 
 
+def opencode_committee_host_config(cfg):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
+    committee = opencode.get("committee") if isinstance(opencode.get("committee"), dict) else {}
+    host = committee.get("host") if isinstance(committee.get("host"), dict) else {}
+    primary_models = _opencode_model_list(
+        host.get("primary_models")
+        or host.get("models")
+        or host.get("model")
+        or committee.get("host_model")
+    )
+    fallback_models = _opencode_model_list(host.get("fallback_models") or host.get("fallback"))
+    result = {}
+    if primary_models:
+        result["primary_models"] = primary_models
+    if fallback_models:
+        result["fallback_models"] = fallback_models
+    return result
+
+
 def opencode_lite_pro_specs_for_config(cfg, profile_id=OPENCODE_AGENT_PROFILE_ID):
     specs = [dict(spec) for spec in opencode_lite_pro_specs(profile_id)]
-    if normalize_opencode_profile_id(profile_id) != OPENCODE_REVIEW_PROFILE_ID:
+    normalized_profile = normalize_opencode_profile_id(profile_id)
+    if normalized_profile == OPENCODE_REVIEW_PROFILE_ID:
+        host = opencode_review_host_config(cfg)
+    elif normalized_profile == OPENCODE_COMMITTEE_PROFILE_ID:
+        host = opencode_committee_host_config(cfg)
+    else:
         return tuple(specs)
-    host = opencode_review_host_config(cfg)
     if not host:
         return tuple(specs)
     for spec in specs:
@@ -159,6 +196,11 @@ def normalize_opencode_profile_id(value):
         "reviewer": OPENCODE_REVIEW_PROFILE_ID,
         "multi_review": OPENCODE_REVIEW_PROFILE_ID,
         "multi_reviewer": OPENCODE_REVIEW_PROFILE_ID,
+        "committee": OPENCODE_COMMITTEE_PROFILE_ID,
+        "committees": OPENCODE_COMMITTEE_PROFILE_ID,
+        "council": OPENCODE_COMMITTEE_PROFILE_ID,
+        "board": OPENCODE_COMMITTEE_PROFILE_ID,
+        "multi_committee": OPENCODE_COMMITTEE_PROFILE_ID,
         # Legacy pro spellings now fold into the single Agent profile.
         "pro": OPENCODE_AGENT_PROFILE_ID,
         "pro_solo": OPENCODE_AGENT_PROFILE_ID,
@@ -215,6 +257,7 @@ def opencode_profile_selection(value):
         "lite_pro_orchestrated_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
         "review_backend": (OPENCODE_REVIEW_PROFILE_ID, "serve"),
         "review_hub_backend": (OPENCODE_REVIEW_PROFILE_ID, "serve"),
+        "committee_backend": (OPENCODE_COMMITTEE_PROFILE_ID, "serve"),
         "acp_multi": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "multi_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "multi_agent_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
@@ -222,6 +265,7 @@ def opencode_profile_selection(value):
         "lite_pro_orchestrated_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "review_acp": (OPENCODE_REVIEW_PROFILE_ID, "acp"),
         "review_hub_acp": (OPENCODE_REVIEW_PROFILE_ID, "acp"),
+        "committee_acp": (OPENCODE_COMMITTEE_PROFILE_ID, "acp"),
     }
     if normalized in aliases:
         return aliases[normalized]
@@ -243,10 +287,13 @@ def apply_opencode_entrypoint(runtime, entrypoint):
 
 
 def opencode_lite_pro_specs(profile_id=OPENCODE_AGENT_PROFILE_ID):
-    if normalize_opencode_profile_id(profile_id) == OPENCODE_REVIEW_PROFILE_ID:
+    normalized_profile = normalize_opencode_profile_id(profile_id)
+    if normalized_profile == OPENCODE_REVIEW_PROFILE_ID:
         return OPENCODE_REVIEW_HUB_SPECS
+    if normalized_profile == OPENCODE_COMMITTEE_PROFILE_ID:
+        return OPENCODE_COMMITTEE_SPECS
     specs = list(OPENCODE_LITE_PRO_SPECS)
-    if normalize_opencode_profile_id(profile_id) == "lite_pro_orchestrated":
+    if normalized_profile == "lite_pro_orchestrated":
         insert_at = next(
             (index + 1 for index, spec in enumerate(specs) if spec.get("key") == "explore_fallback"),
             len(specs),
@@ -313,6 +360,22 @@ def apply_opencode_profile(runtime, profile_id):
             "builder_primary": "review-hub-host",
             "builder_fallback": "review-hub-host-stable",
         }
+    elif profile_id == OPENCODE_COMMITTEE_PROFILE_ID:
+        runtime["opencode_use_global_config"] = False
+        runtime["opencode_pure"] = True
+        runtime["opencode_lite_agents"] = True
+        runtime["opencode_agent"] = "committee-host"
+        runtime["opencode_default_agent"] = "committee-host"
+        runtime["opencode_roster"] = profile_id
+        runtime["opencode_contract_workflow"] = "committee"
+        runtime["opencode_backend_agent_capable"] = True
+        runtime["opencode_acp_capable"] = True
+        runtime["opencode_launch_preflight"] = False
+        runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
+        runtime["opencode_launch_fallback_agents"] = {
+            "builder_primary": "committee-host",
+            "builder_fallback": "committee-host-pro",
+        }
     else:
         runtime["opencode_use_global_config"] = False
         runtime["opencode_pure"] = True
@@ -326,6 +389,8 @@ def apply_opencode_profile(runtime, profile_id):
 __all__ = [
     "OPENCODE_AGENT_PROFILE_ID",
     "OPENCODE_BASE_PROFILE_OPTIONS",
+    "OPENCODE_COMMITTEE_PROFILE_ID",
+    "OPENCODE_COMMITTEE_SPECS",
     "OPENCODE_DEFAULT_MODEL_PREFERENCES",
     "OPENCODE_DEFAULT_PROFILE_ID",
     "OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS",
@@ -339,6 +404,7 @@ __all__ = [
     "normalize_opencode_profile_id",
     "opencode_lite_pro_specs",
     "opencode_lite_pro_specs_for_config",
+    "opencode_committee_host_config",
     "opencode_profile_label",
     "opencode_profile_selection",
     "opencode_profile_selection_ids",

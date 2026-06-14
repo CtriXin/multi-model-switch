@@ -1957,6 +1957,70 @@ def test_config_web_snapshot_has_agent_roster_catalog():
     assert {row["category"] for row in catalog} >= {"执行/协调", "探索", "找茬", "Vision", "审查"}
 
 
+def test_config_web_snapshot_uses_selected_opencode_profile_catalog():
+    snapshot = mms_config_web.build_config_snapshot(
+        {
+            "providers": [],
+            "opencode": {
+                "default_profile": "committee",
+                "committee": {"selected_agents": ["committee-qwen"]},
+                "agent_roster": {
+                    "committee-qwen": {
+                        "custom": True,
+                        "model": "qwen3.7-max",
+                        "provider_id": "qwen-channel",
+                    }
+                },
+            },
+        },
+        config_path="/tmp/mms/config.toml",
+    )
+    catalog = snapshot["opencode"]["agent_catalog"]
+    qwen_row = next(row for row in catalog if row["agent"] == "committee-qwen")
+    agents = {row["agent"] for row in catalog}
+
+    assert snapshot["opencode"]["default_profile"] == "committee"
+    assert "committee-host" in agents
+    assert "committee-qwen" in agents
+    assert "committee-kimi" not in agents
+    assert qwen_row["default_models"] == ["qwen3.7-max"]
+    assert "mobius-builder-pro" not in agents
+    assert snapshot["opencode"]["agent_catalogs"]["committee"][0]["agent"] == "committee-host"
+    assert snapshot["opencode"]["agent_catalogs"]["agent"][0]["agent"] == "mobius-builder-pro"
+
+
+def test_config_web_snapshot_maps_internal_opencode_profile_ids_to_surface_ids():
+    agent_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "lite_pro_orchestrated"}},
+        config_path="/tmp/mms/config.toml",
+    )
+    review_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "review_hub"}},
+        config_path="/tmp/mms/config.toml",
+    )
+
+    assert agent_snapshot["opencode"]["default_profile"] == "agent"
+    assert review_snapshot["opencode"]["default_profile"] == "review"
+
+
+def test_config_web_snapshot_keeps_raw_and_omo_agent_catalogs_empty():
+    raw_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "raw"}},
+        config_path="/tmp/mms/config.toml",
+    )
+    omo_snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [], "opencode": {"default_profile": "heavy_omo"}},
+        config_path="/tmp/mms/config.toml",
+    )
+
+    assert raw_snapshot["opencode"]["default_profile"] == "raw"
+    assert raw_snapshot["opencode"]["agent_catalog"] == []
+    assert raw_snapshot["opencode"]["agent_catalogs"]["raw"] == []
+    assert omo_snapshot["opencode"]["default_profile"] == "omo"
+    assert omo_snapshot["opencode"]["agent_catalog"] == []
+    assert omo_snapshot["opencode"]["agent_catalogs"]["omo"] == []
+
+
 def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mms_config_web,
@@ -2462,7 +2526,7 @@ def test_config_web_snapshot_and_plan_persist_opencode_review_host(tmp_path):
     }
     snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
 
-    assert snapshot["opencode"]["profiles"] == ["agent", "review", "omo", "raw"]
+    assert snapshot["opencode"]["profiles"] == ["agent", "review", "committee", "omo", "raw"]
     assert snapshot["opencode"]["review"]["host"] == {
         "primary_models": ["glm-5-turbo"],
         "fallback_models": ["gpt-5.4"],

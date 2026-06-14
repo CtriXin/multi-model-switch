@@ -122,24 +122,227 @@ def test_opencode_model_limit_includes_required_output_value():
     assert config["limit"]["output"] == 16384
 
 
-def test_opencode_model_config_marks_official_vision_models_only():
+def test_opencode_model_config_maps_profile_thinking_and_effort(monkeypatch):
+    import mms_provider_profiles
     import mms_launchers
 
-    for model in ("mimo-v2.5", "K2.6", "kimi-k2.5", "qwen3.6-plus", "gpt-5.3-codex"):
-        config = mms_launchers._opencode_model_config(_runtime(), model)
-        assert config["attachment"] is True
-        assert config["modalities"] == {"input": ["text", "image"], "output": ["text"]}
-        if model == "mimo-v2.5":
-            assert config["reasoning"] is False
-            assert config["limit"] == {"context": 1048576, "output": 131072}
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-opencode": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "body_patches": {
+                        "openai_chat": {
+                            "thinking_on": {"thinking.type": "enabled"},
+                            "thinking_off": {"thinking.type": "disabled"},
+                        }
+                    },
+                    "effort": {
+                        "openai_chat": {
+                            "path": "reasoning_effort",
+                            "default": "high",
+                            "allowed": ["high", "max"],
+                            "map": {"xhigh": "max", "medium": "high"},
+                        }
+                    },
+                }
+            }
+        },
+    )
 
-    for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro", "MiniMax-M2.7"):
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="unit",
+            provider_profile="unit-opencode",
+            models=["unit-model"],
+            reasoning_effort="xhigh",
+            thinking_mode="enable",
+            opencode_lite_agents=False,
+        ),
+        "unit-model",
+    )
+    model_config = payload["provider"]["mms"]["models"]["unit-model"]
+
+    assert model_config["options"] == {
+        "thinking": {"type": "enabled"},
+        "reasoningEffort": "max",
+    }
+    assert model_config["variants"]["high"]["reasoningEffort"] == "high"
+    assert model_config["variants"]["xhigh"]["reasoningEffort"] == "max"
+
+
+def test_opencode_model_config_does_not_turn_non_request_effort_into_variant(monkeypatch):
+    import mms_provider_profiles
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-env-only": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "body_patches": {
+                        "openai_chat": {
+                            "thinking_on": {"thinking.type": "enabled"},
+                        }
+                    },
+                    "effort": {
+                        "claude_code_env": {
+                            "path": "CLAUDE_CODE_EFFORT_LEVEL",
+                            "default": "max",
+                            "allowed": ["high", "max"],
+                            "map": {"xhigh": "max"},
+                        }
+                    },
+                }
+            }
+        },
+    )
+
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="unit",
+            provider_profile="unit-env-only",
+            models=["unit-model"],
+            reasoning_effort="xhigh",
+            opencode_lite_agents=False,
+        ),
+        "unit-model",
+    )
+    model_config = payload["provider"]["mms"]["models"]["unit-model"]
+
+    assert model_config["options"] == {"thinking": {"type": "enabled"}}
+    assert "variants" not in model_config
+
+
+def test_opencode_agent_variant_is_data_driven(monkeypatch):
+    import mms_opencode_config
+    import mms_provider_profiles
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-opencode": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "effort": {
+                        "openai_chat": {
+                            "path": "reasoning_effort",
+                            "default": "high",
+                            "allowed": ["high", "max"],
+                            "map": {"xhigh": "max"},
+                        }
+                    },
+                },
+                "unit-env-only": {
+                    "match": {"profile_only": True},
+                    "thinking": {"supported": True, "default_enabled": True},
+                    "body_patches": {"openai_chat": {"thinking_on": {"thinking.type": "enabled"}}},
+                    "effort": {
+                        "claude_code_env": {
+                            "path": "CLAUDE_CODE_EFFORT_LEVEL",
+                            "default": "max",
+                            "allowed": ["high", "max"],
+                        }
+                    },
+                },
+            }
+        },
+    )
+    routes = [
+        {
+            "id": "reasoning",
+            "model": "unit-reasoner",
+            "provider_id": "unit",
+            "provider_ref": "mms-reasoning",
+            "protocol": "openai_chat_completions",
+            "openai_base_url": "https://unit.invalid/v1",
+            "provider_profile": "unit-opencode",
+        },
+        {
+            "id": "env_only",
+            "model": "unit-env",
+            "provider_id": "unit",
+            "provider_ref": "mms-env",
+            "protocol": "openai_chat_completions",
+            "openai_base_url": "https://unit.invalid/v1",
+            "provider_profile": "unit-env-only",
+        },
+    ]
+    agents = {
+        "reasoning-agent": {"model": "mms-reasoning/unit-reasoner", "variant": "high"},
+        "env-agent": {"model": "mms-env/unit-env", "variant": "high"},
+    }
+
+    updated = mms_opencode_config.opencode_apply_agent_model_variants(
+        agents,
+        {"reasoning_effort": "xhigh"},
+        routes,
+    )
+
+    assert updated["reasoning-agent"]["variant"] == "xhigh"
+    assert "variant" not in updated["env-agent"]
+
+
+def test_opencode_model_limit_uses_shared_model_policy(monkeypatch):
+    import mms_launchers
+
+    def fake_capabilities(model_name, **_kwargs):
+        return {
+            "model_name": str(model_name),
+            "context_window_tokens": 512_000,
+            "max_output_tokens": 65_536,
+            "sources": {
+                "context_window_tokens": "model_policy",
+                "max_output_tokens": "model_policy",
+            },
+        }
+
+    monkeypatch.setattr(mms_launchers, "resolve_model_capabilities", fake_capabilities)
+
+    config = mms_launchers._opencode_model_config(_runtime(id="policy-provider"), "unit-policy-model")
+
+    assert config["limit"] == {"context": 512_000, "output": 8192}
+
+
+def test_opencode_model_config_uses_runtime_model_capabilities_for_limits_and_vision():
+    import mms_launchers
+
+    runtime = _runtime(
+        model_capabilities={
+            "mimo-v2.5": {
+                "vision": True,
+                "context_window_tokens": 1_048_576,
+                "max_output_tokens": 131_072,
+            },
+            "MiniMax-M3": {
+                "context_window_tokens": 1_000_000,
+                "max_output_tokens": 131_072,
+            },
+        }
+    )
+    mimo = mms_launchers._opencode_model_config(runtime, "mimo-v2.5")
+    assert mimo["attachment"] is True
+    assert mimo["modalities"] == {"input": ["text", "image"], "output": ["text"]}
+    assert mimo["reasoning"] is False
+    assert mimo["limit"] == {"context": 1_048_576, "output": 131_072}
+
+    minimax = mms_launchers._opencode_model_config(runtime, "MiniMax-M3")
+    assert "attachment" not in minimax
+    assert "modalities" not in minimax
+    assert minimax["limit"] == {"context": 1_000_000, "output": 131_072}
+
+    for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro"):
         config = mms_launchers._opencode_model_config(_runtime(), model)
         assert "attachment" not in config
         assert "modalities" not in config
-        if model == "mimo-v2.5-pro":
-            assert config["reasoning"] is False
-            assert config["limit"] == {"context": 1048576, "output": 131072}
 
 
 def test_core_opencode_prefers_mimo_openai_compatible_base_from_anthropic():
@@ -643,14 +846,17 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert mms_core._normalize_opencode_profile_id("openspec-multi") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("review") == "review_hub"
     assert mms_core._normalize_opencode_profile_id("multi-review") == "review_hub"
+    assert mms_core._normalize_opencode_profile_id("committee") == "committee"
     assert mms_core._normalize_opencode_profile_id("omo") == "heavy_omo"
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_backend") == ("lite_pro_orchestrated", "serve")
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_acp") == ("lite_pro_orchestrated", "acp")
     assert mms_core._opencode_profile_selection("review_backend") == ("review_hub", "serve")
+    assert mms_core._opencode_profile_selection("committee_backend") == ("committee", "serve")
 
     lite = mms_core._apply_opencode_profile(_runtime(), "lite")
     agent = mms_core._apply_opencode_profile(_runtime(), "agent")
     review = mms_core._apply_opencode_profile(_runtime(), "review")
+    committee = mms_core._apply_opencode_profile(_runtime(), "committee")
     backend_multi = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated_backend")
     heavy = mms_core._apply_opencode_profile(_runtime(), "omo")
     raw = mms_core._apply_opencode_profile(_runtime(), "raw")
@@ -669,6 +875,10 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert review["opencode_roster"] == "review_hub"
     assert review["opencode_profile_label"] == "Review"
     assert review["opencode_launch_fallback_agents"]["builder_fallback"] == "review-hub-host-stable"
+    assert committee["opencode_agent"] == "committee-host"
+    assert committee["opencode_roster"] == "committee"
+    assert committee["opencode_profile_label"] == "Committee"
+    assert committee["opencode_launch_fallback_agents"]["builder_fallback"] == "committee-host-pro"
     assert backend_multi["opencode_profile"] == "lite_pro_orchestrated"
     assert backend_multi["opencode_entrypoint"] == "serve"
     assert heavy["opencode_use_global_config"] is True
@@ -781,6 +991,10 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     vision_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_primary")
     assert vision_route["provider_id"] == "mimo-direct-anthropic"
     assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["attachment"] is True
+    assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["modalities"] == {
+        "input": ["text", "image"],
+        "output": ["text"],
+    }
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     reviewer_route = next(route for route in runtime["opencode_routes"] if route["id"] == "reviewer_primary")
     assert reviewer_route["provider_id"] == "mixed"
@@ -960,6 +1174,8 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     assert payload["agent"]["review-deepseek"]["model"].endswith("/deepseek-v4-pro")
     assert payload["agent"]["review-mimo"]["model"].endswith("/mimo-v2.5")
     assert payload["agent"]["review-mimo-pro"]["model"].endswith("/mimo-v2.5-pro")
+    assert "steps" not in payload["agent"]["review-qwen"]
+    assert "steps" not in payload["agent"]["review-mimo-pro"]
     assert "review-hub aggregate" in payload["agent"]["review-hub-host"]["prompt"]
     assert payload["agent"]["review-qwen"]["permission"]["edit"] == "allow"
     review_mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "review_mimo")
@@ -989,7 +1205,12 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     assert payload["agent"]["review-kimi-k2-5"]["model"].endswith("/kimi-k2.5")
     assert payload["agent"]["review-minimax-m2-7"]["model"].lower().endswith("/minimax-m2.7")
     assert payload["agent"]["review-glm-5-turbo"]["model"].endswith("/glm-5-turbo")
+    assert "steps" not in payload["agent"]["review-kimi-k2-5"]
+    assert "steps" not in payload["agent"]["review-minimax-m2-7"]
     assert payload["agent"]["review-hub-host"]["permission"]["task"]["review-kimi-k2-5"] == "allow"
+    dynamic_kimi_route = next(route for route in runtime["opencode_routes"] if route["id"] == "custom_review-kimi-k2-5")
+    assert dynamic_kimi_route["protocol"] == "anthropic_messages"
+    assert payload["provider"]["mms-custom_review-kimi-k2-5"]["npm"] == "@ai-sdk/anthropic"
 
     _review_cfg, selection = mms_core._prepare_opencode_review_profile_config(
         cfg,
@@ -999,6 +1220,377 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
         interactive=False,
     )
     assert [item["model"] for item in selection["selected"]] == ["MiniMax-M3"]
+
+
+def test_core_opencode_review_tui_uses_all_models_and_remembers_channels(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider_a = _runtime(
+        id="newapi-tokyo",
+        name="Tokyo",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    provider_b = _runtime(
+        id="newapi-sg",
+        name="Singapore",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    models_a = ["gpt-5.4", "gemini-3.1-pro-preview", "qwen3.7-max"]
+    models_b = ["gpt-5.4", "gemini-3.1-pro-preview", "glm-5.1"]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider_a, models_a), (provider_b, models_b)],
+    )
+
+    options = mms_core._opencode_review_tui_options(cfg, provider_a, models_a)
+    gemini_options = [item for item in options if item["model"] == "gemini-3.1-pro-preview"]
+
+    assert {item["provider_id"] for item in gemini_options} == {"newapi-tokyo", "newapi-sg"}
+    assert any(item["model"] == "gpt-5.4" for item in options)
+    assert any(item["model"] == "glm-5.1" for item in options)
+    all_selected, _unresolved = mms_core._resolve_opencode_review_models(
+        cfg,
+        provider_a,
+        models_a,
+        ["all"],
+    )
+    assert "gemini-3.1-pro-preview" in {item["model"] for item in all_selected}
+
+    review_cfg, selection = mms_core._prepare_opencode_review_profile_config(
+        cfg,
+        provider_a,
+        models_a,
+        host_model={"model": "gpt-5.4", "provider_id": "newapi-sg"},
+        model_tokens=[{"model": "gemini-3.1-pro-preview", "provider_id": "newapi-sg"}],
+        interactive=False,
+    )
+    roster = review_cfg["opencode"]["agent_roster"]
+
+    assert selection["host"] == "gpt-5.4"
+    assert selection["selected"][0]["provider_id"] == "newapi-sg"
+    assert roster["review-hub-host"]["provider_id"] == "newapi-sg"
+    dynamic_agent = next(agent for agent in roster if agent.startswith("review-gemini-3-1-pro-preview"))
+    assert roster[dynamic_agent]["provider_id"] == "newapi-sg"
+
+
+def test_core_opencode_profile_tui_respects_provider_hidden_models(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    visible_provider = _runtime(
+        id="visible-channel",
+        name="Visible",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    hidden_provider = _runtime(
+        id="hidden-channel",
+        name="Hidden",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+        hidden_models=["gemini-3.1-pro-preview"],
+    )
+    models = ["gemini-3.1-pro-preview", "gpt-5.4"]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(visible_provider, models), (hidden_provider, models)],
+    )
+
+    options = mms_core._opencode_committee_tui_options(cfg, visible_provider, models)
+    gemini_options = [item for item in options if item["model"] == "gemini-3.1-pro-preview"]
+
+    assert [item["provider_id"] for item in gemini_options] == ["visible-channel"]
+
+    visible_provider["hidden_models"] = ["gemini-3.1-pro-preview"]
+    options = mms_core._opencode_committee_tui_options(cfg, visible_provider, models)
+
+    assert all(item["model"] != "gemini-3.1-pro-preview" for item in options)
+
+
+def test_core_opencode_model_families_use_priority_before_role(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    company = _runtime(id="company", name="Company", role="auto", priority=10)
+    tokyo = _runtime(id="tokyo", name="Tokyo", role="fallback", priority=190)
+    models = ["gemini-3-flash-agent(high)"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(company, models), (tokyo, models)])
+
+    families = mms_core._build_model_families_for_cli(cfg, "opencode", company, models)
+    gemini_models = next(item["models"] for item in families if item["family"] == "Gemini")
+    provider, provider_name = mms_core._resolve_best_provider(cfg, models[0], company, models, cli_name="opencode")
+
+    assert gemini_models[0]["provider_id"] == "tokyo"
+    assert provider["id"] == "tokyo"
+    assert provider_name == "Tokyo"
+
+
+def test_core_opencode_saved_committee_selection_uses_committee_agents_only():
+    import mms_core
+
+    cfg = {
+        "opencode": {
+            "committee": {
+                "models": ["gpt-5.4"],
+                "selected_agents": ["committee-gpt-5-4"],
+            },
+            "agent_roster": {
+                "review-gpt-5-4": {
+                    "enabled": True,
+                    "model": "gpt-5.4",
+                    "provider_id": "review-channel",
+                },
+                "committee-gpt-5-4": {
+                    "enabled": True,
+                    "model": "gpt-5.4",
+                    "provider_id": "committee-channel",
+                },
+            },
+        }
+    }
+
+    selected = mms_core._opencode_saved_model_selections(
+        cfg,
+        mms_core._opencode_committee_saved_model_tokens(cfg),
+        prefix="committee-",
+        agent_ids=mms_core._opencode_committee_saved_agent_ids(cfg),
+    )
+
+    assert selected == [{"model": "gpt-5.4", "family": "GPT", "provider_id": "committee-channel"}]
+
+
+def test_core_opencode_saved_options_restore_unhidden_saved_model():
+    import mms_core
+
+    visible_provider = _runtime(
+        id="direct-zai",
+        name="Z.ai",
+        supported_clis=["opencode"],
+        fallback_models=["glm-5.1"],
+        hidden_models=[],
+    )
+    hidden_provider = _runtime(
+        id="hidden-zai",
+        name="Hidden Z.ai",
+        supported_clis=["opencode"],
+        fallback_models=["glm-5.1"],
+        hidden_models=["glm-5.3"],
+    )
+    cfg = {"providers": [visible_provider, hidden_provider]}
+
+    options = mms_core._opencode_with_saved_selection_options(
+        cfg,
+        [],
+        [
+            {"model": "glm-5.2", "family": "GLM", "provider_id": "direct-zai"},
+            {"model": "glm-5.3", "family": "GLM", "provider_id": "hidden-zai"},
+        ],
+    )
+
+    assert [item["model"] for item in options] == ["glm-5.2"]
+    assert options[0]["provider_id"] == "direct-zai"
+
+
+def test_core_preview_runtime_merges_local_committee_preferences(monkeypatch):
+    import mms_core
+
+    bundle_cfg = {
+        "_mms_config_source": "latest-approved-bundle",
+        "opencode": {
+            "default_profile": "agent",
+            "committee": {"models": ["gpt-5.4"]},
+            "agent_roster": {
+                "committee-gpt-5-4": {"enabled": True, "model": "gpt-5.4", "provider_id": "bundle"}
+            },
+        },
+    }
+    local_cfg = {
+        "opencode": {
+            "default_profile": "committee",
+            "committee": {
+                "models": ["gpt-5.4", "deepseek-v4-flash"],
+                "selected_agents": ["committee-gpt-5-4", "committee-deepseek-v4-flash"],
+                "host": {"model": "mimo-v2.5", "provider_id": "mimo-direct"},
+            },
+            "agent_roster": {
+                "committee-gpt-5-4": {
+                    "enabled": True,
+                    "model": "gpt-5.4",
+                    "provider_id": "local-gpt",
+                },
+                "committee-deepseek-v4-flash": {
+                    "enabled": True,
+                    "model": "deepseek-v4-flash",
+                    "provider_id": "direct-deepseek",
+                },
+                "mobius-builder": {
+                    "enabled": True,
+                    "model": "should-not-merge",
+                    "provider_id": "local-only",
+                },
+            },
+        }
+    }
+    monkeypatch.setattr(mms_core, "load_config", lambda persist=False: local_cfg)
+
+    merged = mms_core._merge_preview_local_launch_preferences(bundle_cfg)
+
+    assert merged["opencode"]["default_profile"] == "committee"
+    assert merged["opencode"]["committee"]["models"] == ["gpt-5.4", "deepseek-v4-flash"]
+    assert merged["opencode"]["committee"]["host"]["provider_id"] == "mimo-direct"
+    assert merged["opencode"]["agent_roster"]["committee-gpt-5-4"]["provider_id"] == "local-gpt"
+    assert merged["opencode"]["agent_roster"]["committee-deepseek-v4-flash"]["provider_id"] == "direct-deepseek"
+    assert "mobius-builder" not in merged["opencode"]["agent_roster"]
+
+
+def test_core_opencode_committee_profile_builds_general_committee_roster(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"committee": {"models": ["gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi", "minimax"]}},
+    }
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "kimi-k2.6",
+        "MiniMax-M3",
+        "MiniMax-M2.7",
+        "glm-5.1",
+        "glm-5-turbo",
+        "deepseek-v4-pro",
+    ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
+    )
+
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg,
+        provider,
+        models,
+        host_model="gpt-5.5",
+        interactive=False,
+    )
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        committee_cfg,
+        provider,
+        models,
+        "committee",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    tui_models = {item["model"] for item in mms_core._opencode_committee_tui_options(cfg, provider, models)}
+    assert {
+        "gpt-5.5",
+        "gpt-5.4",
+        "kimi-k2.6",
+        "MiniMax-M3",
+        "MiniMax-M2.7",
+        "glm-5.1",
+        "glm-5-turbo",
+        "deepseek-v4-pro",
+        "mimo-v2.5-pro",
+        "mimo-v2.5",
+    }.issubset(tui_models)
+    assert model_info == {"model": "gpt-5.5", "profile": "committee"}
+    assert selection["host"] == "gpt-5.5"
+    assert [item["model"] for item in selection["selected"]] == [
+        "gpt-5.4",
+        "gpt-5.5",
+        "deepseek-v4-pro",
+        "glm-5.1",
+        "mimo-v2.5-pro",
+        "kimi-k2.6",
+        "MiniMax-M3",
+    ]
+    assert runtime["opencode_agent"] == "committee-host"
+    assert runtime["opencode_roster"] == "committee"
+    assert payload["default_agent"] == "committee-host"
+    assert payload["agent"]["committee-host"]["mode"] == "primary"
+    assert payload["agent"]["committee-host"]["permission"]["task"]["committee-gpt-5-5"] == "allow"
+    assert payload["agent"]["committee-deepseek-v4-pro"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["committee-glm-5-1"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["committee-mimo-v2-5-pro"]["model"].endswith("/mimo-v2.5-pro")
+    assert payload["agent"]["committee-kimi-k2-6"]["model"].endswith("/kimi-k2.6")
+    assert payload["agent"]["committee-minimax-m3"]["model"].lower().endswith("/minimax-m3")
+    assert "steps" not in payload["agent"]["committee-deepseek-v4-pro"]
+    host_prompt = payload["agent"]["committee-host"]["prompt"]
+    host_prompt_lower = host_prompt.lower()
+    assert "review-hub" not in host_prompt_lower
+    assert "gate mode" in host_prompt_lower
+    assert "estimate mode" in host_prompt_lower
+    assert "median" in host_prompt_lower
+    assert "verify them directly" in host_prompt_lower
+    assert "at least 2-4 members" in host_prompt_lower
+    assert "agENTS.md".lower() in host_prompt_lower
+    assert "claude.md" in host_prompt_lower
+    assert "governance/readme.md" in host_prompt_lower
+    assert "local project rules" in host_prompt_lower
+    assert "override generic committee defaults" in host_prompt_lower
+    assert "durable formal artifacts" in host_prompt_lower
+    assert "votes/<model>.vote.md" in host_prompt
+    assert "must not write or update votes/<model>.vote.md" in host_prompt
+    assert "must not update decision.md or ratification markers" in host_prompt
+    assert "must not promote advisory/chat ballots into formal quorum votes" in host_prompt
+    assert "advisory review evidence only" in host_prompt
+    assert "formal durable ballots" in host_prompt_lower
+    assert "assign each member its own vote-file path" in host_prompt_lower
+    assert "never ratify, merge, or mark final approval" in host_prompt_lower
+    assert "host/adapter write votes" not in host_prompt
+    host_pro_prompt = payload["agent"]["committee-host-pro"]["prompt"].lower()
+    assert "re-read and obey target project local" in host_pro_prompt
+    assert "preserve the same host boundary" in host_pro_prompt
+    assert "do not promote advisory/chat ballots into formal quorum votes" in host_pro_prompt
+    assert "artifact-first dispatch" in host_prompt_lower
+    assert "full artifact" in host_prompt_lower
+    assert "subagent scorecard" in host_prompt_lower
+    assert "1-5 scale" in host_prompt_lower
+    assert "usefulness" in host_prompt_lower
+    assert "evidence quality" in host_prompt_lower
+    assert "relevance" in host_prompt_lower
+    assert "independence" in host_prompt_lower
+    assert "not dispatched" in host_prompt_lower
+    assert "global model ranking" in host_prompt_lower
+    assert "output is truncated" in host_prompt_lower
+    assert "not to repeat already received content" in host_prompt_lower
+    member_prompt = payload["agent"]["committee-deepseek-v4-pro"]["prompt"].lower()
+    assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["edit"] == "allow"
+    assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["task"] == "deny"
+    assert "obey target project local instructions" in member_prompt
+    assert "durable formal artifact" in member_prompt
+    assert "write only your own assigned vote file" in member_prompt
+    assert "do not update decision.md" in member_prompt
+    assert "any other member's vote file" in member_prompt
+    assert "long structured outputs" in member_prompt
+    assert "full content through chat" in member_prompt
+    assert "compact summary" in member_prompt
+    assert "do not repeat prior content" in member_prompt
+    mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "custom_committee-mimo-v2-5-pro")
+    assert mimo_route["provider_id"] == "mimo-direct-anthropic"
 
 
 def test_core_opencode_review_host_models_are_configurable(monkeypatch):
@@ -1091,13 +1683,30 @@ def test_core_preview_bundle_restores_opencode_review_host(monkeypatch):
     }
     monkeypatch.setattr(mms_core, "_preview_root_mode", lambda: True)
     monkeypatch.setattr(mms_registry, "load_latest_approved_bundle", lambda **_kwargs: bundle)
+    monkeypatch.setattr(
+        mms_core,
+        "load_config",
+        lambda persist=False: {
+            "opencode": {
+                "review": {
+                    "models": ["kimi-k2.7-code"],
+                    "host": {
+                        "primary_models": ["local-should-not-replace-bundle"],
+                    },
+                }
+            }
+        },
+    )
 
-    cfg = mms_core._load_preview_runtime_config_from_latest_bundle()
+    cfg = mms_core._merge_preview_local_launch_preferences(
+        mms_core._load_preview_runtime_config_from_latest_bundle()
+    )
 
     assert cfg["opencode"]["review"]["host"] == {
         "primary_models": ["mimo-v2.5"],
         "fallback_models": ["glm-5-turbo"],
     }
+    assert cfg["opencode"]["review"]["models"] == ["kimi-k2.7-code"]
 
 
 def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):
@@ -1577,14 +2186,15 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
 
     assert mms_core._handle_tui_launcher_selection(cfg, provider, False, ["opencode"]) is True
-    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "review", "omo", "raw"]
+    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "review", "committee", "omo", "raw"]
     assert [item["profile_id"] for item in captured["profile_options"]["opencode"]] == [
         "lite_pro_orchestrated",
         "review_hub",
+        "committee",
         "heavy_omo",
         "raw",
     ]
-    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "Review", "OMO", "Raw"]
+    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "Review", "Committee", "OMO", "Raw"]
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.4", "profile": "lite_pro_orchestrated"}
     assert captured["runtime"]["id"] == "dual-protocol"
@@ -2016,8 +2626,9 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     options = mms_core._opencode_profile_menu_options()
     agent = next(option for option in options if option["id"] == "agent")
 
-    assert [option["id"] for option in options] == ["agent", "review", "omo", "raw"]
+    assert [option["id"] for option in options] == ["agent", "review", "committee", "omo", "raw"]
     assert next(option for option in options if option["id"] == "review")["profile_id"] == "review_hub"
+    assert next(option for option in options if option["id"] == "committee")["profile_id"] == "committee"
     assert agent["label"] == "Agent"
     assert agent["badge"] == "默认"
     assert "health: 1/18 healthy" in agent["summary"]

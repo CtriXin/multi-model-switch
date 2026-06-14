@@ -123,6 +123,7 @@ from mms_opencode_health import (
 from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID as _OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
+    OPENCODE_COMMITTEE_PROFILE_ID as _OPENCODE_COMMITTEE_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES as _OPENCODE_DEFAULT_MODEL_PREFERENCES,
     OPENCODE_DEFAULT_PROFILE_ID as _OPENCODE_DEFAULT_PROFILE_ID,
     OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS as _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS,
@@ -8479,6 +8480,7 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
         models = _provider_effective_models(provider, cached_models, cfg)
         pid = provider.get("id", DEFAULT_PROVIDER_ID)
         pname = _provider_label(provider)
+        role = _normalize_role(provider.get("role", "auto"))
         for model_name in models:
             normalized = str(model_name or "").strip()
             if not normalized:
@@ -8491,13 +8493,16 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
                 "model": normalized,
                 "provider_id": pid,
                 "provider_name": pname,
+                "priority": _runtime_priority_for_model(provider, normalized),
+                "role": role,
+                "role_weight": ROLE_WEIGHTS.get(role, 1),
             })
     return aggregated
 
 
 def _resolve_best_provider(cfg, model_name, default_provider, default_models,
                            cli_name=None, protocol=None):
-    """给定模型名，返回最优 (provider_ctx, provider_name) — primary > auto > fallback × priority 高到低。
+    """给定模型名，返回最优 (provider_ctx, provider_name) — priority 高优先，role 仅作同分兜底。
 
     如果指定了 protocol（如 "anthropic_messages"），只考虑支持该协议的 provider。
     如果指定了 cli_name，只考虑支持该 CLI 的 provider。
@@ -8507,7 +8512,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
     if not model_lower:
         return None, None
 
-    scored = []  # [(role_weight, -priority, provider_ctx, provider_name)]
+    scored = []  # [(-priority, role_weight, provider_ctx, provider_name)]
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
@@ -8532,7 +8537,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
         role = _normalize_role(provider.get("role", "auto"))
         priority = _runtime_priority_for_model(provider, model_name)
         pname = _provider_label(provider)
-        scored.append((ROLE_WEIGHTS.get(role, 1), -priority, provider, pname))
+        scored.append((-priority, ROLE_WEIGHTS.get(role, 1), provider, pname))
 
     if not scored:
         return None, None
@@ -8604,7 +8609,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
             priority = _runtime_priority_for_model(provider, normalized)
-            score = (ROLE_WEIGHTS.get(role, 1), -priority)
+            score = (-priority, ROLE_WEIGHTS.get(role, 1))
             existing = model_best.get(normalized)
             if existing is None or score < existing[0]:
                 model_best[normalized] = (
@@ -10221,6 +10226,8 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
 
 _OPENCODE_REVIEW_DEFAULT_TOKENS = ("qwen", "kimi", "glm", "deepseek", "mimo")
 _OPENCODE_REVIEW_DOMESTIC_TOKENS = ("qwen", "kimi", "glm", "minimax", "deepseek", "mimo")
+_OPENCODE_COMMITTEE_DEFAULT_TOKENS = ("gpt-5.4",)
+_OPENCODE_COMMITTEE_OPTION_TOKENS = ("gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi", "minimax")
 _OPENCODE_REVIEW_BASE_REVIEWER_AGENTS = (
     "review-qwen",
     "review-kimi",
@@ -10230,6 +10237,8 @@ _OPENCODE_REVIEW_BASE_REVIEWER_AGENTS = (
     "review-mimo-pro",
 )
 _OPENCODE_REVIEW_FAMILY_ALIASES = {
+    "gpt": "GPT",
+    "openai": "GPT",
     "qwen": "Qwen",
     "tongyi": "Qwen",
     "kimi": "Kimi",
@@ -10277,6 +10286,194 @@ def _split_opencode_review_model_tokens(values):
     return tokens
 
 
+def _opencode_model_selection_entries(values):
+    if values is None:
+        return []
+    raw_items = [values] if isinstance(values, dict) else values
+    if not isinstance(raw_items, (list, tuple)):
+        return []
+    entries = []
+    seen = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        model = str(item.get("model") or item.get("id") or "").strip()
+        if not model:
+            continue
+        key = model.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(
+            {
+                "model": model,
+                "family": str(item.get("family") or "").strip(),
+                "provider_id": str(item.get("provider_id") or item.get("provider") or "").strip(),
+                "provider_name": str(item.get("provider_name") or "").strip(),
+            }
+        )
+    return entries
+
+
+def _opencode_apply_selection_entries(selected, selection_entries):
+    by_model = {
+        str(item.get("model") or "").strip().lower(): item
+        for item in (selection_entries or [])
+        if str(item.get("model") or "").strip()
+    }
+    if not by_model:
+        return selected
+    result = []
+    for item in selected:
+        model_key = str(item.get("model") or "").strip().lower()
+        override = by_model.get(model_key)
+        next_item = dict(item)
+        if override:
+            if override.get("provider_id"):
+                next_item["provider_id"] = override["provider_id"]
+            if override.get("provider_name"):
+                next_item["provider_name"] = override["provider_name"]
+            if override.get("family") and not next_item.get("family"):
+                next_item["family"] = override["family"]
+        result.append(next_item)
+    return result
+
+
+def _opencode_agent_roster_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    roster = opencode.get("agent_roster") if isinstance(opencode.get("agent_roster"), dict) else {}
+    return roster
+
+
+def _opencode_saved_provider_entries_for_prefix(cfg, prefix="", agent_ids=None):
+    entries = {}
+    roster = _opencode_agent_roster_config(cfg)
+    if agent_ids:
+        iterable = [(agent_id, roster.get(agent_id)) for agent_id in agent_ids]
+    else:
+        iterable = roster.items()
+    prefix = str(prefix or "").strip()
+    for agent_id, entry in iterable:
+        if prefix and not str(agent_id or "").startswith(prefix):
+            continue
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        model = str(entry.get("model") or "").strip()
+        if not model:
+            continue
+        provider_id = str(entry.get("provider_id") or entry.get("provider") or "").strip()
+        if not provider_id:
+            continue
+        entries[model.lower()] = {
+            "model": model,
+            "provider_id": provider_id,
+            "provider_name": str(entry.get("provider_name") or "").strip(),
+        }
+    return entries
+
+
+def _opencode_enrich_selected_with_saved_providers(selected, cfg, *, prefix="", agent_ids=None):
+    saved = _opencode_saved_provider_entries_for_prefix(cfg, prefix, agent_ids=agent_ids)
+    return _opencode_apply_selection_entries(selected, list(saved.values()))
+
+
+def _opencode_saved_model_selections(cfg, tokens, *, prefix="", agent_ids=None):
+    saved = _opencode_saved_provider_entries_for_prefix(cfg, prefix, agent_ids=agent_ids)
+    result = []
+    seen = set()
+    for token in tokens or []:
+        model = str(token or "").strip()
+        if not model:
+            continue
+        key = model.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        family, _category = _infer_model_family(model)
+        entry = {
+            "model": model,
+            "family": family,
+        }
+        saved_entry = saved.get(key)
+        if saved_entry:
+            entry.update({k: v for k, v in saved_entry.items() if v})
+        result.append(entry)
+    return result
+
+
+def _opencode_provider_hides_model(provider, model_name):
+    model_key = str(model_name or "").strip().lower()
+    if not model_key:
+        return False
+    hidden = {item.lower() for item in _normalize_model_id_list((provider or {}).get("hidden_models") or [])}
+    return model_key in hidden
+
+
+def _opencode_with_saved_selection_options(cfg, options, selected_models):
+    """Keep remembered rows visible unless the saved provider is hidden/unusable."""
+    result = list(options or [])
+    seen = {
+        str(item.get("model") or "").strip().lower()
+        for item in result
+        if isinstance(item, dict) and str(item.get("model") or "").strip()
+    }
+    providers = _provider_map(cfg)
+    for selection in selected_models or []:
+        model = _opencode_selection_model(selection)
+        key = model.lower()
+        if not key or key in seen or not _mms_model_visible(model):
+            continue
+        provider_id = _opencode_selection_provider_id(selection)
+        provider = providers.get(provider_id)
+        if not provider:
+            continue
+        if not provider.get("enabled", True):
+            continue
+        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
+            continue
+        if _opencode_provider_hides_model(provider, model):
+            continue
+        if not _provider_supports_model_for_cli(provider, "opencode", model):
+            continue
+        family = str(selection.get("family") or "").strip() if isinstance(selection, dict) else ""
+        if not family:
+            family, _category = _infer_model_family(model)
+        role = _normalize_role(provider.get("role", "auto"))
+        result.append(
+            {
+                "model": model,
+                "family": family,
+                "provider_id": provider_id,
+                "provider_name": _opencode_selection_provider_name(selection) or _provider_label(provider),
+                "priority": _runtime_priority_for_model(provider, model),
+                "role": role,
+                "role_weight": ROLE_WEIGHTS.get(role, 1),
+            }
+        )
+        seen.add(key)
+    return result
+
+
+def _opencode_selection_model(selection):
+    if isinstance(selection, dict):
+        return str(selection.get("model") or "").strip()
+    return str(selection or "").strip()
+
+
+def _opencode_selection_provider_id(selection):
+    if isinstance(selection, dict):
+        return str(selection.get("provider_id") or selection.get("provider") or "").strip()
+    return ""
+
+
+def _opencode_selection_provider_name(selection):
+    if isinstance(selection, dict):
+        return str(selection.get("provider_name") or "").strip()
+    return ""
+
+
 def _opencode_review_config(cfg):
     opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
     review = opencode.get("review") if isinstance(opencode.get("review"), dict) else {}
@@ -10290,6 +10487,36 @@ def _opencode_review_saved_model_tokens(cfg):
         if tokens:
             return tokens
     return []
+
+
+def _opencode_review_saved_agent_ids(cfg):
+    review = _opencode_review_config(cfg)
+    agents = review.get("selected_agents")
+    if not isinstance(agents, (list, tuple)):
+        return []
+    return [str(agent_id or "").strip() for agent_id in agents if str(agent_id or "").strip()]
+
+
+def _opencode_review_saved_host_selection(cfg):
+    review = _opencode_review_config(cfg)
+    host = review.get("host") if isinstance(review.get("host"), dict) else {}
+    if not host:
+        opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+        host = opencode.get("review_host") if isinstance(opencode.get("review_host"), dict) else {}
+    models = _split_opencode_review_model_tokens(
+        host.get("primary_models")
+        or host.get("models")
+        or host.get("model")
+    )
+    roster_entry = _opencode_agent_roster_config(cfg).get("review-hub-host")
+    if not isinstance(roster_entry, dict):
+        roster_entry = {}
+    model = (models[0] if models else str(roster_entry.get("model") or "").strip()) or "gpt-5.4"
+    selection = {"model": model}
+    provider_id = str(roster_entry.get("provider_id") or host.get("provider_id") or "").strip()
+    if provider_id:
+        selection["provider_id"] = provider_id
+    return selection
 
 
 def _opencode_review_compact(value):
@@ -10397,8 +10624,6 @@ def _opencode_review_pool(cfg, default_provider, default_models):
         if model_key in seen:
             continue
         family, category = _infer_model_family(model_name)
-        if family == "GPT":
-            continue
         seen.add(model_key)
         item = dict(entry)
         item["family"] = family
@@ -10472,7 +10697,9 @@ def _resolve_opencode_review_models(cfg, default_provider, default_models, token
     for token in tokens:
         compact = _opencode_review_compact(token)
         raw_lower = str(token or "").strip().lower()
-        if compact in {"all", "allmodels", "domesticall", "allcn", "cnall"}:
+        if compact in {"all", "allmodels"}:
+            expanded = sorted(pool, key=lambda item: (str(item.get("family") or ""), _opencode_review_model_sort_key(item)))
+        elif compact in {"domesticall", "allcn", "cnall"}:
             expanded = sorted(
                 [item for item in pool if _opencode_review_item_is_domestic(item)],
                 key=lambda item: (str(item.get("family") or ""), _opencode_review_model_sort_key(item)),
@@ -10512,7 +10739,7 @@ def _opencode_review_agent_id_for_model(model_name, existing):
     return agent_id
 
 
-def _inject_opencode_review_roster(cfg, selected_models, tokens):
+def _inject_opencode_review_roster(cfg, selected_models, tokens, *, host_selection=None):
     next_cfg = copy.deepcopy(cfg)
     opencode = next_cfg.setdefault("opencode", {})
     if not isinstance(opencode, dict):
@@ -10522,11 +10749,12 @@ def _inject_opencode_review_roster(cfg, selected_models, tokens):
     if not isinstance(roster, dict):
         roster = {}
         opencode["agent_roster"] = roster
-    for agent_id in _OPENCODE_REVIEW_BASE_REVIEWER_AGENTS:
-        entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
-        entry = dict(entry)
-        entry["enabled"] = False
-        roster[agent_id] = entry
+    if selected_models:
+        for agent_id in _OPENCODE_REVIEW_BASE_REVIEWER_AGENTS:
+            entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
+            entry = dict(entry)
+            entry["enabled"] = False
+            roster[agent_id] = entry
 
     existing = set(roster)
     selected_agents = []
@@ -10545,6 +10773,9 @@ def _inject_opencode_review_roster(cfg, selected_models, tokens):
             "priority": 200 + index,
             "description": f"Review Hub dynamic reviewer for {model_name}",
         }
+        provider_id = str(item.get("provider_id") or "").strip()
+        if provider_id:
+            entry["provider_id"] = provider_id
         if lower.startswith("mimo-"):
             entry["route_policy"] = "mimo_direct"
         roster[agent_id] = entry
@@ -10555,9 +10786,26 @@ def _inject_opencode_review_roster(cfg, selected_models, tokens):
     if not isinstance(review, dict):
         review = {}
         opencode["review"] = review
-    review["models"] = list(tokens)
-    review["selected_agents"] = selected_agents
-    review["resolved_models"] = resolved_models
+    if tokens or selected_agents or resolved_models:
+        review["models"] = list(tokens)
+        review["selected_agents"] = selected_agents
+        review["resolved_models"] = resolved_models
+    host_model = _opencode_selection_model(host_selection)
+    if host_model:
+        host = review.setdefault("host", {})
+        if not isinstance(host, dict):
+            host = {}
+            review["host"] = host
+        fallback = host.get("fallback_models") or host.get("fallback") or []
+        host["primary_models"] = [host_model]
+        if fallback:
+            host["fallback_models"] = _split_opencode_review_model_tokens(fallback)
+        host_entry = dict(roster.get("review-hub-host") if isinstance(roster.get("review-hub-host"), dict) else {})
+        host_entry.update({"enabled": True, "model": host_model})
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_entry["provider_id"] = host_provider
+        roster["review-hub-host"] = host_entry
     return next_cfg
 
 
@@ -10580,27 +10828,42 @@ def _opencode_review_available_summary(cfg, default_provider, default_models):
     return " | ".join(parts)
 
 
+def _opencode_profile_tui_model_options(cfg, default_provider, default_models):
+    options = []
+    for entry in _aggregate_provider_models(cfg, "opencode", default_provider, default_models):
+        model_name = str(entry.get("model") or "").strip()
+        if not model_name:
+            continue
+        family, category = _infer_model_family(model_name)
+        item = dict(entry)
+        item["family"] = family
+        item["category"] = category
+        item["keys"] = _opencode_review_model_keys(model_name)
+        options.append(
+            {
+                "model": model_name,
+                "family": family,
+                "provider_id": str(item.get("provider_id") or ""),
+                "provider_name": str(item.get("provider_name") or ""),
+                "priority": int(item.get("priority", 100) or 100),
+                "role": str(item.get("role") or "auto"),
+                "role_weight": int(item.get("role_weight", 1) or 1),
+            }
+        )
+    return options
+
+
 def _opencode_review_tui_options(cfg, default_provider, default_models):
-    pool = [
-        item for item in _opencode_review_pool(cfg, default_provider, default_models)
-        if _opencode_review_item_is_domestic(item)
-    ]
+    pool = _opencode_profile_tui_model_options(cfg, default_provider, default_models)
     pool.sort(
         key=lambda item: (
+            0 if str(item.get("family") or "") == "GPT" else 1,
             _OPENCODE_REVIEW_FAMILY_ORDER.get(str(item.get("family") or ""), 99),
             _opencode_review_model_sort_key(item),
             str(item.get("provider_name") or ""),
         )
     )
-    return [
-        {
-            "model": str(item.get("model") or ""),
-            "family": str(item.get("family") or ""),
-            "provider_name": str(item.get("provider_name") or ""),
-        }
-        for item in pool
-        if str(item.get("model") or "").strip()
-    ]
+    return pool
 
 
 def _select_opencode_review_models_tui(cfg, default_provider, default_models):
@@ -10610,8 +10873,17 @@ def _select_opencode_review_models_tui(cfg, default_provider, default_models):
         return []
     saved_tokens = _opencode_review_saved_model_tokens(cfg)
     default_tokens = saved_tokens or list(_OPENCODE_REVIEW_DEFAULT_TOKENS)
-    selected, _unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, default_tokens)
-    selected_models = [item["model"] for item in selected]
+    if saved_tokens:
+        selected_models = _opencode_saved_model_selections(
+            cfg,
+            saved_tokens,
+            prefix="review-",
+            agent_ids=_opencode_review_saved_agent_ids(cfg),
+        )
+    else:
+        selected, _unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, default_tokens)
+        selected_models = _opencode_enrich_selected_with_saved_providers(selected, cfg, prefix="review-")
+    options = _opencode_with_saved_selection_options(cfg, options, selected_models)
     try:
         from mms_tui import select_review_models_tui
     except Exception:
@@ -10620,10 +10892,11 @@ def _select_opencode_review_models_tui(cfg, default_provider, default_models):
         options,
         selected_models=selected_models,
         title="OpenCode Review reviewers",
+        return_provider=True,
     )
 
 
-def _save_opencode_review_model_tokens(cfg, tokens):
+def _save_opencode_review_model_tokens(cfg, tokens, *, selected_models=None, host_selection=None):
     base_cfg = cfg
     if _preview_root_mode():
         try:
@@ -10641,7 +10914,15 @@ def _save_opencode_review_model_tokens(cfg, tokens):
     if not isinstance(review, dict):
         review = {}
         opencode["review"] = review
-    review["models"] = list(tokens)
+    if tokens or selected_models:
+        review["models"] = list(tokens)
+    if selected_models or host_selection:
+        next_cfg = _inject_opencode_review_roster(
+            next_cfg,
+            selected_models or [],
+            tokens,
+            host_selection=host_selection,
+        )
     save_config(next_cfg, reason="opencode:save_review_models")
     return next_cfg
 
@@ -10651,13 +10932,16 @@ def _prepare_opencode_review_profile_config(
     default_provider,
     default_models,
     *,
+    host_model=None,
     model_tokens=None,
     interactive=False,
     save_selected=False,
     save_cfg=None,
     ask_to_save=False,
 ):
-    explicit_tokens = _split_opencode_review_model_tokens(model_tokens)
+    host_selection = host_model if host_model is not None else None
+    explicit_entries = _opencode_model_selection_entries(model_tokens)
+    explicit_tokens = [item["model"] for item in explicit_entries] if explicit_entries else _split_opencode_review_model_tokens(model_tokens)
     saved_tokens = _opencode_review_saved_model_tokens(cfg)
     tokens = explicit_tokens or saved_tokens
     source = "cli" if explicit_tokens else ("saved" if saved_tokens else "")
@@ -10676,25 +10960,611 @@ def _prepare_opencode_review_profile_config(
         source = "prompt"
 
     if not tokens:
+        host_text = _opencode_selection_model(host_selection)
+        if host_text:
+            next_cfg = _inject_opencode_review_roster(cfg, [], [], host_selection=host_selection)
+            if save_selected:
+                _save_opencode_review_model_tokens(
+                    save_cfg or cfg,
+                    [],
+                    selected_models=[],
+                    host_selection=host_selection,
+                )
+            return next_cfg, {"host": host_text, "tokens": [], "selected": [], "unresolved": [], "source": source}
         return cfg, {"tokens": [], "selected": [], "unresolved": [], "source": source}
 
-    selected, unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, tokens)
+    if explicit_entries:
+        selected = [
+            {
+                **entry,
+                "family": entry.get("family") or _infer_model_family(entry.get("model"))[0],
+                "token": entry.get("model"),
+            }
+            for entry in explicit_entries
+        ]
+        unresolved = []
+    else:
+        selected, unresolved = _resolve_opencode_review_models(cfg, default_provider, default_models, tokens)
+        selected = _opencode_enrich_selected_with_saved_providers(
+            selected,
+            cfg,
+            prefix="review-",
+            agent_ids=_opencode_review_saved_agent_ids(cfg),
+        )
     if unresolved:
         console.print(f"[yellow]Review models 未解析: {', '.join(unresolved)}[/yellow]")
     if not selected:
         return cfg, {"tokens": tokens, "selected": [], "unresolved": unresolved, "source": source}
 
+    next_cfg = _inject_opencode_review_roster(cfg, selected, tokens, host_selection=host_selection)
     if save_selected:
-        _save_opencode_review_model_tokens(save_cfg or cfg, tokens)
+        _save_opencode_review_model_tokens(
+            save_cfg or cfg,
+            tokens,
+            selected_models=selected,
+            host_selection=host_selection,
+        )
     elif ask_to_save and source == "prompt":
         _ensure_rich()
         if Confirm.ask("保存这次 Review models 为下次默认？", default=False):
-            _save_opencode_review_model_tokens(save_cfg or cfg, tokens)
+            _save_opencode_review_model_tokens(
+                save_cfg or cfg,
+                tokens,
+                selected_models=selected,
+                host_selection=host_selection,
+            )
 
-    next_cfg = _inject_opencode_review_roster(cfg, selected, tokens)
+    host_text = _opencode_selection_model(host_selection)
+    if host_text:
+        console.print(f"[green]Review host:[/green] {host_text}")
     selected_text = ", ".join(f"{item['model']} -> review-{_opencode_review_slug(item['model'])}" for item in selected)
     console.print(f"[green]Review reviewers:[/green] {selected_text}")
-    return next_cfg, {"tokens": tokens, "selected": selected, "unresolved": unresolved, "source": source}
+    return next_cfg, {"host": host_text, "tokens": tokens, "selected": selected, "unresolved": unresolved, "source": source}
+
+
+def _opencode_committee_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    committee = opencode.get("committee") if isinstance(opencode.get("committee"), dict) else {}
+    return committee
+
+
+def _opencode_committee_saved_model_tokens(cfg):
+    committee = _opencode_committee_config(cfg)
+    for key in ("models", "model_tokens", "selected_models"):
+        tokens = _split_opencode_review_model_tokens(committee.get(key))
+        if tokens:
+            return tokens
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    return _split_opencode_review_model_tokens(opencode.get("committee_models"))
+
+
+def _opencode_committee_saved_agent_ids(cfg):
+    committee = _opencode_committee_config(cfg)
+    agents = committee.get("selected_agents")
+    if not isinstance(agents, (list, tuple)):
+        return []
+    return [str(agent_id or "").strip() for agent_id in agents if str(agent_id or "").strip()]
+
+
+def _opencode_committee_saved_host_model(cfg):
+    committee = _opencode_committee_config(cfg)
+    host = committee.get("host") if isinstance(committee.get("host"), dict) else {}
+    for value in (
+        host.get("model"),
+        host.get("primary_model"),
+        committee.get("host_model"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    for value in (host.get("primary_models"), host.get("models")):
+        models = _split_opencode_review_model_tokens(value)
+        if models:
+            return models[0]
+    return ""
+
+
+def _opencode_committee_saved_host_selection(cfg):
+    committee = _opencode_committee_config(cfg)
+    host = committee.get("host") if isinstance(committee.get("host"), dict) else {}
+    roster_entry = _opencode_agent_roster_config(cfg).get("committee-host")
+    if not isinstance(roster_entry, dict):
+        roster_entry = {}
+    model = _opencode_committee_saved_host_model(cfg) or str(roster_entry.get("model") or "").strip() or "gpt-5.4"
+    selection = {"model": model}
+    provider_id = str(host.get("provider_id") or roster_entry.get("provider_id") or "").strip()
+    if provider_id:
+        selection["provider_id"] = provider_id
+    return selection
+
+
+def _opencode_committee_pool(cfg, default_provider, default_models):
+    pool = []
+    seen = set()
+    for entry in _aggregate_provider_models(cfg, "opencode", default_provider, default_models):
+        model_name = str(entry.get("model") or "").strip()
+        if not model_name:
+            continue
+        model_key = model_name.lower()
+        if model_key in seen:
+            continue
+        family, category = _infer_model_family(model_name)
+        seen.add(model_key)
+        item = dict(entry)
+        item["family"] = family
+        item["category"] = category
+        item["keys"] = _opencode_review_model_keys(model_name)
+        pool.append(item)
+    return pool
+
+
+def _opencode_committee_model_rank(family, model_name):
+    lower = str(model_name or "").strip().lower()
+    compact = _opencode_review_compact(lower)
+    if family == "GPT":
+        if lower == "gpt-5.4":
+            return 0
+        if lower == "gpt-5.5":
+            return 1
+        return _opencode_default_model_rank(model_name) + 10
+    if family == "MiniMax":
+        if "m3" in lower:
+            return 0
+        if "m2.7" in lower or "m27" in compact:
+            return 1
+        if "m2.5" in lower or "m25" in compact:
+            return 2
+        return 3
+    if family == "Mimo":
+        if ("v2.5" in lower or "v25" in compact) and "pro" in lower:
+            return 0
+        if "pro" in lower:
+            return 1
+        if "v2.5" in lower or "v25" in compact:
+            return 2
+        return 3
+    return _opencode_review_family_rank(family, model_name)
+
+
+def _opencode_committee_model_sort_key(item):
+    family = str(item.get("family") or "")
+    model = str(item.get("model") or "")
+    return (
+        _opencode_committee_model_rank(family, model),
+        _opencode_default_model_rank(model),
+        model.lower(),
+    )
+
+
+def _opencode_committee_resolve_token(pool, token):
+    raw = str(token or "").strip()
+    compact = _opencode_review_compact(raw)
+    exact_aliases = {
+        "54": "gpt-5.4",
+        "5.4": "gpt-5.4",
+        "gpt54": "gpt-5.4",
+        "gpt5.4": "gpt-5.4",
+        "gpt5_4": "gpt-5.4",
+        "55": "gpt-5.5",
+        "5.5": "gpt-5.5",
+        "gpt55": "gpt-5.5",
+        "gpt5.5": "gpt-5.5",
+        "gpt5_5": "gpt-5.5",
+    }
+    exact = exact_aliases.get(compact) or (raw if raw.lower().startswith("gpt-5.") else "")
+    if exact:
+        exact_lower = exact.lower()
+        matches = [item for item in pool if str(item.get("model") or "").strip().lower() == exact_lower]
+        if matches:
+            return sorted(matches, key=_opencode_committee_model_sort_key)[0]
+
+    family = _opencode_review_token_family(raw)
+    if family:
+        candidates = [item for item in pool if item.get("family") == family]
+        if candidates:
+            return sorted(candidates, key=_opencode_committee_model_sort_key)[0]
+        return None
+
+    return _opencode_review_resolve_token(pool, raw)
+
+
+def _resolve_opencode_committee_models(cfg, default_provider, default_models, tokens):
+    pool = _opencode_committee_pool(cfg, default_provider, default_models)
+    selected = []
+    unresolved = []
+    seen_models = set()
+    for token in tokens:
+        compact = _opencode_review_compact(token)
+        if compact in {"all", "allmodels"}:
+            expanded = sorted(pool, key=lambda item: (str(item.get("family") or ""), _opencode_committee_model_sort_key(item)))
+        elif compact in {"domestic", "cn", "china", "guochan"} or str(token or "").strip().lower() == "国产":
+            expanded = [
+                _opencode_committee_resolve_token(pool, item)
+                for item in ("deepseek", "glm", "mimo", "kimi", "minimax")
+            ]
+            expanded = [item for item in expanded if item]
+        else:
+            expanded = [_opencode_committee_resolve_token(pool, token)]
+        if not expanded or not expanded[0]:
+            unresolved.append(token)
+            continue
+        for item in expanded:
+            model_key = str(item.get("model") or "").strip().lower()
+            if not model_key or model_key in seen_models:
+                continue
+            seen_models.add(model_key)
+            selected.append({
+                "token": token,
+                "model": str(item.get("model") or "").strip(),
+                "family": str(item.get("family") or ""),
+            })
+    return selected, unresolved
+
+
+def _opencode_committee_agent_id_for_model(model_name, existing):
+    base = f"committee-{_opencode_review_slug(model_name)}"
+    agent_id = base
+    suffix = 2
+    while agent_id in existing:
+        agent_id = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(agent_id)
+    return agent_id
+
+
+def _inject_opencode_committee_roster(cfg, selected_models, tokens, *, host_model="", host_selection=None):
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    roster = opencode.setdefault("agent_roster", {})
+    if not isinstance(roster, dict):
+        roster = {}
+        opencode["agent_roster"] = roster
+
+    for agent_id in list(roster):
+        if str(agent_id).startswith("committee-") and agent_id not in {"committee-host", "committee-host-pro"}:
+            entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
+            entry = dict(entry)
+            entry["enabled"] = False
+            roster[agent_id] = entry
+
+    existing = set(roster)
+    selected_agents = []
+    resolved_models = []
+    for index, item in enumerate(selected_models):
+        model_name = str(item.get("model") or "").strip()
+        if not model_name:
+            continue
+        agent_id = _opencode_committee_agent_id_for_model(model_name, existing)
+        lower = model_name.lower()
+        entry = {
+            "enabled": True,
+            "custom": True,
+            "preset": "reviewer",
+            "model": model_name,
+            "priority": 300 + index,
+            "description": f"Committee member for {model_name}",
+        }
+        provider_id = str(item.get("provider_id") or "").strip()
+        if provider_id:
+            entry["provider_id"] = provider_id
+        if lower.startswith("mimo-"):
+            entry["route_policy"] = "mimo_direct"
+        roster[agent_id] = entry
+        selected_agents.append(agent_id)
+        resolved_models.append(model_name)
+
+    committee = opencode.setdefault("committee", {})
+    if not isinstance(committee, dict):
+        committee = {}
+        opencode["committee"] = committee
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        committee["host"] = host_payload
+        host_entry = dict(roster.get("committee-host") if isinstance(roster.get("committee-host"), dict) else {})
+        host_entry.update({"enabled": True, "model": resolved_host_model})
+        if host_provider:
+            host_entry["provider_id"] = host_provider
+        roster["committee-host"] = host_entry
+    committee["models"] = list(tokens)
+    committee["selected_agents"] = selected_agents
+    committee["resolved_models"] = resolved_models
+    return next_cfg
+
+
+def _opencode_committee_tui_options(cfg, default_provider, default_models):
+    pool = _opencode_profile_tui_model_options(cfg, default_provider, default_models)
+    pool.sort(
+        key=lambda item: (
+            0 if str(item.get("model") or "").strip().lower() == "gpt-5.4" else 1,
+            0 if str(item.get("family") or "") == "GPT" else 1,
+            str(item.get("family") or ""),
+            _opencode_committee_model_sort_key(item),
+            str(item.get("provider_name") or ""),
+        )
+    )
+    return pool
+
+
+def _select_opencode_host_model_tui(cfg, default_provider, default_models, *, saved_selection, title):
+    saved_selection = dict(saved_selection or {})
+    saved_model = str(saved_selection.get("model") or "gpt-5.4").strip() or "gpt-5.4"
+    raw = _build_model_families_for_cli(cfg, "opencode", default_provider, default_models)
+    if not raw:
+        console.print("[yellow]没有可用于 OpenCode host 的模型池；将使用保存/default host。[/yellow]")
+        return saved_selection or {"model": saved_model}
+    families = []
+    detail = {}
+    for family in raw:
+        family_name = str(family.get("family") or "").strip()
+        models = [item for item in (family.get("models") or []) if isinstance(item, dict)]
+        if not family_name or not models:
+            continue
+        family_last_used_at = max((str(item.get("last_used_at") or "").strip() for item in models), default="")
+        families.append(
+            {
+                "family": family_name,
+                "count": len(models),
+                "use_count": sum(int(item.get("use_count", 0) or 0) for item in models),
+                "last_used_at": family_last_used_at,
+                "is_cold": _family_is_cold_for_tui(family_name, 0, family_last_used_at, preferred_family="GPT"),
+            }
+        )
+        detail[family_name] = models
+    if not families:
+        return saved_selection or {"model": saved_model}
+    families = _sort_family_entries_for_tui(families, preferred_family="GPT")
+    last_used = {
+        "opencode": {
+            "model": saved_model,
+            "model_info": {"model": saved_model},
+            "provider_id": str(saved_selection.get("provider_id") or ""),
+        }
+    }
+    try:
+        from mms_tui import select_family_tui
+    except Exception:
+        return saved_selection or {"model": saved_model}
+    result = select_family_tui(
+        {"opencode": families},
+        ["opencode"],
+        last_used=last_used,
+        families_detail={"opencode": detail},
+        provider_options_by_cli={"opencode": {}},
+        provider_options_loader_by_cli={
+            "opencode": _make_provider_options_loader(cfg, "opencode", default_provider, default_models)
+        },
+    )
+    if result is None:
+        return None
+    action, _cli, payload = result
+    if action == "last":
+        return saved_selection or {"model": saved_model}
+    if action == "submodel" and isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _select_opencode_review_host_tui(cfg, default_provider, default_models):
+    selection = _opencode_review_saved_host_selection(cfg)
+    return _select_opencode_host_model_tui(
+        cfg,
+        default_provider,
+        default_models,
+        saved_selection=selection,
+        title="OpenCode Review host",
+    )
+
+
+def _select_opencode_committee_host_tui(cfg, default_provider, default_models):
+    selection = _opencode_committee_saved_host_selection(cfg)
+    return _select_opencode_host_model_tui(
+        cfg,
+        default_provider,
+        default_models,
+        saved_selection=selection,
+        title="OpenCode Committee host",
+    )
+
+
+def _select_opencode_committee_models_tui(cfg, default_provider, default_models):
+    options = _opencode_committee_tui_options(cfg, default_provider, default_models)
+    if not options:
+        console.print("[yellow]没有可用于 OpenCode committee 的模型池；将只尝试 committee host。[/yellow]")
+        return []
+    saved_tokens = _opencode_committee_saved_model_tokens(cfg)
+    default_tokens = saved_tokens or list(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+    if saved_tokens:
+        selected_models = _opencode_saved_model_selections(
+            cfg,
+            saved_tokens,
+            prefix="committee-",
+            agent_ids=_opencode_committee_saved_agent_ids(cfg),
+        )
+    else:
+        selected, _unresolved = _resolve_opencode_committee_models(cfg, default_provider, default_models, default_tokens)
+        selected_models = _opencode_enrich_selected_with_saved_providers(selected, cfg, prefix="committee-")
+    options = _opencode_with_saved_selection_options(cfg, options, selected_models)
+    try:
+        from mms_tui import select_review_models_tui
+    except Exception:
+        return selected_models
+    return select_review_models_tui(
+        options,
+        selected_models=selected_models,
+        title="OpenCode Committee members",
+        return_provider=True,
+    )
+
+
+def _save_opencode_committee_model_tokens(cfg, tokens, *, host_model="", host_selection=None, selected_models=None):
+    base_cfg = cfg
+    if _preview_root_mode():
+        try:
+            loaded_cfg = _load_toml_file(_config_write_target_path())
+        except Exception:
+            loaded_cfg = None
+        if isinstance(loaded_cfg, dict):
+            base_cfg = loaded_cfg
+    next_cfg = copy.deepcopy(base_cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    committee = opencode.setdefault("committee", {})
+    if not isinstance(committee, dict):
+        committee = {}
+        opencode["committee"] = committee
+    committee["models"] = list(tokens)
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        committee["host"] = host_payload
+    if selected_models or host_selection or host_model:
+        next_cfg = _inject_opencode_committee_roster(
+            next_cfg,
+            selected_models or [],
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+        )
+    save_config(next_cfg, reason="opencode:save_committee_models")
+    return next_cfg
+
+
+def _prepare_opencode_committee_profile_config(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    host_model=None,
+    model_tokens=None,
+    interactive=False,
+    save_selected=False,
+    save_cfg=None,
+    ask_to_save=False,
+):
+    explicit_host_entry = _opencode_model_selection_entries(host_model)
+    explicit_host = _opencode_selection_model(explicit_host_entry[0]) if explicit_host_entry else str(host_model or "").strip()
+    saved_host = _opencode_committee_saved_host_model(cfg)
+    host_token = explicit_host or saved_host or "gpt-5.4"
+    explicit_entries = _opencode_model_selection_entries(model_tokens)
+    explicit_tokens = [item["model"] for item in explicit_entries] if explicit_entries else _split_opencode_review_model_tokens(model_tokens)
+    saved_tokens = _opencode_committee_saved_model_tokens(cfg)
+    tokens = explicit_tokens or saved_tokens or list(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+    source = "cli" if explicit_tokens else ("saved" if saved_tokens else "default")
+
+    if interactive and not explicit_host and not saved_host:
+        _ensure_rich()
+        host_token = Prompt.ask(
+            "Committee host model（默认 gpt-5.4；可填 gpt-5.5 或任意可用模型）",
+            default="gpt-5.4",
+        ).strip() or "gpt-5.4"
+
+    if explicit_host_entry:
+        selected_host = explicit_host_entry
+        unresolved_host = []
+        resolved_host_model = explicit_host
+    else:
+        selected_host, unresolved_host = _resolve_opencode_committee_models(cfg, default_provider, default_models, [host_token])
+        resolved_host_model = selected_host[0]["model"] if selected_host else ""
+    host_selection = explicit_host_entry[0] if explicit_host_entry else ({"model": resolved_host_model} if resolved_host_model else None)
+    if unresolved_host:
+        console.print(f"[yellow]Committee host 未解析: {host_token}；将使用 profile 默认 host。[/yellow]")
+
+    if interactive and not explicit_tokens and not saved_tokens:
+        _ensure_rich()
+        default_text = " ".join(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+        answer = Prompt.ask(
+            "Committee models（空格/逗号分隔；支持 gpt-5.4、gpt-5.5、deepseek、glm、mimo、kimi、minimax、domestic、all）",
+            default=default_text,
+        )
+        tokens = _split_opencode_review_model_tokens(answer) or list(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
+        source = "prompt"
+
+    if explicit_entries:
+        selected = [
+            {
+                **entry,
+                "family": entry.get("family") or _infer_model_family(entry.get("model"))[0],
+                "token": entry.get("model"),
+            }
+            for entry in explicit_entries
+        ]
+        unresolved = []
+    else:
+        selected, unresolved = _resolve_opencode_committee_models(cfg, default_provider, default_models, tokens)
+        selected = _opencode_enrich_selected_with_saved_providers(
+            selected,
+            cfg,
+            prefix="committee-",
+            agent_ids=_opencode_committee_saved_agent_ids(cfg),
+        )
+    if unresolved:
+        console.print(f"[yellow]Committee models 未解析: {', '.join(unresolved)}[/yellow]")
+    if not selected:
+        return cfg, {
+            "host": resolved_host_model,
+            "host_token": host_token,
+            "tokens": tokens,
+            "selected": [],
+            "unresolved": unresolved,
+            "unresolved_host": unresolved_host,
+            "source": source,
+        }
+
+    if save_selected:
+        _save_opencode_committee_model_tokens(
+            save_cfg or cfg,
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+            selected_models=selected,
+        )
+    elif ask_to_save and source == "prompt":
+        _ensure_rich()
+        if Confirm.ask("保存这次 Committee models 为下次默认？", default=False):
+            _save_opencode_committee_model_tokens(
+                save_cfg or cfg,
+                tokens,
+                host_model=resolved_host_model,
+                host_selection=host_selection,
+                selected_models=selected,
+            )
+
+    next_cfg = _inject_opencode_committee_roster(
+        cfg,
+        selected,
+        tokens,
+        host_model=resolved_host_model,
+        host_selection=host_selection,
+    )
+    selected_text = ", ".join(f"{item['model']} -> committee-{_opencode_review_slug(item['model'])}" for item in selected)
+    if resolved_host_model:
+        console.print(f"[green]Committee host:[/green] {resolved_host_model}")
+    console.print(f"[green]Committee members:[/green] {selected_text}")
+    return next_cfg, {
+        "host": resolved_host_model,
+        "host_token": host_token,
+        "tokens": tokens,
+        "selected": selected,
+        "unresolved": unresolved,
+        "unresolved_host": unresolved_host,
+        "source": source,
+    }
 
 
 def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
@@ -11222,6 +12092,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             profile_cfg = current_cfg
             canonical_profile, _profile_entrypoint = _opencode_profile_selection(action_data)
             if canonical_profile == _OPENCODE_REVIEW_PROFILE_ID:
+                selected_review_host = _select_opencode_review_host_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_review_host is None:
+                    continue
                 selected_review_models = _select_opencode_review_models_tui(
                     current_cfg,
                     current_provider,
@@ -11233,11 +12110,40 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     current_cfg,
                     current_provider,
                     default_models,
+                    host_model=selected_review_host,
                     model_tokens=selected_review_models,
                     interactive=False,
-                    save_selected=bool(selected_review_models),
+                    save_selected=bool(selected_review_models or selected_review_host),
                     save_cfg=current_cfg,
                 )
+            elif canonical_profile == _OPENCODE_COMMITTEE_PROFILE_ID:
+                selected_committee_host = _select_opencode_committee_host_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_committee_host is None:
+                    continue
+                selected_committee_models = _select_opencode_committee_models_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_committee_models is None:
+                    continue
+                profile_cfg, _committee_selection = _prepare_opencode_committee_profile_config(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    host_model=selected_committee_host,
+                    model_tokens=selected_committee_models,
+                    interactive=False,
+                    save_selected=bool(selected_committee_models or selected_committee_host),
+                    save_cfg=current_cfg,
+                )
+            if profile_cfg is not current_cfg:
+                current_cfg = profile_cfg
+                _families_dirty = True
             model_info, runtime_runtime = _resolve_opencode_profile_runtime(
                 profile_cfg,
                 current_provider,
@@ -12158,7 +13064,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     runtime_runtime.get("disabled_session_surfaces"),
                     disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {},
                 )
-        if cli in {"claude", "codex"}:
+        if cli in {"claude", "codex", "opencode"}:
             runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
             runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
@@ -14050,12 +14956,14 @@ def _merge_preview_local_launch_preferences(cfg):
 
     local_opencode = local_cfg.get("opencode") if isinstance(local_cfg.get("opencode"), dict) else {}
     local_review = local_opencode.get("review") if isinstance(local_opencode.get("review"), dict) else {}
+    local_committee = local_opencode.get("committee") if isinstance(local_opencode.get("committee"), dict) else {}
+    local_roster = local_opencode.get("agent_roster") if isinstance(local_opencode.get("agent_roster"), dict) else {}
     local_opencode_defaults = {
         key: local_opencode.get(key)
         for key in ("default_profile", "profile")
         if str(local_opencode.get(key) or "").strip()
     }
-    if not local_review and not local_opencode_defaults:
+    if not local_review and not local_committee and not local_roster and not local_opencode_defaults:
         return cfg
 
     next_cfg = copy.deepcopy(cfg)
@@ -14064,9 +14972,39 @@ def _merge_preview_local_launch_preferences(cfg):
         opencode = {}
         next_cfg["opencode"] = opencode
     for key, value in local_opencode_defaults.items():
-        opencode.setdefault(key, value)
-    if local_review and "review" not in opencode:
-        opencode["review"] = copy.deepcopy(local_review)
+        opencode[key] = copy.deepcopy(value)
+    if local_review:
+        review = opencode.setdefault("review", {})
+        if not isinstance(review, dict):
+            review = {}
+            opencode["review"] = review
+        for key, value in local_review.items():
+            if key == "host" and isinstance(value, dict):
+                host = review.setdefault("host", {})
+                if isinstance(host, dict):
+                    for host_key, host_value in value.items():
+                        host.setdefault(host_key, copy.deepcopy(host_value))
+                elif "host" not in review:
+                    review["host"] = copy.deepcopy(value)
+                continue
+            review.setdefault(key, copy.deepcopy(value))
+    if local_committee:
+        opencode["committee"] = copy.deepcopy(local_committee)
+    if local_roster:
+        roster = opencode.setdefault("agent_roster", {})
+        if not isinstance(roster, dict):
+            roster = {}
+            opencode["agent_roster"] = roster
+        for agent_id, entry in local_roster.items():
+            agent_key = str(agent_id or "")
+            if not (
+                agent_key.startswith("review-")
+                or agent_key.startswith("committee-")
+                or agent_key in {"review-hub-host", "committee-host", "committee-host-pro"}
+            ):
+                continue
+            if isinstance(entry, dict):
+                roster[agent_key] = copy.deepcopy(entry)
     return next_cfg
 
 
@@ -15676,17 +16614,40 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / committee / omo / raw")
     parser.add_argument(
         "--review-models",
         nargs="+",
         help="OpenCode review profile 使用的 reviewer 模型/家族，支持模糊输入：qwen kimi2.5 minimax2.7 glm5-turbo domestic all",
     )
     parser.add_argument(
+        "--review-host-model",
+        "--review-host",
+        dest="review_host_model",
+        help="OpenCode review profile 使用的 host 模型，例如 gpt-5.4 / gpt-5.5 / 任意可用模型",
+    )
+    parser.add_argument(
         "--save-review-models",
         "--review-save",
         action="store_true",
-        help="把本次 --review-models 或交互选择保存为下次 review profile 默认",
+        help="把本次 --review-host-model / --review-models 或交互选择保存为下次 review profile 默认",
+    )
+    parser.add_argument(
+        "--committee-models",
+        nargs="+",
+        help="OpenCode committee profile 使用的成员模型/家族，支持 gpt-5.4 gpt-5.5 deepseek glm mimo kimi minimax domestic all",
+    )
+    parser.add_argument(
+        "--committee-host-model",
+        "--committee-host",
+        dest="committee_host_model",
+        help="OpenCode committee profile 使用的 host 模型，例如 gpt-5.4 / gpt-5.5 / 任意可用模型",
+    )
+    parser.add_argument(
+        "--save-committee-models",
+        "--committee-save",
+        action="store_true",
+        help="把本次 --committee-host-model / --committee-models 保存为下次 committee profile 默认",
     )
     parser.add_argument(
         "--opencode-entrypoint",
@@ -15734,8 +16695,10 @@ def main():
     if args.opencode_profile and not requested_opencode_profile:
         valid_profiles = ", ".join(_opencode_profile_selection_ids())
         parser.error(f"--profile 仅支持 OpenCode mode：{valid_profiles}")
-    if (args.review_models or args.save_review_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_REVIEW_PROFILE_ID:
-        parser.error("--review-models / --save-review-models 仅支持 --profile review")
+    if (args.review_models or args.review_host_model or args.save_review_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_REVIEW_PROFILE_ID:
+        parser.error("--review-host-model / --review-models / --save-review-models 仅支持 --profile review")
+    if (args.committee_models or args.committee_host_model or args.save_committee_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_COMMITTEE_PROFILE_ID:
+        parser.error("--committee-host-model / --committee-models / --save-committee-models 仅支持 --profile committee")
     if requested_opencode_profile and args.account:
         parser.error("--profile 是 OpenCode 专用参数，不支持同时使用 --account")
     requested_opencode_entrypoints = []
@@ -15877,8 +16840,10 @@ def main():
             profile_to_launch, configured_entrypoint = _opencode_default_profile_from_config(cfg)
             if not entrypoint_to_launch:
                 entrypoint_to_launch = configured_entrypoint
-            if not profile_to_launch and (args.review_models or args.save_review_models):
+            if not profile_to_launch and (args.review_models or args.review_host_model or args.save_review_models):
                 profile_to_launch = _OPENCODE_REVIEW_PROFILE_ID
+            if not profile_to_launch and (args.committee_models or args.committee_host_model or args.save_committee_models):
+                profile_to_launch = _OPENCODE_COMMITTEE_PROFILE_ID
 
         if target == "opencode" and profile_to_launch:
             cli = "opencode"
@@ -15893,14 +16858,29 @@ def main():
                     cfg,
                     profile_provider,
                     profile_models,
+                    host_model=args.review_host_model,
                     model_tokens=args.review_models,
-                    interactive=sys.stdin.isatty(),
+                    interactive=sys.stdin.isatty() and not bool(args.review_host_model),
                     save_selected=bool(args.save_review_models),
                     save_cfg=user_cfg,
-                    ask_to_save=not bool(args.review_models),
+                    ask_to_save=not bool(args.review_models or args.review_host_model),
                 )
-            elif args.review_models or args.save_review_models:
-                parser.error("--review-models / --save-review-models 仅支持 --profile review")
+            elif profile_to_launch == _OPENCODE_COMMITTEE_PROFILE_ID:
+                profile_cfg, _committee_selection = _prepare_opencode_committee_profile_config(
+                    cfg,
+                    profile_provider,
+                    profile_models,
+                    host_model=args.committee_host_model,
+                    model_tokens=args.committee_models,
+                    interactive=sys.stdin.isatty() and not bool(args.committee_models or args.committee_host_model),
+                    save_selected=bool(args.save_committee_models),
+                    save_cfg=user_cfg,
+                    ask_to_save=not bool(args.committee_models or args.committee_host_model),
+                )
+            elif args.review_models or args.review_host_model or args.save_review_models:
+                parser.error("--review-host-model / --review-models / --save-review-models 仅支持 --profile review")
+            elif args.committee_models or args.committee_host_model or args.save_committee_models:
+                parser.error("--committee-host-model / --committee-models / --save-committee-models 仅支持 --profile committee")
             model_info, runtime = _resolve_opencode_profile_runtime(
                 profile_cfg,
                 profile_provider,

@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from mms_opencode_agents import (
     opencode_apply_agent_bypass_permissions,
+    opencode_committee_agent_configs,
     opencode_lite_agent_configs,
     opencode_lite_pro_agent_configs,
     opencode_review_hub_agent_configs,
@@ -43,26 +44,8 @@ OPENCODE_BYPASS_PERMISSION_ENV = json.dumps(
 )
 OPENCODE_LAUNCH_PREFLIGHT_TIMEOUT = 35
 OPENCODE_LAUNCH_PREFLIGHT_PROMPT = "MMS OpenCode launch preflight. Reply exactly OK and nothing else."
-OPENCODE_IMAGE_INPUT_MODELS = {
-    "gpt-5.3-codex",
-    "gpt-5.4",
-    "gpt-5.5",
-    "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-pro-preview",
-    "k2.6",
-    "kimi-k2.5",
-    "mimo-v2.5",
-    "qwen3.6-flash",
-    "qwen3.6-plus",
-}
-OPENCODE_MODEL_LIMIT_OVERRIDES = {
-    # MiMo's OpenCode guide advertises 1M context and 131072 output for the
-    # OpenAI-compatible provider config, independent of Claude Code's [1m]
-    # Anthropic selector.
-    "mimo-v2.5-pro": {"context": 1_048_576, "output": 131_072},
-    "mimo-v2.5": {"context": 1_048_576, "output": 131_072},
-}
+OPENCODE_IMAGE_INPUT_MODELS = set()
+OPENCODE_MODEL_LIMIT_OVERRIDES = {}
 
 
 def opencode_model_names(runtime, selected_model=""):
@@ -349,10 +332,429 @@ def opencode_model_limit_override(model_name):
     return OPENCODE_MODEL_LIMIT_OVERRIDES.get(model)
 
 
-def opencode_model_output_limit(runtime, model_name):
+def _opencode_model_key(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    if normalized.endswith("[1m]"):
+        normalized = normalized[:-4]
+    return normalized
+
+
+def opencode_model_capabilities(runtime, model_name):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    caps_map = runtime.get("model_capabilities")
+    target = _opencode_model_key(model_name)
+    if isinstance(caps_map, dict) and target:
+        for key, value in caps_map.items():
+            if _opencode_model_key(key) == target and isinstance(value, dict):
+                return value
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        return resolve_model_capabilities(
+            model_name,
+            runtime=runtime,
+            provider_id=str(runtime.get("id") or runtime.get("provider_id") or ""),
+            base_url=str(
+                runtime.get("anthropic_base_url")
+                or runtime.get("openai_base_url")
+                or runtime.get("base_url")
+                or ""
+            ),
+            profile_id=str(runtime.get("profile") or runtime.get("provider_profile") or ""),
+        )
+    except Exception:
+        return {}
+
+
+def _opencode_capability_source(caps, key):
+    sources = caps.get("sources") if isinstance(caps, dict) else {}
+    if not isinstance(sources, dict):
+        return ""
+    return str(sources.get(key) or "").strip()
+
+
+def _opencode_capability_source_allowed(caps, key):
+    source = _opencode_capability_source(caps, key)
+    return source != "conservative_fallback"
+
+
+def opencode_capability_int(runtime, model_name, *keys):
+    caps = opencode_model_capabilities(runtime, model_name)
+    for key in keys:
+        if not _opencode_capability_source_allowed(caps, key):
+            continue
+        try:
+            value = int(caps.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def opencode_capability_bool(runtime, model_name, *keys):
+    caps = opencode_model_capabilities(runtime, model_name)
+    for key in keys:
+        if not _opencode_capability_source_allowed(caps, key):
+            continue
+        if isinstance(caps.get(key), bool):
+            return bool(caps[key])
+    return None
+
+
+def _opencode_profile_protocol(protocol):
+    raw = str(protocol or "").strip()
+    if raw == "openai_responses":
+        return "responses"
+    if raw == "anthropic_messages":
+        return "anthropic_messages"
+    return "openai_chat"
+
+
+def _opencode_runtime_thinking_enabled(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if "thinking_mode" not in runtime:
+        return None
+    raw = str(runtime.get("thinking_mode") or "").strip().lower()
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    return None
+
+
+def _opencode_runtime_effort(runtime, model_name, caps=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    caps = caps if isinstance(caps, dict) else opencode_model_capabilities(runtime, model_name)
+    for source in (runtime, caps):
+        raw = str(source.get("opencode_reasoning_effort") or source.get("reasoning_effort") or "").strip().lower()
+        if raw and raw != "auto":
+            return raw
+    if not _opencode_capability_source_allowed(caps, "thinking_control"):
+        return ""
+    control = caps.get("thinking_control") if isinstance(caps.get("thinking_control"), dict) else {}
+    raw = str(control.get("default") or "").strip().lower()
+    return raw if raw and raw != "auto" else ""
+
+
+def _opencode_option_path(path):
+    normalized = str(path or "").strip().replace("[", ".").replace("]", "")
+    normalized_l = normalized.lower().replace("_", ".")
+    if normalized_l in {"reasoning.effort", "reasoningeffort", "reasoning.effort"}:
+        return ["reasoningEffort"]
+    if normalized_l in {"thinking.budget.tokens", "thinking.budgettokens", "thinking.budget.tokens"}:
+        return ["thinking", "budgetTokens"]
+    parts = [part for part in normalized.split(".") if part]
+    converted = []
+    for part in parts:
+        if part == "budget_tokens":
+            converted.append("budgetTokens")
+        elif part == "reasoning_effort":
+            converted.append("reasoningEffort")
+        else:
+            converted.append(part)
+    return converted
+
+
+def _opencode_set_option_path(target, path, value):
+    parts = _opencode_option_path(path)
+    if not parts:
+        return
+    cursor = target
+    for part in parts[:-1]:
+        child = cursor.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            cursor[part] = child
+        cursor = child
+    cursor[parts[-1]] = value
+
+
+def _opencode_options_from_payload(payload):
+    options = {}
+
+    def walk(value, prefix=""):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, f"{prefix}.{key}" if prefix else str(key))
+            return
+        _opencode_set_option_path(options, prefix, value)
+
+    if isinstance(payload, dict):
+        walk(payload)
+    return options
+
+
+def _opencode_deep_merge(base, override):
+    result = dict(base or {})
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _opencode_deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _opencode_options_have_effort_signal(options):
+    if not isinstance(options, dict):
+        return False
+
+    def walk(value, path=""):
+        if isinstance(value, dict):
+            return any(walk(child, f"{path}.{key}" if path else str(key)) for key, child in value.items())
+        normalized = path.lower()
+        return any(token in normalized for token in ("effort", "thinkingbudget", "thinkinglevel", "budgettokens"))
+
+    return walk(options)
+
+
+def _opencode_normalize_control_value(control, effort, thinking_enabled):
+    control = control if isinstance(control, dict) else {}
+    path = str(control.get("path") or "").strip()
+    path_l = path.lower()
+    mapping = control.get("map") if isinstance(control.get("map"), dict) else {}
+    value = str(effort or control.get("default") or "").strip().lower()
+    if value in mapping:
+        value = str(mapping[value] or "").strip().lower()
+    if "budget" in path_l:
+        raw = mapping.get(value, value) if value else control.get("numeric_budget_tokens") or control.get("default")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+    if "effort" in path_l or "thinkinglevel" in path_l:
+        return value or str(control.get("default") or "").strip().lower() or None
+    if path_l.endswith("thinking.type") or path_l == "thinking.type":
+        return "disabled" if thinking_enabled is False else "enabled"
+    return value or None
+
+
+def _opencode_control_path_is_request_option(path):
+    raw = str(path or "").strip()
+    if not raw:
+        return False
+    normalized = raw.lower().replace("[", ".").replace("]", "").replace("_", ".")
+    compact = "".join(ch for ch in normalized if ch.isalnum())
+    return compact in {
+        "reasoningeffort",
+        "outputconfigeffort",
+        "thinkingtype",
+        "thinkingconfigthinkinglevel",
+        "thinkingconfigthinkingbudget",
+        "thinkingbudget",
+        "thinkingbudgettokens",
+        "budgettokens",
+    }
+
+
+def _opencode_options_from_capabilities(runtime, model_name, *, thinking_enabled=None, effort=""):
+    caps = opencode_model_capabilities(runtime, model_name)
+    if not _opencode_capability_source_allowed(caps, "thinking_control"):
+        return {}
+    control = caps.get("thinking_control") if isinstance(caps.get("thinking_control"), dict) else {}
+    if not control or control.get("supported") is False:
+        return {}
+    path = str(control.get("path") or "").strip()
+    if not _opencode_control_path_is_request_option(path):
+        return {}
+    value = _opencode_normalize_control_value(control, effort, thinking_enabled)
+    if value is None or value == "":
+        return {}
+    options = {}
+    _opencode_set_option_path(options, path, value)
+    return options
+
+
+def opencode_model_request_options(
+    runtime,
+    model_name,
+    *,
+    protocol="",
+    provider_id="",
+    base_url="",
+    reasoning_effort="",
+    thinking_enabled=None,
+):
+    """Build OpenCode model options from MMS capability/provider-profile data."""
+    runtime = runtime if isinstance(runtime, dict) else {}
+    caps = opencode_model_capabilities(runtime, model_name)
+    if thinking_enabled is None:
+        thinking_enabled = _opencode_runtime_thinking_enabled(runtime)
+    effort = str(reasoning_effort or _opencode_runtime_effort(runtime, model_name, caps)).strip().lower()
+
+    payload = {}
+    try:
+        from mms_provider_profiles import apply_profile_body_patches
+
+        apply_profile_body_patches(
+            payload,
+            protocol=_opencode_profile_protocol(protocol),
+            runtime=runtime,
+            provider_id=provider_id or runtime.get("id") or runtime.get("provider_id") or "",
+            base_url=base_url
+            or runtime.get("anthropic_base_url")
+            or runtime.get("openai_base_url")
+            or runtime.get("base_url")
+            or "",
+            model_name=model_name,
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=effort or None,
+        )
+    except Exception:
+        payload = {}
+
+    profile_options = _opencode_options_from_payload(payload)
+    capability_options = _opencode_options_from_capabilities(
+        runtime,
+        model_name,
+        thinking_enabled=thinking_enabled,
+        effort=effort,
+    )
+    return _opencode_deep_merge(capability_options, profile_options)
+
+
+def _opencode_effort_variant_values(runtime, model_name, *, provider_id="", base_url="", protocol=""):
+    values = []
+
+    def add(value):
+        raw = str(value or "").strip().lower()
+        if raw and raw != "auto" and raw not in values:
+            values.append(raw)
+
+    caps = opencode_model_capabilities(runtime, model_name)
+    control = caps.get("thinking_control") if isinstance(caps.get("thinking_control"), dict) else {}
+    path = str(control.get("path") or "").strip()
+    if _opencode_capability_source_allowed(caps, "thinking_control") and _opencode_control_path_is_request_option(path):
+        for item in control.get("allowed") or []:
+            add(item)
+        if isinstance(control.get("map"), dict):
+            for key, value in control["map"].items():
+                add(key)
+                add(value)
+        add(control.get("default"))
+    if _opencode_capability_source_allowed(caps, "reasoning_effort"):
+        add(caps.get("reasoning_effort"))
+
+    try:
+        from mms_provider_profiles import profile_thinking_capabilities
+
+        profile_caps = profile_thinking_capabilities(
+            model_name,
+            runtime=runtime if isinstance(runtime, dict) else None,
+            provider_id=provider_id or runtime.get("id") or runtime.get("provider_id") or "",
+            base_url=base_url
+            or runtime.get("anthropic_base_url")
+            or runtime.get("openai_base_url")
+            or runtime.get("base_url")
+            or "",
+            protocol=_opencode_profile_protocol(protocol),
+        )
+        for item in profile_caps.get("effort_allowed") or []:
+            add(item)
+        if isinstance(profile_caps.get("effort_map"), dict):
+            for key, value in profile_caps["effort_map"].items():
+                add(key)
+                add(value)
+        add(profile_caps.get("effort_default"))
+    except Exception:
+        pass
+    return values
+
+
+def opencode_model_variants(runtime, model_name, *, protocol="", provider_id="", base_url=""):
+    variants = {}
+    for effort in _opencode_effort_variant_values(
+        runtime,
+        model_name,
+        provider_id=provider_id,
+        base_url=base_url,
+        protocol=protocol,
+    ):
+        options = opencode_model_request_options(
+            runtime,
+            model_name,
+            protocol=protocol,
+            provider_id=provider_id,
+            base_url=base_url,
+            reasoning_effort=effort,
+            thinking_enabled=True,
+        )
+        if options and _opencode_options_have_effort_signal(options):
+            variants[effort] = options
+    return variants
+
+
+def _opencode_agent_variant(runtime, route, existing_variant="", variants=None):
+    variants = variants if isinstance(variants, dict) else {}
+    if not variants:
+        return ""
+    caps = opencode_model_capabilities(runtime, route.get("model"))
+    for value in (runtime.get("opencode_reasoning_effort"), runtime.get("reasoning_effort")):
+        raw = str(value or "").strip().lower()
+        if raw and raw in variants:
+            return raw
+    raw_existing = str(existing_variant or "").strip().lower()
+    if raw_existing and raw_existing in variants:
+        return raw_existing
+    raw_cap = str(caps.get("reasoning_effort") or "").strip().lower()
+    if raw_cap and raw_cap in variants:
+        return raw_cap
+    return ""
+
+
+def opencode_apply_agent_model_variants(agents, runtime, routes):
+    if not isinstance(agents, dict):
+        return agents
+    runtime = runtime if isinstance(runtime, dict) else {}
+    route_by_ref = {
+        opencode_route_model_ref(route, index): route
+        for index, route in enumerate(routes or [])
+    }
+    updated = {}
+    for name, agent in agents.items():
+        if not isinstance(agent, dict):
+            updated[name] = agent
+            continue
+        next_agent = dict(agent)
+        route = route_by_ref.get(str(next_agent.get("model") or "").strip())
+        if route:
+            route_runtime = {**runtime, "id": route.get("provider_id") or runtime.get("id")}
+            if isinstance(route.get("model_capabilities"), dict):
+                route_runtime["model_capabilities"] = route["model_capabilities"]
+            if route.get("provider_profile"):
+                route_runtime["provider_profile"] = route.get("provider_profile")
+            variants = opencode_model_variants(
+                route_runtime,
+                route.get("model"),
+                protocol=route.get("protocol") or "",
+                provider_id=route.get("provider_id") or "",
+                base_url=route.get("anthropic_base_url") or route.get("openai_base_url") or "",
+            )
+            variant = _opencode_agent_variant(route_runtime, route, next_agent.get("variant"), variants)
+            if variant:
+                next_agent["variant"] = variant
+            else:
+                next_agent.pop("variant", None)
+        updated[name] = next_agent
+    return updated
+
+
+def opencode_model_output_limit(runtime, model_name, *, output_limit_resolver=None):
     explicit = opencode_explicit_output_limit(runtime)
     if explicit is not None:
         return explicit
+    capability_output = opencode_capability_int(runtime, model_name, "max_output_tokens", "official_max_output_tokens")
+    if capability_output is not None:
+        return capability_output
+    if callable(output_limit_resolver):
+        try:
+            resolved = int(output_limit_resolver(model_name, provider_id=(runtime or {}).get("id")))
+        except (TypeError, ValueError):
+            resolved = 0
+        if resolved > 0:
+            return resolved
     override = opencode_model_limit_override(model_name)
     if isinstance(override, dict):
         try:
@@ -369,7 +771,16 @@ def opencode_model_requires_reasoning_roundtrip_guard(model_name):
     return normalized.startswith("mimo-")
 
 
-def opencode_model_config(runtime, model_name, *, context_window_resolver=None):
+def opencode_model_config(
+    runtime,
+    model_name,
+    *,
+    context_window_resolver=None,
+    output_limit_resolver=None,
+    protocol="",
+    provider_id="",
+    base_url="",
+):
     runtime = runtime if isinstance(runtime, dict) else {}
     model = str(model_name or "").strip()
     config = {"name": model}
@@ -380,6 +791,8 @@ def opencode_model_config(runtime, model_name, *, context_window_resolver=None):
             context_window = int(limit_override.get("context"))
         except (TypeError, ValueError):
             context_window = None
+    if not context_window:
+        context_window = opencode_capability_int(runtime, model, "context_window_tokens", "max_context_tokens")
     if not context_window and callable(context_window_resolver):
         context_window = context_window_resolver(
             model,
@@ -391,20 +804,43 @@ def opencode_model_config(runtime, model_name, *, context_window_resolver=None):
     if context_window:
         config["limit"] = {
             "context": context_window,
-            "output": opencode_model_output_limit(runtime, model),
+            "output": opencode_model_output_limit(
+                runtime,
+                model,
+                output_limit_resolver=output_limit_resolver,
+            ),
         }
-    if model.lower() in OPENCODE_IMAGE_INPUT_MODELS:
+    supports_vision = opencode_capability_bool(runtime, model, "vision", "supports_vision")
+    if supports_vision is True or (supports_vision is None and model.lower() in OPENCODE_IMAGE_INPUT_MODELS):
         config["attachment"] = True
         config["modalities"] = {
             "input": ["text", "image"],
             "output": ["text"],
         }
+    options = opencode_model_request_options(
+        runtime,
+        model,
+        protocol=protocol,
+        provider_id=provider_id,
+        base_url=base_url,
+    )
+    if options:
+        config["options"] = options
+    variants = opencode_model_variants(
+        runtime,
+        model,
+        protocol=protocol,
+        provider_id=provider_id,
+        base_url=base_url,
+    )
+    if variants:
+        config["variants"] = variants
     if opencode_model_requires_reasoning_roundtrip_guard(model):
         config["reasoning"] = False
     return config
 
 
-def opencode_build_config_payload(runtime, model_name="", *, context_window_resolver=None):
+def opencode_build_config_payload(runtime, model_name="", *, context_window_resolver=None, output_limit_resolver=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     routes = opencode_runtime_routes(runtime, model_name)
     providers = {}
@@ -443,10 +879,19 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
                 "models": {},
             },
         )
+        route_runtime = {**runtime, "id": route.get("provider_id") or runtime.get("id")}
+        if isinstance(route.get("model_capabilities"), dict):
+            route_runtime["model_capabilities"] = route["model_capabilities"]
+        if route.get("provider_profile"):
+            route_runtime["provider_profile"] = route.get("provider_profile")
         provider_config["models"][route["model"]] = opencode_model_config(
-            {**runtime, "id": route.get("provider_id") or runtime.get("id")},
+            route_runtime,
             route["model"],
             context_window_resolver=context_window_resolver,
+            output_limit_resolver=output_limit_resolver,
+            protocol=protocol,
+            provider_id=route.get("provider_id") or runtime.get("id") or "",
+            base_url=base_url,
         )
     payload = {
         "$schema": "https://opencode.ai/config.json",
@@ -474,6 +919,11 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
                     opencode_agent_model_refs(runtime, routes),
                     roster_config=runtime.get("opencode_agent_roster"),
                 )
+            elif roster == "committee":
+                payload["agent"] = opencode_committee_agent_configs(
+                    opencode_agent_model_refs(runtime, routes),
+                    roster_config=runtime.get("opencode_agent_roster"),
+                )
             elif roster in {"lite_pro", "lite_pro_orchestrated"}:
                 payload["agent"] = opencode_lite_pro_agent_configs(
                     opencode_agent_model_refs(runtime, routes),
@@ -482,6 +932,9 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
                 )
             else:
                 payload["agent"] = opencode_lite_agent_configs(model_ref)
+            payload["agent"] = opencode_apply_agent_model_variants(payload.get("agent"), runtime, routes)
+            if roster == "committee" and payload.get("default_agent") not in payload.get("agent", {}):
+                payload["default_agent"] = "committee-host"
     if opencode_bypass_enabled(runtime):
         payload["permission"] = "allow"
         if "agent" in payload:
@@ -512,12 +965,13 @@ def opencode_apply_bypass_env(env, runtime):
     return env
 
 
-def opencode_build_config_content(runtime, model_name="", *, context_window_resolver=None):
+def opencode_build_config_content(runtime, model_name="", *, context_window_resolver=None, output_limit_resolver=None):
     return json.dumps(
         opencode_build_config_payload(
             runtime,
             model_name,
             context_window_resolver=context_window_resolver,
+            output_limit_resolver=output_limit_resolver,
         ),
         ensure_ascii=False,
         indent=2,

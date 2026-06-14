@@ -40,8 +40,11 @@ from mms_config_web_server import (
     serve_config_web,
 )
 from mms_opencode_profiles import (
+    OPENCODE_PROFILE_OPTIONS,
     OPENCODE_REVIEW_PROFILE_ID,
+    normalize_opencode_profile_id,
     opencode_lite_pro_specs,
+    opencode_profile_selection_ids,
     opencode_review_host_config,
 )
 
@@ -1991,9 +1994,26 @@ def _opencode_review_host_defaults() -> dict[str, list[str]]:
     }
 
 
+def _opencode_surface_profile_id(value: Any, *, default: str = "agent") -> str:
+    raw = _safe_text(value)
+    if not raw:
+        return default
+    canonical = normalize_opencode_profile_id(raw)
+    for option in OPENCODE_PROFILE_OPTIONS:
+        option_id = _safe_text(option.get("id"))
+        option_profile = normalize_opencode_profile_id(option.get("profile_id") or option_id)
+        if raw == option_id or canonical == option_profile:
+            return option_id
+    return default
+
+
 def _opencode_agent_preset(agent_id: str, category: str = "") -> str:
     text = _safe_text(agent_id).lower()
     category = _safe_text(category).lower()
+    if text == "committee-host":
+        return "builder"
+    if text.startswith("committee-") or "委员会" in category:
+        return "reviewer"
     if "vision" in text or category == "vision":
         return "vision"
     if "bughunt" in text or "找茬" in category:
@@ -2091,23 +2111,78 @@ def _strip_empty_provider_model_lists(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def _opencode_agent_catalog(profile_id: str = "agent") -> list[dict[str, Any]]:
+def _opencode_committee_catalog_from_config(opencode_cfg: dict[str, Any], existing_agents: set[str]) -> list[dict[str, Any]]:
+    """Expose configured committee members without baking model families into the profile."""
+    if not isinstance(opencode_cfg, dict):
+        return []
+    committee = opencode_cfg.get("committee") if isinstance(opencode_cfg.get("committee"), dict) else {}
+    roster = opencode_cfg.get("agent_roster") if isinstance(opencode_cfg.get("agent_roster"), dict) else {}
+    selected_agents = [
+        _safe_text(agent)
+        for agent in (committee.get("selected_agents") if isinstance(committee.get("selected_agents"), list) else [])
+    ]
+    if not selected_agents:
+        selected_agents = [
+            _safe_text(agent)
+            for agent in roster
+            if _safe_text(agent).startswith("committee-") and _safe_text(agent) not in {"committee-host", "committee-host-pro"}
+        ]
+    if not selected_agents:
+        for model in _normalize_model_list(committee.get("models")):
+            slug = re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
+            if slug:
+                selected_agents.append(f"committee-{slug}")
+
+    rows: list[dict[str, Any]] = []
+    for agent in selected_agents:
+        if not agent or agent in existing_agents or agent in {"committee-host", "committee-host-pro"}:
+            continue
+        entry = roster.get(agent) if isinstance(roster.get(agent), dict) else {}
+        model = _safe_text(entry.get("model"))
+        if not model and agent.startswith("committee-"):
+            model = agent.removeprefix("committee-")
+        rows.append(
+            {
+                "agent": agent,
+                "route_key": f"custom_{agent}",
+                "category": "委员会",
+                "preset": _opencode_agent_preset(agent, "委员会"),
+                "priority": 1000 + len(rows) * 10,
+                "default_models": [model] if model else [],
+                "fallback_allowed": False,
+                "custom": True,
+            }
+        )
+        existing_agents.add(agent)
+    return rows
+
+
+def _opencode_agent_catalog(profile_id: str = "agent", opencode_cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    surface_profile = _opencode_surface_profile_id(profile_id, default="agent")
+    if surface_profile in {"raw", "omo"}:
+        return []
     try:
         mms_core = _load_mms_core()
         specs = mms_core._opencode_lite_pro_specs(profile_id)  # noqa: SLF001 - setup UI mirrors launcher roster
     except Exception:
         specs = ()
     rows = []
+    seen_agents = set()
     for spec in specs:
         if not isinstance(spec, dict):
             continue
         agent = _safe_text(spec.get("agent"))
-        if not agent:
+        if not agent or agent in seen_agents:
             continue
+        seen_agents.add(agent)
         key = _safe_text(spec.get("key"))
         models = _normalize_model_list(spec.get("models"))
         category = "执行/协调"
-        if "explore" in agent:
+        if agent == "committee-host":
+            category = "执行/协调"
+        elif agent.startswith("committee-"):
+            category = "委员会"
+        elif "explore" in agent:
             category = "探索"
         elif "bughunt" in agent:
             category = "找茬"
@@ -2128,6 +2203,8 @@ def _opencode_agent_catalog(profile_id: str = "agent") -> list[dict[str, Any]]:
                 "fallback_allowed": spec.get("gpt_fallback", True) is not False,
             }
         )
+    if surface_profile == "committee":
+        rows.extend(_opencode_committee_catalog_from_config(opencode_cfg or {}, seen_agents))
     return rows
 
 
@@ -2153,17 +2230,23 @@ def build_config_snapshot(
     coding_preset = presets.get("coding") if isinstance(presets.get("coding"), dict) else {}
     opencode_cfg = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
     opencode_agent_models = _normalize_agent_model_overrides(opencode_cfg.get("agent_models") or opencode_cfg.get("agent_model_overrides"))
-    opencode_profile = _safe_text(opencode_cfg.get("default_profile") or "agent")
-    opencode_agent_catalog = _opencode_agent_catalog("agent")
+    opencode_profile = _opencode_surface_profile_id(opencode_cfg.get("default_profile") or "agent")
+    opencode_profiles = opencode_profile_selection_ids()
+    opencode_agent_catalogs = {
+        profile: _opencode_agent_catalog(profile, opencode_cfg=opencode_cfg)
+        for profile in opencode_profiles
+    }
+    opencode_agent_catalog = opencode_agent_catalogs.get(opencode_profile) or _opencode_agent_catalog(opencode_profile, opencode_cfg=opencode_cfg)
     opencode = {
         "default_profile": opencode_profile,
         "recommended_profile": "agent",
-        "profiles": ["agent", "review", "omo", "raw"],
+        "profiles": opencode_profiles,
         "review": {"host": _normalize_opencode_review_host(opencode_cfg)},
         "review_host_defaults": _opencode_review_host_defaults(),
         "agent_models": opencode_agent_models,
-        "agent_roster": _normalize_opencode_agent_roster(opencode_cfg.get("agent_roster"), profile_id="agent"),
+        "agent_roster": _normalize_opencode_agent_roster(opencode_cfg.get("agent_roster"), profile_id=opencode_profile),
         "agent_catalog": opencode_agent_catalog,
+        "agent_catalogs": opencode_agent_catalogs,
         "roster_presets": list(_OPENCODE_ROSTER_PRESETS),
         "vision_agents": ["mobius-vision-mimo", "mobius-vision-kimi", "mobius-vision-qwen"],
         "executor": "mobius-executor-gpt54",
@@ -4576,10 +4659,14 @@ def build_config_plan(
                 next_cfg["presets"] = presets
 
     opencode_payload = draft.get("opencode") if isinstance(draft.get("opencode"), dict) else {}
-    default_profile = _safe_text(opencode_payload.get("default_profile"))
+    raw_default_profile = _safe_text(opencode_payload.get("default_profile"))
+    default_profile = _opencode_surface_profile_id(raw_default_profile, default="") if raw_default_profile else ""
     review_host = _normalize_opencode_review_host(opencode_payload)
     agent_model_overrides = _normalize_agent_model_overrides(opencode_payload.get("agent_models") or opencode_payload.get("agent_model_overrides"))
-    agent_roster = _normalize_opencode_agent_roster(opencode_payload.get("agent_roster"), profile_id="agent")
+    agent_roster_profile = default_profile or _opencode_surface_profile_id(
+        (next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {}).get("default_profile") or "agent"
+    )
+    agent_roster = _normalize_opencode_agent_roster(opencode_payload.get("agent_roster"), profile_id=agent_roster_profile)
     opencode_payload_touched = (
         default_profile
         or "agent_models" in opencode_payload

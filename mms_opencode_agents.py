@@ -747,7 +747,6 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
             "mode": "subagent",
             "model": _agent_model(name),
             "temperature": 0.1,
-            "steps": 24,
             "permission": {
                 **common_permissions,
                 "edit": "ask",
@@ -758,6 +757,205 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
                 "external_directory": "ask",
             },
             "prompt": _reviewer_prompt(description),
+        }
+    return agents
+
+
+def opencode_committee_agent_configs(agent_models, *, roster_config=None):
+    """Return a general-purpose committee roster without per-agent step caps."""
+    agent_models = agent_models if isinstance(agent_models, dict) else {}
+    roster_config = roster_config if isinstance(roster_config, dict) else {}
+    host_model = (
+        agent_models.get("committee-host")
+        or agent_models.get("committee-host-pro")
+        or next(iter(agent_models.values()), "")
+    )
+    if not host_model:
+        return {}
+
+    safe_read_bash = {
+        "*": "ask",
+        "pwd": "allow",
+        "ls *": "allow",
+        "rg *": "allow",
+        "git status*": "allow",
+        "git diff*": "allow",
+        "git log*": "allow",
+    }
+    common_permissions = {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+    }
+    member_permission = {
+        **common_permissions,
+        "edit": "allow",
+        "bash": safe_read_bash,
+        "task": "deny",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "ask",
+    }
+    host_permission = {
+        **common_permissions,
+        "edit": "ask",
+        "bash": safe_read_bash,
+        "task": {"*": "deny"},
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "ask",
+    }
+    member_names = sorted(
+        name for name in agent_models
+        if str(name).startswith("committee-") and name not in {"committee-host", "committee-host-pro"}
+    )
+    for name in member_names:
+        host_permission["task"][name] = "allow"
+
+    def _agent_model(name, fallback=host_model):
+        return str(agent_models.get(name) or fallback or host_model)
+
+    member_list_text = ", ".join(member_names) or "no committee-* subagents"
+    host_prompt = (
+        "You are a general committee host, not a specialized review dispatcher. "
+        "For any user request, restate the goal, classify the request type, and "
+        "choose the right committee mode. Use Gate mode for approve/reject/modify "
+        "decisions: collect one independent ballot per delegated member with "
+        "model, verdict, veto, cited evidence, and reason. Use Estimate mode for "
+        "scores, risk, effort, or confidence: collect estimates, aggregate by "
+        "median, and do not use veto as a scoring tool. For verifiable facts such "
+        "as tests, compile results, or command exits, verify them directly instead "
+        "of asking members to vote. "
+        "Split the goal into a compact brief and delegate to selected committee "
+        "subagents. For non-trivial work, prefer at least 2-4 members; for "
+        "high-risk Gate decisions, prefer at least 3 or all relevant available "
+        "members. If you delegate to fewer members, explain why. "
+        f"Available committee members: {member_list_text}. Do not invent missing agents. "
+        "Before choosing mode or dispatching, inspect and obey the target project's "
+        "local instructions when present: AGENTS.md, CLAUDE.md, SKILL.md, README.md, "
+        "governance/README.md, docs/how-to-raise-amendment-pr.md, or an explicit "
+        "checker/runbook. Local project rules and user instructions override generic "
+        "committee defaults, including whether members must write durable formal "
+        "artifacts such as vote files. If local rules define host/secretary and "
+        "juror/member duties, follow those duties exactly. "
+        "Members are general-purpose and may request edits only for explicitly "
+        "assigned artifacts or implementation work; otherwise keep them read-first. "
+        "By default, the host only dispatches, verifies facts, collects ballots, "
+        "tallies, and synthesizes. Unless the user explicitly grants execution "
+        "authority, the host must not write or update votes/<model>.vote.md, must "
+        "not update decision.md or ratification markers, must not promote "
+        "advisory/chat ballots into formal quorum votes, and must not ask members "
+        "to write formal vote files. If a prior dispatch did not explicitly assign "
+        "a formal vote-file artifact, treat returned ballots as advisory review "
+        "evidence only. If the user explicitly asks for formal durable ballots, "
+        "assign each member its own vote-file path; a member may write only its "
+        "own assigned vote file when write permission is granted. The host may "
+        "update decision.md or run a quorum checker only when the user explicitly "
+        "grants that artifact/checker task; never ratify, merge, or mark final "
+        "approval unless the user explicitly asks. Never pretend a member wrote a "
+        "file it did not write. If an external gate checker is provided, call that "
+        "checker instead of reimplementing project-specific quorum rules. "
+        "For long ballots, audits, or multi-section answers, use artifact-first "
+        "dispatch: assign each member an output file path, ask it to write the "
+        "full artifact there, and require the chat reply to contain only the path, "
+        "a compact summary, and any blocked/missing sections. "
+        "Synthesize only after member outputs are in. The final answer or packet "
+        "must include assignments, member findings, disagreements, risks, a "
+        "subagent scorecard, and a recommended next action. In the scorecard, "
+        "rate each delegated member for this task only on a 1-5 scale for "
+        "usefulness, evidence quality, relevance, and independence; include one "
+        "objective sentence of rationale. Mark selected but non-dispatched members "
+        "as not dispatched, and never present these scores as a global model "
+        "ranking. Preserve real disagreement; do not treat a majority as truth "
+        "when evidence is weak. If the request asks for implementation, produce "
+        "an execution packet or ask before editing; this profile is for "
+        "deliberation and dispatch. If a member output is truncated, re-dispatch "
+        "only the missing sections and instruct the member not to repeat already "
+        "received content. Do not assume a request-root workflow unless the user "
+        "explicitly asks for that external workflow."
+    )
+    agents = {
+        "committee-host": {
+            "description": "General committee host that delegates to selected subagents and summarizes",
+            "mode": "primary",
+            "model": _agent_model("committee-host"),
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": host_permission,
+            "prompt": host_prompt,
+        },
+        "committee-host-pro": {
+            "description": "Higher-depth fallback committee host",
+            "mode": "primary",
+            "model": _agent_model("committee-host-pro"),
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": host_permission,
+            "prompt": (
+                "Fallback committee host. Continue the same deliberation flow, "
+                "preserve selected members, re-read and obey target project local "
+                "instructions before dispatching, apply the same Gate mode or Estimate "
+                "mode contract, preserve the same host boundary by default "
+                "(dispatch, verify, collect, tally, synthesize only), do not "
+                "write votes/<model>.vote.md, decision.md, or ratification "
+                "markers unless the user explicitly grants that artifact task, "
+                "do not promote advisory/chat ballots into formal quorum votes, "
+                "keep durable ballot provenance honest, include the same "
+                "task-local subagent scorecard, and summarize only "
+                "evidence-backed conclusions."
+            ),
+        },
+    }
+
+    def _member_prompt(name, model_ref):
+        lower = f"{name} {model_ref}".lower()
+        if "deepseek" in lower:
+            focus = "deep reasoning, edge cases, algorithmic risk, and counterexamples"
+        elif "glm" in lower:
+            focus = "structured reasoning, Chinese technical nuance, and clear synthesis"
+        elif "mimo" in lower:
+            focus = "divergent critique, product risk, visual/multimodal concerns when present"
+        elif "kimi" in lower or "k2" in lower:
+            focus = "repo reading, context reconstruction, documentation, and codebase navigation"
+        elif "minimax" in lower:
+            focus = "pragmatic low-cost sanity checks, simple-path alternatives, and product feel"
+        elif "5.5" in lower:
+            focus = "highest-risk architecture, planning, and final-quality judgment"
+        else:
+            focus = "deep engineering judgment, implementation risk, and validation strategy"
+        return (
+            f"You are {name}, an independent committee member focused on {focus}. "
+            "Obey target project local instructions and the host-assigned artifact "
+            "contract; if those local rules require a durable formal artifact, write "
+            "that artifact exactly as assigned. "
+            "Read only what is needed first, do not call other agents, and edit only "
+            "when the host or user explicitly assigns an artifact or implementation "
+            "slice. Keep edits narrow and explain provenance. "
+            "For Gate mode, return ballot fields: model, verdict "
+            "(approve|reject|modify), veto (yes|no), cited evidence, and reason; "
+            "if assigned a vote file path, write only your own assigned vote file "
+            "and do not update decision.md, ratification markers, or any other "
+            "member's vote file. "
+            "For Estimate mode, return your estimate, confidence, evidence, and "
+            "uncertainty. Otherwise return concise findings, assumptions, evidence, "
+            "disagreements with likely other models, and your recommended next action. "
+            "For long structured outputs, write the assigned artifact instead of "
+            "sending the full content through chat; return only path, compact "
+            "summary, and blocked/missing sections. If asked to continue, resume "
+            "at the next missing section and do not repeat prior content."
+        )
+
+    for name in member_names:
+        roster_entry = roster_config.get(name) if isinstance(roster_config.get(name), dict) else {}
+        model_ref = _agent_model(name)
+        agents[name] = {
+            "description": str(roster_entry.get("description") or f"Committee member {name}"),
+            "mode": "subagent",
+            "model": model_ref,
+            "temperature": 0.1,
+            "permission": member_permission,
+            "prompt": str(roster_entry.get("prompt") or _member_prompt(name, model_ref)),
         }
     return agents
 
@@ -793,6 +991,7 @@ def opencode_apply_agent_bypass_permissions(agents):
 
 __all__ = [
     "opencode_apply_agent_bypass_permissions",
+    "opencode_committee_agent_configs",
     "opencode_lite_agent_configs",
     "opencode_lite_pro_agent_configs",
     "opencode_permission_bypass_value",

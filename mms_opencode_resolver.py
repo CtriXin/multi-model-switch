@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID,
+    OPENCODE_COMMITTEE_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES,
     OPENCODE_REVIEW_PROFILE_ID,
     opencode_lite_pro_specs_for_config,
@@ -117,6 +118,10 @@ def find_opencode_model_route(
                     "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
                     "protocols": opencode_provider_protocols(provider),
                 }
+                if isinstance(provider.get("model_capabilities"), dict):
+                    route["model_capabilities"] = provider["model_capabilities"]
+                if provider.get("provider_profile"):
+                    route["provider_profile"] = provider.get("provider_profile")
                 health_row = deps.route_health_for_route(latest_health, profile_id, route_key, route)
                 if not deps.route_health_allows_route(health_row):
                     continue
@@ -285,7 +290,7 @@ def resolve_opencode_profile_runtime(cfg, default_provider, default_models, prof
         }
         runtime = deps.apply_profile(runtime, profile_id)
         return {"model": "global-omo"}, deps.apply_entrypoint(runtime, selection_entrypoint)
-    if profile_id in {OPENCODE_AGENT_PROFILE_ID, OPENCODE_REVIEW_PROFILE_ID}:
+    if profile_id in {OPENCODE_AGENT_PROFILE_ID, OPENCODE_REVIEW_PROFILE_ID, OPENCODE_COMMITTEE_PROFILE_ID}:
         model_info, runtime = resolve_opencode_lite_pro_runtime(
             cfg,
             default_provider,

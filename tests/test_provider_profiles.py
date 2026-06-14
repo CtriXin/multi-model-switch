@@ -481,6 +481,8 @@ def test_stable_root_without_latest_bundle_keeps_legacy_profile_overlay(monkeypa
     monkeypatch.setenv("XDG_CONFIG_HOME", str(stable_root.parent))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
     import mms_provider_profiles
 
     mms_provider_profiles.load_provider_profiles.cache_clear()

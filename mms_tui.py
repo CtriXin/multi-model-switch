@@ -1601,27 +1601,170 @@ def select_submodel_tui(
         return None
 
 
-def select_review_models_tui(options, selected_models=None, title=None):
-    """Review profile multi-select: Space toggles reviewers, Enter confirms."""
-    options = [opt for opt in (options or []) if isinstance(opt, dict) and opt.get("model")]
-    if not options:
+def _build_review_model_rows(options, selected_models=None, *, selected_first=True):
+    """Normalize review/committee model rows without requiring curses."""
+    raw_options = [opt for opt in (options or []) if isinstance(opt, dict) and opt.get("model")]
+    selected = set()
+    selected_order = {}
+    selected_provider = {}
+    selected_provider_name = {}
+    for item in selected_models or []:
+        if isinstance(item, dict):
+            model = str(item.get("model") or "").strip()
+            provider_id = str(item.get("provider_id") or "").strip()
+            provider_name = str(item.get("provider_name") or "").strip()
+        else:
+            model = str(item or "").strip()
+            provider_id = ""
+            provider_name = ""
+        if not model:
+            continue
+        key = model.lower()
+        selected.add(key)
+        selected_order.setdefault(key, len(selected_order))
+        if provider_id:
+            selected_provider[key] = provider_id
+        if provider_name:
+            selected_provider_name[key] = provider_name
+
+    grouped = []
+    by_model = {}
+
+    def _add_provider(row, opt):
+        providers = opt.get("providers") if isinstance(opt.get("providers"), list) else [opt]
+        seen = {str(item.get("provider_id") or item.get("provider_name") or "").strip() for item in row["providers"]}
+        for provider in providers:
+            if not isinstance(provider, dict):
+                continue
+            provider_id = str(provider.get("provider_id") or "").strip()
+            provider_name = str(provider.get("provider_name") or provider_id or "").strip()
+            provider_key = provider_id or provider_name
+            if not provider_key or provider_key in seen:
+                continue
+            seen.add(provider_key)
+            row["providers"].append({
+                "provider_id": provider_id,
+                "provider_name": provider_name,
+                "priority": int(provider.get("priority", 100) or 100) if str(provider.get("priority", "")).strip() else 100,
+                "role_weight": int(provider.get("role_weight", 1) or 1) if str(provider.get("role_weight", "")).strip() else 1,
+                "role": str(provider.get("role") or "auto"),
+            })
+
+    for opt in raw_options:
+        model = str(opt.get("model") or "").strip()
+        if not model:
+            continue
+        key = model.lower()
+        row = by_model.get(key)
+        if row is None:
+            row = {
+                "model": model,
+                "family": str(opt.get("family") or "").strip(),
+                "providers": [],
+                "_index": len(grouped),
+            }
+            by_model[key] = row
+            grouped.append(row)
+        elif not row.get("family") and opt.get("family"):
+            row["family"] = str(opt.get("family") or "").strip()
+        _add_provider(row, opt)
+
+    for row in grouped:
+        row["providers"].sort(
+            key=lambda provider: (
+                -int(provider.get("priority", 100) or 100),
+                int(provider.get("role_weight", 1) or 1),
+                str(provider.get("provider_name") or provider.get("provider_id") or ""),
+            )
+        )
+
+    visible_keys = {str(row.get("model") or "").strip().lower() for row in grouped}
+    selected = {key for key in selected if key in visible_keys}
+
+    provider_idx = {}
+    for row in grouped:
+        key = row["model"].lower()
+        wanted = selected_provider.get(key, "")
+        wanted_name = selected_provider_name.get(key, "")
+        idx = 0
+        if wanted or wanted_name:
+            for i, opt in enumerate(row["providers"]):
+                if wanted and str(opt.get("provider_id") or "") == wanted:
+                    idx = i
+                    break
+                if wanted_name and str(opt.get("provider_name") or "") == wanted_name:
+                    idx = i
+                    break
+        provider_idx[key] = idx
+
+    if selected_first and selected:
+        grouped.sort(
+            key=lambda row: (
+                0 if str(row.get("model") or "").strip().lower() in selected else 1,
+                selected_order.get(str(row.get("model") or "").strip().lower(), 10**9),
+                int(row.get("_index", 0) or 0),
+            )
+        )
+
+    return grouped, selected, provider_idx
+
+
+def select_review_models_tui(options, selected_models=None, title=None, return_provider=False):
+    """Review/committee multi-select with per-model channel cycling."""
+    grouped, selected, provider_idx = _build_review_model_rows(options, selected_models)
+    if not grouped:
         return None
 
-    selected = {
-        str(model or "").strip().lower()
-        for model in (selected_models or [])
-        if str(model or "").strip()
-    }
+    skipped_saved = []
+    seen_skipped = set()
+    for item in selected_models or []:
+        if isinstance(item, dict):
+            model = str(item.get("model") or "").strip()
+        else:
+            model = str(item or "").strip()
+        key = model.lower()
+        if key and key not in selected and key not in seen_skipped:
+            seen_skipped.add(key)
+            skipped_saved.append(model)
 
     def _option_key(opt):
         return str(opt.get("model") or "").strip().lower()
 
-    def _selected_models_in_option_order():
-        return [
-            str(opt.get("model") or "").strip()
-            for opt in options
-            if _option_key(opt) in selected and str(opt.get("model") or "").strip()
-        ]
+    def _active_provider(row):
+        providers = row.get("providers") or []
+        if not providers:
+            return {"provider_id": "", "provider_name": ""}
+        key = _option_key(row)
+        idx = max(0, min(provider_idx.get(key, 0), len(providers) - 1))
+        provider_idx[key] = idx
+        return providers[idx]
+
+    def _selected_rows_in_option_order():
+        rows = []
+        for row in grouped:
+            key = _option_key(row)
+            if key not in selected:
+                continue
+            if return_provider:
+                active = _active_provider(row)
+                rows.append({
+                    "model": str(row.get("model") or "").strip(),
+                    "family": str(row.get("family") or "").strip(),
+                    "provider_id": str(active.get("provider_id") or "").strip(),
+                    "provider_name": str(active.get("provider_name") or "").strip(),
+                })
+            else:
+                rows.append(str(row.get("model") or "").strip())
+        return [row for row in rows if row]
+
+    def _row_matches(row, query):
+        if not query:
+            return True
+        haystack = [str(row.get("model") or ""), str(row.get("family") or "")]
+        for provider in row.get("providers") or []:
+            haystack.append(str(provider.get("provider_name") or ""))
+            haystack.append(str(provider.get("provider_id") or ""))
+        return query in " ".join(haystack).lower()
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -1634,71 +1777,88 @@ def select_review_models_tui(options, selected_models=None, title=None):
         idx = 0
         scroll = 0
         search = ""
-        status_text = ""
+        status_text = (
+            "已跳过隐藏/不可用: " + ", ".join(skipped_saved[:3]) + ("..." if len(skipped_saved) > 3 else "")
+            if skipped_saved
+            else ""
+        )
 
         while True:
             stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
             query = search.lower().strip()
-            if query:
-                filtered = [
-                    opt for opt in options
-                    if query in str(opt.get("model") or "").lower()
-                    or query in str(opt.get("family") or "").lower()
-                    or query in str(opt.get("provider_name") or "").lower()
-                ]
-            else:
-                filtered = list(options)
+            filtered = [row for row in grouped if _row_matches(row, query)] if query else list(grouped)
             if not filtered:
-                filtered = list(options)
+                filtered = list(grouped)
             idx = max(0, min(idx, len(filtered) - 1))
 
-            total_w = min(82, max_w - 4)
+            total_w = min(96, max_w - 4)
+            left_w = max(32, min(46, total_w - 42))
             visible = max(1, min(len(filtered), max_y - 9))
             ph = visible + 7 + (1 if search else 0) + (1 if status_text else 0)
             px = max(0, (max_w - total_w) // 2)
             py = max(1, (max_y - ph) // 2)
             ll = px + 2
+            sep = px + left_w
+            rl = sep + 2
             rr = px + total_w - 2
 
-            row = py
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.color_pair(1))
-            row += 1
+            row_y = py
+            _safe_addstr(stdscr, row_y, px, "-" * total_w, curses.color_pair(1))
+            row_y += 1
             header = title or _L("Review 模型多选", "Review Model Multi-select")
-            _safe_addstr(stdscr, row, ll, header, curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row_y, ll, header, curses.color_pair(1) | curses.A_BOLD)
             count_text = f"{len(selected)} selected"
-            _safe_addstr(stdscr, row, rr - len(count_text), count_text, curses.color_pair(5) | curses.A_BOLD)
-            row += 1
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
-            row += 1
+            _safe_addstr(stdscr, row_y, rr - len(count_text), count_text, curses.color_pair(5) | curses.A_BOLD)
+            row_y += 1
+            _safe_addstr(stdscr, row_y, px, "-" * total_w, curses.A_DIM)
+            row_y += 1
             if search:
-                _safe_addstr(stdscr, row, ll, f"/ {search}_", curses.color_pair(4) | curses.A_BOLD)
-                row += 1
+                _safe_addstr(stdscr, row_y, ll, f"/ {search}_", curses.color_pair(4) | curses.A_BOLD)
+                row_y += 1
+
+            _safe_addstr(stdscr, row_y, ll + 1, _L("模型", "Model"), curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row_y, rl, _L("通道", "Channel"), curses.color_pair(4) | curses.A_BOLD)
+            row_y += 1
+            _safe_addstr(stdscr, row_y, px, "-" * left_w + "+" + "-" * (total_w - left_w - 1), curses.A_DIM)
+            row_y += 1
 
             if idx < scroll:
                 scroll = idx
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
-            content_y = row
+            content_y = row_y
             for i in range(scroll, min(scroll + visible, len(filtered))):
                 y = content_y + i - scroll
                 opt = filtered[i]
                 model = str(opt.get("model") or "").strip()
                 family = str(opt.get("family") or "").strip()
-                provider = str(opt.get("provider_name") or "").strip()
-                is_selected = _option_key(opt) in selected
+                key = _option_key(opt)
+                providers = opt.get("providers") or []
+                active = _active_provider(opt)
+                provider_name = str(active.get("provider_name") or active.get("provider_id") or "-").strip()
+                pidx = provider_idx.get(key, 0)
+                channel_text = provider_name
+                if len(providers) > 1:
+                    channel_text = f"<{pidx + 1}/{len(providers)}> {provider_name}"
+                is_selected = key in selected
                 is_cursor = i == idx
                 mark = "[x]" if is_selected else "[ ]"
                 left = f"{mark} {model}"
-                right = " / ".join(part for part in (family, provider) if part)
+                if family:
+                    left = f"{left}  {family}"
                 attr = curses.color_pair(1) | curses.A_REVERSE if is_cursor else curses.color_pair(2)
                 if is_selected and not is_cursor:
                     attr = curses.color_pair(5) | curses.A_BOLD
-                _safe_addstr(stdscr, y, ll, " " * max(1, total_w - 4), attr if is_cursor else 0)
-                _safe_addstr(stdscr, y, ll, left, attr, max_w=max(10, total_w - 30))
-                if right:
-                    _safe_addstr(stdscr, y, rr - min(26, _display_width(right)), right, curses.A_DIM, max_w=26)
+                _safe_addstr(stdscr, y, sep, "|", curses.A_DIM)
+                if is_cursor:
+                    _safe_addstr(stdscr, y, ll, " " * max(1, left_w - 3), attr)
+                _safe_addstr(stdscr, y, ll, left, attr, max_w=max(10, left_w - 3))
+                channel_attr = curses.color_pair(4) | curses.A_BOLD if is_cursor else curses.A_DIM
+                if is_selected and not is_cursor:
+                    channel_attr = curses.color_pair(5)
+                _safe_addstr(stdscr, y, rl, channel_text, channel_attr, max_w=max(10, rr - rl))
 
             bot_y = content_y + visible
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
@@ -1711,7 +1871,7 @@ def select_review_models_tui(options, selected_models=None, title=None):
                 _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 20, _L("Space 勾选", "Space Toggle"), curses.color_pair(5) | curses.A_DIM)
             else:
-                footer = "Space 勾选  Enter 启动并记住  A 全选  C 清空  直接输入搜索  Esc 返回"
+                footer = "↑↓ 移动  ←/→ 切通道  Space 勾选  Enter 启动并记住  A 全选  C 清空  输入搜索  Esc 返回"
                 _safe_addstr(stdscr, bot_y, ll, footer, curses.A_DIM, max_w=total_w - 4)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.color_pair(1))
@@ -1724,6 +1884,14 @@ def select_review_models_tui(options, selected_models=None, title=None):
                 idx = (idx - 1) % len(filtered)
             elif key == curses.KEY_DOWN:
                 idx = (idx + 1) % len(filtered)
+            elif key in (curses.KEY_LEFT, curses.KEY_RIGHT) and not search:
+                if filtered:
+                    current = filtered[idx]
+                    providers = current.get("providers") or []
+                    if len(providers) > 1:
+                        key_name = _option_key(current)
+                        delta = -1 if key == curses.KEY_LEFT else 1
+                        provider_idx[key_name] = (provider_idx.get(key_name, 0) + delta) % len(providers)
             elif key == ord(" "):
                 if filtered:
                     key_name = _option_key(filtered[idx])
@@ -1734,7 +1902,7 @@ def select_review_models_tui(options, selected_models=None, title=None):
             elif key in (10, 13, curses.KEY_ENTER):
                 if not selected and filtered:
                     selected.add(_option_key(filtered[idx]))
-                chosen = _selected_models_in_option_order()
+                chosen = _selected_rows_in_option_order()
                 if chosen:
                     return chosen
                 status_text = _L("至少选择一个模型", "Select at least one model")
@@ -4314,6 +4482,8 @@ def _confirm_policy_capability_flags(tokens):
             flags["reasoning"].append(bool(caps["reasoning"]))
         elif isinstance(caps.get("reasoning_effort"), bool):
             flags["reasoning"].append(bool(caps["reasoning_effort"]))
+        elif str(caps.get("reasoning_effort") or "").strip():
+            flags["reasoning"].append(True)
     return flags
 
 

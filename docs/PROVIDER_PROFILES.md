@@ -76,12 +76,18 @@ documented 1048576 context / 131072 output limits for `mimo-v2.5-pro` and
 - OpenRouter models API: https://openrouter.ai/api/v1/models
 - MiniMax Anthropic API: https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
 - MiniMax OpenAI API: https://platform.minimaxi.com/docs/api-reference/text-openai-api
+- MiniMax text generation / M3: https://platform.minimax.io/docs/guides/text-generation
+- MiniMax M3 function call: https://platform.minimax.io/docs/guides/text-m3-function-call
 - DeepSeek Chat Completion: https://api-docs.deepseek.com/api/create-chat-completion
 - DeepSeek pricing / context lengths: https://api-docs.deepseek.com/quick_start/pricing/
 - DeepSeek Claude Code integration: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 - DeepSeek Anthropic API: https://api-docs.deepseek.com/guides/anthropic_api
 - Kimi Code docs: https://www.kimi.com/code/docs/en/
 - Kimi Code third-party agents: https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html
+- Kimi K2.7 Code quickstart: https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart
+- Kimi K2 thinking model guide: https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model
+- Kimi K2.7 Code pricing: https://platform.kimi.ai/docs/pricing/chat-k27-code
 - Z.ai API introduction: https://docs.z.ai/api-reference/introduction
 - Z.ai GLM-4.6 guide: https://docs.z.ai/guides/llm/glm-4.6
 - Z.ai DevPack overview: https://docs.z.ai/devpack/overview
+- Z.ai latest GLM coding model: https://docs.z.ai/devpack/latest-model
