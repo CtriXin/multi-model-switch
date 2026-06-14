@@ -163,6 +163,13 @@ def _redact_inline_secrets(value: Any) -> str:
     return text
 
 
+def _is_redacted_secret_token(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return text in {"<redacted>", "[redacted]", "***", "****"} or "***" in text or "****" in text
+
+
 def _is_secret_like_key(key_lower: str) -> bool:
     if key_lower in _SAFE_TOKEN_COUNT_KEYS or key_lower.endswith("_tokens"):
         return False
@@ -509,13 +516,22 @@ def _resolve_preview_provider_secret(
         return provider
     config_root = _config_root_for_snapshot(config_path)
     provider_id = _safe_text(provider.get("id") or provider.get("provider_id"))
+    secret_refs = _preview_secret_refs_by_provider(config_root)
+    secret_values = _preview_secret_values_by_ref(config_root)
     secret_ref = _safe_text(provider.get("secret_ref"))
-    if provider_id and not secret_ref:
-        secret_ref = _preview_secret_refs_by_provider(config_root).get(provider_id, "")
-        if secret_ref:
-            provider["secret_ref"] = secret_ref
+    replacement_ref = secret_refs.get(provider_id, "") if provider_id else ""
+    if provider_id and replacement_ref and (
+        not secret_ref or _is_redacted_secret_token(secret_ref) or not _safe_text(secret_values.get(secret_ref))
+    ):
+        secret_ref = replacement_ref
+    elif _is_redacted_secret_token(secret_ref):
+        secret_ref = ""
+    if secret_ref:
+        provider["secret_ref"] = secret_ref
+    else:
+        provider.pop("secret_ref", None)
     if secret_ref and not _safe_text(provider.get("api_key") or provider.get("openai_api_key") or provider.get("anthropic_api_key")):
-        value = _preview_secret_values_by_ref(config_root).get(secret_ref, "")
+        value = secret_values.get(secret_ref, "")
         if value:
             provider["api_key"] = value
     return provider
@@ -533,6 +549,7 @@ def _attach_preview_secret_refs(
     refs = _preview_secret_refs_by_provider(_config_root_for_snapshot(config_path))
     if not refs:
         return cfg
+    values = _preview_secret_values_by_ref(_config_root_for_snapshot(config_path))
     providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
     changed = False
     next_providers = []
@@ -542,8 +559,15 @@ def _attach_preview_secret_refs(
             continue
         row = dict(provider)
         provider_id = _safe_text(row.get("id") or row.get("provider_id"))
-        if provider_id and not _safe_text(row.get("secret_ref")) and refs.get(provider_id):
-            row["secret_ref"] = refs[provider_id]
+        secret_ref = _safe_text(row.get("secret_ref"))
+        replacement_ref = refs.get(provider_id, "") if provider_id else ""
+        if provider_id and replacement_ref and (
+            not secret_ref or _is_redacted_secret_token(secret_ref) or not _safe_text(values.get(secret_ref))
+        ):
+            row["secret_ref"] = replacement_ref
+            changed = True
+        elif _is_redacted_secret_token(secret_ref):
+            row.pop("secret_ref", None)
             changed = True
         next_providers.append(row)
     if changed:
@@ -593,7 +617,15 @@ def _preview_bundle_config_from_verified_files(verified_files: dict[str, Any], *
         cached_url = _preview_cached_provider_url(provider_id)
         openai_base_url = _safe_text(route_info.get("openai_base_url"))
         anthropic_base_url = _safe_text(route_info.get("anthropic_base_url"))
-        secret_ref = _safe_text(route_info.get("secret_ref") or secret_refs.get(provider_id))
+        route_secret_ref = _safe_text(route_info.get("secret_ref"))
+        backend_secret_ref = _safe_text(secret_refs.get(provider_id))
+        secret_ref = route_secret_ref or backend_secret_ref
+        if backend_secret_ref and (
+            not secret_ref or _is_redacted_secret_token(secret_ref) or not _safe_text(secret_values.get(secret_ref))
+        ):
+            secret_ref = backend_secret_ref
+        elif _is_redacted_secret_token(secret_ref):
+            secret_ref = ""
         protocols = _normalize_model_list(profile.get("protocols"))
         if cached_url:
             if not openai_base_url and "openai_chat_completions" in protocols:

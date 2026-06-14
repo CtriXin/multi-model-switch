@@ -526,14 +526,23 @@ def _model_source_readiness(
         status = "needs_init"
         headline = "Preview root needs registry DB initialization."
         next_action = {"label": "Initialize preview root", "command": "./mmf preview init --json"}
-    elif route_count <= 0:
-        status = "needs_import"
-        headline = "Preview DB has no route candidates yet."
-        next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}
+    elif bundle.get("verified") and bundle.get("runtime_ready") is True:
+        status = "ready"
+        watchdog_root = shlex.quote(str(root))
+        headline = "Preview root is ready: DB candidates, latest-approved bundle, and runtime routes verify."
+        next_action = {
+            "label": "Optional: run read-only watchdog check",
+            "command": f"scripts/mms_health_watchdog.py --config-dir {watchdog_root} --require-bundle --dry-run --print-json",
+        }
     elif not bundle.get("verified"):
-        status = "needs_publish"
-        headline = "Latest-approved bundle is missing or failed manifest verification."
-        next_action = {"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"}
+        if route_count <= 0:
+            status = "needs_import"
+            headline = "Preview DB has no route candidates yet."
+            next_action = {"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"}
+        else:
+            status = "needs_publish"
+            headline = "Latest-approved bundle is missing or failed manifest verification."
+            next_action = {"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"}
     elif bundle.get("runtime_ready") is not True:
         status = "verified_not_runtime_ready"
         if missing_urls > 0:
@@ -834,6 +843,8 @@ def preview_doctor(
     candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
     bundle = source.get("generated_bundle") if isinstance(source.get("generated_bundle"), dict) else {}
     secrets = _preview_secret_backend_summary(root)
+    legacy_candidate_count = int(candidates.get("provider_route_count") or 0)
+    bundle_runtime_ready = bundle.get("verified") and bundle.get("runtime_ready") is True
 
     checks = [
         {
@@ -848,8 +859,8 @@ def preview_doctor(
         },
         {
             "id": "legacy_candidates",
-            "ok": int(candidates.get("provider_route_count") or 0) > 0,
-            "detail": f"provider_routes={int(candidates.get('provider_route_count') or 0)}",
+            "ok": legacy_candidate_count > 0 or bundle_runtime_ready,
+            "detail": f"provider_routes={legacy_candidate_count}",
         },
         {
             "id": "latest_bundle",
@@ -870,12 +881,20 @@ def preview_doctor(
     elif registry_db.get("status") != "ok":
         overall = "needs_init"
         next_actions.append({"label": "Initialize preview root", "command": "./mmf preview init --json"})
-    elif int(candidates.get("provider_route_count") or 0) <= 0:
-        overall = "needs_import"
-        next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})
+    elif bundle.get("verified") and bundle.get("runtime_ready") is True:
+        overall = "ready"
+        watchdog_root = shlex.quote(str(root))
+        next_actions.append({
+            "label": "Optional: run read-only watchdog check",
+            "command": f"scripts/mms_health_watchdog.py --config-dir {watchdog_root} --require-bundle --dry-run --print-json",
+        })
     elif not bundle.get("verified"):
-        overall = "needs_publish"
-        next_actions.append({"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"})
+        if int(candidates.get("provider_route_count") or 0) <= 0:
+            overall = "needs_import"
+            next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})
+        else:
+            overall = "needs_publish"
+            next_actions.append({"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"})
     elif bundle.get("runtime_ready") is not True:
         overall = "verified_not_runtime_ready"
         if int(bundle.get("router_missing_base_url_count") or 0) > 0:
@@ -1769,16 +1788,23 @@ def _provider_route_models(provider: Mapping[str, Any], *, ignore_fallback_model
     return result
 
 
+def _is_redacted_secret_token(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return text in {"<redacted>", "[redacted]", "***", "****"} or "***" in text or "****" in text
+
+
 def _provider_route_secret_ref(provider: Mapping[str, Any], credential_provider_ids: set[str]) -> tuple[str, str]:
     provider_id = str(provider.get("id") or provider.get("provider_id") or "default").strip() or "default"
-    explicit_ref = str(provider.get("secret_ref") or "").strip()
-    if explicit_ref:
-        return explicit_ref, "provider.secret_ref"
     if provider_id in credential_provider_ids:
         return f"pending-webui:{_secret_ref_part(provider_id)}:api_key", "credential_update"
+    explicit_ref = str(provider.get("secret_ref") or "").strip()
+    if explicit_ref and not _is_redacted_secret_token(explicit_ref):
+        return explicit_ref, "provider.secret_ref"
     for field in ("api_key", "openai_api_key", "anthropic_api_key"):
         value = str(provider.get(field) or "").strip()
-        if value:
+        if value and not _is_redacted_secret_token(value):
             return f"legacy-config:{_secret_ref_part(provider_id)}:{field}", f"config.{field}"
     return "", ""
 
@@ -2088,6 +2114,11 @@ def _route_scoped_candidate_payload(
     root = root.expanduser()
     profiles_payload = candidate_payload.get("profile") if isinstance(candidate_payload.get("profile"), Mapping) else {}
     profiles = profiles_payload.get("profiles") if isinstance(profiles_payload.get("profiles"), Mapping) else {}
+    candidate_provider_ids = {
+        str(provider_id or "").strip()
+        for provider_id in profiles.keys()
+        if str(provider_id or "").strip()
+    }
     scoped_hidden: dict[str, set[str]] = {}
     scoped_enabled: dict[str, bool] = {}
     for provider_id in scope:
@@ -2104,8 +2135,12 @@ def _route_scoped_candidate_payload(
         if route_id
     }
     preserved_entries: list[dict[str, Any]] = []
+    removed_provider_ids: set[str] = set()
     for entry in _latest_approved_route_entries(root):
         provider_id = str(entry.get("provider_id") or "").strip()
+        if provider_id and provider_id not in candidate_provider_ids:
+            removed_provider_ids.add(provider_id)
+            continue
         if provider_id in scope:
             model = str(entry.get("model") or "").strip()
             route_id = _provider_route_identity(model, provider_id)
@@ -2133,6 +2168,7 @@ def _route_scoped_candidate_payload(
             "refreshed_provider_ids": sorted(refresh_scope),
             "scoped_route_count": len(scoped_entries),
             "preserved_route_count": len(preserved_entries),
+            "removed_provider_ids": sorted(removed_provider_ids),
         }
     )
     payload["skipped"] = skipped
