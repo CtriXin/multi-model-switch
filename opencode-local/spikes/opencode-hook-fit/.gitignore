@@ -1,0 +1,2 @@
+# Local spike run artifacts can include large OpenCode DBs, snapshots, and logs.
+artifacts/

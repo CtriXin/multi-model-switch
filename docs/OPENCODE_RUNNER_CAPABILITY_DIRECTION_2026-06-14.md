@@ -2,7 +2,7 @@
 
 Date: 2026-06-14
 Owner: Codex committee host
-Status: frozen direction pending hook-fit spike
+Status: frozen direction; phase-1 hook-fit spike returned partial_blocked
 
 ## Goal
 
@@ -482,6 +482,29 @@ The spike is successful only if it demonstrates payload shape and timing fit, no
 - Subagent dispatch uses only `contract_ref`-bounded or budgeted payloads; a negative test rejects full-state injection.
 - Session-local plugin/skill/tool directories are created without persisting artifacts into the global `~/.config/opencode/` root.
 - One end-to-end loop proves: open task -> hydrate -> work -> finish request -> done-gate mediated closeout, with `mommy` + `state-core` remaining the only workflow authorities.
+
+## Phase-1 Spike Result Update
+
+Phase 1 of `opencode-local/spikes/opencode-hook-fit/` returned `partial_blocked` on 2026-06-14.
+
+Key result:
+
+- session-local OpenCode plugins load correctly;
+- legacy `/session/{sessionID}/summarize` can trigger `experimental.session.compacting`;
+- `/api/session/{sessionID}/compact` exists in OpenAPI but returned 503 `V2 session compact is not available yet` in OpenCode `1.15.13`;
+- the hook return string was not proven to survive as a durable restore packet after compaction;
+- boundary kill-switch B was not run because fail-fast stopped at kill-switch A.
+
+Updated implication:
+
+- do not start the OpenCode adapter MVP yet;
+- treat compaction restore as experimental/optional until a future run proves durable post-compaction restore;
+- required continuity should be narrowed toward external session-close / pickup artifacts controlled by `opencode-local` or MMF adapter, with compaction injection as an optimization.
+
+Evidence:
+
+- `opencode-local/spikes/opencode-hook-fit/PHASE1_EVIDENCE.md`
+- `opencode-local/spikes/opencode-hook-fit/RESULT.md`
 
 ## Final Decision Snapshot
 

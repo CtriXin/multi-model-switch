@@ -1,10 +1,12 @@
 # OpenCode Hook-Fit Spike
 
 Date: 2026-06-15
-Status: outline
+Status: phase-1 partial_blocked
 Owner: Codex
 
 Phase 1 only runs the two kill-switch checks; all other surfaces remain `not_run` until Phase 1 passes.
+
+Phase 1 result: `partial_blocked`. Do not expand into Phase 2 or adapter MVP until the compaction continuity requirement is narrowed or re-proven. See `PHASE1_EVIDENCE.md` and `RESULT.md`.
 
 ## Purpose
 
