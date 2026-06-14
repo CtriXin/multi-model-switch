@@ -43,11 +43,20 @@ Agent-Step: 0.0.1
 
 ## Worktree Safety
 
+- At the start of each coding/review turn, run `git pull --ff-only` for the current branch before editing, unless local changes make that unsafe; if pull is blocked, stop and report the exact blocker.
 - Assume the worktree may contain user changes.
 - Never revert or overwrite unrelated changes without explicit user request.
 - Make surgical changes: every changed line should trace to the current task.
 - Before global config changes, irreversible deletion, force-push, or adding dependencies, explicitly tell the user first.
 - If changing project conventions, update this file or the relevant rule file.
+
+## Issue / PR / Committee Gate
+
+- MMF/MMS development should track problems through issues, submit changes through PRs, and require committee review before merge.
+- Agents must not merge PRs or bypass the committee review gate.
+- Agents must not create commits unless the human explicitly approves that specific commit.
+- If commit approval is granted, keep the commit scoped, verified, and traceable; do not include unrelated dirty files.
+- Because this repo is developed from multiple computers, always check remote freshness before work and avoid assuming the local worktree is current.
 
 ## Protected Surfaces
 

@@ -246,6 +246,10 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 
 为了降低多 agent 共用工作树时的污染风险：
 
+- 每次开始开发或审查前，先对当前分支执行 `git pull --ff-only`；如果本地改动导致无法安全 pull，停止并报告阻塞原因，不要猜测本地已经最新。
+- MMF/MMS 后续问题必须先通过 issue 记录，改动通过 PR 提交，并在合并前经过 committee review。
+- agent 不得自行 merge PR，也不得绕过 committee review gate。
+- agent 不得自行创建 commit；只有 human 明确同意本次 commit 后才允许提交。
 - 一个迭代完成后，agent 必须先询问用户是否提交当前改动
 - 在用户没有明确回复前，不应默认进入下一轮实质性改动
 - 如果用户选择暂不提交，agent 在继续前应把“当前仍未提交”视为显式风险写明

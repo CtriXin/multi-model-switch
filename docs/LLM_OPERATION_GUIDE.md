@@ -179,6 +179,13 @@ After substantive changes, write a local regression report under:
 
 ## Commit Rules For LLMs
 
+Before commit planning:
+
+- Run `git pull --ff-only` on the active branch before editing/reviewing; if local changes block a safe pull, stop and report.
+- Record issues through the issue tracker, submit changes through PRs, and require committee review before merge.
+- Do not merge PRs or bypass committee review.
+- Do not create a commit unless the human explicitly approves that specific commit.
+
 For every agent-created commit:
 
 - keep the commit scoped to the requested change

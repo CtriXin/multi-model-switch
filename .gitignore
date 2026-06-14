@@ -116,3 +116,19 @@ issue/
 # local runtime state
 .mms/
 .xmem/
+
+# local AI tool overlays / generated skill caches
+.agents/
+.cursor/skills/
+.gemini/skills/
+.kiro/skills/
+.qoder/skills/
+.opencode/skills/
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock
+.opencode/.gitignore
+.impeccable/design.json
+.impeccable/live/
+.review-hub/
