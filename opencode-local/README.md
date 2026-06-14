@@ -20,6 +20,7 @@ It is intentionally not an OpenCode fork, not a patched OpenCode distribution, a
 | `capabilities/` | Reusable policies such as context projection, closeout bridge, continuity bridge, and subagent dispatch discipline. |
 | `adapters/opencode/` | OpenCode binding notes and future adapter code that uses official OpenCode plugin/tool/skill/agent surfaces. |
 | `profiles/` | MMF/MMS profile binding documents. Profiles decide how a capability pack is attached, not what task truth means. |
+| `spikes/` | Proof-first validation work such as hook-fit spikes, evidence templates, and bounded experiments before adapter MVP work. |
 | `examples/` | Non-secret examples for generated profile/pack manifests. |
 
 ## Design Rules
