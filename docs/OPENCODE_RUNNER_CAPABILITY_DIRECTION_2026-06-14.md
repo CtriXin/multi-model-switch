@@ -485,7 +485,7 @@ The spike is successful only if it demonstrates payload shape and timing fit, no
 
 ## Phase-1 Spike Result Update
 
-Phase 1 of `opencode-local/spikes/opencode-hook-fit/` returned `partial_blocked` on 2026-06-14.
+Phase 1 now lives in `../opencode-scaffolding/spikes/opencode-hook-fit/` and returned `partial_blocked` on 2026-06-14.
 
 Key result:
 
@@ -499,12 +499,12 @@ Updated implication:
 
 - do not start the OpenCode adapter MVP yet;
 - treat compaction restore as experimental/optional until a future run proves durable post-compaction restore;
-- required continuity should be narrowed toward external session-close / pickup artifacts controlled by `opencode-local` or MMF adapter, with compaction injection as an optimization.
+- required continuity should be narrowed toward external session-close / pickup artifacts controlled by `opencode-scaffolding` or the MMF adapter, with compaction injection as an optimization.
 
 Evidence:
 
-- `opencode-local/spikes/opencode-hook-fit/PHASE1_EVIDENCE.md`
-- `opencode-local/spikes/opencode-hook-fit/RESULT.md`
+- `../opencode-scaffolding/spikes/opencode-hook-fit/PHASE1_EVIDENCE.md`
+- `../opencode-scaffolding/spikes/opencode-hook-fit/RESULT.md`
 
 ## Final Decision Snapshot
 
