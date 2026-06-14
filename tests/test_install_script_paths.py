@@ -464,6 +464,16 @@ def test_install_script_copies_bundled_session_assets():
     assert "$MMS_HOME/assets/session-assets" in text
 
 
+def test_install_script_copies_bundled_provider_profiles():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    profile_text = (ROOT_DIR / "config" / "provider-profiles.json").read_text(encoding="utf-8")
+
+    assert 'copy_dir_safely "$SOURCE_DIR/config" "$MMS_HOME/config"' in text
+    assert "glm-5.2" in profile_text
+    assert "kimi-k2.7-code" in profile_text
+    assert "minimax-m3" in profile_text
+
+
 def test_install_script_retires_mmc_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 

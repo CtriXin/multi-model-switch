@@ -1836,7 +1836,21 @@ def is_legacy_global_nsr(command):
     )
 
 
-# read-once dedup removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
+def read_once_key(command):
+    text = normalize(command)
+    prefix = ""
+    if text.startswith("READ_ONCE_DIFF=1 "):
+        prefix = "READ_ONCE_DIFF=1 "
+        text = text[len(prefix):]
+    bash_wrapped = False
+    if text.startswith("/bin/bash "):
+        bash_wrapped = True
+        text = text[len("/bin/bash "):]
+    if ".claude/read-once/" not in text:
+        return "", False
+    if not (text.endswith("/hook.sh") or text.endswith("/compact.sh")):
+        return "", False
+    return prefix + text, bash_wrapped
 
 
 def cleanup_file(path):
@@ -1867,6 +1881,14 @@ def cleanup_file(path):
                 continue
             matcher = str(group.get("matcher") or "").strip()
             kept_hooks = []
+            read_once_bash_keys = set()
+            read_once_seen = set()
+            for hook in hook_items:
+                if not isinstance(hook, dict):
+                    continue
+                key, bash_wrapped = read_once_key(hook.get("command"))
+                if key and bash_wrapped:
+                    read_once_bash_keys.add(key)
             for hook in hook_items:
                 if not isinstance(hook, dict):
                     kept_hooks.append(hook)
@@ -1875,6 +1897,12 @@ def cleanup_file(path):
                 if is_legacy_global_nsr(command):
                     removed += 1
                     continue
+                read_once_canonical, read_once_bash = read_once_key(command)
+                if read_once_canonical:
+                    if (not read_once_bash and read_once_canonical in read_once_bash_keys) or read_once_canonical in read_once_seen:
+                        removed += 1
+                        continue
+                    read_once_seen.add(read_once_canonical)
                 kept_hooks.append(hook)
             if kept_hooks:
                 cleaned = dict(group)
@@ -4405,6 +4433,7 @@ cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
 copy_dir_safely "$SOURCE_DIR/assets" "$MMS_HOME/assets" "assets 目录" "assets directory"
+copy_dir_safely "$SOURCE_DIR/config" "$MMS_HOME/config" "config 目录" "config directory"
 copy_dir_safely "$SOURCE_DIR/mms_config_web_static" "$MMS_HOME/mms_config_web_static" "WebUI 静态资源目录" "WebUI static assets directory"
 copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor" "vendor 目录" "vendor directory"
 copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scripts directory"
