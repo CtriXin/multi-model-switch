@@ -86,11 +86,14 @@
                     <label class="check" title="当前主要是模型 metadata / 手动 hint；OpenRouter 快速匹配不会默认写入这一项。"><input data-truth-field="tool_use" type="checkbox"><span>工具（手动项）</span></label>
                     <label class="check"><input data-truth-field="reasoning" type="checkbox" checked><span>推理</span></label>
                     <label class="check"><input data-truth-field="thinking" type="checkbox" checked><span>Think</span></label>
+                    <label class="check"><input data-truth-field="thinking_control" type="checkbox" checked><span>Effort 控制</span></label>
+                    <label class="check"><input data-truth-field="reasoning_effort" type="checkbox" checked><span>默认 Effort</span></label>
                     <label class="check"><input data-truth-field="one_m_context" type="checkbox" checked><span>1M</span></label>
                   </div>
                   <div class="btns">
                     <button id="refreshCapabilityTruth" class="secondary">用本地已知快照刷新</button>
                     <button id="refreshOpenRouterCatalog" class="secondary">从 OpenRouter catalog 快速匹配</button>
+                    <button id="refreshMmfOfficialOverrides" class="secondary">应用 MMF 官方覆盖</button>
                   </div>
                 </div>
                 <div class="btns">

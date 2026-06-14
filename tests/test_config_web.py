@@ -679,7 +679,7 @@ def test_config_web_bundle_runtime_ignores_remote_probe_cache(monkeypatch):
     assert rows[0]["source"] == "approved"
 
 
-def test_config_web_model_capability_defaults_cover_mimo_and_minimax_m3():
+def test_config_web_model_capability_defaults_are_profile_backed_not_hardcoded():
     cfg = {
         "providers": [
             {
@@ -699,14 +699,14 @@ def test_config_web_model_capability_defaults_cover_mimo_and_minimax_m3():
     )
     rows = {row["id"]: row["capabilities"] for row in snapshot["providers"][0]["models"]}
 
-    assert rows["mimo-v2.5"]["vision"] is True
-    assert rows["mimo-v2.5"]["tool_use"] is True
+    assert rows["mimo-v2.5"]["vision"] is False
+    assert rows["mimo-v2.5"]["tool_use"] is False
     assert rows["mimo-v2.5"]["reasoning"] is True
     assert rows["mimo-v2.5"]["long_context"] is True
     assert rows["mimo-v2.5-pro"]["vision"] is False
-    assert rows["mimo-v2.5-pro"]["tool_use"] is True
+    assert rows["mimo-v2.5-pro"]["tool_use"] is False
     assert rows["mimo-v2.5-pro"]["reasoning"] is True
-    assert rows["MiniMax-M3"]["tool_use"] is True
+    assert rows["MiniMax-M3"]["tool_use"] is False
     assert rows["MiniMax-M3"]["reasoning"] is True
     assert rows["MiniMax-M3"]["long_context"] is True
 
@@ -4372,11 +4372,15 @@ def test_config_web_capability_truth_button_and_fields_are_present():
 
     assert "refreshCapabilityTruth" in html
     assert "refreshOpenRouterCatalog" in html
+    assert "refreshMmfOfficialOverrides" in html
     assert "/api/model-capabilities/refresh" in html
     assert "data-truth-field=\"context_window_tokens\"" in html
     assert "data-truth-field=\"vision\"" in html
+    assert "data-truth-field=\"thinking_control\"" in html
+    assert "data-truth-field=\"reasoning_effort\"" in html
     assert "已知能力快照" in html
     assert "OpenRouter catalog" in html
+    assert "MMF 官方覆盖" in html
     assert "不是厂商官方真值" in html
     assert "openrouter_catalog:openrouter" in html
     assert "providerPayloadForCapabilityRefresh" in html
@@ -4418,3 +4422,143 @@ def test_setup_web_requests_are_guard_exempt():
     assert mms_core._is_config_help_request(["web"])
     assert not mms_core._config_subcommand_mutates_legacy_config(["web"])
     assert not mms_core._config_subcommand_mutates_legacy_config(["web", "--print-summary"])
+
+
+
+def test_config_web_reasoning_effort_and_control_are_saved_to_model_policy(tmp_path):
+    payload = _large_route_draft_payload(count=1)
+    row = payload["draft"]["providers"][0]["models"][0]
+    row["id"] = "glm-5.2"
+    row["visible"] = True
+    row["policy_touched"] = True
+    row["capabilities"] = {
+        "text": True,
+        "reasoning": True,
+        "thinking": True,
+        "reasoning_effort": "max",
+        "thinking_control": {
+            "supported": True,
+            "path": "CLAUDE_CODE_EFFORT_LEVEL",
+            "control_type": "CLAUDE_CODE_EFFORT_LEVEL",
+            "default": "max",
+            "allowed": ["high", "max"],
+            "map": {"xhigh": "max"},
+        },
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    caps = plan["model_policy"]["models"]["glm-5.2"]["capabilities"]
+    assert caps["reasoning_effort"] == "max"
+    assert caps["thinking_control"]["path"] == "CLAUDE_CODE_EFFORT_LEVEL"
+    assert caps["thinking_control"]["allowed"] == ["high", "max"]
+
+
+
+def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [
+                {"id": "glm-5.2", "visible": True},
+                {"id": "kimi-k2.7-code", "visible": True},
+                {"id": "MiniMax-M3", "visible": True},
+            ],
+        },
+        "fields": [
+            "context_window_tokens",
+            "max_output_tokens",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "reasoning_effort",
+            "one_m_context",
+        ],
+        "refresh_sources": False,
+        "mmf_official_overrides": True,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["source_mode"] == "mmf_official_overrides"
+    assert result["force_apply"] is True
+    assert result["matched_model_count"] == 3
+    assert result["catalog_sources"][0]["source"] == "mmf_official_overrides"
+    assert result["model_sources"]["glm-5.2"]["context_window_tokens"]["source_name"] == "MMF 官方覆盖"
+
+    glm = result["model_capabilities"]["glm-5.2"]
+    assert glm["context_window_tokens"] == 1_000_000
+    assert glm["max_output_tokens"] == 131_072
+    assert glm["reasoning_effort"] == "max"
+
+    kimi = result["model_capabilities"]["kimi-k2.7-code"]
+    assert kimi["context_window_tokens"] == 262_144
+    assert kimi["max_output_tokens"] == 32_768
+
+    minimax = result["model_capabilities"]["MiniMax-M3"]
+    assert minimax["context_window_tokens"] == 1_000_000
+    assert minimax["max_output_tokens"] == 131_072
+    assert minimax["thinking_control"]["path"] == "thinking.type"
+
+
+
+def test_config_web_mmf_official_overrides_do_not_downgrade_openrouter_capabilities(tmp_path):
+    models = ["google/gemini-2.5-pro", "minimax/minimax-m3", "z-ai/glm-5.2"]
+    payload = {
+        "provider": {
+            "id": "openrouter",
+            "openai_base_url": "https://openrouter.ai/api/v1",
+            "models": [
+                {
+                    "id": model,
+                    "visible": True,
+                    "capabilities": {
+                        "vision": True,
+                        "tool_use": True,
+                        "reasoning": True,
+                        "thinking": True,
+                    },
+                }
+                for model in models
+            ],
+        },
+        "fields": [
+            "context_window_tokens",
+            "max_output_tokens",
+            "vision",
+            "tool_use",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "reasoning_effort",
+            "one_m_context",
+        ],
+        "refresh_sources": False,
+        "mmf_official_overrides": True,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["matched_model_count"] == 3
+    assert result["model_capabilities"]["google/gemini-2.5-pro"]["thinking_control"]["path"] == "thinkingConfig.thinkingBudget"
+    assert result["model_capabilities"]["minimax/minimax-m3"]["max_output_tokens"] == 131_072
+    assert result["model_capabilities"]["z-ai/glm-5.2"]["reasoning_effort"] == "max"
+    for caps in result["model_capabilities"].values():
+        for field in ("vision", "tool_use", "reasoning", "thinking"):
+            assert caps.get(field) is not False
+    for change in result["changes"]:
+        assert change["after"] is not False

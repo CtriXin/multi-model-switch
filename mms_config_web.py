@@ -130,6 +130,8 @@ _CAPABILITY_TRUTH_REFRESH_FIELDS = (
     "tool_use",
     "reasoning",
     "thinking",
+    "thinking_control",
+    "reasoning_effort",
     "one_m_context",
 )
 _OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
@@ -865,12 +867,12 @@ def _model_capability_defaults(
     lower = model.lower().rsplit("/", 1)[-1]
     caps = {
         "text": True,
-        "vision": lower in _KNOWN_VISION_MODELS or lower.startswith(("claude-", "sonnet-", "opus-", "haiku-", "gemini-")),
-        "tool_use": lower.startswith(("claude-", "gpt-", "o", "qwen", "kimi", "glm", "minimax", "mimo", "gemini-")),
-        "reasoning": any(hint in lower for hint in _REASONING_HINTS),
-        "thinking": lower.startswith(("claude-", "sonnet-", "opus-", "haiku-", "gemini-", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max", "kimi", "k2.", "glm", "deepseek", "minimax")),
-        "long_context": "1m" in lower or "long" in lower or lower.startswith(("qwen3", "kimi-k2", "gpt-5", "claude-", "mimo-v2.5", "minimax-m3")),
-        "cache_sensitive": lower.startswith(_CACHE_SENSITIVE_PREFIXES),
+        "vision": False,
+        "tool_use": False,
+        "reasoning": False,
+        "thinking": False,
+        "long_context": "1m" in lower or "long" in lower,
+        "cache_sensitive": False,
     }
     try:
         from mms_capability_resolver import resolve_model_capabilities
@@ -879,6 +881,8 @@ def _model_capability_defaults(
         if resolved.get("supports_thinking") is True:
             caps["thinking"] = True
             caps["reasoning"] = True
+        if isinstance(resolved.get("thinking_control"), dict) and resolved.get("sources", {}).get("thinking_control") != "conservative_fallback":
+            caps["thinking_control"] = _truth_thinking_control(resolved["thinking_control"])
         context_window = int(resolved.get("context_window_tokens") or 0)
         if context_window > 0 and resolved.get("sources", {}).get("context_window_tokens") != "conservative_fallback":
             caps["context_window_tokens"] = context_window
@@ -920,6 +924,10 @@ def _model_capability_defaults(
         )
         if policy_max_output:
             caps["max_output_tokens"] = policy_max_output
+        if isinstance(policy_caps.get("thinking_control"), dict):
+            caps["thinking_control"] = _truth_thinking_control(policy_caps["thinking_control"])
+        if _safe_text(policy_caps.get("reasoning_effort")):
+            caps["reasoning_effort"] = _safe_text(policy_caps["reasoning_effort"])
     return caps
 
 
@@ -932,6 +940,8 @@ def capability_truth_refresh_fields() -> list[dict[str, str]]:
         "tool_use": ("工具", "结构化 supported_parameters 包含 tools/tool_choice"),
         "reasoning": ("推理", "supports_thinking 或结构化 reasoning 参数"),
         "thinking": ("Think", "supports_thinking / thinking_control"),
+        "thinking_control": ("Effort 控制", "结构化 thinking / effort 控制路径、默认值和可选档位"),
+        "reasoning_effort": ("默认 Effort", "模型默认 reasoning effort 档位"),
         "one_m_context": ("1M", "one_million_context 或 context >= 1M"),
     }
     return [
@@ -1048,6 +1058,28 @@ def _truth_field_source(field: str, row: dict[str, Any], source_path: str = "") 
     return result
 
 
+def _truth_thinking_control(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, Any] = {}
+    for key in ("supported", "control_type", "path", "default", "numeric_budget_tokens"):
+        if key in value:
+            result[key] = copy.deepcopy(value[key])
+    for key in ("allowed", "map"):
+        if isinstance(value.get(key), (list, dict)):
+            result[key] = copy.deepcopy(value[key])
+    return result
+
+def _truth_control_has_positive_signal(control: dict[str, Any]) -> bool:
+    if not isinstance(control, dict):
+        return False
+    if control.get("supported") is True:
+        return True
+    path = _safe_text(control.get("path"))
+    control_type = _safe_text(control.get("control_type")).lower()
+    return bool(path) or bool(control_type and control_type != "none")
+
+
 def _truth_caps_from_row(row: dict[str, Any], *, fields: set[str], source_path: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
     caps: dict[str, Any] = {}
     sources: dict[str, Any] = {}
@@ -1094,6 +1126,20 @@ def _truth_caps_from_row(row: dict[str, Any], *, fields: set[str], source_path: 
         if "reasoning" in fields:
             caps["reasoning"] = bool(row["supports_thinking"])
             sources["reasoning"] = _truth_field_source("reasoning", row, source_path)
+    thinking_control = _truth_thinking_control(row.get("thinking_control"))
+    if thinking_control and "thinking_control" in fields:
+        caps["thinking_control"] = thinking_control
+        sources["thinking_control"] = _truth_field_source("thinking_control", row, source_path)
+        if "thinking" in fields and "thinking" not in caps:
+            caps["thinking"] = bool(thinking_control.get("supported", True))
+            sources["thinking"] = _truth_field_source("thinking", row, source_path)
+        if "reasoning" in fields and "reasoning" not in caps:
+            caps["reasoning"] = bool(thinking_control.get("supported", True))
+            sources["reasoning"] = _truth_field_source("reasoning", row, source_path)
+    effort_default = _safe_text(row.get("reasoning_effort") or row.get("reasoning_effort_default"))
+    if effort_default and "reasoning_effort" in fields:
+        caps["reasoning_effort"] = effort_default
+        sources["reasoning_effort"] = _truth_field_source("reasoning_effort", row, source_path)
 
     params = _truth_supported_parameters(row)
     if "tool_use" in fields and {"tools", "tool_choice", "parallel_tool_calls"}.intersection(params):
@@ -1327,6 +1373,106 @@ def _load_capability_truth_payloads(config_path: str = "", *, refresh_sources: b
     return payloads, refresh_reports, warnings
 
 
+def _mmf_official_overrides_payload(
+    provider: dict[str, Any],
+    model_ids: list[str],
+    *,
+    source_path: str = "",
+) -> dict[str, Any]:
+    """Build a draft-only capability payload from MMS-maintained provider profiles."""
+    checked = _now_iso()
+    source = source_path or str(Path(__file__).resolve().parent / "config" / "provider-profiles.json")
+    rows: list[dict[str, Any]] = []
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+        from mms_provider_profiles import load_provider_profiles
+        from mms_provider_profiles import profile_thinking_capabilities
+    except Exception:
+        return {
+            "schema": "mms.model_capability.mmf_official_overrides.v1",
+            "source": "mmf_official_overrides",
+            "source_layer": "official",
+            "source_path": source,
+            "checked_at": checked,
+            "models": rows,
+        }
+
+    profiles = load_provider_profiles()
+    runtime = provider if isinstance(provider, dict) else {}
+    provider_id = _safe_text(runtime.get("id") or runtime.get("provider_id"))
+    base_url = _safe_text(runtime.get("anthropic_base_url") or runtime.get("openai_base_url") or runtime.get("base_url"))
+    for model_id in model_ids:
+        model = _safe_text(model_id)
+        if not model:
+            continue
+        try:
+            resolved = resolve_model_capabilities(
+                model,
+                runtime=runtime,
+                provider_id=provider_id,
+                base_url=base_url,
+                approved_facts={},
+                model_policy={},
+                provider_profiles=profiles,
+            )
+        except Exception:
+            continue
+        sources = resolved.get("sources") if isinstance(resolved.get("sources"), dict) else {}
+        row: dict[str, Any] = {
+            "alias": model,
+            "model": model,
+            "model_id": model,
+            "confidence": "mmf_official_profile",
+            "source_layer": "official",
+            "source_name": "MMF 官方覆盖",
+            "checked_at": checked,
+            "evidence": [{"url": source, "source": "mms_provider_profiles"}],
+        }
+        has_profile_value = False
+        if sources.get("context_window_tokens") == "provider_profile":
+            row["official_context_window_tokens"] = resolved.get("context_window_tokens")
+            has_profile_value = True
+        if sources.get("max_output_tokens") == "provider_profile":
+            row["official_max_output_tokens"] = resolved.get("max_output_tokens")
+            has_profile_value = True
+        # MMF official overlays are additive: never downgrade OpenRouter/user enabled booleans to false.
+        if sources.get("supports_vision") == "provider_profile" and resolved.get("supports_vision") is True:
+            row["supports_vision"] = resolved.get("supports_vision")
+            has_profile_value = True
+        if sources.get("supports_thinking") == "provider_profile" and resolved.get("supports_thinking") is True:
+            row["supports_thinking"] = resolved.get("supports_thinking")
+            has_profile_value = True
+        if sources.get("thinking_control") == "provider_profile" and isinstance(resolved.get("thinking_control"), dict):
+            thinking_control = _truth_thinking_control(resolved["thinking_control"])
+            if _truth_control_has_positive_signal(thinking_control):
+                row["thinking_control"] = thinking_control
+            if "thinking_control" in row:
+                control_path = _safe_text(row["thinking_control"].get("path")).lower()
+                control_type = _safe_text(row["thinking_control"].get("control_type")).lower()
+                default_effort = _safe_text(row["thinking_control"].get("default"))
+                if default_effort and ("effort" in control_path or "effort" in control_type):
+                    row["reasoning_effort_default"] = default_effort
+                has_profile_value = True
+        try:
+            profile_caps = profile_thinking_capabilities(model, runtime=runtime, provider_id=provider_id, base_url=base_url)
+        except Exception:
+            profile_caps = {}
+        effort_default = _safe_text(profile_caps.get("effort_default"))
+        if effort_default:
+            row["reasoning_effort_default"] = effort_default
+            has_profile_value = True
+        if has_profile_value:
+            rows.append(row)
+    return {
+        "schema": "mms.model_capability.mmf_official_overrides.v1",
+        "source": "mmf_official_overrides",
+        "source_layer": "official",
+        "source_path": source,
+        "checked_at": checked,
+        "models": rows,
+    }
+
+
 def refresh_model_capability_truth(
     cfg: dict[str, Any] | None,
     payload: dict[str, Any] | None,
@@ -1347,16 +1493,33 @@ def refresh_model_capability_truth(
     fields = requested_fields.intersection(_CAPABILITY_TRUTH_REFRESH_FIELDS) or set(_CAPABILITY_TRUTH_REFRESH_FIELDS)
     model_ids = _normalize_model_list(payload.get("models")) or _truth_model_ids_from_provider(provider)
     use_openrouter_catalog = _truthy(payload.get("openrouter_catalog"), False)
+    use_mmf_official = _truthy(payload.get("mmf_official_overrides"), False)
     truth_payloads, refresh_reports, warnings = _load_capability_truth_payloads(
         config_path,
-        refresh_sources=_truthy(payload.get("refresh_sources"), True),
+        refresh_sources=_truthy(payload.get("refresh_sources"), True) and not use_mmf_official,
     )
     # OpenRouter refresh should mean OpenRouter-only matching; the local snapshot button covers official/approved facts.
-    if use_openrouter_catalog:
+    if use_openrouter_catalog or use_mmf_official:
         truth_payloads = []
         refresh_reports = []
     catalog_sources: list[dict[str, Any]] = []
-    if use_openrouter_catalog:
+    if use_mmf_official:
+        official_truth = _mmf_official_overrides_payload(provider, model_ids)
+        official_truth["_source_path"] = _safe_text(official_truth.get("source_path"))
+        truth_payloads.insert(0, official_truth)
+        catalog_sources.append(
+            {
+                "source": "mmf_official_overrides",
+                "source_layer": "official",
+                "transport": "local",
+                "source_path": official_truth.get("source_path"),
+                "model_count": len(official_truth.get("models") or []),
+                "checked_at": official_truth.get("checked_at"),
+                "confidence": "mmf_official_profile",
+                "note": "MMF 官方覆盖来自仓库维护的 provider-profiles，用于覆盖 OpenRouter catalog 的 provider 参考值。",
+            }
+        )
+    if use_openrouter_catalog and not use_mmf_official:
         source_url = _safe_text(payload.get("openrouter_url") or _OPENROUTER_MODELS_API_URL)
         try:
             timeout = float(payload.get("openrouter_timeout") or 20.0)
@@ -1430,12 +1593,13 @@ def refresh_model_capability_truth(
         "schema": "mms.config_web.model_capability_snapshot_refresh.v1",
         "provider_id": provider.get("id"),
         "mode": "draft_only",
-        "source_mode": "openrouter_catalog" if catalog_sources else "known_snapshots",
+        "source_mode": "mmf_official_overrides" if use_mmf_official else "openrouter_catalog" if catalog_sources else "known_snapshots",
         "fields": [field for field in _CAPABILITY_TRUTH_REFRESH_FIELDS if field in fields],
         "field_config": capability_truth_refresh_fields(),
         "model_count": len(model_ids),
         "matched_model_count": len(model_capabilities),
         "changed_field_count": len(changes),
+        "force_apply": bool(use_mmf_official),
         "model_capabilities": model_capabilities,
         "model_sources": model_sources,
         "changes": changes[:200],
@@ -1443,7 +1607,7 @@ def refresh_model_capability_truth(
         "warnings": warnings,
         "refresh_reports": refresh_reports,
         "catalog_sources": catalog_sources,
-        "note": "只使用结构化 source snapshot、approved capabilities 或 provider catalog 字段；OpenRouter 是快速结构化参考源，不是厂商官方真值；结果只进入页面草稿，保存发布后才生效。",
+        "note": "只使用结构化 source snapshot、approved capabilities、MMF 官方覆盖或 provider catalog 字段；OpenRouter 是快速结构化参考源，不是厂商官方真值；结果只进入页面草稿，保存发布后才生效。",
     }
 
 
@@ -3752,6 +3916,8 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             source = source_map.get("cache_sensitive")
         if source is None and field == "long_context":
             source = source_map.get("context_window_tokens") or source_map.get("one_m_context")
+        if source is None and field == "thinking_control":
+            source = source_map.get("reasoning_effort")
         return sanitize_capability_source(source)
 
     for provider in providers:
@@ -3831,6 +3997,12 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                 max_output_tokens = _normalize_context_tokens(caps.get("max_output_tokens") or caps.get("official_max_output_tokens"))
                 if max_output_tokens:
                     cap_payload["max_output_tokens"] = max_output_tokens
+            if isinstance(caps.get("thinking_control"), dict):
+                control = _truth_thinking_control(caps["thinking_control"])
+                if control:
+                    cap_payload["thinking_control"] = control
+            if _safe_text(caps.get("reasoning_effort")):
+                cap_payload["reasoning_effort"] = _safe_text(caps.get("reasoning_effort")).lower()
             per_model_sources = source_map.get(model_id) if isinstance(source_map.get(model_id), dict) else {}
             if per_model_sources:
                 source_payload = entry.get("capability_sources") if isinstance(entry.get("capability_sources"), dict) else {}
@@ -3846,6 +4018,8 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                     "long_context",
                     "context_window_tokens",
                     "max_output_tokens",
+                    "thinking_control",
+                    "reasoning_effort",
                     "cache_sensitive_transport",
                 ):
                     source = source_for_field(per_model_sources, field)
@@ -4258,6 +4432,8 @@ def _build_review_summary(
         "capabilities.long_context": "长上下文",
         "capabilities.context_window_tokens": "上下文",
         "capabilities.max_output_tokens": "输出上限",
+        "capabilities.thinking_control": "Effort 控制",
+        "capabilities.reasoning_effort": "默认 Effort",
         "capabilities.cache_sensitive": "缓存",
         "capabilities.cache_sensitive_transport": "缓存传输",
         "capabilities.supports_thinking": "支持 Think",

@@ -57,6 +57,21 @@ _CAPABILITY_FIELDS = (
     "body_patch_aliases",
 )
 
+_PROFILE_CAPABILITY_SECTIONS = (
+    "api_formats",
+    "auth_headers",
+    "body_patches",
+    "budget",
+    "context_windows",
+    "endpoints",
+    "effort",
+    "max_output_tokens",
+    "model_aliases",
+    "model_overrides",
+    "parameter_aliases",
+    "thinking",
+)
+
 _CONTEXT_KEYS = (
     "context_window_tokens",
     "max_context_tokens",
@@ -661,7 +676,9 @@ def _resolve_profile(
 
     explicit = _clean(profile_id or runtime.get("profile") or runtime.get("provider_profile"))
     if explicit and isinstance(profiles.get(explicit), Mapping):
-        return explicit, copy.deepcopy(dict(profiles[explicit]))
+        explicit_profile = dict(profiles[explicit])
+        if _profile_has_capability_data(explicit_profile):
+            return explicit, copy.deepcopy(explicit_profile)
 
     provider = _clean(provider_id or runtime.get("id") or runtime.get("provider_id"))
     base = _clean(
@@ -686,6 +703,8 @@ def _resolve_profile(
 
 
 def _profile_match_score(profile_id: str, profile: Mapping[str, Any], *, provider_id: str, base_url: str, model_name: str) -> int:
+    if not _profile_has_capability_data(profile):
+        return 0
     match = profile.get("match") if isinstance(profile.get("match"), Mapping) else {}
     if match.get("profile_only"):
         return 0
@@ -693,21 +712,30 @@ def _profile_match_score(profile_id: str, profile: Mapping[str, Any], *, provide
     provider_l = _lower(provider_id)
     base_l = _lower(base_url)
     model_l = _normalize_model(model_name)
+    model_prefixes = [_lower(item) for item in match.get("model_prefixes") or [] if _lower(item)]
+    model_matched = any(model_l.startswith(token) for token in model_prefixes)
+    require_model_prefix = bool(match.get("require_model_prefix") or match.get("provider_base_requires_model_prefix"))
+    allow_provider_base_match = not (require_model_prefix and model_prefixes and not model_matched)
     for item in match.get("provider_id_contains") or []:
         token = _lower(item)
-        if token and token in provider_l:
+        if allow_provider_base_match and token and token in provider_l:
             score = max(score, 70)
     for item in match.get("base_url_contains") or []:
         token = _lower(item)
-        if token and token in base_l:
+        if allow_provider_base_match and token and token in base_l:
             score = max(score, 90)
-    for item in match.get("model_prefixes") or []:
-        token = _lower(item)
+    for token in model_prefixes:
         if token and model_l.startswith(token):
             score = max(score, 50)
     if profile_id and profile_id in {provider_l, model_l}:
         score = max(score, 80)
     return score
+
+
+def _profile_has_capability_data(profile: Mapping[str, Any]) -> bool:
+    if not isinstance(profile, Mapping):
+        return False
+    return any(isinstance(profile.get(section), Mapping) and bool(profile.get(section)) for section in _PROFILE_CAPABILITY_SECTIONS)
 
 
 def _lookup_model_override(profile: Mapping[str, Any], model_name: str) -> dict[str, Any]:
@@ -773,7 +801,9 @@ def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str) 
 
     path = _select_thinking_path(list(configs_by_path))
     if not path:
-        return _normalize_thinking_control({"supported": bool(thinking.get("supported"))})
+        if isinstance(thinking.get("supported"), bool):
+            return _normalize_thinking_control({"supported": bool(thinking.get("supported"))})
+        return {}
 
     config = configs_by_path.get(path, {})
     control = {

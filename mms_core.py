@@ -2282,6 +2282,34 @@ def _default_reasoning_effort_for_model_info(model_info):
             normalized = normalized.rsplit("/", 1)[-1]
         if _model_matches_account_cli("codex", normalized):
             return _default_gpt_reasoning_effort()
+    try:
+        from mms_capability_resolver import load_default_model_policy
+
+        policy = load_default_model_policy()
+        models = policy.get("models") if isinstance(policy, dict) else {}
+        if isinstance(models, dict):
+            normalized_values = []
+            for item in values:
+                token = str(item or "").strip().lower()
+                if "/" in token:
+                    token = token.rsplit("/", 1)[-1]
+                normalized_values.append(token)
+            for key, entry in models.items():
+                model_key = str(key or "").strip().lower()
+                if "/" in model_key:
+                    model_key = model_key.rsplit("/", 1)[-1]
+                if model_key not in normalized_values or not isinstance(entry, dict):
+                    continue
+                caps = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+                effort = str(caps.get("reasoning_effort") or entry.get("reasoning_effort") or "").strip().lower()
+                if effort in {"low", "medium", "high", "xhigh"}:
+                    return effort
+                if effort in {"none", "minimal"}:
+                    return "low"
+                if effort == "max":
+                    return "xhigh"
+    except Exception:
+        pass
     return "high"
 
 

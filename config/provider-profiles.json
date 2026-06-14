@@ -353,7 +353,8 @@
         ],
         "model_prefixes": [
           "mimo"
-        ]
+        ],
+        "require_model_prefix": true
       },
       "references": [
         "https://openrouter.ai/api/v1/models",
@@ -563,15 +564,20 @@
       "body_patches": {
         "openai_chat": {
           "thinking_on": {
-            "reasoning_split": true
+            "reasoning_split": true,
+            "thinking.type": "adaptive"
           },
           "classify": {
-            "reasoning_split": false
+            "reasoning_split": false,
+            "thinking.type": "disabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
           }
         },
         "anthropic_messages": {
           "thinking_on": {
-            "thinking.type": "enabled"
+            "thinking.type": "adaptive"
           },
           "thinking_off": {
             "thinking.type": "disabled"
@@ -607,6 +613,22 @@
         "anthropic_messages_global": {
           "base_url": "https://api.minimax.io/anthropic",
           "request_path": "/v1/messages"
+        }
+      },
+      "max_output_tokens": {
+        "minimax-m3": 131072
+      },
+      "effort": {
+        "responses": {
+          "path": "reasoning.effort",
+          "default": "none",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
         }
       }
     },
@@ -744,7 +766,9 @@
       },
       "references": [
         "https://www.kimi.com/code/docs/en/",
-        "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html"
+        "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html",
+        "https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart",
+        "https://platform.kimi.ai/docs/guide/agent-support"
       ],
       "endpoints": {
         "openai_base_url": "https://api.kimi.com/coding/v1",
@@ -784,7 +808,8 @@
         "kimi-k2.6": 262144,
         "kimi-k2.6-code-preview": 262144,
         "k2.6": 262144,
-        "k2.6-code-preview": 262144
+        "k2.6-code-preview": 262144,
+        "kimi-k2.7-code": 262144
       },
       "api_formats": {
         "openai_chat": {
@@ -795,6 +820,9 @@
           "base_url": "https://api.kimi.com/coding/",
           "request_path": "/v1/messages"
         }
+      },
+      "max_output_tokens": {
+        "kimi-k2.7-code": 32768
       }
     },
     "gemini": {
@@ -967,7 +995,9 @@
         "https://docs.z.ai/api-reference/introduction",
         "https://docs.z.ai/guides/llm/glm-4.6",
         "https://docs.z.ai/scenario-example/develop-tools/claude",
-        "https://docs.z.ai/devpack/tool/others"
+        "https://docs.z.ai/devpack/tool/others",
+        "https://docs.z.ai/devpack/tool/claude",
+        "https://docs.z.ai/devpack/latest-model"
       ],
       "endpoints": {
         "openai_base_url": "https://api.z.ai/api/paas/v4/",
@@ -1027,7 +1057,8 @@
         "glm-4.7": 200000,
         "glm-4.6": 200000,
         "glm-4.5": 200000,
-        "glm-4.5-air": 200000
+        "glm-4.5-air": 200000,
+        "glm-5.2": 1000000
       },
       "api_formats": {
         "openai_chat": {
@@ -1054,7 +1085,27 @@
       "max_output_tokens": {
         "glm-5.1": 128000,
         "glm-5": 128000,
-        "glm-5-turbo": 128000
+        "glm-5-turbo": 128000,
+        "glm-5.2": 131072
+      },
+      "model_overrides": {
+        "glm-5.2": {
+          "effort": {
+            "claude_code_env": {
+              "path": "CLAUDE_CODE_EFFORT_LEVEL",
+              "default": "max",
+              "allowed": [
+                "high",
+                "max"
+              ],
+              "map": {
+                "low": "high",
+                "medium": "high",
+                "xhigh": "max"
+              }
+            }
+          }
+        }
       }
     }
   }

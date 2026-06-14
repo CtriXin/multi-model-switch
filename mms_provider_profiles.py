@@ -146,6 +146,7 @@ _COMPATIBILITY_PROFILE_SECTIONS = (
     "context_windows",
     "endpoints",
     "effort",
+    "max_output_tokens",
     "match",
     "model_aliases",
     "model_overrides",
@@ -213,17 +214,20 @@ def _profile_match_score(profile_id: str, profile: dict[str, Any], *, provider_i
     provider_l = _lower(provider_id)
     base_l = _lower(base_url)
     model_l = _normalize_model(model_name)
+    model_prefixes = [_lower(item) for item in match.get("model_prefixes") or [] if _lower(item)]
+    model_matched = any(model_l.startswith(token) for token in model_prefixes)
+    require_model_prefix = bool(match.get("require_model_prefix") or match.get("provider_base_requires_model_prefix"))
+    allow_provider_base_match = not (require_model_prefix and model_prefixes and not model_matched)
 
     for item in match.get("provider_id_contains") or []:
         token = _lower(item)
-        if token and token in provider_l:
+        if allow_provider_base_match and token and token in provider_l:
             score = max(score, 70)
     for item in match.get("base_url_contains") or []:
         token = _lower(item)
-        if token and token in base_l:
+        if allow_provider_base_match and token and token in base_l:
             score = max(score, 90)
-    for item in match.get("model_prefixes") or []:
-        token = _lower(item)
+    for token in model_prefixes:
         if token and model_l.startswith(token):
             score = max(score, 50)
     if profile_id and profile_id in {provider_l, model_l}:

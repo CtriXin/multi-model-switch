@@ -331,3 +331,48 @@ def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monk
 
     assert caps["context_window_tokens"] == 8_192
     assert caps["sources"]["context_window_tokens"] == "conservative_fallback"
+
+
+
+def test_provider_profile_resolution_ignores_runtime_provider_entries() -> None:
+    provider_profiles = {
+        "profiles": {
+            "openrouter": {
+                "name": "OpenRouter runtime provider",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex", "opencode"],
+            },
+            "openrouter-mimo": {
+                "match": {
+                    "provider_id_contains": ["openrouter"],
+                    "base_url_contains": ["openrouter.ai"],
+                    "model_prefixes": ["mimo"],
+                    "require_model_prefix": True,
+                },
+                "context_windows": {"mimo-v2.5": 1_048_576},
+            },
+            "glm": {
+                "match": {
+                    "provider_id_contains": ["glm"],
+                    "base_url_contains": ["api.z.ai"],
+                    "model_prefixes": ["glm"],
+                },
+                "thinking": {"supported": True},
+                "context_windows": {"glm-5.2": 1_000_000},
+                "max_output_tokens": {"glm-5.2": 131_072},
+            },
+        }
+    }
+
+    caps = resolve_model_capabilities(
+        "z-ai/glm-5.2",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        approved_facts={},
+        provider_profiles=provider_profiles,
+    )
+
+    assert caps["context_window_tokens"] == 1_000_000
+    assert caps["max_output_tokens"] == 131_072
+    assert caps["supports_thinking"] is True
+    assert caps["sources"]["context_window_tokens"] == "provider_profile"
