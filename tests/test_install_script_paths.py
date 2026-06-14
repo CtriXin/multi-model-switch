@@ -448,6 +448,14 @@ def test_install_script_copies_session_tool_scripts_directory():
     assert '[ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +' in text
 
 
+def test_install_script_copies_bundled_provider_profiles():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    profile_path = ROOT_DIR / "config" / "provider-profiles.json"
+
+    assert 'copy_dir_safely "$SOURCE_DIR/config" "$MMS_HOME/config"' in text
+    assert profile_path.exists()
+
+
 def test_install_script_retires_mmc_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
