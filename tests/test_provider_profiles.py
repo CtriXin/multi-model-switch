@@ -372,6 +372,22 @@ def test_empty_generated_provider_profile_does_not_shadow_gpt_capabilities(monke
     assert caps["effort_supported"] is True
 
 
+def test_gemini_opencode_policy_uses_shell_search_fallback(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    policy = profiles.profile_opencode_policy(
+        "gemini-3-flash-agent(high)",
+        provider_id="cpa-antigravity",
+        base_url="http://161.33.197.51:4001/v1",
+        protocol="anthropic_messages",
+    )
+
+    assert policy["profile"] == "gemini"
+    assert policy["builtin_search_tools"] == "fallback_only"
+    assert policy["shell_search_fallback"] is True
+    assert policy["strict_json_schema"] == "weak"
+
+
 def test_gemini_profile_keeps_3_level_and_25_numeric_budget(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 

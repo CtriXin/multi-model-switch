@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 
 def opencode_lite_agent_configs(model_ref):
     """Return session-local OpenCode agents for the MMS lite lane."""
@@ -761,10 +763,11 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
     return agents
 
 
-def opencode_committee_agent_configs(agent_models, *, roster_config=None):
+def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_policies=None):
     """Return a general-purpose committee roster without per-agent step caps."""
     agent_models = agent_models if isinstance(agent_models, dict) else {}
     roster_config = roster_config if isinstance(roster_config, dict) else {}
+    agent_policies = agent_policies if isinstance(agent_policies, dict) else {}
     host_model = (
         agent_models.get("committee-host")
         or agent_models.get("committee-host-pro")
@@ -815,6 +818,56 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None):
 
     def _agent_model(name, fallback=host_model):
         return str(agent_models.get(name) or fallback or host_model)
+
+    def _merge_dict(base, override):
+        merged = dict(base or {})
+        for key, value in (override or {}).items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = _merge_dict(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    def _agent_policy(name):
+        policy = agent_policies.get(name) if isinstance(agent_policies.get(name), dict) else {}
+        roster_entry = roster_config.get(name) if isinstance(roster_config.get(name), dict) else {}
+        roster_policy = roster_entry.get("opencode_policy")
+        if isinstance(roster_policy, dict):
+            policy = _merge_dict(policy, roster_policy)
+        return policy
+
+    def _search_tools_fallback_only(policy):
+        raw = str((policy or {}).get("builtin_search_tools") or "").strip().lower()
+        return raw in {"disabled", "deny", "off", "shell", "shell_only", "fallback_only"}
+
+    def _permission_for_agent(base_permission, policy):
+        permission = copy.deepcopy(base_permission)
+        if not _search_tools_fallback_only(policy):
+            return permission
+        for tool_name in ("grep", "glob", "list"):
+            permission[tool_name] = "deny"
+        bash_permission = permission.get("bash")
+        if isinstance(bash_permission, dict):
+            bash_permission = dict(bash_permission)
+            bash_permission.update({
+                "pwd": "allow",
+                "ls *": "allow",
+                "find *": "allow",
+                "rg *": "allow",
+            })
+            permission["bash"] = bash_permission
+        return permission
+
+    def _prompt_with_tool_policy(prompt, policy):
+        if not _search_tools_fallback_only(policy):
+            return prompt
+        return (
+            f"{prompt} "
+            "Tool policy: do not call built-in grep/glob/list for search or file "
+            "listing on this route; use shell commands instead (`rg --files`, "
+            "`rg -n`, `find`, `ls`, `pwd`). If a built-in search tool returns a "
+            "schema error, do not retry it; switch to the shell fallback."
+        )
 
     member_list_text = ", ".join(member_names) or "no committee-* subagents"
     host_prompt = (
@@ -882,8 +935,8 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None):
             "model": _agent_model("committee-host"),
             "variant": "high",
             "temperature": 0.1,
-            "permission": host_permission,
-            "prompt": host_prompt,
+            "permission": _permission_for_agent(host_permission, _agent_policy("committee-host")),
+            "prompt": _prompt_with_tool_policy(host_prompt, _agent_policy("committee-host")),
         },
         "committee-host-pro": {
             "description": "Higher-depth fallback committee host",
@@ -891,19 +944,22 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None):
             "model": _agent_model("committee-host-pro"),
             "variant": "high",
             "temperature": 0.1,
-            "permission": host_permission,
-            "prompt": (
-                "Fallback committee host. Continue the same deliberation flow, "
-                "preserve selected members, re-read and obey target project local "
-                "instructions before dispatching, apply the same Gate mode or Estimate "
-                "mode contract, preserve the same host boundary by default "
-                "(dispatch, verify, collect, tally, synthesize only), do not "
-                "write votes/<model>.vote.md, decision.md, or ratification "
-                "markers unless the user explicitly grants that artifact task, "
-                "do not promote advisory/chat ballots into formal quorum votes, "
-                "keep durable ballot provenance honest, include the same "
-                "task-local subagent scorecard, and summarize only "
-                "evidence-backed conclusions."
+            "permission": _permission_for_agent(host_permission, _agent_policy("committee-host-pro")),
+            "prompt": _prompt_with_tool_policy(
+                (
+                    "Fallback committee host. Continue the same deliberation flow, "
+                    "preserve selected members, re-read and obey target project local "
+                    "instructions before dispatching, apply the same Gate mode or Estimate "
+                    "mode contract, preserve the same host boundary by default "
+                    "(dispatch, verify, collect, tally, synthesize only), do not "
+                    "write votes/<model>.vote.md, decision.md, or ratification "
+                    "markers unless the user explicitly grants that artifact task, "
+                    "do not promote advisory/chat ballots into formal quorum votes, "
+                    "keep durable ballot provenance honest, include the same "
+                    "task-local subagent scorecard, and summarize only "
+                    "evidence-backed conclusions."
+                ),
+                _agent_policy("committee-host-pro"),
             ),
         },
     }
@@ -949,13 +1005,17 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None):
     for name in member_names:
         roster_entry = roster_config.get(name) if isinstance(roster_config.get(name), dict) else {}
         model_ref = _agent_model(name)
+        policy = _agent_policy(name)
         agents[name] = {
             "description": str(roster_entry.get("description") or f"Committee member {name}"),
             "mode": "subagent",
             "model": model_ref,
             "temperature": 0.1,
-            "permission": member_permission,
-            "prompt": str(roster_entry.get("prompt") or _member_prompt(name, model_ref)),
+            "permission": _permission_for_agent(member_permission, policy),
+            "prompt": _prompt_with_tool_policy(
+                str(roster_entry.get("prompt") or _member_prompt(name, model_ref)),
+                policy,
+            ),
         }
     return agents
 

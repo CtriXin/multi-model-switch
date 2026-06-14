@@ -29,11 +29,22 @@ candidates and then publish into the latest-approved bundle.
 - `effort`: protocol-specific effort field path, allowed values, defaults, and mappings.
 - `context_windows`: model-prefix context metadata.
 - `model_aliases`: protocol-specific provider wire-model aliases, optionally gated by `provider_id_contains` or `base_url_contains`, for cases where the logical MMS model should stay stable but the upstream API needs a different model string.
+- `opencode`: OpenCode runtime policy hints, such as `builtin_search_tools`, `shell_search_fallback`, `strict_json_schema`, and tool smoke status. These hints shape generated session-local agent permissions/prompts; they do not force provider transport by themselves.
 - `model_overrides`: model-prefix overrides for thinking/effort/context behavior.
 
 Context metadata is advisory unless the matching protocol can activate that upstream context mode. If an upstream rejects a documented long-context model suffix, keep the built-in profile conservative and move any larger context window to a human-managed local overlay only after a live smoke proves it.
 
 The patch engine intentionally supports only data-driven field patches. It does not load Python hooks from profiles.
+
+## OpenCode Runtime Policy
+
+`opencode.builtin_search_tools` controls whether generated OpenCode agents should rely on built-in search tools. Supported values are:
+
+- `auto`: keep the default OpenCode built-in `grep` / `glob` / `list` permissions.
+- `fallback_only`: deny built-in `grep` / `glob` / `list` for affected agents and instruct them to use shell fallback commands such as `rg --files`, `rg -n`, `find`, `ls`, and `pwd`.
+- `disabled` / `deny` / `shell_only`: aliases for the same shell-first behavior.
+
+Use this when a provider route passes normal tool smoke tests but still drifts on long OpenCode agent sessions. For Gemini relay routes, MMS keeps transport selection route-driven (for example CPA/NewAPI may still use Anthropic Messages), while committee agents use shell search fallback to avoid missing required built-in tool arguments such as `pattern`.
 
 ## Current Dual-Format References
 

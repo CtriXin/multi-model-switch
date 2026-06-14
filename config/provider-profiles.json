@@ -971,6 +971,13 @@
             }
           }
         }
+      },
+      "opencode": {
+        "tool_schema_smoke": "passed",
+        "strict_json_schema": "weak",
+        "builtin_search_tools": "fallback_only",
+        "shell_search_fallback": true,
+        "note": "Gemini relay/tool schemas can drift on OpenCode built-in search tools; prefer shell search fallback for committee agents without changing transport."
       }
     },
     "glm": {

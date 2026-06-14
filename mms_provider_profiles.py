@@ -626,6 +626,33 @@ def profile_context_window(
     return best_value
 
 
+def profile_opencode_policy(
+    model_name: str,
+    *,
+    runtime: dict[str, Any] | None = None,
+    provider_id: str = "",
+    base_url: str = "",
+    profile_id: str = "",
+    protocol: str = "",
+) -> dict[str, Any]:
+    """Return OpenCode-specific model policy from the resolved provider profile."""
+    resolved_id, profile = resolve_provider_profile(
+        runtime=runtime,
+        provider_id=provider_id,
+        base_url=base_url,
+        model_name=model_name,
+        profile_id=profile_id,
+        protocol=protocol,
+    )
+    if not resolved_id or not profile:
+        return {}
+    policy = _effective_section(profile, "opencode", model_name)
+    if not policy:
+        return {}
+    policy["profile"] = resolved_id
+    return policy
+
+
 def profile_model_alias(
     model_name: str,
     *,

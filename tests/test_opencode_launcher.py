@@ -291,6 +291,101 @@ def test_opencode_agent_variant_is_data_driven(monkeypatch):
     assert "variant" not in updated["env-agent"]
 
 
+def test_opencode_committee_gemini_policy_disables_builtin_search_tools(monkeypatch):
+    import mms_launchers
+    import mms_provider_profiles
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-cpa-gemini": {
+                    "match": {"profile_only": True},
+                    "opencode": {
+                        "builtin_search_tools": "fallback_only",
+                        "shell_search_fallback": True,
+                        "strict_json_schema": "weak",
+                    },
+                },
+                "unit-kimi": {"match": {"profile_only": True}},
+            }
+        },
+    )
+    runtime = _runtime(
+        id="committee-test",
+        opencode_lite_agents=True,
+        opencode_roster="committee",
+        opencode_agent="committee-host",
+        opencode_default_agent="committee-host",
+        opencode_default_route_key="builder_primary",
+        bypass=False,
+        opencode_routes=[
+            {
+                "id": "builder_primary",
+                "model": "gpt-5.4",
+                "provider_id": "openai",
+                "provider_ref": "mms-builder",
+                "provider_name": "OpenAI",
+                "protocol": "openai_responses",
+                "openai_base_url": "https://api.openai.com/v1",
+                "api_key": "sk-openai",
+            },
+            {
+                "id": "custom_committee-gemini",
+                "model": "gemini-3-flash-agent(high)",
+                "provider_id": "cpa-antigravity",
+                "provider_ref": "mms-gemini",
+                "provider_name": "CPA Antigravity",
+                "protocol": "anthropic_messages",
+                "openai_base_url": "http://161.33.197.51:4001/v1",
+                "anthropic_base_url": "http://161.33.197.51:4001/v1",
+                "api_key": "sk-gemini",
+                "provider_profile": "unit-cpa-gemini",
+            },
+            {
+                "id": "custom_committee-kimi",
+                "model": "kimi-k2.7-code",
+                "provider_id": "kimi",
+                "provider_ref": "mms-kimi",
+                "provider_name": "Kimi",
+                "protocol": "anthropic_messages",
+                "anthropic_base_url": "https://api.kimi.com/coding/v1",
+                "api_key": "sk-kimi",
+                "provider_profile": "unit-kimi",
+            },
+        ],
+        opencode_agent_model_keys={
+            "committee-host": "builder_primary",
+            "committee-gemini": "custom_committee-gemini",
+            "committee-kimi": "custom_committee-kimi",
+        },
+        opencode_agent_roster={
+            "committee-gemini": {"enabled": True, "custom": True, "model": "gemini-3-flash-agent(high)"},
+            "committee-kimi": {"enabled": True, "custom": True, "model": "kimi-k2.7-code"},
+        },
+    )
+
+    payload = mms_launchers._build_opencode_config_payload(runtime, "gpt-5.4")
+
+    assert payload["provider"]["mms-gemini"]["npm"] == "@ai-sdk/anthropic"
+    gemini_agent = payload["agent"]["committee-gemini"]
+    assert gemini_agent["permission"]["grep"] == "deny"
+    assert gemini_agent["permission"]["glob"] == "deny"
+    assert gemini_agent["permission"]["list"] == "deny"
+    assert gemini_agent["permission"]["bash"]["rg *"] == "allow"
+    assert gemini_agent["permission"]["bash"]["find *"] == "allow"
+    assert "built-in grep/glob/list" in gemini_agent["prompt"]
+    assert "rg --files" in gemini_agent["prompt"]
+    assert "schema error" in gemini_agent["prompt"]
+
+    kimi_agent = payload["agent"]["committee-kimi"]
+    assert kimi_agent["permission"]["grep"] == "allow"
+    assert kimi_agent["permission"]["glob"] == "allow"
+    assert kimi_agent["permission"]["list"] == "allow"
+    assert "built-in grep/glob/list" not in kimi_agent["prompt"]
+
+
 def test_opencode_model_limit_uses_shared_model_policy(monkeypatch):
     import mms_capability_resolver
     import mms_launchers
