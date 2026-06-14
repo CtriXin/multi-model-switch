@@ -1,0 +1,30 @@
+# Example only. Do not copy into real ~/.config/mms/** without the MMS human gate.
+
+[opencode]
+default_profile = "agent"
+
+[opencode.capability_pack]
+enabled = true
+id = "opencode-local/mmf-agent-v0"
+version = "0.1"
+attach = "session-local"
+
+[opencode.role_slots.coordinator]
+preset = "builder"
+edit = "deny"
+
+[opencode.role_slots.executor]
+preset = "executor"
+edit = "ask"
+
+[opencode.role_slots.explorer]
+preset = "explore"
+edit = "deny"
+
+[opencode.role_slots.reviewer]
+preset = "reviewer"
+edit = "deny"
+
+[opencode.role_slots.fixer]
+preset = "fixer"
+edit = "ask"
