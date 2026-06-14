@@ -1397,6 +1397,9 @@ def _mmf_official_overrides_payload(
             "models": rows,
         }
 
+    cache_clear = getattr(load_provider_profiles, "cache_clear", None)
+    if callable(cache_clear):
+        cache_clear()
     profiles = load_provider_profiles()
     runtime = provider if isinstance(provider, dict) else {}
     provider_id = _safe_text(runtime.get("id") or runtime.get("provider_id"))

@@ -4510,6 +4510,50 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
     assert minimax["thinking_control"]["path"] == "thinking.type"
 
 
+def test_config_web_mmf_official_overrides_refreshes_provider_profile_cache(monkeypatch, tmp_path):
+    import mms_provider_profiles
+
+    profile_path = tmp_path / "provider-profiles.json"
+    profile_path.write_text(json.dumps({"profiles": {}}), encoding="utf-8")
+    monkeypatch.setattr(mms_provider_profiles, "_BUILTIN_PROFILE_PATH", str(profile_path))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+    assert "cache-test" not in mms_provider_profiles.load_provider_profiles().get("profiles", {})
+
+    profile_path.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "cache-test": {
+                        "match": {"model_prefixes": ["cache-refresh-model"]},
+                        "context_windows": {"cache-refresh-model": 123456},
+                        "max_output_tokens": {"cache-refresh-model": 7890},
+                        "thinking": {"supported": True},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        {
+            "provider": {"id": "demo", "models": [{"id": "cache-refresh-model", "visible": True}]},
+            "fields": ["context_window_tokens", "max_output_tokens", "thinking"],
+            "refresh_sources": False,
+            "mmf_official_overrides": True,
+        },
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["matched_model_count"] == 1
+    caps = result["model_capabilities"]["cache-refresh-model"]
+    assert caps["context_window_tokens"] == 123456
+    assert caps["max_output_tokens"] == 7890
+    assert caps["thinking"] is True
+
+
 
 def test_config_web_mmf_official_overrides_do_not_downgrade_openrouter_capabilities(tmp_path):
     models = ["google/gemini-2.5-pro", "minimax/minimax-m3", "z-ai/glm-5.2"]

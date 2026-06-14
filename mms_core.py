@@ -1039,6 +1039,43 @@ def _print_about_version_summary(about_snapshot):
         console.print(f"[cyan]{label}[/cyan] {value}")
 
 
+def _is_version_request(argv):
+    if not argv:
+        return False
+    return str(argv[0] or "").strip().lower() in {"--version", "-v", "version", "about"}
+
+
+def _version_summary_line(version_info=None):
+    info = version_info if isinstance(version_info, dict) else _release_version_info()
+    track = str(info.get("release_track_label") or info.get("release_track_version") or "").strip()
+    release = str(info.get("release") or "").strip()
+    branch = str(info.get("git_branch") or info.get("installed_ref") or "").strip()
+    commit = str(info.get("git_commit") or "").strip()
+    label = track or release or "dev"
+    source = ""
+    if branch and commit:
+        source = f" · {branch}@{commit}"
+    elif branch:
+        source = f" · {branch}"
+    elif commit:
+        source = f" · {commit}"
+    return f"{display_title()} {label}{source}"
+
+
+def _print_version_summary(argv=None):
+    argv = list(argv or [])
+    info = _release_version_info()
+    if "--json" in argv:
+        payload = {
+            "command": current_command(),
+            "display": _version_summary_line(info),
+            **info,
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    print(_version_summary_line(info))
+
+
 def _run_about_upgrade(*, target="mms", include_clis=False):
     _ensure_rich()
     target = str(target or "mms").strip().lower()
@@ -16397,6 +16434,10 @@ def _handle_disabled_legacy_chat_discuss(command):
 
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
+    if _is_version_request(argv):
+        set_language(_resolve_ui_language(None, lang_override))
+        _print_version_summary(argv[1:])
+        return
     if len(argv) >= 1 and argv[0] == "registry":
         set_language(_resolve_ui_language(None, lang_override))
         from mms_registry_cli import handle_registry_command

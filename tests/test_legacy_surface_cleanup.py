@@ -137,6 +137,27 @@ def test_release_version_info_uses_command_env_for_dev_and_canary_tracks(monkeyp
     assert dev["release_track_label"] == "4.0 Dev Preview"
 
 
+def test_cli_version_flag_prints_release_track(monkeypatch, capsys) -> None:
+    import mms_core
+
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.setattr(sys, "argv", ["mmf", "--version"])
+    monkeypatch.setattr(
+        mms_core,
+        "_release_version_info",
+        lambda: {
+            "release": "dev",
+            "git_branch": "dev",
+            "git_commit": "abc123",
+            "release_track_label": "4.0 Dev Preview",
+        },
+    )
+
+    mms_core.main()
+
+    assert capsys.readouterr().out.strip() == "MMF 4.0 Dev Preview · dev@abc123"
+
+
 def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch) -> None:
     import mms_core
 
