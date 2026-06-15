@@ -79,15 +79,29 @@ Modify `opencode_set_soft_home()` to use a shared, persistent state directory in
 **Function**: `opencode_set_soft_home()`
 
 ```python
+import re
+
+
+def normalize_opencode_profile_id(profile_id):
+    """Return the filesystem-safe OpenCode profile shard id."""
+    raw = (profile_id or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9._-]+", "-", raw).strip("._-")
+    if not slug:
+        raise ValueError("profile_id is required for OpenCode soft home isolation")
+    if slug == "default":
+        raise ValueError("profile_id must not fall back to the reserved default namespace")
+    return slug
+
+
 def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
     """Set soft home for OpenCode with shared state directory.
 
     Args:
-        profile_id: Mandatory profile identifier for state sharding.
-                   Must be non-empty to prevent cross-profile privacy leaks.
+        profile_id: Mandatory profile identifier for state sharding. It must be
+            normalized before use as a path segment to prevent cross-profile
+            privacy leaks and path traversal.
     """
-    if not profile_id:
-        raise ValueError("profile_id is required for OpenCode soft home isolation")
+    profile_slug = normalize_opencode_profile_id(profile_id)
 
     real_home = real_user_path()
     env["HOME"] = real_home
@@ -96,7 +110,7 @@ def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_hom
 
     # Shared state directory for OpenCode session history (XDG-compliant path)
     state_root = real_user_path(
-        ".local", "share", "mms-opencode", "state", profile_id
+        ".local", "share", "mms-opencode", "state", profile_slug
     )
     os.makedirs(state_root, exist_ok=True)
     env["XDG_DATA_HOME"] = state_root  # Shared across launches
@@ -121,7 +135,7 @@ def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_hom
 - `XDG_CONFIG_HOME` remains per-session to isolate MMS-generated `opencode.json` and plugins
 - `XDG_DATA_HOME` and `XDG_STATE_HOME` are shared to enable session history persistence
 - Profile-based sharding prevents cross-profile privacy leaks
-- Mandatory `profile_id` prevents accidental defaulting to shared "default" namespace
+- Mandatory, normalized `profile_id` prevents accidental defaulting to the reserved shared "default" namespace
 - `MMS_OPENCODE_ISOLATE_DATA=1` provides kill-switch for rollback
 - XDG-compliant path (`~/.local/share/mms-opencode`) follows standards
 
@@ -168,10 +182,9 @@ def _share_opencode_data(session_home, *, real_user_path):
 def opencode_roots() -> list[Path]:
     """Return paths to scan for OpenCode session records."""
     home = _real_user_home()
-    candidates = [
-        home / ".config" / "mms" / "opencode-gateway" / "state" / "default" / "opencode",
-        home / ".local" / "share" / "opencode",
-    ]
+    mms_state_root = home / ".local" / "share" / "mms-opencode" / "state"
+    candidates = list(mms_state_root.glob("*/opencode"))
+    candidates.append(home / ".local" / "share" / "opencode")
     return [path for path in _dedupe_paths(candidates) if path.exists()]
 
 def _opencode_db_records(root: Path) -> list[dict]:
@@ -286,13 +299,13 @@ def launch_opencode(...):
 **Scope**: Fix Issue #8 user-facing symptom (OpenCode session switcher empty)
 
 1. **Modify `mms_opencode_env.py`**:
-   - Update `opencode_set_soft_home()` to use shared state directory at `~/.local/share/mms-opencode/state/<profile_id>`
-   - Add mandatory `profile_id` parameter (raise ValueError if missing)
+   - Update `opencode_set_soft_home()` to use shared state directory at `~/.local/share/mms-opencode/state/<profile_slug>`
+   - Add mandatory `profile_id` parameter (raise ValueError if missing, invalid, or normalizes to the reserved `default` namespace)
    - Add `MMS_OPENCODE_ISOLATE_DATA=1` kill-switch for rollback
    - Add `MMS_OPENCODE_STATE_SHARED=1` diagnostic marker
 
 2. **Update caller chain with explicit `profile_id` threading**:
-   - `opencode_gateway_env()`: Extract `runtime.get("opencode_profile", "lite")` and pass as `profile_id`
+   - `opencode_gateway_env()`: Read the explicit resolved OpenCode profile id and pass it as `profile_id`; fail closed if it is absent rather than falling back to `default`
    - `mms_launchers.py:_set_opencode_soft_home()`: Add `profile_id` parameter and forward
    - Update function signatures and documentation
 
@@ -360,7 +373,7 @@ def launch_opencode(...):
 | OpenCode future schema changes | Low | Track B (separate PR) will include schema version check and graceful degradation |
 | Existing tests assert old behavior | Medium | Explicit test updates documented in Appendix; new tests verify shared behavior |
 | Data migration complexity | Low | One-time migration helper runs automatically; handles edge cases gracefully |
-| `profile_id` validation | Low | Mandatory parameter with explicit validation prevents accidental misuse |
+| `profile_id` validation | Low | Mandatory parameter plus slug normalization prevents accidental misuse and path traversal |
 
 ## Verification Steps
 
@@ -548,7 +561,7 @@ Based on review feedback, the following decisions have been made:
 2. **Track B will be implemented in a separate PR** to keep the core fix focused
 3. **`MMS_OPENCODE_ISOLATE_DATA=1` kill-switch** will be added in Phase 1
 4. **One-time data migration helper** will be added in Phase 1 (not optional)
-5. **Shared state path** will use XDG-compliant location: `~/.local/share/mms-opencode/state/<profile_id>`
+5. **Shared state path** will use XDG-compliant location: `~/.local/share/mms-opencode/state/<profile_slug>`, where `profile_slug` is the normalized profile id
 
 ### Updated Implementation Plan
 
@@ -556,13 +569,13 @@ Based on committee review, the implementation plan has been updated:
 
 #### Phase 1: Core Fix (Must Have) - UPDATED
 1. **Modify `mms_opencode_env.py`**:
-   - Update `opencode_set_soft_home()` to use shared state directory at `~/.local/share/mms-opencode/state/<profile_id>`
-   - Add mandatory `profile_id` parameter (no fallback to "default")
+   - Update `opencode_set_soft_home()` to use shared state directory at `~/.local/share/mms-opencode/state/<profile_slug>`
+   - Add mandatory `profile_id` parameter (no fallback to `default`; normalize to a safe slug before using it as a path segment)
    - Add `MMS_OPENCODE_ISOLATE_DATA=1` kill-switch for rollback
    - Add `MMS_OPENCODE_STATE_SHARED=1` diagnostic marker
 
 2. **Update caller chain with explicit `profile_id` threading**:
-   - `opencode_gateway_env()`: Extract `runtime.get("opencode_profile", "lite")` and pass as `profile_id`
+   - `opencode_gateway_env()`: Read the explicit resolved OpenCode profile id and pass it as `profile_id`; fail closed if it is absent rather than falling back to `default`
    - `mms_launchers.py:_set_opencode_soft_home()`: Add `profile_id` parameter and forward
 
 3. **Add one-time data migration helper**:
@@ -687,8 +700,32 @@ set -e
 SHARED_DIR="$HOME/.local/share/mms-opencode/state"
 PID_DIRS="$HOME/.config/mms/opencode-gateway/s"
 
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <opencode-profile-id>" >&2
+    echo "Example: $0 agent" >&2
+    exit 2
+fi
+
+PROFILE_ID_RAW="$1"
+PROFILE_ID_SLUG=$(python3 - "$PROFILE_ID_RAW" <<'PY'
+import re
+import sys
+raw = (sys.argv[1] or "").strip().lower()
+slug = re.sub(r"[^a-z0-9._-]+", "-", raw).strip("._-")
+if not slug or slug == "default":
+    raise SystemExit(2)
+print(slug)
+PY
+) || {
+    echo "ERROR: profile id must normalize to a non-empty slug and must not be 'default'." >&2
+    exit 2
+}
+
+PROFILE_SHARED_DIR="$SHARED_DIR/$PROFILE_ID_SLUG/opencode"
+
 echo "OpenCode Session Migration Tool"
 echo "================================"
+echo "Target profile: $PROFILE_ID_RAW -> $PROFILE_ID_SLUG"
 
 # Find all per-PID directories with opencode.db
 PID_DBS=$(find "$PID_DIRS" -name "opencode.db" -type f 2>/dev/null || true)
@@ -707,8 +744,9 @@ echo "$PID_DBS" | while read -r db; do
     echo "  PID $pid: $sessions sessions"
 done
 
-# Create shared directory structure for default profile
-mkdir -p "$SHARED_DIR/default/opencode"
+# Create shared directory structure for the explicit profile.
+# Do not use a default namespace; profile selection must be intentional.
+mkdir -p "$PROFILE_SHARED_DIR"
 
 # Use the most recent per-PID database as the source
 LATEST_PID_DB=$(ls -t $PID_DBS | head -1)
@@ -718,13 +756,13 @@ if [ -n "$LATEST_PID_DB" ]; then
     echo "Migrating sessions from: $LATEST_PID_DB"
 
     # Copy database (simple approach)
-    cp "$LATEST_PID_DB" "$SHARED_DIR/default/opencode/opencode.db"
+    cp "$LATEST_PID_DB" "$PROFILE_SHARED_DIR/opencode.db"
 
     # Verify migration
-    MIGRATED_SESSIONS=$(sqlite3 "$SHARED_DIR/default/opencode/opencode.db" "SELECT COUNT(*) FROM session;" 2>/dev/null || echo "0")
+    MIGRATED_SESSIONS=$(sqlite3 "$PROFILE_SHARED_DIR/opencode.db" "SELECT COUNT(*) FROM session;" 2>/dev/null || echo "0")
     echo "Migration complete. $MIGRATED_SESSIONS sessions migrated to shared location."
     echo ""
-    echo "Shared database location: $SHARED_DIR/default/opencode/opencode.db"
+    echo "Shared database location: $PROFILE_SHARED_DIR/opencode.db"
     echo ""
     echo "Note: Old per-PID directories have not been deleted."
     echo "They can be manually removed after verifying the migration."

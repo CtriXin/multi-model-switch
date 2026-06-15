@@ -78,11 +78,11 @@ env["XDG_STATE_HOME"] = real_user_path(".local", "state")
 
 **Strategy**: Share OpenCode data directory across MMS launches while preserving config isolation.
 
-**Implementation**: Modify `opencode_set_soft_home()` to use shared state directory at `~/.local/share/mms-opencode/state/<profile_id>`
+**Implementation**: Modify `opencode_set_soft_home()` to use shared state directory at `~/.local/share/mms-opencode/state/<profile_slug>`
 
 **Key Changes**:
-1. Mandatory `profile_id` parameter (raise ValueError if missing)
-2. XDG-compliant shared state path
+1. Mandatory `profile_id` parameter (raise ValueError if missing, invalid, or normalizes to reserved `default`)
+2. XDG-compliant shared state path using a normalized safe `profile_slug`
 3. `MMS_OPENCODE_ISOLATE_DATA=1` kill-switch for rollback
 4. One-time data migration helper
 
@@ -108,12 +108,24 @@ env["XDG_STATE_HOME"] = real_user_path(".local", "state")
 
 **Key Implementation Details**:
 ```python
-def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
-    if not profile_id:
+import re
+
+
+def normalize_opencode_profile_id(profile_id):
+    raw = (profile_id or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9._-]+", "-", raw).strip("._-")
+    if not slug:
         raise ValueError("profile_id is required")
+    if slug == "default":
+        raise ValueError("profile_id must not fall back to the reserved default namespace")
+    return slug
+
+
+def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
+    profile_slug = normalize_opencode_profile_id(profile_id)
 
     # Shared state directory (XDG-compliant)
-    state_root = real_user_path(".local", "share", "mms-opencode", "state", profile_id)
+    state_root = real_user_path(".local", "share", "mms-opencode", "state", profile_slug)
     os.makedirs(state_root, exist_ok=True)
 
     env["XDG_DATA_HOME"] = state_root  # Shared across launches
@@ -149,7 +161,7 @@ CREATE TABLE session (
 | Risk | Severity | Mitigation |
 |------|----------|------------|
 | Concurrent SQLite writes | Medium | Profile sharding isolates writes; WAL mode enabled |
-| Cross-profile privacy leaks | Low | Mandatory `profile_id` sharding |
+| Cross-profile privacy leaks | Low | Mandatory `profile_id` sharding with slug validation; no implicit `default` namespace |
 | Breaking isolation expectations | Low | `MMS_OPENCODE_ISOLATE_DATA=1` kill-switch |
 | Data migration complexity | Low | One-time migration helper runs automatically |
 | OpenCode schema changes | Low | Track B will include schema version check |
