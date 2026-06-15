@@ -99,6 +99,7 @@ pull_request
        - install pinned redline-guard
        - run redline-guard audit with --digger-run and --out
        - upload artifact: redline-report
+       - write one-line Actions step summary
        - soft-fail/advisory in the first integration
   -> committee review
        - inspect PR diff, Digger report, Redline report, CI checks
@@ -108,6 +109,7 @@ pull_request
 Candidate Redline command based on the current `redline-guard` CLI:
 
 ```bash
+# Intentionally omit --comment and --notify in the first integration.
 redline-guard audit \
   --provider github \
   --pr "$PR_NUMBER" \
@@ -147,8 +149,13 @@ The CLI already supports `--digger-run` and writes `audit-result.json`,
   `unknown` rather than guessing silently.
 - Install `redline-guard` from a pinned commit SHA or immutable package digest.
 - Run Redline with `--digger-run` and `--out`.
+- If Digger produced no run root, Redline should exit `0` and write a
+  `decision=unknown` report explaining the missing evidence; tool failure is
+  escalated to committee, not used to deadlock development.
 - Upload `.redline-guard/report` as artifact `redline-report` with explicit
   retention.
+- Write a one-line Actions step summary with the Redline decision and artifact
+  name so advisory status is visible without opening the artifact first.
 - Do not enable `--comment`, `--notify`, callback actions, automatic merge,
   approval, deployment, force-push, close, or destructive actions in the first
   integration.
@@ -194,6 +201,22 @@ After the MMS flow proves stable, consider one of these distribution paths:
 This is the path that can eventually make Digger/Redline available to other
 repositories and fork PRs without private deploy keys.
 
+
+## Out of Scope for the First Redline PR
+
+The first Redline follow-up PR should not attempt to solve every guardrail at
+once. These items stay out of scope unless committee explicitly reopens them:
+
+- hard-failing CI on `blocked`, `needs-review`, or `unknown`;
+- posting Redline PR comments by default;
+- enabling Feishu notifications or callback actions;
+- supporting fork PRs that require private install credentials;
+- publishing public npm packages, Docker images, or reusable workflows;
+- replacing Digger as the primary reviewer job;
+- changing branch protection rules automatically;
+- implementing automatic merge, approval, close, deploy, or force-push actions.
+
+
 ## Security Boundary
 
 The guard workflow should follow these rules:
@@ -212,6 +235,10 @@ The guard workflow should follow these rules:
   maintainer CI configuration, never PR-controlled input.
 - Keep any LLM bridge command behind an allowlisted command path, controlled env,
   and no PR-controlled shell interpolation.
+- Keep network egress for LLM bridge calls scoped to the configured provider or
+  MMS bridge endpoint, not arbitrary PR-controlled destinations.
+- Redact secrets, bearer tokens, webhook URLs, and provider keys from Digger,
+  Redline, and Actions summary output before upload or comment publication.
 - Do not store provider keys, webhooks, or deploy credentials in the repository.
 
 ## Supply Chain and Pinning Policy
@@ -223,11 +250,12 @@ The guard workflow should follow these rules:
 - Do not install Digger or Redline from floating branches in CI.
 - Pin or constrain Python support dependencies (`pytest`, `httpx`, `rich`) if
   they become part of the required gate rather than runner support.
-- Avoid `ssh-keyscan github.com` TOFU as a long-term security posture. Either
-  document the current risk explicitly, pin GitHub SSH host keys, or move to a
-  distribution path that does not require ad hoc SSH host discovery.
-- If artifacts become release-blocking, include a manifest with file paths,
-  sizes, and SHA-256 hashes for Digger and Redline reports.
+- First integration may document the current `ssh-keyscan github.com` TOFU risk;
+  Phase 5 should remove that risk by using public packages, reusable workflows,
+  Docker images, or pinned host keys.
+- Generate low-cost SHA-256 sidecars for Redline report files in the first
+  integration; if artifacts become release-blocking, promote this into a full
+  manifest with file paths, sizes, and hashes for Digger and Redline reports.
 
 ## Artifact Policy
 
@@ -235,6 +263,7 @@ The guard workflow should follow these rules:
 - Digger run path inside the artifact: `.digger/runs/<run-id>`.
 - Redline artifact name: `redline-report`.
 - Redline output path: `.redline-guard/report`.
+- Redline integrity sidecar path: `.redline-guard/report/*.sha256`.
 - Set explicit artifact retention instead of relying on GitHub's default.
   Proposed first value: 30 days for normal PR evidence.
 - If the committee wants longer auditability for release branches, raise
