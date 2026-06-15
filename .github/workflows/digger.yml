@@ -6,7 +6,10 @@ on:
 
 jobs:
   digger:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    env:
+      DIGGER_REF: 9c22178c961ebe25914b6580b9e7a1000af046f9
     permissions:
       contents: read
       pull-requests: write
@@ -49,7 +52,7 @@ jobs:
           eval "$(ssh-agent -s)"
           ssh-add - <<< "$DIGGER_DEPLOY_KEY"
 
-          npm install --global "git+ssh://git@github.com/CtriXin/digger.git#codex/baseline-aware-validation"
+          npm install --global "git+ssh://git@github.com/CtriXin/digger.git#${DIGGER_REF}"
 
       - name: Run digger
         env:
