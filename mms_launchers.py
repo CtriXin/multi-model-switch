@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import copy
 import inspect
 import json
+import math
 import os
 import re
 import shlex
@@ -7010,6 +7011,20 @@ def _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir):
     return seeded_settings
 
 
+def _gateway_ping_timeout(runtime=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw = runtime.get("gateway_health_timeout_sec")
+    if raw in (None, ""):
+        raw = 8
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 8
+    if not math.isfinite(value) or value <= 0:
+        return 8
+    return min(value, 8)
+
+
 def _gateway_ping(base_url, api_key, runtime=None):
     """Quick connectivity check; returns True/False/None (None = can't determine)."""
     _ensure_bridge_helpers()
@@ -7033,7 +7048,7 @@ def _gateway_ping(base_url, api_key, runtime=None):
             models_url,
             runtime=runtime,
             headers=headers,
-            timeout=8,
+            timeout=_gateway_ping_timeout(runtime),
         )
         return 200 <= int(getattr(r, "status_code", 0) or 0) < 300
     except Exception:
