@@ -111,14 +111,14 @@ env["XDG_STATE_HOME"] = real_user_path(".local", "state")
 def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
     if not profile_id:
         raise ValueError("profile_id is required")
-    
+
     # Shared state directory (XDG-compliant)
     state_root = real_user_path(".local", "share", "mms-opencode", "state", profile_id)
     os.makedirs(state_root, exist_ok=True)
-    
+
     env["XDG_DATA_HOME"] = state_root  # Shared across launches
     env["XDG_STATE_HOME"] = state_root  # Shared across launches
-    
+
     # Kill-switch for rollback
     if os.environ.get("MMS_OPENCODE_ISOLATE_DATA") == "1":
         env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
@@ -194,7 +194,7 @@ python3 scripts/regression_fresh_user_gate.py --quick
 
 All 5 committee members approved the RFC with modifications:
 1. **deepseek-v4-pro-7**: Approved with modifications
-2. **glm-5-2-7**: Approved with modifications  
+2. **glm-5-2-7**: Approved with modifications
 3. **kimi-k2-7-code-7**: Approved with modifications
 4. **minimax-m3-7**: Approved with modifications
 5. **qwen3-7-max-7**: Approved with modifications

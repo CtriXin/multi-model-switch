@@ -81,19 +81,19 @@ Modify `opencode_set_soft_home()` to use a shared, persistent state directory in
 ```python
 def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
     """Set soft home for OpenCode with shared state directory.
-    
+
     Args:
         profile_id: Mandatory profile identifier for state sharding.
                    Must be non-empty to prevent cross-profile privacy leaks.
     """
     if not profile_id:
         raise ValueError("profile_id is required for OpenCode soft home isolation")
-    
+
     real_home = real_user_path()
     env["HOME"] = real_home
     env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")  # Session-local
     env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")    # Session-local
-    
+
     # Shared state directory for OpenCode session history (XDG-compliant path)
     state_root = real_user_path(
         ".local", "share", "mms-opencode", "state", profile_id
@@ -101,18 +101,18 @@ def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_hom
     os.makedirs(state_root, exist_ok=True)
     env["XDG_DATA_HOME"] = state_root  # Shared across launches
     env["XDG_STATE_HOME"] = state_root  # Shared across launches
-    
+
     env["MMS_HOME_ISOLATION_MODE"] = "soft"
     env["MMS_SOFT_HOME"] = "1"
     env["MMS_OPENCODE_SOFT_HOME"] = "1"
     env["MMS_OPENCODE_STATE_SHARED"] = "1"  # Diagnostic marker
-    
+
     # Kill-switch for rollback: restore old per-PID behavior
     if os.environ.get("MMS_OPENCODE_ISOLATE_DATA") == "1":
         env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
         env["XDG_STATE_HOME"] = os.path.join(session_home, ".local", "state")
         del env["MMS_OPENCODE_STATE_SHARED"]
-    
+
     set_session_home_hint(env, session_home)
     return env
 ```
@@ -147,10 +147,10 @@ def _share_opencode_data(session_home, *, real_user_path):
         ".config", "mms", "opencode-gateway", "shared-data", "opencode"
     )
     os.makedirs(shared_data_dir, exist_ok=True)
-    
+
     xdg_data_home = os.path.join(session_home, ".local", "share")
     target_data_dir = os.path.join(xdg_data_home, "opencode")
-    
+
     if not os.path.exists(target_data_dir):
         os.symlink(shared_data_dir, target_data_dir)
 ```
@@ -179,7 +179,7 @@ def _opencode_db_records(root: Path) -> list[dict]:
     db_path = root / "opencode.db"
     if not db_path.exists():
         return []
-    
+
     try:
         import sqlite3
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -209,11 +209,11 @@ def _opencode_db_records(root: Path) -> list[dict]:
 ```python
 def list_session_records(cli: str = "all", query: str = "", limit: int | None = None) -> list[dict]:
     # ... existing code ...
-    
+
     if cli in {"all", "opencode"}:
         for root in opencode_roots():
             records.extend(_opencode_db_records(root))
-    
+
     # ... existing filtering and sorting ...
 ```
 
@@ -255,7 +255,7 @@ In `launch_opencode()` function, add session recording:
 ```python
 def launch_opencode(...):
     # ... existing code ...
-    
+
     # Record session start
     record_opencode_session_start(
         cwd=os.getcwd(),
@@ -264,7 +264,7 @@ def launch_opencode(...):
         runtime_kind=runtime.get("runtime_kind", ""),
         slot_home=env.get("MMS_SESSION_HOME", ""),
     )
-    
+
     # Register session finalization
     def _finalize_session():
         finalize_opencode_session(
@@ -272,9 +272,9 @@ def launch_opencode(...):
             pid=os.getpid(),
             account_id=runtime.get("account_id", ""),
         )
-    
+
     atexit.register(_finalize_session)
-    
+
     # ... rest of existing code ...
 ```
 
@@ -623,12 +623,12 @@ def _opencode_db_records(root: Path) -> list[dict]:
     db_path = root / "opencode.db"
     if not db_path.exists():
         return []
-    
+
     try:
         import sqlite3
         import json
         from datetime import datetime, timezone
-        
+
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT id, title, directory, time_created, time_updated, model FROM session"
@@ -641,13 +641,13 @@ def _opencode_db_records(root: Path) -> list[dict]:
                 created_at = datetime.fromtimestamp(
                     row[3]/1000, tz=timezone.utc
                 ).isoformat()
-            
+
             updated_at = ""
             if row[4]:
                 updated_at = datetime.fromtimestamp(
                     row[4]/1000, tz=timezone.utc
                 ).isoformat()
-            
+
             # Parse model JSON to extract ID
             model_id = ""
             if row[5]:
@@ -656,7 +656,7 @@ def _opencode_db_records(root: Path) -> list[dict]:
                     model_id = model_data.get("id", "")
                 except (json.JSONDecodeError, AttributeError):
                     model_id = row[5]  # Fallback to raw string
-            
+
             records.append({
                 "cli": "opencode",
                 "session_id": row[0],
@@ -716,10 +716,10 @@ LATEST_PID_DB=$(ls -t $PID_DBS | head -1)
 if [ -n "$LATEST_PID_DB" ]; then
     echo ""
     echo "Migrating sessions from: $LATEST_PID_DB"
-    
+
     # Copy database (simple approach)
     cp "$LATEST_PID_DB" "$SHARED_DIR/default/opencode/opencode.db"
-    
+
     # Verify migration
     MIGRATED_SESSIONS=$(sqlite3 "$SHARED_DIR/default/opencode/opencode.db" "SELECT COUNT(*) FROM session;" 2>/dev/null || echo "0")
     echo "Migration complete. $MIGRATED_SESSIONS sessions migrated to shared location."
