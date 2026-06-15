@@ -118,6 +118,24 @@ Playbooks are domain checklists. They are not decision modes. For example, a
 Git/CI/security request normally uses `decision_mode = gate` or `review` with
 `playbook = git_ci_security`; it is not a hidden `git` decision mode.
 
+### `general`
+
+Use when the request does not fit a narrower domain checklist, or when the host
+is still classifying a broad request before delegating. `general` is not a
+weaker decision mode; the selected `decision_mode` still controls the required
+member output.
+
+Evidence checklist:
+
+- user goal and explicit constraints
+- relevant local instructions
+- files or artifacts inspected
+- assumptions and missing context
+- why no narrower playbook was selected
+
+Default decision mode: `advisory` for open-ended input, `review` for
+finding-first audits.
+
 ### `git_ci_security`
 
 Use for Git diffs, CI workflows, GitHub Actions, credentials, token scopes,

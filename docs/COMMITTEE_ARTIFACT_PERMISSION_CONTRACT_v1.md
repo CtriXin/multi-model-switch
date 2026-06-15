@@ -10,9 +10,10 @@ This document defines how the OpenCode `committee` profile handles file writes,
 formal vote artifacts, checker runs, and permissions. It complements
 `docs/COMMITTEE_MODE_POLICY_v1.md`.
 
-The default committee posture is advisory and non-formal. Durable writes, formal
-votes, `decision.md`, ratification markers, merges, approvals, and deploy gates
-require explicit user or project authorization.
+The default committee posture is advisory, non-formal, and read-only for
+members. Durable writes, formal votes, `decision.md`, ratification markers,
+merges, approvals, and deploy gates require explicit user or project
+authorization.
 
 ## Artifact Modes
 
@@ -111,6 +112,10 @@ Denied by default:
 - task delegation by members
 - external directory writes
 - formal artifact writes
+
+Runtime mapping: generated committee member agents use `edit: deny` for the
+default profile. This preserves the read-only boundary even when a launch mode
+auto-approves `ask` permissions.
 
 ### `artifact_write`
 
