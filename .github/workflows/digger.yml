@@ -1,0 +1,88 @@
+name: Digger
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  digger:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      DIGGER_REF: 9c22178c961ebe25914b6580b9e7a1000af046f9
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Enable package managers
+        run: corepack enable
+
+      - name: Install Python test tools
+        run: python3 -m pip install pytest httpx rich
+
+      - name: Install digger
+        env:
+          DIGGER_DEPLOY_KEY: ${{ secrets.DIGGER_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DIGGER_DEPLOY_KEY" ]; then
+            echo "Missing DIGGER_DEPLOY_KEY secret."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$DIGGER_DEPLOY_KEY"
+
+          npm install --global "git+ssh://git@github.com/CtriXin/digger.git#${DIGGER_REF}"
+
+      - name: Run digger
+        env:
+          DIGGER_BASE: ${{ github.event.pull_request.base.sha }}
+          DIGGER_HEAD: ${{ github.event.pull_request.head.sha }}
+          DIGGER_MMS_COMMAND: ${{ secrets.DIGGER_MMS_COMMAND }}
+          DIGGER_MMS_REVIEWER: minimax-m2.7
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$DIGGER_MMS_COMMAND" ]; then
+            digger ci github \
+              --checkout "$GITHUB_WORKSPACE" \
+              --dry-run \
+              --baseline-aware \
+              --post-comment \
+              --fail-on-validation \
+              --llm mms \
+              --mms-reviewer "$DIGGER_MMS_REVIEWER"
+          else
+            digger ci github \
+              --checkout "$GITHUB_WORKSPACE" \
+              --dry-run \
+              --baseline-aware \
+              --post-comment \
+              --fail-on-validation
+          fi
+
+      - name: Upload review packet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digger
+          path: .digger/runs
