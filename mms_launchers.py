@@ -10204,6 +10204,19 @@ def _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir
         return []
 
     dst = os.path.join(session_claude_dir, "rules")
+    if os.path.isdir(dst) and not os.path.islink(dst):
+        loaded = []
+        for name, src in rule_files:
+            link = os.path.join(dst, name)
+            if os.path.exists(link) or os.path.islink(link):
+                continue
+            try:
+                os.symlink(src, link)
+            except OSError:
+                continue
+            loaded.append(name)
+        return loaded
+
     overlay_root = os.path.join(os.path.dirname(session_claude_dir), ".mms-agent-rules-overlay")
     merged_dir = os.path.join(overlay_root, "rules")
     if os.path.isdir(merged_dir) and not os.path.islink(merged_dir):
@@ -10260,7 +10273,7 @@ def _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir
     return loaded
 
 
-def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entry_set):
+def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entry_set, *, allow_agent_rules=False):
     """Merge entries from ~/.agents/{skills,commands,rules} into the session .claude tree.
 
     When ``~/.claude/skills/`` is a real directory (not a symlink), the existing
@@ -10293,7 +10306,8 @@ def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entr
                 os.symlink(src, dst)
             except OSError:
                 pass
-    _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir)
+    if allow_agent_rules:
+        _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir)
 
 
 def _prepare_claude_session_tree(
@@ -10308,11 +10322,13 @@ def _prepare_claude_session_tree(
     source_claude_dir=None,
     allowed_source_entries=None,
     disabled_session_surfaces=None,
+    allow_agent_rules=None,
 ):
     current_cwd = os.path.realpath(_safe_getcwd())
     normalized_account_id = str(account_id or "").strip()
     store = ensure_claude_project_store(current_cwd, account_id=normalized_account_id)
     skip_real_entries = set(skip_real_entries or ())
+    using_default_source_entries = allowed_source_entries is None
     allowed_source_entries = [
         str(entry).strip()
         for entry in (
@@ -10323,6 +10339,8 @@ def _prepare_claude_session_tree(
         if str(entry or "").strip()
     ]
     allowed_source_entry_set = set(allowed_source_entries)
+    if allow_agent_rules is None:
+        allow_agent_rules = using_default_source_entries
     scoped_claude_dir = source_claude_dir or _real_user_path(".claude")
     agents_dir = _real_user_path(".agents")
     if os.path.islink(session_claude_dir):
@@ -10359,7 +10377,12 @@ def _prepare_claude_session_tree(
             if os.path.exists(dst) or os.path.islink(dst):
                 continue
             os.symlink(src, dst)
-    _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_source_entry_set)
+    _merge_agents_into_session_tree(
+        session_claude_dir,
+        agents_dir,
+        allowed_source_entry_set,
+        allow_agent_rules=bool(allow_agent_rules),
+    )
     for entry in CLAUDE_PERSISTENT_ENTRIES:
         dst = os.path.join(session_claude_dir, entry)
         target = str(
