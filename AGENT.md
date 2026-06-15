@@ -50,6 +50,15 @@ Agent-Step: 0.0.1
 - Before global config changes, irreversible deletion, force-push, or adding dependencies, explicitly tell the user first.
 - If changing project conventions, update this file or the relevant rule file.
 
+## Default Dev Entry
+
+- The repository root should be the clean maintainer entrypoint on `dev`.
+- Do not use `.worktrees/dev` as the shared default development entry.
+- The repository root is for coordination: pull latest `dev`, inspect status, open issues, and create isolated task worktrees.
+- Non-trivial work must start from an issue and use a dedicated branch/worktree such as `.worktrees/issue-14-redline-gate`.
+- Agents must not stack substantive changes or leave untracked files in the shared `dev` entry unless the human explicitly asks for direct edits there.
+- Docs-only plan/report changes may be committed by default when the human asks to record, submit, or produce the document, but the commit must stage only the target document and no unrelated dirty files.
+
 ## Issue / PR / Committee Gate
 
 - MMF/MMS development should track problems through issues, submit changes through PRs, and require committee review before merge.

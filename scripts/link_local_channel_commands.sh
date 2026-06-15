@@ -2,21 +2,22 @@
 set -euo pipefail
 
 # Link the maintainer's local command matrix without touching ~/.config/mms.
-# mms = public installed copy, mmd = stable worktree, mmf = dev worktree,
-# mmg = canary worktree, mmm = main worktree.
+# mms = public installed copy, mmd = stable worktree, mmf = root dev checkout,
+# mmg = canary worktree, mmm = main/stable observation worktree.
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
-MAIN_ROOT_DEFAULT="$REPO_ROOT"
+BASE_ROOT="$REPO_ROOT"
 case "$REPO_ROOT" in
-  */.worktrees/*) MAIN_ROOT_DEFAULT="${REPO_ROOT%%/.worktrees/*}" ;;
+  */.worktrees/*) BASE_ROOT="${REPO_ROOT%%/.worktrees/*}" ;;
 esac
-DEV_ROOT_DEFAULT="$MAIN_ROOT_DEFAULT/.worktrees/dev"
-CANARY_ROOT_DEFAULT="$MAIN_ROOT_DEFAULT/.worktrees/canary"
-STABLE_ROOT_DEFAULT="$MAIN_ROOT_DEFAULT/.worktrees/stable-v3.3-no-db"
-if [ "$(basename "$REPO_ROOT")" = "dev" ] && [ "$(basename "$(dirname "$REPO_ROOT")")" = ".worktrees" ]; then
-  DEV_ROOT_DEFAULT="$REPO_ROOT"
+DEV_ROOT_DEFAULT="$BASE_ROOT"
+MAIN_ROOT_DEFAULT="$BASE_ROOT/.worktrees/main"
+if [ ! -f "$MAIN_ROOT_DEFAULT/mms" ]; then
+  MAIN_ROOT_DEFAULT="$BASE_ROOT"
 fi
+CANARY_ROOT_DEFAULT="$BASE_ROOT/.worktrees/canary"
+STABLE_ROOT_DEFAULT="$BASE_ROOT/.worktrees/stable-v3.3-no-db"
 if [ "$(basename "$REPO_ROOT")" = "canary" ] && [ "$(basename "$(dirname "$REPO_ROOT")")" = ".worktrees" ]; then
   CANARY_ROOT_DEFAULT="$REPO_ROOT"
 fi
@@ -152,7 +153,7 @@ cat <<EOF_SUMMARY
 linked local MMS command matrix in $BIN_DIR:
   mms -> public installed copy: $PUBLIC_ENTRY
   mmd -> stable worktree:      $STABLE_ROOT/mms
-  mmf -> dev worktree:         $DEV_ROOT/mmf  (MMS_CONFIG_ROOT=$PREVIEW_CONFIG_ROOT)
+  mmf -> root dev checkout:    $DEV_ROOT/mmf  (MMS_CONFIG_ROOT=$PREVIEW_CONFIG_ROOT)
   mmg -> canary worktree:      $CANARY_ROOT/mms  (MMS_CONFIG_ROOT=$PREVIEW_CONFIG_ROOT)
   mmm -> main worktree:        $MAIN_ROOT/mms
 EOF_SUMMARY

@@ -55,15 +55,17 @@ MMS 采用 Stable / Dev / Canary 三通道。目标是把“普通用户能放�
 |---|---|---|---|---|
 | `mms` | Public installed MMS | `~/.mms/mms` | 默认 `~/.config/mms` | 只用于公开版本问题复现 |
 | `mmd` | Stable | `.worktrees/stable-v3.3-no-db/mms` | 默认 `~/.config/mms` | stable 线验证 |
-| `mmf` | Dev | `.worktrees/dev/mmf` | 强制 `~/.config/mms-next` | 日常开发 / DB preview |
+| `mmf` | Dev | 仓库根目录 `dev` checkout 的 `mmf` | 强制 `~/.config/mms-next` | 日常开发 / DB preview |
 | `mmg` | Canary | `.worktrees/canary/mms` | 强制 `~/.config/mms-next` | 每日实验 / 快速回滚 |
 | `mmm` | Main | 当前 main worktree `mms` | 默认 `~/.config/mms` | main 过渡观察入口 |
 
 - `main`：未来等同 Stable/default branch；当前用 `mmm` 明确区分 main 过渡入口。
-- `dev`：作者平时常用的开发通道；固定对应 `MMF/mmf`。
+- `dev`：作者平时常用的开发通道；固定对应 `MMF/mmf`，且维护者默认从仓库根目录进入这个 clean `dev` checkout。
 - `canary`：最激进的金丝雀通道；固定对应 `MMG/mmg`。
 - 重新生成本机命令时运行：`scripts/link_local_channel_commands.sh`。
 - 不要把 `mms` 当本地开发入口；`mms` 后续只代表 public installed copy。
+- 不要把 `.worktrees/dev` 当多人共享的默认开发入口；`.worktrees/*` 只用于 issue/PR 隔离施工。
+- 标准开发循环：根目录 `dev` 先 `git pull --ff-only`，开 issue 并记录计划，从最新 `dev` 创建独立 worktree/branch，开发后 commit/push/PR，committee 审核通过后 merge 回 `dev`，根目录再 fast-forward。
 
 ### 启动更新提醒策略
 

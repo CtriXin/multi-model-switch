@@ -246,10 +246,15 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 
 为了降低多 agent 共用工作树时的污染风险：
 
+- 仓库根目录是维护者的 `dev` 调度入口，必须保持 clean、最新；不要把 `.worktrees/dev` 当作多人共享的默认开发入口。
+- 根目录只用于 `git pull --ff-only`、查看状态、开 issue、记录计划、创建独立 worktree/branch。
+- 非 trivial 改动必须先有 issue，再从最新 `dev` 创建独立 worktree/branch，例如 `.worktrees/issue-14-redline-gate`；开发、验证、commit、push 都在该隔离 worktree 完成。
+- 共享 `dev` 入口不得叠加实质性改动或留下未跟踪文件；如果发现无关脏文件，不要 stage，不要清理，必须在交付中说明。
 - 每次开始开发或审查前，先对当前分支执行 `git pull --ff-only`；如果本地改动导致无法安全 pull，停止并报告阻塞原因，不要猜测本地已经最新。
 - MMF/MMS 后续问题必须先通过 issue 记录，改动通过 PR 提交，并在合并前经过 committee review。
 - agent 不得自行 merge PR，也不得绕过 committee review gate。
 - agent 不得自行创建 commit；只有 human 明确同意本次 commit 后才允许提交。
+- 例外：docs-only 计划/报告/committee baseline 文档，在用户要求“记录/提交/产出文档”时可默认 commit；但必须只 stage 目标文档，不能带入任何无关脏文件。
 - 一个迭代完成后，agent 必须先询问用户是否提交当前改动
 - 在用户没有明确回复前，不应默认进入下一轮实质性改动
 - 如果用户选择暂不提交，agent 在继续前应把“当前仍未提交”视为显式风险写明

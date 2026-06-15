@@ -37,6 +37,22 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。`mmf` / `mmg` 都使用 `~/.config/mms-next` preview DB root。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
+## 维护者开发入口
+
+维护者默认从仓库根目录进入 MMS，且根目录应 checkout `dev` 并保持干净、最新。`.worktrees/*` 只用于具体 issue/PR 的隔离施工，不再把 `.worktrees/dev` 当作多人共享的默认开发入口。
+
+标准循环：
+
+1. 进入仓库根目录，确认当前分支是 `dev`。
+2. 执行 `git pull --ff-only`，保持 `dev` 最新且干净。
+3. 先开 issue，并把计划写进 issue 或对应计划文档。
+4. 从最新 `dev` 创建独立 worktree/branch，例如 `.worktrees/issue-14-redline-gate`。
+5. 在独立 worktree 中开发、验证、commit、push。
+6. 提 PR 到 `dev`，由 committee 审核。
+7. committee/human 同意后 merge；根目录 `dev` 再 fast-forward 到最新，进入下一轮。
+
+除非人类明确要求直接在 `dev` 根入口编辑，否则 agent 不得在共享 `dev` 入口叠加实质性改动或留下未跟踪文件。docs-only 计划/报告类改动在用户要求“记录/提交/产出文档”时可以默认 commit，但必须只 stage 目标文档，不能带入任何无关脏文件。
+
 ## 安装 / 升级
 
 > 默认 UI 语言是中文；如果要英文，加 `--lang en`。

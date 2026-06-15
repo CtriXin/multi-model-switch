@@ -37,6 +37,22 @@ Stable target branch: `main` after the current catch-up window.
 
 Daily development branch: `dev`.
 
+## Maintainer Development Entry
+
+Maintainers should enter MMS from the repository root, and that root checkout should be on `dev`, clean, and current. `.worktrees/*` is reserved for isolated issue/PR work; `.worktrees/dev` must not be used as the shared default development entry.
+
+Standard loop:
+
+1. Enter the repository root and confirm the branch is `dev`.
+2. Run `git pull --ff-only` so `dev` is current and clean.
+3. Open an issue first, and record the plan in the issue or a linked plan document.
+4. Create an isolated worktree/branch from current `dev`, for example `.worktrees/issue-14-redline-gate`.
+5. Develop, validate, commit, and push inside that isolated worktree.
+6. Open a PR targeting `dev` for committee review.
+7. Merge only after committee/human approval, then fast-forward the root `dev` checkout before the next task.
+
+Unless the human explicitly asks for direct edits in the shared `dev` entry, agents must not stack substantive work or leave untracked files there. Docs-only plan/report changes may be committed by default when the user asks to record, submit, or produce the document, but the commit must stage only the target document and no unrelated dirty files.
+
 Key changes in this generation:
 
 - Codex primary/rescue fallback now retries prompt-cache-sensitive GLM/DeepSeek/Qwen-compatible routes over Anthropic `/v1/messages` when a gateway rejects `/v1/chat/completions`

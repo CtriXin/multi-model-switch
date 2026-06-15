@@ -181,10 +181,13 @@ After substantive changes, write a local regression report under:
 
 Before commit planning:
 
+- Treat the repository root as the clean maintainer entrypoint on `dev`; use it to pull, inspect, open issues, and create isolated worktrees, not as a shared construction area.
+- For non-trivial work, open/confirm an issue and create a dedicated branch/worktree from latest `dev`; do implementation, validation, commit, push, and PR from that isolated worktree.
 - Run `git pull --ff-only` on the active branch before editing/reviewing; if local changes block a safe pull, stop and report.
 - Record issues through the issue tracker, submit changes through PRs, and require committee review before merge.
 - Do not merge PRs or bypass committee review.
 - Do not create a commit unless the human explicitly approves that specific commit.
+- Docs-only plan/report/committee baseline documents may be committed by default when the human asks to record, submit, or produce the document; stage only the target document and no unrelated dirty files.
 
 For every agent-created commit:
 
