@@ -1071,6 +1071,256 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
     return agents
 
 
+def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_policies=None):
+    """Return a debate-only roster with host-authored v1 artifacts."""
+    agent_models = agent_models if isinstance(agent_models, dict) else {}
+    roster_config = roster_config if isinstance(roster_config, dict) else {}
+    agent_policies = agent_policies if isinstance(agent_policies, dict) else {}
+    host_model = (
+        agent_models.get("debate-host")
+        or agent_models.get("debate-host-pro")
+        or next(iter(agent_models.values()), "")
+    )
+    if not host_model:
+        return {}
+
+    safe_read_bash = {
+        "*": "ask",
+        "pwd": "allow",
+        "ls *": "allow",
+        "rg *": "allow",
+        "git status*": "allow",
+        "git diff*": "allow",
+        "git log*": "allow",
+    }
+    artifact_bash = {
+        **safe_read_bash,
+        "mkdir *": "ask",
+        "cat *": "ask",
+        "python*": "ask",
+        "node *": "ask",
+    }
+    common_permissions = {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+    }
+    member_permission = {
+        **common_permissions,
+        "edit": "ask",
+        "bash": safe_read_bash,
+        "task": "deny",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "ask",
+    }
+    host_permission = {
+        **common_permissions,
+        "edit": "ask",
+        "bash": artifact_bash,
+        "task": {"*": "deny"},
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "ask",
+    }
+    member_names = sorted(
+        name for name in agent_models
+        if str(name).startswith("debate-") and name not in {"debate-host", "debate-host-pro"}
+    )
+    for name in member_names:
+        host_permission["task"][name] = "allow"
+
+    def _agent_model(name, fallback=host_model):
+        return str(agent_models.get(name) or fallback or host_model)
+
+    def _merge_dict(base, override):
+        merged = dict(base or {})
+        for key, value in (override or {}).items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = _merge_dict(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    def _agent_policy(name):
+        policy = agent_policies.get(name) if isinstance(agent_policies.get(name), dict) else {}
+        roster_entry = roster_config.get(name) if isinstance(roster_config.get(name), dict) else {}
+        roster_policy = roster_entry.get("opencode_policy")
+        if isinstance(roster_policy, dict):
+            policy = _merge_dict(policy, roster_policy)
+        return policy
+
+    def _search_tools_fallback_only(policy):
+        raw = str((policy or {}).get("builtin_search_tools") or "").strip().lower()
+        return raw in {"disabled", "deny", "off", "shell", "shell_only", "fallback_only"}
+
+    def _permission_for_agent(base_permission, policy):
+        permission = copy.deepcopy(base_permission)
+        if not _search_tools_fallback_only(policy):
+            return permission
+        for tool_name in ("grep", "glob", "list"):
+            permission[tool_name] = "deny"
+        bash_permission = permission.get("bash")
+        if isinstance(bash_permission, dict):
+            bash_permission = dict(bash_permission)
+            bash_permission.update({
+                "pwd": "allow",
+                "ls *": "allow",
+                "rg *": "allow",
+            })
+            permission["bash"] = bash_permission
+        return permission
+
+    def _prompt_with_tool_policy(prompt, policy):
+        if not _search_tools_fallback_only(policy):
+            return prompt
+        return (
+            f"{prompt} "
+            "Tool policy: do not call built-in grep/glob/list for search or file "
+            "listing on this route; use shell commands instead (`rg --files`, "
+            "`rg -n`, `ls`, `pwd`; request `find` only when needed). If a "
+            "built-in search tool returns a schema error, switch to shell fallback."
+        )
+
+    member_list_text = ", ".join(member_names) or "no debate-* subagents"
+    host_prompt = (
+        "You are debate-host for the MMS OpenCode debate profile. This profile is "
+        "not committee, not review-hub, and not legacy discuss. Do not use "
+        "committee vote files, committee verdict vocabulary, committee decision "
+        "artifacts, review-hub request roots, or legacy mms discuss semantics. "
+        "Use only the selected debate subagents available in this session: "
+        f"{member_list_text}. Do not invent missing agents or model aliases. "
+        "If the user has not supplied a concrete question, ask for one concise "
+        "debate question and a decision boundary. Otherwise start immediately. "
+        "Create one thread_id and write all durable output under "
+        "`.ai/debate/<thread-id>/`. The v1 required files are `brief.md`, "
+        "`state.json`, `round-1-seed.json`, `round-2-clusters.json`, "
+        "`round-3-crossfire.json`, `round-4-revision.json`, `resolution.json`, "
+        "and `resolution.md`. The host writes these artifacts directly; there is "
+        "no helper command or validator program in v1. "
+        "Run the v1 regulation mechanic: blind seed -> crossfire -> revision. "
+        "First, send every selected member the same compact packet and require a "
+        "blind seed with stance, claim, evidence, risks, recommended_path, "
+        "confidence, pushback, quality_gate, and provenance. Do not expose other "
+        "members' arguments during this first pass. Then write `round-2-clusters.json` "
+        "as a host-owned clustering artifact with camps, strongest evidence, and "
+        "open_conflicts. Next, run crossfire by giving each member only strongest "
+        "opposing-case summaries, not full transcripts, and require "
+        "opponent_strongest_point, my_rebuttal, what_i_accept, "
+        "what_i_still_reject, what_evidence_would_change_my_mind, quality_gate, "
+        "and provenance. Finally, request revision with final_stance, stance_shift "
+        "(unchanged|softened|switched), shift_reason, confidence, quality_gate, "
+        "and provenance. "
+        "No extra time: never auto-append more crossfire rounds after the revision "
+        "round. Golden-goal early stop is allowed only with deterministic triggers: "
+        "positive when all valid final stances are in the same camp and at least "
+        "one stance_shift is not unchanged; negative when crossfire shows every "
+        "member's what_evidence_would_change_my_mind is empty or unreachable and "
+        "there are at least two camps with high-confidence members. If an early "
+        "stop happens, still write the required artifact files; for a negative "
+        "stop after crossfire, write `round-4-revision.json` as a skipped revision "
+        "artifact with unchanged final stances and the checkable stop reason. "
+        "Record the stop reason in state and resolution. "
+        "Before writing `resolution.json`, perform the required v1 self-check from "
+        "`docs/DEBATE_STATE_RESULT_CONTRACT_v1.md` and "
+        "`docs/DEBATE_HOST_RESOLUTION_RUBRIC_v1.md`: at least 2 valid members, "
+        "all required resolution fields present, `converged` is mutually exclusive "
+        "with `conclusion_opposite`, unresolved `fix_conflict`, and "
+        "`deterministic_vs_opinion`, deterministic facts outrank model opinion, "
+        "and missing required artifacts force `insufficient_evidence` with "
+        "quality_gate=fail. Use the conservative priority order "
+        "insufficient_evidence > split_human_required > converged > leaning. "
+        "Always set `synthesis_strategy` to `host_authored` in v1 and record "
+        "`synthesized_by` and `synthesis_attempted_by` honestly. Preserve minority "
+        "pushback; never flatten disagreement into fake consensus. The final chat "
+        "reply should be compact: resolution_state, quality_gate, recommended_next_step, "
+        "key pushback, and artifact paths."
+    )
+    agents = {
+        "debate-host": {
+            "description": "Structured debate host that runs blind seed, crossfire, revision, and host-authored resolution",
+            "mode": "primary",
+            "model": _agent_model("debate-host"),
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": _permission_for_agent(host_permission, _agent_policy("debate-host")),
+            "prompt": _prompt_with_tool_policy(host_prompt, _agent_policy("debate-host")),
+        },
+        "debate-host-pro": {
+            "description": "Higher-depth fallback debate host",
+            "mode": "primary",
+            "model": _agent_model("debate-host-pro"),
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": _permission_for_agent(host_permission, _agent_policy("debate-host-pro")),
+            "prompt": _prompt_with_tool_policy(
+                (
+                    "Fallback debate host. Continue the same debate thread, preserve "
+                    "selected debate members, keep debate separate from committee, "
+                    "write only `.ai/debate/<thread-id>/` artifacts, enforce the "
+                    "fixed blind seed -> crossfire -> revision mechanic, apply the "
+                    "v1 self-check checklist, use host_authored synthesis only, and "
+                    "preserve real disagreement instead of claiming fake convergence."
+                ),
+                _agent_policy("debate-host-pro"),
+            ),
+        },
+    }
+
+    def _member_prompt(name, model_ref):
+        lower = f"{name} {model_ref}".lower()
+        if "deepseek" in lower:
+            lens = "counterexamples, hidden failure modes, and hard technical objections"
+        elif "glm" in lower:
+            lens = "structured logic, Chinese technical nuance, and explicit tradeoffs"
+        elif "mimo" in lower:
+            lens = "divergent critique, product risk, and multimodal/visual concerns when present"
+        elif "kimi" in lower or "k2" in lower:
+            lens = "long-context reading, repo/document evidence, and source provenance"
+        elif "minimax" in lower:
+            lens = "pragmatic alternatives, low-cost paths, and user-facing product feel"
+        elif "5.5" in lower:
+            lens = "highest-risk architecture, adversarial planning, and final-quality judgment"
+        else:
+            lens = "independent engineering judgment, implementation risk, and validation strategy"
+        return (
+            f"You are {name}, an independent debate member focused on {lens}. "
+            "You are not a committee voter and must not write committee vote files, "
+            "decision.md, or ratification markers. Do not call other agents. Do not "
+            "edit product/source files unless the user explicitly assigns a separate "
+            "implementation task; normal debate outputs go back to debate-host. "
+            "For blind seed, answer without considering other members: stance, claim, "
+            "evidence, risks, recommended_path, confidence, pushback, quality_gate, "
+            "and provenance. For crossfire, engage only the strongest opposing-case "
+            "summary provided by the host and return opponent_strongest_point, "
+            "my_rebuttal, what_i_accept, what_i_still_reject, "
+            "what_evidence_would_change_my_mind, quality_gate, and provenance. "
+            "For revision, return final_stance, stance_shift "
+            "(unchanged|softened|switched), shift_reason, confidence, quality_gate, "
+            "and provenance. Be willing to switch when evidence warrants it, but "
+            "do not soften merely to create consensus. Separate deterministic facts "
+            "from model opinion and name uncertainty plainly."
+        )
+
+    for name in member_names:
+        roster_entry = roster_config.get(name) if isinstance(roster_config.get(name), dict) else {}
+        model_ref = _agent_model(name)
+        policy = _agent_policy(name)
+        agents[name] = {
+            "description": str(roster_entry.get("description") or f"Debate member {name}"),
+            "mode": "subagent",
+            "model": model_ref,
+            "temperature": 0.1,
+            "permission": _permission_for_agent(member_permission, policy),
+            "prompt": _prompt_with_tool_policy(
+                str(roster_entry.get("prompt") or _member_prompt(name, model_ref)),
+                policy,
+            ),
+        }
+    return agents
+
+
 def opencode_permission_bypass_value(value):
     if isinstance(value, dict):
         return {
@@ -1103,6 +1353,7 @@ def opencode_apply_agent_bypass_permissions(agents):
 __all__ = [
     "opencode_apply_agent_bypass_permissions",
     "opencode_committee_agent_configs",
+    "opencode_debate_agent_configs",
     "opencode_lite_agent_configs",
     "opencode_lite_pro_agent_configs",
     "opencode_permission_bypass_value",

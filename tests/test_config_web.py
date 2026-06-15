@@ -2666,7 +2666,7 @@ def test_config_web_snapshot_and_plan_persist_opencode_review_host(tmp_path):
     }
     snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
 
-    assert snapshot["opencode"]["profiles"] == ["agent", "review", "committee", "omo", "raw"]
+    assert snapshot["opencode"]["profiles"] == ["agent", "review", "committee", "debate", "omo", "raw"]
     assert snapshot["opencode"]["review"]["host"] == {
         "primary_models": ["glm-5-turbo"],
         "fallback_models": ["gpt-5.4"],

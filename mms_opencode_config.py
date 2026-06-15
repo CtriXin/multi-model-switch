@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from mms_opencode_agents import (
     opencode_apply_agent_bypass_permissions,
     opencode_committee_agent_configs,
+    opencode_debate_agent_configs,
     opencode_lite_agent_configs,
     opencode_lite_pro_agent_configs,
     opencode_review_hub_agent_configs,
@@ -971,6 +972,12 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
                     roster_config=runtime.get("opencode_agent_roster"),
                     agent_policies=opencode_agent_opencode_policies(runtime, routes),
                 )
+            elif roster == "debate":
+                payload["agent"] = opencode_debate_agent_configs(
+                    opencode_agent_model_refs(runtime, routes),
+                    roster_config=runtime.get("opencode_agent_roster"),
+                    agent_policies=opencode_agent_opencode_policies(runtime, routes),
+                )
             elif roster in {"lite_pro", "lite_pro_orchestrated"}:
                 payload["agent"] = opencode_lite_pro_agent_configs(
                     opencode_agent_model_refs(runtime, routes),
@@ -982,6 +989,8 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
             payload["agent"] = opencode_apply_agent_model_variants(payload.get("agent"), runtime, routes)
             if roster == "committee" and payload.get("default_agent") not in payload.get("agent", {}):
                 payload["default_agent"] = "committee-host"
+            if roster == "debate" and payload.get("default_agent") not in payload.get("agent", {}):
+                payload["default_agent"] = "debate-host"
     if opencode_bypass_enabled(runtime):
         payload["permission"] = "allow"
         if "agent" in payload:

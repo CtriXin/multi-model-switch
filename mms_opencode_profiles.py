@@ -5,6 +5,7 @@ from __future__ import annotations
 OPENCODE_AGENT_PROFILE_ID = "lite_pro_orchestrated"
 OPENCODE_REVIEW_PROFILE_ID = "review_hub"
 OPENCODE_COMMITTEE_PROFILE_ID = "committee"
+OPENCODE_DEBATE_PROFILE_ID = "debate"
 OPENCODE_DEFAULT_PROFILE_ID = "agent"
 
 OPENCODE_PROFILE_OPTIONS = [
@@ -28,6 +29,13 @@ OPENCODE_PROFILE_OPTIONS = [
         "label": "Committee",
         "badge": "委员会",
         "summary": "通用委员会：GPT-5.4 host 默认派发给所选 subagent，最后汇总共识/分歧；默认只选 GPT-5.4，可加 GPT-5.5、DeepSeek、GLM、MiMo、Kimi、MiniMax。",
+    },
+    {
+        "id": "debate",
+        "profile_id": OPENCODE_DEBATE_PROFILE_ID,
+        "label": "Debate",
+        "badge": "辩论",
+        "summary": "结构化辩论：独立于 Committee；blind seed -> crossfire -> revision，由 debate-host 写 .ai/debate/<thread-id>/ artifacts 并按 rubric 输出 resolution。",
     },
     {
         "id": "omo",
@@ -94,6 +102,11 @@ OPENCODE_COMMITTEE_SPECS = (
     {"key": "builder_fallback", "agent": "committee-host-pro", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
 )
 
+OPENCODE_DEBATE_SPECS = (
+    {"key": "builder_primary", "agent": "debate-host", "models": ("gpt-5.4", "gpt-5.5", "gpt-5.3-codex")},
+    {"key": "builder_fallback", "agent": "debate-host-pro", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
+)
+
 
 def _opencode_model_list(value):
     if isinstance(value, str):
@@ -154,6 +167,26 @@ def opencode_committee_host_config(cfg):
     return result
 
 
+def opencode_debate_host_config(cfg):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
+    debate = opencode.get("debate") if isinstance(opencode.get("debate"), dict) else {}
+    host = debate.get("host") if isinstance(debate.get("host"), dict) else {}
+    primary_models = _opencode_model_list(
+        host.get("primary_models")
+        or host.get("models")
+        or host.get("model")
+        or debate.get("host_model")
+    )
+    fallback_models = _opencode_model_list(host.get("fallback_models") or host.get("fallback"))
+    result = {}
+    if primary_models:
+        result["primary_models"] = primary_models
+    if fallback_models:
+        result["fallback_models"] = fallback_models
+    return result
+
+
 def opencode_lite_pro_specs_for_config(cfg, profile_id=OPENCODE_AGENT_PROFILE_ID):
     specs = [dict(spec) for spec in opencode_lite_pro_specs(profile_id)]
     normalized_profile = normalize_opencode_profile_id(profile_id)
@@ -161,6 +194,8 @@ def opencode_lite_pro_specs_for_config(cfg, profile_id=OPENCODE_AGENT_PROFILE_ID
         host = opencode_review_host_config(cfg)
     elif normalized_profile == OPENCODE_COMMITTEE_PROFILE_ID:
         host = opencode_committee_host_config(cfg)
+    elif normalized_profile == OPENCODE_DEBATE_PROFILE_ID:
+        host = opencode_debate_host_config(cfg)
     else:
         return tuple(specs)
     if not host:
@@ -201,6 +236,9 @@ def normalize_opencode_profile_id(value):
         "council": OPENCODE_COMMITTEE_PROFILE_ID,
         "board": OPENCODE_COMMITTEE_PROFILE_ID,
         "multi_committee": OPENCODE_COMMITTEE_PROFILE_ID,
+        "debate": OPENCODE_DEBATE_PROFILE_ID,
+        "debates": OPENCODE_DEBATE_PROFILE_ID,
+        "structured_debate": OPENCODE_DEBATE_PROFILE_ID,
         # Legacy pro spellings now fold into the single Agent profile.
         "pro": OPENCODE_AGENT_PROFILE_ID,
         "pro_solo": OPENCODE_AGENT_PROFILE_ID,
@@ -258,6 +296,7 @@ def opencode_profile_selection(value):
         "review_backend": (OPENCODE_REVIEW_PROFILE_ID, "serve"),
         "review_hub_backend": (OPENCODE_REVIEW_PROFILE_ID, "serve"),
         "committee_backend": (OPENCODE_COMMITTEE_PROFILE_ID, "serve"),
+        "debate_backend": (OPENCODE_DEBATE_PROFILE_ID, "serve"),
         "acp_multi": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "multi_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
         "multi_agent_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
@@ -266,6 +305,7 @@ def opencode_profile_selection(value):
         "review_acp": (OPENCODE_REVIEW_PROFILE_ID, "acp"),
         "review_hub_acp": (OPENCODE_REVIEW_PROFILE_ID, "acp"),
         "committee_acp": (OPENCODE_COMMITTEE_PROFILE_ID, "acp"),
+        "debate_acp": (OPENCODE_DEBATE_PROFILE_ID, "acp"),
     }
     if normalized in aliases:
         return aliases[normalized]
@@ -292,6 +332,8 @@ def opencode_lite_pro_specs(profile_id=OPENCODE_AGENT_PROFILE_ID):
         return OPENCODE_REVIEW_HUB_SPECS
     if normalized_profile == OPENCODE_COMMITTEE_PROFILE_ID:
         return OPENCODE_COMMITTEE_SPECS
+    if normalized_profile == OPENCODE_DEBATE_PROFILE_ID:
+        return OPENCODE_DEBATE_SPECS
     specs = list(OPENCODE_LITE_PRO_SPECS)
     if normalized_profile == "lite_pro_orchestrated":
         insert_at = next(
@@ -376,6 +418,22 @@ def apply_opencode_profile(runtime, profile_id):
             "builder_primary": "committee-host",
             "builder_fallback": "committee-host-pro",
         }
+    elif profile_id == OPENCODE_DEBATE_PROFILE_ID:
+        runtime["opencode_use_global_config"] = False
+        runtime["opencode_pure"] = True
+        runtime["opencode_lite_agents"] = True
+        runtime["opencode_agent"] = "debate-host"
+        runtime["opencode_default_agent"] = "debate-host"
+        runtime["opencode_roster"] = profile_id
+        runtime["opencode_contract_workflow"] = "debate"
+        runtime["opencode_backend_agent_capable"] = True
+        runtime["opencode_acp_capable"] = True
+        runtime["opencode_launch_preflight"] = False
+        runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
+        runtime["opencode_launch_fallback_agents"] = {
+            "builder_primary": "debate-host",
+            "builder_fallback": "debate-host-pro",
+        }
     else:
         runtime["opencode_use_global_config"] = False
         runtime["opencode_pure"] = True
@@ -391,6 +449,8 @@ __all__ = [
     "OPENCODE_BASE_PROFILE_OPTIONS",
     "OPENCODE_COMMITTEE_PROFILE_ID",
     "OPENCODE_COMMITTEE_SPECS",
+    "OPENCODE_DEBATE_PROFILE_ID",
+    "OPENCODE_DEBATE_SPECS",
     "OPENCODE_DEFAULT_MODEL_PREFERENCES",
     "OPENCODE_DEFAULT_PROFILE_ID",
     "OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS",
@@ -405,6 +465,7 @@ __all__ = [
     "opencode_lite_pro_specs",
     "opencode_lite_pro_specs_for_config",
     "opencode_committee_host_config",
+    "opencode_debate_host_config",
     "opencode_profile_label",
     "opencode_profile_selection",
     "opencode_profile_selection_ids",
