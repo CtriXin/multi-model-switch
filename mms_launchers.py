@@ -10174,15 +10174,116 @@ def _link_claude_persistent_entry(session_claude_dir, entry, target):
     os.symlink(target, dst)
 
 
-def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entry_set):
-    """Merge entries from ~/.agents/{skills,commands} into the session .claude tree.
+_AGENT_RULE_FILE_SUFFIXES = (".md", ".markdown")
+
+
+def _optional_agent_rule_files(rules_dir):
+    """Return supported local agent rule files in deterministic load order."""
+    rules_dir = str(rules_dir or "").strip()
+    if not rules_dir or not os.path.isdir(rules_dir):
+        return []
+    try:
+        names = sorted(os.listdir(rules_dir), key=lambda item: (item.casefold(), item))
+    except OSError:
+        return []
+    rules = []
+    for name in names:
+        suffix = os.path.splitext(name)[1].lower()
+        if suffix not in _AGENT_RULE_FILE_SUFFIXES:
+            continue
+        path = os.path.join(rules_dir, name)
+        if os.path.isfile(path):
+            rules.append((name, path))
+    return rules
+
+
+def _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir):
+    """Load optional ~/.agents/rules/*.md into the isolated Claude rules dir."""
+    rule_files = _optional_agent_rule_files(os.path.join(str(agents_dir or ""), "rules"))
+    if not rule_files:
+        return []
+
+    dst = os.path.join(session_claude_dir, "rules")
+    if os.path.isdir(dst) and not os.path.islink(dst):
+        loaded = []
+        for name, src in rule_files:
+            link = os.path.join(dst, name)
+            if os.path.exists(link) or os.path.islink(link):
+                continue
+            try:
+                os.symlink(src, link)
+            except OSError:
+                continue
+            loaded.append(name)
+        return loaded
+
+    overlay_root = os.path.join(os.path.dirname(session_claude_dir), ".mms-agent-rules-overlay")
+    merged_dir = os.path.join(overlay_root, "rules")
+    if os.path.isdir(merged_dir) and not os.path.islink(merged_dir):
+        shutil.rmtree(merged_dir)
+    elif os.path.exists(merged_dir) or os.path.islink(merged_dir):
+        os.unlink(merged_dir)
+    os.makedirs(merged_dir, exist_ok=True)
+
+    def _merge_existing(src_dir):
+        src_dir = str(src_dir or "").strip()
+        if not src_dir or not os.path.isdir(src_dir):
+            return
+        try:
+            if os.path.samefile(src_dir, merged_dir):
+                return
+        except Exception:
+            pass
+        try:
+            names = sorted(os.listdir(src_dir), key=lambda item: (item.casefold(), item))
+        except OSError:
+            return
+        for name in names:
+            src = os.path.join(src_dir, name)
+            link = os.path.join(merged_dir, name)
+            if os.path.exists(link) or os.path.islink(link):
+                continue
+            try:
+                os.symlink(src, link)
+            except OSError:
+                pass
+
+    if os.path.exists(dst) or os.path.islink(dst):
+        _merge_existing(os.path.realpath(dst))
+
+    loaded = []
+    for name, src in rule_files:
+        link = os.path.join(merged_dir, name)
+        if not os.path.exists(link) and not os.path.islink(link):
+            try:
+                os.symlink(src, link)
+            except OSError:
+                continue
+        loaded.append(name)
+
+    if not os.listdir(merged_dir):
+        return []
+    if os.path.islink(dst):
+        os.unlink(dst)
+    elif os.path.isdir(dst):
+        shutil.rmtree(dst)
+    elif os.path.exists(dst):
+        os.unlink(dst)
+    os.symlink(merged_dir, dst)
+    return loaded
+
+
+def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entry_set, *, allow_agent_rules=False):
+    """Merge entries from ~/.agents/{skills,commands,rules} into the session .claude tree.
 
     When ``~/.claude/skills/`` is a real directory (not a symlink), the existing
     symlink-creation logic in ``_prepare_claude_session_tree`` skips it.  Skills
     installed via ``install_global_commands.py`` live under ``~/.agents/skills/``
     and would therefore never reach the overlay chain.  This helper symlinks
     individual entries from ``~/.agents/{skills,commands}`` into the session
-    ``.claude/{skills,commands}`` directories so that they are picked up.
+    ``.claude/{skills,commands}`` directories so that they are picked up.  It
+    also opportunistically exposes Markdown files from ``~/.agents/rules/`` as
+    a local-only rule overlay; a missing or empty rules directory is a no-op.
     """
     if not os.path.isdir(agents_dir):
         return
@@ -10205,6 +10306,8 @@ def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entr
                 os.symlink(src, dst)
             except OSError:
                 pass
+    if allow_agent_rules:
+        _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir)
 
 
 def _prepare_claude_session_tree(
@@ -10219,11 +10322,13 @@ def _prepare_claude_session_tree(
     source_claude_dir=None,
     allowed_source_entries=None,
     disabled_session_surfaces=None,
+    allow_agent_rules=None,
 ):
     current_cwd = os.path.realpath(_safe_getcwd())
     normalized_account_id = str(account_id or "").strip()
     store = ensure_claude_project_store(current_cwd, account_id=normalized_account_id)
     skip_real_entries = set(skip_real_entries or ())
+    using_default_source_entries = allowed_source_entries is None
     allowed_source_entries = [
         str(entry).strip()
         for entry in (
@@ -10234,6 +10339,8 @@ def _prepare_claude_session_tree(
         if str(entry or "").strip()
     ]
     allowed_source_entry_set = set(allowed_source_entries)
+    if allow_agent_rules is None:
+        allow_agent_rules = using_default_source_entries
     scoped_claude_dir = source_claude_dir or _real_user_path(".claude")
     agents_dir = _real_user_path(".agents")
     if os.path.islink(session_claude_dir):
@@ -10270,7 +10377,12 @@ def _prepare_claude_session_tree(
             if os.path.exists(dst) or os.path.islink(dst):
                 continue
             os.symlink(src, dst)
-    _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_source_entry_set)
+    _merge_agents_into_session_tree(
+        session_claude_dir,
+        agents_dir,
+        allowed_source_entry_set,
+        allow_agent_rules=bool(allow_agent_rules),
+    )
     for entry in CLAUDE_PERSISTENT_ENTRIES:
         dst = os.path.join(session_claude_dir, entry)
         target = str(
