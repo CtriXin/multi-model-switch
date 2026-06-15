@@ -87,7 +87,10 @@ apps/*/task_plan.md
 .antigravitycli/
 .codegraph/
 .sparkring/
+.agents/
+.work/
 .worktrees/
+*.sync-conflict-*
 
 # macOS
 .DS_Store
