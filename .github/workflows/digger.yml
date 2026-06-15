@@ -1,0 +1,300 @@
+name: Digger + Redline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  digger:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      DIGGER_REF: 9c22178c961ebe25914b6580b9e7a1000af046f9
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Enable package managers
+        run: corepack enable
+
+      - name: Install Python test tools
+        run: python3 -m pip install pytest httpx rich
+
+      - name: Prepare trusted Digger run directory
+        run: |
+          rm -rf .digger "$RUNNER_TEMP/digger-runs"
+          mkdir -p "$RUNNER_TEMP/digger-runs" .digger
+          ln -s "$RUNNER_TEMP/digger-runs" .digger/runs
+
+      - name: Install digger
+        env:
+          DIGGER_DEPLOY_KEY: ${{ secrets.DIGGER_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DIGGER_DEPLOY_KEY" ]; then
+            echo "Missing DIGGER_DEPLOY_KEY secret."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$DIGGER_DEPLOY_KEY"
+
+          npm install --global "git+ssh://git@github.com/CtriXin/digger.git#${DIGGER_REF}"
+
+      - name: Run digger
+        env:
+          DIGGER_BASE: ${{ github.event.pull_request.base.sha }}
+          DIGGER_HEAD: ${{ github.event.pull_request.head.sha }}
+          DIGGER_MMS_COMMAND: ${{ secrets.DIGGER_MMS_COMMAND }}
+          DIGGER_MMS_REVIEWER: minimax-m2.7
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$DIGGER_MMS_COMMAND" ]; then
+            digger ci github \
+              --checkout "$GITHUB_WORKSPACE" \
+              --dry-run \
+              --baseline-aware \
+              --post-comment \
+              --fail-on-validation \
+              --llm mms \
+              --mms-reviewer "$DIGGER_MMS_REVIEWER"
+          else
+            digger ci github \
+              --checkout "$GITHUB_WORKSPACE" \
+              --dry-run \
+              --baseline-aware \
+              --post-comment \
+              --fail-on-validation
+          fi
+
+      - name: Verify trusted Digger run directory
+        if: always()
+        run: |
+          if [ ! -L .digger/runs ]; then
+            echo "::warning::.digger/runs is not the trusted symlink; ignoring checkout-local runs"
+            rm -rf "$RUNNER_TEMP/digger-runs"
+            mkdir -p "$RUNNER_TEMP/digger-runs"
+          fi
+
+      - name: Upload review packet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digger
+          path: ${{ runner.temp }}/digger-runs
+          retention-days: 30
+
+  redline:
+    needs: digger
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      REDLINE_GUARD_REF: 661dfbf52912534054a2340bf9dd5bca16a2c41f
+      REDLINE_GUARD_ENABLED: ${{ vars.REDLINE_GUARD_ENABLED || 'true' }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable package managers
+        run: corepack enable
+
+      - name: Prepare trusted Digger artifact directory
+        run: |
+          rm -rf .trusted-digger-artifact
+          mkdir -p .trusted-digger-artifact
+
+      - name: Download Digger artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: digger
+          path: .trusted-digger-artifact
+
+      - name: Locate Digger run
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          from pathlib import Path
+
+          candidates = {}
+          markers = ["manifest.json", "findings.json", "REVIEW.md", "baseline-summary.json"]
+          search_roots = [Path(".trusted-digger-artifact")]
+          for root in search_roots:
+              if not root.exists():
+                  continue
+              for marker in markers:
+                  for path in root.rglob(marker):
+                      parent = path.parent
+                      if parent.name == "checks":
+                          parent = parent.parent
+                      candidates[str(parent)] = parent
+
+          def sort_key(path: Path):
+              manifest = path / "manifest.json"
+              if manifest.exists():
+                  try:
+                      data = json.loads(manifest.read_text(encoding="utf-8"))
+                      return data.get("createdAt") or data.get("created_at") or ""
+                  except Exception:
+                      pass
+              return str(path.stat().st_mtime)
+
+          if candidates:
+              selected = sorted(candidates.values(), key=sort_key)[-1]
+              print(f"DIGGER_RUN_ROOT={selected}")
+          else:
+              print("DIGGER_RUN_ROOT=")
+          PY
+
+      - name: Install redline-guard
+        env:
+          REDLINE_GUARD_DEPLOY_KEY: ${{ secrets.REDLINE_GUARD_DEPLOY_KEY }}
+        run: |
+          mkdir -p .redline-guard/report
+          if [ "$REDLINE_GUARD_ENABLED" = "false" ]; then
+            echo "REDLINE_SKIP_REASON=REDLINE_GUARD_ENABLED=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ -z "$REDLINE_GUARD_DEPLOY_KEY" ]; then
+            echo "REDLINE_SKIP_REASON=missing REDLINE_GUARD_DEPLOY_KEY secret" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$REDLINE_GUARD_DEPLOY_KEY"
+
+          npm install --global "git+ssh://git@github.com/CtriXin/redline-guard.git#${REDLINE_GUARD_REF}"
+
+      - name: Run redline-guard advisory audit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .redline-guard/report
+
+          write_unknown_report() {
+            local reason="$1"
+            python3 - "$reason" <<'PY'
+          import json
+          import os
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          reason = sys.argv[1]
+          out = Path(".redline-guard/report")
+          out.mkdir(parents=True, exist_ok=True)
+          result = {
+              "version": "ci-advisory-fallback",
+              "createdAt": datetime.now(timezone.utc).isoformat(),
+              "decision": "unknown",
+              "color": "yellow",
+              "provider": "github",
+              "repo": "${{ github.repository }}",
+              "url": "${{ github.event.pull_request.html_url }}",
+              "sourceBranch": "${{ github.event.pull_request.head.ref }}",
+              "targetBranch": "${{ github.event.pull_request.base.ref }}",
+              "blockers": [],
+              "warnings": [reason],
+              "checks": [],
+              "diggerRunRoot": os.environ.get("DIGGER_RUN_ROOT", ""),
+          }
+          (out / "audit-result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+          (out / "audit-result.md").write_text(f"# redline-guard audit\n\nDecision: `unknown`\n\nReason: {reason}\n", encoding="utf-8")
+          PY
+          }
+
+          if [ -n "${REDLINE_SKIP_REASON:-}" ]; then
+            write_unknown_report "$REDLINE_SKIP_REASON"
+          elif [ -z "${DIGGER_RUN_ROOT:-}" ]; then
+            write_unknown_report "Digger artifact did not contain a run root"
+          else
+            set +e
+            redline-guard audit \
+              --provider github \
+              --pr "$PR_NUMBER" \
+              --repo "$GITHUB_WORKSPACE" \
+              --digger-run "$DIGGER_RUN_ROOT" \
+              --out .redline-guard/report
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              write_unknown_report "redline-guard exited with status $status"
+            fi
+          fi
+
+          find .redline-guard/report -type f ! -name '*.sha256' -print0 | while IFS= read -r -d '' file; do
+            sha256sum "$file" > "$file.sha256"
+          done
+
+      - name: Summarize Redline decision
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          path = Path(".redline-guard/report/audit-result.json")
+          if path.exists():
+              data = json.loads(path.read_text(encoding="utf-8"))
+              decision = data.get("decision", "unknown")
+              warnings = data.get("warnings") or []
+              blockers = data.get("blockers") or []
+          else:
+              decision = "unknown"
+              warnings = ["audit-result.json missing"]
+              blockers = []
+
+          print("## redline-guard advisory result")
+          print(f"- decision: `{decision}`")
+          print("- artifact: `redline-report`")
+          if blockers:
+              print(f"- blockers: {len(blockers)}")
+          if warnings:
+              print(f"- warnings: {len(warnings)}")
+          print("- mode: advisory-only; committee/human review remains the merge gate")
+          PY
+
+      - name: Upload Redline report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redline-report
+          path: .redline-guard/report
+          retention-days: 30
