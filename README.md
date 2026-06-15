@@ -53,6 +53,17 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 除非人类明确要求直接在 `dev` 根入口编辑，否则 agent 不得在共享 `dev` 入口叠加实质性改动或留下未跟踪文件。docs-only 计划/报告类改动在用户要求“记录/提交/产出文档”时可以默认 commit，但必须只 stage 目标文档，不能带入任何无关脏文件。
 
+辅助命令：
+
+```bash
+scripts/dev_doctor.sh
+scripts/start_issue_worktree.sh 14 redline-gate
+```
+
+`dev_doctor.sh` 只检查并报告状态：根目录是否在 `dev`、是否跟踪并落后于 `origin/dev`、是否有共享根目录脏文件、旧 `.worktrees/dev` 是否仍占用 `dev`、`mmf` 是否指向根目录 dev checkout，以及是否存在 git 标记的 prunable worktree。它不会自动删除或 reset。
+
+`start_issue_worktree.sh` 会先确认根目录 dev 干净并 fast-forward 到最新，再创建 `issue/<number>-<slug>` 分支和 `.worktrees/issue-<number>-<slug>` worktree。代码、配置、CI 行为改动都应从这个隔离 worktree 开始；docs-only 计划/报告变更才允许在明确请求下直接落到根目录 dev。
+
 ## 安装 / 升级
 
 > 默认 UI 语言是中文；如果要英文，加 `--lang en`。
