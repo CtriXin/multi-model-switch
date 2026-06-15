@@ -956,6 +956,146 @@ def test_config_web_secret_ref_without_value_is_not_key_set():
     assert summary["has_api_key"] is False
 
 
+def test_config_web_attach_preview_secret_refs_replaces_redacted_ref(tmp_path):
+    config_root = tmp_path / "mms-next"
+    secrets_dir = config_root / "secrets"
+    secrets_dir.mkdir(parents=True)
+    (secrets_dir / "webui-secrets.json").write_text(
+        json.dumps(
+            {
+                "secrets": [
+                    {
+                        "provider_id": "demo",
+                        "field": "api_key",
+                        "secret_ref": "pending-webui:demo:api_key",
+                        "value": "sk-demo-secret",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web._attach_preview_secret_refs(
+        {"providers": [{"id": "demo", "secret_ref": "pen***key"}]},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert result["providers"][0]["secret_ref"] == "pending-webui:demo:api_key"
+
+
+def test_config_web_resolve_preview_provider_secret_replaces_redacted_ref(tmp_path):
+    config_root = tmp_path / "mms-next"
+    secrets_dir = config_root / "secrets"
+    secrets_dir.mkdir(parents=True)
+    (secrets_dir / "webui-secrets.json").write_text(
+        json.dumps(
+            {
+                "secrets": [
+                    {
+                        "provider_id": "demo",
+                        "field": "api_key",
+                        "secret_ref": "pending-webui:demo:api_key",
+                        "value": "sk-demo-secret",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web._resolve_preview_provider_secret(
+        {"id": "demo", "secret_ref": "pen***key"},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+
+    assert result["secret_ref"] == "pending-webui:demo:api_key"
+    assert result["api_key"] == "sk-demo-secret"
+
+
+def test_config_web_preview_bundle_config_from_verified_files_replaces_redacted_ref(tmp_path):
+    config_root = tmp_path / "mms-next"
+    generated_dir = config_root / "generated"
+    secrets_dir = config_root / "secrets"
+    generated_dir.mkdir(parents=True)
+    secrets_dir.mkdir(parents=True)
+    (secrets_dir / "webui-secrets.json").write_text(
+        json.dumps(
+            {
+                "secrets": [
+                    {
+                        "provider_id": "demo",
+                        "field": "api_key",
+                        "secret_ref": "pending-webui:demo:api_key",
+                        "value": "sk-demo-secret",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    profile_path = generated_dir / "provider-profiles.generated.json"
+    router_path = generated_dir / "model-routes.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "demo": {
+                        "name": "Demo",
+                        "protocols": ["openai_chat_completions"],
+                        "supported_clis": ["codex"],
+                    }
+                },
+                "provider": {"default": "demo"},
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    router_path.write_text(
+        json.dumps(
+            {
+                "routes": {
+                    "gpt-5.5": {
+                        "primary": {
+                            "provider_id": "demo",
+                            "model": "gpt-5.5",
+                            "openai_base_url": "https://demo.example/v1",
+                            "api_key": "",
+                            "secret_ref": "pen***key",
+                        },
+                        "fallbacks": [],
+                    }
+                }
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_config_web._preview_bundle_config_from_verified_files(
+        {
+            "profile": {"path": str(profile_path)},
+            "router": {"path": str(router_path)},
+        },
+        config_root=str(config_root),
+    )
+
+    provider = result["providers"][0]
+    assert provider["secret_ref"] == "pending-webui:demo:api_key"
+    assert provider["has_api_key"] is True
+
+
 def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
     config_root = tmp_path / "mms-next"
     snapshot = mms_config_web.build_config_snapshot(
@@ -3537,6 +3677,76 @@ def test_config_web_registry_v2_apply_refreshed_provider_preserves_stale_routes_
     assert "claude-opus-4.7" not in router["routes"]
     assert cleanup["candidate"]["route_candidates"]["provider_route_count"] == 1
     assert cleanup["route_publish_guard"]["diff"]["removed_models_sample"] == ["claude-opus-4.7"]
+
+
+def test_config_web_registry_v2_apply_deleted_provider_does_not_resurrect(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+
+    def provider(provider_id, priority):
+        return {
+            "original_id": provider_id,
+            "id": provider_id,
+            "name": provider_id,
+            "enabled": True,
+            "role": "primary" if provider_id == "tokyo" else "fallback",
+            "priority": priority,
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["claude", "codex", "opencode"],
+            "models_endpoint": "manual",
+            "openai_base_url": f"https://{provider_id}.example/v1",
+            "anthropic_base_url": f"https://{provider_id}.example/v1",
+            "api_key": f"sk-{provider_id}-secret",
+            "update_credentials": True,
+            "fallback_models": ["mimo-v2.5"],
+            "extra_models": [],
+            "hidden_models": [],
+            "models": [{"id": "mimo-v2.5", "visible": True}],
+        }
+
+    first_payload = {
+        "draft": {
+            "provider_default": "tokyo",
+            "providers": [provider("tokyo", 200), provider("tencent", 100)],
+            "rescue": {},
+            "vision_sidecar": {},
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "mimo-v2.5"},
+            "opencode": {"default_profile": "lite_pro_orchestrated", "agent_models": {}},
+        },
+        "confirm_v2_preview": True,
+        "confirm_phrase": "写入预览DB",
+    }
+    first = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        first_payload,
+        config_path=str(config_path),
+    )
+
+    second_payload = json.loads(json.dumps(first_payload))
+    second_payload["draft"]["providers"] = [provider("tokyo", 200)]
+    second_payload["draft"]["route_scope_provider_ids"] = ["tencent"]
+    second = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        second_payload,
+        config_path=str(config_path),
+    )
+    router = json.loads((config_root / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": [{"id": "tokyo", "name": "Old"}], "provider": {"default": "tokyo"}},
+        config_path=str(config_path),
+        command_name="mmf",
+    )
+
+    provider_ids = {
+        leaf["provider_id"]
+        for route in router["routes"].values()
+        for leaf in [route["primary"], *(route.get("fallbacks") or [])]
+    }
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert provider_ids == {"tokyo"}
+    assert [item["id"] for item in snapshot["providers"]] == ["tokyo"]
 
 
 def test_config_web_registry_v2_apply_blocks_route_shrink_from_stale_small_draft(tmp_path):

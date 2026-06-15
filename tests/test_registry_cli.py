@@ -989,6 +989,46 @@ def test_registry_v2_save_candidate_writes_preview_db_without_secrets(tmp_path: 
         db.close()
 
 
+def test_provider_route_secret_ref_prefers_credential_update_over_redacted_ref() -> None:
+    secret_ref, source = mms_registry_cli._provider_route_secret_ref(
+        {"id": "primary-local", "secret_ref": "pen***key"},
+        {"primary-local"},
+    )
+
+    assert secret_ref == "pending-webui:primary_local:api_key"
+    assert source == "credential_update"
+
+
+def test_provider_route_secret_ref_ignores_redacted_api_key_fallback() -> None:
+    secret_ref, source = mms_registry_cli._provider_route_secret_ref(
+        {"id": "primary-local", "api_key": "pen***key"},
+        set(),
+    )
+
+    assert secret_ref == ""
+    assert source == ""
+
+
+def test_provider_route_secret_ref_prefers_credential_update_over_stale_ref() -> None:
+    secret_ref, source = mms_registry_cli._provider_route_secret_ref(
+        {"id": "primary-local", "secret_ref": "legacy-config:old:api_key"},
+        {"primary-local"},
+    )
+
+    assert secret_ref == "pending-webui:primary_local:api_key"
+    assert source == "credential_update"
+
+
+def test_provider_route_secret_ref_ignores_named_redacted_tokens() -> None:
+    secret_ref, source = mms_registry_cli._provider_route_secret_ref(
+        {"id": "primary-local", "secret_ref": "<redacted>", "api_key": "[redacted]"},
+        set(),
+    )
+
+    assert secret_ref == ""
+    assert source == ""
+
+
 def test_registry_v2_save_candidate_refuses_stable_root_without_allow_stable(tmp_path: Path) -> None:
     stable_root = tmp_path / "mms"
 
@@ -1374,6 +1414,93 @@ def test_publish_preview_bundle_prefers_latest_registry_v2_save_candidate(tmp_pa
     assert profile_payload["source"] == "registry-preview-v2-save-candidate"
     assert profile_payload["profiles"]["primary-local"]["models_endpoint"] == "/models"
     assert "sk-primary-local-secret" not in generated_text
+
+
+def test_route_scoped_candidate_payload_drops_deleted_provider_not_in_scope(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    policy = {"version": 1, "models": {"shared-model": {"visible": True}}}
+    first_cfg = {
+        "provider": {"default": "tokyo"},
+        "providers": [
+            {
+                "id": "tokyo",
+                "name": "Tokyo",
+                "enabled": True,
+                "role": "primary",
+                "priority": 200,
+                "default_openai_base_url": "https://tokyo.example/v1",
+                "api_key": "sk-tokyo-secret",
+                "models_endpoint": "/models",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["shared-model"],
+            },
+            {
+                "id": "tencent",
+                "name": "Tencent",
+                "enabled": True,
+                "role": "fallback",
+                "priority": 100,
+                "default_openai_base_url": "https://tencent.example/v1",
+                "api_key": "sk-tencent-secret",
+                "models_endpoint": "/models",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["shared-model"],
+            },
+        ],
+    }
+    mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=first_cfg,
+        policy_payload=policy,
+        credential_updates=[
+            {"provider_id": "tokyo", "api_key": "sk-tokyo-secret"},
+            {"provider_id": "tencent", "api_key": "sk-tencent-secret"},
+        ],
+        apply=True,
+        command_name="mmf registry",
+    )
+    mms_registry_cli.write_registry_v2_webui_secret_backend(
+        config_dir=config_dir,
+        credential_updates=[
+            {"provider_id": "tokyo", "api_key": "sk-tokyo-secret"},
+            {"provider_id": "tencent", "api_key": "sk-tencent-secret"},
+        ],
+        command_name="mmf registry",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+
+    second_cfg = {
+        "provider": {"default": "tokyo"},
+        "providers": [
+            {
+                "id": "tokyo",
+                "name": "Tokyo",
+                "enabled": True,
+                "role": "primary",
+                "priority": 200,
+                "default_openai_base_url": "https://tokyo.example/v1",
+                "api_key": "sk-tokyo-secret",
+                "models_endpoint": "/models",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "fallback_models": ["shared-model"],
+            }
+        ],
+    }
+    candidate_payload = mms_registry_cli._registry_v2_candidate_payload(second_cfg, policy_payload=policy)
+
+    scoped = mms_registry_cli._route_scoped_candidate_payload(
+        config_dir=config_dir,
+        candidate_payload=candidate_payload,
+        route_scope_provider_ids=["tokyo"],
+    )
+
+    provider_ids = {str(entry.get("provider_id") or "") for entry in scoped["route_entries"]}
+
+    assert provider_ids == {"tokyo"}
+    assert scoped["skipped"][-1]["removed_provider_ids"] == ["tencent"]
 
 
 def test_publish_preview_bundle_does_not_mix_foreign_registry_v2_policy_revision(tmp_path: Path) -> None:
@@ -2126,6 +2253,176 @@ def test_model_source_status_downgrades_stale_runtime_ready_when_route_url_missi
     assert status["generated_bundle"]["runtime_ready"] is False
     assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
     assert status["generated_bundle"]["router_missing_base_url_count"] == 1
+
+
+def test_model_source_status_ready_with_verified_runtime_ready_bundle_without_legacy_candidates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    mms_registry_cli.init_config_root(config_dir=config_dir, command_name="mmf preview")
+    generated = config_dir / "generated"
+    generated.mkdir(parents=True, exist_ok=True)
+    router = generated / "model-routes.json"
+    lineup = generated / "model-routes.lineup.json"
+    profile = generated / "provider-profiles.generated.json"
+    policy = generated / "model-policy.effective.json"
+    capabilities = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(
+        router,
+        {
+            "version": 1,
+            "runtime_ready": True,
+            "routes": {
+                "ready-model": {
+                    "primary": {
+                        "provider_id": "ready-provider",
+                        "model_id": "ready-model",
+                        "openai_base_url": "https://ready.example/v1",
+                        "api_key": "sk-ready-secret",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        lineup,
+        {
+            "version": 1,
+            "routes": {
+                "ready-model": {
+                    "primary": {"provider_id": "ready-provider", "model_id": "ready-model"},
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        profile,
+        {
+            "schema_version": 1,
+            "profiles": {
+                "ready-provider": {
+                    "name": "Ready Provider",
+                    "enabled": True,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                }
+            },
+            "provider": {"default": "ready-provider"},
+        },
+    )
+    mms_registry.write_json_atomic(policy, {"version": 1, "models": {"ready-model": {"visible": True}}})
+    mms_registry.write_json_atomic(capabilities, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_ready_without_candidates",
+        capability_revision="cap_ready_without_candidates",
+        route_revision="route_ready_without_candidates",
+        policy_revision="policy_ready_without_candidates",
+        profile_revision="profile_ready_without_candidates",
+        files={
+            "router": {"path": router, "canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+            "lineup": {"path": lineup, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+        },
+    )
+
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+
+    assert status["registry_db"]["status"] == "ok"
+    assert status["legacy_import"]["candidates"]["provider_route_count"] == 0
+    assert status["generated_bundle"]["verified"] is True
+    assert status["generated_bundle"]["runtime_ready"] is True
+    assert status["status"] == "ready"
+    assert status["result"] == "READY"
+    assert status["ready"] is True
+
+
+def test_preview_doctor_ready_with_verified_runtime_ready_bundle_without_legacy_candidates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    mms_registry_cli.init_config_root(config_dir=config_dir, command_name="mmf preview")
+    generated = config_dir / "generated"
+    generated.mkdir(parents=True, exist_ok=True)
+    router = generated / "model-routes.json"
+    lineup = generated / "model-routes.lineup.json"
+    profile = generated / "provider-profiles.generated.json"
+    policy = generated / "model-policy.effective.json"
+    capabilities = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(
+        router,
+        {
+            "version": 1,
+            "runtime_ready": True,
+            "routes": {
+                "ready-model": {
+                    "primary": {
+                        "provider_id": "ready-provider",
+                        "model_id": "ready-model",
+                        "openai_base_url": "https://ready.example/v1",
+                        "api_key": "sk-ready-secret",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        lineup,
+        {
+            "version": 1,
+            "routes": {
+                "ready-model": {
+                    "primary": {"provider_id": "ready-provider", "model_id": "ready-model"},
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+    mms_registry.write_json_atomic(
+        profile,
+        {
+            "schema_version": 1,
+            "profiles": {
+                "ready-provider": {
+                    "name": "Ready Provider",
+                    "enabled": True,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["codex"],
+                }
+            },
+            "provider": {"default": "ready-provider"},
+        },
+    )
+    mms_registry.write_json_atomic(policy, {"version": 1, "models": {"ready-model": {"visible": True}}})
+    mms_registry.write_json_atomic(capabilities, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_ready_without_candidates_doctor",
+        capability_revision="cap_ready_without_candidates_doctor",
+        route_revision="route_ready_without_candidates_doctor",
+        policy_revision="policy_ready_without_candidates_doctor",
+        profile_revision="profile_ready_without_candidates_doctor",
+        files={
+            "router": {"path": router, "canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+            "lineup": {"path": lineup, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+        },
+    )
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir, command_name="mmf config doctor")
+
+    assert summary["counts"]["candidate_provider_routes"] == 0
+    assert summary["bundle"]["verified"] is True
+    assert summary["bundle"]["runtime_ready"] is True
+    assert summary["status"] == "ready"
+    assert summary["result"] == "READY"
+    assert summary["ready"] is True
+    checks = {item["id"]: item for item in summary["checks"]}
+    assert checks["legacy_candidates"]["ok"] is True
+    assert summary["next_actions"][0]["command"].startswith("scripts/mms_health_watchdog.py")
 
 
 def test_mmf_preview_publish_wrapper_fails_closed_without_candidates(tmp_path: Path) -> None:
