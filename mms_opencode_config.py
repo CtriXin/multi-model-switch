@@ -192,6 +192,52 @@ def opencode_agent_model_refs(runtime, routes):
     return refs
 
 
+def opencode_agent_opencode_policies(runtime, routes):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    policies_by_ref = {}
+    for index, route in enumerate(routes or []):
+        if not isinstance(route, dict):
+            continue
+        model_ref = opencode_route_model_ref(route, index)
+        model_name = str(route.get("model") or "").strip()
+        if not model_ref or not model_name:
+            continue
+        protocol = str(route.get("protocol") or "").strip()
+        base_url = str(route.get("anthropic_base_url") or route.get("openai_base_url") or "").strip()
+        # OpenCode agent policy is per route. Do not let a top-level runtime
+        # profile force unrelated fallback routes into the same policy bucket.
+        route_runtime = {
+            key: value
+            for key, value in runtime.items()
+            if key not in {"profile", "provider_profile"}
+        }
+        route_runtime["id"] = route.get("provider_id") or runtime.get("id")
+        if route.get("provider_profile"):
+            route_runtime["provider_profile"] = route.get("provider_profile")
+        try:
+            from mms_provider_profiles import profile_opencode_policy
+
+            policy = profile_opencode_policy(
+                model_name,
+                runtime=route_runtime,
+                provider_id=str(route.get("provider_id") or runtime.get("id") or ""),
+                base_url=base_url,
+                profile_id=str(route.get("provider_profile") or ""),
+                protocol=_opencode_profile_protocol(protocol),
+            )
+        except (ImportError, KeyError, TypeError, ValueError):
+            policy = {}
+        if policy:
+            policies_by_ref[model_ref] = policy
+
+    refs = opencode_agent_model_refs(runtime, routes)
+    return {
+        agent: policies_by_ref[model_ref]
+        for agent, model_ref in refs.items()
+        if model_ref in policies_by_ref
+    }
+
+
 def opencode_env_bool(name, default=False):
     raw = str(os.environ.get(name) or "").strip().lower()
     if not raw:
@@ -364,7 +410,7 @@ def opencode_model_capabilities(runtime, model_name):
             ),
             profile_id=str(runtime.get("profile") or runtime.get("provider_profile") or ""),
         )
-    except Exception:
+    except (ImportError, KeyError, TypeError, ValueError):
         return {}
 
 
@@ -602,7 +648,7 @@ def opencode_model_request_options(
             thinking_enabled=thinking_enabled,
             reasoning_effort=effort or None,
         )
-    except Exception:
+    except (ImportError, KeyError, TypeError, ValueError):
         payload = {}
 
     profile_options = _opencode_options_from_payload(payload)
@@ -658,7 +704,7 @@ def _opencode_effort_variant_values(runtime, model_name, *, provider_id="", base
                 add(key)
                 add(value)
         add(profile_caps.get("effort_default"))
-    except Exception:
+    except (ImportError, KeyError, TypeError, ValueError):
         pass
     return values
 
@@ -923,6 +969,7 @@ def opencode_build_config_payload(runtime, model_name="", *, context_window_reso
                 payload["agent"] = opencode_committee_agent_configs(
                     opencode_agent_model_refs(runtime, routes),
                     roster_config=runtime.get("opencode_agent_roster"),
+                    agent_policies=opencode_agent_opencode_policies(runtime, routes),
                 )
             elif roster in {"lite_pro", "lite_pro_orchestrated"}:
                 payload["agent"] = opencode_lite_pro_agent_configs(

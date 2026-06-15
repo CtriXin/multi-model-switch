@@ -1107,6 +1107,29 @@
           }
         }
       }
+    },
+    "cpa-antigravity-gemini": {
+      "label": "CPA Antigravity Gemini",
+      "match": {
+        "provider_id_contains": [
+          "cpa",
+          "antigravity"
+        ],
+        "base_url_contains": [
+          "antigravity"
+        ],
+        "model_prefixes": [
+          "gemini"
+        ],
+        "require_model_prefix": true
+      },
+      "opencode": {
+        "tool_schema_smoke": "passed",
+        "strict_json_schema": "weak",
+        "builtin_search_tools": "fallback_only",
+        "shell_search_fallback": true,
+        "note": "Gemini relay/tool schemas can drift on OpenCode built-in search tools; prefer shell search fallback for committee agents without changing transport."
+      }
     }
   }
 }
