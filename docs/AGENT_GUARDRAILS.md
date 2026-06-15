@@ -253,6 +253,7 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - 每次开始开发或审查前，先对当前分支执行 `git pull --ff-only`；如果本地改动导致无法安全 pull，停止并报告阻塞原因，不要猜测本地已经最新。
 - MMF/MMS 后续问题必须先通过 issue 记录，改动通过 PR 提交，并在合并前经过 committee review。
 - agent 不得自行 merge PR，也不得绕过 committee review gate。
+- 如果 human/committee 授权 agent 执行 merge，且该 merge 对应本地 task worktree，merge 成功后必须清理关联 worktree，除非 human 明确要求保留。默认先运行 `scripts/cleanup_merged_worktree.sh <branch-or-pr>`；脚本因 dirty/unmerged/untracked/unpushed 状态拒绝时，必须保留现场并报告 blocker。
 - agent 不得自行创建 commit；只有 human 明确同意本次 commit 后才允许提交。
 - 例外：docs-only 计划/报告/committee baseline 文档，在用户要求“记录/提交/产出文档”时可默认 commit；但必须只 stage 目标文档，不能带入任何无关脏文件。
 - 一个迭代完成后，agent 必须先询问用户是否提交当前改动
