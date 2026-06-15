@@ -40,28 +40,29 @@ This document describes the CI evidence portion of that workflow.
 
 ## Current State
 
-Live status verified on 2026-06-15:
+Verified PR #4 state on 2026-06-15, retained as historical context rather than a moving invariant:
 
 - `CtriXin/digger` exists as a separate private repository.
 - `CtriXin/redline-guard` exists as a separate private repository.
-- PR #4 is open, targets `main`, and currently has HEAD `1da83c25`.
-- PR #4 files are `.github/workflows/digger.yml` and
+- PR #4 was open, targeted `main`, and had verified HEAD `1da83c25` at review time.
+- PR #4 files were `.github/workflows/digger.yml` and
   `docs/DIGGER_PR_VALIDATION.md`.
-- PR #4 installs Digger in GitHub Actions from pinned commit
+- PR #4 installed Digger in GitHub Actions from pinned commit
   `9c22178c961ebe25914b6580b9e7a1000af046f9`, not from a floating branch or a
   local path.
-- PR #4 limits the Digger job to same-repository PRs with
+- PR #4 limited the Digger job to same-repository PRs with
   `github.event.pull_request.head.repo.full_name == github.repository`.
-- PR #4 grants `contents: read`, `pull-requests: write`, and `issues: write`.
+- PR #4 granted `contents: read`, `pull-requests: write`, and `issues: write`.
   The issue permission is needed because GitHub PR conversation comments use the
   Issues API path.
-- PR #4 uploads `.digger/runs` as artifact `digger`.
+- PR #4 uploaded `.digger/runs` as artifact `digger`.
 - Redline is not installed, executed, or uploaded by the MMS workflow yet.
 
 Earlier committee feedback flagged a mismatch between this plan and PR #4 when
-#4 still pointed at `4df1c349`. That mismatch is resolved in live PR #4 by
-commit `1da83c25`; keep this section tied to verified PR state when the branch
-moves.
+#4 still pointed at `4df1c349`. That mismatch was resolved at verified HEAD
+`1da83c25`. Do not duplicate PR #4 HEAD references elsewhere; if PR #4 moves,
+update this single historical state block or link to the PR instead of editing
+multiple scattered lines.
 
 ## Committee Decisions Adopted
 
@@ -173,8 +174,11 @@ The CLI already supports `--digger-run` and writes `audit-result.json`,
 - Document branch coverage: `main`, `dev`, `release/*`, and feature branches.
 - Document local fallback commands for maintainers, but make CI independent of
   local paths.
-- Document a kill switch such as `REDLINE_GUARD_ENABLED=false` or a workflow
-  input/env value that skips Redline without changing code.
+- Document the first kill-switch implementation as a repository variable named
+  `REDLINE_GUARD_ENABLED`; the Redline job should skip when the variable is set
+  to `false`, so emergency disablement does not require a PR. If repository
+  variables are unavailable, fall back to a workflow env default that requires a
+  PR to change and document that weaker operational mode.
 
 ### Phase 4: Committee Validation Before Merge
 
@@ -307,6 +311,8 @@ Digger/Redline checks on protected branches.
 - A follow-up PR adds Redline as an advisory downstream job.
 - Digger runs in GitHub Actions and uploads `.digger/runs` as artifact `digger`.
 - Redline runs in GitHub Actions and uploads artifact `redline-report`.
+- Redline writes a one-line Actions step summary containing its decision and
+  artifact name, so advisory status is visible without opening artifacts.
 - Digger and Redline installs are pinned.
 - Same-repo/fork behavior is explicit.
 - Branch coverage expectations are documented.
