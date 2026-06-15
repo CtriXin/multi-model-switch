@@ -204,7 +204,14 @@ def opencode_agent_opencode_policies(runtime, routes):
             continue
         protocol = str(route.get("protocol") or "").strip()
         base_url = str(route.get("anthropic_base_url") or route.get("openai_base_url") or "").strip()
-        route_runtime = {**runtime, "id": route.get("provider_id") or runtime.get("id")}
+        # OpenCode agent policy is per route. Do not let a top-level runtime
+        # profile force unrelated fallback routes into the same policy bucket.
+        route_runtime = {
+            key: value
+            for key, value in runtime.items()
+            if key not in {"profile", "provider_profile"}
+        }
+        route_runtime["id"] = route.get("provider_id") or runtime.get("id")
         if route.get("provider_profile"):
             route_runtime["provider_profile"] = route.get("provider_profile")
         try:

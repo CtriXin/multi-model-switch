@@ -387,6 +387,111 @@ def test_opencode_committee_gemini_policy_disables_builtin_search_tools(monkeypa
     assert "built-in grep/glob/list" not in kimi_agent["prompt"]
 
 
+def test_opencode_committee_route_policy_ignores_runtime_provider_profile(monkeypatch):
+    import mms_launchers
+    import mms_provider_profiles
+
+    monkeypatch.setattr(
+        mms_provider_profiles,
+        "load_provider_profiles",
+        lambda: {
+            "profiles": {
+                "unit-gemini-fallback": {
+                    "match": {"profile_only": True},
+                    "opencode": {"builtin_search_tools": "fallback_only"},
+                },
+                "unit-openai": {"match": {"profile_only": True}},
+                "unit-cpa-gemini": {
+                    "match": {
+                        "provider_id_contains": ["cpa", "antigravity"],
+                        "model_prefixes": ["gemini"],
+                        "require_model_prefix": True,
+                    },
+                    "opencode": {"builtin_search_tools": "fallback_only"},
+                },
+            }
+        },
+    )
+
+    def build_payload(*, runtime_profile, committee_route):
+        return mms_launchers._build_opencode_config_payload(
+            _runtime(
+                id="committee-test",
+                provider_profile=runtime_profile,
+                opencode_lite_agents=True,
+                opencode_roster="committee",
+                opencode_agent="committee-host",
+                opencode_default_agent="committee-host",
+                opencode_default_route_key="builder_primary",
+                bypass=False,
+                opencode_routes=[
+                    {
+                        "id": "builder_primary",
+                        "model": "gpt-5.4",
+                        "provider_id": "openai",
+                        "provider_ref": "mms-builder",
+                        "provider_name": "OpenAI",
+                        "protocol": "openai_responses",
+                        "openai_base_url": "https://api.openai.com/v1",
+                        "api_key": "sk-openai",
+                    },
+                    committee_route,
+                ],
+                opencode_agent_model_keys={
+                    "committee-host": "builder_primary",
+                    "committee-member": "custom_committee-member",
+                },
+                opencode_agent_roster={
+                    "committee-member": {
+                        "enabled": True,
+                        "custom": True,
+                        "model": committee_route["model"],
+                    },
+                },
+            ),
+            "gpt-5.4",
+        )
+
+    kimi_payload = build_payload(
+        runtime_profile="unit-gemini-fallback",
+        committee_route={
+            "id": "custom_committee-member",
+            "model": "kimi-k2.7-code",
+            "provider_id": "kimi",
+            "provider_ref": "mms-kimi",
+            "provider_name": "Kimi",
+            "protocol": "anthropic_messages",
+            "anthropic_base_url": "https://api.kimi.com/coding/v1",
+            "api_key": "sk-kimi",
+        },
+    )
+    kimi_agent = kimi_payload["agent"]["committee-member"]
+    assert kimi_agent["permission"]["grep"] == "allow"
+    assert kimi_agent["permission"]["glob"] == "allow"
+    assert kimi_agent["permission"]["list"] == "allow"
+    assert "built-in grep/glob/list" not in kimi_agent["prompt"]
+
+    gemini_payload = build_payload(
+        runtime_profile="unit-openai",
+        committee_route={
+            "id": "custom_committee-member",
+            "model": "gemini-3-flash-agent(high)",
+            "provider_id": "cpa-antigravity",
+            "provider_ref": "mms-gemini",
+            "provider_name": "CPA Antigravity",
+            "protocol": "anthropic_messages",
+            "openai_base_url": "http://161.33.197.51:4001/v1",
+            "anthropic_base_url": "http://161.33.197.51:4001/v1",
+            "api_key": "sk-gemini",
+        },
+    )
+    gemini_agent = gemini_payload["agent"]["committee-member"]
+    assert gemini_agent["permission"]["grep"] == "deny"
+    assert gemini_agent["permission"]["glob"] == "deny"
+    assert gemini_agent["permission"]["list"] == "deny"
+    assert "built-in grep/glob/list" in gemini_agent["prompt"]
+
+
 def test_opencode_model_limit_uses_shared_model_policy(monkeypatch):
     import mms_capability_resolver
     import mms_launchers

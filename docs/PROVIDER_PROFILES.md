@@ -44,7 +44,9 @@ The patch engine intentionally supports only data-driven field patches. It does 
 - `fallback_only`: deny built-in `grep` / `glob` / `list` for affected agents and instruct them to use shell fallback commands such as `rg --files`, `rg -n`, `find`, `ls`, and `pwd`.
 - `disabled` / `deny` / `shell_only`: aliases for the same shell-first behavior.
 
-Use this when a provider route passes normal tool smoke tests but still drifts on long OpenCode agent sessions. For Gemini relay routes, MMS keeps transport selection route-driven (for example CPA/NewAPI may still use Anthropic Messages), while committee agents use shell search fallback to avoid missing required built-in tool arguments such as `pattern`.
+Use this when a provider route passes normal tool smoke tests but still drifts on long OpenCode agent sessions. For the known CPA/Antigravity Gemini relay route, MMS keeps transport selection route-driven (for example CPA/NewAPI may still use Anthropic Messages), while committee agents use shell search fallback to avoid missing required built-in tool arguments such as `pattern`.
+
+Keep this policy route-scoped. The built-in `cpa-antigravity-gemini` profile carries the Gemini search fallback because that is the known problem channel; the generic `gemini` profile does not force all Gemini routes into shell search fallback.
 
 ## Current Dual-Format References
 

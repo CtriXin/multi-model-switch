@@ -382,10 +382,23 @@ def test_gemini_opencode_policy_uses_shell_search_fallback(monkeypatch, tmp_path
         protocol="anthropic_messages",
     )
 
-    assert policy["profile"] == "gemini"
+    assert policy["profile"] == "cpa-antigravity-gemini"
     assert policy["builtin_search_tools"] == "fallback_only"
     assert policy["shell_search_fallback"] is True
     assert policy["strict_json_schema"] == "weak"
+
+
+def test_generic_gemini_profile_does_not_force_opencode_search_fallback(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    policy = profiles.profile_opencode_policy(
+        "gemini-3-flash-agent(high)",
+        provider_id="gemini-direct",
+        base_url="https://generativelanguage.googleapis.com",
+        protocol="anthropic_messages",
+    )
+
+    assert policy == {}
 
 
 def test_gemini_profile_keeps_3_level_and_25_numeric_budget(monkeypatch, tmp_path):
