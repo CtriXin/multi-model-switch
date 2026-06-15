@@ -1115,6 +1115,66 @@ def test_opencode_health_check_can_probe_more_routes_with_short_timeout(monkeypa
     assert calls[1]["anthropic_base_url"] == "https://fallback.example/v1"
 
 
+def test_opencode_health_check_max_routes_zero_falls_back_to_default(monkeypatch):
+    import mms_opencode_launch
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK_MAX_ROUTES", "0")
+    calls = []
+    routes = [
+        {
+            "id": "builder_primary",
+            "provider_id": "primary",
+            "protocol": "openai_responses",
+            "openai_base_url": "https://primary.example/v1",
+            "api_key": "sk-primary",
+            "model": "gpt-5.4",
+        },
+        {
+            "id": "builder_fallback",
+            "provider_id": "fallback",
+            "protocol": "anthropic_messages",
+            "anthropic_base_url": "https://fallback.example/v1",
+            "api_key": "sk-fallback",
+            "model": "gpt-5.5",
+        },
+    ]
+
+    mms_opencode_launch.opencode_gateway_health_check(
+        {"model": "gpt-5.4", "opencode_default_route_key": "builder_primary"},
+        runtime_routes=lambda _runtime, _model: routes,
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+
+    assert [call["id"] for call in calls] == ["primary"]
+
+
+def test_opencode_health_check_nan_timeout_falls_back_to_default(monkeypatch):
+    import mms_opencode_launch
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK_TIMEOUT", "nan")
+    calls = []
+
+    mms_opencode_launch.opencode_gateway_health_check(
+        {"model": "gpt-5.4"},
+        runtime_routes=lambda _runtime, _model: [
+            {
+                "id": "builder_primary",
+                "provider_id": "primary",
+                "openai_base_url": "https://primary.example/v1",
+                "api_key": "sk-primary",
+                "model": "gpt-5.4",
+            }
+        ],
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+
+    assert calls[0]["gateway_health_timeout_sec"] == 2.0
+
+
 def test_opencode_health_check_env_can_disable_probe(monkeypatch):
     import mms_opencode_launch
 
@@ -1163,6 +1223,29 @@ def test_gateway_ping_uses_runtime_health_timeout(monkeypatch):
 
     assert ok is True
     assert captured["timeout"] == 1.25
+
+
+def test_gateway_ping_nan_timeout_falls_back_to_default(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    def fake_request(method, url, runtime=None, headers=None, timeout=None):
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_launchers, "_runtime_httpx_request", fake_request)
+    monkeypatch.setattr(mms_launchers, "_build_gateway_url", lambda base_url, path: f"{base_url.rstrip('/')}{path}")
+
+    assert mms_launchers._gateway_ping(
+        "https://gateway.example/v1",
+        "sk-test",
+        runtime={"gateway_health_timeout_sec": "nan"},
+    ) is True
+    assert captured["timeout"] == 8
 
 
 def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeypatch):

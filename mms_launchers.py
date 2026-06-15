@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import copy
 import inspect
 import json
+import math
 import os
 import re
 import shlex
@@ -7019,7 +7020,7 @@ def _gateway_ping_timeout(runtime=None):
         value = float(raw)
     except (TypeError, ValueError):
         return 8
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         return 8
     return min(value, 8)
 

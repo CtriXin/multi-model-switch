@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 
 
@@ -40,7 +41,7 @@ def _opencode_float_setting(runtime, env_name, runtime_keys, default, *, environ
         value = float(raw)
     except (TypeError, ValueError):
         return float(default)
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         return float(default)
     return min(value, 8.0)
 
@@ -56,9 +57,12 @@ def _opencode_int_setting(runtime, env_name, runtime_keys, default, *, environ=N
     if not raw:
         return int(default)
     try:
-        return max(0, int(raw))
+        value = int(raw)
     except (TypeError, ValueError):
         return int(default)
+    if value <= 0:
+        return int(default)
+    return value
 
 
 def _opencode_health_check_timeout(runtime, *, environ=None):
@@ -129,8 +133,6 @@ def _opencode_health_check_routes(runtime, routes, *, environ=None):
         1,
         environ=environ,
     )
-    if max_routes <= 0:
-        return []
     return unique[:max_routes]
 
 
