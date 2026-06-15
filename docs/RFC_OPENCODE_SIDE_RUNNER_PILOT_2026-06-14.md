@@ -253,6 +253,9 @@ Additional proof after issue #8:
 
 - GitHub issue #10: RFC: Pilot OpenCode side-runner for managed background sessions.
 - GitHub issue #8: Bug: OpenCode profile cannot switch sessions; session list is empty.
+  - **Status**: RFC approved with modifications (2026-06-15)
+  - **RFC Document**: [`RFC_OPENCODE_SESSION_SWITCHING_FIX_2026-06-15.md`](RFC_OPENCODE_SESSION_SWITCHING_FIX_2026-06-15.md)
+  - **Implementation Guide**: [`ISSUE_8_OPENCODE_SESSION_FIX_GUIDE.md`](ISSUE_8_OPENCODE_SESSION_FIX_GUIDE.md)
 - OpenCode plugins: https://opencode.ai/docs/plugins/
 - OpenCode commands: https://opencode.ai/docs/commands/
 - OpenCode server API: https://opencode.ai/docs/server/
