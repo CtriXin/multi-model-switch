@@ -62,3 +62,23 @@ is not a merge bot and must not be treated as committee approval.
 - Fork PRs are out of scope for now and are skipped by the same-repository guard.
 - Digger results are advisory. A passing Digger run does not replace committee
   review, human merge approval, or the project-specific release checklist.
+
+## Redline Follow-up Gate
+
+A follow-up workflow job may run `redline-guard` after Digger. The first MMS
+integration keeps Redline advisory-only and artifact-only:
+
+- The Redline job depends on Digger with `needs: digger` and uses `if: always()`
+  so missing Digger evidence becomes an `unknown` report instead of a silent gap.
+- Redline consumes the Digger artifact named `digger` and writes
+  `.redline-guard/report` as artifact `redline-report`.
+- Redline does not receive `pull-requests: write` or `issues: write`, and the CI
+  command intentionally omits `--comment`, `--notify`, callback actions, merge,
+  approve, deploy, close, and force-push behavior.
+- `blocked`, `needs-review`, and `unknown` decisions are advisory in the first
+  integration. Committee/human review remains the merge gate.
+- Redline installation must be pinned by commit SHA through `REDLINE_GUARD_REF`
+  or another immutable coordinate.
+
+See [`docs/REDLINE_PR_GATE.md`](REDLINE_PR_GATE.md) for the Redline artifact,
+secret, permission, kill-switch, and local fallback contract.
