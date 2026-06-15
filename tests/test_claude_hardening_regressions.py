@@ -2847,6 +2847,65 @@ def test_optional_agent_rules_loader_filters_markdown_and_sorts(tmp_path):
     ]
 
 
+def test_agent_rules_diagnostics_reports_noop_states(tmp_path):
+    import mms_launchers
+
+    rules_dir = tmp_path / ".agents" / "rules"
+
+    missing = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+    )
+    assert missing["schema"] == mms_launchers.AGENT_RULES_DIAGNOSTICS_SCHEMA
+    assert missing["checked_path"] == "~/.agents/rules/"
+    assert missing["status"] == "missing"
+    assert missing["loaded_count"] == 0
+    assert missing["loaded_files"] == []
+
+    rules_dir.mkdir(parents=True)
+    empty = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+    )
+    assert empty["status"] == "empty"
+    assert empty["entry_count"] == 0
+
+    (rules_dir / "notes.txt").write_text("skip\n", encoding="utf-8")
+    (rules_dir / "nested.md").mkdir()
+    unsupported = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+    )
+    assert unsupported["status"] == "unsupported-only"
+    assert unsupported["supported_count"] == 0
+    assert unsupported["unsupported_count"] == 2
+
+
+def test_agent_rules_diagnostics_reports_loaded_filenames_without_content(tmp_path):
+    import mms_launchers
+
+    rules_dir = tmp_path / ".agents" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "20-second.markdown").write_text("# private second body\n", encoding="utf-8")
+    (rules_dir / "10-first.md").write_text("# private first body\n", encoding="utf-8")
+    (rules_dir / "notes.txt").write_text("private note\n", encoding="utf-8")
+
+    payload = mms_launchers._agent_rules_diagnostics_payload(
+        str(rules_dir),
+        allow_agent_rules=True,
+        loaded_files=["10-first.md", "20-second.markdown"],
+    )
+    serialized = json.dumps(payload, ensure_ascii=False)
+
+    assert payload["status"] == "loaded"
+    assert payload["supported_count"] == 2
+    assert payload["unsupported_count"] == 1
+    assert payload["loaded_count"] == 2
+    assert payload["loaded_files"] == ["10-first.md", "20-second.markdown"]
+    assert "private first body" not in serialized
+    assert "private second body" not in serialized
+
+
 def test_optional_agent_rules_loader_preserves_existing_real_rules_dir(tmp_path):
     import mms_launchers
 
@@ -2937,7 +2996,7 @@ def test_prepare_claude_session_tree_skips_agent_rules_for_restricted_allowlist(
     session_claude_dir = session_home / ".claude"
     session_claude_dir.mkdir(parents=True)
 
-    mms_launchers._prepare_claude_session_tree(
+    session_tree_env = mms_launchers._prepare_claude_session_tree(
         str(session_home),
         str(session_claude_dir),
         account_id="oauth-a",
@@ -2946,6 +3005,14 @@ def test_prepare_claude_session_tree_skips_agent_rules_for_restricted_allowlist(
     )
 
     assert not (session_claude_dir / "rules").exists()
+    diagnostics_path = Path(session_tree_env["agent_rules_diagnostics"])
+    assert diagnostics_path == session_home / ".mms" / "diagnostics" / "agent-rules.json"
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    assert diagnostics["status"] == "skipped-by-restricted-allowlist"
+    assert diagnostics["allow_agent_rules"] is False
+    assert diagnostics["supported_count"] == 1
+    assert diagnostics["loaded_count"] == 0
+    assert diagnostics["loaded_files"] == []
 
 
 def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch, tmp_path):
@@ -3085,6 +3152,68 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     assert settings["env"]["MMS_MODEL_NAME"] == "kimi-for-coding"
     assert settings["env"]["MMS_SESSION_PACKET_JSON"] == env["MMS_SESSION_PACKET_JSON"]
     assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
+
+
+def test_claude_gateway_env_exposes_agent_rules_diagnostics(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    diagnostics_path = session_home / ".mms" / "diagnostics" / "agent-rules.json"
+
+    def prepare_session_tree(_home, claude_dir, **_kwargs):
+        os.makedirs(claude_dir, exist_ok=True)
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text(
+            json.dumps(
+                {
+                    "schema": "mms.agent_rules_diagnostics.v1",
+                    "checked_path": "~/.agents/rules/",
+                    "status": "loaded",
+                    "loaded_count": 1,
+                    "loaded_files": ["10-local.md"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {"agent_rules_diagnostics": str(diagnostics_path)}
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_session_tree", prepare_session_tree)
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "kimi-for-coding")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
+
+    env = mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="kimi-for-coding",
+        display_model="kimi-for-coding",
+    )
+
+    settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
+
+    assert env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] == str(diagnostics_path)
+    assert settings["env"]["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] == str(diagnostics_path)
+    assert {"name": "agent_rules_diagnostics", "path": str(diagnostics_path)} in packet["paths"]
 
 
 def test_claude_gateway_env_materializes_session_toon_skill_and_export(monkeypatch, tmp_path):
