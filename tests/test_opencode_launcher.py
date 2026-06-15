@@ -1088,8 +1088,11 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
     vision_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_primary")
     assert vision_route["provider_id"] == "mimo-direct-anthropic"
-    assert "attachment" not in payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]
-    assert "modalities" not in payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]
+    assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["attachment"] is True
+    assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["modalities"] == {
+        "input": ["text", "image"],
+        "output": ["text"],
+    }
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     reviewer_route = next(route for route in runtime["opencode_routes"] if route["id"] == "reviewer_primary")
     assert reviewer_route["provider_id"] == "mixed"
