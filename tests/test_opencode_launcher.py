@@ -1965,8 +1965,23 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "review-hub" not in host_prompt_lower
     assert "gate mode" in host_prompt_lower
     assert "estimate mode" in host_prompt_lower
+    assert "committee_policy with decision_mode, playbook, artifact_mode" in host_prompt_lower
+    assert "permission_profile" in host_prompt_lower
+    assert "decision modes are advisory, gate, estimate, review, and execution_packet" in host_prompt_lower
+    assert "playbooks are domain checklists, not decision modes" in host_prompt_lower
+    assert "use general for unspecialized tasks" in host_prompt_lower
+    assert "declared decision_mode output contract" in host_prompt_lower
+    assert "git_ci_security" in host_prompt_lower
+    assert "do not invent a hidden git mode" in host_prompt_lower
+    assert "artifact modes are chat_only, artifact_advisory, formal_vote_files" in host_prompt_lower
+    assert "permission profiles are readonly, artifact_write, checker_run" in host_prompt_lower
+    assert "member edits are denied in the generated default permissions" in host_prompt_lower
+    assert "explicit scoped escalation" in host_prompt_lower
+    assert "keep this separate from debate" in host_prompt_lower
+    assert "blind rounds, crossfire, stance-shift tracking" in host_prompt_lower
     assert "median" in host_prompt_lower
     assert "verify them directly" in host_prompt_lower
+    assert "deterministic evidence that model votes must not override" in host_prompt_lower
     assert "at least 2-4 members" in host_prompt_lower
     assert "agENTS.md".lower() in host_prompt_lower
     assert "claude.md" in host_prompt_lower
@@ -1986,6 +2001,10 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     host_pro_prompt = payload["agent"]["committee-host-pro"]["prompt"].lower()
     assert "re-read and obey target project local" in host_pro_prompt
     assert "preserve the same host boundary" in host_pro_prompt
+    assert "committee_policy fields" in host_pro_prompt
+    assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
+    assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
+    assert "separation from debate semantics" in host_pro_prompt
     assert "do not promote advisory/chat ballots into formal quorum votes" in host_pro_prompt
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
@@ -2000,13 +2019,27 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "output is truncated" in host_prompt_lower
     assert "not to repeat already received content" in host_prompt_lower
     member_prompt = payload["agent"]["committee-deepseek-v4-pro"]["prompt"].lower()
-    assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["edit"] == "allow"
+    assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["edit"] == "deny"
     assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["task"] == "deny"
     assert "obey target project local instructions" in member_prompt
     assert "durable formal artifact" in member_prompt
+    assert "follow the host-declared committee_policy" in member_prompt
+    assert "decision_mode" in member_prompt
+    assert "artifact_mode" in member_prompt
+    assert "permission_profile" in member_prompt
+    assert "playbooks such as git_ci_security as evidence checklists" in member_prompt
+    assert "not as hidden decision modes" in member_prompt
+    assert "no blind rounds, crossfire" in member_prompt
+    assert "do not edit files under the default readonly profile" in member_prompt
+    assert "request the explicit scoped permission/profile escalation" in member_prompt
     assert "write only your own assigned vote file" in member_prompt
     assert "do not update decision.md" in member_prompt
     assert "any other member's vote file" in member_prompt
+    assert "for review mode, return findings ordered by severity" in member_prompt
+    assert "missing validation" in member_prompt
+    assert "residual risk" in member_prompt
+    assert "recommended fix or escalation" in member_prompt
+    assert "for execution packet mode" in member_prompt
     assert "long structured outputs" in member_prompt
     assert "full content through chat" in member_prompt
     assert "compact summary" in member_prompt
