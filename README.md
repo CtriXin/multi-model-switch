@@ -129,6 +129,7 @@ mms                         # 交互式启动器
 mms claude                  # 启动 Claude
 mms codex                   # 启动 Codex
 mms opencode --profile agent
+mms opencode --profile review
 mms --provider <id> codex
 mms --account <id> claude
 ```

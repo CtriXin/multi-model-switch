@@ -612,7 +612,7 @@ def main() -> int:
     parser.add_argument(
         "--profile",
         default="agent",
-        help="OpenCode mode/profile to smoke: agent / omo / raw",
+        help="OpenCode mode/profile to smoke: agent / review / omo / raw",
     )
     parser.add_argument("--live", action="store_true", help="Run real opencode run calls for each selected agent")
     parser.add_argument("--agent", action="append", help="Agent to live-smoke. Repeatable. Default: all profile agents")

@@ -603,6 +603,73 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
     return agents
 
 
+def opencode_review_agent_configs(agent_models):
+    """Return the Review Hub OpenCode host agents."""
+    agent_models = agent_models if isinstance(agent_models, dict) else {}
+    host_model = str(agent_models.get("review-hub-host") or next(iter(agent_models.values()), "")).strip()
+    if not host_model:
+        return {}
+
+    common_read_permissions = {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+    }
+    review_host_bash = {
+        "*": "ask",
+        "pwd": "allow",
+        "ls *": "allow",
+        "cat *": "allow",
+        "jq *": "allow",
+        "review-hub *": "allow",
+        "opencode run *": "ask",
+    }
+    host_prompt = (
+        "You are a Review Hub host, not the original dispatcher. Ask for or read a "
+        "review-hub request_root, then help the user choose reviewer model names. "
+        "Create or refresh the worker plan with `review-hub worker-plan --request "
+        "<request_root> --runner opencode --model <model>...`. Each worker must run "
+        "the same request root with its own REVIEW_HUB_MODEL / MULTI_REVIEW_REVIEWER "
+        "identity and write only inside its assigned slot. Do not reinterpret the "
+        "dispatcher conversation; the request_root is the source of truth. Before "
+        "claiming completion, show the worker plan path, slot roots, and aggregate "
+        "command. If required MCP servers or skills are missing in this OpenCode "
+        "session, stop and report the missing capability instead of faking review."
+    )
+    agents = {
+        "review-hub-host": {
+            "description": "Review Hub host for model selection and toolful worker fanout",
+            "mode": "primary",
+            "model": host_model,
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": {
+                **common_read_permissions,
+                "edit": "deny",
+                "bash": review_host_bash,
+                "task": "deny",
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "ask",
+            },
+            "prompt": host_prompt,
+        },
+    }
+    fallback_model = str(agent_models.get("review-hub-host-fallback") or "").strip()
+    if fallback_model:
+        agents["review-hub-host-fallback"] = {
+            "description": "Fallback Review Hub host for model selection and worker fanout",
+            "mode": "primary",
+            "model": fallback_model,
+            "variant": "high",
+            "temperature": 0.1,
+            "permission": agents["review-hub-host"]["permission"],
+            "prompt": "Fallback host. Use the same Review Hub host contract. " + host_prompt,
+        }
+    return agents
+
+
 def opencode_permission_bypass_value(value):
     if isinstance(value, dict):
         return {
@@ -636,5 +703,6 @@ __all__ = [
     "opencode_apply_agent_bypass_permissions",
     "opencode_lite_agent_configs",
     "opencode_lite_pro_agent_configs",
+    "opencode_review_agent_configs",
     "opencode_permission_bypass_value",
 ]

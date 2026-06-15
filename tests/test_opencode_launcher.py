@@ -639,6 +639,7 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert mms_core._normalize_opencode_profile_id("agent") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("orchestrated") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("openspec-multi") == "lite_pro_orchestrated"
+    assert mms_core._normalize_opencode_profile_id("review") == "review_toolful"
     assert mms_core._normalize_opencode_profile_id("omo") == "heavy_omo"
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_backend") == ("lite_pro_orchestrated", "serve")
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_acp") == ("lite_pro_orchestrated", "acp")
@@ -646,6 +647,7 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     lite = mms_core._apply_opencode_profile(_runtime(), "lite")
     agent = mms_core._apply_opencode_profile(_runtime(), "agent")
     backend_multi = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated_backend")
+    review = mms_core._apply_opencode_profile(_runtime(), "review")
     heavy = mms_core._apply_opencode_profile(_runtime(), "omo")
     raw = mms_core._apply_opencode_profile(_runtime(), "raw")
 
@@ -661,6 +663,11 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert orchestrated["opencode_profile_label"] == "Agent"
     assert backend_multi["opencode_profile"] == "lite_pro_orchestrated"
     assert backend_multi["opencode_entrypoint"] == "serve"
+    assert review["opencode_profile"] == "review_toolful"
+    assert review["opencode_profile_label"] == "Review"
+    assert review["opencode_agent"] == "review-hub-host"
+    assert review["opencode_roster"] == "review_toolful"
+    assert review["opencode_launch_fallback_route_keys"] == ["builder_primary", "review_host_fallback"]
     assert heavy["opencode_use_global_config"] is True
     assert heavy["opencode_lite_agents"] is False
     assert raw["opencode_pure"] is True
@@ -691,6 +698,42 @@ def test_core_opencode_profile_runtime_uses_fixed_safe_gpt_not_kimi():
     assert runtime["model"] == "gpt-5.4"
     assert runtime["opencode_profile"] == "lite"
     assert runtime["opencode_agent"] == "mobius-builder"
+
+
+def test_core_opencode_review_profile_uses_gpt54_host_and_review_agent():
+    import mms_core
+    import mms_launchers
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(
+        id="crs-gpt",
+        name="CRS GPT",
+        supported_clis=["opencode"],
+        protocols=["openai_chat_completions"],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex"],
+        "review",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "gpt-5.4", "profile": "review_toolful"}
+    assert runtime["id"] == "crs-gpt"
+    assert runtime["opencode_profile"] == "review_toolful"
+    assert runtime["opencode_agent"] == "review-hub-host"
+    assert runtime["opencode_default_agent"] == "review-hub-host"
+    assert runtime["opencode_default_route_key"] == "builder_primary"
+    assert runtime["opencode_launch_fallback_agents"]["review_host_fallback"] == "review-hub-host-fallback"
+    assert payload["model"].endswith("/gpt-5.4")
+    assert payload["default_agent"] == "review-hub-host"
+    assert payload["agent"]["review-hub-host"]["mode"] == "primary"
+    assert payload["agent"]["review-hub-host"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["review-hub-host"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["review-hub-host"]["permission"]["bash"]["review-hub *"] == "allow"
+    assert "review-hub worker-plan" in payload["agent"]["review-hub-host"]["prompt"]
 
 
 def test_core_opencode_heavy_profile_uses_global_runtime_without_model_provider():
@@ -1368,8 +1411,8 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
 
     assert mms_core._handle_tui_launcher_selection(cfg, provider, False, ["opencode"]) is True
-    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "omo", "raw"]
-    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "OMO", "Raw"]
+    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "review", "omo", "raw"]
+    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "Review", "OMO", "Raw"]
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.4", "profile": "lite_pro_orchestrated"}
     assert captured["runtime"]["id"] == "dual-protocol"
@@ -1801,7 +1844,7 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     options = mms_core._opencode_profile_menu_options()
     agent = next(option for option in options if option["id"] == "agent")
 
-    assert [option["id"] for option in options] == ["agent", "omo", "raw"]
+    assert [option["id"] for option in options] == ["agent", "review", "omo", "raw"]
     assert agent["label"] == "Agent"
     assert agent["badge"] == "默认"
     assert "health: 1/18 healthy" in agent["summary"]

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES,
+    OPENCODE_REVIEW_PROFILE_ID,
     opencode_lite_pro_specs,
     opencode_profile_label,
     opencode_profile_selection,
@@ -284,7 +285,7 @@ def resolve_opencode_profile_runtime(cfg, default_provider, default_models, prof
         }
         runtime = deps.apply_profile(runtime, profile_id)
         return {"model": "global-omo"}, deps.apply_entrypoint(runtime, selection_entrypoint)
-    if profile_id == OPENCODE_AGENT_PROFILE_ID:
+    if profile_id in {OPENCODE_AGENT_PROFILE_ID, OPENCODE_REVIEW_PROFILE_ID}:
         model_info, runtime = resolve_opencode_lite_pro_runtime(
             cfg,
             default_provider,

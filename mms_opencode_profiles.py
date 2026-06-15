@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 OPENCODE_AGENT_PROFILE_ID = "lite_pro_orchestrated"
+OPENCODE_REVIEW_PROFILE_ID = "review_toolful"
 OPENCODE_DEFAULT_PROFILE_ID = "agent"
 
 OPENCODE_PROFILE_OPTIONS = [
@@ -12,6 +13,12 @@ OPENCODE_PROFILE_OPTIONS = [
         "label": "Agent",
         "badge": "默认",
         "summary": "默认推荐：session-local agent roster；GPT 总控/规格/执行/修复/终审；国产模型只做 explore、bug-hunt、vision/context checks 等轻量只读辅助。",
+    },
+    {
+        "id": "review",
+        "profile_id": OPENCODE_REVIEW_PROFILE_ID,
+        "label": "Review",
+        "summary": "Review Hub host：固定 GPT host 进入 OpenCode TUI，读取 request-root 后派发多模型 toolful review worker。",
     },
     {
         "id": "omo",
@@ -62,6 +69,11 @@ OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
     {"key": "executor_gpt54", "agent": "mobius-executor-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
 )
 
+OPENCODE_REVIEW_SPECS = (
+    {"key": "builder_primary", "agent": "review-hub-host", "models": ("gpt-5.4", "gpt-5.5", "gpt-5.3-codex", "gpt-5.2-codex")},
+    {"key": "review_host_fallback", "agent": "review-hub-host-fallback", "models": ("gpt-5.3-codex", "gpt-5.2-codex")},
+)
+
 
 def normalize_opencode_profile_id(value):
     raw = str(value or "").strip()
@@ -85,6 +97,10 @@ def normalize_opencode_profile_id(value):
         "litepro": OPENCODE_AGENT_PROFILE_ID,
         "lite_pro": OPENCODE_AGENT_PROFILE_ID,
         "5_5_pro": OPENCODE_AGENT_PROFILE_ID,
+        "review": OPENCODE_REVIEW_PROFILE_ID,
+        "reviewer": OPENCODE_REVIEW_PROFILE_ID,
+        "review_hub": OPENCODE_REVIEW_PROFILE_ID,
+        "review_toolful": OPENCODE_REVIEW_PROFILE_ID,
         "omo": "heavy_omo",
         "heavy": "heavy_omo",
         "heavy_omo": "heavy_omo",
@@ -159,6 +175,8 @@ def apply_opencode_entrypoint(runtime, entrypoint):
 
 
 def opencode_lite_pro_specs(profile_id=OPENCODE_AGENT_PROFILE_ID):
+    if normalize_opencode_profile_id(profile_id) == OPENCODE_REVIEW_PROFILE_ID:
+        return OPENCODE_REVIEW_SPECS
     specs = list(OPENCODE_LITE_PRO_SPECS)
     if normalize_opencode_profile_id(profile_id) == "lite_pro_orchestrated":
         insert_at = next(
@@ -211,6 +229,22 @@ def apply_opencode_profile(runtime, profile_id):
             "builder_primary": "mobius-builder-pro",
             "builder_fallback": "mobius-builder-stable",
         }
+    elif profile_id == OPENCODE_REVIEW_PROFILE_ID:
+        runtime["opencode_use_global_config"] = False
+        runtime["opencode_pure"] = True
+        runtime["opencode_lite_agents"] = True
+        runtime["opencode_agent"] = "review-hub-host"
+        runtime["opencode_default_agent"] = "review-hub-host"
+        runtime["opencode_roster"] = profile_id
+        runtime["opencode_contract_workflow"] = "review-hub"
+        runtime["opencode_backend_agent_capable"] = False
+        runtime["opencode_acp_capable"] = False
+        runtime["opencode_launch_preflight"] = False
+        runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "review_host_fallback"]
+        runtime["opencode_launch_fallback_agents"] = {
+            "builder_primary": "review-hub-host",
+            "review_host_fallback": "review-hub-host-fallback",
+        }
     else:
         runtime["opencode_use_global_config"] = False
         runtime["opencode_pure"] = True
@@ -229,6 +263,8 @@ __all__ = [
     "OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS",
     "OPENCODE_LITE_PRO_SPECS",
     "OPENCODE_PROFILE_OPTIONS",
+    "OPENCODE_REVIEW_PROFILE_ID",
+    "OPENCODE_REVIEW_SPECS",
     "apply_opencode_entrypoint",
     "apply_opencode_profile",
     "normalize_opencode_entrypoint",
