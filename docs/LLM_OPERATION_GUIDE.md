@@ -186,6 +186,7 @@ Before commit planning:
 - Run `git pull --ff-only` on the active branch before editing/reviewing; if local changes block a safe pull, stop and report.
 - Record issues through the issue tracker, submit changes through PRs, and require committee review before merge.
 - Do not merge PRs or bypass committee review.
+- If the human/committee authorizes the agent to perform a merge, and the merged PR maps to a local task worktree, run `scripts/cleanup_merged_worktree.sh <branch-or-pr>` after the merge succeeds unless the human explicitly asks to preserve that worktree. Report either the removed worktree or the blocker that caused preservation.
 - Do not create a commit unless the human explicitly approves that specific commit.
 - Docs-only plan/report/committee baseline documents may be committed by default when the human asks to record, submit, or produce the document; stage only the target document and no unrelated dirty files.
 

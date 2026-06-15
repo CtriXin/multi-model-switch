@@ -64,6 +64,14 @@ scripts/start_issue_worktree.sh 14 redline-gate
 
 `start_issue_worktree.sh` 会先确认根目录 dev 干净并 fast-forward 到最新，再创建 `issue/<number>-<slug>` 分支和 `.worktrees/issue-<number>-<slug>` worktree。代码、配置、CI 行为改动都应从这个隔离 worktree 开始；docs-only 计划/报告变更才允许在明确请求下直接落到根目录 dev。
 
+如果 LLM/agent 负责执行 merge，且能识别该 PR 对应的本地 task worktree，merge 成功后还必须清理关联 worktree，除非人类明确要求保留。默认使用：
+
+```bash
+scripts/cleanup_merged_worktree.sh <branch-or-pr>
+```
+
+该脚本只会删除已经合入 base 且 `git status` 干净的 worktree；传入 PR 编号或可由 `gh` 解析的 branch 时，也支持 GitHub squash/rebase merge 的 merged 状态核验。遇到未合并、未 push、未提交或未跟踪文件时会保留现场并报告原因。
+
 ## 安装 / 升级
 
 > 默认 UI 语言是中文；如果要英文，加 `--lang en`。
