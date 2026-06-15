@@ -2812,6 +2812,76 @@ def test_overlay_ecc_session_entries_merges_session_and_ecc_assets(monkeypatch, 
     assert os.path.islink(parent_dir / "rules" / "everything-claude-code-guardrails.md")
 
 
+def test_optional_agent_rules_loader_noops_when_missing_or_empty(tmp_path):
+    import mms_launchers
+
+    parent_dir = tmp_path / "session" / ".claude"
+    parent_dir.mkdir(parents=True)
+    agents_dir = tmp_path / ".agents"
+
+    assert mms_launchers._merge_optional_agent_rules_into_session_tree(str(parent_dir), str(agents_dir)) == []
+    assert not (parent_dir / "rules").exists()
+
+    (agents_dir / "rules").mkdir(parents=True)
+    assert mms_launchers._merge_optional_agent_rules_into_session_tree(str(parent_dir), str(agents_dir)) == []
+    assert not (parent_dir / "rules").exists()
+
+
+def test_optional_agent_rules_loader_filters_markdown_and_sorts(tmp_path):
+    import mms_launchers
+
+    rules_dir = tmp_path / ".agents" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "20-second.md").write_text("# second\n", encoding="utf-8")
+    (rules_dir / "10-first.MD").write_text("# first\n", encoding="utf-8")
+    (rules_dir / "30-third.markdown").write_text("# third\n", encoding="utf-8")
+    (rules_dir / "notes.txt").write_text("skip\n", encoding="utf-8")
+    (rules_dir / "40-dir.md").mkdir()
+
+    files = mms_launchers._optional_agent_rule_files(str(rules_dir))
+
+    assert [name for name, _path in files] == [
+        "10-first.MD",
+        "20-second.md",
+        "30-third.markdown",
+    ]
+
+
+def test_merge_agents_into_session_tree_loads_optional_agent_rules(tmp_path):
+    import mms_launchers
+
+    parent_dir = tmp_path / "session" / ".claude"
+    parent_dir.mkdir(parents=True)
+    existing_rules = tmp_path / "existing-rules"
+    existing_rules.mkdir()
+    (existing_rules / "00-existing.md").write_text("# existing\n", encoding="utf-8")
+    os.symlink(existing_rules, parent_dir / "rules")
+
+    agents_dir = tmp_path / ".agents"
+    (agents_dir / "rules").mkdir(parents=True)
+    (agents_dir / "rules" / "20-second.md").write_text("# second\n", encoding="utf-8")
+    (agents_dir / "rules" / "10-first.md").write_text("# first\n", encoding="utf-8")
+    (agents_dir / "rules" / "notes.txt").write_text("skip\n", encoding="utf-8")
+    (agents_dir / "rules" / "nested.md").mkdir()
+
+    mms_launchers._merge_agents_into_session_tree(
+        str(parent_dir),
+        str(agents_dir),
+        {"skills", "commands"},
+    )
+
+    assert os.path.islink(parent_dir / "rules")
+    assert sorted(os.listdir(parent_dir / "rules")) == [
+        "00-existing.md",
+        "10-first.md",
+        "20-second.md",
+    ]
+    assert os.path.islink(parent_dir / "rules" / "10-first.md")
+    assert os.path.islink(parent_dir / "rules" / "20-second.md")
+    assert not (parent_dir / "rules" / "notes.txt").exists()
+    assert not (parent_dir / "rules" / "nested.md").exists()
+
+
 def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch, tmp_path):
     import mms_launchers
 
