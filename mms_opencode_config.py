@@ -218,7 +218,7 @@ def opencode_agent_opencode_policies(runtime, routes):
                 profile_id=str(route.get("provider_profile") or ""),
                 protocol=_opencode_profile_protocol(protocol),
             )
-        except Exception:
+        except (ImportError, KeyError, TypeError, ValueError):
             policy = {}
         if policy:
             policies_by_ref[model_ref] = policy
@@ -403,7 +403,7 @@ def opencode_model_capabilities(runtime, model_name):
             ),
             profile_id=str(runtime.get("profile") or runtime.get("provider_profile") or ""),
         )
-    except Exception:
+    except (ImportError, KeyError, TypeError, ValueError):
         return {}
 
 
@@ -641,7 +641,7 @@ def opencode_model_request_options(
             thinking_enabled=thinking_enabled,
             reasoning_effort=effort or None,
         )
-    except Exception:
+    except (ImportError, KeyError, TypeError, ValueError):
         payload = {}
 
     profile_options = _opencode_options_from_payload(payload)
@@ -697,7 +697,7 @@ def _opencode_effort_variant_values(runtime, model_name, *, provider_id="", base
                 add(key)
                 add(value)
         add(profile_caps.get("effort_default"))
-    except Exception:
+    except (ImportError, KeyError, TypeError, ValueError):
         pass
     return values
 

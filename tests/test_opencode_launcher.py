@@ -374,9 +374,10 @@ def test_opencode_committee_gemini_policy_disables_builtin_search_tools(monkeypa
     assert gemini_agent["permission"]["glob"] == "deny"
     assert gemini_agent["permission"]["list"] == "deny"
     assert gemini_agent["permission"]["bash"]["rg *"] == "allow"
-    assert gemini_agent["permission"]["bash"]["find *"] == "allow"
+    assert gemini_agent["permission"]["bash"].get("find *") != "allow"
     assert "built-in grep/glob/list" in gemini_agent["prompt"]
     assert "rg --files" in gemini_agent["prompt"]
+    assert "request `find` only when needed" in gemini_agent["prompt"]
     assert "schema error" in gemini_agent["prompt"]
 
     kimi_agent = payload["agent"]["committee-kimi"]

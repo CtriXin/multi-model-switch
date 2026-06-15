@@ -852,7 +852,6 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
             bash_permission.update({
                 "pwd": "allow",
                 "ls *": "allow",
-                "find *": "allow",
                 "rg *": "allow",
             })
             permission["bash"] = bash_permission
@@ -865,7 +864,8 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
             f"{prompt} "
             "Tool policy: do not call built-in grep/glob/list for search or file "
             "listing on this route; use shell commands instead (`rg --files`, "
-            "`rg -n`, `find`, `ls`, `pwd`). If a built-in search tool returns a "
+            "`rg -n`, `ls`, `pwd`; request `find` only when needed). If a "
+            "built-in search tool returns a "
             "schema error, do not retry it; switch to the shell fallback."
         )
 
