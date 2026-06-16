@@ -124,6 +124,7 @@ from mms_opencode_profiles import (
     OPENCODE_AGENT_PROFILE_ID as _OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
     OPENCODE_COMMITTEE_PROFILE_ID as _OPENCODE_COMMITTEE_PROFILE_ID,
+    OPENCODE_DEBATE_PROFILE_ID as _OPENCODE_DEBATE_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES as _OPENCODE_DEFAULT_MODEL_PREFERENCES,
     OPENCODE_DEFAULT_PROFILE_ID as _OPENCODE_DEFAULT_PROFILE_ID,
     OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS as _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS,
@@ -10293,6 +10294,7 @@ _OPENCODE_REVIEW_DEFAULT_TOKENS = ("qwen", "kimi", "glm", "deepseek", "mimo")
 _OPENCODE_REVIEW_DOMESTIC_TOKENS = ("qwen", "kimi", "glm", "minimax", "deepseek", "mimo")
 _OPENCODE_COMMITTEE_DEFAULT_TOKENS = ("gpt-5.4",)
 _OPENCODE_COMMITTEE_OPTION_TOKENS = ("gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi", "minimax")
+_OPENCODE_DEBATE_DEFAULT_TOKENS = ("gpt-5.4", "gpt-5.5", "deepseek")
 _OPENCODE_REVIEW_BASE_REVIEWER_AGENTS = (
     "review-qwen",
     "review-kimi",
@@ -11359,6 +11361,149 @@ def _opencode_committee_tui_options(cfg, default_provider, default_models):
     return pool
 
 
+def _opencode_debate_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    debate = opencode.get("debate") if isinstance(opencode.get("debate"), dict) else {}
+    return debate
+
+
+def _opencode_debate_saved_model_tokens(cfg):
+    debate = _opencode_debate_config(cfg)
+    for key in ("models", "model_tokens", "selected_models"):
+        tokens = _split_opencode_review_model_tokens(debate.get(key))
+        if tokens:
+            return tokens
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    return _split_opencode_review_model_tokens(opencode.get("debate_models"))
+
+
+def _opencode_debate_saved_agent_ids(cfg):
+    debate = _opencode_debate_config(cfg)
+    agents = debate.get("selected_agents")
+    if not isinstance(agents, (list, tuple)):
+        return []
+    return [str(agent_id or "").strip() for agent_id in agents if str(agent_id or "").strip()]
+
+
+def _opencode_debate_saved_host_model(cfg):
+    debate = _opencode_debate_config(cfg)
+    host = debate.get("host") if isinstance(debate.get("host"), dict) else {}
+    for value in (
+        host.get("model"),
+        host.get("primary_model"),
+        debate.get("host_model"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    for value in (host.get("primary_models"), host.get("models")):
+        models = _split_opencode_review_model_tokens(value)
+        if models:
+            return models[0]
+    return ""
+
+
+def _opencode_debate_saved_host_selection(cfg):
+    debate = _opencode_debate_config(cfg)
+    host = debate.get("host") if isinstance(debate.get("host"), dict) else {}
+    roster_entry = _opencode_agent_roster_config(cfg).get("debate-host")
+    if not isinstance(roster_entry, dict):
+        roster_entry = {}
+    model = _opencode_debate_saved_host_model(cfg) or str(roster_entry.get("model") or "").strip() or "gpt-5.4"
+    selection = {"model": model}
+    provider_id = str(host.get("provider_id") or roster_entry.get("provider_id") or "").strip()
+    if provider_id:
+        selection["provider_id"] = provider_id
+    return selection
+
+
+def _resolve_opencode_debate_models(cfg, default_provider, default_models, tokens):
+    return _resolve_opencode_committee_models(cfg, default_provider, default_models, tokens)
+
+
+def _opencode_debate_agent_id_for_model(model_name, existing):
+    base = f"debate-{_opencode_review_slug(model_name)}"
+    agent_id = base
+    suffix = 2
+    while agent_id in existing:
+        agent_id = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(agent_id)
+    return agent_id
+
+
+def _inject_opencode_debate_roster(cfg, selected_models, tokens, *, host_model="", host_selection=None):
+    next_cfg = copy.deepcopy(cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    roster = opencode.setdefault("agent_roster", {})
+    if not isinstance(roster, dict):
+        roster = {}
+        opencode["agent_roster"] = roster
+
+    for agent_id in list(roster):
+        if str(agent_id).startswith("debate-") and agent_id not in {"debate-host", "debate-host-pro"}:
+            entry = roster.get(agent_id) if isinstance(roster.get(agent_id), dict) else {}
+            entry = dict(entry)
+            entry["enabled"] = False
+            roster[agent_id] = entry
+
+    existing = set(roster)
+    selected_agents = []
+    resolved_models = []
+    for index, item in enumerate(selected_models):
+        model_name = str(item.get("model") or "").strip()
+        if not model_name:
+            continue
+        agent_id = _opencode_debate_agent_id_for_model(model_name, existing)
+        lower = model_name.lower()
+        entry = {
+            "enabled": True,
+            "custom": True,
+            "preset": "reviewer",
+            "model": model_name,
+            "priority": 350 + index,
+            "description": f"Debate member for {model_name}",
+        }
+        provider_id = str(item.get("provider_id") or "").strip()
+        if provider_id:
+            entry["provider_id"] = provider_id
+        if lower.startswith("mimo-"):
+            entry["route_policy"] = "mimo_direct"
+        roster[agent_id] = entry
+        selected_agents.append(agent_id)
+        resolved_models.append(model_name)
+
+    debate = opencode.setdefault("debate", {})
+    if not isinstance(debate, dict):
+        debate = {}
+        opencode["debate"] = debate
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        debate["host"] = host_payload
+        host_entry = dict(roster.get("debate-host") if isinstance(roster.get("debate-host"), dict) else {})
+        host_entry.update({"enabled": True, "model": resolved_host_model})
+        if host_provider:
+            host_entry["provider_id"] = host_provider
+        roster["debate-host"] = host_entry
+    debate["models"] = list(tokens)
+    debate["selected_agents"] = selected_agents
+    debate["resolved_models"] = resolved_models
+    return next_cfg
+
+
+def _opencode_debate_tui_options(cfg, default_provider, default_models):
+    return _opencode_committee_tui_options(cfg, default_provider, default_models)
+
+
 def _select_opencode_host_model_tui(cfg, default_provider, default_models, *, saved_selection, title):
     saved_selection = dict(saved_selection or {})
     saved_model = str(saved_selection.get("model") or "gpt-5.4").strip() or "gpt-5.4"
@@ -11621,6 +11766,209 @@ def _prepare_opencode_committee_profile_config(
     if resolved_host_model:
         console.print(f"[green]Committee host:[/green] {resolved_host_model}")
     console.print(f"[green]Committee members:[/green] {selected_text}")
+    return next_cfg, {
+        "host": resolved_host_model,
+        "host_token": host_token,
+        "tokens": tokens,
+        "selected": selected,
+        "unresolved": unresolved,
+        "unresolved_host": unresolved_host,
+        "source": source,
+    }
+
+
+def _select_opencode_debate_host_tui(cfg, default_provider, default_models):
+    selection = _opencode_debate_saved_host_selection(cfg)
+    return _select_opencode_host_model_tui(
+        cfg,
+        default_provider,
+        default_models,
+        saved_selection=selection,
+        title="OpenCode Debate host",
+    )
+
+
+def _select_opencode_debate_models_tui(cfg, default_provider, default_models):
+    options = _opencode_debate_tui_options(cfg, default_provider, default_models)
+    if not options:
+        console.print("[yellow]没有可用于 OpenCode debate 的模型池；将只尝试 debate host。[/yellow]")
+        return []
+    saved_tokens = _opencode_debate_saved_model_tokens(cfg)
+    default_tokens = saved_tokens or list(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+    if saved_tokens:
+        selected_models = _opencode_saved_model_selections(
+            cfg,
+            saved_tokens,
+            prefix="debate-",
+            agent_ids=_opencode_debate_saved_agent_ids(cfg),
+        )
+    else:
+        selected, _unresolved = _resolve_opencode_debate_models(cfg, default_provider, default_models, default_tokens)
+        selected_models = _opencode_enrich_selected_with_saved_providers(selected, cfg, prefix="debate-")
+    options = _opencode_with_saved_selection_options(cfg, options, selected_models)
+    try:
+        from mms_tui import select_review_models_tui
+    except Exception:
+        return selected_models
+    return select_review_models_tui(
+        options,
+        selected_models=selected_models,
+        title="OpenCode Debate members",
+        return_provider=True,
+    )
+
+
+def _save_opencode_debate_model_tokens(cfg, tokens, *, host_model="", host_selection=None, selected_models=None):
+    base_cfg = cfg
+    if _preview_root_mode():
+        try:
+            loaded_cfg = _load_toml_file(_config_write_target_path())
+        except Exception:
+            loaded_cfg = None
+        if isinstance(loaded_cfg, dict):
+            base_cfg = loaded_cfg
+    next_cfg = copy.deepcopy(base_cfg)
+    opencode = next_cfg.setdefault("opencode", {})
+    if not isinstance(opencode, dict):
+        opencode = {}
+        next_cfg["opencode"] = opencode
+    debate = opencode.setdefault("debate", {})
+    if not isinstance(debate, dict):
+        debate = {}
+        opencode["debate"] = debate
+    debate["models"] = list(tokens)
+    if host_selection is None and host_model:
+        host_selection = {"model": str(host_model).strip()}
+    resolved_host_model = _opencode_selection_model(host_selection) or str(host_model or "").strip()
+    if resolved_host_model:
+        host_payload = {"model": resolved_host_model}
+        host_provider = _opencode_selection_provider_id(host_selection)
+        if host_provider:
+            host_payload["provider_id"] = host_provider
+        debate["host"] = host_payload
+    if selected_models or host_selection or host_model:
+        next_cfg = _inject_opencode_debate_roster(
+            next_cfg,
+            selected_models or [],
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+        )
+    save_config(next_cfg, reason="opencode:save_debate_models")
+    return next_cfg
+
+
+def _prepare_opencode_debate_profile_config(
+    cfg,
+    default_provider,
+    default_models,
+    *,
+    host_model=None,
+    model_tokens=None,
+    interactive=False,
+    save_selected=False,
+    save_cfg=None,
+    ask_to_save=False,
+):
+    explicit_host_entry = _opencode_model_selection_entries(host_model)
+    explicit_host = _opencode_selection_model(explicit_host_entry[0]) if explicit_host_entry else str(host_model or "").strip()
+    saved_host = _opencode_debate_saved_host_model(cfg)
+    host_token = explicit_host or saved_host or "gpt-5.4"
+    explicit_entries = _opencode_model_selection_entries(model_tokens)
+    explicit_tokens = [item["model"] for item in explicit_entries] if explicit_entries else _split_opencode_review_model_tokens(model_tokens)
+    saved_tokens = _opencode_debate_saved_model_tokens(cfg)
+    tokens = explicit_tokens or saved_tokens or list(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+    source = "cli" if explicit_tokens else ("saved" if saved_tokens else "default")
+
+    if interactive and not explicit_host and not saved_host:
+        _ensure_rich()
+        host_token = Prompt.ask(
+            "Debate host model（默认 gpt-5.4；可填 gpt-5.5 或任意可用模型）",
+            default="gpt-5.4",
+        ).strip() or "gpt-5.4"
+
+    if explicit_host_entry:
+        selected_host = explicit_host_entry
+        unresolved_host = []
+        resolved_host_model = explicit_host
+    else:
+        selected_host, unresolved_host = _resolve_opencode_debate_models(cfg, default_provider, default_models, [host_token])
+        resolved_host_model = selected_host[0]["model"] if selected_host else ""
+    host_selection = explicit_host_entry[0] if explicit_host_entry else ({"model": resolved_host_model} if resolved_host_model else None)
+    if unresolved_host:
+        console.print(f"[yellow]Debate host 未解析: {host_token}；将使用 profile 默认 host。[/yellow]")
+
+    if interactive and not explicit_tokens and not saved_tokens:
+        _ensure_rich()
+        default_text = " ".join(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+        answer = Prompt.ask(
+            "Debate models（空格/逗号分隔；支持 gpt-5.4、gpt-5.5、deepseek、glm、mimo、kimi、minimax、domestic、all）",
+            default=default_text,
+        )
+        tokens = _split_opencode_review_model_tokens(answer) or list(_OPENCODE_DEBATE_DEFAULT_TOKENS)
+        source = "prompt"
+
+    if explicit_entries:
+        selected = [
+            {
+                **entry,
+                "family": entry.get("family") or _infer_model_family(entry.get("model"))[0],
+                "token": entry.get("model"),
+            }
+            for entry in explicit_entries
+        ]
+        unresolved = []
+    else:
+        selected, unresolved = _resolve_opencode_debate_models(cfg, default_provider, default_models, tokens)
+        selected = _opencode_enrich_selected_with_saved_providers(
+            selected,
+            cfg,
+            prefix="debate-",
+            agent_ids=_opencode_debate_saved_agent_ids(cfg),
+        )
+    if unresolved:
+        console.print(f"[yellow]Debate models 未解析: {', '.join(unresolved)}[/yellow]")
+    if not selected:
+        return cfg, {
+            "host": resolved_host_model,
+            "host_token": host_token,
+            "tokens": tokens,
+            "selected": [],
+            "unresolved": unresolved,
+            "unresolved_host": unresolved_host,
+            "source": source,
+        }
+
+    if save_selected:
+        _save_opencode_debate_model_tokens(
+            save_cfg or cfg,
+            tokens,
+            host_model=resolved_host_model,
+            host_selection=host_selection,
+            selected_models=selected,
+        )
+    elif ask_to_save and source == "prompt":
+        _ensure_rich()
+        if Confirm.ask("保存这次 Debate models 为下次默认？", default=False):
+            _save_opencode_debate_model_tokens(
+                save_cfg or cfg,
+                tokens,
+                host_model=resolved_host_model,
+                host_selection=host_selection,
+                selected_models=selected,
+            )
+
+    next_cfg = _inject_opencode_debate_roster(
+        cfg,
+        selected,
+        tokens,
+        host_model=resolved_host_model,
+        host_selection=host_selection,
+    )
+    selected_text = ", ".join(f"{item['model']} -> debate-{_opencode_review_slug(item['model'])}" for item in selected)
+    if resolved_host_model:
+        console.print(f"[green]Debate host:[/green] {resolved_host_model}")
+    console.print(f"[green]Debate members:[/green] {selected_text}")
     return next_cfg, {
         "host": resolved_host_model,
         "host_token": host_token,
@@ -12204,6 +12552,31 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     model_tokens=selected_committee_models,
                     interactive=False,
                     save_selected=bool(selected_committee_models or selected_committee_host),
+                    save_cfg=current_cfg,
+                )
+            elif canonical_profile == _OPENCODE_DEBATE_PROFILE_ID:
+                selected_debate_host = _select_opencode_debate_host_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_debate_host is None:
+                    continue
+                selected_debate_models = _select_opencode_debate_models_tui(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                )
+                if selected_debate_models is None:
+                    continue
+                profile_cfg, _debate_selection = _prepare_opencode_debate_profile_config(
+                    current_cfg,
+                    current_provider,
+                    default_models,
+                    host_model=selected_debate_host,
+                    model_tokens=selected_debate_models,
+                    interactive=False,
+                    save_selected=bool(selected_debate_models or selected_debate_host),
                     save_cfg=current_cfg,
                 )
             if profile_cfg is not current_cfg:
@@ -15022,13 +15395,14 @@ def _merge_preview_local_launch_preferences(cfg):
     local_opencode = local_cfg.get("opencode") if isinstance(local_cfg.get("opencode"), dict) else {}
     local_review = local_opencode.get("review") if isinstance(local_opencode.get("review"), dict) else {}
     local_committee = local_opencode.get("committee") if isinstance(local_opencode.get("committee"), dict) else {}
+    local_debate = local_opencode.get("debate") if isinstance(local_opencode.get("debate"), dict) else {}
     local_roster = local_opencode.get("agent_roster") if isinstance(local_opencode.get("agent_roster"), dict) else {}
     local_opencode_defaults = {
         key: local_opencode.get(key)
         for key in ("default_profile", "profile")
         if str(local_opencode.get(key) or "").strip()
     }
-    if not local_review and not local_committee and not local_roster and not local_opencode_defaults:
+    if not local_review and not local_committee and not local_debate and not local_roster and not local_opencode_defaults:
         return cfg
 
     next_cfg = copy.deepcopy(cfg)
@@ -15055,6 +15429,8 @@ def _merge_preview_local_launch_preferences(cfg):
             review.setdefault(key, copy.deepcopy(value))
     if local_committee:
         opencode["committee"] = copy.deepcopy(local_committee)
+    if local_debate:
+        opencode["debate"] = copy.deepcopy(local_debate)
     if local_roster:
         roster = opencode.setdefault("agent_roster", {})
         if not isinstance(roster, dict):
@@ -15065,7 +15441,8 @@ def _merge_preview_local_launch_preferences(cfg):
             if not (
                 agent_key.startswith("review-")
                 or agent_key.startswith("committee-")
-                or agent_key in {"review-hub-host", "committee-host", "committee-host-pro"}
+                or agent_key.startswith("debate-")
+                or agent_key in {"review-hub-host", "committee-host", "committee-host-pro", "debate-host", "debate-host-pro"}
             ):
                 continue
             if isinstance(entry, dict):
@@ -16683,7 +17060,7 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / committee / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / review / committee / debate / omo / raw")
     parser.add_argument(
         "--review-models",
         nargs="+",
@@ -16717,6 +17094,23 @@ def main():
         "--committee-save",
         action="store_true",
         help="把本次 --committee-host-model / --committee-models 保存为下次 committee profile 默认",
+    )
+    parser.add_argument(
+        "--debate-models",
+        nargs="+",
+        help="OpenCode debate profile 使用的成员模型/家族，支持 gpt-5.4 gpt-5.5 deepseek glm mimo kimi minimax domestic all",
+    )
+    parser.add_argument(
+        "--debate-host-model",
+        "--debate-host",
+        dest="debate_host_model",
+        help="OpenCode debate profile 使用的 host 模型，例如 gpt-5.4 / gpt-5.5 / 任意可用模型",
+    )
+    parser.add_argument(
+        "--save-debate-models",
+        "--debate-save",
+        action="store_true",
+        help="把本次 --debate-host-model / --debate-models 保存为下次 debate profile 默认",
     )
     parser.add_argument(
         "--opencode-entrypoint",
@@ -16768,6 +17162,8 @@ def main():
         parser.error("--review-host-model / --review-models / --save-review-models 仅支持 --profile review")
     if (args.committee_models or args.committee_host_model or args.save_committee_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_COMMITTEE_PROFILE_ID:
         parser.error("--committee-host-model / --committee-models / --save-committee-models 仅支持 --profile committee")
+    if (args.debate_models or args.debate_host_model or args.save_debate_models) and requested_opencode_profile and requested_opencode_profile != _OPENCODE_DEBATE_PROFILE_ID:
+        parser.error("--debate-host-model / --debate-models / --save-debate-models 仅支持 --profile debate")
     if requested_opencode_profile and args.account:
         parser.error("--profile 是 OpenCode 专用参数，不支持同时使用 --account")
     requested_opencode_entrypoints = []
@@ -16913,6 +17309,8 @@ def main():
                 profile_to_launch = _OPENCODE_REVIEW_PROFILE_ID
             if not profile_to_launch and (args.committee_models or args.committee_host_model or args.save_committee_models):
                 profile_to_launch = _OPENCODE_COMMITTEE_PROFILE_ID
+            if not profile_to_launch and (args.debate_models or args.debate_host_model or args.save_debate_models):
+                profile_to_launch = _OPENCODE_DEBATE_PROFILE_ID
 
         if target == "opencode" and profile_to_launch:
             cli = "opencode"
@@ -16946,10 +17344,24 @@ def main():
                     save_cfg=user_cfg,
                     ask_to_save=not bool(args.committee_models or args.committee_host_model),
                 )
+            elif profile_to_launch == _OPENCODE_DEBATE_PROFILE_ID:
+                profile_cfg, _debate_selection = _prepare_opencode_debate_profile_config(
+                    cfg,
+                    profile_provider,
+                    profile_models,
+                    host_model=args.debate_host_model,
+                    model_tokens=args.debate_models,
+                    interactive=sys.stdin.isatty() and not bool(args.debate_models or args.debate_host_model),
+                    save_selected=bool(args.save_debate_models),
+                    save_cfg=user_cfg,
+                    ask_to_save=not bool(args.debate_models or args.debate_host_model),
+                )
             elif args.review_models or args.review_host_model or args.save_review_models:
                 parser.error("--review-host-model / --review-models / --save-review-models 仅支持 --profile review")
             elif args.committee_models or args.committee_host_model or args.save_committee_models:
                 parser.error("--committee-host-model / --committee-models / --save-committee-models 仅支持 --profile committee")
+            elif args.debate_models or args.debate_host_model or args.save_debate_models:
+                parser.error("--debate-host-model / --debate-models / --save-debate-models 仅支持 --profile debate")
             model_info, runtime = _resolve_opencode_profile_runtime(
                 profile_cfg,
                 profile_provider,

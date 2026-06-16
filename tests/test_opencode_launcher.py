@@ -1050,16 +1050,20 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert mms_core._normalize_opencode_profile_id("review") == "review_hub"
     assert mms_core._normalize_opencode_profile_id("multi-review") == "review_hub"
     assert mms_core._normalize_opencode_profile_id("committee") == "committee"
+    assert mms_core._normalize_opencode_profile_id("debate") == "debate"
     assert mms_core._normalize_opencode_profile_id("omo") == "heavy_omo"
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_backend") == ("lite_pro_orchestrated", "serve")
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_acp") == ("lite_pro_orchestrated", "acp")
     assert mms_core._opencode_profile_selection("review_backend") == ("review_hub", "serve")
     assert mms_core._opencode_profile_selection("committee_backend") == ("committee", "serve")
+    assert mms_core._opencode_profile_selection("debate_backend") == ("debate", "serve")
+    assert mms_core._opencode_profile_selection("debate_acp") == ("debate", "acp")
 
     lite = mms_core._apply_opencode_profile(_runtime(), "lite")
     agent = mms_core._apply_opencode_profile(_runtime(), "agent")
     review = mms_core._apply_opencode_profile(_runtime(), "review")
     committee = mms_core._apply_opencode_profile(_runtime(), "committee")
+    debate = mms_core._apply_opencode_profile(_runtime(), "debate")
     backend_multi = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated_backend")
     heavy = mms_core._apply_opencode_profile(_runtime(), "omo")
     raw = mms_core._apply_opencode_profile(_runtime(), "raw")
@@ -1082,6 +1086,11 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert committee["opencode_roster"] == "committee"
     assert committee["opencode_profile_label"] == "Committee"
     assert committee["opencode_launch_fallback_agents"]["builder_fallback"] == "committee-host-pro"
+    assert debate["opencode_agent"] == "debate-host"
+    assert debate["opencode_roster"] == "debate"
+    assert debate["opencode_profile_label"] == "Debate"
+    assert debate["opencode_contract_workflow"] == "debate"
+    assert debate["opencode_launch_fallback_agents"]["builder_fallback"] == "debate-host-pro"
     assert backend_multi["opencode_profile"] == "lite_pro_orchestrated"
     assert backend_multi["opencode_entrypoint"] == "serve"
     assert heavy["opencode_use_global_config"] is True
@@ -2048,6 +2057,110 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert mimo_route["provider_id"] == "mimo-direct-anthropic"
 
 
+def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"debate": {"models": ["gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi"]}},
+    }
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex", "opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "kimi-k2.6",
+        "glm-5.1",
+        "deepseek-v4-pro",
+    ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
+    )
+
+    debate_cfg, selection = mms_core._prepare_opencode_debate_profile_config(
+        cfg,
+        provider,
+        models,
+        host_model="gpt-5.5",
+        interactive=False,
+    )
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        debate_cfg,
+        provider,
+        models,
+        "debate",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "gpt-5.5", "profile": "debate"}
+    assert selection["host"] == "gpt-5.5"
+    assert [item["model"] for item in selection["selected"]] == [
+        "gpt-5.4",
+        "gpt-5.5",
+        "deepseek-v4-pro",
+        "glm-5.1",
+        "mimo-v2.5-pro",
+        "kimi-k2.6",
+    ]
+    assert runtime["opencode_agent"] == "debate-host"
+    assert runtime["opencode_roster"] == "debate"
+    assert payload["default_agent"] == "debate-host"
+    assert payload["agent"]["debate-host"]["mode"] == "primary"
+    assert payload["agent"]["debate-host"]["permission"]["task"]["debate-gpt-5-5"] == "allow"
+    assert payload["agent"]["debate-deepseek-v4-pro"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["debate-glm-5-1"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["debate-mimo-v2-5-pro"]["model"].endswith("/mimo-v2.5-pro")
+    assert payload["agent"]["debate-kimi-k2-6"]["model"].endswith("/kimi-k2.6")
+
+    host_prompt = payload["agent"]["debate-host"]["prompt"]
+    host_prompt_lower = host_prompt.lower()
+    assert "not committee" in host_prompt_lower
+    assert "not legacy discuss" in host_prompt_lower
+    assert ".ai/debate/<thread-id>/" in host_prompt
+    assert "blind seed -> crossfire -> revision" in host_prompt_lower
+    assert "round-1-seed.json" in host_prompt
+    assert "round-2-clusters.json" in host_prompt
+    assert "round-3-crossfire.json" in host_prompt
+    assert "round-4-revision.json" in host_prompt
+    assert "resolution.json" in host_prompt
+    assert "skipped revision" in host_prompt_lower
+    assert "no helper command or validator program in v1" in host_prompt_lower
+    assert "self-check" in host_prompt_lower
+    assert "insufficient_evidence > split_human_required > converged > leaning" in host_prompt
+    assert "host_authored" in host_prompt
+    assert "fake consensus" in host_prompt_lower
+    assert "committee vote files" in host_prompt_lower
+    assert "review-hub request roots" in host_prompt_lower
+
+    member_prompt = payload["agent"]["debate-deepseek-v4-pro"]["prompt"].lower()
+    assert "independent debate member" in member_prompt
+    assert "not a committee voter" in member_prompt
+    assert "blind seed" in member_prompt
+    assert "stance_shift" in member_prompt
+    assert "deterministic facts" in member_prompt
+    assert payload["agent"]["debate-deepseek-v4-pro"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["debate-deepseek-v4-pro"]["permission"]["task"] == "deny"
+    mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "custom_debate-mimo-v2-5-pro")
+    assert mimo_route["provider_id"] == "mimo-direct-anthropic"
+
+
 def test_core_opencode_review_host_models_are_configurable(monkeypatch):
     import mms_core
     import mms_launchers
@@ -2641,15 +2754,16 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
 
     assert mms_core._handle_tui_launcher_selection(cfg, provider, False, ["opencode"]) is True
-    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "review", "committee", "omo", "raw"]
+    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "review", "committee", "debate", "omo", "raw"]
     assert [item["profile_id"] for item in captured["profile_options"]["opencode"]] == [
         "lite_pro_orchestrated",
         "review_hub",
         "committee",
+        "debate",
         "heavy_omo",
         "raw",
     ]
-    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "Review", "Committee", "OMO", "Raw"]
+    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "Review", "Committee", "Debate", "OMO", "Raw"]
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.4", "profile": "lite_pro_orchestrated"}
     assert captured["runtime"]["id"] == "dual-protocol"
@@ -3081,9 +3195,10 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     options = mms_core._opencode_profile_menu_options()
     agent = next(option for option in options if option["id"] == "agent")
 
-    assert [option["id"] for option in options] == ["agent", "review", "committee", "omo", "raw"]
+    assert [option["id"] for option in options] == ["agent", "review", "committee", "debate", "omo", "raw"]
     assert next(option for option in options if option["id"] == "review")["profile_id"] == "review_hub"
     assert next(option for option in options if option["id"] == "committee")["profile_id"] == "committee"
+    assert next(option for option in options if option["id"] == "debate")["profile_id"] == "debate"
     assert agent["label"] == "Agent"
     assert agent["badge"] == "默认"
     assert "health: 1/18 healthy" in agent["summary"]
