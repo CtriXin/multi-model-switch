@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,6 +26,183 @@ def _write_skill(root: Path, name: str) -> Path:
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
     return skill_dir
+
+
+def _write_opencode_session_db(
+    path: Path,
+    *,
+    sessions: list[dict],
+    messages: list[dict] | None = None,
+    parts: list[dict] | None = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("DROP TABLE IF EXISTS part")
+        conn.execute("DROP TABLE IF EXISTS message")
+        conn.execute("DROP TABLE IF EXISTS session")
+        conn.execute("DROP TABLE IF EXISTS project")
+        conn.execute(
+            "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, vcs TEXT, name TEXT, icon_url TEXT, icon_color TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_initialized INTEGER, sandboxes TEXT NOT NULL, commands TEXT, icon_url_override TEXT)"
+        )
+        conn.execute("DROP TABLE IF EXISTS session")
+        conn.execute(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT, revert TEXT, permission TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT, path TEXT, agent TEXT, model TEXT, cost REAL DEFAULT 0 NOT NULL, tokens_input INTEGER DEFAULT 0 NOT NULL, tokens_output INTEGER DEFAULT 0 NOT NULL, tokens_reasoning INTEGER DEFAULT 0 NOT NULL, tokens_cache_read INTEGER DEFAULT 0 NOT NULL, tokens_cache_write INTEGER DEFAULT 0 NOT NULL, metadata TEXT, FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE)"
+        )
+        conn.execute(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE)"
+        )
+        conn.execute(
+            "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (message_id) REFERENCES message(id) ON DELETE CASCADE)"
+        )
+        project_rows = {}
+        for row in sessions:
+            project_id = row.get("project_id", "project-1")
+            project_rows[project_id] = {
+                "id": project_id,
+                "worktree": row.get("worktree", "/tmp/worktree"),
+                "vcs": row.get("vcs"),
+                "name": row.get("project_name", "Test Project"),
+                "time_created": row.get("project_time_created", row["time_created"]),
+                "time_updated": row.get("project_time_updated", row["time_updated"]),
+            }
+        for project in project_rows.values():
+            conn.execute(
+                "INSERT INTO project (id, worktree, vcs, name, icon_url, icon_color, time_created, time_updated, time_initialized, sandboxes, commands, icon_url_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    project["id"],
+                    project["worktree"],
+                    project["vcs"],
+                    project["name"],
+                    None,
+                    None,
+                    project["time_created"],
+                    project["time_updated"],
+                    None,
+                    json.dumps([]),
+                    None,
+                    None,
+                ),
+            )
+        for row in sessions:
+            conn.execute(
+                "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id, path, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row.get("project_id", "project-1"),
+                    row.get("parent_id"),
+                    row.get("slug", row["id"]),
+                    row["directory"],
+                    row["title"],
+                    row.get("version", "1"),
+                    row.get("share_url"),
+                    row.get("summary_additions"),
+                    row.get("summary_deletions"),
+                    row.get("summary_files"),
+                    row.get("summary_diffs"),
+                    row.get("revert"),
+                    row.get("permission"),
+                    row["time_created"],
+                    row["time_updated"],
+                    row.get("time_compacting"),
+                    row.get("time_archived"),
+                    row.get("workspace_id"),
+                    row.get("path"),
+                    row.get("agent"),
+                    json.dumps(row["model"]),
+                    row.get("cost", 0),
+                    row.get("tokens_input", 0),
+                    row.get("tokens_output", 0),
+                    row.get("tokens_reasoning", 0),
+                    row.get("tokens_cache_read", 0),
+                    row.get("tokens_cache_write", 0),
+                    json.dumps(row.get("metadata", {})),
+                ),
+            )
+        for row in messages or []:
+            conn.execute(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row["session_id"],
+                    row["time_created"],
+                    row["time_updated"],
+                    json.dumps(row["data"]),
+                ),
+            )
+        for row in parts or []:
+            conn.execute(
+                "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    row["message_id"],
+                    row["session_id"],
+                    row["time_created"],
+                    row["time_updated"],
+                    json.dumps(row["data"]),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _read_opencode_session_db(path: Path) -> dict[str, dict]:
+    conn = sqlite3.connect(path)
+    try:
+        def _table_exists(name: str) -> bool:
+            return conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (name,),
+            ).fetchone() is not None
+
+        def _session_rows() -> dict[str, dict]:
+            if not _table_exists("session"):
+                return {}
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(session)").fetchall()]
+            return {
+                row_dict["id"]: {
+                    "id": row_dict.get("id"),
+                    "title": row_dict.get("title"),
+                    "directory": row_dict.get("directory"),
+                    "time_created": row_dict.get("time_created"),
+                    "time_updated": row_dict.get("time_updated"),
+                    "model": json.loads(row_dict["model"]) if row_dict.get("model") else None,
+                    "metadata": json.loads(row_dict["metadata"]) if row_dict.get("metadata") else {},
+                }
+                for row_dict in (
+                    dict(zip(columns, row))
+                    for row in conn.execute("SELECT * FROM session ORDER BY id").fetchall()
+                )
+            }
+
+        return {
+            "sessions": _session_rows(),
+            "messages": {
+                row[0]: {
+                    "id": row[0],
+                    "session_id": row[1],
+                    "time_created": row[2],
+                    "time_updated": row[3],
+                    "data": json.loads(row[4]),
+                }
+                for row in (conn.execute("SELECT * FROM message ORDER BY id").fetchall() if _table_exists("message") else [])
+            },
+            "parts": {
+                row[0]: {
+                    "id": row[0],
+                    "message_id": row[1],
+                    "session_id": row[2],
+                    "time_created": row[3],
+                    "time_updated": row[4],
+                    "data": json.loads(row[5]),
+                }
+                for row in (conn.execute("SELECT * FROM part ORDER BY id").fetchall() if _table_exists("part") else [])
+            },
+        }
+    finally:
+        conn.close()
 
 
 def test_opencode_config_uses_openai_compatible_provider():
@@ -788,7 +966,7 @@ def test_opencode_gateway_env_migrates_existing_session_local_opencode_data(monk
     assert (shared_state / ".mms-shared-state-migration-v1").read_text(encoding="utf-8") == "migrated=1\n"
 
 
-def test_opencode_gateway_env_migrates_only_matching_profile_data(monkeypatch, tmp_path):
+def test_opencode_gateway_env_migrates_all_legacy_profile_data_before_cleanup(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -811,7 +989,14 @@ def test_opencode_gateway_env_migrates_only_matching_profile_data(monkeypatch, t
 
     real_home.mkdir(exist_ok=True)
     monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
-    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+
+    def fake_cleanup(*_args, **_kwargs):
+        review_shared = real_home / ".local" / "share" / "mms-opencode" / "state" / "review_hub" / "opencode" / "opencode.db"
+        agent_shared = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
+        assert review_shared.read_text(encoding="utf-8") == "review-db"
+        assert agent_shared.read_text(encoding="utf-8") == "agent-db"
+
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", fake_cleanup)
     monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
@@ -828,7 +1013,646 @@ def test_opencode_gateway_env_migrates_only_matching_profile_data(monkeypatch, t
     assert shared_state.name == "review_hub"
     assert (shared_state / "opencode" / "opencode.db").read_text(encoding="utf-8") == "review-db"
     agent_shared_db = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
-    assert not agent_shared_db.exists()
+    assert agent_shared_db.read_text(encoding="utf-8") == "agent-db"
+
+
+def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "first pass",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 1,
+                "model": {"id": "gpt-5.4"},
+                "metadata": {"phase": "first"},
+            }
+        ],
+        messages=[
+            {
+                "id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 1,
+                "data": {"role": "user", "text": "hello"},
+            }
+        ],
+        parts=[
+            {
+                "id": "part-1",
+                "message_id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 1,
+                "data": {"type": "text", "text": "hello"},
+            }
+        ],
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "first pass"
+    assert rows["sessions"]["session-1"]["time_updated"] == 1
+    assert rows["messages"]["message-1"]["data"] == {"role": "user", "text": "hello"}
+    assert rows["parts"]["part-1"]["data"] == {"type": "text", "text": "hello"}
+
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "second pass",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+                "metadata": {"phase": "second"},
+            },
+            {
+                "id": "session-2",
+                "title": "new session",
+                "directory": "/tmp/project-b",
+                "time_created": 3,
+                "time_updated": 3,
+                "model": {"id": "deepseek-chat"},
+                "metadata": {"phase": "new"},
+            },
+        ],
+        messages=[
+            {
+                "id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 2,
+                "data": {"role": "assistant", "text": "updated"},
+            },
+            {
+                "id": "message-2",
+                "session_id": "session-2",
+                "time_created": 3,
+                "time_updated": 3,
+                "data": {"role": "user", "text": "new message"},
+            },
+        ],
+        parts=[
+            {
+                "id": "part-1",
+                "message_id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 2,
+                "data": {"type": "text", "text": "updated"},
+            },
+            {
+                "id": "part-2",
+                "message_id": "message-2",
+                "session_id": "session-2",
+                "time_created": 3,
+                "time_updated": 3,
+                "data": {"type": "text", "text": "new message"},
+            },
+        ],
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "second pass"
+    assert rows["sessions"]["session-1"]["time_updated"] == 2
+    assert rows["sessions"]["session-1"]["model"] == {"id": "gpt-5.5"}
+    assert rows["sessions"]["session-1"]["metadata"] == {"phase": "second"}
+    assert rows["sessions"]["session-2"]["title"] == "new session"
+    assert rows["messages"]["message-1"]["data"] == {"role": "assistant", "text": "updated"}
+    assert rows["messages"]["message-2"]["data"] == {"role": "user", "text": "new message"}
+    assert rows["parts"]["part-1"]["data"] == {"type": "text", "text": "updated"}
+    assert rows["parts"]["part-2"]["data"] == {"type": "text", "text": "new message"}
+
+
+def test_opencode_set_soft_home_does_not_overwrite_newer_shared_state_when_legacy_mtime_is_newer(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "legacy",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 1,
+                "model": {"id": "gpt-5.4"},
+            }
+        ],
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        shared_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "shared-newer",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 5,
+                "model": {"id": "gpt-5.5"},
+            },
+            {
+                "id": "session-2",
+                "title": "shared-only",
+                "directory": "/tmp/project-b",
+                "time_created": 2,
+                "time_updated": 2,
+                "model": {"id": "deepseek-chat"},
+            },
+        ],
+        messages=[
+            {
+                "id": "message-shared",
+                "session_id": "session-2",
+                "time_created": 2,
+                "time_updated": 2,
+                "data": {"role": "assistant", "text": "keep me"},
+            }
+        ],
+    )
+    old_db.touch()
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "shared-newer"
+    assert rows["sessions"]["session-1"]["time_updated"] == 5
+    assert rows["sessions"]["session-2"]["title"] == "shared-only"
+    assert rows["messages"]["message-shared"]["data"] == {"role": "assistant", "text": "keep me"}
+
+
+def test_opencode_set_soft_home_upgrades_existing_narrow_shared_schema(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "legacy source",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+        messages=[
+            {
+                "id": "message-1",
+                "session_id": "session-1",
+                "time_created": 1,
+                "time_updated": 2,
+                "data": {"role": "assistant", "text": "migrated content"},
+            }
+        ],
+    )
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    narrow_db = shared_root / "opencode.db"
+    conn = sqlite3.connect(narrow_db)
+    try:
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, model TEXT)")
+        conn.execute(
+            "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)",
+            ("session-1", "narrow target", "/tmp/project-a", 1, 1, json.dumps({"id": "gpt-5.4"})),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(narrow_db)
+    session_columns_conn = sqlite3.connect(narrow_db)
+    try:
+        session_columns = [row[1] for row in session_columns_conn.execute("PRAGMA table_info(session)").fetchall()]
+        project_rows = session_columns_conn.execute("SELECT id, name FROM project ORDER BY id").fetchall()
+    finally:
+        session_columns_conn.close()
+
+    assert "project_id" in session_columns
+    assert "slug" in session_columns
+    assert "version" in session_columns
+    assert rows["sessions"]["session-1"]["title"] == "legacy source"
+    assert rows["sessions"]["session-1"]["time_updated"] == 2
+    assert rows["messages"]["message-1"]["data"] == {"role": "assistant", "text": "migrated content"}
+    assert project_rows[0][0] == "legacy-migrated-project"
+
+
+def test_opencode_set_soft_home_handles_narrow_source_project_schema(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    old_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(old_db)
+    try:
+        conn.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, name TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, sandboxes TEXT NOT NULL)")
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT, revert TEXT, permission TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT, path TEXT, agent TEXT, model TEXT, cost REAL DEFAULT 0 NOT NULL, tokens_input INTEGER DEFAULT 0 NOT NULL, tokens_output INTEGER DEFAULT 0 NOT NULL, tokens_reasoning INTEGER DEFAULT 0 NOT NULL, tokens_cache_read INTEGER DEFAULT 0 NOT NULL, tokens_cache_write INTEGER DEFAULT 0 NOT NULL, metadata TEXT, FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE)")
+        conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE)")
+        conn.execute("INSERT INTO project VALUES (?, ?, ?, ?, ?, ?)", ("project-1", "/tmp/worktree", "Legacy Narrow Project", 1, 1, json.dumps([])))
+        conn.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id, path, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ("session-1", "project-1", None, "session-1", "/tmp/project-a", "legacy narrow source", "1", None, None, None, None, None, None, None, 1, 3, None, None, None, None, None, json.dumps({"id": "gpt-5.5"}), 0, 0, 0, 0, 0, 0, json.dumps({})))
+        conn.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("message-1", "session-1", 1, 3, json.dumps({"role": "assistant", "text": "from narrow project schema"})))
+        conn.commit()
+    finally:
+        conn.close()
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    narrow_db = shared_root / "opencode.db"
+    conn = sqlite3.connect(narrow_db)
+    try:
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, model TEXT)")
+        conn.execute("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", ("session-1", "dst narrow", "/tmp/project-a", 1, 1, json.dumps({"id": "gpt-5.4"})))
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(narrow_db)
+    assert rows["sessions"]["session-1"]["title"] == "legacy narrow source"
+    assert rows["sessions"]["session-1"]["time_updated"] == 3
+    assert rows["messages"]["message-1"]["data"] == {"role": "assistant", "text": "from narrow project schema"}
+
+
+def test_opencode_set_soft_home_commits_schema_backfill_when_source_tables_are_empty(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(old_db, sessions=[])
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    narrow_db = shared_root / "opencode.db"
+    conn = sqlite3.connect(narrow_db)
+    try:
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, model TEXT)")
+        conn.execute("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", ("session-1", "dst narrow", "/tmp/project-a", 1, 1, json.dumps({"id": "gpt-5.4"})))
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    conn = sqlite3.connect(narrow_db)
+    try:
+        session_columns = [row[1] for row in conn.execute("PRAGMA table_info(session)").fetchall()]
+        project_row = conn.execute("SELECT id FROM project WHERE id = ?", ("legacy-migrated-project",)).fetchone()
+        session_row = conn.execute("SELECT project_id, slug, version FROM session WHERE id = ?", ("session-1",)).fetchone()
+    finally:
+        conn.close()
+
+    assert "project_id" in session_columns
+    assert project_row == ("legacy-migrated-project",)
+    assert session_row == ("legacy-migrated-project", "session-1", "1")
+
+
+def test_opencode_gateway_env_skips_cleanup_when_migration_fails(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_opencode_dir = old_session / ".local" / "share" / "opencode"
+    old_opencode_dir.mkdir(parents=True)
+    (old_opencode_dir / "opencode.db").write_text("broken-sqlite", encoding="utf-8")
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_sqlite_db",
+        lambda _src, _dst: (True, False, True),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_cleanup_stale_sessions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cleanup must be skipped on migration failure")),
+    )
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
+
+
+def test_opencode_gateway_env_skips_cleanup_when_shared_target_is_non_sqlite(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "legacy source",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+    )
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    (shared_root / "opencode.db").write_text("corrupt-target", encoding="utf-8")
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_cleanup_stale_sessions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cleanup must be skipped for corrupt shared target")),
+    )
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
+
+
+def test_opencode_gateway_env_skips_cleanup_when_legacy_source_is_non_sqlite_and_shared_target_is_valid(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_opencode_dir = old_session / ".local" / "share" / "opencode"
+    old_opencode_dir.mkdir(parents=True)
+    (old_opencode_dir / "opencode.db").write_text("corrupt-source", encoding="utf-8")
+
+    shared_root = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode"
+    shared_root.mkdir(parents=True, exist_ok=True)
+    shared_db = shared_root / "opencode.db"
+    _write_opencode_session_db(
+        shared_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "shared state",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 3,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+    )
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_cleanup_stale_sessions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cleanup must be skipped for corrupt legacy source")),
+    )
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "shared state"
+
+
+def test_opencode_set_soft_home_initial_sqlite_backup_reads_wal_state(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    old_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(old_db)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, vcs TEXT, name TEXT, icon_url TEXT, icon_color TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_initialized INTEGER, sandboxes TEXT NOT NULL, commands TEXT, icon_url_override TEXT)")
+        conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT, revert TEXT, permission TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT, path TEXT, agent TEXT, model TEXT, cost REAL DEFAULT 0 NOT NULL, tokens_input INTEGER DEFAULT 0 NOT NULL, tokens_output INTEGER DEFAULT 0 NOT NULL, tokens_reasoning INTEGER DEFAULT 0 NOT NULL, tokens_cache_read INTEGER DEFAULT 0 NOT NULL, tokens_cache_write INTEGER DEFAULT 0 NOT NULL, metadata TEXT, FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE)")
+        conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE)")
+        conn.execute("INSERT INTO project VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ("project-1", "/tmp/worktree", None, "WAL Project", None, None, 1, 1, None, json.dumps([]), None, None))
+        conn.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id, path, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ("session-1", "project-1", None, "session-1", "/tmp/project-a", "wal source", "1", None, None, None, None, None, None, None, 1, 1, None, None, None, None, None, json.dumps({"id": "gpt-5.4"}), 0, 0, 0, 0, 0, 0, json.dumps({})))
+        conn.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("message-wal", "session-1", 1, 1, json.dumps({"role": "assistant", "text": "from wal"})))
+        conn.commit()
+
+        def _real_user_path(*parts):
+            return str(real_home.joinpath(*parts))
+
+        env = {}
+        mms_opencode_env.opencode_set_soft_home(
+            env,
+            str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+            real_user_path=_real_user_path,
+            set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+            profile_id="lite_pro_orchestrated",
+        )
+    finally:
+        conn.close()
+
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    rows = _read_opencode_session_db(shared_db)
+    assert rows["sessions"]["session-1"]["title"] == "wal source"
+    assert rows["messages"]["message-wal"]["data"] == {"role": "assistant", "text": "from wal"}
+
+
+def test_opencode_set_soft_home_skips_intentionally_isolated_session_data(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    isolated_env = {"MMS_OPENCODE_ISOLATE_DATA": "1"}
+    isolated_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    mms_opencode_env.opencode_set_soft_home(
+        isolated_env,
+        str(isolated_session),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    isolated_db = Path(isolated_env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    isolated_db.parent.mkdir(parents=True, exist_ok=True)
+    isolated_db.write_text("intentional-isolation", encoding="utf-8")
+
+    shared_env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        shared_env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    shared_db = Path(shared_env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    assert not shared_db.exists()
 
 
 def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path):
