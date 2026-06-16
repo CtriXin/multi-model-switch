@@ -3293,6 +3293,18 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "committee vote files" in host_prompt_lower
     assert "review-hub request roots" in host_prompt_lower
     host_pro_prompt = payload["agent"]["debate-host-pro"]["prompt"].lower()
+    authority_order = (
+        "human > deterministic facts > rubric applied to member outputs > host"
+    )
+    # Primary and fallback hosts must carry the identical full authority contract.
+    for prompt_text in (host_prompt_lower, host_pro_prompt):
+        assert "host authority contract" in prompt_text
+        assert "you are not the decision authority" in prompt_text
+        assert authority_order in prompt_text
+        assert "never answer in a member's place" in prompt_text
+        assert "never invent a member's missing position" in prompt_text
+        assert "aggregate losslessly" in prompt_text
+        assert "the user does not need to" in prompt_text
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt
