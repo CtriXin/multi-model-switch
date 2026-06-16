@@ -41,9 +41,15 @@ For every non-trivial `review`, `committee`, or `debate` task, the host must:
 
 1. create or preserve one mission block before delegation;
 2. include the unchanged mission block in every delegated reviewer/member brief;
-3. begin the final chat synthesis with the mission block;
+3. include a visible mission trace in the final chat synthesis, preferably in
+   the copy-forward/provenance area or immediately after human-facing notes;
 4. end the final chat synthesis with at least `MMS-MISSION` and `MMS-TARGET`;
 5. preserve the same mission id across retries within the same manual dispatch.
+
+The trace shown in the body/top area and the trace footer both identify the same
+current manual dispatch. Do not use the body/top trace for the previous dispatch,
+and do not use the footer for a future dispatch. A future dispatch gets its own
+new `MMS-MISSION` when that dispatch starts.
 
 Every new manual dispatch after executor repair should get a new
 `MMS-MISSION`, even if it belongs to the same issue or PR. The `MMS-TARGET`
