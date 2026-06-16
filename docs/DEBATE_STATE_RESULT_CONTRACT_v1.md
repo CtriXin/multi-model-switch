@@ -218,7 +218,7 @@ Stores blind first pass outputs from all selected members.
         "MMS-MODE": "debate",
         "MMS-SOURCE": "user-pasted"
       },
-      "lens": "proponent",
+      "assigned_role": "proponent",
       "stance": "independent debate profile",
       "claim": "debate should be separate from committee",
       "evidence": ["RFC boundary requires separation"],
@@ -322,6 +322,7 @@ Stores opponent-summary rebuttal outputs.
         "MMS-MODE": "debate",
         "MMS-SOURCE": "user-pasted"
       },
+      "assigned_role": "opponent",
       "opponent_strongest_point": "skill-first rollout reduces risk",
       "my_rebuttal": "it weakens public product surface",
       "what_i_accept": ["risk is lower"],
@@ -340,6 +341,8 @@ Stores opponent-summary rebuttal outputs.
 
 - Do not attach full opponent transcript.
 - Use strongest-opposing-case summaries only.
+- Echo `assigned_role` so the host can separate assigned advocacy from genuine
+  conviction during revision.
 
 ## `round-4-revision.json`
 

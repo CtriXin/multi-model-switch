@@ -3242,6 +3242,31 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert mimo_route["provider_id"] == "mimo-direct-anthropic"
 
 
+def test_debate_contract_declares_assigned_role_and_stance_authenticity():
+    import pathlib
+
+    contract = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "docs"
+        / "DEBATE_STATE_RESULT_CONTRACT_v1.md"
+    ).read_text(encoding="utf-8")
+    assert "### `assigned_role`" in contract
+    assert "### `stance_authenticity`" in contract
+    round1 = contract.split("## `round-3-crossfire.json`")[0]
+    crossfire = contract.split("## `round-3-crossfire.json`")[1].split(
+        "## `round-4-revision.json`"
+    )[0]
+    revision = contract.split("## `round-4-revision.json`")[1].split(
+        "## `resolution.json`"
+    )[0]
+    # Each round that the prompt requires the field in must also declare it.
+    assert "assigned_role" in round1
+    assert "assigned_role" in crossfire
+    assert "stance_authenticity" in revision
+    # The stale lens field must not linger in the seed example.
+    assert '"lens"' not in round1
+
+
 def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatch):
     import mms_core
     import mms_launchers
@@ -3371,8 +3396,12 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     ]
     assert member_prompts
     for member_prompt in member_prompts:
-        assert "assigned_role" in member_prompt
+        # assigned_role must appear in both the seed and crossfire field lists,
+        # not just once in passing.
+        assert member_prompt.count("assigned_role") >= 2
         assert "stance_authenticity" in member_prompt
+    # Primary host must require assigned_role in both seed and crossfire rounds.
+    assert host_prompt_lower.count("assigned_role") >= 2
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt
