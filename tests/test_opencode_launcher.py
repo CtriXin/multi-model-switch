@@ -3086,10 +3086,15 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
     assert "start this packet with 追踪块 / trace" in host_prompt_lower
     assert "same current mms-mission block" in host_prompt_lower
-    assert "member findings or ballots, model timing" in host_prompt_lower
+    assert "compact for forwarding" in host_prompt_lower
+    assert "direct verification summary" in host_prompt_lower
+    assert "key findings" in host_prompt_lower
+    assert "model timing summary" in host_prompt_lower
+    assert "do not duplicate human notes" in host_prompt_lower
     assert "host 建议 / host recommendation" in host_prompt_lower
     assert "追踪页脚 / trace footer" in host_prompt_lower
-    assert "do not include scorecard, meta commentary, or host private advice" in host_prompt_lower
+    assert "per-member score rationale" in host_prompt_lower
+    assert "long ballot prose" in host_prompt_lower
     assert "mms-mission plus mms-target at the very end" in host_prompt_lower
     assert (
         host_prompt_lower.index("人需要看的 / human notes")
