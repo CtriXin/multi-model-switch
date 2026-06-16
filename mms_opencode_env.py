@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -18,6 +19,13 @@ def opencode_write_config(path, runtime, model, *, build_config_content, atomic_
 
 
 _OPENCODE_SHARED_STATE_MIGRATION_MARKER = ".mms-shared-state-migration-v1"
+_OPENCODE_PROFILE_MARKER = ".mms/opencode-profile"
+
+
+def _write_opencode_profile_marker(session_home, profile_slug):
+    marker = Path(session_home) / _OPENCODE_PROFILE_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(profile_slug + "\n", encoding="utf-8")
 
 
 def opencode_profile_state_slug(profile_id):
@@ -55,6 +63,51 @@ def _copy_missing_tree(src, dst):
     return copied
 
 
+def _opencode_profile_slug_from_session(session_dir):
+    session_dir = Path(session_dir)
+    marker = session_dir / _OPENCODE_PROFILE_MARKER
+    if marker.is_file():
+        try:
+            return opencode_profile_state_slug(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+
+    config_path = session_dir / ".config" / "opencode" / "opencode.json"
+    if not config_path.is_file():
+        return ""
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+
+    default_agent = str(payload.get("default_agent") or payload.get("agent") or "").strip()
+    agent_map = {
+        "mobius-builder-pro": "lite_pro_orchestrated",
+        "mobius-builder-stable": "lite_pro_orchestrated",
+        "mobius-builder": "lite",
+        "review-hub-host": "review_hub",
+        "review-hub-host-stable": "review_hub",
+        "committee-host": "committee",
+        "committee-host-pro": "committee",
+    }
+    if default_agent in agent_map:
+        return agent_map[default_agent]
+
+    agents = payload.get("agent")
+    agent_keys = set(agents) if isinstance(agents, dict) else set()
+    if any(str(key).startswith("review-") for key in agent_keys):
+        return "review_hub"
+    if any(str(key).startswith("committee-") for key in agent_keys):
+        return "committee"
+    if any(str(key).startswith("mobius-") for key in agent_keys):
+        return "lite_pro_orchestrated"
+    if not default_agent and not agent_keys:
+        return "raw"
+    return ""
+
+
 def _migrate_opencode_data_to_shared_state(session_home, state_root):
     sessions_dir = Path(session_home).parent
     state_root = Path(state_root)
@@ -64,6 +117,8 @@ def _migrate_opencode_data_to_shared_state(session_home, state_root):
 
     candidates = []
     for session_dir in sessions_dir.iterdir():
+        if _opencode_profile_slug_from_session(session_dir) != state_root.name:
+            continue
         data_dir = session_dir / ".local" / "share" / "opencode"
         if not data_dir.is_dir():
             continue
@@ -88,6 +143,7 @@ def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_hom
     profile_slug = opencode_profile_state_slug(profile_id)
     real_home = real_user_path()
     state_root = real_user_path(".local", "share", "mms-opencode", "state", profile_slug)
+    _write_opencode_profile_marker(session_home, profile_slug)
     env["HOME"] = real_home
     env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
     env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")
@@ -171,7 +227,6 @@ def opencode_gateway_env(
     sessions_dir = os.path.join(gateway_base, "s")
     session_home = os.path.join(sessions_dir, str(getpid()))
     os.makedirs(session_home, exist_ok=True)
-    cleanup_stale_sessions(sessions_dir)
 
     link_shared_dotfiles(session_home)
 
@@ -181,6 +236,7 @@ def opencode_gateway_env(
     inject_real_home_hints(env)
     inject_selected_model_name(env, model, model_info=model_info)
     set_opencode_soft_home(env, session_home, profile_id=opencode_profile_id)
+    cleanup_stale_sessions(sessions_dir)
 
     config_dir = os.path.join(env["XDG_CONFIG_HOME"], "opencode")
     os.makedirs(config_dir, exist_ok=True)
