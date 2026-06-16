@@ -5,6 +5,22 @@ from __future__ import annotations
 import copy
 
 
+OPENCODE_REVIEW_MISSION_CONTRACT = (
+    "MMS mission correlation contract: for every manual dispatch in a review, "
+    "committee, or debate task, create one visible MMS-MISSION id before "
+    "delegating. Keep it separate from the reviewed code target. Emit fields "
+    "MMS-MISSION, MMS-TARGET, MMS-MODE, and MMS-SOURCE. Prefer a stable source "
+    "identifier such as a Review Hub request id/root basename, PR plus commit, "
+    "or branch plus commit; otherwise generate a compact id using the profile "
+    "name, current date/time if known, and an 8-character nonce/hash. If the "
+    "reviewed target is unclear, write exactly MMS-TARGET: unknown and describe "
+    "the source evidence instead of inventing a PR or commit. Include the same "
+    "mission block in every delegated member brief. Final chat synthesis must "
+    "repeat the mission block at the top and repeat at least MMS-MISSION and "
+    "MMS-TARGET at the bottom so pasted findings remain traceable."
+)
+
+
 def opencode_lite_agent_configs(model_ref):
     """Return session-local OpenCode agents for the MMS lite lane."""
     if not model_ref:
@@ -662,7 +678,10 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
             "prompt. Do environment preflight first. If required MCP/tools/skills/auth "
             "are missing, write the blocked preflight artifact and stop. Do not edit "
             "source files; write review artifacts only inside your assigned slot_root. "
-            "Lead with concrete findings, evidence, uncertainty, and missing tests."
+            "If the host provides an MMS-MISSION block, copy the unchanged "
+            "MMS-MISSION block into your review artifact and compact chat summary "
+            "unchanged. Lead with concrete findings, evidence, uncertainty, and "
+            "missing tests."
         )
 
     host_task_permission = {"*": "deny"}
@@ -687,6 +706,7 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
             },
             "prompt": (
                 "You are a Review Hub execution host, not the original dispatcher. "
+                + OPENCODE_REVIEW_MISSION_CONTRACT + " "
                 "Default host route prefers fast domestic GLM/Kimi/Qwen and falls back through MMS route "
                 "resolution. Start by asking the user for a Review Hub request root "
                 "or short command such as `/review-hub <request-root>` if it was not "
@@ -694,14 +714,17 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
                 f"unless the user narrows them: {reviewer_list_text}. If the user "
                 "does ask to narrow, only use agents already available in this "
                 "session; do not invent new model aliases inside OpenCode. Send every "
-                "selected reviewer the same request-root task, including its model name. "
+                "selected reviewer the same request-root task, including its model name "
+                "and the unchanged MMS-MISSION block. "
                 "Each reviewer must hydrate its own slot with `review-hub reviewer`, "
                 "read PROMPT.md, run preflight first, and write only inside slot_root. "
                 "MCP and skills are session-local runner capabilities; do not claim a "
                 "tool exists unless the reviewer preflight confirms it. After reviewers "
                 "finish, run `review-hub aggregate --request <request-root>` when "
                 "available, then report blockers, consensus findings, disagreements, "
-                "and the aggregate path. Do not edit product/source files."
+                "and the aggregate path. Put the MMS-MISSION block before the verdict "
+                "and repeat MMS-MISSION plus MMS-TARGET at the end. Do not edit "
+                "product/source files."
             ),
         },
         "review-hub-host-stable": {
@@ -721,8 +744,13 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
             },
             "prompt": (
                 "Fallback Review Hub host. Continue only if the primary host is "
-                "unavailable or low-confidence. Preserve the same request root, model "
-                "selection, preflight-first behavior, and slot-only write boundary."
+                "unavailable or low-confidence. "
+                + OPENCODE_REVIEW_MISSION_CONTRACT + " "
+                "Preserve the same request root, model "
+                "selection, MMS-MISSION block, preflight-first behavior, and slot-only "
+                "write boundary. If no MMS-MISSION exists yet, create it before any "
+                "delegation. Send the unchanged mission block in every reviewer brief "
+                "and repeat it in the final synthesis."
             ),
         },
     }
@@ -898,11 +926,13 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
     member_list_text = ", ".join(member_names) or "no committee-* subagents"
     host_prompt = (
         "You are a general committee host, not a specialized review dispatcher. "
+        + OPENCODE_REVIEW_MISSION_CONTRACT + " "
         "For any user request, restate the goal, classify the request type, and "
         "choose the right committee mode. "
         + committee_policy_contract + " "
-        "When dispatching, include the declared committee policy in each member "
-        "brief and adapt the requested output to that decision mode and playbook. "
+        "When dispatching, include the declared committee policy and the unchanged "
+        "MMS-MISSION block in each member brief and adapt the requested output to "
+        "that decision mode and playbook. "
         "For checker_only or checker_run work, treat command exits and provided "
         "checker output as deterministic evidence that model votes must not "
         "override without explicit human direction. "
@@ -947,8 +977,10 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
         "full artifact there, and require the chat reply to contain only the path, "
         "a compact summary, and any blocked/missing sections. "
         "Synthesize only after member outputs are in. The final answer or packet "
-        "must include assignments, member findings, disagreements, risks, a "
-        "subagent scorecard, and a recommended next action. In the scorecard, "
+        "must begin with the MMS-MISSION block and include assignments, member "
+        "findings, disagreements, risks, a subagent scorecard, and a recommended "
+        "next action. Repeat MMS-MISSION plus MMS-TARGET at the very end. In the "
+        "scorecard, "
         "rate each delegated member for this task only on a 1-5 scale for "
         "usefulness, evidence quality, relevance, and independence; include one "
         "objective sentence of rationale. Mark selected but non-dispatched members "
@@ -981,6 +1013,8 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
             "prompt": _prompt_with_tool_policy(
                 (
                     "Fallback committee host. Continue the same deliberation flow, "
+                    + OPENCODE_REVIEW_MISSION_CONTRACT + " "
+                    "preserve or create the MMS-MISSION block before delegation, "
                     "preserve selected members, re-read and obey target project local "
                     "instructions before dispatching, apply all committee decision "
                     "mode contracts (advisory, gate, estimate, review, and "
@@ -994,7 +1028,9 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
                     "keep durable ballot provenance honest, include the same "
                     "separation from Debate semantics, include the same "
                     "task-local subagent scorecard, and summarize only "
-                    "evidence-backed conclusions."
+                    "evidence-backed conclusions. Send the unchanged mission block "
+                    "in every member brief. Repeat the MMS-MISSION block at the top "
+                    "and MMS-MISSION plus MMS-TARGET at the bottom."
                 ),
                 _agent_policy("committee-host-pro"),
             ),
@@ -1022,6 +1058,8 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
             "Obey target project local instructions and the host-assigned artifact "
             "contract; if those local rules require a durable formal artifact, write "
             "that artifact exactly as assigned. "
+            "If the host provides an MMS-MISSION block, copy it unchanged in your "
+            "ballot, artifact, or chat response. "
             "Follow the host-declared committee_policy, including decision_mode, "
             "playbook, artifact_mode, and permission_profile. Treat playbooks such "
             "as git_ci_security as evidence checklists, not as hidden decision "
@@ -1189,6 +1227,7 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
         "not committee, not review-hub, and not legacy discuss. Do not use "
         "committee vote files, committee verdict vocabulary, committee decision "
         "artifacts, review-hub request roots, or legacy mms discuss semantics. "
+        + OPENCODE_REVIEW_MISSION_CONTRACT + " "
         "Use only the selected debate subagents available in this session: "
         f"{member_list_text}. Do not invent missing agents or model aliases. "
         "If the user has not supplied a concrete question, ask for one concise "
@@ -1198,10 +1237,13 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
         "`state.json`, `round-1-seed.json`, `round-2-clusters.json`, "
         "`round-3-crossfire.json`, `round-4-revision.json`, `resolution.json`, "
         "and `resolution.md`. The host writes these artifacts directly; there is "
-        "no helper command or validator program in v1. "
+        "no helper command or validator program in v1. In JSON artifacts, store "
+        "the mission block as a mission object with literal keys MMS-MISSION, "
+        "MMS-TARGET, MMS-MODE, and MMS-SOURCE. "
         "Run the v1 regulation mechanic: blind seed -> crossfire -> revision. "
         "First, send every selected member the same compact packet and require a "
-        "blind seed with stance, claim, evidence, risks, recommended_path, "
+        "blind seed with the unchanged MMS-MISSION block, stance, claim, evidence, "
+        "risks, recommended_path, "
         "confidence, pushback, quality_gate, and provenance. Do not expose other "
         "members' arguments during this first pass. Then write `round-2-clusters.json` "
         "as a host-owned clustering artifact with camps, strongest evidence, and "
@@ -1234,8 +1276,9 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
         "Always set `synthesis_strategy` to `host_authored` in v1 and record "
         "`synthesized_by` and `synthesis_attempted_by` honestly. Preserve minority "
         "pushback; never flatten disagreement into fake consensus. The final chat "
-        "reply should be compact: resolution_state, quality_gate, recommended_next_step, "
-        "key pushback, and artifact paths."
+        "reply should begin with the MMS-MISSION block and stay compact: "
+        "resolution_state, quality_gate, recommended_next_step, key pushback, "
+        "and artifact paths. Repeat MMS-MISSION plus MMS-TARGET at the bottom."
     )
     agents = {
         "debate-host": {
@@ -1257,11 +1300,16 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
             "prompt": _prompt_with_tool_policy(
                 (
                     "Fallback debate host. Continue the same debate thread, preserve "
+                    + OPENCODE_REVIEW_MISSION_CONTRACT + " "
+                    "or create the MMS-MISSION block before any delegation, preserve "
                     "selected debate members, keep debate separate from committee, "
                     "write only `.ai/debate/<thread-id>/` artifacts, enforce the "
                     "fixed blind seed -> crossfire -> revision mechanic, apply the "
                     "v1 self-check checklist, use host_authored synthesis only, and "
-                    "preserve real disagreement instead of claiming fake convergence."
+                    "preserve real disagreement instead of claiming fake convergence. "
+                    "Send the unchanged mission block in every debate member packet. "
+                    "Repeat the MMS-MISSION block at the top and MMS-MISSION plus "
+                    "MMS-TARGET at the bottom."
                 ),
                 _agent_policy("debate-host-pro"),
             ),
@@ -1290,6 +1338,8 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
             "decision.md, or ratification markers. Do not call other agents. Do not "
             "edit product/source files unless the user explicitly assigns a separate "
             "implementation task; normal debate outputs go back to debate-host. "
+            "If the host provides an MMS-MISSION block, copy it unchanged in your "
+            "round response. "
             "For blind seed, answer without considering other members: stance, claim, "
             "evidence, risks, recommended_path, confidence, pushback, quality_gate, "
             "and provenance. For crossfire, engage only the strongest opposing-case "

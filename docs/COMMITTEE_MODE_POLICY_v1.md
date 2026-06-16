@@ -30,6 +30,12 @@ The host must declare all four axes before delegating non-trivial work. If a
 user or local project rule supplies a stricter contract, that contract overrides
 these defaults.
 
+Committee also follows the OpenCode review mission trace contract in
+`docs/OPENCODE_REVIEW_MISSION_TRACE_v1.md`. The host must create or preserve a
+visible `MMS-MISSION` block before dispatch, include it in every member brief,
+begin final synthesis with it, and repeat at least `MMS-MISSION` plus
+`MMS-TARGET` at the end.
+
 ## Decision Modes
 
 ### `advisory`
@@ -230,6 +236,18 @@ committee_policy:
 
 The final synthesis must include assignments, member findings, disagreements,
 risks, a task-local member scorecard, and the recommended next action.
+
+The final synthesis must also include the mission block:
+
+```text
+MMS-MISSION: committee-20260616-091830-a8f31c2e
+MMS-TARGET: pr39@dc12352d
+MMS-MODE: gate
+MMS-SOURCE: github-pr
+```
+
+If the target is unclear, use `MMS-TARGET: unknown` instead of inventing a PR or
+commit.
 
 ## Non-Goals
 
