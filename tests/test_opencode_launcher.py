@@ -2209,18 +2209,22 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
     assert "final synthesis order" in host_prompt_lower
-    assert "human review notes" in host_prompt_lower
-    assert "copy-forward packet" in host_prompt_lower
-    assert "safe to copy/forward" in host_prompt_lower
-    assert "host recommendation" in host_prompt_lower
+    assert "simplified chinese section titles" in host_prompt_lower
+    assert "do not wrap the copy-forward packet in a fenced code block" in host_prompt_lower
+    assert "normal markdown" in host_prompt_lower
+    assert "追踪块 / trace" in host_prompt_lower
+    assert "人需要看的 / human notes" in host_prompt_lower
+    assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
+    assert "host 建议 / host recommendation" in host_prompt_lower
+    assert "追踪页脚 / trace footer" in host_prompt_lower
     assert "do not include scorecard, meta commentary, or host private advice" in host_prompt_lower
-    assert "recommended next action at the bottom of the substantive synthesis" in host_prompt_lower
-    assert "before the trace footer" in host_prompt_lower
-    assert "finally, repeat mms-mission plus mms-target at the very end" in host_prompt_lower
+    assert "mms-mission plus mms-target at the very end" in host_prompt_lower
     assert (
-        host_prompt_lower.index("human review notes")
-        < host_prompt_lower.index("copy-forward packet")
-        < host_prompt_lower.index("host recommendation")
+        host_prompt_lower.index("追踪块 / trace")
+        < host_prompt_lower.index("人需要看的 / human notes")
+        < host_prompt_lower.index("可直接复制转发 / copy-forward packet")
+        < host_prompt_lower.index("host 建议 / host recommendation")
+        < host_prompt_lower.index("追踪页脚 / trace footer")
     )
     assert "subagent scorecard" in host_prompt_lower
     assert "1-5 scale" in host_prompt_lower
