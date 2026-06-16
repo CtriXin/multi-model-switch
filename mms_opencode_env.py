@@ -22,6 +22,7 @@ def opencode_write_config(path, runtime, model, *, build_config_content, atomic_
 _OPENCODE_SHARED_STATE_MIGRATION_MARKER = ".mms-shared-state-migration-v1"
 _OPENCODE_PROFILE_MARKER = ".mms/opencode-profile"
 _OPENCODE_ISOLATE_DATA_MARKER = ".mms/opencode-isolate-data"
+_OPENCODE_INCREMENTAL_SKIP_DIRS = {"log"}
 
 
 def _write_opencode_profile_marker(session_home, profile_slug):
@@ -151,18 +152,36 @@ def _opencode_shared_state_marker_mtime_ns(state_root):
 
 def _opencode_data_checkpoint_mtime_ns(data_dir):
     data_dir = Path(data_dir)
-    candidates = [data_dir, data_dir / "opencode.db"]
-    try:
-        candidates.extend(path for path in data_dir.iterdir() if path.is_file())
-    except OSError:
-        return 0
     newest = 0
-    for path in candidates:
+    stack = [data_dir]
+    while stack:
+        current = stack.pop()
         try:
-            newest = max(newest, path.stat().st_mtime_ns)
+            newest = max(newest, current.stat().st_mtime_ns)
         except OSError:
             continue
+        try:
+            children = sorted(current.iterdir())
+        except OSError:
+            return 0
+        for path in children:
+            if _opencode_incremental_path_skipped(data_dir, path):
+                continue
+            try:
+                newest = max(newest, path.stat().st_mtime_ns)
+            except OSError:
+                continue
+            if path.is_dir():
+                stack.append(path)
     return newest
+
+
+def _opencode_incremental_path_skipped(root, path):
+    try:
+        rel = Path(path).relative_to(root)
+    except ValueError:
+        return False
+    return bool(rel.parts and rel.parts[0] in _OPENCODE_INCREMENTAL_SKIP_DIRS)
 
 
 def _is_sqlite_db(path):
@@ -484,27 +503,40 @@ def _sync_opencode_incremental_state(src, dst):
         return False, False
     changed = False
     failed = False
-    db_changed, db_failed = _sync_opencode_db(src / "opencode.db", dst / "opencode.db")
-    changed = db_changed or changed
-    failed = db_failed or failed
-    try:
-        children = sorted(src.iterdir())
-    except OSError:
-        return changed, True
-    for path in children:
-        if not path.is_file() or path.name in {"opencode.db", "opencode.db-wal", "opencode.db-shm"}:
+    stack = [src]
+    while stack:
+        current = stack.pop()
+        try:
+            children = sorted(current.iterdir())
+        except OSError:
+            failed = True
             continue
-        target = dst / path.name
-        if target.exists():
-            try:
-                if path.stat().st_mtime_ns <= target.stat().st_mtime_ns:
-                    continue
-            except OSError:
-                failed = True
+        for path in children:
+            if _opencode_incremental_path_skipped(src, path):
                 continue
-        file_changed, file_failed = _copy_opencode_file(path, target)
-        changed = file_changed or changed
-        failed = file_failed or failed
+            rel = path.relative_to(src)
+            target = dst / rel
+            if path.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                stack.append(path)
+                continue
+            if path.name in {"opencode.db-wal", "opencode.db-shm"}:
+                continue
+            if rel == Path("opencode.db"):
+                db_changed, db_failed = _sync_opencode_db(path, target)
+                changed = db_changed or changed
+                failed = db_failed or failed
+                continue
+            if target.exists():
+                try:
+                    if path.stat().st_mtime_ns <= target.stat().st_mtime_ns:
+                        continue
+                except OSError:
+                    failed = True
+                    continue
+            file_changed, file_failed = _copy_opencode_file(path, target)
+            changed = file_changed or changed
+            failed = file_failed or failed
     return changed, failed
 
 
