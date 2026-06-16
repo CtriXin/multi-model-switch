@@ -1291,6 +1291,9 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
     old_nested = old_data_dir / "storage" / "nested.txt"
     old_nested.parent.mkdir(parents=True)
     old_nested.write_text("first\n", encoding="utf-8")
+    os.utime(old_nested, ns=(100, 100))
+    cutoff_values = iter([100, 300, 500])
+    monkeypatch.setattr(mms_opencode_env, "_opencode_migration_cutoff_mtime_ns", lambda: next(cutoff_values))
 
     def _real_user_path(*parts):
         return str(real_home.joinpath(*parts))
@@ -1308,14 +1311,13 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
     assert shared_nested.read_text(encoding="utf-8") == "first\n"
 
     old_nested.write_text("second\n", encoding="utf-8")
-    checkpoint_before_scan = mms_opencode_env._opencode_data_checkpoint_mtime_ns(old_data_dir)
+    os.utime(old_nested, ns=(200, 200))
     original_incremental = mms_opencode_env._sync_opencode_incremental_state
 
     def racing_incremental(src, dst):
         result = original_incremental(src, dst)
         old_nested.write_text("third\n", encoding="utf-8")
-        race_mtime = checkpoint_before_scan + 1
-        os.utime(old_nested, ns=(race_mtime, race_mtime))
+        os.utime(old_nested, ns=(400, 400))
         return result
 
     monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", racing_incremental)
@@ -1331,7 +1333,7 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
 
     assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
     assert shared_nested.read_text(encoding="utf-8") == "second\n"
-    assert marker.stat().st_mtime_ns <= checkpoint_before_scan
+    assert marker.stat().st_mtime_ns <= 300
 
     monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", original_incremental)
     env3 = {}
@@ -1345,6 +1347,99 @@ def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_mark
 
     assert "MMS_OPENCODE_MIGRATION_FAILED" not in env3
     assert shared_nested.read_text(encoding="utf-8") == "third\n"
+
+
+def test_opencode_set_soft_home_replays_skipped_candidate_write_during_other_candidate_replay(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    sessions_dir = real_home / ".config" / "mms" / "opencode-gateway" / "s"
+    session_a = sessions_dir / "123"
+    session_b = sessions_dir / "124"
+
+    def write_legacy_session(session_dir, nested_rel, text):
+        config_dir = session_dir / ".config" / "opencode"
+        config_dir.mkdir(parents=True)
+        (config_dir / "opencode.json").write_text(
+            json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+            encoding="utf-8",
+        )
+        nested = session_dir / ".local" / "share" / "opencode" / nested_rel
+        nested.parent.mkdir(parents=True)
+        nested.write_text(text, encoding="utf-8")
+        return nested
+
+    def set_tree_mtime(root, ns):
+        paths = sorted(Path(root).rglob("*"), key=lambda path: len(path.parts), reverse=True)
+        for path in paths:
+            os.utime(path, ns=(ns, ns))
+        os.utime(root, ns=(ns, ns))
+
+    nested_a = write_legacy_session(session_a, Path("storage") / "a" / "nested.txt", "A-first\n")
+    nested_b = write_legacy_session(session_b, Path("storage") / "b" / "nested.txt", "B-first\n")
+    data_a = session_a / ".local" / "share" / "opencode"
+    data_b = session_b / ".local" / "share" / "opencode"
+    set_tree_mtime(data_a, 80)
+    set_tree_mtime(data_b, 80)
+
+    cutoff_values = iter([100, 150, 250])
+    monkeypatch.setattr(mms_opencode_env, "_opencode_migration_cutoff_mtime_ns", lambda: next(cutoff_values))
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(sessions_dir / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_a = Path(env["XDG_DATA_HOME"]) / "opencode" / "storage" / "a" / "nested.txt"
+    shared_b = Path(env["XDG_DATA_HOME"]) / "opencode" / "storage" / "b" / "nested.txt"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+    assert shared_a.read_text(encoding="utf-8") == "A-first\n"
+    assert shared_b.read_text(encoding="utf-8") == "B-first\n"
+    assert marker.stat().st_mtime_ns <= 100
+
+    nested_b.write_text("B-second\n", encoding="utf-8")
+    os.utime(nested_b, ns=(140, 140))
+    original_incremental = mms_opencode_env._sync_opencode_incremental_state
+
+    def racing_incremental(src, dst):
+        result = original_incremental(src, dst)
+        if Path(src) == data_b:
+            nested_a.write_text("A-race\n", encoding="utf-8")
+            os.utime(nested_a, ns=(160, 160))
+        return result
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", racing_incremental)
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(sessions_dir / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_a.read_text(encoding="utf-8") == "A-first\n"
+    assert shared_b.read_text(encoding="utf-8") == "B-second\n"
+    assert marker.stat().st_mtime_ns <= 150
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", original_incremental)
+    env3 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env3,
+        str(sessions_dir / "202"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env3
+    assert shared_a.read_text(encoding="utf-8") == "A-race\n"
 
 
 def test_opencode_set_soft_home_ignores_log_churn_after_marker(monkeypatch, tmp_path):

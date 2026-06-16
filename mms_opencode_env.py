@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from mms_opencode_config import opencode_config_slug
@@ -152,6 +153,13 @@ def _opencode_shared_state_marker_mtime_ns(state_root):
             return 0
         return marker.stat().st_mtime_ns
     except OSError:
+        return 0
+
+
+def _opencode_migration_cutoff_mtime_ns():
+    try:
+        return time.time_ns()
+    except Exception:
         return 0
 
 
@@ -550,6 +558,7 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
     if not sessions_dir.is_dir():
         return False, False
 
+    migration_cutoff_mtime_ns = _opencode_migration_cutoff_mtime_ns()
     candidates_by_profile = {}
     for session_dir in sessions_dir.iterdir():
         profile_slug = _opencode_legacy_profile_slug_from_session(session_dir)
@@ -569,13 +578,11 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
         profile_migrated = False
         profile_failed = False
         profile_scanned = False
-        profile_covered_mtime_ns = 0
         marker_mtime_ns = _opencode_shared_state_marker_mtime_ns(state_root)
         for _mtime, data_dir in sorted(candidates, reverse=True):
             if marker_mtime_ns and _mtime and _mtime <= marker_mtime_ns:
                 continue
             profile_scanned = True
-            profile_covered_mtime_ns = max(profile_covered_mtime_ns, int(_mtime or 0))
             if marker_mtime_ns:
                 tree_changed, tree_failed = _sync_opencode_incremental_state(data_dir, target_opencode_dir)
             else:
@@ -586,7 +593,7 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
             _write_opencode_shared_state_marker(
                 state_root,
                 migrated=bool(candidates) and not profile_failed,
-                covered_mtime_ns=profile_covered_mtime_ns,
+                covered_mtime_ns=migration_cutoff_mtime_ns,
             )
         copied = profile_migrated or copied
         failed = profile_failed or failed
