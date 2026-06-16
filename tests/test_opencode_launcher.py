@@ -2155,6 +2155,7 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "blind seed" in member_prompt
     assert "stance_shift" in member_prompt
     assert "deterministic facts" in member_prompt
+    assert payload["agent"]["debate-deepseek-v4-pro"]["permission"]["edit"] == "deny"
     assert payload["agent"]["debate-deepseek-v4-pro"]["permission"]["task"] == "deny"
     mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "custom_debate-mimo-v2-5-pro")
     assert mimo_route["provider_id"] == "mimo-direct-anthropic"

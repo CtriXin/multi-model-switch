@@ -1108,7 +1108,7 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
     }
     member_permission = {
         **common_permissions,
-        "edit": "ask",
+        "edit": "deny",
         "bash": safe_read_bash,
         "task": "deny",
         "webfetch": "ask",
