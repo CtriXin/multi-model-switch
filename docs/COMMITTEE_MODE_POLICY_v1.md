@@ -243,7 +243,7 @@ and syntax-highlighted paths stay readable while still being copyable.
 Use this exact section order:
 
 1. `人需要看的 / Human Notes`: conclusion, advisory/formal boundary, direct
-   verification status, material risks or dissent, and the task-local member
+   verification status, material risks or dissent, and the task-local subagent
    scorecard. Include `模型耗时 / Model Timing` with each delegated member's
    return order, elapsed wall time when captured, and speed ratio against the
    fastest captured member. If exact timing is unavailable, still record the
@@ -260,12 +260,13 @@ Use this exact section order:
 4. `追踪页脚 / Trace Footer`: repeat at least `MMS-MISSION` plus `MMS-TARGET` as
    the final trace footer. The `追踪块 / Trace` and `追踪页脚 / Trace Footer`
    identify the same current dispatch; they are not previous/next pointers.
+   Do not place `追踪块 / Trace` before `人需要看的 / Human Notes`.
 
-The final synthesis must also include the mission block:
+Use the actual unchanged mission block for the current target. The format is:
 
 ```text
-MMS-MISSION: committee-20260616-091830-a8f31c2e
-MMS-TARGET: pr39@dc12352d
+MMS-MISSION: committee-<id>
+MMS-TARGET: pr<number>@<commit> | unknown
 MMS-MODE: gate
 MMS-SOURCE: github-pr
 ```
