@@ -1773,11 +1773,16 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     assert "mms-target" in review_host_prompt_lower
     assert "mms-mode" in review_host_prompt_lower
     assert "mms-source" in review_host_prompt_lower
-    assert "manual review dispatch" in review_host_prompt_lower
+    assert "manual dispatch" in review_host_prompt_lower
     assert "reviewed code target" in review_host_prompt_lower
     assert "repeat mms-mission plus mms-target at the end" in review_host_prompt_lower
     assert "unchanged mms-mission block" in payload["agent"]["review-qwen"]["prompt"].lower()
-    assert "mms-mission block" in payload["agent"]["review-hub-host-stable"]["prompt"].lower()
+    review_stable_prompt = payload["agent"]["review-hub-host-stable"]["prompt"].lower()
+    assert "mms-mission" in review_stable_prompt
+    assert "mms-target" in review_stable_prompt
+    assert "mms-mode" in review_stable_prompt
+    assert "mms-source" in review_stable_prompt
+    assert "every reviewer brief" in review_stable_prompt
     assert payload["agent"]["review-qwen"]["permission"]["edit"] == "allow"
     review_mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "review_mimo")
     assert review_mimo_route["provider_id"] == "mimo-direct-anthropic"
@@ -2149,7 +2154,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-target" in host_prompt_lower
     assert "mms-mode" in host_prompt_lower
     assert "mms-source" in host_prompt_lower
-    assert "manual review dispatch" in host_prompt_lower
+    assert "manual dispatch" in host_prompt_lower
     assert "reviewed code target" in host_prompt_lower
     assert "unchanged mms-mission block in each member brief" in host_prompt_lower
     assert "repeat mms-mission plus mms-target at the very end" in host_prompt_lower
@@ -2189,7 +2194,11 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "re-read and obey target project local" in host_pro_prompt
     assert "preserve the same host boundary" in host_pro_prompt
     assert "committee_policy fields" in host_pro_prompt
-    assert "mms-mission block" in host_pro_prompt
+    assert "mms-mission" in host_pro_prompt
+    assert "mms-target" in host_pro_prompt
+    assert "mms-mode" in host_pro_prompt
+    assert "mms-source" in host_pro_prompt
+    assert "every member brief" in host_pro_prompt
     assert "mms-target at the bottom" in host_pro_prompt
     assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
     assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
@@ -2319,8 +2328,9 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "mms-target" in host_prompt_lower
     assert "mms-mode" in host_prompt_lower
     assert "mms-source" in host_prompt_lower
-    assert "manual review dispatch" in host_prompt_lower
+    assert "manual dispatch" in host_prompt_lower
     assert "reviewed code target" in host_prompt_lower
+    assert "mission object" in host_prompt_lower
     assert "unchanged mms-mission block" in host_prompt_lower
     assert "repeat mms-mission plus mms-target at the bottom" in host_prompt_lower
     assert "blind seed -> crossfire -> revision" in host_prompt_lower
@@ -2337,6 +2347,12 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "fake consensus" in host_prompt_lower
     assert "committee vote files" in host_prompt_lower
     assert "review-hub request roots" in host_prompt_lower
+    host_pro_prompt = payload["agent"]["debate-host-pro"]["prompt"].lower()
+    assert "mms-mission" in host_pro_prompt
+    assert "mms-target" in host_pro_prompt
+    assert "mms-mode" in host_pro_prompt
+    assert "mms-source" in host_pro_prompt
+    assert "every debate member packet" in host_pro_prompt
 
     member_prompt = payload["agent"]["debate-deepseek-v4-pro"]["prompt"].lower()
     assert "independent debate member" in member_prompt

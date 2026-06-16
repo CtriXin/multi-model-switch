@@ -6,8 +6,8 @@ import copy
 
 
 OPENCODE_REVIEW_MISSION_CONTRACT = (
-    "MMS mission correlation contract: for every manual review dispatch in a "
-    "review, committee, or debate task, create one visible MMS-MISSION id before "
+    "MMS mission correlation contract: for every manual dispatch in a review, "
+    "committee, or debate task, create one visible MMS-MISSION id before "
     "delegating. Keep it separate from the reviewed code target. Emit fields "
     "MMS-MISSION, MMS-TARGET, MMS-MODE, and MMS-SOURCE. Prefer a stable source "
     "identifier such as a Review Hub request id/root basename, PR plus commit, "
@@ -744,10 +744,13 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
             },
             "prompt": (
                 "Fallback Review Hub host. Continue only if the primary host is "
-                "unavailable or low-confidence. Preserve the same request root, model "
+                "unavailable or low-confidence. "
+                + OPENCODE_REVIEW_MISSION_CONTRACT + " "
+                "Preserve the same request root, model "
                 "selection, MMS-MISSION block, preflight-first behavior, and slot-only "
                 "write boundary. If no MMS-MISSION exists yet, create it before any "
-                "delegation and repeat it in the final synthesis."
+                "delegation. Send the unchanged mission block in every reviewer brief "
+                "and repeat it in the final synthesis."
             ),
         },
     }
@@ -1010,6 +1013,7 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
             "prompt": _prompt_with_tool_policy(
                 (
                     "Fallback committee host. Continue the same deliberation flow, "
+                    + OPENCODE_REVIEW_MISSION_CONTRACT + " "
                     "preserve or create the MMS-MISSION block before delegation, "
                     "preserve selected members, re-read and obey target project local "
                     "instructions before dispatching, apply all committee decision "
@@ -1024,8 +1028,9 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
                     "keep durable ballot provenance honest, include the same "
                     "separation from Debate semantics, include the same "
                     "task-local subagent scorecard, and summarize only "
-                    "evidence-backed conclusions. Repeat the MMS-MISSION block at "
-                    "the top and MMS-MISSION plus MMS-TARGET at the bottom."
+                    "evidence-backed conclusions. Send the unchanged mission block "
+                    "in every member brief. Repeat the MMS-MISSION block at the top "
+                    "and MMS-MISSION plus MMS-TARGET at the bottom."
                 ),
                 _agent_policy("committee-host-pro"),
             ),
@@ -1232,7 +1237,9 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
         "`state.json`, `round-1-seed.json`, `round-2-clusters.json`, "
         "`round-3-crossfire.json`, `round-4-revision.json`, `resolution.json`, "
         "and `resolution.md`. The host writes these artifacts directly; there is "
-        "no helper command or validator program in v1. "
+        "no helper command or validator program in v1. In JSON artifacts, store "
+        "the mission block as a mission object with literal keys MMS-MISSION, "
+        "MMS-TARGET, MMS-MODE, and MMS-SOURCE. "
         "Run the v1 regulation mechanic: blind seed -> crossfire -> revision. "
         "First, send every selected member the same compact packet and require a "
         "blind seed with the unchanged MMS-MISSION block, stance, claim, evidence, "
@@ -1293,12 +1300,14 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
             "prompt": _prompt_with_tool_policy(
                 (
                     "Fallback debate host. Continue the same debate thread, preserve "
+                    + OPENCODE_REVIEW_MISSION_CONTRACT + " "
                     "or create the MMS-MISSION block before any delegation, preserve "
                     "selected debate members, keep debate separate from committee, "
                     "write only `.ai/debate/<thread-id>/` artifacts, enforce the "
                     "fixed blind seed -> crossfire -> revision mechanic, apply the "
                     "v1 self-check checklist, use host_authored synthesis only, and "
                     "preserve real disagreement instead of claiming fake convergence. "
+                    "Send the unchanged mission block in every debate member packet. "
                     "Repeat the MMS-MISSION block at the top and MMS-MISSION plus "
                     "MMS-TARGET at the bottom."
                 ),

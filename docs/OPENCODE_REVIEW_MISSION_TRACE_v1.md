@@ -8,7 +8,7 @@ Profiles: `review`, `committee`, `debate`
 
 MMS-managed OpenCode review flows need a human-visible correlation anchor for
 parallel windows and repeated review/fix cycles. A commit hash identifies the
-code target. It does not identify a specific manual review dispatch.
+code target. It does not identify a specific manual dispatch.
 
 This contract adds a dispatch-local mission block that Review Hub, Committee,
 and Debate hosts must create and repeat in chat output and delegated briefs.
@@ -26,7 +26,7 @@ MMS-SOURCE: <review-hub-request|github-pr|local-diff|commit|user-pasted|unknown>
 
 Rules:
 
-- `MMS-MISSION` identifies this manual review dispatch, not the code commit.
+- `MMS-MISSION` identifies this manual dispatch, not the code commit.
 - `MMS-TARGET` identifies the reviewed object when known.
 - If the target is unclear, write exactly `MMS-TARGET: unknown` and describe
   the observed source evidence. Do not invent a PR or commit.

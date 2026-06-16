@@ -113,7 +113,7 @@ MMS-MODE: review
 MMS-SOURCE: review-hub-request
 ```
 
-`MMS-MISSION` identifies this manual review dispatch. `MMS-TARGET` identifies
+`MMS-MISSION` identifies this manual dispatch. `MMS-TARGET` identifies
 the reviewed PR, commit, branch, or diff when known. The host repeats the full
 block at the top of final synthesis and repeats at least `MMS-MISSION` plus
 `MMS-TARGET` at the bottom. See

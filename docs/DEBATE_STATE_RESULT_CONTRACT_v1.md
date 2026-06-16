@@ -52,6 +52,8 @@ Minimum file set for v1:
   per `docs/OPENCODE_REVIEW_MISSION_TRACE_v1.md`.
 - Include the unchanged mission block in every member packet and final chat
   resolution. If the reviewed target is unclear, use `MMS-TARGET: unknown`.
+- In JSON artifacts, store the block as a `mission` object with literal keys
+  `MMS-MISSION`, `MMS-TARGET`, `MMS-MODE`, and `MMS-SOURCE`.
 - Every round artifact must be valid JSON.
 - Every member result must carry provenance and quality metadata.
 - Deterministic facts must be stored separately from model opinion.
@@ -110,6 +112,12 @@ Thread-local durable state for resume and status inspection.
 {
   "schema": "opencode.debate.state.v1",
   "thread_id": "20260615-example",
+  "mission": {
+    "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+    "MMS-TARGET": "unknown",
+    "MMS-MODE": "debate",
+    "MMS-SOURCE": "user-pasted"
+  },
   "status": "running",
   "round": 1,
   "goal": "decide whether to add a new debate profile",
@@ -133,6 +141,7 @@ Thread-local durable state for resume and status inspection.
 
 - `schema`
 - `thread_id`
+- `mission`
 - `status`
 - `round`
 - `goal`
@@ -181,10 +190,22 @@ Stores blind first pass outputs from all selected members.
 {
   "schema": "opencode.debate.round1.v1",
   "thread_id": "20260615-example",
+  "mission": {
+    "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+    "MMS-TARGET": "unknown",
+    "MMS-MODE": "debate",
+    "MMS-SOURCE": "user-pasted"
+  },
   "round": 1,
   "member_results": [
     {
       "member_id": "debate-gpt-5-5",
+      "mission": {
+        "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+        "MMS-TARGET": "unknown",
+        "MMS-MODE": "debate",
+        "MMS-SOURCE": "user-pasted"
+      },
       "lens": "proponent",
       "stance": "independent debate profile",
       "claim": "debate should be separate from committee",
@@ -207,6 +228,7 @@ Stores blind first pass outputs from all selected members.
 ### Required per-member fields
 
 - `member_id`
+- `mission`
 - `stance`
 - `claim`
 - `evidence`
@@ -235,6 +257,12 @@ Host-owned clustering result after blind first pass.
 {
   "schema": "opencode.debate.round2.v1",
   "thread_id": "20260615-example",
+  "mission": {
+    "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+    "MMS-TARGET": "unknown",
+    "MMS-MODE": "debate",
+    "MMS-SOURCE": "user-pasted"
+  },
   "round": 2,
   "clusters": [
     {
@@ -261,10 +289,22 @@ Stores opponent-summary rebuttal outputs.
 {
   "schema": "opencode.debate.round3.v1",
   "thread_id": "20260615-example",
+  "mission": {
+    "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+    "MMS-TARGET": "unknown",
+    "MMS-MODE": "debate",
+    "MMS-SOURCE": "user-pasted"
+  },
   "round": 3,
   "member_results": [
     {
       "member_id": "debate-gpt-5-5",
+      "mission": {
+        "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+        "MMS-TARGET": "unknown",
+        "MMS-MODE": "debate",
+        "MMS-SOURCE": "user-pasted"
+      },
       "opponent_strongest_point": "skill-first rollout reduces risk",
       "my_rebuttal": "it weakens public product surface",
       "what_i_accept": ["risk is lower"],
@@ -296,10 +336,22 @@ Stores stance updates after crossfire.
 {
   "schema": "opencode.debate.round4.v1",
   "thread_id": "20260615-example",
+  "mission": {
+    "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+    "MMS-TARGET": "unknown",
+    "MMS-MODE": "debate",
+    "MMS-SOURCE": "user-pasted"
+  },
   "round": 4,
   "member_results": [
     {
       "member_id": "debate-gpt-5-5",
+      "mission": {
+        "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+        "MMS-TARGET": "unknown",
+        "MMS-MODE": "debate",
+        "MMS-SOURCE": "user-pasted"
+      },
       "final_stance": "independent profile",
       "stance_shift": "unchanged",
       "shift_reason": "opposing case lowered risk concerns but not enough to change boundary judgment",
@@ -325,6 +377,12 @@ Final machine-readable outcome of the debate thread.
 {
   "schema": "opencode.debate.result.v1",
   "thread_id": "20260615-example",
+  "mission": {
+    "MMS-MISSION": "debate-20260615-example-a8f31c2e",
+    "MMS-TARGET": "unknown",
+    "MMS-MODE": "debate",
+    "MMS-SOURCE": "user-pasted"
+  },
   "status": "resolved",
   "resolution_state": "leaning",
   "quality_gate": "pass",
@@ -366,6 +424,7 @@ Final machine-readable outcome of the debate thread.
 
 - `schema`
 - `thread_id`
+- `mission`
 - `status`
 - `resolution_state`
 - `quality_gate`
