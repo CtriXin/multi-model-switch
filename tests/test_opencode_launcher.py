@@ -3014,19 +3014,19 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "assign each member its own vote-file path" in host_prompt_lower
     assert "never ratify, merge, or mark final approval" in host_prompt_lower
     assert "host/adapter write votes" not in host_prompt
-    assert "host authority contract" in host_prompt_lower
-    assert "you are not the decision authority" in host_prompt_lower
-    assert (
-        "human > deterministic facts > member verdicts and tally > host"
-        in host_prompt
-    )
-    assert "aggregate losslessly" in host_prompt_lower
-    assert "the user does not need to restate" in host_prompt_lower
     host_pro_prompt = payload["agent"]["committee-host-pro"]["prompt"].lower()
+    authority_order = "human > deterministic facts > member verdicts and tally > host"
+    # Primary and fallback committee hosts must carry the identical full contract.
+    for prompt_text in (host_prompt_lower, host_pro_prompt):
+        assert "host authority contract" in prompt_text
+        assert "you are not the decision authority" in prompt_text
+        assert authority_order in prompt_text
+        assert "never answer in a member's place" in prompt_text
+        assert "never invent a member's missing" in prompt_text
+        assert "aggregate losslessly" in prompt_text
+        assert "the user does not need to restate" in prompt_text
     assert "re-read and obey target project local" in host_pro_prompt
     assert "preserve the same host boundary" in host_pro_prompt
-    assert "rather than the decision authority" in host_pro_prompt
-    assert "never rewrite member substance" in host_pro_prompt
     assert "committee_policy fields" in host_pro_prompt
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
