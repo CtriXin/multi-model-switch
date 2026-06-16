@@ -4382,6 +4382,21 @@ def test_opencode_smoke_classifies_thinking_block_roundtrip_as_blocked():
     assert smoke_opencode_profile._health_status(error_class, 0.5) == "blocked"
 
 
+def test_opencode_profile_summaries_state_debate_vs_committee_split():
+    import mms_opencode_profiles as profiles
+
+    by_id = {opt.get("id"): opt for opt in profiles.OPENCODE_PROFILE_OPTIONS}
+    debate_summary = by_id["debate"]["summary"]
+    committee_summary = by_id["committee"]["summary"]
+    # Debate selection surface states the fork/proposition trigger split.
+    assert "fork" in debate_summary
+    assert "命题" in debate_summary
+    assert "Committee" in debate_summary
+    # Committee side is symmetric: judges an artifact, points forks at Debate.
+    assert "artifact" in committee_summary
+    assert "Debate" in committee_summary
+
+
 def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch):
     import mms_core
 

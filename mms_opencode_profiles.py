@@ -28,14 +28,14 @@ OPENCODE_PROFILE_OPTIONS = [
         "profile_id": OPENCODE_COMMITTEE_PROFILE_ID,
         "label": "Committee",
         "badge": "委员会",
-        "summary": "通用委员会：GPT-5.4 host 默认派发给所选 subagent，最后汇总共识/分歧；默认只选 GPT-5.4，可加 GPT-5.5、DeepSeek、GLM、MiMo、Kimi、MiniMax。",
+        "summary": "通用委员会：评判已有 artifact（执行后 review / 共识汇总）；遇事不决、要对 fork/命题辩论时改用 Debate。GPT-5.4 host 默认派发给所选 subagent，最后汇总共识/分歧；默认只选 GPT-5.4，可加 GPT-5.5、DeepSeek、GLM、MiMo、Kimi、MiniMax。",
     },
     {
         "id": "debate",
         "profile_id": OPENCODE_DEBATE_PROFILE_ID,
         "label": "Debate",
         "badge": "辩论",
-        "summary": "结构化辩论：独立于 Committee；blind seed -> crossfire -> revision，由 debate-host 写 .ai/debate/<thread-id>/ artifacts 并按 rubric 输出 resolution。",
+        "summary": "结构化辩论：用于 fork / 命题（遇事不决、issue 开发方向），不评判单一 artifact（那走 Committee）；独立于 Committee；blind seed -> crossfire -> revision，由 debate-host 写 .ai/debate/<thread-id>/ artifacts 并按 rubric 输出 resolution。",
     },
     {
         "id": "omo",
