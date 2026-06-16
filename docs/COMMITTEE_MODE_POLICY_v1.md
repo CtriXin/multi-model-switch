@@ -244,24 +244,24 @@ Use this exact section order:
 
 0. `追踪块 / Trace`: the unchanged mission block as its own visible section.
 1. `人需要看的 / Human Notes`: conclusion, advisory/formal boundary, direct
-   verification status, material risks or dissent, and the task-local member
+   verification status, material risks or dissent, and the task-local subagent
    scorecard.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
    be copied or forwarded directly. Include the same `追踪块 / Trace`, goal,
    `committee_policy`, assignments, direct verification, member findings or
    ballots, tally/consensus, disagreements, risks, formal artifact status, and
-   provenance. Do not include scorecard, host meta commentary, or private host
+   provenance. Do not include scorecard, meta commentary, or host private
    advice in this packet.
 3. `Host 建议 / Host Recommendation`: the host's recommended next action, placed
    after the copy-forward packet as the last substantive section.
 4. `追踪页脚 / Trace Footer`: repeat at least `MMS-MISSION` plus `MMS-TARGET` as
    the final trace footer.
 
-The final synthesis must also include the mission block:
+Use the actual unchanged mission block for the current target. The format is:
 
 ```text
-MMS-MISSION: committee-20260616-091830-a8f31c2e
-MMS-TARGET: pr39@dc12352d
+MMS-MISSION: committee-<id>
+MMS-TARGET: pr<number>@<commit> | unknown
 MMS-MODE: gate
 MMS-SOURCE: github-pr
 ```

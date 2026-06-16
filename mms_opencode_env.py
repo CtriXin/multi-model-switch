@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 from mms_opencode_config import opencode_config_slug
@@ -386,8 +387,7 @@ def _sync_opencode_db(src, dst):
     if handled:
         return changed, failed
     if not dst.exists():
-        shutil.copy2(src, dst)
-        return True, False
+        return _copy_opencode_file(src, dst)
     try:
         src_stat = src.stat()
         dst_stat = dst.stat()
@@ -395,8 +395,28 @@ def _sync_opencode_db(src, dst):
         return False, True
     if src_stat.st_mtime_ns <= dst_stat.st_mtime_ns:
         return False, False
-    shutil.copy2(src, dst)
-    return True, False
+    return _copy_opencode_file(src, dst)
+
+
+def _copy_opencode_file(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{dst.name}.", suffix=".tmp", dir=dst.parent)
+        os.close(fd)
+        tmp = Path(tmp_name)
+        try:
+            shutil.copy2(src, tmp)
+            os.replace(tmp, dst)
+            return True, False
+        finally:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
+    except OSError:
+        return False, True
 
 
 def _sync_opencode_tree(src, dst):
@@ -425,9 +445,9 @@ def _sync_opencode_tree(src, dst):
                     continue
             except OSError:
                 continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
-        changed = True
+        file_changed, file_failed = _copy_opencode_file(path, target)
+        changed = file_changed or changed
+        failed = file_failed or failed
     return changed, failed
 
 

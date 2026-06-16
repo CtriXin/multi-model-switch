@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1014,6 +1015,90 @@ def test_opencode_gateway_env_migrates_all_legacy_profile_data_before_cleanup(mo
     assert (shared_state / "opencode" / "opencode.db").read_text(encoding="utf-8") == "review-db"
     agent_shared_db = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
     assert agent_shared_db.read_text(encoding="utf-8") == "agent-db"
+
+
+def test_opencode_set_soft_home_replaces_read_only_shared_pack_file(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    rel_pack = Path("snapshot/a/b/objects/pack/pack-test.idx")
+    old_pack = old_session / ".local" / "share" / "opencode" / rel_pack
+    old_pack.parent.mkdir(parents=True)
+    old_pack.write_text("new-pack", encoding="utf-8")
+    shared_pack = (
+        real_home
+        / ".local"
+        / "share"
+        / "mms-opencode"
+        / "state"
+        / "lite_pro_orchestrated"
+        / "opencode"
+        / rel_pack
+    )
+    shared_pack.parent.mkdir(parents=True)
+    shared_pack.write_text("old-pack", encoding="utf-8")
+    os.chmod(old_pack, 0o444)
+    os.chmod(shared_pack, 0o444)
+    os.utime(shared_pack, (1000, 1000))
+    os.utime(old_pack, (2000, 2000))
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env
+    assert shared_pack.read_text(encoding="utf-8") == "new-pack"
+    assert shared_pack.stat().st_mode & 0o777 == 0o444
+
+
+def test_opencode_set_soft_home_marks_generic_file_copy_failure_without_crashing(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_state = old_session / ".local" / "share" / "opencode" / "metadata.json"
+    old_state.parent.mkdir(parents=True)
+    old_state.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        mms_opencode_env.shutil,
+        "copy2",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("copy blocked")),
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
 
 
 def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_path):
@@ -3033,13 +3118,29 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every member brief" in host_pro_prompt
-    assert "mms-target at the bottom" in host_pro_prompt
+    assert "mms-target at the very end" in host_pro_prompt
     assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
     assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
     assert "separation from debate semantics" in host_pro_prompt
     assert "human review notes, copy-forward packet" in host_pro_prompt
     assert "host recommendation at the bottom" in host_pro_prompt
     assert "do not promote advisory/chat ballots into formal quorum votes" in host_pro_prompt
+    assert "simplified chinese section titles" in host_pro_prompt
+    assert "do not wrap the copy-forward packet in a fenced code block" in host_pro_prompt
+    assert "normal markdown" in host_pro_prompt
+    assert "追踪块 / trace" in host_pro_prompt
+    assert "人需要看的 / human notes" in host_pro_prompt
+    assert "可直接复制转发 / copy-forward packet" in host_pro_prompt
+    assert "host 建议 / host recommendation" in host_pro_prompt
+    assert "追踪页脚 / trace footer" in host_pro_prompt
+    assert "host private advice" in host_pro_prompt
+    assert (
+        host_pro_prompt.index("追踪块 / trace")
+        < host_pro_prompt.index("人需要看的 / human notes")
+        < host_pro_prompt.index("可直接复制转发 / copy-forward packet")
+        < host_pro_prompt.index("host 建议 / host recommendation")
+        < host_pro_prompt.index("追踪页脚 / trace footer")
+    )
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
     assert "final synthesis order" in host_prompt_lower
@@ -3202,6 +3303,18 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "committee vote files" in host_prompt_lower
     assert "review-hub request roots" in host_prompt_lower
     host_pro_prompt = payload["agent"]["debate-host-pro"]["prompt"].lower()
+    authority_order = (
+        "human > deterministic facts > rubric applied to member outputs > host"
+    )
+    # Primary and fallback hosts must carry the identical full authority contract.
+    for prompt_text in (host_prompt_lower, host_pro_prompt):
+        assert "host authority contract" in prompt_text
+        assert "you are not the decision authority" in prompt_text
+        assert authority_order in prompt_text
+        assert "never answer in a member's place" in prompt_text
+        assert "never invent a member's missing position" in prompt_text
+        assert "aggregate losslessly" in prompt_text
+        assert "the user does not need to" in prompt_text
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt
