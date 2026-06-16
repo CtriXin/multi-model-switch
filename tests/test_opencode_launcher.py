@@ -2203,9 +2203,25 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
     assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
     assert "separation from debate semantics" in host_pro_prompt
+    assert "human review notes, copy-forward packet" in host_pro_prompt
+    assert "host recommendation at the bottom" in host_pro_prompt
     assert "do not promote advisory/chat ballots into formal quorum votes" in host_pro_prompt
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
+    assert "final synthesis order" in host_prompt_lower
+    assert "human review notes" in host_prompt_lower
+    assert "copy-forward packet" in host_prompt_lower
+    assert "safe to copy/forward" in host_prompt_lower
+    assert "host recommendation" in host_prompt_lower
+    assert "do not include scorecard, meta commentary, or host private advice" in host_prompt_lower
+    assert "recommended next action at the bottom of the substantive synthesis" in host_prompt_lower
+    assert "before the trace footer" in host_prompt_lower
+    assert "finally, repeat mms-mission plus mms-target at the very end" in host_prompt_lower
+    assert (
+        host_prompt_lower.index("human review notes")
+        < host_prompt_lower.index("copy-forward packet")
+        < host_prompt_lower.index("host recommendation")
+    )
     assert "subagent scorecard" in host_prompt_lower
     assert "1-5 scale" in host_prompt_lower
     assert "usefulness" in host_prompt_lower

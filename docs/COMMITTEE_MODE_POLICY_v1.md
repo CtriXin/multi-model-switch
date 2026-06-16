@@ -234,8 +234,18 @@ committee_policy:
   reason: <why this policy fits>
 ```
 
-The final synthesis must include assignments, member findings, disagreements,
-risks, a task-local member scorecard, and the recommended next action.
+The final synthesis must begin with the mission block, then keep reader-only
+material separate from copy-forward material:
+
+1. Human review notes: conclusion, advisory/formal boundary, direct verification
+   status, material risks or dissent, and the task-local member scorecard.
+2. Copy-forward packet: a clearly labeled, clean, self-contained block that can
+   be copied or forwarded directly. Include the goal, `committee_policy`,
+   assignments, direct verification, member findings or ballots, tally/consensus,
+   disagreements, risks, formal artifact status, and provenance. Do not include
+   scorecard, host meta commentary, or private host advice in this packet.
+3. Host recommendation: the host's recommended next action, placed after the
+   copy-forward packet as the last substantive section.
 
 The final synthesis must also include the mission block:
 
@@ -247,7 +257,8 @@ MMS-SOURCE: github-pr
 ```
 
 If the target is unclear, use `MMS-TARGET: unknown` instead of inventing a PR or
-commit.
+commit. After the host recommendation, repeat at least `MMS-MISSION` plus
+`MMS-TARGET` as the final trace footer.
 
 ## Non-Goals
 
