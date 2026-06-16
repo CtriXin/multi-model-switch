@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 
 def _runtime(**overrides):
     runtime = {
@@ -646,7 +648,7 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
 
     env = mms_launchers._opencode_gateway_env(
-        _runtime(),
+        _runtime(opencode_profile="lite_pro_orchestrated"),
         model_info={"model": "deepseek-chat"},
     )
 
@@ -659,17 +661,174 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     assert env["HOME"] == str(real_home)
     assert env["XDG_CONFIG_HOME"] == str(session_home / ".config")
     assert env["XDG_CACHE_HOME"] == str(session_home / ".cache")
-    assert env["XDG_DATA_HOME"] == str(session_home / ".local" / "share")
-    assert env["XDG_STATE_HOME"] == str(session_home / ".local" / "state")
+    shared_state = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated"
+    assert env["XDG_DATA_HOME"] == str(shared_state)
+    assert env["XDG_STATE_HOME"] == str(shared_state)
     assert env["MMS_SESSION_HOME"] == str(session_home)
     assert env["MMS_HOME_ISOLATION_MODE"] == "soft"
     assert env["MMS_OPENCODE_SOFT_HOME"] == "1"
+    assert env["MMS_OPENCODE_STATE_SHARED"] == "1"
+    assert env["MMS_OPENCODE_PROFILE"] == "lite_pro_orchestrated"
     assert env["MMS_OPENCODE_API_KEY"] == "sk-runtime"
     assert env["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
     assert env["OPENCODE_CLIENT"] == "mms"
     assert env["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
     assert env["MMS_OPENCODE_BYPASS"] == "1"
     assert "OPENCODE_CONFIG_CONTENT" not in env
+
+
+def test_opencode_gateway_env_requires_explicit_profile(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+
+    with pytest.raises(ValueError, match="opencode_profile is required"):
+        mms_launchers._opencode_gateway_env(
+            _runtime(),
+            model_info={"model": "deepseek-chat"},
+        )
+
+
+def test_opencode_gateway_env_profiles_get_isolated_shared_state(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+
+    agent_env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+    review_env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="review_hub"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    assert agent_env["XDG_DATA_HOME"].endswith("/mms-opencode/state/lite_pro_orchestrated")
+    assert review_env["XDG_DATA_HOME"].endswith("/mms-opencode/state/review_hub")
+    assert agent_env["XDG_DATA_HOME"] != review_env["XDG_DATA_HOME"]
+    assert agent_env["XDG_STATE_HOME"] == agent_env["XDG_DATA_HOME"]
+    assert review_env["XDG_STATE_HOME"] == review_env["XDG_DATA_HOME"]
+
+
+def test_opencode_gateway_env_isolate_data_kill_switch_restores_session_local_state(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("MMS_OPENCODE_ISOLATE_DATA", "1")
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+    session_home = Path(env["MMS_SESSION_HOME"])
+
+    assert env["XDG_DATA_HOME"] == str(session_home / ".local" / "share")
+    assert env["XDG_STATE_HOME"] == str(session_home / ".local" / "state")
+    assert "MMS_OPENCODE_STATE_SHARED" not in env
+    assert env["MMS_OPENCODE_PROFILE"] == "lite_pro_orchestrated"
+
+
+def test_opencode_gateway_env_migrates_existing_session_local_opencode_data(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_opencode_dir = old_session / ".local" / "share" / "opencode"
+    old_opencode_dir.mkdir(parents=True)
+    (old_opencode_dir / "opencode.db").write_text("old-session-db", encoding="utf-8")
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+
+    def fake_cleanup(*_args, **_kwargs):
+        shared_db = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
+        assert shared_db.read_text(encoding="utf-8") == "old-session-db"
+        assert old_opencode_dir.exists()
+
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", fake_cleanup)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="lite_pro_orchestrated"),
+        model_info={"model": "deepseek-chat"},
+    )
+    shared_state = Path(env["XDG_DATA_HOME"])
+
+    assert (shared_state / "opencode" / "opencode.db").read_text(encoding="utf-8") == "old-session-db"
+    assert (shared_state / ".mms-shared-state-migration-v1").read_text(encoding="utf-8") == "migrated=1\n"
+
+
+def test_opencode_gateway_env_migrates_only_matching_profile_data(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    sessions_dir = real_home / ".config" / "mms" / "opencode-gateway" / "s"
+    agent_session = sessions_dir / "123"
+    review_session = sessions_dir / "456"
+    for session, default_agent, db_text in (
+        (agent_session, "mobius-builder-pro", "agent-db"),
+        (review_session, "review-hub-host", "review-db"),
+    ):
+        config_dir = session / ".config" / "opencode"
+        config_dir.mkdir(parents=True)
+        (config_dir / "opencode.json").write_text(
+            json.dumps({"default_agent": default_agent}) + "\n",
+            encoding="utf-8",
+        )
+        opencode_dir = session / ".local" / "share" / "opencode"
+        opencode_dir.mkdir(parents=True)
+        (opencode_dir / "opencode.db").write_text(db_text, encoding="utf-8")
+
+    real_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(opencode_profile="review_hub"),
+        model_info={"model": "deepseek-chat"},
+    )
+    shared_state = Path(env["XDG_DATA_HOME"])
+
+    assert shared_state.name == "review_hub"
+    assert (shared_state / "opencode" / "opencode.db").read_text(encoding="utf-8") == "review-db"
+    agent_shared_db = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
+    assert not agent_shared_db.exists()
 
 
 def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path):
@@ -704,7 +863,7 @@ def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_launchers, "_opencode_rtk_plugin_path", lambda _runtime=None: str(rtk_plugin))
 
     env = mms_launchers._opencode_gateway_env(
-        _runtime(caveman_mode="enable"),
+        _runtime(caveman_mode="enable", opencode_profile="lite_pro_orchestrated"),
         model_info={"model": "deepseek-chat"},
     )
 
@@ -740,7 +899,7 @@ def test_opencode_gateway_env_can_disable_bypass(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENCODE_PERMISSION", mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV)
 
     env = mms_launchers._opencode_gateway_env(
-        _runtime(bypass=False),
+        _runtime(bypass=False, opencode_profile="lite_pro_orchestrated"),
         model_info={"model": "deepseek-chat"},
     )
     config_payload = json.loads(Path(env["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))
@@ -2884,6 +3043,60 @@ def test_main_uses_configured_opencode_default_profile_for_direct_target(monkeyp
     assert captured["profile_models"] == ["gpt-5.5"]
     assert captured["cli"] == "opencode"
     assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
+
+
+def test_main_opencode_preset_applies_agent_profile_when_preset_has_no_profile(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "presets": {
+            "fast-opencode": {
+                "cli": "opencode",
+                "provider": "default-provider",
+                "model": "deepseek-chat",
+            }
+        },
+    }
+    provider = _runtime(id="default-provider", name="Default Provider")
+    captured = {}
+
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "--preset", "fast-opencode"])
+    monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "set_language", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda *_args, **_kwargs: "zh")
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda current_cfg: current_cfg)
+    monkeypatch.setattr(mms_core, "ensure_provider_credentials", lambda _cfg, provider_id=None: provider)
+    monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, ["deepseek-chat"]))
+    monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["opencode"])
+    monkeypatch.setattr(
+        mms_core,
+        "_select_opencode_profile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("preset launch must not prompt for profile")),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_launch_with_tracking",
+        lambda cli, model_info, runtime, once=False: captured.update(
+            {"cli": cli, "model_info": model_info, "runtime": runtime, "once": once}
+        ),
+    )
+
+    mms_core.main()
+
+    assert captured["cli"] == "opencode"
+    assert captured["model_info"] == {"model": "deepseek-chat"}
+    assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
+    assert captured["runtime"]["opencode_agent"] == "mobius-builder-pro"
 
 
 def test_existing_openai_provider_lists_show_opencode_without_config_migration(monkeypatch):

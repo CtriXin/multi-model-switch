@@ -1228,12 +1228,13 @@ def _set_codex_soft_home(env, session_home):
     return env
 
 
-def _set_opencode_soft_home(env, session_home):
+def _set_opencode_soft_home(env, session_home, *, profile_id):
     return _opencode_set_soft_home_impl(
         env,
         session_home,
         real_user_path=_real_user_path,
         set_session_home_hint=_set_session_home_hint,
+        profile_id=profile_id,
     )
 
 

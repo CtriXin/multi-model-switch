@@ -10142,6 +10142,20 @@ def _opencode_default_profile_from_config(cfg):
     return _opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile"))
 
 
+def _opencode_profile_for_preset(cfg, preset, requested_profile=""):
+    requested_profile = str(requested_profile or "").strip()
+    if requested_profile:
+        return requested_profile
+    if isinstance(preset, dict):
+        preset_profile = str(preset.get("opencode_profile") or preset.get("profile") or "").strip()
+        if preset_profile:
+            profile_id, _entrypoint = _opencode_profile_selection(preset_profile)
+            if profile_id:
+                return profile_id
+    profile_id, _entrypoint = _opencode_default_profile_from_config(cfg)
+    return profile_id or _OPENCODE_AGENT_PROFILE_ID
+
+
 def _opencode_default_model_rank(model_name):
     return _opencode_default_model_rank_impl(
         model_name,
@@ -17278,6 +17292,7 @@ def main():
             console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
         if cli == "opencode":
+            runtime = _apply_opencode_profile(runtime, _opencode_profile_for_preset(cfg, p, requested_opencode_profile))
             runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
         _launch_with_tracking(cli, model_info, runtime, once=once)
         return

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import shutil
+from pathlib import Path
 
 from mms_opencode_config import opencode_config_slug
 
@@ -14,17 +18,149 @@ def opencode_write_config(path, runtime, model, *, build_config_content, atomic_
     return config_content
 
 
-def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint):
-    """Keep real HOME for GUI/Keychain; keep OpenCode XDG state session-local."""
+_OPENCODE_SHARED_STATE_MIGRATION_MARKER = ".mms-shared-state-migration-v1"
+_OPENCODE_PROFILE_MARKER = ".mms/opencode-profile"
+
+
+def _write_opencode_profile_marker(session_home, profile_slug):
+    marker = Path(session_home) / _OPENCODE_PROFILE_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(profile_slug + "\n", encoding="utf-8")
+
+
+def opencode_profile_state_slug(profile_id):
+    raw = str(profile_id or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9._-]+", "-", raw).strip("._-")
+    if not slug:
+        raise ValueError("opencode profile_id is required for shared OpenCode state")
+    if slug == "default":
+        raise ValueError("opencode profile_id must not use the reserved default namespace")
+    return slug
+
+
+def _opencode_isolate_data_enabled(env):
+    raw = str(env.get("MMS_OPENCODE_ISOLATE_DATA") or os.environ.get("MMS_OPENCODE_ISOLATE_DATA") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _copy_missing_tree(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    if not src.is_dir():
+        return False
+    copied = False
+    for path in sorted(src.rglob("*")):
+        rel = path.relative_to(src)
+        target = dst / rel
+        if path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        copied = True
+    return copied
+
+
+def _opencode_profile_slug_from_session(session_dir):
+    session_dir = Path(session_dir)
+    marker = session_dir / _OPENCODE_PROFILE_MARKER
+    if marker.is_file():
+        try:
+            return opencode_profile_state_slug(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+
+    config_path = session_dir / ".config" / "opencode" / "opencode.json"
+    if not config_path.is_file():
+        return ""
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+
+    default_agent = str(payload.get("default_agent") or payload.get("agent") or "").strip()
+    agent_map = {
+        "mobius-builder-pro": "lite_pro_orchestrated",
+        "mobius-builder-stable": "lite_pro_orchestrated",
+        "mobius-builder": "lite",
+        "review-hub-host": "review_hub",
+        "review-hub-host-stable": "review_hub",
+        "committee-host": "committee",
+        "committee-host-pro": "committee",
+    }
+    if default_agent in agent_map:
+        return agent_map[default_agent]
+
+    agents = payload.get("agent")
+    agent_keys = set(agents) if isinstance(agents, dict) else set()
+    if any(str(key).startswith("review-") for key in agent_keys):
+        return "review_hub"
+    if any(str(key).startswith("committee-") for key in agent_keys):
+        return "committee"
+    if any(str(key).startswith("mobius-") for key in agent_keys):
+        return "lite_pro_orchestrated"
+    if not default_agent and not agent_keys:
+        return "raw"
+    return ""
+
+
+def _migrate_opencode_data_to_shared_state(session_home, state_root):
+    sessions_dir = Path(session_home).parent
+    state_root = Path(state_root)
+    marker = state_root / _OPENCODE_SHARED_STATE_MIGRATION_MARKER
+    if marker.exists() or not sessions_dir.is_dir():
+        return False
+
+    candidates = []
+    for session_dir in sessions_dir.iterdir():
+        if _opencode_profile_slug_from_session(session_dir) != state_root.name:
+            continue
+        data_dir = session_dir / ".local" / "share" / "opencode"
+        if not data_dir.is_dir():
+            continue
+        try:
+            mtime = data_dir.stat().st_mtime
+        except OSError:
+            mtime = 0
+        candidates.append((mtime, data_dir))
+
+    copied = False
+    target_opencode_dir = state_root / "opencode"
+    for _mtime, data_dir in sorted(candidates, reverse=True):
+        copied = _copy_missing_tree(data_dir, target_opencode_dir) or copied
+
+    state_root.mkdir(parents=True, exist_ok=True)
+    marker.write_text("migrated=1\n" if copied else "migrated=0\n", encoding="utf-8")
+    return copied
+
+
+def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
+    """Keep real HOME/config soft; share OpenCode data/state by profile."""
+    profile_slug = opencode_profile_state_slug(profile_id)
     real_home = real_user_path()
+    state_root = real_user_path(".local", "share", "mms-opencode", "state", profile_slug)
+    _write_opencode_profile_marker(session_home, profile_slug)
     env["HOME"] = real_home
     env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
     env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")
-    env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
-    env["XDG_STATE_HOME"] = os.path.join(session_home, ".local", "state")
+    if _opencode_isolate_data_enabled(env):
+        env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
+        env["XDG_STATE_HOME"] = os.path.join(session_home, ".local", "state")
+        env.pop("MMS_OPENCODE_STATE_SHARED", None)
+    else:
+        os.makedirs(state_root, exist_ok=True)
+        _migrate_opencode_data_to_shared_state(session_home, state_root)
+        env["XDG_DATA_HOME"] = state_root
+        env["XDG_STATE_HOME"] = state_root
+        env["MMS_OPENCODE_STATE_SHARED"] = "1"
     env["MMS_HOME_ISOLATION_MODE"] = "soft"
     env["MMS_SOFT_HOME"] = "1"
     env["MMS_OPENCODE_SOFT_HOME"] = "1"
+    env["MMS_OPENCODE_PROFILE"] = profile_slug
     set_session_home_hint(env, session_home)
     return env
 
@@ -79,6 +215,11 @@ def opencode_gateway_env(
 ):
     runtime = runtime if isinstance(runtime, dict) else {}
     model = resolve_model(model_info or runtime)
+    opencode_profile_id = str(runtime.get("opencode_profile") or "").strip()
+    if not opencode_profile_id and isinstance(model_info, dict):
+        opencode_profile_id = str(model_info.get("opencode_profile") or "").strip()
+    if not opencode_profile_id:
+        raise ValueError("opencode_profile is required for MMS-managed OpenCode shared state")
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
     enable_caveman = runtime_caveman_enabled(runtime)
     gateway_base = real_user_path(".config", "mms", "opencode-gateway")
@@ -86,7 +227,6 @@ def opencode_gateway_env(
     sessions_dir = os.path.join(gateway_base, "s")
     session_home = os.path.join(sessions_dir, str(getpid()))
     os.makedirs(session_home, exist_ok=True)
-    cleanup_stale_sessions(sessions_dir)
 
     link_shared_dotfiles(session_home)
 
@@ -95,7 +235,8 @@ def opencode_gateway_env(
     clear_opencode_config_env(env)
     inject_real_home_hints(env)
     inject_selected_model_name(env, model, model_info=model_info)
-    set_opencode_soft_home(env, session_home)
+    set_opencode_soft_home(env, session_home, profile_id=opencode_profile_id)
+    cleanup_stale_sessions(sessions_dir)
 
     config_dir = os.path.join(env["XDG_CONFIG_HOME"], "opencode")
     os.makedirs(config_dir, exist_ok=True)
@@ -204,6 +345,7 @@ __all__ = [
     "opencode_gateway_env",
     "opencode_global_export_env",
     "opencode_global_omo_env",
+    "opencode_profile_state_slug",
     "opencode_provider_export_env",
     "opencode_set_soft_home",
     "opencode_write_config",
