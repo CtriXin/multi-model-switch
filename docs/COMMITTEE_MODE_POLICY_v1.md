@@ -234,8 +234,28 @@ committee_policy:
   reason: <why this policy fits>
 ```
 
-The final synthesis must include assignments, member findings, disagreements,
-risks, a task-local member scorecard, and the recommended next action.
+The final synthesis must use Simplified Chinese headings and prose by default,
+while keeping technical terms such as `committee_policy`, `MMS-MISSION`,
+`verdict`, `veto`, and file paths in English. It must not wrap the copy-forward
+packet in a fenced code block; render it as normal Markdown so headings, bullets,
+and syntax-highlighted paths stay readable while still being copyable.
+
+Use this exact section order:
+
+0. `追踪块 / Trace`: the unchanged mission block as its own visible section.
+1. `人需要看的 / Human Notes`: conclusion, advisory/formal boundary, direct
+   verification status, material risks or dissent, and the task-local member
+   scorecard.
+2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
+   be copied or forwarded directly. Include the same `追踪块 / Trace`, goal,
+   `committee_policy`, assignments, direct verification, member findings or
+   ballots, tally/consensus, disagreements, risks, formal artifact status, and
+   provenance. Do not include scorecard, host meta commentary, or private host
+   advice in this packet.
+3. `Host 建议 / Host Recommendation`: the host's recommended next action, placed
+   after the copy-forward packet as the last substantive section.
+4. `追踪页脚 / Trace Footer`: repeat at least `MMS-MISSION` plus `MMS-TARGET` as
+   the final trace footer.
 
 The final synthesis must also include the mission block:
 
