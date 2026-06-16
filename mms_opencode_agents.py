@@ -36,6 +36,9 @@ COMMITTEE_HOST_AUTHORITY_CONTRACT = (
     "by the profile; the user does not need to restate 'dispatch, do not "
     "modify, only summarize'. The only host writes allowed are the bounded "
     "opt-in execution actions explicitly granted by the user."
+)
+
+
 DEBATE_HOST_AUTHORITY_CONTRACT = (
     "Host authority contract: you are a neutral dispatcher, a faithful "
     "summarizer, and a rubric referee; you are not the decision authority and "
