@@ -151,23 +151,11 @@ def _opencode_shared_state_marker_mtime_ns(state_root):
 
 def _opencode_data_checkpoint_mtime_ns(data_dir):
     data_dir = Path(data_dir)
-    candidates = [data_dir, data_dir / "opencode.db", data_dir / "snapshot"]
+    candidates = [data_dir, data_dir / "opencode.db"]
     try:
         candidates.extend(path for path in data_dir.iterdir() if path.is_file())
     except OSError:
         return 0
-    snapshot_dir = data_dir / "snapshot"
-    if snapshot_dir.is_dir():
-        try:
-            for project_dir in snapshot_dir.iterdir():
-                candidates.append(project_dir)
-                if not project_dir.is_dir():
-                    continue
-                for session_dir in project_dir.iterdir():
-                    candidates.append(session_dir)
-                    candidates.append(session_dir / "objects" / "pack")
-        except OSError:
-            return 0
     newest = 0
     for path in candidates:
         try:
@@ -489,6 +477,37 @@ def _sync_opencode_tree(src, dst):
     return changed, failed
 
 
+def _sync_opencode_incremental_state(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    if not src.is_dir():
+        return False, False
+    changed = False
+    failed = False
+    db_changed, db_failed = _sync_opencode_db(src / "opencode.db", dst / "opencode.db")
+    changed = db_changed or changed
+    failed = db_failed or failed
+    try:
+        children = sorted(src.iterdir())
+    except OSError:
+        return changed, True
+    for path in children:
+        if not path.is_file() or path.name in {"opencode.db", "opencode.db-wal", "opencode.db-shm"}:
+            continue
+        target = dst / path.name
+        if target.exists():
+            try:
+                if path.stat().st_mtime_ns <= target.stat().st_mtime_ns:
+                    continue
+            except OSError:
+                failed = True
+                continue
+        file_changed, file_failed = _copy_opencode_file(path, target)
+        changed = file_changed or changed
+        failed = file_failed or failed
+    return changed, failed
+
+
 def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
     sessions_dir = Path(session_home).parent
     if not sessions_dir.is_dir():
@@ -518,7 +537,10 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
             if marker_mtime_ns and _mtime and _mtime <= marker_mtime_ns:
                 continue
             profile_scanned = True
-            tree_changed, tree_failed = _sync_opencode_tree(data_dir, target_opencode_dir)
+            if marker_mtime_ns:
+                tree_changed, tree_failed = _sync_opencode_incremental_state(data_dir, target_opencode_dir)
+            else:
+                tree_changed, tree_failed = _sync_opencode_tree(data_dir, target_opencode_dir)
             profile_migrated = tree_changed or profile_migrated
             profile_failed = tree_failed or profile_failed
         if profile_scanned or profile_failed or not marker_mtime_ns:

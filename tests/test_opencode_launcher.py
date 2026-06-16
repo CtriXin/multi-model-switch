@@ -1149,6 +1149,81 @@ def test_opencode_set_soft_home_skips_unchanged_legacy_tree_after_marker(monkeyp
     assert shared_state.read_text(encoding="utf-8") == '{"status":"first"}\n'
 
 
+def test_opencode_set_soft_home_replays_db_after_marker_without_full_tree_scan(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_db = old_session / ".local" / "share" / "opencode" / "opencode.db"
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "first",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 1,
+                "model": {"id": "gpt-5.4"},
+            }
+        ],
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+
+    _write_opencode_session_db(
+        old_db,
+        sessions=[
+            {
+                "id": "session-1",
+                "title": "second",
+                "directory": "/tmp/project-a",
+                "time_created": 1,
+                "time_updated": 2,
+                "model": {"id": "gpt-5.5"},
+            }
+        ],
+    )
+    newer = marker.stat().st_mtime + 1
+    os.utime(old_db, (newer, newer))
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_tree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("incremental replay used full tree scan")),
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    rows = _read_opencode_session_db(shared_db)
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert rows["sessions"]["session-1"]["title"] == "second"
+
+
 def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_path):
     import mms_opencode_env
 
