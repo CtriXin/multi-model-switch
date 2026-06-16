@@ -3023,13 +3023,29 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every member brief" in host_pro_prompt
-    assert "mms-target at the bottom" in host_pro_prompt
+    assert "mms-target at the very end" in host_pro_prompt
     assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
     assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
     assert "separation from debate semantics" in host_pro_prompt
     assert "human review notes, copy-forward packet" in host_pro_prompt
     assert "host recommendation at the bottom" in host_pro_prompt
     assert "do not promote advisory/chat ballots into formal quorum votes" in host_pro_prompt
+    assert "simplified chinese section titles" in host_pro_prompt
+    assert "do not wrap the copy-forward packet in a fenced code block" in host_pro_prompt
+    assert "normal markdown" in host_pro_prompt
+    assert "追踪块 / trace" in host_pro_prompt
+    assert "人需要看的 / human notes" in host_pro_prompt
+    assert "可直接复制转发 / copy-forward packet" in host_pro_prompt
+    assert "host 建议 / host recommendation" in host_pro_prompt
+    assert "追踪页脚 / trace footer" in host_pro_prompt
+    assert "host private advice" in host_pro_prompt
+    assert (
+        host_pro_prompt.index("追踪块 / trace")
+        < host_pro_prompt.index("人需要看的 / human notes")
+        < host_pro_prompt.index("可直接复制转发 / copy-forward packet")
+        < host_pro_prompt.index("host 建议 / host recommendation")
+        < host_pro_prompt.index("追踪页脚 / trace footer")
+    )
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
     assert "final synthesis order" in host_prompt_lower
