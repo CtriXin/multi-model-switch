@@ -14,10 +14,14 @@ OPENCODE_REVIEW_MISSION_CONTRACT = (
     "or branch plus commit; otherwise generate a compact id using the profile "
     "name, current date/time if known, and an 8-character nonce/hash. If the "
     "reviewed target is unclear, write exactly MMS-TARGET: unknown and describe "
-    "the source evidence instead of inventing a PR or commit. Include the same "
-    "mission block in every delegated member brief. Final chat synthesis must "
-    "repeat the mission block at the top and repeat at least MMS-MISSION and "
-    "MMS-TARGET at the bottom so pasted findings remain traceable."
+    "the source evidence instead of inventing a PR or commit. For committee, set "
+    "MMS-MODE to the declared decision_mode such as gate or review, not "
+    "committee-gate. Include the same mission block in every delegated member "
+    "brief. Final chat synthesis must include a visible mission trace in the "
+    "copy-forward/provenance area or immediately after human-facing notes, and "
+    "repeat at least MMS-MISSION and MMS-TARGET at the bottom so pasted findings "
+    "remain traceable. The body trace and bottom footer identify the same current "
+    "manual dispatch; never use them as previous/next pointers."
 )
 
 
@@ -983,20 +987,22 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
         "veto, and file paths in English. Do not wrap the copy-forward packet in "
         "a fenced code block; render it as normal Markdown so headings, bullets, "
         "and syntax-highlighted paths stay readable while still being copyable. "
-        "Use exact section order: (0) 追踪块 / Trace: begin with the unchanged "
-        "MMS-MISSION block as its own visible section. (1) 人需要看的 / Human "
-        "Notes: put the conclusion, advisory/formal boundary, direct verification "
+        "Use exact section order: (1) 人需要看的 / Human Notes: put the "
+        "conclusion, advisory/formal boundary, direct verification "
         "status, material risks or dissent, and task-local subagent scorecard here; "
         "this section is for the requester, not the copy-forward packet. (2) 可直接"
-        "复制转发 / Copy-forward Packet: keep it clean and self-contained, and include "
-        "the same 追踪块 / Trace, goal, committee_policy, assignments, direct "
+        "复制转发 / Copy-forward Packet: keep it clean and self-contained. Start "
+        "this packet with 追踪块 / Trace containing the same current MMS-MISSION "
+        "block, then include the goal, committee_policy, assignments, direct "
         "verification, member findings or ballots, tally and consensus, disagreements, "
         "risks, formal artifact status, and provenance. Do not include scorecard, "
         "meta commentary, or host private advice in this packet. (3) Host 建议 / "
         "Host Recommendation: put the host's recommended next action at the bottom "
         "of the substantive synthesis, after the copy-forward packet and before "
         "the trace footer. (4) 追踪页脚 / Trace Footer: finally, repeat "
-        "MMS-MISSION plus MMS-TARGET at the very end. In the "
+        "MMS-MISSION plus MMS-TARGET at the very end. The 追踪块 / Trace and "
+        "追踪页脚 / Trace Footer identify the same current dispatch; they are "
+        "not previous/next pointers. In the "
         "scorecard, rate each delegated member for this task only on a 1-5 "
         "scale for usefulness, evidence quality, relevance, and independence; "
         "include one objective sentence of rationale. Mark selected but "
@@ -1049,8 +1055,9 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
                     "then host recommendation at the bottom), include the same "
                     "task-local subagent scorecard, and summarize only "
                     "evidence-backed conclusions. Send the unchanged mission block "
-                    "in every member brief. Repeat the MMS-MISSION block at the top "
-                    "and MMS-MISSION plus MMS-TARGET at the bottom."
+                    "in every member brief. Put the visible mission trace in the "
+                    "copy-forward/provenance area instead of before the human "
+                    "notes, and repeat MMS-MISSION plus MMS-TARGET at the bottom."
                 ),
                 _agent_policy("committee-host-pro"),
             ),
@@ -1296,9 +1303,10 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
         "Always set `synthesis_strategy` to `host_authored` in v1 and record "
         "`synthesized_by` and `synthesis_attempted_by` honestly. Preserve minority "
         "pushback; never flatten disagreement into fake consensus. The final chat "
-        "reply should begin with the MMS-MISSION block and stay compact: "
-        "resolution_state, quality_gate, recommended_next_step, key pushback, "
-        "and artifact paths. Repeat MMS-MISSION plus MMS-TARGET at the bottom."
+        "reply should stay compact with resolution_state, quality_gate, "
+        "recommended_next_step, key pushback, artifact paths, and a visible "
+        "MMS-MISSION trace in the provenance/trace area. Repeat MMS-MISSION plus "
+        "MMS-TARGET at the bottom."
     )
     agents = {
         "debate-host": {
@@ -1328,8 +1336,8 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
                     "v1 self-check checklist, use host_authored synthesis only, and "
                     "preserve real disagreement instead of claiming fake convergence. "
                     "Send the unchanged mission block in every debate member packet. "
-                    "Repeat the MMS-MISSION block at the top and MMS-MISSION plus "
-                    "MMS-TARGET at the bottom."
+                    "Include a visible MMS-MISSION trace in the final reply and "
+                    "repeat MMS-MISSION plus MMS-TARGET at the bottom."
                 ),
                 _agent_policy("debate-host-pro"),
             ),

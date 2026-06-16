@@ -2980,6 +2980,8 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-source" in host_prompt_lower
     assert "manual dispatch" in host_prompt_lower
     assert "reviewed code target" in host_prompt_lower
+    assert "declared decision_mode such as gate or review" in host_prompt_lower
+    assert "not committee-gate" in host_prompt_lower
     assert "unchanged mms-mission block in each member brief" in host_prompt_lower
     assert "repeat mms-mission plus mms-target at the very end" in host_prompt_lower
     assert "permission_profile" in host_prompt_lower
@@ -3024,6 +3026,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-source" in host_pro_prompt
     assert "every member brief" in host_pro_prompt
     assert "mms-target at the bottom" in host_pro_prompt
+    assert "instead of before the human notes" in host_pro_prompt
     assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
     assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
     assert "separation from debate semantics" in host_pro_prompt
@@ -3036,20 +3039,23 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "simplified chinese section titles" in host_prompt_lower
     assert "do not wrap the copy-forward packet in a fenced code block" in host_prompt_lower
     assert "normal markdown" in host_prompt_lower
-    assert "追踪块 / trace" in host_prompt_lower
     assert "人需要看的 / human notes" in host_prompt_lower
     assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
+    assert "start this packet with 追踪块 / trace" in host_prompt_lower
+    assert "same current mms-mission block" in host_prompt_lower
     assert "host 建议 / host recommendation" in host_prompt_lower
     assert "追踪页脚 / trace footer" in host_prompt_lower
     assert "do not include scorecard, meta commentary, or host private advice" in host_prompt_lower
     assert "mms-mission plus mms-target at the very end" in host_prompt_lower
     assert (
-        host_prompt_lower.index("追踪块 / trace")
-        < host_prompt_lower.index("人需要看的 / human notes")
+        host_prompt_lower.index("人需要看的 / human notes")
         < host_prompt_lower.index("可直接复制转发 / copy-forward packet")
+        < host_prompt_lower.index("追踪块 / trace")
         < host_prompt_lower.index("host 建议 / host recommendation")
         < host_prompt_lower.index("追踪页脚 / trace footer")
     )
+    assert "same current dispatch" in host_prompt_lower
+    assert "previous/next pointers" in host_prompt_lower
     assert "subagent scorecard" in host_prompt_lower
     assert "1-5 scale" in host_prompt_lower
     assert "usefulness" in host_prompt_lower
@@ -3176,6 +3182,7 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "reviewed code target" in host_prompt_lower
     assert "mission object" in host_prompt_lower
     assert "unchanged mms-mission block" in host_prompt_lower
+    assert "visible mms-mission trace in the provenance/trace area" in host_prompt_lower
     assert "repeat mms-mission plus mms-target at the bottom" in host_prompt_lower
     assert "blind seed -> crossfire -> revision" in host_prompt_lower
     assert "round-1-seed.json" in host_prompt
@@ -3197,6 +3204,7 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every debate member packet" in host_pro_prompt
+    assert "visible mms-mission trace in the final reply" in host_pro_prompt
 
     member_prompt = payload["agent"]["debate-deepseek-v4-pro"]["prompt"].lower()
     assert "independent debate member" in member_prompt

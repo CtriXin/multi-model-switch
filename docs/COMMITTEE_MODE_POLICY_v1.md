@@ -33,8 +33,8 @@ these defaults.
 Committee also follows the OpenCode review mission trace contract in
 `docs/OPENCODE_REVIEW_MISSION_TRACE_v1.md`. The host must create or preserve a
 visible `MMS-MISSION` block before dispatch, include it in every member brief,
-begin final synthesis with it, and repeat at least `MMS-MISSION` plus
-`MMS-TARGET` at the end.
+include it in the final synthesis trace/provenance area, and repeat at least
+`MMS-MISSION` plus `MMS-TARGET` at the end.
 
 ## Decision Modes
 
@@ -242,12 +242,12 @@ and syntax-highlighted paths stay readable while still being copyable.
 
 Use this exact section order:
 
-0. `追踪块 / Trace`: the unchanged mission block as its own visible section.
 1. `人需要看的 / Human Notes`: conclusion, advisory/formal boundary, direct
    verification status, material risks or dissent, and the task-local member
    scorecard.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
-   be copied or forwarded directly. Include the same `追踪块 / Trace`, goal,
+   be copied or forwarded directly. Start this packet with `追踪块 / Trace`
+   containing the same current mission block, then include the goal,
    `committee_policy`, assignments, direct verification, member findings or
    ballots, tally/consensus, disagreements, risks, formal artifact status, and
    provenance. Do not include scorecard, host meta commentary, or private host
@@ -255,7 +255,8 @@ Use this exact section order:
 3. `Host 建议 / Host Recommendation`: the host's recommended next action, placed
    after the copy-forward packet as the last substantive section.
 4. `追踪页脚 / Trace Footer`: repeat at least `MMS-MISSION` plus `MMS-TARGET` as
-   the final trace footer.
+   the final trace footer. The `追踪块 / Trace` and `追踪页脚 / Trace Footer`
+   identify the same current dispatch; they are not previous/next pointers.
 
 The final synthesis must also include the mission block:
 
