@@ -3035,14 +3035,21 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "do not promote advisory/chat ballots into formal quorum votes" in host_pro_prompt
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
+    assert "task-local model timing" in host_prompt_lower
+    assert "return order" in host_prompt_lower
+    assert "elapsed wall time" in host_prompt_lower
+    assert "speed ratio" in host_prompt_lower
+    assert "not_captured" in host_prompt
     assert "final synthesis order" in host_prompt_lower
     assert "simplified chinese section titles" in host_prompt_lower
     assert "do not wrap the copy-forward packet in a fenced code block" in host_prompt_lower
     assert "normal markdown" in host_prompt_lower
     assert "人需要看的 / human notes" in host_prompt_lower
+    assert "模型耗时 / model timing" in host_prompt_lower
     assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
     assert "start this packet with 追踪块 / trace" in host_prompt_lower
     assert "same current mms-mission block" in host_prompt_lower
+    assert "member findings or ballots, model timing" in host_prompt_lower
     assert "host 建议 / host recommendation" in host_prompt_lower
     assert "追踪页脚 / trace footer" in host_prompt_lower
     assert "do not include scorecard, meta commentary, or host private advice" in host_prompt_lower
@@ -3057,6 +3064,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "same current dispatch" in host_prompt_lower
     assert "previous/next pointers" in host_prompt_lower
     assert "subagent scorecard" in host_prompt_lower
+    assert "task-local subagent scorecard and model timing" in host_pro_prompt
     assert "1-5 scale" in host_prompt_lower
     assert "usefulness" in host_prompt_lower
     assert "evidence quality" in host_prompt_lower

@@ -244,14 +244,17 @@ Use this exact section order:
 
 1. `人需要看的 / Human Notes`: conclusion, advisory/formal boundary, direct
    verification status, material risks or dissent, and the task-local member
-   scorecard.
+   scorecard. Include `模型耗时 / Model Timing` with each delegated member's
+   return order, elapsed wall time when captured, and speed ratio against the
+   fastest captured member. If exact timing is unavailable, still record the
+   observed return order and mark elapsed time as `not_captured`.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
    be copied or forwarded directly. Start this packet with `追踪块 / Trace`
    containing the same current mission block, then include the goal,
    `committee_policy`, assignments, direct verification, member findings or
-   ballots, tally/consensus, disagreements, risks, formal artifact status, and
-   provenance. Do not include scorecard, host meta commentary, or private host
-   advice in this packet.
+   ballots, model timing, tally/consensus, disagreements, risks, formal artifact
+   status, and provenance. Do not include scorecard, host meta commentary, or
+   private host advice in this packet.
 3. `Host 建议 / Host Recommendation`: the host's recommended next action, placed
    after the copy-forward packet as the last substantive section.
 4. `追踪页脚 / Trace Footer`: repeat at least `MMS-MISSION` plus `MMS-TARGET` as
