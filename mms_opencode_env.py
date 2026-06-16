@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from mms_opencode_config import opencode_config_slug
@@ -22,6 +23,7 @@ def opencode_write_config(path, runtime, model, *, build_config_content, atomic_
 _OPENCODE_SHARED_STATE_MIGRATION_MARKER = ".mms-shared-state-migration-v1"
 _OPENCODE_PROFILE_MARKER = ".mms/opencode-profile"
 _OPENCODE_ISOLATE_DATA_MARKER = ".mms/opencode-isolate-data"
+_OPENCODE_INCREMENTAL_SKIP_DIRS = {"log"}
 
 
 def _write_opencode_profile_marker(session_home, profile_slug):
@@ -133,10 +135,66 @@ def _opencode_profile_state_root(real_user_path, profile_slug):
     return Path(real_user_path(".local", "share", "mms-opencode", "state", profile_slug))
 
 
-def _write_opencode_shared_state_marker(state_root, *, migrated):
+def _write_opencode_shared_state_marker(state_root, *, migrated, covered_mtime_ns=0):
     state_root.mkdir(parents=True, exist_ok=True)
     marker = state_root / _OPENCODE_SHARED_STATE_MIGRATION_MARKER
     marker.write_text("migrated=1\n" if migrated else "migrated=0\n", encoding="utf-8")
+    if migrated and covered_mtime_ns:
+        try:
+            os.utime(marker, ns=(int(covered_mtime_ns), int(covered_mtime_ns)))
+        except OSError:
+            marker.write_text("migrated=0\n", encoding="utf-8")
+
+
+def _opencode_shared_state_marker_mtime_ns(state_root):
+    marker = Path(state_root) / _OPENCODE_SHARED_STATE_MIGRATION_MARKER
+    try:
+        if marker.read_text(encoding="utf-8").strip() != "migrated=1":
+            return 0
+        return marker.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _opencode_migration_cutoff_mtime_ns():
+    try:
+        return time.time_ns()
+    except Exception:
+        return 0
+
+
+def _opencode_data_checkpoint_mtime_ns(data_dir):
+    data_dir = Path(data_dir)
+    newest = 0
+    stack = [data_dir]
+    while stack:
+        current = stack.pop()
+        try:
+            newest = max(newest, current.stat().st_mtime_ns)
+        except OSError:
+            continue
+        try:
+            children = sorted(current.iterdir())
+        except OSError:
+            return 0
+        for path in children:
+            if _opencode_incremental_path_skipped(data_dir, path):
+                continue
+            try:
+                newest = max(newest, path.stat().st_mtime_ns)
+            except OSError:
+                continue
+            if path.is_dir():
+                stack.append(path)
+    return newest
+
+
+def _opencode_incremental_path_skipped(root, path):
+    try:
+        rel = Path(path).relative_to(root)
+    except ValueError:
+        return False
+    return bool(rel.parts and rel.parts[0] in _OPENCODE_INCREMENTAL_SKIP_DIRS)
 
 
 def _is_sqlite_db(path):
@@ -451,11 +509,56 @@ def _sync_opencode_tree(src, dst):
     return changed, failed
 
 
+def _sync_opencode_incremental_state(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    if not src.is_dir():
+        return False, False
+    changed = False
+    failed = False
+    stack = [src]
+    while stack:
+        current = stack.pop()
+        try:
+            children = sorted(current.iterdir())
+        except OSError:
+            failed = True
+            continue
+        for path in children:
+            if _opencode_incremental_path_skipped(src, path):
+                continue
+            rel = path.relative_to(src)
+            target = dst / rel
+            if path.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                stack.append(path)
+                continue
+            if path.name in {"opencode.db-wal", "opencode.db-shm"}:
+                continue
+            if rel == Path("opencode.db"):
+                db_changed, db_failed = _sync_opencode_db(path, target)
+                changed = db_changed or changed
+                failed = db_failed or failed
+                continue
+            if target.exists():
+                try:
+                    if path.stat().st_mtime_ns <= target.stat().st_mtime_ns:
+                        continue
+                except OSError:
+                    failed = True
+                    continue
+            file_changed, file_failed = _copy_opencode_file(path, target)
+            changed = file_changed or changed
+            failed = file_failed or failed
+    return changed, failed
+
+
 def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
     sessions_dir = Path(session_home).parent
     if not sessions_dir.is_dir():
         return False, False
 
+    migration_cutoff_mtime_ns = _opencode_migration_cutoff_mtime_ns()
     candidates_by_profile = {}
     for session_dir in sessions_dir.iterdir():
         profile_slug = _opencode_legacy_profile_slug_from_session(session_dir)
@@ -464,10 +567,7 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
         data_dir = session_dir / ".local" / "share" / "opencode"
         if not data_dir.is_dir():
             continue
-        try:
-            mtime = data_dir.stat().st_mtime
-        except OSError:
-            mtime = 0
+        mtime = _opencode_data_checkpoint_mtime_ns(data_dir)
         candidates_by_profile.setdefault(profile_slug, []).append((mtime, data_dir))
 
     copied = False
@@ -477,11 +577,24 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
         target_opencode_dir = state_root / "opencode"
         profile_migrated = False
         profile_failed = False
+        profile_scanned = False
+        marker_mtime_ns = _opencode_shared_state_marker_mtime_ns(state_root)
         for _mtime, data_dir in sorted(candidates, reverse=True):
-            tree_changed, tree_failed = _sync_opencode_tree(data_dir, target_opencode_dir)
+            if marker_mtime_ns and _mtime and _mtime <= marker_mtime_ns:
+                continue
+            profile_scanned = True
+            if marker_mtime_ns:
+                tree_changed, tree_failed = _sync_opencode_incremental_state(data_dir, target_opencode_dir)
+            else:
+                tree_changed, tree_failed = _sync_opencode_tree(data_dir, target_opencode_dir)
             profile_migrated = tree_changed or profile_migrated
             profile_failed = tree_failed or profile_failed
-        _write_opencode_shared_state_marker(state_root, migrated=bool(candidates) and not profile_failed)
+        if profile_scanned or profile_failed or not marker_mtime_ns:
+            _write_opencode_shared_state_marker(
+                state_root,
+                migrated=bool(candidates) and not profile_failed,
+                covered_mtime_ns=migration_cutoff_mtime_ns,
+            )
         copied = profile_migrated or copied
         failed = profile_failed or failed
     return copied, failed
