@@ -1101,6 +1101,54 @@ def test_opencode_set_soft_home_marks_generic_file_copy_failure_without_crashing
     assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
 
 
+def test_opencode_set_soft_home_skips_unchanged_legacy_tree_after_marker(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_state = old_session / ".local" / "share" / "opencode" / "metadata.json"
+    old_state.parent.mkdir(parents=True)
+    old_state.write_text('{"status":"first"}\n', encoding="utf-8")
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_state = Path(env["XDG_DATA_HOME"]) / "opencode" / "metadata.json"
+    assert shared_state.read_text(encoding="utf-8") == '{"status":"first"}\n'
+
+    monkeypatch.setattr(
+        mms_opencode_env,
+        "_sync_opencode_tree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unchanged legacy tree was scanned")),
+    )
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_state.read_text(encoding="utf-8") == '{"status":"first"}\n'
+
+
 def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_path):
     import mms_opencode_env
 
