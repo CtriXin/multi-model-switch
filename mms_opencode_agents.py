@@ -56,6 +56,17 @@ DEBATE_HOST_AUTHORITY_CONTRACT = (
 )
 
 
+DEBATE_TRIGGER_CONTRACT = (
+    "Debate trigger contract: this profile is for a fork or proposition - "
+    "'A vs B', 'should we do X', or an undecided direction before "
+    "implementation (the 'when in doubt, debate it' and issue-direction case). "
+    "If you are handed a pure judge-this-artifact task with no fork (the shape "
+    "the committee profile handles), do not run debate rounds on it: restate it "
+    "as an explicit proposition to debate, or hand it back as 'use the committee "
+    "profile'."
+)
+
+
 def opencode_lite_agent_configs(model_ref):
     """Return session-local OpenCode agents for the MMS lite lane."""
     if not model_ref:
@@ -1292,6 +1303,7 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
         "committee vote files, committee verdict vocabulary, committee decision "
         "artifacts, review-hub request roots, or legacy mms discuss semantics. "
         + DEBATE_HOST_AUTHORITY_CONTRACT + " "
+        + DEBATE_TRIGGER_CONTRACT + " "
         + OPENCODE_REVIEW_MISSION_CONTRACT + " "
         "Use only the selected debate subagents available in this session: "
         f"{member_list_text}. Do not invent missing agents or model aliases. "
@@ -1373,6 +1385,7 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
                     "v1 self-check checklist, use host_authored synthesis only, and "
                     "preserve real disagreement instead of claiming fake convergence. "
                     + DEBATE_HOST_AUTHORITY_CONTRACT + " "
+                    + DEBATE_TRIGGER_CONTRACT + " "
                     "Send the unchanged mission block in every debate member packet. "
                     "Repeat the MMS-MISSION block at the top and MMS-MISSION plus "
                     "MMS-TARGET at the bottom."
