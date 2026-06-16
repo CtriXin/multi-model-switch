@@ -258,10 +258,11 @@ Use this exact section order:
    member, verdict, veto, and one short reason.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
    be copied or forwarded directly. Start this packet with `追踪块 / Trace`
-   containing the same current mission block, then include the goal,
-   `committee_policy`, assignments, direct verification, member findings or
-   ballots, model timing, tally/consensus, disagreements, risks, formal artifact
-   status, and provenance. Do not include scorecard, host meta commentary, or
+   containing the same current mission block. Keep it compact for forwarding:
+   include only the goal, `committee_policy`, direct verification summary, key
+   findings, tally/consensus, model timing summary, formal artifact status, and
+   provenance. Do not duplicate `Human Notes`; do not include scorecard,
+   per-member score rationale, long ballot prose, host meta commentary, or
    private host advice in this packet.
 3. `Host 建议 / Host Recommendation`: the host's recommended next action, placed
    after the copy-forward packet as the last substantive section.
