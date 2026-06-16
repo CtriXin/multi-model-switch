@@ -48,6 +48,10 @@ Minimum file set for v1:
 
 - Use distilled packets, not full transcript replay.
 - Keep one append-only `thread_id` per debate thread.
+- Create or preserve one `MMS-MISSION` block for each manual debate dispatch,
+  per `docs/OPENCODE_REVIEW_MISSION_TRACE_v1.md`.
+- Include the unchanged mission block in every member packet and final chat
+  resolution. If the reviewed target is unclear, use `MMS-TARGET: unknown`.
 - Every round artifact must be valid JSON.
 - Every member result must carry provenance and quality metadata.
 - Deterministic facts must be stored separately from model opinion.

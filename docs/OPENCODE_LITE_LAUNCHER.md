@@ -100,6 +100,25 @@ models = ["qwen", "kimi2.5", "minimax2.7", "glm5-turbo"]
 
 The host does not copy dispatcher context into memory. It expects a durable Review Hub request root, gives each preloaded reviewer the same request-root command, and relies on runner-local MCP/skills during each reviewer preflight.
 
+### Review Mission Trace
+
+The `review`, `committee`, and `debate` profiles must create a visible mission
+block for each manual dispatch so humans can paste findings back into the right
+executor window:
+
+```text
+MMS-MISSION: review-20260616-091830-a8f31c2e
+MMS-TARGET: pr39@dc12352d
+MMS-MODE: review
+MMS-SOURCE: review-hub-request
+```
+
+`MMS-MISSION` identifies this manual review dispatch. `MMS-TARGET` identifies
+the reviewed PR, commit, branch, or diff when known. The host repeats the full
+block at the top of final synthesis and repeats at least `MMS-MISSION` plus
+`MMS-TARGET` at the bottom. See
+`docs/OPENCODE_REVIEW_MISSION_TRACE_v1.md`.
+
 ## Configurable Agent Roster
 
 Supported config shape:
