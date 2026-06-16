@@ -3100,6 +3100,16 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "never ratify, merge, or mark final approval" in host_prompt_lower
     assert "host/adapter write votes" not in host_prompt
     host_pro_prompt = payload["agent"]["committee-host-pro"]["prompt"].lower()
+    authority_order = "human > deterministic facts > member verdicts and tally > host"
+    # Primary and fallback committee hosts must carry the identical full contract.
+    for prompt_text in (host_prompt_lower, host_pro_prompt):
+        assert "host authority contract" in prompt_text
+        assert "you are not the decision authority" in prompt_text
+        assert authority_order in prompt_text
+        assert "never answer in a member's place" in prompt_text
+        assert "never invent a member's missing" in prompt_text
+        assert "aggregate losslessly" in prompt_text
+        assert "the user does not need to restate" in prompt_text
     assert "re-read and obey target project local" in host_pro_prompt
     assert "preserve the same host boundary" in host_pro_prompt
     assert "committee_policy fields" in host_pro_prompt

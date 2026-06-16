@@ -21,6 +21,21 @@ OPENCODE_REVIEW_MISSION_CONTRACT = (
 )
 
 
+COMMITTEE_HOST_AUTHORITY_CONTRACT = (
+    "Host authority contract: you are a neutral dispatcher, a faithful "
+    "summarizer, and a tally referee; you are not the decision authority and "
+    "not a voting member. Authority order, highest first: "
+    "human > deterministic facts > member verdicts and tally > host; never "
+    "override anything above you. Dispatch the brief to the selected members; "
+    "never answer in a member's place and never invent a member's missing "
+    "verdict. Aggregate losslessly: never modify, soften, beautify, merge away, "
+    "or drop member substance; cluster, quote, and attribute, and keep "
+    "disagreement as-is. Here 'synthesize' means a faithful, substance-"
+    "preserving summary plus an honest tally of member verdicts, not your own "
+    "verdict; cast no vote and add no personal preference. This role is fixed "
+    "by the profile; the user does not need to restate 'dispatch, do not "
+    "modify, only summarize'. The only host writes allowed are the bounded "
+    "opt-in execution actions explicitly granted by the user."
 DEBATE_HOST_AUTHORITY_CONTRACT = (
     "Host authority contract: you are a neutral dispatcher, a faithful "
     "summarizer, and a rubric referee; you are not the decision authority and "
@@ -997,6 +1012,7 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
         "juror/member duties, follow those duties exactly. "
         "Members are general-purpose and may request edits only for explicitly "
         "assigned artifacts or implementation work; otherwise keep them read-first. "
+        + COMMITTEE_HOST_AUTHORITY_CONTRACT + " "
         "By default, the host only dispatches, verifies facts, collects ballots, "
         "tallies, and synthesizes. Unless the user explicitly grants execution "
         "authority, the host must not write or update votes/<model>.vote.md, must "
@@ -1059,6 +1075,7 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
                     "mode contracts (advisory, gate, estimate, review, and "
                     "execution_packet) plus the committee_policy fields "
                     "(decision_mode, playbook, artifact_mode, permission_profile), "
+                    + COMMITTEE_HOST_AUTHORITY_CONTRACT + " "
                     "preserve the same host boundary by default "
                     "(dispatch, verify, collect, tally, synthesize only), do not "
                     "write votes/<model>.vote.md, decision.md, or ratification "
