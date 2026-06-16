@@ -84,6 +84,18 @@ converged | leaning | split_human_required | insufficient_evidence
 unchanged | softened | switched
 ```
 
+### `assigned_role`
+
+```text
+proponent | opponent | steelman | free
+```
+
+### `stance_authenticity`
+
+```text
+honest | assigned
+```
+
 ### `synthesis_strategy`
 
 ```text
@@ -229,6 +241,7 @@ Stores blind first pass outputs from all selected members.
 
 - `member_id`
 - `mission`
+- `assigned_role`
 - `stance`
 - `claim`
 - `evidence`
@@ -238,6 +251,10 @@ Stores blind first pass outputs from all selected members.
 - `pushback`
 - `quality_gate`
 - `provenance`
+
+`assigned_role` records the adversarial role the host assigned for this round
+(`proponent | opponent | steelman | free`); `free` means no role was assigned.
+Seed and crossfire are argued from the assigned role.
 
 ### Rules
 
@@ -353,6 +370,7 @@ Stores stance updates after crossfire.
         "MMS-SOURCE": "user-pasted"
       },
       "final_stance": "independent profile",
+      "stance_authenticity": "honest",
       "stance_shift": "unchanged",
       "shift_reason": "opposing case lowered risk concerns but not enough to change boundary judgment",
       "confidence": 0.79,
@@ -364,6 +382,13 @@ Stores stance updates after crossfire.
   ]
 }
 ```
+
+### Rules
+
+- `stance_authenticity` is required. `final_stance` must be the member's honest
+  post-debate position, not the role it was assigned to argue.
+- Stances with `stance_authenticity=assigned` are advocacy, not conviction, and
+  must not be counted as genuine convergence by the host rubric.
 
 ## `resolution.json`
 

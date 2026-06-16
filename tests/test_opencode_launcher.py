@@ -3360,6 +3360,19 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
         assert "debate trigger contract" in prompt_text
         assert "fork or proposition" in prompt_text
         assert "use the committee profile" in prompt_text
+        assert "assigned_role" in prompt_text
+        assert "stance_authenticity" in prompt_text
+    # Members must honor assigned_role and keep their final stance honest.
+    member_prompts = [
+        cfg["prompt"].lower()
+        for name, cfg in payload["agent"].items()
+        if name.startswith("debate-")
+        and name not in {"debate-host", "debate-host-pro"}
+    ]
+    assert member_prompts
+    for member_prompt in member_prompts:
+        assert "assigned_role" in member_prompt
+        assert "stance_authenticity" in member_prompt
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt
