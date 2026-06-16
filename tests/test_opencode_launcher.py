@@ -3191,12 +3191,22 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "fake consensus" in host_prompt_lower
     assert "committee vote files" in host_prompt_lower
     assert "review-hub request roots" in host_prompt_lower
+    assert "host authority contract" in host_prompt_lower
+    assert "you are not the decision authority" in host_prompt_lower
+    assert (
+        "human > deterministic facts > rubric applied to member outputs > host"
+        in host_prompt
+    )
+    assert "aggregate losslessly" in host_prompt_lower
+    assert "the user does not need to" in host_prompt_lower
     host_pro_prompt = payload["agent"]["debate-host-pro"]["prompt"].lower()
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every debate member packet" in host_pro_prompt
+    assert "rather than the decision authority" in host_pro_prompt
+    assert "never rewrite member substance" in host_pro_prompt
 
     member_prompt = payload["agent"]["debate-deepseek-v4-pro"]["prompt"].lower()
     assert "independent debate member" in member_prompt
