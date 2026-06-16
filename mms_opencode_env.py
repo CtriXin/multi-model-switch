@@ -134,10 +134,15 @@ def _opencode_profile_state_root(real_user_path, profile_slug):
     return Path(real_user_path(".local", "share", "mms-opencode", "state", profile_slug))
 
 
-def _write_opencode_shared_state_marker(state_root, *, migrated):
+def _write_opencode_shared_state_marker(state_root, *, migrated, covered_mtime_ns=0):
     state_root.mkdir(parents=True, exist_ok=True)
     marker = state_root / _OPENCODE_SHARED_STATE_MIGRATION_MARKER
     marker.write_text("migrated=1\n" if migrated else "migrated=0\n", encoding="utf-8")
+    if migrated and covered_mtime_ns:
+        try:
+            os.utime(marker, ns=(int(covered_mtime_ns), int(covered_mtime_ns)))
+        except OSError:
+            marker.write_text("migrated=0\n", encoding="utf-8")
 
 
 def _opencode_shared_state_marker_mtime_ns(state_root):
@@ -564,11 +569,13 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
         profile_migrated = False
         profile_failed = False
         profile_scanned = False
+        profile_covered_mtime_ns = 0
         marker_mtime_ns = _opencode_shared_state_marker_mtime_ns(state_root)
         for _mtime, data_dir in sorted(candidates, reverse=True):
             if marker_mtime_ns and _mtime and _mtime <= marker_mtime_ns:
                 continue
             profile_scanned = True
+            profile_covered_mtime_ns = max(profile_covered_mtime_ns, int(_mtime or 0))
             if marker_mtime_ns:
                 tree_changed, tree_failed = _sync_opencode_incremental_state(data_dir, target_opencode_dir)
             else:
@@ -576,7 +583,11 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
             profile_migrated = tree_changed or profile_migrated
             profile_failed = tree_failed or profile_failed
         if profile_scanned or profile_failed or not marker_mtime_ns:
-            _write_opencode_shared_state_marker(state_root, migrated=bool(candidates) and not profile_failed)
+            _write_opencode_shared_state_marker(
+                state_root,
+                migrated=bool(candidates) and not profile_failed,
+                covered_mtime_ns=profile_covered_mtime_ns,
+            )
         copied = profile_migrated or copied
         failed = profile_failed or failed
     return copied, failed

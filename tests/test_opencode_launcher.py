@@ -1276,6 +1276,77 @@ def test_opencode_set_soft_home_replays_nested_state_after_marker_without_full_t
     assert shared_nested.read_text(encoding="utf-8") == "second\n"
 
 
+def test_opencode_set_soft_home_replays_write_after_incremental_scan_before_marker(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_data_dir = old_session / ".local" / "share" / "opencode"
+    old_nested = old_data_dir / "storage" / "nested.txt"
+    old_nested.parent.mkdir(parents=True)
+    old_nested.write_text("first\n", encoding="utf-8")
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+    shared_nested = Path(env["XDG_DATA_HOME"]) / "opencode" / "storage" / "nested.txt"
+    marker = Path(env["XDG_DATA_HOME"]) / ".mms-shared-state-migration-v1"
+    assert shared_nested.read_text(encoding="utf-8") == "first\n"
+
+    old_nested.write_text("second\n", encoding="utf-8")
+    checkpoint_before_scan = mms_opencode_env._opencode_data_checkpoint_mtime_ns(old_data_dir)
+    original_incremental = mms_opencode_env._sync_opencode_incremental_state
+
+    def racing_incremental(src, dst):
+        result = original_incremental(src, dst)
+        old_nested.write_text("third\n", encoding="utf-8")
+        race_mtime = checkpoint_before_scan + 1
+        os.utime(old_nested, ns=(race_mtime, race_mtime))
+        return result
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", racing_incremental)
+
+    env2 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env2,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "201"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env2
+    assert shared_nested.read_text(encoding="utf-8") == "second\n"
+    assert marker.stat().st_mtime_ns <= checkpoint_before_scan
+
+    monkeypatch.setattr(mms_opencode_env, "_sync_opencode_incremental_state", original_incremental)
+    env3 = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env3,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "202"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env3
+    assert shared_nested.read_text(encoding="utf-8") == "third\n"
+
+
 def test_opencode_set_soft_home_ignores_log_churn_after_marker(monkeypatch, tmp_path):
     import mms_opencode_env
 
