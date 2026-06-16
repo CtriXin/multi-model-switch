@@ -7308,7 +7308,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         _link_shared_dotfiles(session_home)
         # .claude/ 目录：创建真实目录，只按 allowlist 暴露可继承项。
         session_claude_dir = os.path.join(session_home, ".claude")
-        _prepare_claude_session_tree(
+        session_tree_env = _prepare_claude_session_tree(
             session_home,
             session_claude_dir,
             account_id=account.get("id", ""),
@@ -7319,6 +7319,9 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
             disabled_session_surfaces=disabled_session_surfaces,
         )
+        agent_rules_diagnostics_path = ""
+        if isinstance(session_tree_env, dict):
+            agent_rules_diagnostics_path = str(session_tree_env.get("agent_rules_diagnostics") or "")
         _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir)
         _overlay_web_access_session_entries(
             session_claude_dir,
@@ -7343,6 +7346,8 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
+        if agent_rules_diagnostics_path:
+            env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] = agent_rules_diagnostics_path
         _install_host_context_env(
             env,
             cli="claude",
@@ -10190,26 +10195,91 @@ def _link_claude_persistent_entry(session_claude_dir, entry, target):
 
 
 _AGENT_RULE_FILE_SUFFIXES = (".md", ".markdown")
+AGENT_RULES_DIAGNOSTICS_SCHEMA = "mms.agent_rules_diagnostics.v1"
+_AGENT_RULES_DIAGNOSTICS_REL_PATH = os.path.join(".mms", "diagnostics", "agent-rules.json")
+_AGENT_RULES_CHECKED_PATH = "~/.agents/rules/"
+
+
+def _agent_rule_directory_listing(rules_dir):
+    """Inspect optional rule filenames only; never read private rule content."""
+    rules_dir = str(rules_dir or "").strip()
+    listing = {
+        "exists": bool(rules_dir and os.path.isdir(rules_dir)),
+        "entry_count": 0,
+        "supported_files": [],
+        "unsupported_count": 0,
+    }
+    if not listing["exists"]:
+        return listing
+    try:
+        names = sorted(os.listdir(rules_dir), key=lambda item: (item.casefold(), item))
+    except OSError:
+        return listing
+    listing["entry_count"] = len(names)
+    for name in names:
+        suffix = os.path.splitext(name)[1].lower()
+        path = os.path.join(rules_dir, name)
+        if suffix in _AGENT_RULE_FILE_SUFFIXES and os.path.isfile(path):
+            listing["supported_files"].append((name, path))
+        else:
+            listing["unsupported_count"] += 1
+    return listing
 
 
 def _optional_agent_rule_files(rules_dir):
     """Return supported local agent rule files in deterministic load order."""
-    rules_dir = str(rules_dir or "").strip()
-    if not rules_dir or not os.path.isdir(rules_dir):
-        return []
+    return list(_agent_rule_directory_listing(rules_dir).get("supported_files") or [])
+
+
+def _agent_rules_diagnostics_payload(rules_dir, *, allow_agent_rules, loaded_files=None):
+    listing = _agent_rule_directory_listing(rules_dir)
+    supported_files = list(listing.get("supported_files") or [])
+    loaded_names = [
+        str(name)
+        for name in dict.fromkeys(loaded_files or [])
+        if str(name or "").strip()
+    ]
+    if not allow_agent_rules:
+        status = "skipped-by-restricted-allowlist"
+    elif not listing.get("exists"):
+        status = "missing"
+    elif int(listing.get("entry_count") or 0) <= 0:
+        status = "empty"
+    elif not supported_files:
+        status = "unsupported-only"
+    else:
+        status = "loaded"
+    return {
+        "schema": AGENT_RULES_DIAGNOSTICS_SCHEMA,
+        "checked_path": _AGENT_RULES_CHECKED_PATH,
+        "status": status,
+        "allow_agent_rules": bool(allow_agent_rules),
+        "entry_count": int(listing.get("entry_count") or 0),
+        "supported_count": len(supported_files),
+        "unsupported_count": int(listing.get("unsupported_count") or 0),
+        "loaded_count": len(loaded_names),
+        "loaded_files": loaded_names,
+    }
+
+
+def _write_agent_rules_diagnostics(session_home, rules_dir, *, allow_agent_rules, loaded_files=None):
+    session_home = str(session_home or "").strip()
+    if not session_home:
+        return ""
+    path = os.path.join(session_home, _AGENT_RULES_DIAGNOSTICS_REL_PATH)
     try:
-        names = sorted(os.listdir(rules_dir), key=lambda item: (item.casefold(), item))
-    except OSError:
-        return []
-    rules = []
-    for name in names:
-        suffix = os.path.splitext(name)[1].lower()
-        if suffix not in _AGENT_RULE_FILE_SUFFIXES:
-            continue
-        path = os.path.join(rules_dir, name)
-        if os.path.isfile(path):
-            rules.append((name, path))
-    return rules
+        atomic_write_json(
+            path,
+            _agent_rules_diagnostics_payload(
+                rules_dir,
+                allow_agent_rules=allow_agent_rules,
+                loaded_files=loaded_files,
+            ),
+            mode=0o600,
+        )
+    except Exception:
+        return ""
+    return path
 
 
 def _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir):
@@ -10300,8 +10370,9 @@ def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entr
     also opportunistically exposes Markdown files from ``~/.agents/rules/`` as
     a local-only rule overlay; a missing or empty rules directory is a no-op.
     """
+    loaded_agent_rules = []
     if not os.path.isdir(agents_dir):
-        return
+        return loaded_agent_rules
     for sub in ("skills", "commands"):
         if sub not in allowed_entry_set:
             continue
@@ -10322,7 +10393,8 @@ def _merge_agents_into_session_tree(session_claude_dir, agents_dir, allowed_entr
             except OSError:
                 pass
     if allow_agent_rules:
-        _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir)
+        loaded_agent_rules = _merge_optional_agent_rules_into_session_tree(session_claude_dir, agents_dir)
+    return loaded_agent_rules
 
 
 def _prepare_claude_session_tree(
@@ -10392,11 +10464,17 @@ def _prepare_claude_session_tree(
             if os.path.exists(dst) or os.path.islink(dst):
                 continue
             os.symlink(src, dst)
-    _merge_agents_into_session_tree(
+    loaded_agent_rules = _merge_agents_into_session_tree(
         session_claude_dir,
         agents_dir,
         allowed_source_entry_set,
         allow_agent_rules=bool(allow_agent_rules),
+    )
+    agent_rules_diagnostics_path = _write_agent_rules_diagnostics(
+        session_home,
+        os.path.join(agents_dir, "rules"),
+        allow_agent_rules=bool(allow_agent_rules),
+        loaded_files=loaded_agent_rules,
     )
     for entry in CLAUDE_PERSISTENT_ENTRIES:
         dst = os.path.join(session_claude_dir, entry)
@@ -10431,6 +10509,7 @@ def _prepare_claude_session_tree(
         runtime_kind=runtime_kind,
         account_home=account_home,
     )
+    return {"agent_rules_diagnostics": agent_rules_diagnostics_path}
 
 
 def _sync_claude_session_state_to_account_home(session_home, account_home, *, state_mode="oauth"):
@@ -10635,8 +10714,9 @@ def _claude_gateway_env(
 
     # ── ~/.claude 目录：仅保留 project-scoped 持久项，其余不再继承真实树 ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
+    agent_rules_diagnostics_path = ""
     with _timed_launch_step(_timings, "prepare claude tree"):
-        _prepare_claude_session_tree(
+        session_tree_env = _prepare_claude_session_tree(
             gateway_home,
             gw_claude_dir,
             account_id=str(runtime.get("id", "")),
@@ -10646,6 +10726,8 @@ def _claude_gateway_env(
             skip_real_entries={"settings.json"},
             disabled_session_surfaces=disabled_session_surfaces,
         )
+        if isinstance(session_tree_env, dict):
+            agent_rules_diagnostics_path = str(session_tree_env.get("agent_rules_diagnostics") or "")
     report = runtime.get("_account_guard_report")
     if report:
         _persist_account_guard_launch(
@@ -10685,6 +10767,8 @@ def _claude_gateway_env(
     }
     if mms_model_name:
         required_settings_env["MMS_MODEL_NAME"] = mms_model_name
+    if agent_rules_diagnostics_path:
+        required_settings_env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] = agent_rules_diagnostics_path
     default_settings_env: dict = {}
     if sensitive_provider:
         required_settings_env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
@@ -10723,6 +10807,12 @@ def _claude_gateway_env(
             model_info={"model": display_model or selected_model or heavy_model or best_model or ""},
             session_home=gateway_home,
         )
+        session_packet_extra_paths = {
+            "route_status": route_status_path,
+            "host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", ""),
+        }
+        if agent_rules_diagnostics_path:
+            session_packet_extra_paths["agent_rules_diagnostics"] = agent_rules_diagnostics_path
         session_packet_env = _install_session_packet_env(
             {},
             cli="claude",
@@ -10747,10 +10837,7 @@ def _claude_gateway_env(
                 "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
-            extra_paths={
-                "route_status": route_status_path,
-                "host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", ""),
-            },
+            extra_paths=session_packet_extra_paths,
         )
         required_settings_env.update(host_context_env)
         required_settings_env.update(session_packet_env)
@@ -10809,6 +10896,8 @@ def _claude_gateway_env(
         env["ANTHROPIC_BASE_URL"] = base_url
         env["ANTHROPIC_AUTH_TOKEN"] = effective_token
         env["MMS_ROUTE_STATUS_PATH"] = route_status_path
+        if agent_rules_diagnostics_path:
+            env["MMS_AGENT_RULES_DIAGNOSTICS_JSON"] = agent_rules_diagnostics_path
         _inject_selected_model_name(env, mms_model_name)
         if sensitive_provider:
             env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
