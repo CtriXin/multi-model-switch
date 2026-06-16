@@ -3191,22 +3191,24 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "fake consensus" in host_prompt_lower
     assert "committee vote files" in host_prompt_lower
     assert "review-hub request roots" in host_prompt_lower
-    assert "host authority contract" in host_prompt_lower
-    assert "you are not the decision authority" in host_prompt_lower
-    assert (
-        "human > deterministic facts > rubric applied to member outputs > host"
-        in host_prompt
-    )
-    assert "aggregate losslessly" in host_prompt_lower
-    assert "the user does not need to" in host_prompt_lower
     host_pro_prompt = payload["agent"]["debate-host-pro"]["prompt"].lower()
+    authority_order = (
+        "human > deterministic facts > rubric applied to member outputs > host"
+    )
+    # Primary and fallback hosts must carry the identical full authority contract.
+    for prompt_text in (host_prompt_lower, host_pro_prompt):
+        assert "host authority contract" in prompt_text
+        assert "you are not the decision authority" in prompt_text
+        assert authority_order in prompt_text
+        assert "never answer in a member's place" in prompt_text
+        assert "never invent a member's missing position" in prompt_text
+        assert "aggregate losslessly" in prompt_text
+        assert "the user does not need to" in prompt_text
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every debate member packet" in host_pro_prompt
-    assert "rather than the decision authority" in host_pro_prompt
-    assert "never rewrite member substance" in host_pro_prompt
 
     member_prompt = payload["agent"]["debate-deepseek-v4-pro"]["prompt"].lower()
     assert "independent debate member" in member_prompt

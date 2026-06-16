@@ -21,6 +21,23 @@ OPENCODE_REVIEW_MISSION_CONTRACT = (
 )
 
 
+DEBATE_HOST_AUTHORITY_CONTRACT = (
+    "Host authority contract: you are a neutral dispatcher, a faithful "
+    "summarizer, and a rubric referee; you are not the decision authority and "
+    "not a voting member. Authority order, highest first: "
+    "human > deterministic facts > rubric applied to member outputs > host; "
+    "never override anything above you. Dispatch the user's direction to the "
+    "selected members; never answer in a member's place and never invent a "
+    "member's missing position. Aggregate losslessly: never modify, soften, "
+    "beautify, merge away, or drop member substance; cluster, quote, and "
+    "attribute, and keep disagreement as-is. Here 'synthesize' means a "
+    "faithful, substance-preserving summary plus the rubric-derived "
+    "resolution_state, not your own verdict; cast no vote and add no personal "
+    "preference. This role is fixed by the profile; the user does not need to "
+    "restate 'dispatch, do not modify, only summarize'."
+)
+
+
 def opencode_lite_agent_configs(model_ref):
     """Return session-local OpenCode agents for the MMS lite lane."""
     if not model_ref:
@@ -1247,19 +1264,7 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
         "not committee, not review-hub, and not legacy discuss. Do not use "
         "committee vote files, committee verdict vocabulary, committee decision "
         "artifacts, review-hub request roots, or legacy mms discuss semantics. "
-        "Host authority contract: you are a neutral dispatcher, a faithful "
-        "summarizer, and a rubric referee; you are not the decision authority and "
-        "not a voting member. Authority order, highest first: "
-        "human > deterministic facts > rubric applied to member outputs > host; "
-        "never override anything above you. Dispatch the user's direction to the "
-        "selected members; never answer in a member's place and never invent a "
-        "member's missing position. Aggregate losslessly: never modify, soften, "
-        "beautify, merge away, or drop member substance; cluster, quote, and "
-        "attribute, and keep disagreement as-is. Here 'synthesize' means a "
-        "faithful, substance-preserving summary plus the rubric-derived "
-        "resolution_state, not your own verdict; cast no vote and add no personal "
-        "preference. This role is fixed by the profile; the user does not need to "
-        "restate 'dispatch, do not modify, only summarize'. "
+        + DEBATE_HOST_AUTHORITY_CONTRACT + " "
         + OPENCODE_REVIEW_MISSION_CONTRACT + " "
         "Use only the selected debate subagents available in this session: "
         f"{member_list_text}. Do not invent missing agents or model aliases. "
@@ -1338,10 +1343,9 @@ def opencode_debate_agent_configs(agent_models, *, roster_config=None, agent_pol
                     "selected debate members, keep debate separate from committee, "
                     "write only `.ai/debate/<thread-id>/` artifacts, enforce the "
                     "fixed blind seed -> crossfire -> revision mechanic, apply the "
-                    "v1 self-check checklist, act as a neutral dispatcher and "
-                    "faithful summarizer rather than the decision authority, never "
-                    "rewrite member substance, use host_authored synthesis only, and "
+                    "v1 self-check checklist, use host_authored synthesis only, and "
                     "preserve real disagreement instead of claiming fake convergence. "
+                    + DEBATE_HOST_AUTHORITY_CONTRACT + " "
                     "Send the unchanged mission block in every debate member packet. "
                     "Repeat the MMS-MISSION block at the top and MMS-MISSION plus "
                     "MMS-TARGET at the bottom."
