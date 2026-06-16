@@ -3347,7 +3347,8 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     authority_order = (
         "human > deterministic facts > rubric applied to member outputs > host"
     )
-    # Primary and fallback hosts must carry the identical full authority contract.
+    # Primary and fallback hosts must carry the identical full authority contract
+    # and the same debate trigger contract.
     for prompt_text in (host_prompt_lower, host_pro_prompt):
         assert "host authority contract" in prompt_text
         assert "you are not the decision authority" in prompt_text
@@ -3356,6 +3357,9 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
         assert "never invent a member's missing position" in prompt_text
         assert "aggregate losslessly" in prompt_text
         assert "the user does not need to" in prompt_text
+        assert "debate trigger contract" in prompt_text
+        assert "fork or proposition" in prompt_text
+        assert "use the committee profile" in prompt_text
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt
@@ -4418,6 +4422,21 @@ def test_opencode_smoke_classifies_thinking_block_roundtrip_as_blocked():
 
     assert error_class == "reasoning_content_roundtrip_required"
     assert smoke_opencode_profile._health_status(error_class, 0.5) == "blocked"
+
+
+def test_opencode_profile_summaries_state_debate_vs_committee_split():
+    import mms_opencode_profiles as profiles
+
+    by_id = {opt.get("id"): opt for opt in profiles.OPENCODE_PROFILE_OPTIONS}
+    debate_summary = by_id["debate"]["summary"]
+    committee_summary = by_id["committee"]["summary"]
+    # Debate selection surface states the fork/proposition trigger split.
+    assert "fork" in debate_summary
+    assert "命题" in debate_summary
+    assert "Committee" in debate_summary
+    # Committee side is symmetric: judges an artifact, points forks at Debate.
+    assert "artifact" in committee_summary
+    assert "Debate" in committee_summary
 
 
 def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch):
