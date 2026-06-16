@@ -253,9 +253,9 @@ Use this exact section order:
    own line, with a blank line before the next block. Use these visible
    subsections in order: `结论 / Decision`, `主要问题 / Findings`, `事实核验 /
    Direct Verification`, `委员票 / Member Ballots`, `风险 / Risks`, `模型耗时 /
-   Model Timing`, and `Scorecard`. In `委员票 / Member Ballots`, show tally
-   first, then use a compact table or aligned list with member, verdict, veto,
-   and one short reason.
+   Model Timing`, `Scorecard`, and `下一步 / Next Steps`. In `委员票 / Member
+   Ballots`, show tally first, then use a compact table or aligned list with
+   member, verdict, veto, and one short reason.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
    be copied or forwarded directly. Start this packet with `追踪块 / Trace`
    containing the same current mission block, then include the goal,

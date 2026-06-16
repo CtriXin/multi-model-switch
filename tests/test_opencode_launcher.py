@@ -3043,6 +3043,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "事实核验 / direct verification" in host_pro_prompt
     assert "委员票 / member ballots" in host_pro_prompt
     assert "风险 / risks" in host_pro_prompt
+    assert "下一步 / next steps" in host_pro_prompt
     assert "可直接复制转发 / copy-forward packet" in host_pro_prompt
     assert "host 建议 / host recommendation" in host_pro_prompt
     assert "追踪页脚 / trace footer" in host_pro_prompt
@@ -3079,6 +3080,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "委员票 / member ballots" in host_prompt_lower
     assert "风险 / risks" in host_prompt_lower
     assert "模型耗时 / model timing" in host_prompt_lower
+    assert "下一步 / next steps" in host_prompt_lower
     assert "show tally first" in host_prompt_lower
     assert "compact table or aligned list" in host_prompt_lower
     assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
