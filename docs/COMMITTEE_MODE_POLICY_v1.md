@@ -247,7 +247,11 @@ Use this exact section order:
    scorecard. Include `模型耗时 / Model Timing` with each delegated member's
    return order, elapsed wall time when captured, and speed ratio against the
    fastest captured member. If exact timing is unavailable, still record the
-   observed return order and mark elapsed time as `not_captured`.
+   observed return order and mark elapsed time as `not_captured`. Do not flatten
+   findings, risks, timing, and scores into one undifferentiated bullet list.
+   Use these visible subsections in order: `结论 / Decision`, `已核验 / Direct
+   Verification`, `需要人看的问题 / Findings`, `风险与分歧 / Risks &
+   Disagreements`, `模型耗时 / Model Timing`, and `Scorecard`.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
    be copied or forwarded directly. Start this packet with `追踪块 / Trace`
    containing the same current mission block, then include the goal,
