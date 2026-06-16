@@ -249,9 +249,13 @@ Use this exact section order:
    fastest captured member. If exact timing is unavailable, still record the
    observed return order and mark elapsed time as `not_captured`. Do not flatten
    findings, risks, timing, and scores into one undifferentiated bullet list.
-   Use these visible subsections in order: `结论 / Decision`, `已核验 / Direct
-   Verification`, `需要人看的问题 / Findings`, `风险与分歧 / Risks &
-   Disagreements`, `模型耗时 / Model Timing`, and `Scorecard`.
+   Use old readable block pacing: every subsection heading stands alone on its
+   own line, with a blank line before the next block. Use these visible
+   subsections in order: `结论 / Decision`, `主要问题 / Findings`, `事实核验 /
+   Direct Verification`, `委员票 / Member Ballots`, `风险 / Risks`, `模型耗时 /
+   Model Timing`, and `Scorecard`. In `委员票 / Member Ballots`, show tally
+   first, then use a compact table or aligned list with member, verdict, veto,
+   and one short reason.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
    be copied or forwarded directly. Start this packet with `追踪块 / Trace`
    containing the same current mission block, then include the goal,

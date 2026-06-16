@@ -3039,9 +3039,10 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "追踪块 / trace" in host_pro_prompt
     assert "人需要看的 / human notes" in host_pro_prompt
     assert "结论 / decision" in host_pro_prompt
-    assert "已核验 / direct verification" in host_pro_prompt
-    assert "需要人看的问题 / findings" in host_pro_prompt
-    assert "风险与分歧 / risks & disagreements" in host_pro_prompt
+    assert "主要问题 / findings" in host_pro_prompt
+    assert "事实核验 / direct verification" in host_pro_prompt
+    assert "委员票 / member ballots" in host_pro_prompt
+    assert "风险 / risks" in host_pro_prompt
     assert "可直接复制转发 / copy-forward packet" in host_pro_prompt
     assert "host 建议 / host recommendation" in host_pro_prompt
     assert "追踪页脚 / trace footer" in host_pro_prompt
@@ -3069,11 +3070,17 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "normal markdown" in host_prompt_lower
     assert "人需要看的 / human notes" in host_prompt_lower
     assert "do not flatten findings, risks, timing, and scores" in host_prompt_lower
+    assert "old readable block pacing" in host_prompt_lower
+    assert "every subsection heading stands alone on its own line" in host_prompt_lower
+    assert "blank line before the next block" in host_prompt_lower
     assert "结论 / decision" in host_prompt_lower
-    assert "已核验 / direct verification" in host_prompt_lower
-    assert "需要人看的问题 / findings" in host_prompt_lower
-    assert "风险与分歧 / risks & disagreements" in host_prompt_lower
+    assert "主要问题 / findings" in host_prompt_lower
+    assert "事实核验 / direct verification" in host_prompt_lower
+    assert "委员票 / member ballots" in host_prompt_lower
+    assert "风险 / risks" in host_prompt_lower
     assert "模型耗时 / model timing" in host_prompt_lower
+    assert "show tally first" in host_prompt_lower
+    assert "compact table or aligned list" in host_prompt_lower
     assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
     assert "start this packet with 追踪块 / trace" in host_prompt_lower
     assert "same current mms-mission block" in host_prompt_lower
