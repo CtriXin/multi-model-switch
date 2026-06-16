@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1014,6 +1015,90 @@ def test_opencode_gateway_env_migrates_all_legacy_profile_data_before_cleanup(mo
     assert (shared_state / "opencode" / "opencode.db").read_text(encoding="utf-8") == "review-db"
     agent_shared_db = real_home / ".local" / "share" / "mms-opencode" / "state" / "lite_pro_orchestrated" / "opencode" / "opencode.db"
     assert agent_shared_db.read_text(encoding="utf-8") == "agent-db"
+
+
+def test_opencode_set_soft_home_replaces_read_only_shared_pack_file(tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    rel_pack = Path("snapshot/a/b/objects/pack/pack-test.idx")
+    old_pack = old_session / ".local" / "share" / "opencode" / rel_pack
+    old_pack.parent.mkdir(parents=True)
+    old_pack.write_text("new-pack", encoding="utf-8")
+    shared_pack = (
+        real_home
+        / ".local"
+        / "share"
+        / "mms-opencode"
+        / "state"
+        / "lite_pro_orchestrated"
+        / "opencode"
+        / rel_pack
+    )
+    shared_pack.parent.mkdir(parents=True)
+    shared_pack.write_text("old-pack", encoding="utf-8")
+    os.chmod(old_pack, 0o444)
+    os.chmod(shared_pack, 0o444)
+    os.utime(shared_pack, (1000, 1000))
+    os.utime(old_pack, (2000, 2000))
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert "MMS_OPENCODE_MIGRATION_FAILED" not in env
+    assert shared_pack.read_text(encoding="utf-8") == "new-pack"
+    assert shared_pack.stat().st_mode & 0o777 == 0o444
+
+
+def test_opencode_set_soft_home_marks_generic_file_copy_failure_without_crashing(monkeypatch, tmp_path):
+    import mms_opencode_env
+
+    real_home = tmp_path / "real-home"
+    old_session = real_home / ".config" / "mms" / "opencode-gateway" / "s" / "123"
+    old_config_dir = old_session / ".config" / "opencode"
+    old_config_dir.mkdir(parents=True)
+    (old_config_dir / "opencode.json").write_text(
+        json.dumps({"default_agent": "mobius-builder-pro"}) + "\n",
+        encoding="utf-8",
+    )
+    old_state = old_session / ".local" / "share" / "opencode" / "metadata.json"
+    old_state.parent.mkdir(parents=True)
+    old_state.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        mms_opencode_env.shutil,
+        "copy2",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("copy blocked")),
+    )
+
+    def _real_user_path(*parts):
+        return str(real_home.joinpath(*parts))
+
+    env = {}
+    mms_opencode_env.opencode_set_soft_home(
+        env,
+        str(real_home / ".config" / "mms" / "opencode-gateway" / "s" / "200"),
+        real_user_path=_real_user_path,
+        set_session_home_hint=lambda e, s: e.update({"MMS_SESSION_HOME": s}),
+        profile_id="lite_pro_orchestrated",
+    )
+
+    assert env["MMS_OPENCODE_MIGRATION_FAILED"] == "1"
 
 
 def test_opencode_set_soft_home_replays_active_legacy_session_tail_writes(tmp_path):
