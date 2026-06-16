@@ -3065,6 +3065,8 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-source" in host_prompt_lower
     assert "manual dispatch" in host_prompt_lower
     assert "reviewed code target" in host_prompt_lower
+    assert "declared decision_mode such as gate or review" in host_prompt_lower
+    assert "not committee-gate" in host_prompt_lower
     assert "unchanged mms-mission block in each member brief" in host_prompt_lower
     assert "repeat mms-mission plus mms-target at the very end" in host_prompt_lower
     assert "permission_profile" in host_prompt_lower
@@ -3118,6 +3120,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every member brief" in host_pro_prompt
+    assert "mms-target at the bottom" in host_pro_prompt
     assert "mms-target at the very end" in host_pro_prompt
     assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
     assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
@@ -3130,38 +3133,70 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "normal markdown" in host_pro_prompt
     assert "追踪块 / trace" in host_pro_prompt
     assert "人需要看的 / human notes" in host_pro_prompt
+    assert "结论 / decision" in host_pro_prompt
+    assert "主要问题 / findings" in host_pro_prompt
+    assert "事实核验 / direct verification" in host_pro_prompt
+    assert "委员票 / member ballots" in host_pro_prompt
+    assert "风险 / risks" in host_pro_prompt
+    assert "下一步 / next steps" in host_pro_prompt
     assert "可直接复制转发 / copy-forward packet" in host_pro_prompt
     assert "host 建议 / host recommendation" in host_pro_prompt
     assert "追踪页脚 / trace footer" in host_pro_prompt
     assert "host private advice" in host_pro_prompt
+    assert "模型耗时 / model timing" in host_pro_prompt
+    assert "task-local subagent scorecard and model timing" in host_pro_prompt
+    assert "do not place 追踪块 / trace before 人需要看的 / human notes" in host_pro_prompt
     assert (
-        host_pro_prompt.index("追踪块 / trace")
-        < host_pro_prompt.index("人需要看的 / human notes")
+        host_pro_prompt.index("人需要看的 / human notes")
         < host_pro_prompt.index("可直接复制转发 / copy-forward packet")
+        < host_pro_prompt.index("追踪块 / trace")
         < host_pro_prompt.index("host 建议 / host recommendation")
         < host_pro_prompt.index("追踪页脚 / trace footer")
     )
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
+    assert "task-local model timing" in host_prompt_lower
+    assert "return order" in host_prompt_lower
+    assert "elapsed wall time" in host_prompt_lower
+    assert "speed ratio" in host_prompt_lower
+    assert "not_captured" in host_prompt
     assert "final synthesis order" in host_prompt_lower
     assert "simplified chinese section titles" in host_prompt_lower
     assert "do not wrap the copy-forward packet in a fenced code block" in host_prompt_lower
     assert "normal markdown" in host_prompt_lower
-    assert "追踪块 / trace" in host_prompt_lower
     assert "人需要看的 / human notes" in host_prompt_lower
+    assert "do not flatten findings, risks, timing, and scores" in host_prompt_lower
+    assert "old readable block pacing" in host_prompt_lower
+    assert "every subsection heading stands alone on its own line" in host_prompt_lower
+    assert "blank line before the next block" in host_prompt_lower
+    assert "结论 / decision" in host_prompt_lower
+    assert "主要问题 / findings" in host_prompt_lower
+    assert "事实核验 / direct verification" in host_prompt_lower
+    assert "委员票 / member ballots" in host_prompt_lower
+    assert "风险 / risks" in host_prompt_lower
+    assert "模型耗时 / model timing" in host_prompt_lower
+    assert "下一步 / next steps" in host_prompt_lower
+    assert "show tally first" in host_prompt_lower
+    assert "compact table or aligned list" in host_prompt_lower
     assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
+    assert "start this packet with 追踪块 / trace" in host_prompt_lower
+    assert "same current mms-mission block" in host_prompt_lower
+    assert "member findings or ballots, model timing" in host_prompt_lower
     assert "host 建议 / host recommendation" in host_prompt_lower
     assert "追踪页脚 / trace footer" in host_prompt_lower
     assert "do not include scorecard, meta commentary, or host private advice" in host_prompt_lower
     assert "mms-mission plus mms-target at the very end" in host_prompt_lower
     assert (
-        host_prompt_lower.index("追踪块 / trace")
-        < host_prompt_lower.index("人需要看的 / human notes")
+        host_prompt_lower.index("人需要看的 / human notes")
         < host_prompt_lower.index("可直接复制转发 / copy-forward packet")
+        < host_prompt_lower.index("追踪块 / trace")
         < host_prompt_lower.index("host 建议 / host recommendation")
         < host_prompt_lower.index("追踪页脚 / trace footer")
     )
+    assert "same current dispatch" in host_prompt_lower
+    assert "previous/next pointers" in host_prompt_lower
     assert "subagent scorecard" in host_prompt_lower
+    assert "task-local subagent scorecard and model timing" in host_pro_prompt
     assert "1-5 scale" in host_prompt_lower
     assert "usefulness" in host_prompt_lower
     assert "evidence quality" in host_prompt_lower
@@ -3287,6 +3322,7 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "reviewed code target" in host_prompt_lower
     assert "mission object" in host_prompt_lower
     assert "unchanged mms-mission block" in host_prompt_lower
+    assert "visible mms-mission trace in the provenance/trace area" in host_prompt_lower
     assert "repeat mms-mission plus mms-target at the bottom" in host_prompt_lower
     assert "blind seed -> crossfire -> revision" in host_prompt_lower
     assert "round-1-seed.json" in host_prompt
@@ -3320,6 +3356,7 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every debate member packet" in host_pro_prompt
+    assert "visible mms-mission trace in the final reply" in host_pro_prompt
 
     member_prompt = payload["agent"]["debate-deepseek-v4-pro"]["prompt"].lower()
     assert "independent debate member" in member_prompt

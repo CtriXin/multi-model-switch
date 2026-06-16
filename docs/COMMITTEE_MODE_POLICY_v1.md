@@ -33,8 +33,8 @@ these defaults.
 Committee also follows the OpenCode review mission trace contract in
 `docs/OPENCODE_REVIEW_MISSION_TRACE_v1.md`. The host must create or preserve a
 visible `MMS-MISSION` block before dispatch, include it in every member brief,
-begin final synthesis with it, and repeat at least `MMS-MISSION` plus
-`MMS-TARGET` at the end.
+include it in the final synthesis trace/provenance area, and repeat at least
+`MMS-MISSION` plus `MMS-TARGET` at the end.
 
 ## Decision Modes
 
@@ -242,20 +242,33 @@ and syntax-highlighted paths stay readable while still being copyable.
 
 Use this exact section order:
 
-0. `追踪块 / Trace`: the unchanged mission block as its own visible section.
 1. `人需要看的 / Human Notes`: conclusion, advisory/formal boundary, direct
    verification status, material risks or dissent, and the task-local subagent
-   scorecard.
+   scorecard. Include `模型耗时 / Model Timing` with each delegated member's
+   return order, elapsed wall time when captured, and speed ratio against the
+   fastest captured member. If exact timing is unavailable, still record the
+   observed return order and mark elapsed time as `not_captured`. Do not flatten
+   findings, risks, timing, and scores into one undifferentiated bullet list.
+   Use old readable block pacing: every subsection heading stands alone on its
+   own line, with a blank line before the next block. Use these visible
+   subsections in order: `结论 / Decision`, `主要问题 / Findings`, `事实核验 /
+   Direct Verification`, `委员票 / Member Ballots`, `风险 / Risks`, `模型耗时 /
+   Model Timing`, `Scorecard`, and `下一步 / Next Steps`. In `委员票 / Member
+   Ballots`, show tally first, then use a compact table or aligned list with
+   member, verdict, veto, and one short reason.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
-   be copied or forwarded directly. Include the same `追踪块 / Trace`, goal,
+   be copied or forwarded directly. Start this packet with `追踪块 / Trace`
+   containing the same current mission block, then include the goal,
    `committee_policy`, assignments, direct verification, member findings or
-   ballots, tally/consensus, disagreements, risks, formal artifact status, and
-   provenance. Do not include scorecard, meta commentary, or host private
-   advice in this packet.
+   ballots, model timing, tally/consensus, disagreements, risks, formal artifact
+   status, and provenance. Do not include scorecard, host meta commentary, or
+   private host advice in this packet.
 3. `Host 建议 / Host Recommendation`: the host's recommended next action, placed
    after the copy-forward packet as the last substantive section.
 4. `追踪页脚 / Trace Footer`: repeat at least `MMS-MISSION` plus `MMS-TARGET` as
-   the final trace footer.
+   the final trace footer. The `追踪块 / Trace` and `追踪页脚 / Trace Footer`
+   identify the same current dispatch; they are not previous/next pointers.
+   Do not place `追踪块 / Trace` before `人需要看的 / Human Notes`.
 
 Use the actual unchanged mission block for the current target. The format is:
 

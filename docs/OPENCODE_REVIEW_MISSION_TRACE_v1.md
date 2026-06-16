@@ -20,7 +20,7 @@ Required fields:
 ```text
 MMS-MISSION: <profile>-<stable-source-or-date>-<hash-or-nonce>
 MMS-TARGET: <pr/commit/branch/diff target, or unknown>
-MMS-MODE: <review|committee-gate|committee-review|debate|...>
+MMS-MODE: <review|gate|advisory|estimate|execution_packet|debate|...>
 MMS-SOURCE: <review-hub-request|github-pr|local-diff|commit|user-pasted|unknown>
 ```
 
@@ -28,6 +28,8 @@ Rules:
 
 - `MMS-MISSION` identifies this manual dispatch, not the code commit.
 - `MMS-TARGET` identifies the reviewed object when known.
+- For committee, prefer the declared `decision_mode` value such as `gate` or
+  `review`; do not prefix it as `committee-gate`.
 - If the target is unclear, write exactly `MMS-TARGET: unknown` and describe
   the observed source evidence. Do not invent a PR or commit.
 - Prefer an existing stable request id, request-root basename, PR plus commit,
@@ -41,9 +43,14 @@ For every non-trivial `review`, `committee`, or `debate` task, the host must:
 
 1. create or preserve one mission block before delegation;
 2. include the unchanged mission block in every delegated reviewer/member brief;
-3. begin the final chat synthesis with the mission block;
+3. include a visible mission trace in the final chat synthesis, preferably in
+   the copy-forward, provenance, or trace area rather than before the human
+   summary;
 4. end the final chat synthesis with at least `MMS-MISSION` and `MMS-TARGET`;
 5. preserve the same mission id across retries within the same manual dispatch.
+
+The body trace and final footer identify the same current manual dispatch. They
+are not previous/next pointers.
 
 Every new manual dispatch after executor repair should get a new
 `MMS-MISSION`, even if it belongs to the same issue or PR. The `MMS-TARGET`
