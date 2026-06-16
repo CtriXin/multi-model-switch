@@ -73,14 +73,15 @@ integration as follows:
 |---|---|
 | Redline start mode | Advisory-only / soft-fail |
 | `unknown` decision | Do not fail CI; escalate to human/committee |
-| Redline PR comments | Artifact-only at first; no default PR comment |
+| Redline PR comments | One compact marker-based PR comment by default; artifacts remain detailed source of truth |
 | Scope of PR #4 | Keep PR #4 Digger-only; use a follow-up PR for Redline |
 | Public package / reusable workflow | Desirable Phase 5+, not a blocker for MMS first integration |
 
 Rationale: Digger should land and stabilize first. Redline is a downstream gate
-with a higher false-positive blast radius, so the first integration should
-produce evidence without blocking normal PR flow unless the committee later opts
-into hard-fail behavior.
+with a higher false-positive blast radius, so the integration should produce
+visible evidence without blocking normal PR flow unless the committee later opts
+into hard-fail behavior. A compact Redline PR comment is allowed because it does
+not approve, merge, deploy, close, or mutate target code.
 
 ## Proposed CI Shape
 
@@ -110,13 +111,13 @@ pull_request
 Candidate Redline command based on the current `redline-guard` CLI:
 
 ```bash
-# Intentionally omit --comment and --notify in the first integration.
 redline-guard audit \
   --provider github \
   --pr "$PR_NUMBER" \
   --repo "$GITHUB_WORKSPACE" \
   --digger-run "$DIGGER_RUN_ROOT" \
-  --out .redline-guard/report
+  --out .redline-guard/report \
+  --comment
 ```
 
 The CLI already supports `--digger-run` and writes `audit-result.json`,
@@ -150,6 +151,8 @@ The CLI already supports `--digger-run` and writes `audit-result.json`,
   `unknown` rather than guessing silently.
 - Install `redline-guard` from a pinned commit SHA or immutable package digest.
 - Run Redline with `--digger-run` and `--out`.
+- Enable `--comment` so Redline creates or updates one compact marker-based PR
+  comment with the current decision.
 - If Digger produced no run root, Redline should exit `0` and write a
   `decision=unknown` report explaining the missing evidence; tool failure is
   escalated to committee, not used to deadlock development.
@@ -157,9 +160,8 @@ The CLI already supports `--digger-run` and writes `audit-result.json`,
   retention.
 - Write a one-line Actions step summary with the Redline decision and artifact
   name so advisory status is visible without opening the artifact first.
-- Do not enable `--comment`, `--notify`, callback actions, automatic merge,
-  approval, deployment, force-push, close, or destructive actions in the first
-  integration.
+- Do not enable `--notify`, callback actions, automatic merge, approval,
+  deployment, force-push, close, or destructive actions in the first integration.
 - Treat `blocked`, `needs-review`, and `unknown` as advisory outputs at first;
   committee/human review remains the final gate.
 
@@ -212,7 +214,6 @@ The first Redline follow-up PR should not attempt to solve every guardrail at
 once. These items stay out of scope unless committee explicitly reopens them:
 
 - hard-failing CI on `blocked`, `needs-review`, or `unknown`;
-- posting Redline PR comments by default;
 - enabling Feishu notifications or callback actions;
 - supporting fork PRs that require private install credentials;
 - publishing public npm packages, Docker images, or reusable workflows;
@@ -231,10 +232,11 @@ The guard workflow should follow these rules:
 - Prefer top-level `permissions: contents: read`, then grant narrower job-level
   write permissions only where needed.
 - Keep `contents: read` unless a job has a documented reason for more.
-- Grant `pull-requests: write` and `issues: write` only to the Digger job while
+- Grant `pull-requests: write` and `issues: write` to the Digger job while
   Digger posts PR comments.
-- Do not grant Redline PR/comment write permissions in the first integration.
-- Prefer artifact upload over comments for early Redline integration.
+- Grant Redline `issues: write` only for the marker-based PR conversation
+  comment; keep `contents: read` and `pull-requests: read` otherwise.
+- Prefer artifact upload for detailed evidence; keep PR comments short.
 - Treat `DIGGER_MMS_COMMAND` or equivalent LLM bridge commands as trusted
   maintainer CI configuration, never PR-controlled input.
 - Keep any LLM bridge command behind an allowlisted command path, controlled env,
@@ -268,6 +270,8 @@ The guard workflow should follow these rules:
 - Redline artifact name: `redline-report`.
 - Redline output path: `.redline-guard/report`.
 - Redline integrity sidecar path: `.redline-guard/report/*.sha256`.
+- Redline PR comment marker: `<!-- redline-guard:audit -->`.
+- Redline comment body: compact decision summary; no full report dump.
 - Set explicit artifact retention instead of relying on GitHub's default.
   Proposed first value: 30 days for normal PR evidence.
 - If the committee wants longer auditability for release branches, raise
@@ -311,6 +315,7 @@ Digger/Redline checks on protected branches.
 - A follow-up PR adds Redline as an advisory downstream job.
 - Digger runs in GitHub Actions and uploads `.digger/runs` as artifact `digger`.
 - Redline runs in GitHub Actions and uploads artifact `redline-report`.
+- Redline creates or updates one compact marker-based PR comment.
 - Redline writes a one-line Actions step summary containing its decision and
   artifact name, so advisory status is visible without opening artifacts.
 - Digger and Redline installs are pinned.

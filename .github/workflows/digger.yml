@@ -12,7 +12,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
-      DIGGER_REF: 9c22178c961ebe25914b6580b9e7a1000af046f9
+      DIGGER_REF: b206c59d8f5a48e7a46dd9f6059a2e253c8609bf
     permissions:
       contents: read
       pull-requests: write
@@ -111,12 +111,13 @@ jobs:
     if: always() && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
-      REDLINE_GUARD_REF: 661dfbf52912534054a2340bf9dd5bca16a2c41f
+      REDLINE_GUARD_REF: 66b857fb36707cd94d493b06f29184afce6d85db
       REDLINE_GUARD_ENABLED: ${{ vars.REDLINE_GUARD_ENABLED || 'true' }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
     permissions:
       contents: read
       pull-requests: read
+      issues: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -205,6 +206,7 @@ jobs:
       - name: Run redline-guard advisory audit
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .redline-guard/report
 
@@ -251,7 +253,8 @@ jobs:
               --pr "$PR_NUMBER" \
               --repo "$GITHUB_WORKSPACE" \
               --digger-run "$DIGGER_RUN_ROOT" \
-              --out .redline-guard/report
+              --out .redline-guard/report \
+              --comment
             status=$?
             set -e
             if [ "$status" -ne 0 ]; then
