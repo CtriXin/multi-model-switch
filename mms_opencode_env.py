@@ -20,12 +20,19 @@ def opencode_write_config(path, runtime, model, *, build_config_content, atomic_
 
 _OPENCODE_SHARED_STATE_MIGRATION_MARKER = ".mms-shared-state-migration-v1"
 _OPENCODE_PROFILE_MARKER = ".mms/opencode-profile"
+_OPENCODE_ISOLATE_DATA_MARKER = ".mms/opencode-isolate-data"
 
 
 def _write_opencode_profile_marker(session_home, profile_slug):
     marker = Path(session_home) / _OPENCODE_PROFILE_MARKER
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(profile_slug + "\n", encoding="utf-8")
+
+
+def _write_opencode_isolate_data_marker(session_home):
+    marker = Path(session_home) / _OPENCODE_ISOLATE_DATA_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("1\n", encoding="utf-8")
 
 
 def opencode_profile_state_slug(profile_id):
@@ -63,15 +70,8 @@ def _copy_missing_tree(src, dst):
     return copied
 
 
-def _opencode_profile_slug_from_session(session_dir):
+def _opencode_profile_slug_from_config(session_dir):
     session_dir = Path(session_dir)
-    marker = session_dir / _OPENCODE_PROFILE_MARKER
-    if marker.is_file():
-        try:
-            return opencode_profile_state_slug(marker.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return ""
-
     config_path = session_dir / ".config" / "opencode" / "opencode.json"
     if not config_path.is_file():
         return ""
@@ -108,16 +108,338 @@ def _opencode_profile_slug_from_session(session_dir):
     return ""
 
 
-def _migrate_opencode_data_to_shared_state(session_home, state_root):
-    sessions_dir = Path(session_home).parent
-    state_root = Path(state_root)
+def _opencode_profile_slug_from_session(session_dir):
+    session_dir = Path(session_dir)
+    marker = session_dir / _OPENCODE_PROFILE_MARKER
+    if marker.is_file():
+        try:
+            return opencode_profile_state_slug(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+    return _opencode_profile_slug_from_config(session_dir)
+
+
+def _opencode_legacy_profile_slug_from_session(session_dir):
+    session_dir = Path(session_dir)
+    if (session_dir / _OPENCODE_PROFILE_MARKER).exists():
+        return ""
+    if (session_dir / _OPENCODE_ISOLATE_DATA_MARKER).exists():
+        return ""
+    return _opencode_profile_slug_from_config(session_dir)
+
+
+def _opencode_profile_state_root(real_user_path, profile_slug):
+    return Path(real_user_path(".local", "share", "mms-opencode", "state", profile_slug))
+
+
+def _write_opencode_shared_state_marker(state_root, *, migrated):
+    state_root.mkdir(parents=True, exist_ok=True)
     marker = state_root / _OPENCODE_SHARED_STATE_MIGRATION_MARKER
-    if marker.exists() or not sessions_dir.is_dir():
+    marker.write_text("migrated=1\n" if migrated else "migrated=0\n", encoding="utf-8")
+
+
+def _is_sqlite_db(path):
+    try:
+        with Path(path).open("rb") as handle:
+            return handle.read(16) == b"SQLite format 3\x00"
+    except OSError:
         return False
 
-    candidates = []
+
+def _sqlite_quote_ident(name):
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _sqlite_table_names(conn):
+    return [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+    ]
+
+
+def _sqlite_table_info(conn, table_name):
+    table_sql = _sqlite_quote_ident(table_name)
+    return conn.execute(f"PRAGMA table_info({table_sql})").fetchall()
+
+
+def _sqlite_table_exists(conn, table_name):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone() is not None
+
+
+def _sqlite_ensure_table(dst_conn, src_conn, table_name):
+    if _sqlite_table_exists(dst_conn, table_name):
+        return False
+    create_row = src_conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    create_sql = str(create_row[0] or "").strip() if create_row else ""
+    if not create_sql:
+        return False
+    dst_conn.execute(create_sql)
+    return True
+
+
+def _sqlite_column_default_sql(table_name, info_row):
+    column_name = str(info_row[1] or "")
+    column_type = str(info_row[2] or "")
+    default_sql = info_row[4]
+    if default_sql is not None:
+        return str(default_sql)
+    if table_name == "session":
+        if column_name == "project_id":
+            return "'legacy-migrated-project'"
+        if column_name == "slug":
+            return "''"
+        if column_name == "version":
+            return "'1'"
+    normalized_type = column_type.upper()
+    if any(token in normalized_type for token in ("INT", "REAL", "NUM")):
+        return "0"
+    return "''"
+
+
+def _sqlite_sync_existing_table_columns(dst_conn, src_conn, table_name):
+    src_info = _sqlite_table_info(src_conn, table_name)
+    dst_columns = {row[1] for row in _sqlite_table_info(dst_conn, table_name)}
+    changed = False
+    table_sql = _sqlite_quote_ident(table_name)
+    for info_row in src_info:
+        column_name = str(info_row[1] or "")
+        if not column_name or column_name in dst_columns:
+            continue
+        if int(info_row[5] or 0) > 0:
+            continue
+        column_type = str(info_row[2] or "").strip() or "TEXT"
+        column_sql = f"{_sqlite_quote_ident(column_name)} {column_type}"
+        not_null = int(info_row[3] or 0) > 0
+        if not_null:
+            column_sql += f" NOT NULL DEFAULT {_sqlite_column_default_sql(table_name, info_row)}"
+        elif info_row[4] is not None:
+            column_sql += f" DEFAULT {info_row[4]}"
+        dst_conn.execute(f"ALTER TABLE {table_sql} ADD COLUMN {column_sql}")
+        changed = True
+    if changed and table_name == "session" and _sqlite_table_exists(dst_conn, "project"):
+        project_table_info = _sqlite_table_info(dst_conn, "project")
+        project_columns = [row[1] for row in project_table_info]
+        legacy_values = {
+            "id": "legacy-migrated-project",
+            "worktree": "",
+            "name": "Legacy Migrated Project",
+            "sandboxes": "[]",
+            "time_created": 0,
+            "time_updated": 0,
+            "time_initialized": 0,
+        }
+        insert_columns = []
+        insert_values = []
+        for info_row in project_table_info:
+            column_name = str(info_row[1] or "")
+            if not column_name:
+                continue
+            insert_columns.append(_sqlite_quote_ident(column_name))
+            if column_name in legacy_values:
+                insert_values.append(legacy_values[column_name])
+                continue
+            if int(info_row[3] or 0) > 0:
+                column_type = str(info_row[2] or "").upper()
+                insert_values.append(0 if any(token in column_type for token in ("INT", "REAL", "NUM")) else "")
+                continue
+            insert_values.append(None)
+        dst_conn.execute(
+            f"INSERT OR IGNORE INTO project ({', '.join(insert_columns)}) VALUES ({', '.join('?' for _ in insert_values)})",
+            tuple(insert_values),
+        )
+        dst_conn.execute(
+            "UPDATE session SET project_id = COALESCE(NULLIF(project_id, ''), ?), slug = COALESCE(NULLIF(slug, ''), id), version = COALESCE(NULLIF(version, ''), ?) WHERE project_id IS NULL OR project_id = '' OR slug IS NULL OR slug = '' OR version IS NULL OR version = ''",
+            ("legacy-migrated-project", "1"),
+        )
+    return changed
+
+
+def _sqlite_row_signature(row):
+    return tuple(row) if row is not None else None
+
+
+def _sqlite_time_updated_value(columns, row):
+    try:
+        idx = columns.index("time_updated")
+    except ValueError:
+        return None
+    return int(row[idx] or 0)
+
+
+def _sync_sqlite_table_rows(src_conn, dst_conn, table_name):
+    schema_changed = _sqlite_sync_existing_table_columns(dst_conn, src_conn, table_name)
+    src_table_info = _sqlite_table_info(src_conn, table_name)
+    dst_table_info = _sqlite_table_info(dst_conn, table_name)
+    dst_columns = {row[1] for row in dst_table_info}
+    table_info = [row for row in src_table_info if row[1] in dst_columns]
+    columns = [row[1] for row in table_info]
+    if not columns:
+        return schema_changed
+    pk_columns = [
+        info_row[1]
+        for info_row in sorted(table_info, key=lambda item: item[5] or 0)
+        if int(info_row[5] or 0) > 0
+    ]
+    table_sql = _sqlite_quote_ident(table_name)
+    column_sql = ", ".join(_sqlite_quote_ident(column) for column in columns)
+    src_rows = src_conn.execute(f"SELECT {column_sql} FROM {table_sql}").fetchall()
+    if not src_rows:
+        return schema_changed
+
+    changed = schema_changed
+    select_existing_sql = ""
+    if pk_columns:
+        where_sql = " AND ".join(f"{_sqlite_quote_ident(column)} = ?" for column in pk_columns)
+        select_existing_sql = f"SELECT {column_sql} FROM {table_sql} WHERE {where_sql}"
+    insert_sql = f"INSERT INTO {table_sql} ({column_sql}) VALUES ({', '.join('?' for _ in columns)})"
+    non_pk_columns = [column for column in columns if column not in pk_columns]
+    if pk_columns and non_pk_columns:
+        set_sql = ", ".join(f"{_sqlite_quote_ident(column)} = ?" for column in non_pk_columns)
+        where_sql = " AND ".join(f"{_sqlite_quote_ident(column)} = ?" for column in pk_columns)
+        update_sql = f"UPDATE {table_sql} SET {set_sql} WHERE {where_sql}"
+    else:
+        update_sql = ""
+
+    for row in src_rows:
+        existing = None
+        if select_existing_sql:
+            pk_values = tuple(row[columns.index(column)] for column in pk_columns)
+            existing = dst_conn.execute(select_existing_sql, pk_values).fetchone()
+        if existing is None:
+            dst_conn.execute(insert_sql, row)
+            changed = True
+            continue
+        if _sqlite_row_signature(existing) == _sqlite_row_signature(row):
+            continue
+        src_updated = _sqlite_time_updated_value(columns, row)
+        dst_updated = _sqlite_time_updated_value(columns, existing)
+        if src_updated is not None and dst_updated is not None and src_updated < dst_updated:
+            continue
+        if update_sql:
+            non_pk_values = [row[columns.index(column)] for column in non_pk_columns]
+            dst_conn.execute(update_sql, tuple(non_pk_values) + pk_values)
+            changed = True
+            continue
+    return changed
+
+
+def _sync_opencode_sqlite_db(src, dst):
+    import sqlite3
+
+    src = Path(src)
+    dst = Path(dst)
+    if not src.exists():
+        return False, False, False
+    if not _is_sqlite_db(src):
+        return False, False, False
+    if dst.exists() and not _is_sqlite_db(dst):
+        return True, False, True
+
+    changed = False
+    src_conn = sqlite3.connect(str(src))
+    try:
+        if not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst_conn = sqlite3.connect(str(dst))
+            try:
+                src_conn.backup(dst_conn)
+                dst_conn.commit()
+                return True, True, False
+            finally:
+                dst_conn.close()
+
+        dst_conn = sqlite3.connect(str(dst))
+        try:
+            for table_name in _sqlite_table_names(src_conn):
+                changed = _sqlite_ensure_table(dst_conn, src_conn, table_name) or changed
+                changed = _sync_sqlite_table_rows(src_conn, dst_conn, table_name) or changed
+            if changed:
+                dst_conn.commit()
+            return True, changed, False
+        finally:
+            dst_conn.close()
+    except sqlite3.DatabaseError:
+        return True, False, True
+    finally:
+        src_conn.close()
+
+
+def _sync_opencode_db(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    if not src.exists():
+        return False, False
+    src_is_sqlite = _is_sqlite_db(src)
+    dst_is_sqlite = dst.exists() and _is_sqlite_db(dst)
+    if not src_is_sqlite and dst_is_sqlite:
+        return False, True
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    handled, changed, failed = _sync_opencode_sqlite_db(src, dst)
+    if handled:
+        return changed, failed
+    if not dst.exists():
+        shutil.copy2(src, dst)
+        return True, False
+    try:
+        src_stat = src.stat()
+        dst_stat = dst.stat()
+    except OSError:
+        return False, True
+    if src_stat.st_mtime_ns <= dst_stat.st_mtime_ns:
+        return False, False
+    shutil.copy2(src, dst)
+    return True, False
+
+
+def _sync_opencode_tree(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    if not src.is_dir():
+        return False, False
+    changed = False
+    failed = False
+    for path in sorted(src.rglob("*")):
+        rel = path.relative_to(src)
+        target = dst / rel
+        if path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        if path.name in {"opencode.db-wal", "opencode.db-shm"}:
+            continue
+        if path.name == "opencode.db":
+            db_changed, db_failed = _sync_opencode_db(path, target)
+            changed = db_changed or changed
+            failed = db_failed or failed
+            continue
+        if target.exists():
+            try:
+                if path.stat().st_mtime_ns <= target.stat().st_mtime_ns:
+                    continue
+            except OSError:
+                continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        changed = True
+    return changed, failed
+
+
+def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
+    sessions_dir = Path(session_home).parent
+    if not sessions_dir.is_dir():
+        return False, False
+
+    candidates_by_profile = {}
     for session_dir in sessions_dir.iterdir():
-        if _opencode_profile_slug_from_session(session_dir) != state_root.name:
+        profile_slug = _opencode_legacy_profile_slug_from_session(session_dir)
+        if not profile_slug:
             continue
         data_dir = session_dir / ".local" / "share" / "opencode"
         if not data_dir.is_dir():
@@ -126,37 +448,49 @@ def _migrate_opencode_data_to_shared_state(session_home, state_root):
             mtime = data_dir.stat().st_mtime
         except OSError:
             mtime = 0
-        candidates.append((mtime, data_dir))
+        candidates_by_profile.setdefault(profile_slug, []).append((mtime, data_dir))
 
     copied = False
-    target_opencode_dir = state_root / "opencode"
-    for _mtime, data_dir in sorted(candidates, reverse=True):
-        copied = _copy_missing_tree(data_dir, target_opencode_dir) or copied
-
-    state_root.mkdir(parents=True, exist_ok=True)
-    marker.write_text("migrated=1\n" if copied else "migrated=0\n", encoding="utf-8")
-    return copied
+    failed = False
+    for profile_slug, candidates in candidates_by_profile.items():
+        state_root = _opencode_profile_state_root(real_user_path, profile_slug)
+        target_opencode_dir = state_root / "opencode"
+        profile_migrated = False
+        profile_failed = False
+        for _mtime, data_dir in sorted(candidates, reverse=True):
+            tree_changed, tree_failed = _sync_opencode_tree(data_dir, target_opencode_dir)
+            profile_migrated = tree_changed or profile_migrated
+            profile_failed = tree_failed or profile_failed
+        _write_opencode_shared_state_marker(state_root, migrated=bool(candidates) and not profile_failed)
+        copied = profile_migrated or copied
+        failed = profile_failed or failed
+    return copied, failed
 
 
 def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
     """Keep real HOME/config soft; share OpenCode data/state by profile."""
     profile_slug = opencode_profile_state_slug(profile_id)
     real_home = real_user_path()
-    state_root = real_user_path(".local", "share", "mms-opencode", "state", profile_slug)
+    state_root = _opencode_profile_state_root(real_user_path, profile_slug)
     _write_opencode_profile_marker(session_home, profile_slug)
     env["HOME"] = real_home
     env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
     env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")
     if _opencode_isolate_data_enabled(env):
+        _write_opencode_isolate_data_marker(session_home)
         env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
         env["XDG_STATE_HOME"] = os.path.join(session_home, ".local", "state")
         env.pop("MMS_OPENCODE_STATE_SHARED", None)
     else:
         os.makedirs(state_root, exist_ok=True)
-        _migrate_opencode_data_to_shared_state(session_home, state_root)
-        env["XDG_DATA_HOME"] = state_root
-        env["XDG_STATE_HOME"] = state_root
+        _migrated, migration_failed = _migrate_opencode_data_to_shared_state(session_home, real_user_path=real_user_path)
+        env["XDG_DATA_HOME"] = str(state_root)
+        env["XDG_STATE_HOME"] = str(state_root)
         env["MMS_OPENCODE_STATE_SHARED"] = "1"
+        if migration_failed:
+            env["MMS_OPENCODE_MIGRATION_FAILED"] = "1"
+        else:
+            env.pop("MMS_OPENCODE_MIGRATION_FAILED", None)
     env["MMS_HOME_ISOLATION_MODE"] = "soft"
     env["MMS_SOFT_HOME"] = "1"
     env["MMS_OPENCODE_SOFT_HOME"] = "1"
@@ -236,7 +570,8 @@ def opencode_gateway_env(
     inject_real_home_hints(env)
     inject_selected_model_name(env, model, model_info=model_info)
     set_opencode_soft_home(env, session_home, profile_id=opencode_profile_id)
-    cleanup_stale_sessions(sessions_dir)
+    if env.get("MMS_OPENCODE_MIGRATION_FAILED") != "1":
+        cleanup_stale_sessions(sessions_dir)
 
     config_dir = os.path.join(env["XDG_CONFIG_HOME"], "opencode")
     os.makedirs(config_dir, exist_ok=True)
