@@ -84,6 +84,18 @@ converged | leaning | split_human_required | insufficient_evidence
 unchanged | softened | switched
 ```
 
+### `assigned_role`
+
+```text
+proponent | opponent | steelman | free
+```
+
+### `stance_authenticity`
+
+```text
+honest | assigned
+```
+
 ### `synthesis_strategy`
 
 ```text
@@ -206,7 +218,7 @@ Stores blind first pass outputs from all selected members.
         "MMS-MODE": "debate",
         "MMS-SOURCE": "user-pasted"
       },
-      "lens": "proponent",
+      "assigned_role": "proponent",
       "stance": "independent debate profile",
       "claim": "debate should be separate from committee",
       "evidence": ["RFC boundary requires separation"],
@@ -229,6 +241,7 @@ Stores blind first pass outputs from all selected members.
 
 - `member_id`
 - `mission`
+- `assigned_role`
 - `stance`
 - `claim`
 - `evidence`
@@ -238,6 +251,22 @@ Stores blind first pass outputs from all selected members.
 - `pushback`
 - `quality_gate`
 - `provenance`
+
+`assigned_role` records the adversarial role the host assigned for this round
+(`proponent | opponent | steelman | free`). Role semantics:
+
+- `proponent`: argue for the proposition / the change.
+- `opponent`: argue against it.
+- `steelman`: build the strongest possible version of the position the member
+  privately disagrees with, so the opposing case is tested at full strength
+  rather than as a strawman.
+- `free`: no role was assigned; the member argues from its own judgment.
+
+Seed and crossfire are argued from the assigned role. Assigning roles is
+optional: the host may leave every member `free` (the all-`free` default). When
+all members are `free`, no member's stance is role-induced, so the host treats
+every `final_stance` as a candidate for genuine conviction and applies the
+normal `stance_authenticity` self-mark in round 4.
 
 ### Rules
 
@@ -305,6 +334,7 @@ Stores opponent-summary rebuttal outputs.
         "MMS-MODE": "debate",
         "MMS-SOURCE": "user-pasted"
       },
+      "assigned_role": "opponent",
       "opponent_strongest_point": "skill-first rollout reduces risk",
       "my_rebuttal": "it weakens public product surface",
       "what_i_accept": ["risk is lower"],
@@ -323,6 +353,8 @@ Stores opponent-summary rebuttal outputs.
 
 - Do not attach full opponent transcript.
 - Use strongest-opposing-case summaries only.
+- Echo `assigned_role` so the host can separate assigned advocacy from genuine
+  conviction during revision.
 
 ## `round-4-revision.json`
 
@@ -353,6 +385,7 @@ Stores stance updates after crossfire.
         "MMS-SOURCE": "user-pasted"
       },
       "final_stance": "independent profile",
+      "stance_authenticity": "honest",
       "stance_shift": "unchanged",
       "shift_reason": "opposing case lowered risk concerns but not enough to change boundary judgment",
       "confidence": 0.79,
@@ -364,6 +397,13 @@ Stores stance updates after crossfire.
   ]
 }
 ```
+
+### Rules
+
+- `stance_authenticity` is required. `final_stance` must be the member's honest
+  post-debate position, not the role it was assigned to argue.
+- Stances with `stance_authenticity=assigned` are advocacy, not conviction, and
+  must not be counted as genuine convergence by the host rubric.
 
 ## `resolution.json`
 
