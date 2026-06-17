@@ -3265,6 +3265,25 @@ def test_debate_contract_declares_assigned_role_and_stance_authenticity():
     assert "stance_authenticity" in revision
     # The stale lens field must not linger in the seed example.
     assert '"lens"' not in round1
+    # steelman must have a behavioral definition, not just sit in the enum;
+    # the all-free default boundary must be documented.
+    assert "steelman`: build the strongest" in contract
+    assert "all-`free`" in contract
+
+    # The host rubric that the host actually consults must enforce the
+    # stance_authenticity honesty filter, not only the contract/prompt text.
+    # This guards the slice-3 gap where convergence was declared on raw camps.
+    rubric = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "docs"
+        / "DEBATE_HOST_RESOLUTION_RUBRIC_v1.md"
+    ).read_text(encoding="utf-8")
+    converged = rubric.split("### Emit `converged`")[1].split("### Emit `leaning`")[0]
+    leaning = rubric.split("### Emit `leaning`")[1].split("## Priority order")[0]
+    assert "stance_authenticity=honest" in converged
+    assert "stance_authenticity=honest" in leaning
+    # assigned stances must be explicitly excluded from convergence in the rubric.
+    assert "stance_authenticity" in rubric.split("## Step 3")[0]
 
 
 def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatch):
@@ -3402,6 +3421,13 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
         assert "stance_authenticity" in member_prompt
     # Primary host must require assigned_role in both seed and crossfire rounds.
     assert host_prompt_lower.count("assigned_role") >= 2
+    # Fallback host-pro must be symmetric: assigned_role in more than one place
+    # (assign + echo in fields) and the same convergence exclusion, not a single
+    # passing mention.
+    assert host_pro_prompt.count("assigned_role") >= 2
+    assert "stance_authenticity=assigned" in host_pro_prompt
+    # Both hosts must exclude assigned stances from genuine convergence.
+    assert "stance_authenticity=assigned" in host_prompt_lower
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt

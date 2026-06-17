@@ -253,8 +253,20 @@ Stores blind first pass outputs from all selected members.
 - `provenance`
 
 `assigned_role` records the adversarial role the host assigned for this round
-(`proponent | opponent | steelman | free`); `free` means no role was assigned.
-Seed and crossfire are argued from the assigned role.
+(`proponent | opponent | steelman | free`). Role semantics:
+
+- `proponent`: argue for the proposition / the change.
+- `opponent`: argue against it.
+- `steelman`: build the strongest possible version of the position the member
+  privately disagrees with, so the opposing case is tested at full strength
+  rather than as a strawman.
+- `free`: no role was assigned; the member argues from its own judgment.
+
+Seed and crossfire are argued from the assigned role. Assigning roles is
+optional: the host may leave every member `free` (the all-`free` default). When
+all members are `free`, no member's stance is role-induced, so the host treats
+every `final_stance` as a candidate for genuine conviction and applies the
+normal `stance_authenticity` self-mark in round 4.
 
 ### Rules
 
