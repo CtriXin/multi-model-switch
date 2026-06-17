@@ -293,7 +293,7 @@ def extract_opencode_committee_tier(value):
     raw = str(value or "").strip()
     if not raw:
         return ""
-    normalized = raw.lower().replace(" ", "-")
+    normalized = raw.lower().replace(" ", "-").replace("_", "-")
     prefix = "committee-"
     if not normalized.startswith(prefix):
         return ""

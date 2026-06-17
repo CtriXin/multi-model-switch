@@ -2051,9 +2051,10 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     assert "OpenCode 默认 profile" in html
     assert "OpenCode Review Host" in html
     assert "重新启动 OpenCode 后才生效" in html
-    assert "opencodeReviewHostPrimarySelect" in html
-    assert "opencodeReviewHostFallbackSelect" in html
-    assert "加入 primary" in html
+    assert "opencodeReviewHostPrimaryPicker" in html
+    assert "opencodeReviewHostFallbackPicker" in html
+    assert "data-op-picker-filter" in html
+    assert "data-op-picker-chip-remove" in html
     assert "data-review-host-reset" in html
     assert "OpenCode Agent 名单" in html
     assert "顺序表示 priority/fallback 顺序，不是 round-robin" in html
@@ -2707,6 +2708,45 @@ def test_config_web_snapshot_exposes_committee_picker_defaults(tmp_path):
     assert presets["heavy"]["default_host_fallback"] == "gpt-5.4"
     assert presets["heavy"]["default_channel"] == "direct"
     assert presets["vision"]["default_members"] == ["mimo-v2.5-pro", "kimi-k2.5"]
+
+
+def test_config_web_plan_persists_committee_picker_round_trip(tmp_path):
+    cfg = {"opencode": {}}
+    payload = {
+        "draft": {
+            "opencode": {
+                "committee_presets": [
+                    {
+                        "tier": "heavy",
+                        "host_primary": "gpt-5.5",
+                        "host_fallback": "gpt-5.4",
+                        "members": ["gpt-5.5", "deepseek-v4-pro"],
+                        "channel": "newapi-cn",
+                        "is_default": False,
+                    },
+                    {
+                        "tier": "light",
+                        "host_primary": "gpt-5.4",
+                        "members": ["gpt-5.4"],
+                        "channel": "direct",
+                        "is_default": True,
+                    },
+                ]
+            }
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+    presets = plan["config"]["opencode"]["committee"]["presets"]
+
+    assert presets == {
+        "heavy": {
+            "host_primary": "gpt-5.5",
+            "host_fallback": "gpt-5.4",
+            "members": ["gpt-5.5", "deepseek-v4-pro"],
+            "channel": "newapi-cn",
+        }
+    }
 
 
 def test_config_web_plan_persists_opencode_agent_roster_delta(tmp_path):

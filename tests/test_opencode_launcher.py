@@ -3656,6 +3656,7 @@ def test_committee_tier_extraction():
     import mms_opencode_profiles as profiles
 
     assert profiles.extract_opencode_committee_tier("committee-fast") == "fast"
+    assert profiles.extract_opencode_committee_tier("committee_fast") == "fast"
     assert profiles.extract_opencode_committee_tier("committee-heavy") == "heavy"
     assert profiles.extract_opencode_committee_tier("committee") == ""
     assert profiles.extract_opencode_committee_tier("") == ""
@@ -3725,6 +3726,61 @@ def test_committee_prepare_uses_tier_preset_when_no_explicit(monkeypatch):
     )
     assert selection["host"] == "gpt-5.5"
     assert [item["model"] for item in selection["selected"]] == ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"]
+
+
+def test_committee_prepare_wires_tier_channel_and_host_fallback(monkeypatch):
+    import mms_core
+
+    direct = _runtime(
+        id="direct",
+        name="Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    newapi = _runtime(
+        id="newapi-cn",
+        name="NewAPI CN",
+        openai_base_url="https://newapi.example/v1",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    cfg = {
+        "providers": [direct, newapi],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"committee": {"presets": {
+            "heavy": {
+                "host_primary": "gpt-5.5",
+                "host_fallback": "gpt-5.4",
+                "members": ["gpt-5.5", "deepseek-v4-pro"],
+                "channel": "newapi-cn",
+            },
+        }}},
+    }
+    models = ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"]
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(direct, models), (newapi, models)])
+
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, direct, models, interactive=False, committee_tier="heavy",
+    )
+    roster = committee_cfg["opencode"]["agent_roster"]
+
+    assert selection["host"] == "gpt-5.5"
+    assert selection["host_fallback"] == "gpt-5.4"
+    assert selection["channel"] == "newapi-cn"
+    assert {item["provider_id"] for item in selection["selected"]} == {"newapi-cn"}
+    assert roster["committee-host"]["provider_id"] == "newapi-cn"
+    assert roster["committee-host-pro"]["model"] == "gpt-5.4"
+    assert roster["committee-host-pro"]["provider_id"] == "newapi-cn"
+    assert roster["committee-deepseek-v4-pro"]["provider_id"] == "newapi-cn"
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(committee_cfg, direct, models, "committee")
+    routes = {route["id"]: route for route in runtime["opencode_routes"]}
+
+    assert model_info == {"model": "gpt-5.5", "profile": "committee"}
+    assert routes["builder_primary"]["provider_id"] == "newapi-cn"
+    assert routes["builder_fallback"]["provider_id"] == "newapi-cn"
+    assert routes["custom_committee-deepseek-v4-pro"]["provider_id"] == "newapi-cn"
 
 
 def test_committee_prepare_bare_tier_matches_standard_default(monkeypatch):
