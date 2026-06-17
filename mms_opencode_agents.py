@@ -20,7 +20,10 @@ OPENCODE_REVIEW_MISSION_CONTRACT = (
     "brief. Final chat synthesis must include a visible mission trace in the "
     "copy-forward/provenance area or immediately after human-facing notes, and "
     "repeat at least MMS-MISSION and MMS-TARGET at the bottom so pasted findings "
-    "remain traceable. The body trace and bottom footer identify the same current "
+    "remain traceable. When this output is pasted into a new session or forwarded "
+    "to another agent, carry MMS-MISSION and MMS-TARGET forward verbatim so the "
+    "receiving agent can continue the same dispatch without losing identity. "
+    "The body trace and bottom footer identify the same current "
     "manual dispatch; never use them as previous/next pointers."
 )
 
@@ -1008,7 +1011,9 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
         "synthesis, after the copy-forward packet and before the trace footer. "
         "(4) 追踪页脚 / Trace Footer: finally, repeat MMS-MISSION plus MMS-TARGET "
         "at the very end. The 追踪块 / Trace and 追踪页脚 / Trace Footer identify "
-        "the same current dispatch; they are not previous/next pointers. Do not "
+        "the same current dispatch; they are not previous/next pointers. "
+        "When this output is pasted into a new session or forwarded, the receiving "
+        "agent must carry MMS-MISSION and MMS-TARGET forward verbatim. Do not "
         "place 追踪块 / Trace before 人需要看的 / Human Notes. "
     )
     host_prompt = (
