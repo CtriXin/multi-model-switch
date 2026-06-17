@@ -3730,6 +3730,20 @@ def test_committee_preset_bare_preserves_current_default():
     assert standard_default["host_primary_channel"] == "uscrsopenai"
 
 
+def test_committee_heavy_default_is_stronger_than_standard():
+    import mms_opencode_profiles as profiles
+
+    standard = profiles.opencode_committee_preset_config({}, "standard")
+    heavy = profiles.opencode_committee_preset_config({}, "heavy")
+
+    assert heavy["host_primary"] == "gpt-5.5"
+    assert heavy["host_fallback"] == "gpt-5.4"
+    assert heavy["members"][:2] == ["claude-opus-4-6-thinking", "gemini-3-flash-agent(high)"]
+    assert "gpt-5.4" in heavy["members"]
+    assert heavy["member_channels"]["claude-opus-4-6-thinking"] == "newapi-personal-tokyo"
+    assert heavy["members"] != standard["members"]
+
+
 def test_committee_fast_requires_two_members():
     import mms_opencode_profiles as profiles
 
