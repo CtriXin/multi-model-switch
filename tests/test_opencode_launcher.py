@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -3549,10 +3550,15 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "artifact-first dispatch" in host_prompt_lower
     assert "full artifact" in host_prompt_lower
     assert "task-local model timing" in host_prompt_lower
-    assert "return order" in host_prompt_lower
-    assert "elapsed wall time" in host_prompt_lower
+    assert "calibrated per-member elapsed time" in host_prompt_lower
+    assert "service=session.processor" in host_prompt_lower
+    assert "exiting loop" in host_prompt_lower
     assert "speed ratio" in host_prompt_lower
-    assert "not_captured" in host_prompt
+    assert "same-batch same-tier" in host_prompt_lower
+    assert "never cross-compare across batches" in host_prompt_lower
+    assert "committee-timing.jsonl" in host_prompt_lower
+    assert "never write" in host_prompt_lower and "as not_captured" in host_prompt_lower
+    assert "not_captured" not in re.sub(r"never write .* as not_captured", "", host_prompt)
     assert "final synthesis order" in host_prompt_lower
     assert "simplified chinese section titles" in host_prompt_lower
     assert "do not wrap the copy-forward packet in a fenced code block" in host_prompt_lower
