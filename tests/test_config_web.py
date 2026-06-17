@@ -2700,6 +2700,15 @@ def test_config_web_snapshot_and_plan_persist_opencode_review_host(tmp_path):
     assert profile_payload["runtime_config"]["opencode"]["review"]["host"] == host
 
 
+def test_config_web_snapshot_exposes_committee_picker_defaults(tmp_path):
+    snapshot = mms_config_web.build_config_snapshot({}, config_path=str(tmp_path / "config.toml"))
+    presets = {row["tier"]: row for row in snapshot["opencode"]["committee_presets"]}
+
+    assert presets["heavy"]["default_host_fallback"] == "gpt-5.4"
+    assert presets["heavy"]["default_channel"] == "direct"
+    assert presets["vision"]["default_members"] == ["mimo-v2.5-pro", "kimi-k2.5"]
+
+
 def test_config_web_plan_persists_opencode_agent_roster_delta(tmp_path):
     cfg = {"opencode": {"default_profile": "lite_pro_orchestrated"}}
     payload = {

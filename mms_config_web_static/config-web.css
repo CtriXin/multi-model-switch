@@ -1773,6 +1773,133 @@
     }
     .diff { max-height: 320px; }
 
+
+    /* ===== OpenCode model pickers ===== */
+    .model-picker,
+    .committee-tier-card {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .model-picker summary,
+    .committee-tier-card summary {
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: minmax(0, .45fr) minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      list-style: none;
+      user-select: none;
+    }
+    .model-picker summary::-webkit-details-marker,
+    .committee-tier-card summary::-webkit-details-marker { display: none; }
+    .model-picker summary::after,
+    .committee-tier-card summary::after {
+      content: "展开";
+      justify-self: end;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .model-picker[open] summary::after,
+    .committee-tier-card[open] summary::after { content: "收起"; }
+    .model-picker summary strong,
+    .committee-tier-card summary strong { display: block; }
+    .model-picker summary small,
+    .committee-tier-card summary small {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .model-picker-selected,
+    .committee-tier-card summary .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+    }
+    .model-picker-filters {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      padding: 0 14px 12px;
+      border-top: 1px solid var(--border);
+    }
+    .model-picker-filters label {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .model-picker-table-wrap {
+      max-height: 270px;
+      overflow: auto;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .model-picker-table {
+      min-width: 0;
+      table-layout: fixed;
+      font-size: 12.5px;
+    }
+    .model-picker-table th:first-child,
+    .model-picker-table td:first-child { width: 46px; }
+    .model-picker-table th:nth-child(2),
+    .model-picker-table td:nth-child(2) { width: 58%; }
+    .model-picker-table th:nth-child(3),
+    .model-picker-table td:nth-child(3) { width: 32%; }
+    .model-picker-table th {
+      position: sticky;
+      top: 0;
+      text-transform: none;
+      letter-spacing: .02em;
+      background: var(--surface);
+    }
+    .model-picker-table td {
+      vertical-align: middle;
+      background: var(--surface);
+    }
+    .model-picker-table small {
+      display: block;
+      color: var(--muted);
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .model-picker-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 3px;
+    }
+    .model-picker-tags .tag {
+      margin: 0;
+      padding: 2px 7px;
+      font-size: 10px;
+    }
+    .model-picker-footer {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .committee-preset-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .committee-tier-card[open] {
+      border-color: color-mix(in oklch, var(--accent) 28%, var(--border));
+    }
+    .committee-tier-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+      padding: 0 14px 14px;
+      border-top: 1px solid var(--border);
+    }
+    .committee-tier-grid > * { margin-top: 12px; }
+    .committee-tier-grid button { margin-top: 10px; }
+
     .migration-grid .card {
       align-content: start;
     }

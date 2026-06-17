@@ -2225,7 +2225,9 @@ def _normalize_opencode_committee_presets(opencode_cfg: dict[str, Any]) -> list[
                 "is_default": user_value is None,
                 "user_value": user_value,
                 "default_host_primary": builtin.get("host_primary") or "",
+                "default_host_fallback": builtin.get("host_fallback") or "",
                 "default_members": list(builtin.get("members") or []),
+                "default_channel": builtin.get("channel") or "direct",
             }
         )
     return rows
