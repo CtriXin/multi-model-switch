@@ -304,17 +304,21 @@ def extract_opencode_committee_tier(value):
 def opencode_committee_preset_config(cfg, tier=""):
     """Resolve a committee tier preset to {host_primary, host_fallback, members, channel}.
 
-    Precedence: user config `opencode.committee.presets.{tier}` > built-in
+    Precedence for an explicit tier: user config
+    `opencode.committee.presets.{tier}` > built-in
     `OPENCODE_COMMITTEE_TIER_DEFAULTS`. An unknown/empty tier falls back to the
-    default tier ("standard"). Always returns a complete dict so callers never
-    need to special-case missing keys.
+    built-in default tier ("standard") without reading editable presets; this
+    keeps bare `--profile committee` on the legacy committee host path. Always
+    returns a complete dict so callers never need to special-case missing keys.
     """
-    resolved_tier = tier if tier in OPENCODE_COMMITTEE_TIERS else OPENCODE_COMMITTEE_DEFAULT_TIER
+    requested_tier = str(tier or "").strip()
+    explicit_tier = requested_tier in OPENCODE_COMMITTEE_TIERS
+    resolved_tier = requested_tier if explicit_tier else OPENCODE_COMMITTEE_DEFAULT_TIER
     cfg = cfg if isinstance(cfg, dict) else {}
     opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
     committee = opencode.get("committee") if isinstance(opencode.get("committee"), dict) else {}
     presets = committee.get("presets") if isinstance(committee.get("presets"), dict) else {}
-    user_preset = presets.get(resolved_tier) if isinstance(presets.get(resolved_tier), dict) else {}
+    user_preset = presets.get(resolved_tier) if explicit_tier and isinstance(presets.get(resolved_tier), dict) else {}
 
     base = dict(OPENCODE_COMMITTEE_TIER_DEFAULTS.get(resolved_tier) or {})
     host_primary = str(user_preset.get("host_primary") or base.get("host_primary") or "").strip()

@@ -3673,15 +3673,27 @@ def test_committee_preset_reader_default_and_override():
     assert standard["channel"] == "direct"
 
     cfg = {"opencode": {"committee": {"presets": {
+        "standard": {"host_primary": "gpt-5.5", "members": ["deepseek-v4-pro"], "channel": "newapi-cn"},
         "fast": {"host_primary": "gpt-5.5", "members": ["gpt-5.5", "deepseek-v4-pro"], "channel": "direct"},
     }}}}
+    bare = profiles.opencode_committee_preset_config(cfg, "")
+    assert bare["host_primary"] == "gpt-5.4"
+    assert bare["members"] == ["gpt-5.4"]
+    assert bare["channel"] == "direct"
+
+    edited_standard = profiles.opencode_committee_preset_config(cfg, "standard")
+    assert edited_standard["host_primary"] == "gpt-5.5"
+    assert edited_standard["members"] == ["deepseek-v4-pro"]
+    assert edited_standard["channel"] == "newapi-cn"
+
     fast = profiles.opencode_committee_preset_config(cfg, "fast")
     assert fast["host_primary"] == "gpt-5.5"
     assert fast["members"] == ["gpt-5.5", "deepseek-v4-pro"]
 
-    # Unknown tier falls back to the default tier (standard) defaults, never crashes.
-    unknown = profiles.opencode_committee_preset_config({}, "turbo")
+    # Unknown tier falls back to built-in standard defaults, never editable standard.
+    unknown = profiles.opencode_committee_preset_config(cfg, "turbo")
     assert unknown["host_primary"] == "gpt-5.4"
+    assert unknown["members"] == ["gpt-5.4"]
 
 
 def test_committee_preset_standard_aligns_current_default():
@@ -3786,14 +3798,21 @@ def test_committee_prepare_wires_tier_channel_and_host_fallback(monkeypatch):
 def test_committee_prepare_bare_tier_matches_standard_default(monkeypatch):
     import mms_core
 
-    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {"committee": {"presets": {
+            "standard": {"host_primary": "gpt-5.5", "members": ["deepseek-v4-pro"]},
+        }}},
+    }
     provider = _runtime(
         id="mixed",
         name="Mixed",
         supported_clis=["codex", "opencode"],
         protocols=["anthropic_messages", "openai_chat_completions"],
     )
-    models = ["gpt-5.4", "gpt-5.5"]
+    models = ["gpt-5.4", "gpt-5.5", "deepseek-v4-pro"]
     monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, models)])
 
     # Bare committee (no tier) resolves via the standard tier default = current behavior.
@@ -3802,6 +3821,15 @@ def test_committee_prepare_bare_tier_matches_standard_default(monkeypatch):
     )
     assert selection["host"] == "gpt-5.4"
     assert [item["model"] for item in selection["selected"]] == ["gpt-5.4"]
+
+    # Explicit `committee-standard` is the editable standard preset; bare
+    # `committee` remains the legacy host path above.
+    _standard_cfg, standard_selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, provider, models, interactive=False, committee_tier="standard",
+    )
+    assert standard_selection["host"] == "gpt-5.5"
+    assert [item["model"] for item in standard_selection["selected"]] == ["deepseek-v4-pro"]
+    assert standard_selection["source"] == "tier"
 
 
 def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatch):
