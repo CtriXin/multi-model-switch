@@ -2080,6 +2080,33 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     assert "session-local opencode.json" in html
 
 
+def test_config_web_opencode_picker_avoids_interactive_summary_controls():
+    html = _frontend_source()
+
+    picker_fn = html.split("function opencodeModelPicker", 1)[1].split("function bindOpencodeModelPickers", 1)[0]
+    picker_summary = picker_fn.split("</summary>", 1)[0]
+    committee_fn = html.split("function renderCommitteePresets", 1)[1].split("function renderCommitteeSummary", 1)[0]
+    committee_summary = committee_fn.split("</summary>", 1)[0]
+
+    assert "data-op-picker-chip-remove" not in picker_summary
+    assert "opencodePickerSummaryChips" in picker_summary
+    assert "model-picker-selected-actions" in picker_fn
+    assert "data-committee-reset" not in committee_summary
+    assert "committee-tier-actions" in committee_fn
+
+
+def test_config_web_opencode_picker_prioritizes_crs_and_demotes_company_channels():
+    html = _frontend_source()
+
+    assert "provider_priority" in html
+    assert "opencodePickerIsCompany" in html
+    assert "opencodePickerIsCrs" in html
+    assert "compareOpencodePickerRows" in html
+    assert "compareOpencodePickerChannels" in html
+    assert "selectedChannelKey" in html
+    assert "rowChannelKey===selectedChannelKey" in html
+
+
 def test_config_web_snapshot_has_agent_roster_catalog():
     snapshot = mms_config_web.build_config_snapshot({"providers": []}, config_path="/tmp/mms/config.toml")
     catalog = snapshot["opencode"]["agent_catalog"]
