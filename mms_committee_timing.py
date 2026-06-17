@@ -38,9 +38,17 @@ _TIMING_FILENAME = "committee-timing.jsonl"
 
 
 # Regexes aligned to observed opencode session log lines (UTC ISO-8601).
-# Example: "INFO  2026-06-17T01:36:29 +0ms service=session.processor session.id=ses_xxx ... process"
+# The session.created line uses the form "service=session id=ses_xxx",
+# while processor/prompt lines use "service=session.<x> session.id=ses_xxx".
+# Match BOTH so member extraction (which lives on the created line) works.
 _TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*[+-]\d+ms")
-_SESSION_ID_RE = re.compile(r"session\.id=(ses_[A-Za-z0-9]+)")
+# The session.created line uses "service=session id=ses_xxx", while
+# processor/prompt lines use "service=session.<x> session.id=ses_xxx".
+# The (?:^|\s) anchor + separate capture group keeps group(1) clean of the
+# leading whitespace/marker so downstream session-id equality works across
+# both line forms. Session ids contain underscores (e.g. ses_12c4b640dffe...),
+# so the character class must include '_'.
+_SESSION_ID_RE = re.compile(r"(?:^|\s)(?:session\.)?id=(ses_[A-Za-z0-9_]+)")
 _PROCESSOR_PROCESS_RE = re.compile(r"service=session\.processor\b.*\bprocess\b")
 _PROMPT_EXITING_RE = re.compile(r"service=session\.prompt\b.*\bexiting loop\b")
 _SESSION_CREATED_RE = re.compile(r"service=session\b.*\bcreated\b")
@@ -57,7 +65,10 @@ class MemberTiming:
     """One member's timing within a single dispatch batch."""
 
     member: str
-    model_id: str | None
+    # model_id is intentionally omitted: the opencode session.created JSON blob
+    # does not carry a model field, and guessing it from the member name would
+    # duplicate the member field. Downstream consumers needing model should join
+    # on the mms roster/config by member name.
     session_id: str
     process_start_ts: str | None  # ISO-8601 UTC, from session.processor process event
     exiting_loop_ts: str | None  # ISO-8601 UTC, from session.prompt exiting loop event
@@ -141,7 +152,6 @@ def extract_member_sessions(
             sid,
             {
                 "member": None,
-                "model_id": None,
                 "process_at": None,
                 "exiting_at": None,
                 "created_at_unix_ms": None,
@@ -222,7 +232,6 @@ def compute_batch_timing(
         members.append(
             MemberTiming(
                 member=e["member"],
-                model_id=e.get("model_id"),
                 session_id=sid,
                 process_start_ts=e.get("process_at"),
                 exiting_loop_ts=e.get("exiting_at"),
@@ -325,7 +334,11 @@ def render_timing_table(batch: BatchTiming) -> str:
             "(same-batch same-tier comparison)._"
         )
     header = (
-        "| 返回顺序 | 成员 | process 开始(UTC) | exiting loop(UTC) | "
+        # Header says "耗时排名" (elapsed rank), NOT "返回顺序" (return order):
+        # members are sorted by elapsed_s, which only equals return order when
+        # all members start at the same instant. With staggered dispatch starts
+        # the two can diverge, so we label the column by what we actually sort on.
+        "| 耗时排名 | 成员 | process 开始(UTC) | exiting loop(UTC) | "
         "耗时 | 相对最快 |\n"
         "|---|---|---|---|---|---|\n"
     )

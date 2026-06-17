@@ -57,6 +57,30 @@ SAMPLE_LOG_LINES = [
 ]
 
 
+# Production-format log lines: the created line uses 'service=session id=ses_xxx'
+# (NOT 'session.id='), while processor/prompt lines use 'session.id='. This is
+# the actual opencode emit form; the extractor must match BOTH to reach the
+# title (where the member name lives) on the created line.
+PRODUCTION_FORMAT_LINES = [
+    'INFO  2026-06-17T03:51:29 +1ms service=session id=ses_prod_gpt '
+    'slug=stellar-rocket version=1.15.10 '
+    'title=审议 PR #65 (@committee-gpt-5-5-14 subagent) '
+    'time={"created":1781668289522,"updated":1781668289522} created',
+    'INFO  2026-06-17T03:51:29 +0ms service=session.processor session.id=ses_prod_gpt '
+    'messageID=msg_pg process',
+    'INFO  2026-06-17T03:54:59 +0ms service=session.prompt session.id=ses_prod_gpt '
+    'exiting loop',
+    'INFO  2026-06-17T03:51:29 +1ms service=session id=ses_prod_ds '
+    'slug=happy-garden '
+    'title=审议 PR #65 (@committee-deepseek-v4-pro-20 subagent) '
+    'time={"created":1781668289536} created',
+    'INFO  2026-06-17T03:51:29 +0ms service=session.processor session.id=ses_prod_ds '
+    'messageID=msg_pd process',
+    'INFO  2026-06-17T03:53:18 +0ms service=session.prompt session.id=ses_prod_ds '
+    'exiting loop',
+]
+
+
 def test_parse_iso_utc_roundtrip():
     dt = parse_iso_utc("2026-06-17T01:36:29")
     assert dt.year == 2026 and dt.month == 6 and dt.day == 17
@@ -71,6 +95,35 @@ def test_extract_member_sessions_finds_three_members():
         "committee-deepseek-v4-pro-20",
         "committee-kimi-k2-7-code-20",
     }
+
+
+def test_extract_handles_production_format_created_line_uses_id_not_session_id():
+    # Regression: the created line in real opencode logs uses
+    # 'service=session id=ses_xxx' (NOT 'session.id='), while processor/prompt
+    # lines use 'session.id='. The extractor must match both so the member
+    # name on the created line is reached. This test failed before the fix.
+    sessions = extract_member_sessions(PRODUCTION_FORMAT_LINES)
+    members = {e["member"] for e in sessions.values() if e["member"]}
+    assert members == {
+        "committee-gpt-5-5-14",
+        "committee-deepseek-v4-pro-20",
+    }
+    # gpt: 03:51:29 -> 03:54:59 = 210s
+    by_member = {e["member"]: e for e in sessions.values() if e["member"]}
+    assert by_member["committee-gpt-5-5-14"]["process_at"] == "2026-06-17T03:51:29"
+    assert by_member["committee-gpt-5-5-14"]["exiting_at"] == "2026-06-17T03:54:59"
+
+
+def test_compute_batch_timing_on_production_format():
+    sessions = extract_member_sessions(PRODUCTION_FORMAT_LINES)
+    batch = compute_batch_timing(
+        sessions, mission_id="prod-1", task_kind="pr_review_gate", tier="member"
+    )
+    by_member = {m.member: m for m in batch.members}
+    # gpt 210s, deepseek 109s -> deepseek is fastest here.
+    assert by_member["committee-deepseek-v4-pro-20"].elapsed_s == 109.0
+    assert by_member["committee-gpt-5-5-14"].elapsed_s == 210.0
+    assert batch.fastest_member == "committee-deepseek-v4-pro-20"
 
 
 def test_extract_captures_process_and_exiting_timestamps():
