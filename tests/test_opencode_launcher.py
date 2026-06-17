@@ -3832,6 +3832,50 @@ def test_committee_prepare_bare_tier_matches_standard_default(monkeypatch):
     assert standard_selection["source"] == "tier"
 
 
+def test_debate_contract_declares_assigned_role_and_stance_authenticity():
+    import pathlib
+
+    contract = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "docs"
+        / "DEBATE_STATE_RESULT_CONTRACT_v1.md"
+    ).read_text(encoding="utf-8")
+    assert "### `assigned_role`" in contract
+    assert "### `stance_authenticity`" in contract
+    round1 = contract.split("## `round-3-crossfire.json`")[0]
+    crossfire = contract.split("## `round-3-crossfire.json`")[1].split(
+        "## `round-4-revision.json`"
+    )[0]
+    revision = contract.split("## `round-4-revision.json`")[1].split(
+        "## `resolution.json`"
+    )[0]
+    # Each round that the prompt requires the field in must also declare it.
+    assert "assigned_role" in round1
+    assert "assigned_role" in crossfire
+    assert "stance_authenticity" in revision
+    # The stale lens field must not linger in the seed example.
+    assert '"lens"' not in round1
+    # steelman must have a behavioral definition, not just sit in the enum;
+    # the all-free default boundary must be documented.
+    assert "steelman`: build the strongest" in contract
+    assert "all-`free`" in contract
+
+    # The host rubric that the host actually consults must enforce the
+    # stance_authenticity honesty filter, not only the contract/prompt text.
+    # This guards the slice-3 gap where convergence was declared on raw camps.
+    rubric = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "docs"
+        / "DEBATE_HOST_RESOLUTION_RUBRIC_v1.md"
+    ).read_text(encoding="utf-8")
+    converged = rubric.split("### Emit `converged`")[1].split("### Emit `leaning`")[0]
+    leaning = rubric.split("### Emit `leaning`")[1].split("## Priority order")[0]
+    assert "stance_authenticity=honest" in converged
+    assert "stance_authenticity=honest" in leaning
+    # assigned stances must be explicitly excluded from convergence in the rubric.
+    assert "stance_authenticity" in rubric.split("## Step 3")[0]
+
+
 def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatch):
     import mms_core
     import mms_launchers
@@ -3950,6 +3994,30 @@ def test_core_opencode_debate_profile_builds_structured_debate_roster(monkeypatc
         assert "debate trigger contract" in prompt_text
         assert "fork or proposition" in prompt_text
         assert "use the committee profile" in prompt_text
+        assert "assigned_role" in prompt_text
+        assert "stance_authenticity" in prompt_text
+    # Members must honor assigned_role and keep their final stance honest.
+    member_prompts = [
+        cfg["prompt"].lower()
+        for name, cfg in payload["agent"].items()
+        if name.startswith("debate-")
+        and name not in {"debate-host", "debate-host-pro"}
+    ]
+    assert member_prompts
+    for member_prompt in member_prompts:
+        # assigned_role must appear in both the seed and crossfire field lists,
+        # not just once in passing.
+        assert member_prompt.count("assigned_role") >= 2
+        assert "stance_authenticity" in member_prompt
+    # Primary host must require assigned_role in both seed and crossfire rounds.
+    assert host_prompt_lower.count("assigned_role") >= 2
+    # Fallback host-pro must be symmetric: assigned_role in more than one place
+    # (assign + echo in fields) and the same convergence exclusion, not a single
+    # passing mention.
+    assert host_pro_prompt.count("assigned_role") >= 2
+    assert "stance_authenticity=assigned" in host_pro_prompt
+    # Both hosts must exclude assigned stances from genuine convergence.
+    assert "stance_authenticity=assigned" in host_prompt_lower
     assert "mms-mission" in host_pro_prompt
     assert "mms-target" in host_pro_prompt
     assert "mms-mode" in host_pro_prompt

@@ -65,6 +65,14 @@ For each member, extract:
 - stance shift
 - confidence
 - strongest accepted opponent point
+- `assigned_role` (proponent | opponent | steelman | free)
+- `stance_authenticity` (honest | assigned)
+
+Only members whose `stance_authenticity` is `honest` count toward camp
+convergence. A `final_stance` self-marked `assigned` is advocacy the host
+requested, not conviction: record it for provenance, but never let it create or
+enlarge a convergence camp. If a member was given an `assigned_role` but did not
+self-mark `stance_authenticity`, treat that stance as `assigned` (fail closed).
 
 Produce a host-internal stance map like:
 
@@ -150,7 +158,9 @@ The host must not override this with a personal preference.
 
 ### Emit `converged` only if all of these hold
 
-- all valid members end in the same camp
+- at least 2 valid members have `stance_authenticity=honest`
+- all `stance_authenticity=honest` members end in the same camp (members whose
+  stance is `assigned` are excluded from this check and can never satisfy it)
 - no `conclusion_opposite`
 - no unresolved `fix_conflict`
 - no `deterministic_vs_opinion`
@@ -164,7 +174,8 @@ The host should explicitly name what caused convergence.
 
 ### Emit `leaning` when all of these hold
 
-- one camp clearly dominates, but minority disagreement remains
+- among `stance_authenticity=honest` members, one camp clearly dominates, but
+  minority disagreement remains
 - no `conclusion_opposite`
 - no unresolved `deterministic_vs_opinion`
 - disagreement is mostly about severity, tradeoff, or implementation depth
