@@ -11187,6 +11187,54 @@ def _opencode_committee_channel_provider_id(cfg, default_provider, channel):
     return channel if channel in _provider_map(cfg) else ""
 
 
+def _opencode_committee_channel_lookup(member_channels, model_or_token, fallback_channel=""):
+    channels = member_channels if isinstance(member_channels, dict) else {}
+    raw = str(model_or_token or "").strip()
+    raw_lower = raw.lower()
+    raw_compact = _opencode_review_compact(raw)
+    for key, value in channels.items():
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        if key_text.lower() == raw_lower or _opencode_review_compact(key_text) == raw_compact:
+            return str(value or "").strip()
+    return str(fallback_channel or "").strip()
+
+
+def _resolve_opencode_committee_models_by_channel(
+    cfg,
+    default_provider,
+    default_models,
+    tokens,
+    member_channels,
+    fallback_channel="",
+):
+    selected = []
+    unresolved = []
+    seen_models = set()
+    for token in tokens:
+        channel = _opencode_committee_channel_lookup(member_channels, token, fallback_channel)
+        provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, channel)
+        resolved, missing = _resolve_opencode_committee_models(
+            cfg,
+            default_provider,
+            default_models,
+            [token],
+            provider_id=provider_id,
+        )
+        unresolved.extend(missing)
+        for item in resolved:
+            model_key = str(item.get("model") or "").strip().lower()
+            if not model_key or model_key in seen_models:
+                continue
+            seen_models.add(model_key)
+            next_item = dict(item)
+            if provider_id and not _opencode_selection_provider_id(next_item):
+                next_item["provider_id"] = provider_id
+            selected.append(next_item)
+    return selected, unresolved
+
+
 def _opencode_committee_pool(cfg, default_provider, default_models, provider_id=""):
     pool = []
     seen = set()
@@ -11757,7 +11805,12 @@ def _prepare_opencode_committee_profile_config(
     tier_host_fallback = tier_preset.get("host_fallback") or ""
     tier_tokens = list(tier_preset.get("members") or _OPENCODE_COMMITTEE_DEFAULT_TOKENS)
     tier_channel = tier_preset.get("channel") if committee_tier else ""
+    tier_host_channel = tier_preset.get("host_primary_channel") if committee_tier else ""
+    tier_host_fallback_channel = tier_preset.get("host_fallback_channel") if committee_tier else ""
+    tier_member_channels = tier_preset.get("member_channels") if committee_tier and isinstance(tier_preset.get("member_channels"), dict) else {}
     tier_provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, tier_channel)
+    tier_host_provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, tier_host_channel or tier_channel)
+    tier_host_fallback_provider_id = _opencode_committee_channel_provider_id(cfg, default_provider, tier_host_fallback_channel or tier_channel)
     explicit_host_entry = _opencode_model_selection_entries(host_model)
     explicit_host = _opencode_selection_model(explicit_host_entry[0]) if explicit_host_entry else str(host_model or "").strip()
     saved_host = _opencode_committee_saved_host_model(cfg)
@@ -11787,12 +11840,12 @@ def _prepare_opencode_committee_profile_config(
             default_provider,
             default_models,
             [host_token],
-            provider_id=tier_provider_id if not saved_host else "",
+            provider_id=tier_host_provider_id if not saved_host else "",
         )
         resolved_host_model = selected_host[0]["model"] if selected_host else ""
     host_selection = explicit_host_entry[0] if explicit_host_entry else ({"model": resolved_host_model} if resolved_host_model else None)
-    if host_selection and tier_provider_id and not explicit_host_entry and not saved_host and not _opencode_selection_provider_id(host_selection):
-        host_selection = {**host_selection, "provider_id": tier_provider_id}
+    if host_selection and tier_host_provider_id and not explicit_host_entry and not saved_host and not _opencode_selection_provider_id(host_selection):
+        host_selection = {**host_selection, "provider_id": tier_host_provider_id}
     if unresolved_host:
         console.print(f"[yellow]Committee host 未解析: {host_token}；将使用 profile 默认 host。[/yellow]")
 
@@ -11806,12 +11859,12 @@ def _prepare_opencode_committee_profile_config(
             default_provider,
             default_models,
             [host_fallback_token],
-            provider_id=tier_provider_id if not saved_host_fallback else "",
+            provider_id=tier_host_fallback_provider_id if not saved_host_fallback else "",
         )
         resolved_host_fallback_model = selected_host_fallback[0]["model"] if selected_host_fallback else str(host_fallback_token or "").strip()
         host_fallback_selection = selected_host_fallback[0] if selected_host_fallback else {"model": resolved_host_fallback_model}
-        if tier_provider_id and not saved_host_fallback and not _opencode_selection_provider_id(host_fallback_selection):
-            host_fallback_selection = {**host_fallback_selection, "provider_id": tier_provider_id}
+        if tier_host_fallback_provider_id and not saved_host_fallback and not _opencode_selection_provider_id(host_fallback_selection):
+            host_fallback_selection = {**host_fallback_selection, "provider_id": tier_host_fallback_provider_id}
     if unresolved_host_fallback:
         console.print(f"[yellow]Committee fallback host 未解析: {host_fallback_token}；将使用 profile 默认 fallback。[/yellow]")
 
@@ -11836,13 +11889,23 @@ def _prepare_opencode_committee_profile_config(
         ]
         unresolved = []
     else:
-        selected, unresolved = _resolve_opencode_committee_models(
-            cfg,
-            default_provider,
-            default_models,
-            tokens,
-            provider_id=tier_provider_id if source == "tier" else "",
-        )
+        if source == "tier" and tier_member_channels:
+            selected, unresolved = _resolve_opencode_committee_models_by_channel(
+                cfg,
+                default_provider,
+                default_models,
+                tokens,
+                tier_member_channels,
+                tier_channel,
+            )
+        else:
+            selected, unresolved = _resolve_opencode_committee_models(
+                cfg,
+                default_provider,
+                default_models,
+                tokens,
+                provider_id=tier_provider_id if source == "tier" else "",
+            )
         selected = _opencode_enrich_selected_with_saved_providers(
             selected,
             cfg,
@@ -11858,6 +11921,9 @@ def _prepare_opencode_committee_profile_config(
             "host_token": host_token,
             "host_fallback_token": host_fallback_token,
             "channel": tier_provider_id or tier_channel or "",
+            "host_channel": tier_host_provider_id or tier_host_channel or "",
+            "host_fallback_channel": tier_host_fallback_provider_id or tier_host_fallback_channel or "",
+            "member_channels": dict(tier_member_channels) if source == "tier" else {},
             "tokens": tokens,
             "selected": [],
             "unresolved": unresolved,
@@ -11908,6 +11974,9 @@ def _prepare_opencode_committee_profile_config(
         "host_token": host_token,
         "host_fallback_token": host_fallback_token,
         "channel": tier_provider_id or tier_channel or "",
+        "host_channel": tier_host_provider_id or tier_host_channel or "",
+        "host_fallback_channel": tier_host_fallback_provider_id or tier_host_fallback_channel or "",
+        "member_channels": dict(tier_member_channels) if source == "tier" else {},
         "tokens": tokens,
         "selected": selected,
         "unresolved": unresolved,

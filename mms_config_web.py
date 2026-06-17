@@ -221,6 +221,22 @@ def _normalize_model_list(value: Any) -> list[str]:
     return _split_values(value)
 
 
+def _normalize_channel_map(value: Any, allowed_models: list[str] | None = None) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    allowed = {str(model or "").strip().lower() for model in (allowed_models or []) if str(model or "").strip()}
+    result: dict[str, str] = {}
+    for key, channel in value.items():
+        model = _safe_text(key)
+        route = _safe_text(channel)
+        if not model or not route:
+            continue
+        if allowed and model.lower() not in allowed:
+            continue
+        result[model] = route
+    return result
+
+
 def _normalize_choice_list(value: Any, allowed: tuple[str, ...], default: tuple[str, ...]) -> list[str]:
     values = []
     seen = set()
@@ -2209,25 +2225,48 @@ def _normalize_opencode_committee_presets(opencode_cfg: dict[str, Any]) -> list[
     for tier in OPENCODE_COMMITTEE_TIERS:
         resolved = opencode_committee_preset_config({"opencode": opencode_cfg or {}}, tier)
         builtin = OPENCODE_COMMITTEE_TIER_DEFAULTS.get(tier, {})
+        members = list(resolved.get("members") or [])
+        default_members = list(builtin.get("members") or [])
+        member_channels = _normalize_channel_map(resolved.get("member_channels"), members)
+        default_member_channels = _normalize_channel_map(builtin.get("member_channels"), default_members)
+        host_primary_channel = resolved.get("host_primary_channel") or resolved.get("channel") or "direct"
+        host_fallback_channel = resolved.get("host_fallback_channel") or resolved.get("channel") or "direct"
+        default_host_primary_channel = builtin.get("host_primary_channel") or builtin.get("channel") or "direct"
+        default_host_fallback_channel = builtin.get("host_fallback_channel") or builtin.get("channel") or "direct"
         user_value = None
         if isinstance(opencode_cfg, dict):
             committee = opencode_cfg.get("committee") if isinstance(opencode_cfg.get("committee"), dict) else {}
             presets = committee.get("presets") if isinstance(committee.get("presets"), dict) else {}
             if isinstance(presets.get(tier), dict):
                 user_value = presets.get(tier)
+        is_default = (
+            (resolved.get("host_primary") or "") == (builtin.get("host_primary") or "")
+            and (resolved.get("host_fallback") or "") == (builtin.get("host_fallback") or "")
+            and members == default_members
+            and (resolved.get("channel") or "direct") == (builtin.get("channel") or "direct")
+            and host_primary_channel == default_host_primary_channel
+            and host_fallback_channel == default_host_fallback_channel
+            and member_channels == default_member_channels
+        )
         rows.append(
             {
                 "tier": tier,
                 "host_primary": resolved.get("host_primary") or "",
                 "host_fallback": resolved.get("host_fallback") or "",
-                "members": list(resolved.get("members") or []),
+                "members": members,
                 "channel": resolved.get("channel") or "direct",
-                "is_default": user_value is None,
+                "host_primary_channel": host_primary_channel,
+                "host_fallback_channel": host_fallback_channel,
+                "member_channels": member_channels,
+                "is_default": is_default,
                 "user_value": user_value,
                 "default_host_primary": builtin.get("host_primary") or "",
                 "default_host_fallback": builtin.get("host_fallback") or "",
-                "default_members": list(builtin.get("members") or []),
+                "default_members": default_members,
                 "default_channel": builtin.get("channel") or "direct",
+                "default_host_primary_channel": default_host_primary_channel,
+                "default_host_fallback_channel": default_host_fallback_channel,
+                "default_member_channels": default_member_channels,
             }
         )
     return rows
@@ -2250,11 +2289,17 @@ def _normalize_opencode_committee_presets_input(payload: dict[str, Any], errors:
             continue
         if _truthy(item.get("is_default"), False):
             continue
+        members = _normalize_model_list(item.get("members"))
+        host_primary = _safe_text(item.get("host_primary"))
+        host_fallback = _safe_text(item.get("host_fallback"))
         preset = {
-            "host_primary": _safe_text(item.get("host_primary")),
-            "host_fallback": _safe_text(item.get("host_fallback")),
-            "members": _normalize_model_list(item.get("members")),
+            "host_primary": host_primary,
+            "host_fallback": host_fallback,
+            "members": members,
             "channel": _safe_text(item.get("channel")) or "direct",
+            "host_primary_channel": _safe_text(item.get("host_primary_channel")) if host_primary else "",
+            "host_fallback_channel": _safe_text(item.get("host_fallback_channel")) if host_fallback else "",
+            "member_channels": _normalize_channel_map(item.get("member_channels"), members),
         }
         preset = {key: value for key, value in preset.items() if value}
         for message in validate_opencode_committee_tier_preset(tier, preset):

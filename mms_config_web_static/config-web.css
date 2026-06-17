@@ -1836,6 +1836,23 @@
       font-size: 11.5px;
       max-width: 280px;
     }
+    .model-picker-selected-actions,
+    .committee-tier-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+      padding: 8px 12px 0;
+    }
+    .model-picker-selected-actions {
+      justify-content: flex-start;
+      border-top: 1px solid var(--border);
+      background: color-mix(in oklch, var(--bg) 58%, var(--surface));
+    }
+    .model-picker-selected-actions .chip {
+      padding: 4px 9px;
+      font-size: 11.5px;
+    }
     .committee-reset-inline {
       min-height: 28px;
       padding: 5px 10px;
