@@ -107,6 +107,28 @@ OPENCODE_DEBATE_SPECS = (
     {"key": "builder_fallback", "agent": "debate-host-pro", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
 )
 
+# Named committee tiers (issue #67). Each tier is a fixed {host, members, channel}
+# bundle that AI review consumers can select by profile alias
+# `--profile committee-<tier>` without restating the model list.
+OPENCODE_COMMITTEE_TIERS = ("fast", "light", "standard", "heavy", "vision")
+OPENCODE_COMMITTEE_DEFAULT_TIER = "standard"
+OPENCODE_COMMITTEE_DEFAULT_CHANNEL = "direct"
+
+# standard tier MUST stay aligned with the bare `--profile committee` defaults
+# (host "gpt-5.4", members ["gpt-5.4"]) so the no-tier path is unchanged.
+OPENCODE_COMMITTEE_TIER_DEFAULTS = {
+    "fast": {"host_primary": "gpt-5.4", "members": ["gpt-5.3-codex", "gpt-5.4-mini"], "channel": "direct"},
+    "light": {"host_primary": "gpt-5.4", "members": ["gpt-5.4"], "channel": "direct"},
+    "standard": {"host_primary": "gpt-5.4", "members": ["gpt-5.4"], "channel": "direct"},
+    "heavy": {
+        "host_primary": "gpt-5.5",
+        "host_fallback": "gpt-5.4",
+        "members": ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"],
+        "channel": "direct",
+    },
+    "vision": {"host_primary": "mimo-v2.5-pro", "members": ["mimo-v2.5-pro", "kimi-k2.5"], "channel": "direct"},
+}
+
 
 def _opencode_model_list(value):
     if isinstance(value, str):
@@ -236,6 +258,13 @@ def normalize_opencode_profile_id(value):
         "council": OPENCODE_COMMITTEE_PROFILE_ID,
         "board": OPENCODE_COMMITTEE_PROFILE_ID,
         "multi_committee": OPENCODE_COMMITTEE_PROFILE_ID,
+        # Committee tier aliases (issue #67): normalize to the committee profile;
+        # the tier itself is recovered via extract_opencode_committee_tier().
+        "committee_fast": OPENCODE_COMMITTEE_PROFILE_ID,
+        "committee_light": OPENCODE_COMMITTEE_PROFILE_ID,
+        "committee_standard": OPENCODE_COMMITTEE_PROFILE_ID,
+        "committee_heavy": OPENCODE_COMMITTEE_PROFILE_ID,
+        "committee_vision": OPENCODE_COMMITTEE_PROFILE_ID,
         "debate": OPENCODE_DEBATE_PROFILE_ID,
         "debates": OPENCODE_DEBATE_PROFILE_ID,
         "structured_debate": OPENCODE_DEBATE_PROFILE_ID,
@@ -252,6 +281,72 @@ def normalize_opencode_profile_id(value):
         "lite": "lite",
     }
     return aliases.get(normalized, "")
+
+
+def extract_opencode_committee_tier(value):
+    """Recover the committee tier from a raw profile string.
+
+    `normalize_opencode_profile_id` collapses `committee-fast` and `committee`
+    to the same profile id, so the tier must be re-read from the raw value.
+    Returns "" for a bare committee profile (falls back to the default tier).
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    normalized = raw.lower().replace(" ", "-")
+    prefix = "committee-"
+    if not normalized.startswith(prefix):
+        return ""
+    tier = normalized[len(prefix):]
+    return tier if tier in OPENCODE_COMMITTEE_TIERS else ""
+
+
+def opencode_committee_preset_config(cfg, tier=""):
+    """Resolve a committee tier preset to {host_primary, host_fallback, members, channel}.
+
+    Precedence: user config `opencode.committee.presets.{tier}` > built-in
+    `OPENCODE_COMMITTEE_TIER_DEFAULTS`. An unknown/empty tier falls back to the
+    default tier ("standard"). Always returns a complete dict so callers never
+    need to special-case missing keys.
+    """
+    resolved_tier = tier if tier in OPENCODE_COMMITTEE_TIERS else OPENCODE_COMMITTEE_DEFAULT_TIER
+    cfg = cfg if isinstance(cfg, dict) else {}
+    opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
+    committee = opencode.get("committee") if isinstance(opencode.get("committee"), dict) else {}
+    presets = committee.get("presets") if isinstance(committee.get("presets"), dict) else {}
+    user_preset = presets.get(resolved_tier) if isinstance(presets.get(resolved_tier), dict) else {}
+
+    base = dict(OPENCODE_COMMITTEE_TIER_DEFAULTS.get(resolved_tier) or {})
+    host_primary = str(user_preset.get("host_primary") or base.get("host_primary") or "").strip()
+    host_fallback = str(user_preset.get("host_fallback") or base.get("host_fallback") or "").strip()
+    members = _opencode_model_list(user_preset.get("members")) or _opencode_model_list(base.get("members"))
+    channel = str(user_preset.get("channel") or base.get("channel") or OPENCODE_COMMITTEE_DEFAULT_CHANNEL).strip()
+    result = {"host_primary": host_primary, "members": list(members), "channel": channel}
+    if host_fallback:
+        result["host_fallback"] = host_fallback
+    return result
+
+
+def validate_opencode_committee_tier_preset(tier, preset):
+    """Return a list of human-readable validation errors for a tier preset.
+
+    Empty list means valid. The fast tier must carry at least two members
+    (no host-only fast tier). Every tier requires a host_primary and members.
+    """
+    errors = []
+    if tier not in OPENCODE_COMMITTEE_TIERS:
+        errors.append(f"unknown committee tier: {tier!r}")
+        return errors
+    preset = preset if isinstance(preset, dict) else {}
+    host_primary = str(preset.get("host_primary") or "").strip()
+    members = _opencode_model_list(preset.get("members"))
+    if not host_primary:
+        errors.append(f"tier {tier}: host_primary is required")
+    if not members:
+        errors.append(f"tier {tier}: at least one member model is required")
+    if tier == "fast" and len(members) < 2:
+        errors.append("tier fast: at least two member models are required (no host-only fast tier)")
+    return errors
 
 
 def normalize_opencode_entrypoint(value):
@@ -449,6 +544,9 @@ __all__ = [
     "OPENCODE_BASE_PROFILE_OPTIONS",
     "OPENCODE_COMMITTEE_PROFILE_ID",
     "OPENCODE_COMMITTEE_SPECS",
+    "OPENCODE_COMMITTEE_TIERS",
+    "OPENCODE_COMMITTEE_TIER_DEFAULTS",
+    "OPENCODE_COMMITTEE_DEFAULT_TIER",
     "OPENCODE_DEBATE_PROFILE_ID",
     "OPENCODE_DEBATE_SPECS",
     "OPENCODE_DEFAULT_MODEL_PREFERENCES",
@@ -460,8 +558,11 @@ __all__ = [
     "OPENCODE_REVIEW_PROFILE_ID",
     "apply_opencode_entrypoint",
     "apply_opencode_profile",
+    "extract_opencode_committee_tier",
     "normalize_opencode_entrypoint",
     "normalize_opencode_profile_id",
+    "opencode_committee_preset_config",
+    "validate_opencode_committee_tier_preset",
     "opencode_lite_pro_specs",
     "opencode_lite_pro_specs_for_config",
     "opencode_committee_host_config",

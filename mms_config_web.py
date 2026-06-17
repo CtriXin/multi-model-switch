@@ -40,12 +40,16 @@ from mms_config_web_server import (
     serve_config_web,
 )
 from mms_opencode_profiles import (
+    OPENCODE_COMMITTEE_TIERS,
+    OPENCODE_COMMITTEE_TIER_DEFAULTS,
     OPENCODE_PROFILE_OPTIONS,
     OPENCODE_REVIEW_PROFILE_ID,
     normalize_opencode_profile_id,
+    opencode_committee_preset_config,
     opencode_lite_pro_specs,
     opencode_profile_selection_ids,
     opencode_review_host_config,
+    validate_opencode_committee_tier_preset,
 )
 
 
@@ -2193,6 +2197,71 @@ def _opencode_review_host_defaults() -> dict[str, list[str]]:
     }
 
 
+def _normalize_opencode_committee_presets(opencode_cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose the 5 committee tiers with resolved {host, members, channel} for the web UI.
+
+    Each row merges user config `opencode.committee.presets.{tier}` over the
+    built-in defaults. `is_default` marks tiers whose resolved value still equals
+    the built-in default (no user override). Read-only display data; the frontend
+    persists edits into `state.opencode.committee.presets[tier]`.
+    """
+    rows: list[dict[str, Any]] = []
+    for tier in OPENCODE_COMMITTEE_TIERS:
+        resolved = opencode_committee_preset_config({"opencode": opencode_cfg or {}}, tier)
+        builtin = OPENCODE_COMMITTEE_TIER_DEFAULTS.get(tier, {})
+        user_value = None
+        if isinstance(opencode_cfg, dict):
+            committee = opencode_cfg.get("committee") if isinstance(opencode_cfg.get("committee"), dict) else {}
+            presets = committee.get("presets") if isinstance(committee.get("presets"), dict) else {}
+            if isinstance(presets.get(tier), dict):
+                user_value = presets.get(tier)
+        rows.append(
+            {
+                "tier": tier,
+                "host_primary": resolved.get("host_primary") or "",
+                "host_fallback": resolved.get("host_fallback") or "",
+                "members": list(resolved.get("members") or []),
+                "channel": resolved.get("channel") or "direct",
+                "is_default": user_value is None,
+                "user_value": user_value,
+                "default_host_primary": builtin.get("host_primary") or "",
+                "default_members": list(builtin.get("members") or []),
+            }
+        )
+    return rows
+
+
+def _normalize_opencode_committee_presets_input(payload: dict[str, Any], errors: list[str]) -> dict[str, dict[str, Any]]:
+    """Convert the frontend committee_presets list into a `{tier: {host, members, channel}}` config dict.
+
+    Rows flagged `is_default` (or with no host/members) are dropped so the config
+    only records explicit user overrides. Invalid rows append an error message.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    raw = payload.get("committee_presets")
+    items = raw if isinstance(raw, list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        tier = _safe_text(item.get("tier"))
+        if tier not in OPENCODE_COMMITTEE_TIERS:
+            continue
+        if _truthy(item.get("is_default"), False):
+            continue
+        preset = {
+            "host_primary": _safe_text(item.get("host_primary")),
+            "host_fallback": _safe_text(item.get("host_fallback")),
+            "members": _normalize_model_list(item.get("members")),
+            "channel": _safe_text(item.get("channel")) or "direct",
+        }
+        preset = {key: value for key, value in preset.items() if value}
+        for message in validate_opencode_committee_tier_preset(tier, preset):
+            errors.append(f"committee 档位 {tier}: {message}")
+        if preset:
+            result[tier] = preset
+    return result
+
+
 def _opencode_surface_profile_id(value: Any, *, default: str = "agent") -> str:
     raw = _safe_text(value)
     if not raw:
@@ -2442,6 +2511,7 @@ def build_config_snapshot(
         "profiles": opencode_profiles,
         "review": {"host": _normalize_opencode_review_host(opencode_cfg)},
         "review_host_defaults": _opencode_review_host_defaults(),
+        "committee_presets": _normalize_opencode_committee_presets(opencode_cfg),
         "agent_models": opencode_agent_models,
         "agent_roster": _normalize_opencode_agent_roster(opencode_cfg.get("agent_roster"), profile_id=opencode_profile),
         "agent_catalog": opencode_agent_catalog,
@@ -4885,6 +4955,7 @@ def build_config_plan(
         or "agent_roster" in opencode_payload
         or "review" in opencode_payload
         or "review_host" in opencode_payload
+        or "committee_presets" in opencode_payload
     )
     if opencode_payload_touched:
         opencode_cfg = dict(next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {})
@@ -4904,6 +4975,18 @@ def build_config_plan(
             else:
                 opencode_cfg.pop("review", None)
             opencode_cfg.pop("review_host", None)
+        if "committee_presets" in opencode_payload:
+            committee_presets = _normalize_opencode_committee_presets_input(opencode_payload, errors)
+            committee_cfg = dict(opencode_cfg.get("committee") if isinstance(opencode_cfg.get("committee"), dict) else {})
+            if committee_presets:
+                committee_cfg["presets"] = committee_presets
+                opencode_cfg["committee"] = committee_cfg
+            else:
+                committee_cfg.pop("presets", None)
+                if committee_cfg:
+                    opencode_cfg["committee"] = committee_cfg
+                else:
+                    opencode_cfg.pop("committee", None)
         if agent_model_overrides:
             opencode_cfg["agent_models"] = agent_model_overrides
             opencode_cfg.pop("agent_model_overrides", None)

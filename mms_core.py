@@ -133,8 +133,10 @@ from mms_opencode_profiles import (
     OPENCODE_REVIEW_PROFILE_ID as _OPENCODE_REVIEW_PROFILE_ID,
     apply_opencode_entrypoint as _apply_opencode_entrypoint,
     apply_opencode_profile as _apply_opencode_profile,
+    extract_opencode_committee_tier as _extract_opencode_committee_tier,
     normalize_opencode_entrypoint as _normalize_opencode_entrypoint,
     normalize_opencode_profile_id as _normalize_opencode_profile_id,
+    opencode_committee_preset_config as _opencode_committee_preset_config,
     opencode_lite_pro_specs as _opencode_lite_pro_specs,
     opencode_profile_label as _opencode_profile_label,
     opencode_profile_selection as _opencode_profile_selection,
@@ -11680,16 +11682,20 @@ def _prepare_opencode_committee_profile_config(
     save_selected=False,
     save_cfg=None,
     ask_to_save=False,
+    committee_tier="",
 ):
+    tier_preset = _opencode_committee_preset_config(cfg, committee_tier)
+    tier_host = tier_preset.get("host_primary") or "gpt-5.4"
+    tier_tokens = list(tier_preset.get("members") or _OPENCODE_COMMITTEE_DEFAULT_TOKENS)
     explicit_host_entry = _opencode_model_selection_entries(host_model)
     explicit_host = _opencode_selection_model(explicit_host_entry[0]) if explicit_host_entry else str(host_model or "").strip()
     saved_host = _opencode_committee_saved_host_model(cfg)
-    host_token = explicit_host or saved_host or "gpt-5.4"
+    host_token = explicit_host or saved_host or tier_host
     explicit_entries = _opencode_model_selection_entries(model_tokens)
     explicit_tokens = [item["model"] for item in explicit_entries] if explicit_entries else _split_opencode_review_model_tokens(model_tokens)
     saved_tokens = _opencode_committee_saved_model_tokens(cfg)
-    tokens = explicit_tokens or saved_tokens or list(_OPENCODE_COMMITTEE_DEFAULT_TOKENS)
-    source = "cli" if explicit_tokens else ("saved" if saved_tokens else "default")
+    tokens = explicit_tokens or saved_tokens or tier_tokens
+    source = "cli" if explicit_tokens else ("saved" if saved_tokens else ("tier" if committee_tier else "default"))
 
     if interactive and not explicit_host and not saved_host:
         _ensure_rich()
@@ -17169,6 +17175,7 @@ def main():
         console.print("[red]--account 和 --provider 不能同时使用[/red]")
         sys.exit(1)
     requested_opencode_profile, requested_profile_entrypoint = _opencode_profile_selection(args.opencode_profile)
+    requested_committee_tier = _extract_opencode_committee_tier(args.opencode_profile)
     if args.opencode_profile and not requested_opencode_profile:
         valid_profiles = ", ".join(_opencode_profile_selection_ids())
         parser.error(f"--profile 仅支持 OpenCode mode：{valid_profiles}")
@@ -17358,6 +17365,7 @@ def main():
                     save_selected=bool(args.save_committee_models),
                     save_cfg=user_cfg,
                     ask_to_save=not bool(args.committee_models or args.committee_host_model),
+                    committee_tier=requested_committee_tier,
                 )
             elif profile_to_launch == _OPENCODE_DEBATE_PROFILE_ID:
                 profile_cfg, _debate_selection = _prepare_opencode_debate_profile_config(
