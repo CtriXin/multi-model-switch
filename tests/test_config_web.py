@@ -2739,6 +2739,9 @@ def test_config_web_snapshot_exposes_committee_picker_defaults(tmp_path):
     assert presets["standard"]["default_host_fallback"] == "gpt-5.5"
     assert presets["standard"]["default_channel"] == "uscrsopenai"
     assert presets["standard"]["default_member_channels"]["glm-5.2"] == "direct-zai"
+    assert presets["heavy"]["default_host_primary"] == "gpt-5.5"
+    assert presets["heavy"]["default_host_fallback"] == "gpt-5.4"
+    assert presets["heavy"]["default_members"][:2] == ["claude-opus-4-6-thinking", "gemini-3-flash-agent(high)"]
     assert presets["heavy"]["default_member_channels"]["claude-opus-4-6-thinking"] == "newapi-personal-tokyo"
     assert presets["vision"]["default_members"] == [
         "kimi-k2.6",
