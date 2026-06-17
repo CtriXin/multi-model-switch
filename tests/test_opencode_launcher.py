@@ -3667,14 +3667,29 @@ def test_committee_tier_extraction():
 def test_committee_preset_reader_default_and_override():
     import mms_opencode_profiles as profiles
 
-    standard = profiles.opencode_committee_preset_config({}, "")
+    bare = profiles.opencode_committee_preset_config({}, "")
+    assert bare["host_primary"] == "gpt-5.4"
+    assert bare["members"] == ["gpt-5.4"]
+    assert bare["channel"] == "direct"
+
+    standard = profiles.opencode_committee_preset_config({}, "standard")
     assert standard["host_primary"] == "gpt-5.4"
-    assert standard["members"] == ["gpt-5.4"]
-    assert standard["channel"] == "direct"
+    assert standard["host_primary_channel"] == "uscrsopenai"
+    assert standard["host_fallback"] == "gpt-5.5"
+    assert standard["host_fallback_channel"] == "uscrsopenai"
+    assert standard["members"] == ["gpt-5.5", "glm-5.2", "deepseek-v4-pro", "MiniMax-M3", "mimo-v2.5-pro", "qwen3.7-max"]
+    assert standard["member_channels"]["gpt-5.5"] == "uscrsopenai"
+    assert standard["member_channels"]["glm-5.2"] == "direct-zai"
 
     cfg = {"opencode": {"committee": {"presets": {
         "standard": {"host_primary": "gpt-5.5", "members": ["deepseek-v4-pro"], "channel": "newapi-cn"},
-        "fast": {"host_primary": "gpt-5.5", "members": ["gpt-5.5", "deepseek-v4-pro"], "channel": "direct"},
+        "fast": {
+            "host_primary": "gpt-5.5",
+            "host_primary_channel": "newapi-cn",
+            "members": ["gpt-5.5", "deepseek-v4-pro"],
+            "channel": "direct",
+            "member_channels": {"gpt-5.5": "newapi-cn", "deepseek-v4-pro": "direct"},
+        },
     }}}}
     bare = profiles.opencode_committee_preset_config(cfg, "")
     assert bare["host_primary"] == "gpt-5.4"
@@ -3685,25 +3700,34 @@ def test_committee_preset_reader_default_and_override():
     assert edited_standard["host_primary"] == "gpt-5.5"
     assert edited_standard["members"] == ["deepseek-v4-pro"]
     assert edited_standard["channel"] == "newapi-cn"
+    assert edited_standard["host_primary_channel"] == "newapi-cn"
+    assert edited_standard["member_channels"] == {"deepseek-v4-pro": "newapi-cn"}
 
     fast = profiles.opencode_committee_preset_config(cfg, "fast")
     assert fast["host_primary"] == "gpt-5.5"
+    assert fast["host_primary_channel"] == "newapi-cn"
     assert fast["members"] == ["gpt-5.5", "deepseek-v4-pro"]
+    assert fast["member_channels"] == {"gpt-5.5": "newapi-cn", "deepseek-v4-pro": "direct"}
 
-    # Unknown tier falls back to built-in standard defaults, never editable standard.
+    # Unknown tier falls back to bare legacy defaults, never editable standard.
     unknown = profiles.opencode_committee_preset_config(cfg, "turbo")
     assert unknown["host_primary"] == "gpt-5.4"
     assert unknown["members"] == ["gpt-5.4"]
 
 
-def test_committee_preset_standard_aligns_current_default():
+def test_committee_preset_bare_preserves_current_default():
     import mms_opencode_profiles as profiles
 
-    # standard tier default MUST equal the bare `--profile committee` defaults so
-    # the no-tier launch path is unchanged.
+    # Named standard can evolve, but bare `--profile committee` keeps the legacy
+    # single-host default.
+    bare = profiles.opencode_committee_preset_config({}, "")
     standard_default = profiles.OPENCODE_COMMITTEE_TIER_DEFAULTS["standard"]
+    assert bare["host_primary"] == "gpt-5.4"
+    assert bare["members"] == ["gpt-5.4"]
+    assert bare["channel"] == "direct"
     assert standard_default["host_primary"] == "gpt-5.4"
-    assert list(standard_default["members"]) == ["gpt-5.4"]
+    assert list(standard_default["members"]) != bare["members"]
+    assert standard_default["host_primary_channel"] == "uscrsopenai"
 
 
 def test_committee_fast_requires_two_members():
@@ -3795,7 +3819,7 @@ def test_committee_prepare_wires_tier_channel_and_host_fallback(monkeypatch):
     assert routes["custom_committee-deepseek-v4-pro"]["provider_id"] == "newapi-cn"
 
 
-def test_committee_prepare_bare_tier_matches_standard_default(monkeypatch):
+def test_committee_prepare_bare_tier_stays_legacy_default(monkeypatch):
     import mms_core
 
     cfg = {
@@ -3815,7 +3839,8 @@ def test_committee_prepare_bare_tier_matches_standard_default(monkeypatch):
     models = ["gpt-5.4", "gpt-5.5", "deepseek-v4-pro"]
     monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, models)])
 
-    # Bare committee (no tier) resolves via the standard tier default = current behavior.
+    # Bare committee (no tier) keeps the legacy default and does not inherit the
+    # editable standard preset.
     committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
         cfg, provider, models, interactive=False,
     )
@@ -3830,6 +3855,68 @@ def test_committee_prepare_bare_tier_matches_standard_default(monkeypatch):
     assert standard_selection["host"] == "gpt-5.5"
     assert [item["model"] for item in standard_selection["selected"]] == ["deepseek-v4-pro"]
     assert standard_selection["source"] == "tier"
+
+
+def test_committee_prepare_builtin_standard_routes_per_model_channel(monkeypatch):
+    import mms_core
+
+    protocols = ["anthropic_messages", "openai_chat_completions"]
+    providers = [
+        _runtime(id="uscrsopenai", name="US CRS OpenAI", protocols=protocols),
+        _runtime(id="direct-zai", name="ZAI Direct", protocols=protocols),
+        _runtime(id="direct-deepseek", name="DeepSeek Direct", protocols=protocols),
+        _runtime(id="direct-minimax", name="MiniMax Direct", protocols=protocols),
+        _runtime(id="mimo-direct", name="Mimo Direct", protocols=protocols),
+        _runtime(id="direct-qwen", name="Qwen Direct", protocols=protocols),
+    ]
+    models_by_provider = {
+        "uscrsopenai": ["gpt-5.4", "gpt-5.5"],
+        "direct-zai": ["glm-5.2"],
+        "direct-deepseek": ["deepseek-v4-pro"],
+        "direct-minimax": ["MiniMax-M3"],
+        "mimo-direct": ["mimo-v2.5-pro"],
+        "direct-qwen": ["qwen3.7-max"],
+    }
+    cfg = {
+        "providers": providers,
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {},
+    }
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models_by_provider[provider["id"]]) for provider in providers],
+    )
+
+    committee_cfg, selection = mms_core._prepare_opencode_committee_profile_config(
+        cfg, providers[0], models_by_provider["uscrsopenai"], interactive=False, committee_tier="standard",
+    )
+    selected_by_model = {item["model"]: item["provider_id"] for item in selection["selected"]}
+
+    assert selection["host"] == "gpt-5.4"
+    assert selection["host_fallback"] == "gpt-5.5"
+    assert selection["host_channel"] == "uscrsopenai"
+    assert selected_by_model == {
+        "gpt-5.5": "uscrsopenai",
+        "glm-5.2": "direct-zai",
+        "deepseek-v4-pro": "direct-deepseek",
+        "MiniMax-M3": "direct-minimax",
+        "mimo-v2.5-pro": "mimo-direct",
+        "qwen3.7-max": "direct-qwen",
+    }
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(committee_cfg, providers[0], models_by_provider["uscrsopenai"], "committee")
+    routes = {route["id"]: route for route in runtime["opencode_routes"]}
+
+    assert model_info == {"model": "gpt-5.4", "profile": "committee"}
+    assert routes["builder_primary"]["provider_id"] == "uscrsopenai"
+    assert routes["builder_fallback"]["provider_id"] == "uscrsopenai"
+    assert routes["custom_committee-glm-5-2"]["provider_id"] == "direct-zai"
+    assert routes["custom_committee-deepseek-v4-pro"]["provider_id"] == "direct-deepseek"
+    assert routes["custom_committee-minimax-m3"]["provider_id"] == "direct-minimax"
+    assert routes["custom_committee-mimo-v2-5-pro"]["provider_id"] == "mimo-direct"
+    assert routes["custom_committee-qwen3-7-max"]["provider_id"] == "direct-qwen"
 
 
 def test_debate_contract_declares_assigned_role_and_stance_authenticity():

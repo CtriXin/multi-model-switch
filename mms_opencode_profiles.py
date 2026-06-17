@@ -107,26 +107,106 @@ OPENCODE_DEBATE_SPECS = (
     {"key": "builder_fallback", "agent": "debate-host-pro", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
 )
 
-# Named committee tiers (issue #67). Each tier is a fixed {host, members, channel}
+# Named committee tiers (issue #67). Each tier is a fixed host/fallback/member
 # bundle that AI review consumers can select by profile alias
-# `--profile committee-<tier>` without restating the model list.
+# `--profile committee-<tier>` without restating the model/channel list.
 OPENCODE_COMMITTEE_TIERS = ("fast", "light", "standard", "heavy", "vision")
 OPENCODE_COMMITTEE_DEFAULT_TIER = "standard"
 OPENCODE_COMMITTEE_DEFAULT_CHANNEL = "direct"
 
-# standard tier MUST stay aligned with the bare `--profile committee` defaults
-# (host "gpt-5.4", members ["gpt-5.4"]) so the no-tier path is unchanged.
+OPENCODE_COMMITTEE_BARE_DEFAULT = {
+    "host_primary": "gpt-5.4",
+    "members": ["gpt-5.4"],
+    "channel": "direct",
+}
+
 OPENCODE_COMMITTEE_TIER_DEFAULTS = {
-    "fast": {"host_primary": "gpt-5.4", "members": ["gpt-5.3-codex", "gpt-5.4-mini"], "channel": "direct"},
-    "light": {"host_primary": "gpt-5.4", "members": ["gpt-5.4"], "channel": "direct"},
-    "standard": {"host_primary": "gpt-5.4", "members": ["gpt-5.4"], "channel": "direct"},
-    "heavy": {
-        "host_primary": "gpt-5.5",
-        "host_fallback": "gpt-5.4",
-        "members": ["gpt-5.5", "gpt-5.4", "deepseek-v4-pro"],
+    "fast": {
+        "host_primary": "glm-5.2",
+        "host_primary_channel": "direct-zai",
+        "host_fallback": "kimi-for-coding",
+        "host_fallback_channel": "direct-kimi",
+        "members": ["deepseek-v4-flash", "MiniMax-M3", "mimo-v2.5"],
+        "member_channels": {
+            "deepseek-v4-flash": "direct-deepseek",
+            "MiniMax-M3": "direct-minimax",
+            "mimo-v2.5": "mimo-direct",
+        },
         "channel": "direct",
     },
-    "vision": {"host_primary": "mimo-v2.5-pro", "members": ["mimo-v2.5-pro", "kimi-k2.5"], "channel": "direct"},
+    "light": {
+        "host_primary": "glm-5.2",
+        "host_primary_channel": "direct-zai",
+        "host_fallback": "kimi-for-coding",
+        "host_fallback_channel": "direct-kimi",
+        "members": ["deepseek-v4-pro", "MiniMax-M3", "glm-5.2", "mimo-v2.5-pro"],
+        "member_channels": {
+            "deepseek-v4-pro": "direct-deepseek",
+            "MiniMax-M3": "direct-minimax",
+            "glm-5.2": "direct-zai",
+            "mimo-v2.5-pro": "mimo-direct",
+        },
+        "channel": "direct",
+    },
+    "standard": {
+        "host_primary": "gpt-5.4",
+        "host_primary_channel": "uscrsopenai",
+        "host_fallback": "gpt-5.5",
+        "host_fallback_channel": "uscrsopenai",
+        "members": ["gpt-5.5", "glm-5.2", "deepseek-v4-pro", "MiniMax-M3", "mimo-v2.5-pro", "qwen3.7-max"],
+        "member_channels": {
+            "gpt-5.5": "uscrsopenai",
+            "glm-5.2": "direct-zai",
+            "deepseek-v4-pro": "direct-deepseek",
+            "MiniMax-M3": "direct-minimax",
+            "mimo-v2.5-pro": "mimo-direct",
+            "qwen3.7-max": "direct-qwen",
+        },
+        "channel": "uscrsopenai",
+    },
+    "heavy": {
+        "host_primary": "gpt-5.4",
+        "host_primary_channel": "uscrsopenai",
+        "host_fallback": "gpt-5.5",
+        "host_fallback_channel": "uscrsopenai",
+        "members": [
+            "gpt-5.5",
+            "glm-5.2",
+            "deepseek-v4-pro",
+            "MiniMax-M3",
+            "mimo-v2.5-pro",
+            "qwen3.7-max",
+            "gemini-3-flash-agent(high)",
+            "claude-opus-4-6-thinking",
+        ],
+        "member_channels": {
+            "gpt-5.5": "uscrsopenai",
+            "glm-5.2": "direct-zai",
+            "deepseek-v4-pro": "direct-deepseek",
+            "MiniMax-M3": "direct-minimax",
+            "mimo-v2.5-pro": "mimo-direct",
+            "qwen3.7-max": "direct-qwen",
+            "gemini-3-flash-agent(high)": "newapi-personal-tokyo",
+            "claude-opus-4-6-thinking": "newapi-personal-tokyo",
+        },
+        "channel": "uscrsopenai",
+    },
+    "vision": {
+        "host_primary": "mimo-v2.5",
+        "host_primary_channel": "mimo-direct",
+        "host_fallback": "kimi-k2.6",
+        "host_fallback_channel": "direct-kimi",
+        "members": ["kimi-k2.6", "qwen3.6-flash", "MiniMax-M3", "mimo-v2.5", "qwen3.7-max", "gemini-3-flash-agent(high)"],
+        "member_channels": {
+            "kimi-k2.6": "direct-kimi",
+            "qwen3.6-flash": "direct-qwen",
+            "MiniMax-M3": "direct-minimax",
+            "mimo-v2.5": "mimo-direct",
+            "qwen3.7-max": "direct-qwen",
+            "gemini-3-flash-agent(high)": "newapi-personal-tokyo",
+        },
+        "channel": "mimo-direct",
+    },
 }
 
 
@@ -150,6 +230,27 @@ def _opencode_model_list(value):
         seen.add(key)
         result.append(model)
     return tuple(result)
+
+
+def _opencode_channel_map(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, channel in value.items():
+        model = str(key or "").strip()
+        route = str(channel or "").strip()
+        if model and route:
+            result[model] = route
+    return result
+
+
+def _opencode_channel_for_model(channel_map, model, fallback):
+    model_text = str(model or "").strip()
+    lower = model_text.lower()
+    for key, channel in (channel_map or {}).items():
+        if str(key or "").strip().lower() == lower:
+            return str(channel or "").strip()
+    return str(fallback or "").strip()
 
 
 def opencode_review_host_config(cfg):
@@ -302,32 +403,62 @@ def extract_opencode_committee_tier(value):
 
 
 def opencode_committee_preset_config(cfg, tier=""):
-    """Resolve a committee tier preset to {host_primary, host_fallback, members, channel}.
+    """Resolve a committee tier preset to host/fallback/member models and channels.
 
     Precedence for an explicit tier: user config
     `opencode.committee.presets.{tier}` > built-in
-    `OPENCODE_COMMITTEE_TIER_DEFAULTS`. An unknown/empty tier falls back to the
-    built-in default tier ("standard") without reading editable presets; this
-    keeps bare `--profile committee` on the legacy committee host path. Always
-    returns a complete dict so callers never need to special-case missing keys.
+    `OPENCODE_COMMITTEE_TIER_DEFAULTS`. An unknown/empty tier intentionally uses
+    the bare legacy default instead of editable standard, so bare
+    `--profile committee` keeps its previous host path. Always returns a
+    complete dict so callers never need to special-case missing keys.
     """
     requested_tier = str(tier or "").strip()
     explicit_tier = requested_tier in OPENCODE_COMMITTEE_TIERS
-    resolved_tier = requested_tier if explicit_tier else OPENCODE_COMMITTEE_DEFAULT_TIER
     cfg = cfg if isinstance(cfg, dict) else {}
     opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
     committee = opencode.get("committee") if isinstance(opencode.get("committee"), dict) else {}
     presets = committee.get("presets") if isinstance(committee.get("presets"), dict) else {}
-    user_preset = presets.get(resolved_tier) if explicit_tier and isinstance(presets.get(resolved_tier), dict) else {}
+    user_preset = presets.get(requested_tier) if explicit_tier and isinstance(presets.get(requested_tier), dict) else {}
+    has_user_preset = bool(user_preset)
 
-    base = dict(OPENCODE_COMMITTEE_TIER_DEFAULTS.get(resolved_tier) or {})
+    base = dict(OPENCODE_COMMITTEE_TIER_DEFAULTS.get(requested_tier) or {}) if explicit_tier else dict(OPENCODE_COMMITTEE_BARE_DEFAULT)
     host_primary = str(user_preset.get("host_primary") or base.get("host_primary") or "").strip()
     host_fallback = str(user_preset.get("host_fallback") or base.get("host_fallback") or "").strip()
     members = _opencode_model_list(user_preset.get("members")) or _opencode_model_list(base.get("members"))
     channel = str(user_preset.get("channel") or base.get("channel") or OPENCODE_COMMITTEE_DEFAULT_CHANNEL).strip()
+    if has_user_preset:
+        base_member_channels = {}
+        user_member_channels = _opencode_channel_map(user_preset.get("member_channels"))
+    else:
+        base_member_channels = _opencode_channel_map(base.get("member_channels"))
+        user_member_channels = {}
+    member_channel_source = {**base_member_channels, **user_member_channels}
+    member_channels = {
+        member: _opencode_channel_for_model(member_channel_source, member, channel)
+        for member in members
+        if _opencode_channel_for_model(member_channel_source, member, channel)
+    }
+    if "host_primary_channel" in user_preset:
+        host_primary_channel = str(user_preset.get("host_primary_channel") or "").strip()
+    elif has_user_preset:
+        host_primary_channel = channel
+    else:
+        host_primary_channel = str(base.get("host_primary_channel") or channel).strip()
+    if "host_fallback_channel" in user_preset:
+        host_fallback_channel = str(user_preset.get("host_fallback_channel") or "").strip()
+    elif has_user_preset:
+        host_fallback_channel = channel
+    else:
+        host_fallback_channel = str(base.get("host_fallback_channel") or channel).strip()
     result = {"host_primary": host_primary, "members": list(members), "channel": channel}
+    if host_primary_channel:
+        result["host_primary_channel"] = host_primary_channel
     if host_fallback:
         result["host_fallback"] = host_fallback
+    if host_fallback and host_fallback_channel:
+        result["host_fallback_channel"] = host_fallback_channel
+    if member_channels:
+        result["member_channels"] = member_channels
     return result
 
 
@@ -549,6 +680,7 @@ __all__ = [
     "OPENCODE_COMMITTEE_PROFILE_ID",
     "OPENCODE_COMMITTEE_SPECS",
     "OPENCODE_COMMITTEE_TIERS",
+    "OPENCODE_COMMITTEE_BARE_DEFAULT",
     "OPENCODE_COMMITTEE_TIER_DEFAULTS",
     "OPENCODE_COMMITTEE_DEFAULT_TIER",
     "OPENCODE_DEBATE_PROFILE_ID",

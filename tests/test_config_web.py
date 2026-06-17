@@ -2103,8 +2103,10 @@ def test_config_web_opencode_picker_prioritizes_crs_and_demotes_company_channels
     assert "opencodePickerIsCrs" in html
     assert "compareOpencodePickerRows" in html
     assert "compareOpencodePickerChannels" in html
-    assert "selectedChannelKey" in html
-    assert "rowChannelKey===selectedChannelKey" in html
+    assert "wantedChannelKey" in html
+    assert "selectedChannels={}" in html
+    assert "channelForModel(selectedChannelMap,row.model,fallbackChannel)" in html
+    assert "rowChannelKey===wantedChannelKey" in html
 
 
 def test_config_web_snapshot_has_agent_roster_catalog():
@@ -2732,9 +2734,20 @@ def test_config_web_snapshot_exposes_committee_picker_defaults(tmp_path):
     snapshot = mms_config_web.build_config_snapshot({}, config_path=str(tmp_path / "config.toml"))
     presets = {row["tier"]: row for row in snapshot["opencode"]["committee_presets"]}
 
-    assert presets["heavy"]["default_host_fallback"] == "gpt-5.4"
-    assert presets["heavy"]["default_channel"] == "direct"
-    assert presets["vision"]["default_members"] == ["mimo-v2.5-pro", "kimi-k2.5"]
+    assert presets["fast"]["default_host_primary"] == "glm-5.2"
+    assert presets["fast"]["default_host_primary_channel"] == "direct-zai"
+    assert presets["standard"]["default_host_fallback"] == "gpt-5.5"
+    assert presets["standard"]["default_channel"] == "uscrsopenai"
+    assert presets["standard"]["default_member_channels"]["glm-5.2"] == "direct-zai"
+    assert presets["heavy"]["default_member_channels"]["claude-opus-4-6-thinking"] == "newapi-personal-tokyo"
+    assert presets["vision"]["default_members"] == [
+        "kimi-k2.6",
+        "qwen3.6-flash",
+        "MiniMax-M3",
+        "mimo-v2.5",
+        "qwen3.7-max",
+        "gemini-3-flash-agent(high)",
+    ]
 
 
 def test_config_web_plan_persists_committee_picker_round_trip(tmp_path):
@@ -2746,9 +2759,12 @@ def test_config_web_plan_persists_committee_picker_round_trip(tmp_path):
                     {
                         "tier": "heavy",
                         "host_primary": "gpt-5.5",
+                        "host_primary_channel": "uscrsopenai",
                         "host_fallback": "gpt-5.4",
+                        "host_fallback_channel": "newapi-cn",
                         "members": ["gpt-5.5", "deepseek-v4-pro"],
                         "channel": "newapi-cn",
+                        "member_channels": {"gpt-5.5": "uscrsopenai", "deepseek-v4-pro": "newapi-cn"},
                         "is_default": False,
                     },
                     {
@@ -2769,9 +2785,12 @@ def test_config_web_plan_persists_committee_picker_round_trip(tmp_path):
     assert presets == {
         "heavy": {
             "host_primary": "gpt-5.5",
+            "host_primary_channel": "uscrsopenai",
             "host_fallback": "gpt-5.4",
+            "host_fallback_channel": "newapi-cn",
             "members": ["gpt-5.5", "deepseek-v4-pro"],
             "channel": "newapi-cn",
+            "member_channels": {"gpt-5.5": "uscrsopenai", "deepseek-v4-pro": "newapi-cn"},
         }
     }
 
