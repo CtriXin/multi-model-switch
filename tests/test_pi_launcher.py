@@ -60,7 +60,6 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
-    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
     monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4", "gpt-5.5"]})
     monkeypatch.setattr(mms_launchers.os, "getpid", lambda: 4242)
@@ -134,7 +133,6 @@ def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacem
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
-    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
     monkeypatch.setattr(
         mms_launchers,

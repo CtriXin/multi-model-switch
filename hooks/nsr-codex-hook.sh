@@ -18,12 +18,13 @@ REAL_HOME="$(resolve_real_home)"
 AUTO_SKILLS_ROOT="$(cd "$MMS_HOME/../.." 2>/dev/null && pwd || true)"
 MMS_PARENT="$(cd "$MMS_HOME/.." 2>/dev/null && pwd || true)"
 BUILTIN_HOOK="$SCRIPT_DIR/nsr-builtin-hook.py"
-
-# New NSR core (2026 rewrite): prefer the MMS-bundled channel payload so fresh
-# installs behave the same as the maintainer machine.
+GLOBAL_NSR_WRAPPER="$REAL_HOME/.mms/hooks/nsr-stop-wrapper.py"
 BUNDLED_NSR_WRAPPER="$SCRIPT_DIR/nsr-stop-wrapper.py"
-if [ -f "$BUNDLED_NSR_WRAPPER" ] && command -v python3 >/dev/null 2>&1; then
-  exec python3 "$BUNDLED_NSR_WRAPPER" codex
+
+# Prefer the user's installed global NSR payload; MMF worktree copies are only
+# fallback so dev branch experiments do not silently override local policy.
+if [ -f "$GLOBAL_NSR_WRAPPER" ] && command -v python3 >/dev/null 2>&1; then
+  exec python3 "$GLOBAL_NSR_WRAPPER" codex
 fi
 
 # Local override for older hand-installed machines; kept only as fallback.
@@ -36,10 +37,10 @@ candidates=(
   "${MMS_NSR_ROOT:-}"
   "${NSR_ROOT:-}"
   "${NSR_HOME:-}"
-  "$MMS_HOME/vendor/non-stop-run"
   "$REAL_HOME/auto-skills/shared-skills/nsr"
   "$AUTO_SKILLS_ROOT/shared-skills/nsr"
   "$MMS_PARENT/shared-skills/nsr"
+  "$MMS_HOME/vendor/non-stop-run"
   "$REAL_HOME/auto-skills/Non-Stop-Run"
   "$REAL_HOME/auto-skills/shared-skills/looop.deprecated"
   "$AUTO_SKILLS_ROOT/shared-skills/looop.deprecated"
@@ -48,11 +49,19 @@ candidates=(
 
 for root in "${candidates[@]}"; do
   [ -n "${root:-}" ] || continue
+  hook="$root/loop_hook.py"
+  if [ -f "$hook" ] && command -v python3 >/dev/null 2>&1; then
+    NSR_LOOP_HOOK="$hook" exec python3 "$BUNDLED_NSR_WRAPPER" codex
+  fi
   hook="$root/scripts/codex_hook.py"
   if [ -f "$hook" ] && command -v python3 >/dev/null 2>&1; then
     exec python3 "$hook"
   fi
 done
+
+if [ -f "$BUNDLED_NSR_WRAPPER" ] && command -v python3 >/dev/null 2>&1; then
+  exec python3 "$BUNDLED_NSR_WRAPPER" codex
+fi
 
 if [ -f "$BUILTIN_HOOK" ] && command -v python3 >/dev/null 2>&1; then
   exec python3 "$BUILTIN_HOOK" codex

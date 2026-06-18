@@ -673,10 +673,8 @@ def opencode_gateway_env(
     resolve_codegraph_root,
     resolve_toon_root,
     resolve_token_saver_root,
-    resolve_xmem_root,
     session_skill_disabled,
     opencode_rtk_plugin_enabled,
-    opencode_xmem_plugin_enabled,
     environ=None,
     getpid=os.getpid,
 ):
@@ -743,8 +741,6 @@ def opencode_gateway_env(
             "codegraph": bool(resolve_codegraph_root()) and not session_skill_disabled(disabled_session_surfaces, "codegraph"),
             "toon": bool(resolve_toon_root()) and not session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(resolve_token_saver_root()) and not session_skill_disabled(disabled_session_surfaces, "token-saver"),
-            "xmem": bool(resolve_xmem_root()) and not session_skill_disabled(disabled_session_surfaces, "xmem"),
-            "opencode_xmem": opencode_xmem_plugin_enabled(runtime),
         },
     )
     return env

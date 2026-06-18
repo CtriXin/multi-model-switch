@@ -47,9 +47,6 @@ ECC_REPO_URL="${ECC_REPO_URL:-https://github.com/affaan-m/everything-claude-code
 ECC_INSTALL_REF="${ECC_INSTALL_REF:-}"
 OMC_REPO_URL="${OMC_REPO_URL:-https://github.com/Yeachan-Heo/oh-my-claudecode}"
 OMC_INSTALL_REF="${OMC_INSTALL_REF:-}"
-XMEM_REPO_URL="${XMEM_REPO_URL:-https://github.com/CtriXin/xmem.git}"
-XMEM_INSTALL_REF="${XMEM_INSTALL_REF:-main}"
-XMEM_SOURCE_DIR="${XMEM_SOURCE_DIR:-}"
 NVM_INSTALL_VERSION="${NVM_INSTALL_VERSION:-v0.40.3}"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=11
@@ -76,8 +73,6 @@ INSTALL_TOKEN_SAVER=0
 INSTALL_TOKEN_SAVER_EXPLICIT=0
 INSTALL_TOON=0
 INSTALL_TOON_EXPLICIT=0
-INSTALL_XMEM=0
-INSTALL_XMEM_EXPLICIT=0
 INSTALL_ECC=0
 INSTALL_ECC_EXPLICIT=0
 INSTALL_OMC=0
@@ -99,7 +94,6 @@ fi
 
 MMS_HOME="$REAL_HOME/.mms"
 BIN_DIR="$REAL_HOME/.local/bin"
-XMEM_INSTALL_DIR="${XMEM_INSTALL_DIR:-$REAL_HOME/.local/share/xmem}"
 VENV_DIR="$MMS_HOME/.venv"
 MMS_UV_BIN_DIR="$MMS_HOME/bin"
 MMS_UV_BIN="$MMS_UV_BIN_DIR/uv"
@@ -296,13 +290,6 @@ optional_toon_installed() {
         && [ -x "$BIN_DIR/mms-toon" ]
 }
 
-optional_xmem_installed() {
-    [ -f "$REAL_HOME/.codex/skills/xmem/SKILL.md" ] \
-        && [ -f "$REAL_HOME/.claude/skills/xmem/SKILL.md" ] \
-        && [ -x "$BIN_DIR/xmem" ] \
-        && "$BIN_DIR/xmem" --version >/dev/null 2>&1
-}
-
 optional_ecc_installed() {
     local pack_dir="$MMS_HOME/agent-packs/everything-claude-code"
     [ -f "$pack_dir/hooks/hooks.json" ] \
@@ -332,9 +319,6 @@ bundled_session_asset_present() {
         toon)
             [ -f "$assets_root/skills/toon/SKILL.md" ]
             ;;
-        xmem)
-            [ -f "$assets_root/skills/xmem/SKILL.md" ]
-            ;;
         web-access)
             [ -f "$assets_root/skills/web-access/SKILL.md" ]
             ;;
@@ -363,12 +347,11 @@ print_bundled_session_asset_status() {
     local asset label path mode
     local assets_root="$MMS_HOME/assets/session-assets"
     echo "$(t "内建 session assets" "Bundled session assets")"
-    for asset in caveman token-saver toon xmem web-access weber agent-browser nsr; do
+    for asset in caveman token-saver toon web-access weber agent-browser nsr; do
         case "$asset" in
             caveman) label="Caveman"; path="$assets_root/packs/caveman"; mode="$(t "按 session 注入；默认随偏好/确认页启用" "session-local; enabled by preference/confirm screen")" ;;
             token-saver) label="token-saver"; path="$assets_root/skills/token-saver"; mode="$(t "默认可用" "available by default")" ;;
             toon) label="TOON"; path="$assets_root/skills/toon"; mode="$(t "默认可用" "available by default")" ;;
-            xmem) label="xmem"; path="$assets_root/skills/xmem"; mode="$(t "默认可用；hook 静默 fail-open" "available by default; hooks are silent/fail-open")" ;;
             web-access) label="web-access"; path="$assets_root/skills/web-access"; mode="$(t "默认可用" "available by default")" ;;
             weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用" "available by default")" ;;
             agent-browser) label="agent-browser"; path="$assets_root/skills/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
@@ -461,7 +444,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--channel stable|dev|canary] [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-token-saver] [--install-toon] [--install-xmem] [--xmem-ref <tag-or-branch>] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
+  bash install.sh [--channel stable|dev|canary] [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-token-saver] [--install-toon] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --stable
   bash install.sh --dev
@@ -491,12 +474,10 @@ $(t "说明:" "Notes:")
   # --install-read-once removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
   - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令，用于长日志/测试输出/diff 的 ref+snippet 收纳" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command for long logs/test output/diff refs and snippets")
   - $(t "--install-toon 会安装 Codex/Claude 共用 TOON skill 和本机 mms-toon 命令，用于结构化 JSON/status/handoff 压缩；MMS session 内仍默认内建 TOON" "--install-toon installs the shared Codex/Claude TOON skill plus the local mms-toon command for structured JSON/status/handoff compression; MMS sessions still bundle TOON by default")
-  - $(t "--install-xmem 会安装通用 xmem CLI/skill，并执行轻量 setup：创建 ~/.xmem、注册 HOME 下浅层 git roots，不写 repo-local .xmem" "--install-xmem installs the generic xmem CLI/skill and runs lightweight setup: create ~/.xmem and register shallow HOME git roots without writing repo-local .xmem")
-  - $(t "--xmem-ref 可覆盖 xmem 安装版本，例如 main / v0.1.36" "--xmem-ref overrides the xmem install ref, for example main / v0.1.36")
   - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR payload 随 channel 内建，默认注入，/nsr 命令会自动安装；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; the NSR payload ships with each channel, is injected by default, and /nsr commands are auto-installed; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
+  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供；NSR payload 随 channel 内建，默认注入，/nsr 命令会自动安装；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, and token-saver ship as bundled MMS session assets; the NSR payload ships with each channel, is injected by default, and /nsr commands are auto-installed; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -762,34 +743,6 @@ prompt_optional_install_choices() {
         fi
     fi
 
-    if [ "$INSTALL_XMEM_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_xmem_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional cross-project memory"
-            else
-                echo "可选跨项目记忆"
-            fi
-            note_optional_pack_detected " xmem" "xmem"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional cross-project memory"
-            echo "  xmem installs a generic CLI/skill for cross-project truth cards and context routing."
-            echo "  MMS sessions already bundle the xmem skill; this adds the global xmem command and runs a lightweight setup."
-            echo "  Setup creates ~/.xmem and registers shallow HOME git roots without writing repo-local .xmem files."
-            if confirm_from_tty "Install xmem CLI and run lightweight setup? [y/N]: " "n"; then
-                INSTALL_XMEM=1
-            fi
-        else
-            echo "可选跨项目记忆"
-            echo "  xmem 会安装通用 CLI/skill，用于跨项目 truth cards 和 context routing。"
-            echo "  MMS session 已内建 xmem skill；这个可选包会补全全局 xmem 命令并执行轻量 setup。"
-            echo "  setup 只创建 ~/.xmem 并注册 HOME 下浅层 git roots，不写 repo-local .xmem 文件。"
-            if confirm_from_tty "是否安装 xmem CLI 并执行轻量 setup？[y/N]: " "n"; then
-                INSTALL_XMEM=1
-            fi
-        fi
-    fi
-
     if [ "$INSTALL_ECC_EXPLICIT" -eq 0 ] || [ "$INSTALL_OMC_EXPLICIT" -eq 0 ]; then
         local answer=""
         local normalized=""
@@ -856,13 +809,13 @@ prompt_optional_install_choices() {
     echo ""
     if [ "$INSTALL_LANG" = "en" ]; then
         echo "Bundled session mode"
-        echo "  Caveman, TOON, token-saver, xmem, and the Web automation bundle ship inside MMS as pinned session assets."
+        echo "  Caveman, TOON, token-saver, and the Web automation bundle ship inside MMS as pinned session assets."
         echo "  Web automation bundle = weber router + web-access logged-in Chrome + agent-browser headless CLI."
         echo "  NSR ships as a channel-pinned payload too: MMS injects the Stop hook, and /nsr enables the loop."
         echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config; installer only adds the /nsr command docs."
     else
         echo "内建 session 模式"
-        echo "  Caveman、TOON、token-saver、xmem 和 Web automation bundle 会随 MMS 一起作为内建 session 资产提供。"
+        echo "  Caveman、TOON、token-saver 和 Web automation bundle 会随 MMS 一起作为内建 session 资产提供。"
         echo "  Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。"
         echo "  NSR payload 也随 channel 内建：MMS 默认注入 Stop hook，/nsr 后才启用 loop。"
         echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置；安装器只补 /nsr 命令文档。"
@@ -2427,12 +2380,6 @@ run_install_check() {
         echo "• $(t "TOON 全局 skill/命令未安装（可选；MMS session 内建仍可用）" "TOON global skill/command not installed (optional; bundled MMS sessions still work)"): --install-toon"
     fi
 
-    if optional_xmem_installed; then
-        echo "✓ $(t "xmem CLI/skill 已安装" "xmem CLI/skill installed"): $BIN_DIR/xmem"
-    else
-        echo "• $(t "xmem CLI/skill 未安装（可选；MMS session 内建 skill 仍可用）" "xmem CLI/skill not installed (optional; bundled MMS session skill still works)"): --install-xmem"
-    fi
-
     print_bundled_session_asset_status
 
     if optional_handover_continuity_installed; then
@@ -3610,43 +3557,6 @@ install_toon_skill_link() {
     return 0
 }
 
-install_xmem_skill_link() {
-    local target_skill_dir="$1"
-    local source_skill_dir="$MMS_HOME/vendor/xmem"
-    local marker="name: xmem"
-    local backup_skill_dir="${target_skill_dir}.bak.$$"
-
-    if [ ! -f "$source_skill_dir/SKILL.md" ]; then
-        echo "⚠ $(t "找不到 xmem skill，跳过" "xmem skill not found, skipping"): $source_skill_dir"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$target_skill_dir")"
-    if [ -L "$target_skill_dir" ]; then
-        rm -f "$target_skill_dir"
-        ln -s "$source_skill_dir" "$target_skill_dir"
-        echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
-        return 0
-    fi
-
-    if [ -e "$target_skill_dir" ]; then
-        if [ -f "$target_skill_dir/SKILL.md" ] && grep -Fq "$marker" "$target_skill_dir/SKILL.md"; then
-            rm -rf "$backup_skill_dir"
-            mv "$target_skill_dir" "$backup_skill_dir"
-            ln -s "$source_skill_dir" "$target_skill_dir"
-            rm -rf "$backup_skill_dir"
-            echo "✓ $(t "已替换托管 skill 为 symlink" "Replaced managed skill with symlink"): $target_skill_dir"
-            return 0
-        fi
-        echo "⚠ $(t "检测到已有自定义 xmem skill，跳过覆盖" "Detected custom xmem skill, skipping overwrite"): $target_skill_dir"
-        return 1
-    fi
-
-    ln -s "$source_skill_dir" "$target_skill_dir"
-    echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
-    return 0
-}
-
 write_mms_script_wrapper() {
     local command_name="$1"
     local source_script="$MMS_HOME/scripts/$command_name"
@@ -3722,26 +3632,6 @@ install_toon_installed_skills_mirror() {
     return 0
 }
 
-install_xmem_installed_skills_mirror() {
-    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
-    local source_skill_dir="$MMS_HOME/vendor/xmem"
-    local target="$mirror_dir/xmem"
-
-    if [ ! -d "$mirror_dir" ]; then
-        return 0
-    fi
-    if [ -e "$target" ] && [ ! -L "$target" ]; then
-        echo "⚠ $(t "检测到 installed-skills 自定义 xmem，跳过覆盖" "Detected custom installed-skills xmem, skipping overwrite"): $target"
-        return 1
-    fi
-    if [ -L "$target" ]; then
-        rm -f "$target"
-    fi
-    ln -s "$source_skill_dir" "$target"
-    echo "✓ $(t "已更新 installed-skills 镜像" "Updated installed-skills mirror"): $target"
-    return 0
-}
-
 install_optional_token_saver() {
     echo ""
     echo "$(t "正在安装 Token Saver..." "Installing Token Saver...")"
@@ -3770,166 +3660,6 @@ install_optional_toon() {
     install_toon_installed_skills_mirror || true
 }
 
-validate_xmem_source_dir() {
-    local source_dir="$1"
-    [ -f "$source_dir/bin/xmem" ] \
-        && [ -f "$source_dir/xmem/cli.py" ] \
-        && [ -f "$source_dir/pyproject.toml" ]
-}
-
-find_local_xmem_source() {
-    local candidate=""
-    for candidate in \
-        "$XMEM_SOURCE_DIR" \
-        "$REAL_HOME/auto-skills/CtriXin-repo/xmem" \
-        "$(dirname "$SOURCE_DIR" 2>/dev/null || echo "")/xmem" \
-        "$SOURCE_DIR/../xmem"; do
-        [ -n "$candidate" ] || continue
-        if validate_xmem_source_dir "$candidate"; then
-            printf "%s\n" "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-copy_xmem_source_dir() {
-    local source_dir="$1"
-    local target_dir="$2"
-    local temp_dir="${target_dir}.new.$$"
-    local backup_dir="${target_dir}.bak.$$"
-
-    if ! validate_xmem_source_dir "$source_dir"; then
-        echo "⚠ $(t "xmem 源目录结构校验失败" "xmem source directory validation failed"): $source_dir"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$target_dir")"
-    rm -rf "$temp_dir" "$backup_dir"
-    mkdir -p "$temp_dir"
-
-    if command -v rsync >/dev/null 2>&1; then
-        if ! rsync -a --delete \
-            --exclude '.git' \
-            --exclude '.pytest_cache' \
-            --exclude '.codegraph' \
-            "$source_dir/" "$temp_dir/"; then
-            echo "⚠ $(t "复制 xmem 源码失败" "Failed to copy xmem source"): $source_dir"
-            rm -rf "$temp_dir"
-            return 1
-        fi
-    else
-        if ! (cd "$source_dir" && tar --exclude='.git' --exclude='.pytest_cache' --exclude='.codegraph' -cf - .) | (cd "$temp_dir" && tar -xf -); then
-            echo "⚠ $(t "复制 xmem 源码失败" "Failed to copy xmem source"): $source_dir"
-            rm -rf "$temp_dir"
-            return 1
-        fi
-    fi
-
-    chmod +x "$temp_dir/bin/xmem" 2>/dev/null || true
-    if ! validate_xmem_source_dir "$temp_dir"; then
-        echo "⚠ $(t "xmem 安装目录结构校验失败" "xmem install directory validation failed"): $temp_dir"
-        rm -rf "$temp_dir"
-        return 1
-    fi
-
-    if [ -e "$target_dir" ]; then
-        if ! mv "$target_dir" "$backup_dir"; then
-            echo "⚠ $(t "备份旧 xmem 安装目录失败" "Failed to back up existing xmem install directory"): $target_dir"
-            rm -rf "$temp_dir"
-            return 1
-        fi
-    fi
-    if mv "$temp_dir" "$target_dir"; then
-        rm -rf "$backup_dir"
-        echo "✓ $(t "已安装 xmem 源码" "Installed xmem source"): $target_dir"
-        return 0
-    fi
-
-    rm -rf "$target_dir"
-    if [ -e "$backup_dir" ]; then
-        mv "$backup_dir" "$target_dir" || true
-    fi
-    echo "⚠ $(t "写入 xmem 安装目录失败" "Failed to write xmem install directory"): $target_dir"
-    return 1
-}
-
-install_xmem_from_git() {
-    local tmp_dir=""
-
-    if ! command -v git >/dev/null 2>&1; then
-        echo "⚠ $(t "未检测到 git，无法下载 xmem CLI" "git not found, cannot download xmem CLI")"
-        return 1
-    fi
-
-    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mms-xmem.XXXXXX")"
-    echo "→ $(t "正在下载 xmem CLI" "Downloading xmem CLI"): $XMEM_REPO_URL#$XMEM_INSTALL_REF"
-    if ! git clone --depth 1 --branch "$XMEM_INSTALL_REF" --single-branch "$XMEM_REPO_URL" "$tmp_dir"; then
-        echo "⚠ $(t "下载 xmem CLI 失败" "Failed to download xmem CLI")"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    local copy_status=0
-    if copy_xmem_source_dir "$tmp_dir" "$XMEM_INSTALL_DIR"; then
-        copy_status=0
-    else
-        copy_status=$?
-    fi
-    rm -rf "$tmp_dir"
-    return "$copy_status"
-}
-
-write_xmem_bin_wrapper() {
-    local target="$BIN_DIR/xmem"
-    local source_script="$XMEM_INSTALL_DIR/bin/xmem"
-    local marker="Managed by MMS optional xmem pack"
-    local tmp_file=""
-
-    if [ ! -f "$source_script" ]; then
-        echo "⚠ $(t "找不到 xmem 命令脚本，跳过" "xmem command script not found, skipping"): $source_script"
-        return 1
-    fi
-
-    mkdir -p "$BIN_DIR"
-    if [ -L "$target" ]; then
-        rm -f "$target"
-    elif [ -e "$target" ] && ! grep -Fq "$marker" "$target" 2>/dev/null; then
-        echo "⚠ $(t "检测到已有自定义 xmem 命令，跳过覆盖" "Detected custom xmem command, skipping overwrite"): $target"
-        return 1
-    fi
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-xmem-bin.XXXXXX")"
-    cat > "$tmp_file" <<EOF
-#!/bin/sh
-# $marker
-exec "$source_script" "\$@"
-EOF
-    mv "$tmp_file" "$target"
-    chmod 755 "$target"
-    echo "✓ $(t "已安装命令" "Installed command"): $target"
-    return 0
-}
-
-run_xmem_setup_onboarding() {
-    local xmem_cmd=""
-
-    xmem_cmd="$(find_cli_binary xmem 2>/dev/null || true)"
-    if [ -z "$xmem_cmd" ]; then
-        echo "⚠ $(t "未找到 xmem 命令，跳过 setup" "xmem command not found, skipping setup")"
-        return 1
-    fi
-
-    echo "→ $(t "正在执行 xmem 轻量 setup" "Running lightweight xmem setup")"
-    if XMEM_HOME="$REAL_HOME/.xmem" XMEM_HOST_HOME="$REAL_HOME" MMS_HOST_HOME="$REAL_HOME" HOST_HOME="$REAL_HOME" \
-        "$xmem_cmd" setup --root "$REAL_HOME" --scan-depth 2 --register-only --yes --no-sync; then
-        echo "✓ $(t "xmem setup 已完成" "xmem setup completed")"
-        return 0
-    fi
-    echo "⚠ $(t "xmem setup 未完成，可稍后手动运行 xmem setup" "xmem setup did not complete; you can run xmem setup later")"
-    return 1
-}
-
 print_dry_run_plan() {
     echo ""
     echo "===================================="
@@ -3939,7 +3669,7 @@ print_dry_run_plan() {
     echo "• $(t "命令目录" "command dir"): $BIN_DIR"
     echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
     echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
-    echo "• $(t "会复制 session assets" "would copy session assets"): Caveman / TOON / token-saver / xmem / Web automation bundle / NSR"
+    echo "• $(t "会复制 session assets" "would copy session assets"): Caveman / TOON / token-saver / Web automation bundle / NSR"
 
     if [ -n "$INSTALL_CLI_LIST" ]; then
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
@@ -3953,45 +3683,12 @@ print_dry_run_plan() {
     [ "$INSTALL_TOKEN_SAVER" -eq 1 ] && echo "• $(t "会安装 Token Saver skill/命令" "would install Token Saver skill/commands")"
     [ "$INSTALL_TOON" -eq 1 ] && echo "• $(t "会安装 TOON skill/命令" "would install TOON skill/command")"
 
-    if [ "$INSTALL_XMEM" -eq 1 ]; then
-        echo "• $(t "会安装 xmem CLI/skill" "would install xmem CLI/skill"): $XMEM_REPO_URL#$XMEM_INSTALL_REF"
-        echo "  $(t "源码落点" "source target"): $XMEM_INSTALL_DIR"
-        echo "  $(t "命令落点" "command target"): $BIN_DIR/xmem"
-        echo "  $(t "skill 落点" "skill targets"): ~/.codex/skills/xmem, ~/.claude/skills/xmem, ~/.agents/skills/xmem"
-        echo "  $(t "setup 预期命令" "setup command"): xmem setup --root \"$REAL_HOME\" --scan-depth 2 --register-only --yes --no-sync"
-        echo "  $(t "setup 效果" "setup effect"): $(t "创建 ~/.xmem，注册浅层 git roots，不写 repo-local .xmem" "create ~/.xmem, register shallow git roots, do not write repo-local .xmem")"
-    fi
-
     [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ] && echo "• $(t "会安装 ops-env-safe path hints" "would install ops-env-safe path hints")"
     [ "$INSTALL_ECC" -eq 1 ] && echo "• $(t "会安装 ECC agent pack" "would install ECC agent pack"): ${ECC_INSTALL_REF:-default}"
     [ "$INSTALL_OMC" -eq 1 ] && echo "• $(t "会安装 OMC agent pack" "would install OMC agent pack"): ${OMC_INSTALL_REF:-default}"
 
     echo ""
-    echo "✓ $(t "dry-run 完成：未创建 venv，未复制文件，未下载/安装可选包，未运行 xmem setup。" "dry-run complete: no venv created, no files copied, no optional packs downloaded/installed, and xmem setup was not run.")"
-}
-
-install_optional_xmem() {
-    local local_source=""
-
-    echo ""
-    echo "$(t "正在安装 xmem..." "Installing xmem...")"
-    echo "⚠ $(t "这个可选包会写入 ~/.local/share/xmem、~/.local/bin/xmem、~/.codex/skills/xmem 和 ~/.claude/skills/xmem。" "This optional pack writes ~/.local/share/xmem, ~/.local/bin/xmem, ~/.codex/skills/xmem, and ~/.claude/skills/xmem.")"
-    echo "  $(t "它会执行轻量 setup：创建 ~/.xmem 并注册 HOME 下浅层 git roots；不会写 repo-local .xmem。" "It runs lightweight setup: creates ~/.xmem and registers shallow HOME git roots; it does not write repo-local .xmem.")"
-
-    local_source="$(find_local_xmem_source || true)"
-    if [ -n "$local_source" ]; then
-        echo "→ $(t "使用本地 xmem 源码" "Using local xmem source"): $local_source"
-        copy_xmem_source_dir "$local_source" "$XMEM_INSTALL_DIR" || install_xmem_from_git || true
-    else
-        install_xmem_from_git || true
-    fi
-
-    write_xmem_bin_wrapper || true
-    install_xmem_skill_link "$REAL_HOME/.codex/skills/xmem" || true
-    install_xmem_skill_link "$REAL_HOME/.claude/skills/xmem" || true
-    install_xmem_skill_link "$REAL_HOME/.agents/skills/xmem" || true
-    install_xmem_installed_skills_mirror || true
-    run_xmem_setup_onboarding || true
+    echo "✓ $(t "dry-run 完成：未创建 venv，未复制文件，未下载/安装可选包。" "dry-run complete: no venv created, no files copied, no optional packs downloaded/installed.")"
 }
 
 validate_ecc_pack_dir() {
@@ -4332,19 +4029,6 @@ while [[ $# -gt 0 ]]; do
             INSTALL_TOON=1
             INSTALL_TOON_EXPLICIT=1
             ;;
-        --install-xmem)
-            INSTALL_XMEM=1
-            INSTALL_XMEM_EXPLICIT=1
-            ;;
-        --xmem-ref)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo "❌ $(t "--xmem-ref 需要一个版本号或分支名" "--xmem-ref requires a tag or branch name")"
-                usage
-                exit 1
-            fi
-            XMEM_INSTALL_REF="$1"
-            ;;
         --install-ops-env-safe)
             INSTALL_OPS_ENV_SAFE=1
             INSTALL_OPS_ENV_SAFE_EXPLICIT=1
@@ -4522,12 +4206,6 @@ if [ "$INSTALL_TOON" -eq 1 ]; then
     echo "  $(t "会写入 Codex/Claude TOON skill 和 ~/.local/bin/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude TOON skills and ~/.local/bin/mms-toon, without writing ~/.config/mms.")"
 fi
 
-if [ "$INSTALL_XMEM" -eq 1 ]; then
-    echo "• $(t "附带安装 xmem" "Optional xmem"): on"
-    echo "  $(t "会安装通用 xmem CLI/skill，并执行轻量 setup：创建 ~/.xmem、注册 HOME 下浅层 git roots。" "This installs the generic xmem CLI/skill and runs lightweight setup: create ~/.xmem and register shallow HOME git roots.")"
-    echo "  $(t "xmem 版本" "xmem ref"): $XMEM_INSTALL_REF"
-fi
-
 if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
     echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
     echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
@@ -4546,7 +4224,7 @@ if [ "$INSTALL_OMC" -eq 1 ]; then
 fi
 
 echo "• $(t "内建 session assets" "Bundled session assets"): on"
-echo "  $(t "安装后会自带 Caveman、TOON、token-saver、xmem、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR channel payload；全部按 session 注入，不改全局 hooks/config，安装器只补 /nsr 命令文档。" "Install includes Caveman, TOON, token-saver, xmem, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR channel payload; all are injected per session without changing global hooks/config, and the installer only adds /nsr command docs.")"
+echo "  $(t "安装后会自带 Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR channel payload；全部按 session 注入，不改全局 hooks/config，安装器只补 /nsr 命令文档。" "Install includes Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR channel payload; all are injected per session without changing global hooks/config, and the installer only adds /nsr command docs.")"
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
@@ -4650,9 +4328,6 @@ if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
 fi
 if [ "$INSTALL_TOON" -eq 1 ]; then
     install_optional_toon || true
-fi
-if [ "$INSTALL_XMEM" -eq 1 ]; then
-    install_optional_xmem || true
 fi
 if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
     install_optional_ops_env_safe || true
@@ -4776,7 +4451,7 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "  $(t "内建：/nsr 命令未全部自动安装；已有自定义命令已保留，可重跑安装器修复缺失项。" "Built-in: /nsr commands were not all auto-installed; custom commands were preserved, and rerunning the installer can repair missing entries.")"
     fi
     echo ""
-    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、xmem、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR payload 会随 MMS 一起提供；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, xmem, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR payload ship with MMS; all are injected per session without global hooks/config writes.")"
+    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR payload 会随 MMS 一起提供；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR payload ship with MMS; all are injected per session without global hooks/config writes.")"
     echo "  $(t "LLM 修改 MMS 前指南:" "LLM editing guide:") $MMS_HOME/docs/LLM_OPERATION_GUIDE.md"
     echo ""
 
@@ -4807,12 +4482,6 @@ if [ -x "$BIN_DIR/mms" ]; then
 
     if [ "$INSTALL_TOON" -eq 1 ]; then
         echo "  $(t "TOON 已安装：Codex/Claude skill 和 mms-toon 命令；MMS session 内仍使用内建 session asset。" "TOON installed: Codex/Claude skill plus the mms-toon command; MMS sessions still use the bundled session asset.")"
-        echo ""
-    fi
-
-    if [ "$INSTALL_XMEM" -eq 1 ]; then
-        echo "  $(t "xmem 可选安装已执行：通用 CLI/skill 和 ~/.xmem 轻量 setup；MMS session 内仍使用内建 session asset。" "xmem optional install ran: generic CLI/skill and lightweight ~/.xmem setup; MMS sessions still use the bundled session asset.")"
-        echo "  $(t "以后在具体 repo 内可直接让 agent 使用 xmem setup / xmem context，不需要记底层 hook。" "Inside a specific repo, agents can use xmem setup / xmem context directly; you do not need to remember low-level hooks.")"
         echo ""
     fi
 

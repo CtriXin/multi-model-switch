@@ -163,9 +163,29 @@ def test_build_claude_session_settings_drops_deprecated_mindkeeper_mcp(monkeypat
     assert "mcpServers" not in result
 
 
-def test_build_claude_session_settings_includes_installed_plugin_http_mcp(monkeypatch):
+def test_build_claude_session_settings_skips_installed_plugin_http_mcp_by_default(monkeypatch):
     import mms_launchers
 
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    result = mms_launchers._build_claude_session_settings({})
+
+    assert "mcpServers" not in result
+
+
+def test_build_claude_session_settings_includes_installed_plugin_http_mcp_when_enabled(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setenv("MMS_ENABLE_MCP_FIGMA", "1")
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
@@ -522,11 +542,31 @@ def test_append_codex_mcp_servers_drops_missing_bare_codegraph(monkeypatch, tmp_
     assert rendered == 'base_url = "https://example.test"\n'
 
 
-def test_append_codex_mcp_servers_includes_installed_plugin_http_server(monkeypatch, tmp_path):
+def test_append_codex_mcp_servers_skips_installed_plugin_http_server_by_default(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
     real_home.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_installed_claude_plugin_mcp_servers",
+        lambda: {"figma": {"type": "http", "url": "https://mcp.figma.com/mcp"}},
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.figma]" not in rendered
+
+
+def test_append_codex_mcp_servers_includes_installed_plugin_http_server_when_enabled(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    monkeypatch.setenv("MMS_ENABLE_MCP_FIGMA", "1")
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
@@ -789,7 +829,6 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert disabled_user_prompt == []
     assert disabled_stop == [
         mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
-        mms_launchers._XMEM_SESSION_END_HOOK,
     ]
 
     enabled = mms_launchers._build_claude_session_settings(
@@ -927,9 +966,7 @@ def test_resolve_local_hooks_dir_canonicalizes_repo_worktree(tmp_path):
     hooks_dir.mkdir(parents=True)
     for name in (
         "nsr-codex-hook.sh",
-        "xmem-session-start-hook.sh",
-        "xmem-session-end-hook.sh",
-        "xmem-gateway-hook.sh",
+        "nsr-claude-hook.sh",
     ):
         (hooks_dir / name).write_text("#!/bin/sh\n", encoding="utf-8")
     worktree_module = repo / ".worktrees" / "feature-a" / "mms_launchers.py"
@@ -1009,7 +1046,6 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in disabled_commands
-    assert mms_launchers._XMEM_SESSION_START_HOOK not in disabled_commands
     assert "PreToolUse" not in disabled["hooks"]
 
     enabled = mms_launchers._build_codex_session_hooks(
@@ -1028,7 +1064,6 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert "CAVEMAN_DEFAULT_MODE=lite" in caveman_commands[0]
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
-    assert mms_launchers._XMEM_SESSION_START_HOOK not in enabled_commands
     assert "PreToolUse" not in enabled["hooks"]
 
 
@@ -2107,6 +2142,7 @@ def test_overlay_agent_browser_session_entries_merges_session_and_agent_browser_
     (agent_browser_root / "_meta.json").write_text("{}\n", encoding="utf-8")
 
     monkeypatch.setenv("MMS_AGENT_BROWSER_ROOT", str(agent_browser_root))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str((tmp_path / "real-home").joinpath(*parts)))
 
     mms_launchers._overlay_agent_browser_session_entries(
         str(parent_dir),
@@ -2372,6 +2408,7 @@ def test_overlay_toon_session_entries_merges_existing_session_skills(monkeypatch
     os.symlink(existing_skills, parent_dir / "skills")
 
     monkeypatch.setenv("MMS_TOON_ROOT", str(toon_root))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str((tmp_path / "real-home").joinpath(*parts)))
 
     mms_launchers._overlay_toon_session_entries(str(parent_dir), str(session_home))
 
@@ -2733,7 +2770,7 @@ def test_sanitize_global_snapshot_strips_session_only_hooks_and_hive_server():
                     "matcher": "WebFetch",
                     "commands": [
                         "/tmp/keep-webfetch.sh",
-                        mms_launchers._CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
+                        "/tmp/claude-feishu-webfetch-guard.sh",
                     ],
                 }
             ],
@@ -7712,3 +7749,22 @@ def test_llm_classify_retries_retry_after_on_429(monkeypatch):
         "https://relay.example.com/v1/messages",
     ]
     assert sleep_calls == [1.0]
+
+
+def test_default_pilot_session_mcp_server_requires_explicit_opt_in(monkeypatch, tmp_path):
+    import mms_launchers
+
+    pilot_root = tmp_path / "pilot"
+    (pilot_root / "scripts").mkdir(parents=True)
+    (pilot_root / "scripts" / "pilot_mcp_server.py").write_text("# pilot\n", encoding="utf-8")
+    monkeypatch.setenv("MMS_PILOT_ROOT", str(pilot_root))
+    monkeypatch.delenv("MMS_ENABLE_MCP_PILOT", raising=False)
+    monkeypatch.delenv("MMS_ENABLE_PILOT_MCP", raising=False)
+
+    assert mms_launchers._default_pilot_session_mcp_server() is None
+
+    monkeypatch.setenv("MMS_ENABLE_MCP_PILOT", "1")
+    spec = mms_launchers._default_pilot_session_mcp_server()
+
+    assert spec["command"] == "python3"
+    assert spec["args"] == [str(pilot_root / "scripts" / "pilot_mcp_server.py")]

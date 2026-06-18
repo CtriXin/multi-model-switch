@@ -118,10 +118,6 @@ def _resolve_token_saver_root():
     return _launchers_module()._resolve_token_saver_root()
 
 
-def _resolve_xmem_root():
-    return _launchers_module()._resolve_xmem_root()
-
-
 def _exec_or_run(cmd, env, once):
     return _launchers_module()._exec_or_run(cmd, env, once)
 
@@ -1012,7 +1008,6 @@ def _pi_gateway_env(runtime, model_info=None):
             "weber": bool(_resolve_weber_root()),
             "toon": bool(_resolve_toon_root()),
             "token_saver": bool(_resolve_token_saver_root()),
-            "xmem": bool(_resolve_xmem_root()),
         },
     )
     return env

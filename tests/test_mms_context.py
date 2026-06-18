@@ -461,6 +461,7 @@ def test_overlay_weber_session_entries_merges_existing_session_skills(monkeypatc
     os.symlink(existing_skills, parent_dir / "skills")
 
     monkeypatch.setenv("MMS_WEBER_ROOT", str(weber_root))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str((tmp_path / "real-home").joinpath(*parts)))
 
     mms_launchers._overlay_weber_session_entries(str(parent_dir), str(session_home))
 
@@ -486,24 +487,6 @@ def test_resolve_weber_root_prefers_bundled_vendor(monkeypatch, tmp_path):
     monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
 
     assert Path(mms_launchers._resolve_weber_root()) == bundled_root
-
-
-def test_resolve_xmem_root_prefers_bundled_vendor(monkeypatch, tmp_path):
-    home = tmp_path / "home"
-    install_root = tmp_path / "mms-install"
-    bundled_root = install_root / "vendor" / "xmem"
-    shared_root = home / "auto-skills" / "shared-skills" / "xmem"
-    bundled_root.mkdir(parents=True)
-    shared_root.mkdir(parents=True)
-    (bundled_root / "SKILL.md").write_text("# bundled xmem\n", encoding="utf-8")
-    (shared_root / "SKILL.md").write_text("# shared xmem\n", encoding="utf-8")
-
-    monkeypatch.setenv("MMS_REAL_HOME", str(home))
-    monkeypatch.delenv("MMS_XMEM_ROOT", raising=False)
-    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
-    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
-
-    assert Path(mms_launchers._resolve_xmem_root()) == bundled_root
 
 
 def test_install_session_command_wrappers_exposes_context_bin(monkeypatch, tmp_path):
@@ -711,3 +694,25 @@ def test_resolve_current_workdir_uses_session_home_as_last_safe_fallback(monkeyp
 
     assert resolved == str(session_home)
     assert resolved != str(real_home)
+
+
+def test_overlay_session_skill_dir_prefers_global_agent_skill(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+    real_home = tmp_path / "real-home"
+    global_skill = real_home / ".agents" / "skills" / "token-saver"
+    bundled_skill = tmp_path / "bundled" / "token-saver"
+    global_skill.mkdir(parents=True)
+    bundled_skill.mkdir(parents=True)
+    (global_skill / "SKILL.md").write_text("# global token-saver\n", encoding="utf-8")
+    (bundled_skill / "SKILL.md").write_text("# bundled token-saver\n", encoding="utf-8")
+    parent_dir = tmp_path / "session" / ".codex"
+
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    assert mms_launchers._overlay_session_skill_dir(
+        str(parent_dir),
+        str(tmp_path / "overlay"),
+        "token-saver",
+        str(bundled_skill),
+    )
+    assert (parent_dir / "skills" / "token-saver").resolve() == global_skill.resolve()

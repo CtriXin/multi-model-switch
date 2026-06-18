@@ -505,7 +505,7 @@ def test_install_script_mentions_bundled_session_assets():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert "Bundled session assets" in text
-    assert "xmem" in text
+    assert "xmem" not in text.lower()
     assert "NSR ships as a channel-pinned payload" in text
     assert "/nsr commands are auto-installed" in text
     assert "Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless)" in text
@@ -521,7 +521,6 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
         session_assets / "packs" / "caveman" / "hooks",
         session_assets / "skills" / "token-saver",
         session_assets / "skills" / "toon",
-        session_assets / "skills" / "xmem",
         session_assets / "skills" / "web-access",
         session_assets / "skills" / "weber",
         session_assets / "skills" / "agent-browser",
@@ -532,7 +531,6 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
         session_assets / "packs" / "caveman" / "skills" / "caveman" / "SKILL.md",
         session_assets / "skills" / "token-saver" / "SKILL.md",
         session_assets / "skills" / "toon" / "SKILL.md",
-        session_assets / "skills" / "xmem" / "SKILL.md",
         session_assets / "skills" / "web-access" / "SKILL.md",
         session_assets / "skills" / "weber" / "SKILL.md",
         session_assets / "skills" / "agent-browser" / "SKILL.md",
@@ -554,7 +552,7 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
     output = _run_install_check(home=home)
 
     assert ("Bundled session assets" in output) or ("内建 session assets" in output)
-    for label in ("Caveman", "token-saver", "TOON", "xmem", "web-access", "weber", "agent-browser", "NSR"):
+    for label in ("Caveman", "token-saver", "TOON", "web-access", "weber", "agent-browser", "NSR"):
         assert f"✓ {label}:" in output
 
 
@@ -617,7 +615,7 @@ def test_install_script_updates_chinese_optional_copy():
     assert "--brainkeeper-ref" in text
     assert "--mindkeeper-ref" in text
     assert "Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。" in text
-    assert "Caveman、TOON、token-saver、xmem" in text
+    assert "Caveman、TOON、token-saver、Web automation bundle" in text
     assert "NSR payload 也随 channel 内建" in text
 
 
@@ -666,25 +664,20 @@ def test_install_script_has_optional_token_saver_pack():
     assert 'write_mms_script_wrapper "mms-toon"' in text
 
 
-def test_install_script_has_optional_xmem_pack():
+def test_install_script_removes_optional_xmem_pack():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     readme_text = (ROOT_DIR / "README.zh-CN.md").read_text(encoding="utf-8")
 
     assert "--dry-run" in text
     assert "print_dry_run_plan" in text
-    assert "--install-xmem" in text
-    assert "--xmem-ref" in text
-    assert "INSTALL_XMEM" in text
-    assert "XMEM_REPO_URL" in text
-    assert "optional_xmem_installed" in text
-    assert "install_optional_xmem" in text
-    assert "run_xmem_setup_onboarding" in text
-    assert "~/.codex/skills/xmem" in text
-    assert "~/.claude/skills/xmem" in text
-    assert 'XMEM_HOME="$REAL_HOME/.xmem"' in text
-    assert 'XMEM_HOST_HOME="$REAL_HOME"' in text
-    assert '"$xmem_cmd" setup --root "$REAL_HOME" --scan-depth 2 --register-only --yes --no-sync' in text
-    assert "bash install.sh --install-xmem" in readme_text
+    assert "--install-xmem" not in text
+    assert "--xmem-ref" not in text
+    assert "INSTALL_XMEM" not in text
+    assert "XMEM_REPO_URL" not in text
+    assert "optional_xmem_installed" not in text
+    assert "install_optional_xmem" not in text
+    assert "run_xmem_setup_onboarding" not in text
+    assert "bash install.sh --install-xmem" not in readme_text
 
 
 def test_install_script_dry_run_does_not_write_home(tmp_path):
@@ -693,7 +686,7 @@ def test_install_script_dry_run_does_not_write_home(tmp_path):
     env.update(_version_env_overrides())
 
     completed = subprocess.run(
-        ["bash", str(INSTALL_SCRIPT), "--lang", "en", "--install-xmem", "--dry-run"],
+        ["bash", str(INSTALL_SCRIPT), "--lang", "en", "--dry-run"],
         cwd=ROOT_DIR,
         env=env,
         capture_output=True,
@@ -702,8 +695,8 @@ def test_install_script_dry_run_does_not_write_home(tmp_path):
     )
 
     assert "DRY RUN: no files will be written" in completed.stdout
-    assert "would install xmem CLI/skill" in completed.stdout
-    assert "xmem setup --root" in completed.stdout
+    assert "would install xmem CLI/skill" not in completed.stdout
+    assert "xmem setup --root" not in completed.stdout
     assert not (tmp_path / ".mms").exists()
     assert not (tmp_path / ".xmem").exists()
     assert not (tmp_path / ".local" / "share" / "xmem").exists()

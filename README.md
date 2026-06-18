@@ -16,7 +16,7 @@
 - **一个地方管理模型来源**：provider、account、route、fallback、thinking、vision、cache-sensitive transport 都在启动前可见。
 - **隔离但可恢复**：Claude/Codex session 使用 MMS 管理的 HOME / config seed，减少污染真实全局配置，同时保留 resume。
 - **Web UI 配配置**：不想手写 TOML 时，用 `mmf config web` 添加通道、拉模型、隐藏噪音模型、预览保存计划。
-- **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、xmem、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
+- **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
 - **诊断优先**：在怀疑模型之前，先看 route、协议、cache、API Key、请求路径和 runtime exposure。
 
 MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
@@ -225,12 +225,16 @@ caveman_level = "light" # light | standard | full
 | CodeGraph | 内建 passive skill | 优先用 symbol graph 做代码定位、callers/callees、impact 分析 |
 | token-saver | 内建 | 长日志/测试输出/diff 存 ref + snippet；`token-gain` / `mms-gain` 看节省估算 |
 | TOON | 内建 | 压缩 agent-facing JSON / status / handoff |
-| xmem | 内建 skill；可选全局 CLI | 跨项目 truth card / recall |
 | Web automation bundle | 内建 | `weber` router + `web-access` 登录态 Chrome + `agent-browser` headless |
 | NSR | 内建 channel payload，默认注入 | Claude/Codex session-local Stop hook；安装器同时安装 `/nsr` 命令；`/nsr` 后启用新版 NSR loop |
 | ECC / OMC | 可选安装 | Claude agent pack；启动确认页显式选择 |
+| Figma / Pilot MCP | 检测到也默认关闭 | 需要时用 `MMS_ENABLE_MCP_FIGMA=1` / `MMS_ENABLE_MCP_PILOT=1` 显式开启 |
+
+xmem 改为 global-only：MMS / MMF 不再 bundle、安装或注入 xmem skill/hook/plugin；如果全局 agent 目录里有 xmem，就由全局版本自己生效，避免 dev channel 复制出低版本。
 
 NSR 现在不是旧的大 runtime，也不再依赖某台机器上的 `/Users/xin/.nsr`。`install.sh --channel stable|dev|canary` 会把对应 channel 的 `nsr-stop-wrapper.py`、`nsr-loop-hook.py`、`nsrctl.py` 和 `nsr-commit-gate.py` 一起复制到 `~/.mms/hooks/`。MMS 默认只注入轻量 Stop-hook wrapper：普通会话未启用时直接放行，不会强行续跑；在 Claude / Codex 里使用 `/nsr <任务>` 后，当前 repo 会启用新版 loop，让 agent 继续推进直到完成或撞上步数、空转、测试红灯等刹车。OpenCode 目前只提供 `/nsr` 手动规则，不自动接管 idle/stop。
+
+Figma 和 Pilot MCP 不再默认注入；即使检测到已安装 plugin/server，也需要用 `MMS_ENABLE_MCP_FIGMA=1`、`MMS_ENABLE_FIGMA_MCP=1`、`MMS_ENABLE_MCP_PILOT=1` 或 `MMS_ENABLE_PILOT_MCP=1` 显式 opt-in。
 
 可选全局安装示例：
 
@@ -238,7 +242,6 @@ NSR 现在不是旧的大 runtime，也不再依赖某台机器上的 `/Users/xi
 bash install.sh --install-codegraph
 bash install.sh --install-token-saver
 bash install.sh --install-toon
-bash install.sh --install-xmem
 ```
 
 CodeGraph 初始化提示：

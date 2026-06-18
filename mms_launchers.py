@@ -89,7 +89,6 @@ from mms_opencode_session import (
     overlay_opencode_session_assets as _overlay_opencode_session_assets_impl,
     opencode_rtk_plugin_path as _opencode_rtk_plugin_path_impl,
     opencode_session_plugin_runtime as _opencode_session_plugin_runtime,
-    opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
     overlay_opencode_plugin as _overlay_opencode_plugin_impl,
 )
 from mms_core import (
@@ -2162,9 +2161,7 @@ def _resolve_local_hooks_dir(module_file=None):
         canonical_hooks = os.path.join(canonical_root, "hooks")
         required_hooks = (
             "nsr-codex-hook.sh",
-            "xmem-session-start-hook.sh",
-            "xmem-session-end-hook.sh",
-            "xmem-gateway-hook.sh",
+            "nsr-claude-hook.sh",
         )
         if all(os.path.isfile(os.path.join(canonical_hooks, name)) for name in required_hooks):
             return canonical_hooks
@@ -2172,7 +2169,16 @@ def _resolve_local_hooks_dir(module_file=None):
 
 
 _LOCAL_HOOKS_DIR = _resolve_local_hooks_dir()
-_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
+
+
+def _global_or_local_hook_path(name):
+    """Prefer the user's installed hook over an MMF worktree copy."""
+    global_hook = _real_user_path(".mms", "hooks", str(name or ""))
+    if os.path.isfile(global_hook):
+        return global_hook
+    return os.path.join(_LOCAL_HOOKS_DIR, str(name or ""))
+
+
 _CLAUDE_HIVE_COMPACT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
 _CLAUDE_BRAINKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-session-start-hook.sh")
 _CLAUDE_BRAINKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-session-end-hook.sh")
@@ -2182,12 +2188,9 @@ _CLAUDE_MINDKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper
 _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-token-monitor-hook.sh")
 _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-codegraph-auto-index.sh")
 _CLAUDE_MMS_RESUME_HINT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mms-resume-hint.sh")
-_XMEM_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-start-hook.sh")
-_XMEM_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-end-hook.sh")
-_XMEM_GATEWAY_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-gateway-hook.sh")
-_NSR_CLAUDE_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-claude-hook.sh")
-_NSR_CODEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-codex-hook.sh")
-_NSR_BUILTIN_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-builtin-hook.py")
+_NSR_CLAUDE_HOOK = _global_or_local_hook_path("nsr-claude-hook.sh")
+_NSR_CODEX_HOOK = _global_or_local_hook_path("nsr-codex-hook.sh")
+_NSR_BUILTIN_HOOK = _global_or_local_hook_path("nsr-builtin-hook.py")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -2717,7 +2720,6 @@ def _prune_session_only_snapshot_entries(snapshot_data):
     hooks = snapshot_data.get("hooks") or {}
     local_hooks_dir = _LOCAL_HOOKS_DIR
     session_only_commands = {
-        _normalize_hook_command(_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK),
         _normalize_hook_command(f"bash {_CLAUDE_HIVE_COMPACT_HOOK}"),
         _normalize_hook_command(_CLAUDE_HIVE_COMPACT_HOOK),
         _normalize_hook_command(_CLAUDE_BRAINKEEPER_SESSION_START_HOOK),
@@ -2728,14 +2730,10 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
         _normalize_hook_command(_CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK),
         _normalize_hook_command(_CLAUDE_MMS_RESUME_HINT_HOOK),
-        _normalize_hook_command(_XMEM_SESSION_START_HOOK),
-        _normalize_hook_command(_XMEM_SESSION_END_HOOK),
-        _normalize_hook_command(_XMEM_GATEWAY_HOOK),
         _normalize_hook_command(_NSR_CLAUDE_HOOK),
         _normalize_hook_command(_NSR_CODEX_HOOK),
         _normalize_hook_command(f"python3 {_NSR_BUILTIN_HOOK}"),
         _normalize_hook_command(_NSR_BUILTIN_HOOK),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
         _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
         _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-start-hook.sh")),
@@ -2746,9 +2744,6 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-codegraph-auto-index.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mms-resume-hint.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-start-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-end-hook.sh")),
-        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-gateway-hook.sh")),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -2760,6 +2755,7 @@ def _prune_session_only_snapshot_entries(snapshot_data):
                 command
                 for command in group.get("commands") or []
                 if _normalize_hook_command(command) not in session_only_commands
+                and not _is_retired_personal_policy_hook_command(command)
             ]
             if not commands:
                 continue
@@ -3190,23 +3186,9 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     hooks_data = _merge_claude_hooks(hooks_data, _load_managed_session_hooks())
     hooks_data = _append_command_hook(
         hooks_data,
-        "PreToolUse",
-        _CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
-        matcher="WebFetch",
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
         "Stop",
         _CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
         matcher="",
-    )
-    hooks_data = _append_command_hook(
-        hooks_data,
-        "Stop",
-        _XMEM_SESSION_END_HOOK,
-        matcher="",
-        timeout=10,
-        status_message="Closing xmem",
     )
     hooks_data = _append_command_hook(
         hooks_data,
@@ -3214,7 +3196,7 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
         _CLAUDE_MMS_RESUME_HINT_HOOK,
         matcher="",
     )
-    return hooks_data
+    return _filter_hook_commands(hooks_data, _is_retired_personal_policy_hook_command)
 
 
 def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
@@ -3234,6 +3216,10 @@ def _resolve_nsr_root():
         explicit = str(os.environ.get(key) or "").strip()
         if explicit:
             candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        _real_user_path("auto-skills", "shared-skills", "nsr"),
+        _real_user_path("auto-skills", "Non-Stop-Run"),
+    ])
     pref = _asset_root_preference("nsr")
     if pref:
         candidates.append(os.path.abspath(os.path.expanduser(pref)))
@@ -3244,8 +3230,6 @@ def _resolve_nsr_root():
     candidates.extend(_bundled_asset_root_candidates("packs", "nsr", "non-stop-run"))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
-        _real_user_path("auto-skills", "shared-skills", "nsr"),
-        _real_user_path("auto-skills", "Non-Stop-Run"),
         _real_user_path("auto-skills", "shared-skills", "looop.deprecated"),
     ])
 
@@ -3254,7 +3238,7 @@ def _resolve_nsr_root():
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
-        if (
+        if os.path.isfile(os.path.join(candidate, "loop_hook.py")) or (
             os.path.isfile(os.path.join(candidate, "scripts", "codex_hook.py"))
             and os.path.isfile(os.path.join(candidate, "scripts", "claude_hook.py"))
         ):
@@ -3553,7 +3537,6 @@ _BUILTIN_MANAGED_SESSION_SKILLS = {
     "codegraph",
     "toon",
     "token-saver",
-    "xmem",
     "auto-github-contributor",
 }
 
@@ -3909,57 +3892,6 @@ def _resolve_token_saver_root():
     return ""
 
 
-def _resolve_xmem_root():
-    candidates = []
-    explicit = str(os.environ.get("MMS_XMEM_ROOT") or "").strip()
-    if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    pref = _asset_root_preference("xmem")
-    if pref:
-        candidates.append(os.path.abspath(os.path.expanduser(pref)))
-    candidates.extend(_managed_asset_root_candidates("skills", "xmem"))
-    candidates.extend(_bundled_asset_root_candidates("skills", "xmem"))
-    candidates.extend([
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "xmem"),
-        _real_user_path("auto-skills", "shared-skills", "xmem"),
-        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "skills", "xmem"),
-        _real_user_path(".codex", "skills", "xmem"),
-        _real_user_path(".agents", "skills", "xmem"),
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
-            return candidate
-    return ""
-
-
-def _xmem_cli_path():
-    candidates = []
-    for key in ("MMS_XMEM_BIN", "XMEM_BIN"):
-        explicit = str(os.environ.get(key) or "").strip()
-        if explicit:
-            candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    candidates.extend([
-        _real_user_path(".local", "bin", "xmem"),
-        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "bin", "xmem"),
-    ])
-    found = shutil.which("xmem")
-    if found:
-        candidates.append(found)
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return ""
-
-
 def _resolve_auto_github_contributor_root():
     candidates = []
     explicit = str(os.environ.get("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT") or "").strip()
@@ -4091,7 +4023,6 @@ def _is_mms_managed_hook_command(command_text):
     if not command_text:
         return False
     markers = (
-        "claude-feishu-webfetch-guard.sh",
         "hive-compact-hook.sh",
         "brainkeeper-session-start-hook.sh",
         "brainkeeper-session-end-hook.sh",
@@ -4101,18 +4032,31 @@ def _is_mms_managed_hook_command(command_text):
         "mindkeeper-token-monitor-hook.sh",
         "claude-codegraph-auto-index.sh",
         "mms-resume-hint.sh",
-        "xmem-session-start-hook.sh",
-        "xmem-session-end-hook.sh",
-        "xmem-gateway-hook.sh",
         "claude-map-auto-index.sh",
         "nsr-claude-hook.sh",
         "nsr-codex-hook.sh",
         "nsr-builtin-hook.py",
-        "scmp_hook.py --host codex",
         "caveman-activate.js",
         "caveman-mode-tracker.js",
         "everything-claude-code",
         "oh-my-claudecode",
+    )
+    return any(marker in command_text for marker in markers)
+
+
+def _is_retired_personal_policy_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "scmp_hook.py",
+        "work_hook.py",
+        "claude-feishu-prompt.sh",
+        "claude-feishu-webfetch-guard.sh",
+        "xmem-session-start-hook.sh",
+        "xmem-session-end-hook.sh",
+        "xmem-gateway-hook.sh",
+        "xmem agent-hook",
     )
     return any(marker in command_text for marker in markers)
 
@@ -4279,6 +4223,23 @@ def _session_surface_disabled(disabled_session_surfaces, surface, value):
     return value in disabled.get(surface, set())
 
 
+def _session_mcp_opt_in_enabled(name):
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(name or "").strip()).strip("_").upper()
+    if not token:
+        return False
+    for key in (f"MMS_ENABLE_MCP_{token}", f"MMS_ENABLE_{token}_MCP"):
+        if str(os.environ.get(key) or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}:
+            return True
+    return False
+
+
+def _session_mcp_default_enabled(name):
+    name = str(name or "").strip().lower()
+    if name in {"pilot", "figma"}:
+        return _session_mcp_opt_in_enabled(name)
+    return True
+
+
 def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None):
     if not isinstance(mcp_servers, dict):
         return {}
@@ -4351,11 +4312,6 @@ def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
         return {}
     disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
     disabled_commands = disabled.get("hooks", set())
-    if "xmem" in disabled.get("skills", set()):
-        disabled_commands = set(disabled_commands)
-        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_START_HOOK))
-        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_END_HOOK))
-        disabled_commands.add(_normalize_hook_command(_XMEM_GATEWAY_HOOK))
     if not disabled_commands:
         return hooks_data
     return _filter_hook_commands(
@@ -4660,14 +4616,7 @@ def _build_codex_session_hooks(
     )
     hooks_data = _configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
     hooks_data = _merge_claude_hooks(hooks_data, _load_managed_session_hooks())
-    hooks_data = _append_shell_command_hook(
-        hooks_data,
-        "Stop",
-        _XMEM_SESSION_END_HOOK,
-        matcher="",
-        timeout=10,
-        status_message="Closing xmem",
-    )
+    hooks_data = _filter_hook_commands(hooks_data, _is_retired_personal_policy_hook_command)
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _filter_missing_managed_hook_commands(hooks_data)
     if hooks_data:
@@ -5307,6 +5256,26 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root,
                 continue
             os.symlink(src, link)
 
+    def _global_skill_root():
+        parent_real = os.path.realpath(parent_dir)
+        roots = []
+        if f"{os.sep}.claude" in parent_real:
+            roots.extend([
+                _real_user_path(".claude", "skills", skill_name),
+                _real_user_path(".agents", "skills", skill_name),
+            ])
+        elif f"{os.sep}.codex" in parent_real:
+            roots.extend([
+                _real_user_path(".codex", "skills", skill_name),
+                _real_user_path(".agents", "skills", skill_name),
+            ])
+        else:
+            roots.append(_real_user_path(".agents", "skills", skill_name))
+        for root in roots:
+            if os.path.isfile(os.path.join(root, "SKILL.md")):
+                return root
+        return ""
+
     disabled = _session_skill_disabled(disabled_session_surfaces, skill_name)
     if os.path.exists(skills_dir) or os.path.islink(skills_dir):
         _merge_dir(os.path.realpath(skills_dir), exclude_names={skill_name} if disabled else None)
@@ -5322,12 +5291,13 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root,
             os.symlink(merged_dir, skills_dir)
         return False
 
-    if not os.path.isfile(os.path.join(skill_root, "SKILL.md")):
+    preferred_skill_root = _global_skill_root() or skill_root
+    if not os.path.isfile(os.path.join(preferred_skill_root, "SKILL.md")):
         return False
 
     skill_link = os.path.join(merged_dir, skill_name)
     if not os.path.exists(skill_link) and not os.path.islink(skill_link):
-        os.symlink(skill_root, skill_link)
+        os.symlink(preferred_skill_root, skill_link)
 
     if not os.listdir(merged_dir):
         return False
@@ -5455,15 +5425,6 @@ def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_
     overlay_root = os.path.join(session_home, ".mms-toon-overlay")
     os.makedirs(overlay_root, exist_ok=True)
     _overlay_session_skill_dir(parent_dir, overlay_root, "toon", toon_root, disabled_session_surfaces=disabled_session_surfaces)
-
-
-def _overlay_xmem_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
-    xmem_root = _resolve_xmem_root()
-    if not xmem_root:
-        return
-    overlay_root = os.path.join(session_home, ".mms-xmem-overlay")
-    os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "xmem", xmem_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
 def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
@@ -5650,7 +5611,6 @@ def _overlay_agy_session_assets(
     _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_managed_dynamic_skill_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_xmem_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
 
@@ -5669,8 +5629,6 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
         overlay_managed_dynamic_skill_entries=_overlay_managed_dynamic_skill_entries,
-        overlay_xmem_session_entries=_overlay_xmem_session_entries,
-        overlay_opencode_xmem_plugin=_overlay_opencode_xmem_plugin,
     )
 
 
@@ -5958,6 +5916,8 @@ def _resolve_pilot_root(module_path=None):
 
 
 def _default_pilot_session_mcp_server():
+    if not _session_mcp_opt_in_enabled("pilot"):
+        return None
     pilot_root = _resolve_pilot_root()
     if pilot_root:
         return {
@@ -6069,6 +6029,8 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
             inherited[name] = copy.deepcopy(fallback[name])
     if allow_execution_surfaces:
         for name, spec in _installed_claude_plugin_mcp_servers().items():
+            if not _session_mcp_default_enabled(name):
+                continue
             inherited.setdefault(name, copy.deepcopy(spec))
         hive_spec = _default_hive_session_mcp_server()
         if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
@@ -7339,11 +7301,6 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             session_home,
             disabled_session_surfaces=disabled_session_surfaces,
         )
-        _overlay_xmem_session_entries(
-            session_claude_dir,
-            session_home,
-            disabled_session_surfaces=disabled_session_surfaces,
-        )
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
@@ -7462,11 +7419,6 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
-            _overlay_xmem_session_entries(
-                os.path.join(session_home, ".codex"),
-                session_home,
-                disabled_session_surfaces=disabled_session_surfaces,
-            )
             _overlay_auto_github_contributor_session_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
@@ -7502,7 +7454,6 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-                "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
             extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
@@ -8703,23 +8654,6 @@ def _install_session_command_wrappers(session_home, env):
             env["MMS_TOKEN_GAIN_BIN"] = token_gain_wrapper_path
             env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
 
-    xmem_script = _xmem_cli_path()
-    if xmem_script:
-        xmem_wrapper_path = os.path.join(wrapper_dir, "xmem")
-        xmem_wrapper = "\n".join(
-            [
-                "#!/bin/sh",
-                f"exec {json.dumps(xmem_script)} \"$@\"",
-                "",
-            ]
-        )
-        with open(xmem_wrapper_path, "w", encoding="utf-8") as handle:
-            handle.write(xmem_wrapper)
-        os.chmod(xmem_wrapper_path, 0o755)
-        if isinstance(env, dict):
-            env["XMEM_BIN"] = xmem_wrapper_path
-            env["MMS_XMEM_BIN"] = xmem_wrapper_path
-
     session_path = env.get("PATH") or current_path
     env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
 
@@ -9002,6 +8936,8 @@ def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_
     servers = copy.deepcopy(servers) if isinstance(servers, dict) else {}
     enabled_codex_plugins = _enabled_real_codex_plugin_names()
     for name, spec in _installed_claude_plugin_mcp_servers().items():
+        if not _session_mcp_default_enabled(name):
+            continue
         if (
             isinstance(spec, dict)
             and isinstance(spec.get("url"), str)
@@ -10835,7 +10771,6 @@ def _claude_gateway_env(
                 "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-                "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
             extra_paths=session_packet_extra_paths,
@@ -10883,7 +10818,6 @@ def _claude_gateway_env(
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_managed_dynamic_skill_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
-        _overlay_xmem_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
 
     with _timed_launch_step(_timings, "build env and wrappers"):
@@ -11331,7 +11265,6 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_managed_dynamic_skill_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_xmem_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
     env = os.environ.copy()
@@ -11369,7 +11302,6 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "codegraph": bool(_resolve_codegraph_root()) and not _session_skill_disabled(disabled_session_surfaces, "codegraph"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-            "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
             "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
         },
         extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
@@ -11600,17 +11532,6 @@ def _opencode_rtk_plugin_path(runtime=None):
     )
 
 
-def _opencode_xmem_plugin_path(runtime=None):
-    return _opencode_xmem_plugin_path_impl(
-        runtime,
-        module_file=__file__,
-        normalize_session_surface_disabled=_normalize_session_surface_disabled,
-        session_skill_disabled=_session_skill_disabled,
-        resolve_xmem_root=_resolve_xmem_root,
-        xmem_cli_path=_xmem_cli_path,
-    )
-
-
 def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
     return _overlay_opencode_plugin_impl(
         config_dir,
@@ -11619,20 +11540,8 @@ def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
     )
 
 
-def _overlay_opencode_xmem_plugin(config_dir, runtime=None):
-    return _overlay_opencode_plugin_impl(
-        config_dir,
-        _opencode_xmem_plugin_path(runtime),
-        "mms-xmem.ts",
-    )
-
-
 def _opencode_rtk_plugin_enabled(runtime=None):
     return bool(_opencode_rtk_plugin_path(runtime))
-
-
-def _opencode_xmem_plugin_enabled(runtime=None):
-    return bool(_opencode_xmem_plugin_path(runtime))
 
 
 def _build_opencode_config_payload(runtime, model_name=""):
@@ -11707,10 +11616,8 @@ def _opencode_gateway_env(runtime, model_info=None):
         resolve_codegraph_root=_resolve_codegraph_root,
         resolve_toon_root=_resolve_toon_root,
         resolve_token_saver_root=_resolve_token_saver_root,
-        resolve_xmem_root=_resolve_xmem_root,
         session_skill_disabled=_session_skill_disabled,
         opencode_rtk_plugin_enabled=_opencode_rtk_plugin_enabled,
-        opencode_xmem_plugin_enabled=_opencode_xmem_plugin_enabled,
     )
 
 
@@ -11991,7 +11898,6 @@ def get_export_env(cli, runtime, model_info=None):
     mms_gain_script = _mms_gain_script_path()
     token_saver_script = _token_saver_script_path()
     token_gain_script = _token_gain_script_path()
-    xmem_script = _xmem_cli_path()
     if cli in {"claude", "codex", "opencode", "pi"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
@@ -12009,10 +11915,7 @@ def get_export_env(cli, runtime, model_info=None):
             exports["TOKEN_GAIN_BIN"] = token_gain_script
             exports["MMS_TOKEN_GAIN_BIN"] = token_gain_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
-        if xmem_script:
-            exports["XMEM_BIN"] = xmem_script
-            exports["MMS_XMEM_BIN"] = xmem_script
-        first_script = toon_script or context_script or mms_gain_script or token_saver_script or token_gain_script or xmem_script
+        first_script = toon_script or context_script or mms_gain_script or token_saver_script or token_gain_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
     return _inject_selected_model_name(exports, _resolve_model(runtime), model_info=runtime)
