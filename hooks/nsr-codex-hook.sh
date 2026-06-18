@@ -19,6 +19,13 @@ AUTO_SKILLS_ROOT="$(cd "$MMS_HOME/../.." 2>/dev/null && pwd || true)"
 MMS_PARENT="$(cd "$MMS_HOME/.." 2>/dev/null && pwd || true)"
 BUILTIN_HOOK="$SCRIPT_DIR/nsr-builtin-hook.py"
 
+# New NSR core (2026 rewrite): opt-in wrapper around shared-skills/nsr/loop_hook.py.
+# Keep this before legacy script lookup; the rewrite no longer has scripts/claude_hook.py or scripts/codex_hook.py.
+LATEST_NSR_WRAPPER="$REAL_HOME/.nsr/nsr_stop_hook.py"
+if [ -f "$LATEST_NSR_WRAPPER" ] && command -v python3 >/dev/null 2>&1; then
+  exec python3 "$LATEST_NSR_WRAPPER"
+fi
+
 candidates=(
   "${MMS_NSR_ROOT:-}"
   "${NSR_ROOT:-}"
