@@ -3609,6 +3609,9 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "可直接复制转发 / copy-forward packet" in host_pro_prompt
     assert "host 建议 / host recommendation" in host_pro_prompt
     assert "追踪页脚 / trace footer" in host_pro_prompt
+    assert "slim, clean, and self-contained" in host_pro_prompt
+    assert "action must be one concise next-step sentence" in host_pro_prompt
+    assert "verbose/full audit packet" in host_pro_prompt
     assert "host private advice" in host_pro_prompt
     assert "模型耗时 / model timing" in host_pro_prompt
     assert "task-local subagent scorecard and model timing" in host_pro_prompt
@@ -3652,11 +3655,18 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "compact table or aligned list" in host_prompt_lower
     assert "可直接复制转发 / copy-forward packet" in host_prompt_lower
     assert "start this packet with 追踪块 / trace" in host_prompt_lower
-    assert "same current mms-mission block" in host_prompt_lower
-    assert "compact for forwarding" in host_prompt_lower
-    assert "direct verification summary" in host_prompt_lower
-    assert "key findings" in host_prompt_lower
-    assert "model timing summary" in host_prompt_lower
+    assert "slim, clean, and self-contained" in host_prompt_lower
+    assert "mms-source when known" in host_prompt_lower
+    assert "action must be one concise next-step sentence" in host_prompt_lower
+    assert "optional verdict when a decision or tally exists" in host_prompt_lower
+    assert "fixing, accepting, merging, rejecting, or deferring" in host_prompt_lower
+    assert "do not put committee_policy" in host_prompt_lower
+    assert "selected_members" in host_prompt_lower
+    assert "non_dispatched_members" in host_prompt_lower
+    assert "model timing" in host_prompt_lower
+    assert "long verification summaries" in host_prompt_lower
+    assert "long host recommendations" in host_prompt_lower
+    assert "verbose/full audit packet" in host_prompt_lower
     assert "do not duplicate human notes" in host_prompt_lower
     assert "host 建议 / host recommendation" in host_prompt_lower
     assert "追踪页脚 / trace footer" in host_prompt_lower

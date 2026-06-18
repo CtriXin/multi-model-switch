@@ -257,13 +257,19 @@ Use this exact section order:
    Ballots`, show tally first, then use a compact table or aligned list with
    member, verdict, veto, and one short reason.
 2. `可直接复制转发 / Copy-forward Packet`: a clean, self-contained block that can
-   be copied or forwarded directly. Start this packet with `追踪块 / Trace`
-   containing the same current mission block. Keep it compact for forwarding:
-   include only the goal, `committee_policy`, direct verification summary, key
-   findings, tally/consensus, model timing summary, formal artifact status, and
-   provenance. Do not duplicate `Human Notes`; do not include scorecard,
-   per-member score rationale, long ballot prose, host meta commentary, or
-   private host advice in this packet.
+   be copied or forwarded directly. Start this packet with `追踪块 / Trace`.
+   Default to a slim reply-back packet: include only `MMS-MISSION`,
+   `MMS-TARGET`, optional `MMS-SOURCE` when known, optional `MMS-MODE` when
+   useful, `ACTION`, optional `VERDICT` when a decision or tally exists, and
+   `MMS-REPLY`. `ACTION` is one concise next-step sentence. `MMS-REPLY`
+   instructs the receiver to include the current `MMS-MISSION` when reporting
+   back after fixing, accepting, merging, rejecting, or deferring the work. Do
+   not include `committee_policy`, selected/non-dispatched members, model
+   timing, provenance, formal artifact status, long verification summaries,
+   long host recommendations, scorecard, per-member score rationale, long ballot
+   prose, host meta commentary, or private host advice. Do not duplicate `Human
+   Notes` in this packet unless the user explicitly asks for a verbose/full audit
+   packet.
 3. `Host 建议 / Host Recommendation`: the host's recommended next action, placed
    after the copy-forward packet as the last substantive section.
 4. `追踪页脚 / Trace Footer`: repeat at least `MMS-MISSION` plus `MMS-TARGET` as
