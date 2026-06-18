@@ -11650,8 +11650,11 @@ def _opencode_gateway_env(runtime, model_info=None):
         resolve_codegraph_root=_resolve_codegraph_root,
         resolve_toon_root=_resolve_toon_root,
         resolve_token_saver_root=_resolve_token_saver_root,
+        resolve_xmem_root=_resolve_xmem_root,
         session_skill_disabled=_session_skill_disabled,
         opencode_rtk_plugin_enabled=_opencode_rtk_plugin_enabled,
+        opencode_xmem_plugin_enabled=_opencode_xmem_plugin_enabled,
+        opencode_nsr_plugin_enabled=_opencode_nsr_plugin_enabled,
     )
 
 

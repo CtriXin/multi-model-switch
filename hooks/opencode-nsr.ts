@@ -19,14 +19,36 @@
 //   - the `session.idle` event field carrying the session id,
 //   - the client.session.prompt() request body,
 //   - MMS_HOME being present in the OpenCode process env.
+import { existsSync } from "node:fs"
 import type { Plugin } from "@opencode-ai/plugin"
 
 const MAX_AUTO_CONTINUE = 4
 const autoContinues = new Map<string, number>()
 
 function nsrHookPath(): string {
-  const home = process.env.MMS_HOME || process.env.MMS_REAL_HOME || ""
-  return home ? `${home}/hooks/nsr-builtin-hook.py` : ""
+  // The OpenCode child env does NOT carry MMS_HOME (confirmed in committee review),
+  // so resolve the hook next to this plugin's own real file first: the overlay
+  // symlinks mms-nsr.ts -> <mms>/hooks/opencode-nsr.ts, whose sibling is the hook.
+  // Fall back to explicit env only when the plugin was copied, not symlinked.
+  const candidates: string[] = []
+  try {
+    const dir = (import.meta as { dir?: string }).dir
+    if (dir) candidates.push(`${dir}/nsr-builtin-hook.py`)
+  } catch {
+    // import.meta.dir unavailable; rely on env fallbacks below.
+  }
+  const explicit = process.env.MMS_OPENCODE_NSR_HOOK
+  if (explicit) candidates.push(explicit)
+  const home = process.env.MMS_HOME || process.env.MMS_REAL_HOME
+  if (home) candidates.push(`${home}/hooks/nsr-builtin-hook.py`)
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch {
+      // ignore and try the next candidate
+    }
+  }
+  return ""
 }
 
 export const NsrOpenCodePlugin: Plugin = async ({ $, client, directory }) => {
@@ -48,8 +70,13 @@ export const NsrOpenCodePlugin: Plugin = async ({ $, client, directory }) => {
         if (used >= MAX_AUTO_CONTINUE) return // runaway backstop
 
         // Reuse the exact NSR decision used for claude/codex (Stop event contract).
+        // KNOWN (committee finding, needs live design): a bare synthesized "Stop"
+        // can trip NSR's builtin repeat-guard (identical signature -> allowed after
+        // STOP_BLOCK_REPEAT_LIMIT), so the local MAX_AUTO_CONTINUE cap above is the
+        // effective budget. `host` lets a future NSR build special-case opencode.
         const payload = JSON.stringify({
           hook_event_name: "Stop",
+          host: "opencode",
           session_id: sessionID,
           cwd: directory || "",
         })
