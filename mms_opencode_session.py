@@ -130,6 +130,8 @@ def overlay_opencode_session_assets(
     overlay_toon_session_entries,
     overlay_token_saver_session_entries,
     overlay_managed_dynamic_skill_entries,
+    overlay_xmem_session_entries=None,
+    overlay_opencode_xmem_plugin=None,
     overlay_codegraph_session_entries=None,
     overlay_opencode_nsr_plugin=None,
 ):
@@ -152,7 +154,9 @@ def overlay_opencode_session_assets(
     overlay_toon_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     overlay_token_saver_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     overlay_managed_dynamic_skill_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    overlay_xmem_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    overlay_opencode_xmem_plugin(config_dir, plugin_runtime)
+    if overlay_xmem_session_entries is not None:
+        overlay_xmem_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    if overlay_opencode_xmem_plugin is not None:
+        overlay_opencode_xmem_plugin(config_dir, plugin_runtime)
     if overlay_opencode_nsr_plugin is not None:
         overlay_opencode_nsr_plugin(config_dir, plugin_runtime)
