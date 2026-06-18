@@ -10,15 +10,15 @@
 // SAFETY (this is a different, re-prompt-based mechanism with runaway risk):
 //   - Opt-in only: inert unless MMS_OPENCODE_NSR=1 (the MMS overlay also gates it
 //     off by default). Never auto-continues a session the user didn't enable.
-//   - Hard per-session cap (MAX_AUTO_CONTINUE) on TOP of NSR's own repeat-guard,
-//     so a decision bug cannot loop forever.
+//   - Hard per-session cap (MAX_AUTO_CONTINUE). The builtin hook special-cases
+//     host=opencode and leaves the continuation budget to this local cap.
 //   - Fail-open: any error / missing hook / unknown shape => do nothing.
 //
 // NOT YET VERIFIED in a live OpenCode session. The exact shapes below are best
 // effort from the SDK type defs and MUST be confirmed live before enabling:
 //   - the `session.idle` event field carrying the session id,
 //   - the client.session.prompt() request body,
-//   - MMS_HOME being present in the OpenCode process env.
+//   - the real idle cadence after an internal re-prompt in a long-running session.
 import { existsSync } from "node:fs"
 import type { Plugin } from "@opencode-ai/plugin"
 
@@ -70,10 +70,8 @@ export const NsrOpenCodePlugin: Plugin = async ({ $, client, directory }) => {
         if (used >= MAX_AUTO_CONTINUE) return // runaway backstop
 
         // Reuse the exact NSR decision used for claude/codex (Stop event contract).
-        // KNOWN (committee finding, needs live design): a bare synthesized "Stop"
-        // can trip NSR's builtin repeat-guard (identical signature -> allowed after
-        // STOP_BLOCK_REPEAT_LIMIT), so the local MAX_AUTO_CONTINUE cap above is the
-        // effective budget. `host` lets a future NSR build special-case opencode.
+        // The builtin hook special-cases host=opencode so this local cap remains the
+        // effective continuation budget for the experimental OpenCode path.
         const payload = JSON.stringify({
           hook_event_name: "Stop",
           host: "opencode",
