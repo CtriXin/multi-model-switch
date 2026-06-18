@@ -63,6 +63,7 @@ _PYTEST_TARGETS = [
     "tests/test_mms_resume_command.py",
     "tests/test_reset_mms_install.py",
     "tests/test_install_script_paths.py",
+    "tests/test_nsr_bundled_wrapper.py",
     "tests/test_mms_installer_runtime.py",
     "tests/test_command_smoke.py",
 ]
@@ -74,6 +75,7 @@ _QUICK_PYTEST_TARGETS = [
     "tests/test_claude_hardening_regressions.py::test_claude_gateway_env_does_not_restore_cross_model_resume_pointer_on_new_launch",
     "tests/test_mms_resume_command.py::test_handle_resume_command_passes_claude_resume_args_and_project",
     "tests/test_install_script_paths.py",
+    "tests/test_nsr_bundled_wrapper.py",
 ]
 
 _SCENARIO_MATRIX = [
@@ -100,7 +102,7 @@ _SCENARIO_MATRIX = [
     {
         "id": "nsr-low-noise-hooks",
         "state": "NSR enabled for Claude/Codex session hooks",
-        "coverage": "NSR stays on Stop/compact hooks and is absent from high-frequency tool hooks",
+        "coverage": "NSR stays on Stop/compact hooks, bundled payload no-ops non-Stop events, and is absent from high-frequency tool hooks",
     },
     {
         "id": "resume-explicit-only",

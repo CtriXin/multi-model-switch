@@ -258,6 +258,19 @@ optional_handover_continuity_installed() {
     done
 }
 
+optional_nsr_commands_installed() {
+    local command
+    for command in \
+        "$REAL_HOME/.agents/commands/nsr.md" \
+        "$REAL_HOME/.claude/commands/nsr.md" \
+        "$REAL_HOME/.codex/commands/nsr.md" \
+        "$REAL_HOME/.config/opencode/commands/nsr.md" \
+        "$REAL_HOME/.opencode/commands/nsr.md"; do
+        [ -f "$command" ] || return 1
+        grep -Fq "Managed by MMS builtin NSR" "$command" || return 1
+    done
+}
+
 optional_map_installed() {
     [ -x "$REAL_HOME/.claude/hooks/map-auto-index.sh" ]
 }
@@ -333,6 +346,10 @@ bundled_session_asset_present() {
             ;;
         nsr)
             [ -f "$MMS_HOME/hooks/nsr-builtin-hook.py" ] \
+                && [ -f "$MMS_HOME/hooks/nsr-loop-hook.py" ] \
+                && [ -f "$MMS_HOME/hooks/nsr-stop-wrapper.py" ] \
+                && [ -f "$MMS_HOME/hooks/nsr-commit-gate.py" ] \
+                && [ -f "$MMS_HOME/hooks/nsrctl.py" ] \
                 && [ -f "$MMS_HOME/hooks/nsr-claude-hook.sh" ] \
                 && [ -f "$MMS_HOME/hooks/nsr-codex-hook.sh" ]
             ;;
@@ -355,7 +372,7 @@ print_bundled_session_asset_status() {
             web-access) label="web-access"; path="$assets_root/skills/web-access"; mode="$(t "默认可用" "available by default")" ;;
             weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用" "available by default")" ;;
             agent-browser) label="agent-browser"; path="$assets_root/skills/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
-            nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-builtin-hook.py"; mode="$(t "默认开启；仍只在 MMS session 注入 hook" "enabled by default; hooks remain MMS-session-local")" ;;
+            nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-stop-wrapper.py"; mode="$(t "默认注入；/nsr 启用后走内置新版 loop payload" "injected by default; /nsr enables the bundled rewritten loop payload")" ;;
         esac
         if bundled_session_asset_present "$asset"; then
             echo "✓ $label: $path ($mode)"
@@ -479,7 +496,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR 内建且默认开启；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; NSR is built in and enabled by default; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
+  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR payload 随 channel 内建，默认注入，/nsr 命令会自动安装；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; the NSR payload ships with each channel, is injected by default, and /nsr commands are auto-installed; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -841,14 +858,14 @@ prompt_optional_install_choices() {
         echo "Bundled session mode"
         echo "  Caveman, TOON, token-saver, xmem, and the Web automation bundle ship inside MMS as pinned session assets."
         echo "  Web automation bundle = weber router + web-access logged-in Chrome + agent-browser headless CLI."
-        echo "  NSR is built in too and is enabled by default for MMS-managed Claude/Codex sessions."
-        echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config."
+        echo "  NSR ships as a channel-pinned payload too: MMS injects the Stop hook, and /nsr enables the loop."
+        echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config; installer only adds the /nsr command docs."
     else
         echo "内建 session 模式"
         echo "  Caveman、TOON、token-saver、xmem 和 Web automation bundle 会随 MMS 一起作为内建 session 资产提供。"
         echo "  Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。"
-        echo "  NSR 也已内建，并对 MMS-managed Claude/Codex session 默认开启。"
-        echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置。"
+        echo "  NSR payload 也随 channel 内建：MMS 默认注入 Stop hook，/nsr 后才启用 loop。"
+        echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置；安装器只补 /nsr 命令文档。"
     fi
 
     if [ "$INSTALL_CLI_EXPLICIT" -eq 1 ]; then
@@ -2424,6 +2441,12 @@ run_install_check() {
         echo "• $(t "offduty/onduty skill 未安装（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "offduty/onduty skills not installed (built-in auto-install; rerun MMS install or upgrade if missing)")"
     fi
 
+    if optional_nsr_commands_installed; then
+        echo "✓ $(t "/nsr 命令已安装（NSR）" "/nsr commands installed (NSR)")"
+    else
+        echo "• $(t "/nsr 命令未安装或被自定义覆盖（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "/nsr commands missing or custom-overridden (built-in auto-install; rerun MMS install or upgrade if missing)")"
+    fi
+
     if optional_ecc_installed; then
         echo "✓ $(t "ECC agent pack 已安装" "ECC agent pack installed"): $MMS_HOME/agent-packs/everything-claude-code"
     else
@@ -3916,13 +3939,14 @@ print_dry_run_plan() {
     echo "• $(t "命令目录" "command dir"): $BIN_DIR"
     echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
     echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
-    echo "• $(t "会复制 session assets" "would copy session assets"): Caveman / TOON / token-saver / xmem / Web automation bundle"
+    echo "• $(t "会复制 session assets" "would copy session assets"): Caveman / TOON / token-saver / xmem / Web automation bundle / NSR"
 
     if [ -n "$INSTALL_CLI_LIST" ]; then
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
     fi
     [ "$INSTALL_RTK" -eq 1 ] && echo "• $(t "会安装 RTK rewrite hook" "would install RTK rewrite hook")"
     echo "• $(t "会安装/修复 offduty/onduty（handover continuity）到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "would install/repair offduty/onduty (handover continuity) into Claude/Codex/OpenCode global skill dirs and clean legacy command symlinks")"
+    echo "• $(t "会安装/修复 /nsr 命令到 Claude/Codex/OpenCode（不写全局 hooks/config）" "would install/repair /nsr commands for Claude/Codex/OpenCode without global hooks/config writes")"
     [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
     [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map auto-index" "would install Map auto-index"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
     [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
@@ -4090,6 +4114,139 @@ install_builtin_handover_continuity() {
     else
         HANDOVER_CONTINUITY_INSTALL_STATUS="partial"
         echo "⚠ $(t "offduty/onduty skill 安装未完全成功，可重试或稍后手动安装" "offduty/onduty skill install did not fully succeed; retry or install manually later")"
+    fi
+
+    return 0
+}
+
+write_builtin_nsr_command_file() {
+    local target="$1"
+    local mode="$2"
+    local marker="Managed by MMS builtin NSR"
+    local tmp_file=""
+
+    mkdir -p "$(dirname "$target")"
+    if [ -f "$target" ] \
+        && ! grep -Fq "$marker" "$target" 2>/dev/null \
+        && ! { grep -Fq "# /nsr" "$target" 2>/dev/null && grep -Fq "Non-Stop-Run" "$target" 2>/dev/null && grep -Fq "nsrctl.py" "$target" 2>/dev/null; }; then
+        echo "⚠ $(t "检测到已有自定义 /nsr，跳过覆盖" "Detected custom /nsr command, skipping overwrite"): $target"
+        return 1
+    fi
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-nsr-command.XXXXXX")"
+    if [ "$mode" = "opencode" ]; then
+        cat > "$tmp_file" <<EOF
+<!-- $marker -->
+# /nsr
+
+Run the current task with NSR discipline in OpenCode.
+
+Important: OpenCode does not expose the Claude/Codex Stop-hook \`decision=block\` protocol. Use this command as a manual loop contract: keep working until done or a brake trips.
+
+## Procedure
+
+1. Treat the user text after \`/nsr\` as the objective.
+2. State success criteria and brakes:
+   - max continuation attempts;
+   - no-change/stall detection by inspecting git status/diff;
+   - validation command, if known;
+   - red-test retry limit.
+3. Work in bounded slices. After each slice, inspect git status/diff and run validation.
+4. If validation is green and success criteria are met, stop.
+5. If no files change across repeated attempts, tests stay red after the retry limit, or a high-risk decision appears, stop and ask.
+6. Before any agent-created commit, run:
+
+\`\`\`bash
+python3 "$MMS_HOME/hooks/nsr-commit-gate.py" --repo "\$PWD"
+\`\`\`
+
+If the gate blocks, do not auto-commit; explain the blocked paths and ask if needed.
+EOF
+    else
+        cat > "$tmp_file" <<EOF
+<!-- $marker -->
+# /nsr
+
+Run the current task in NSR (Non-Stop-Run) mode: keep working until the goal is done or a brake trips.
+
+## Activation
+
+1. Treat the user text after \`/nsr\` as the objective.
+2. Enable NSR for this repo before continuing:
+
+\`\`\`bash
+python3 "$MMS_HOME/hooks/nsrctl.py" enable "\$PWD"
+\`\`\`
+
+3. State the objective and the brakes you will use.
+4. Continue implementing without repeated confirmation until one of these happens:
+   - success criteria are met and validation passes;
+   - \`LOOP_MAX_STEPS\` continuation limit;
+   - \`LOOP_MAX_NO_CHANGE\` no-change/stall limit;
+   - \`LOOP_TEST_CMD\` red reaches \`LOOP_MAX_RED\`;
+   - a high-risk human decision is required.
+
+## Defaults
+
+- Stop hook wrapper: \`$MMS_HOME/hooks/nsr-stop-wrapper.py\`.
+- Core hook: \`$MMS_HOME/hooks/nsr-loop-hook.py\`.
+- Safety gate: \`$MMS_HOME/hooks/nsr-commit-gate.py\`.
+- State file: \`.loop_state.json\`.
+
+Useful env vars when launching the CLI:
+
+\`\`\`bash
+LOOP_TEST_CMD="pytest -q"
+LOOP_MAX_STEPS=30
+LOOP_MAX_NO_CHANGE=3
+LOOP_MAX_RED=5
+LOOP_TEST_SHELL=1   # only when the test command needs shell syntax
+\`\`\`
+
+## Commit Safety
+
+Before any agent-created commit, run:
+
+\`\`\`bash
+python3 "$MMS_HOME/hooks/nsr-commit-gate.py" --repo "\$PWD"
+\`\`\`
+
+If it blocks, do not auto-commit; explain the blocked paths and ask if needed.
+
+## Closeout
+
+When done or blocked, the Stop hook normally disables NSR automatically. If manual cleanup is needed:
+
+\`\`\`bash
+python3 "$MMS_HOME/hooks/nsrctl.py" disable "\$PWD"
+\`\`\`
+EOF
+    fi
+
+    mv "$tmp_file" "$target"
+    chmod 644 "$target"
+    echo "✓ $(t "已安装 NSR 命令" "Installed NSR command"): $target"
+    return 0
+}
+
+install_builtin_nsr_commands() {
+    local failures=0
+
+    echo ""
+    echo "$(t "正在安装内置 /nsr 命令..." "Installing built-in /nsr commands...")"
+
+    write_builtin_nsr_command_file "$REAL_HOME/.agents/commands/nsr.md" "hook" || failures=$((failures + 1))
+    write_builtin_nsr_command_file "$REAL_HOME/.claude/commands/nsr.md" "hook" || failures=$((failures + 1))
+    write_builtin_nsr_command_file "$REAL_HOME/.codex/commands/nsr.md" "hook" || failures=$((failures + 1))
+    write_builtin_nsr_command_file "$REAL_HOME/.config/opencode/commands/nsr.md" "opencode" || failures=$((failures + 1))
+    write_builtin_nsr_command_file "$REAL_HOME/.opencode/commands/nsr.md" "opencode" || failures=$((failures + 1))
+
+    if [ "$failures" -eq 0 ]; then
+        NSR_COMMAND_INSTALL_STATUS="installed"
+        echo "✓ $(t "/nsr 命令已安装" "/nsr commands installed")"
+    else
+        NSR_COMMAND_INSTALL_STATUS="partial"
+        echo "⚠ $(t "/nsr 命令部分安装；已有自定义命令已保留" "/nsr commands partially installed; custom commands were preserved")"
     fi
 
     return 0
@@ -4389,7 +4546,7 @@ if [ "$INSTALL_OMC" -eq 1 ]; then
 fi
 
 echo "• $(t "内建 session assets" "Bundled session assets"): on"
-echo "  $(t "安装后会自带 Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）；NSR 内建且默认开启；全部按 session 注入，不改全局 hooks/config。" "Install includes Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless); NSR is built in and enabled by default; all are injected per session without changing global hooks/config.")"
+echo "  $(t "安装后会自带 Caveman、TOON、token-saver、xmem、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR channel payload；全部按 session 注入，不改全局 hooks/config，安装器只补 /nsr 命令文档。" "Install includes Caveman, TOON, token-saver, xmem, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR channel payload; all are injected per session without changing global hooks/config, and the installer only adds /nsr command docs.")"
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
@@ -4455,6 +4612,10 @@ write_language_config
 # ── 内置安装：handover continuity (offduty/onduty) ──
 HANDOVER_CONTINUITY_INSTALL_STATUS="not_run"
 install_builtin_handover_continuity
+
+# ── 内置安装：NSR slash commands ──
+NSR_COMMAND_INSTALL_STATUS="not_run"
+install_builtin_nsr_commands
 
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"
@@ -4609,8 +4770,13 @@ if [ -x "$BIN_DIR/mms" ]; then
     else
         echo "  $(t "内建：offduty/onduty（handover continuity）未自动安装完成；可重新运行安装器或检查 vendor/handover。" "Built-in: offduty/onduty (handover continuity) was not fully auto-installed; rerun the installer or check vendor/handover.")"
     fi
+    if [ "$NSR_COMMAND_INSTALL_STATUS" = "installed" ]; then
+        echo "  $(t "内建：/nsr 命令已安装到 Claude/Codex/OpenCode；Claude/Codex 通过内置 Stop hook 启用新版 loop，OpenCode 使用手动 loop contract。" "Built-in: /nsr commands installed for Claude/Codex/OpenCode; Claude/Codex enable the rewritten loop through the bundled Stop hook, while OpenCode uses the manual loop contract.")"
+    else
+        echo "  $(t "内建：/nsr 命令未全部自动安装；已有自定义命令已保留，可重跑安装器修复缺失项。" "Built-in: /nsr commands were not all auto-installed; custom commands were preserved, and rerunning the installer can repair missing entries.")"
+    fi
     echo ""
-    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）会随 MMS 一起提供；NSR 内建且默认开启；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless) ship with MMS; NSR is built in and enabled by default; all are injected per session without global hooks/config writes.")"
+    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、xmem、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR payload 会随 MMS 一起提供；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, xmem, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR payload ship with MMS; all are injected per session without global hooks/config writes.")"
     echo "  $(t "LLM 修改 MMS 前指南:" "LLM editing guide:") $MMS_HOME/docs/LLM_OPERATION_GUIDE.md"
     echo ""
 

@@ -322,12 +322,12 @@ MMS can expose capabilities per session without writing global hooks/config.
 | `xmem` | bundled in `~/.mms/vendor` | generic cross-project memory / truth-index skill; only active when an `xmem` CLI/source is configured |
 | Web automation bundle | bundled in `~/.mms/vendor` | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
 | `Caveman` | bundled in `~/.mms/vendor` | compact communication mode; only active when enabled by preference or launch confirmation |
-| `NSR` | built-in hooks, default on | session-local continuation hooks for active NSR goals; no default startup or prompt hook |
+| `NSR` | built-in channel payload, default hook injection | session-local Stop hook for Claude/Codex; installer also adds `/nsr` commands; `/nsr` enables the loop |
 | `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
 | `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`CodeGraph`, `token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is enabled by default for MMS-managed Claude/Codex sessions, but its default hook surface is limited to tool/compact/closeout events and can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / CodeGraph / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`CodeGraph`, `token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is copied with the selected install channel into `~/.mms/hooks/`; MMS injects its lightweight Stop-hook wrapper by default, and `/nsr` opts the current repo into the rewritten loop. It can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / CodeGraph / token-saver / TOON / xmem / web-access / weber skills plus the manual `/nsr` command, and RTK is added through the session-local plugin directory when `rtk` exists.
 
 ## Optional Installer Packs
 

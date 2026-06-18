@@ -89,7 +89,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | `reasoning_effort` | `low` / `medium` / `high` / `xhigh` | Default effort when the selected model profile supports it |
 | `caveman_mode` | `enable` / `disable` | Default session-local Caveman overlay |
 | `caveman_level` | `light` / `standard` / `full` | Default Caveman intensity when enabled |
-| `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `enable`, without startup/prompt hooks |
+| `nsr_mode` | `enable` / `disable` | Default session-local NSR Stop-hook injection for Claude/Codex; default is `enable`, but the rewritten loop only activates after `/nsr` |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
 | `disabled_session_surfaces` | table with `skills` / `mcp` / `hooks` arrays | Per-launch disabled surface overlay |
@@ -206,12 +206,15 @@ Common roots:
 ~/.mms/assets/session-assets/skills/token-saver
 ~/.mms/assets/session-assets/skills/toon
 ~/.mms/assets/session-assets/skills/xmem
-~/.mms/hooks/nsr-builtin-hook.py
+~/.mms/hooks/nsr-stop-wrapper.py
+~/.mms/hooks/nsr-loop-hook.py
+~/.mms/hooks/nsrctl.py
+~/.mms/hooks/nsr-commit-gate.py
 ~/.mms/agent-packs/everything-claude-code
 ~/.mms/agent-packs/oh-my-claudecode
 ```
 
-Passive assets are available naturally in MMS-launched sessions. NSR is also enabled by default for MMS-managed Claude/Codex sessions, but its default hooks are limited to tool/compact/closeout events and can be disabled per launch or via `nsr_mode = "disable"`. Heavier agent packs such as `ECC` and `OMC` remain opt-in.
+Passive assets are available naturally in MMS-launched sessions. NSR is copied with the selected install channel and injected by default for MMS-managed Claude/Codex sessions, but the rewritten loop stays inactive until `/nsr` creates the repo marker. It can be disabled per launch or via `nsr_mode = "disable"`. Heavier agent packs such as `ECC` and `OMC` remain opt-in.
 
 This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giving each MMS session the selected skills, hooks, and MCP surfaces.
 

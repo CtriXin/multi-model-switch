@@ -506,7 +506,8 @@ def test_install_script_mentions_bundled_session_assets():
 
     assert "Bundled session assets" in text
     assert "xmem" in text
-    assert "NSR is built in and enabled by default" in text
+    assert "NSR ships as a channel-pinned payload" in text
+    assert "/nsr commands are auto-installed" in text
     assert "Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless)" in text
 
 
@@ -539,7 +540,15 @@ def test_install_check_reports_all_bundled_session_assets(tmp_path):
         path.write_text("# asset\n", encoding="utf-8")
     (session_assets / "packs" / "caveman" / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
     (session_assets / "packs" / "caveman" / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
-    for name in ("nsr-builtin-hook.py", "nsr-claude-hook.sh", "nsr-codex-hook.sh"):
+    for name in (
+        "nsr-builtin-hook.py",
+        "nsr-loop-hook.py",
+        "nsr-stop-wrapper.py",
+        "nsr-commit-gate.py",
+        "nsrctl.py",
+        "nsr-claude-hook.sh",
+        "nsr-codex-hook.sh",
+    ):
         (hooks / name).write_text("#!/bin/sh\n", encoding="utf-8")
 
     output = _run_install_check(home=home)
@@ -609,7 +618,7 @@ def test_install_script_updates_chinese_optional_copy():
     assert "--mindkeeper-ref" in text
     assert "Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。" in text
     assert "Caveman、TOON、token-saver、xmem" in text
-    assert "NSR 也已内建" in text
+    assert "NSR payload 也随 channel 内建" in text
 
 
 def test_install_script_codegraph_auto_registers_missing_index():
