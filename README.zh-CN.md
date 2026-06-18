@@ -208,8 +208,10 @@ caveman_level = "light" # light | standard | full
 | TOON | 内建 | 压缩 agent-facing JSON / status / handoff |
 | xmem | 内建 skill；可选全局 CLI | 跨项目 truth card / recall |
 | Web automation bundle | 内建 | `weber` router + `web-access` 登录态 Chrome + `agent-browser` headless |
-| NSR | 内建，默认开启 | MMS-managed Claude/Codex hook guard / closeout |
+| NSR | 内建，默认注入 | Claude/Codex session-local Stop hook；`/nsr` 启用后走新版 NSR loop |
 | ECC / OMC | 可选安装 | Claude agent pack；启动确认页显式选择 |
+
+NSR 现在不是旧的大 runtime，而是默认注入一个轻量 Stop-hook wrapper：普通会话未启用时直接放行，不会强行续跑；在 Claude / Codex 里使用 `/nsr <任务>` 后，当前 repo 会启用新版 `loop_hook.py`，让 agent 继续推进直到完成或撞上步数、空转、测试红灯等刹车。OpenCode 目前只提供 `/nsr` 手动规则，不自动接管 idle/stop。
 
 可选全局安装示例：
 
