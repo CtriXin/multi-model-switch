@@ -109,14 +109,17 @@ executor window:
 ```text
 MMS-MISSION: review-20260616-091830-a8f31c2e
 MMS-TARGET: pr39@dc12352d
+MMS-REPLY: After fixing or accepting this review, report back to the human with the MMS-MISSION id/hash above so execution can be matched to this committee dispatch.
 MMS-MODE: review
 MMS-SOURCE: review-hub-request
 ```
 
 `MMS-MISSION` identifies this manual dispatch. `MMS-TARGET` identifies
-the reviewed PR, commit, branch, or diff when known. The host repeats the full
-block at the top of final synthesis and repeats at least `MMS-MISSION` plus
-`MMS-TARGET` at the bottom. See
+the reviewed PR, commit, branch, or diff when known. `MMS-REPLY` is a
+copy-forward instruction for the executor/fixer/acceptor to bring the mission
+id/hash back to the human. The host repeats the full block at the top of final
+synthesis and repeats at least `MMS-MISSION`, `MMS-TARGET`, and `MMS-REPLY` at
+the bottom. See
 `docs/OPENCODE_REVIEW_MISSION_TRACE_v1.md`.
 
 ## Configurable Agent Roster

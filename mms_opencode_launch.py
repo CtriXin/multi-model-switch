@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 
 
 _FALSE_VALUES = {"0", "false", "no", "off", "disable", "disabled", "skip"}
@@ -24,7 +25,37 @@ def _opencode_health_check_enabled(runtime, *, environ=None):
         return False
     if raw in _TRUE_VALUES:
         return True
+    if "opencode_health_check" in runtime:
+        return str(runtime.get("opencode_health_check") or "").strip().lower() not in _FALSE_VALUES
     return True
+
+
+def _opencode_health_check_async_enabled(runtime, *, environ=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw = str(_env(environ).get("MMS_OPENCODE_HEALTHCHECK") or "").strip().lower()
+    if raw in {"async", "background", "bg"}:
+        return True
+    if raw in _TRUE_VALUES or raw in _FALSE_VALUES:
+        return False
+    mode = str(runtime.get("opencode_health_check") or "").strip().lower()
+    return mode in {"async", "background", "bg"}
+
+
+def _run_opencode_health_check_async(check_fn):
+    if hasattr(os, "fork"):
+        try:
+            pid = os.fork()
+        except OSError:
+            pid = -1
+        if pid == 0:
+            try:
+                check_fn()
+            finally:
+                os._exit(0)
+        if pid > 0:
+            return
+    thread = threading.Thread(target=check_fn, daemon=True)
+    thread.start()
 
 
 def _opencode_float_setting(runtime, env_name, runtime_keys, default, *, environ=None):
@@ -165,19 +196,26 @@ def opencode_gateway_health_check(
     if not _opencode_health_check_enabled(runtime):
         return
     timeout_sec = _opencode_health_check_timeout(runtime)
-    routes = runtime_routes(runtime, resolve_model(runtime))
-    checked_routes = _opencode_health_check_routes(runtime, routes)
-    if checked_routes:
-        for route in checked_routes:
-            gateway_health_check(_opencode_route_health_runtime(runtime, route, timeout_sec=timeout_sec))
+
+    def run_check():
+        routes = runtime_routes(runtime, resolve_model(runtime))
+        checked_routes = _opencode_health_check_routes(runtime, routes)
+        if checked_routes:
+            for route in checked_routes:
+                gateway_health_check(_opencode_route_health_runtime(runtime, route, timeout_sec=timeout_sec))
+            return
+        if routes:
+            return
+        health_runtime = dict(runtime)
+        health_runtime["openai_base_url"] = provider_base_url(runtime)
+        health_runtime["gateway_health_timeout_sec"] = timeout_sec
+        health_runtime["gateway_health_source"] = "opencode"
+        gateway_health_check(health_runtime)
+
+    if _opencode_health_check_async_enabled(runtime):
+        _run_opencode_health_check_async(run_check)
         return
-    if routes:
-        return
-    health_runtime = dict(runtime)
-    health_runtime["openai_base_url"] = provider_base_url(runtime)
-    health_runtime["gateway_health_timeout_sec"] = timeout_sec
-    health_runtime["gateway_health_source"] = "opencode"
-    gateway_health_check(health_runtime)
+    run_check()
 
 
 def opencode_is_global_profile_runtime(cli, runtime):

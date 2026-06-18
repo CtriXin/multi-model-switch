@@ -20,6 +20,7 @@ Required fields:
 ```text
 MMS-MISSION: <profile>-<stable-source-or-date>-<hash-or-nonce>
 MMS-TARGET: <pr/commit/branch/diff target, or unknown>
+MMS-REPLY: After fixing or accepting this review, report back to the human with the MMS-MISSION id/hash above so execution can be matched to this committee dispatch.
 MMS-MODE: <review|gate|advisory|estimate|execution_packet|debate|...>
 MMS-SOURCE: <review-hub-request|github-pr|local-diff|commit|user-pasted|unknown>
 ```
@@ -28,6 +29,9 @@ Rules:
 
 - `MMS-MISSION` identifies this manual dispatch, not the code commit.
 - `MMS-TARGET` identifies the reviewed object when known.
+- `MMS-REPLY` is a copy-forward instruction for the executor/fixer/acceptor;
+  it tells the next agent to report back to the human with the same mission id
+  so humans can match the fix or acceptance to this review dispatch.
 - For committee, prefer the declared `decision_mode` value such as `gate` or
   `review`; do not prefix it as `committee-gate`.
 - If the target is unclear, write exactly `MMS-TARGET: unknown` and describe
@@ -46,7 +50,8 @@ For every non-trivial `review`, `committee`, or `debate` task, the host must:
 3. include a visible mission trace in the final chat synthesis, preferably in
    the copy-forward, provenance, or trace area rather than before the human
    summary;
-4. end the final chat synthesis with at least `MMS-MISSION` and `MMS-TARGET`;
+4. end the final chat synthesis with at least `MMS-MISSION`, `MMS-TARGET`,
+   and `MMS-REPLY`;
 5. preserve the same mission id across retries within the same manual dispatch.
 
 The body trace and final footer identify the same current manual dispatch. They

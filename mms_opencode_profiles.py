@@ -592,6 +592,8 @@ def apply_opencode_profile(runtime, profile_id):
     profile_id = profile_id or "lite"
     runtime["opencode_profile"] = profile_id
     runtime["opencode_profile_label"] = opencode_profile_label(profile_id)
+    # Keep the route health ping, but never block profile startup on /models.
+    runtime["opencode_health_check"] = "async"
     if profile_id == "heavy_omo":
         runtime["opencode_use_global_config"] = True
         runtime["opencode_pure"] = False

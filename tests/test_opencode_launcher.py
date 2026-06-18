@@ -2534,6 +2534,7 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert lite["opencode_agent"] == "mobius-builder"
     assert lite["opencode_lite_agents"] is True
     assert agent["opencode_agent"] == "mobius-builder-pro"
+    assert agent["opencode_health_check"] == "async"
     assert agent["opencode_launch_preflight"] is False
     assert agent["opencode_launch_fallback_route_keys"] == ["builder_primary", "builder_fallback"]
     orchestrated = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated")
@@ -2541,14 +2542,17 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert orchestrated["opencode_roster"] == "lite_pro_orchestrated"
     assert orchestrated["opencode_profile_label"] == "Agent"
     assert review["opencode_agent"] == "review-hub-host"
+    assert review["opencode_health_check"] == "async"
     assert review["opencode_roster"] == "review_hub"
     assert review["opencode_profile_label"] == "Review"
     assert review["opencode_launch_fallback_agents"]["builder_fallback"] == "review-hub-host-stable"
     assert committee["opencode_agent"] == "committee-host"
+    assert committee["opencode_health_check"] == "async"
     assert committee["opencode_roster"] == "committee"
     assert committee["opencode_profile_label"] == "Committee"
     assert committee["opencode_launch_fallback_agents"]["builder_fallback"] == "committee-host-pro"
     assert debate["opencode_agent"] == "debate-host"
+    assert debate["opencode_health_check"] == "async"
     assert debate["opencode_roster"] == "debate"
     assert debate["opencode_profile_label"] == "Debate"
     assert debate["opencode_contract_workflow"] == "debate"
@@ -2558,6 +2562,7 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert heavy["opencode_use_global_config"] is True
     assert heavy["opencode_lite_agents"] is False
     assert raw["opencode_pure"] is True
+    assert raw["opencode_health_check"] == "async"
     assert raw["opencode_agent"] == ""
     assert raw["opencode_lite_agents"] is False
 
@@ -2873,6 +2878,72 @@ def test_opencode_health_check_env_can_disable_probe(monkeypatch):
     )
 
     assert calls == []
+
+
+def test_opencode_profile_health_check_runtime_default_is_async_and_env_can_force_sync(monkeypatch):
+    import mms_opencode_launch
+
+    calls = []
+    scheduled = []
+    runtime = {
+        "model": "gpt-5.4",
+        "opencode_health_check": "async",
+    }
+    route = {
+        "id": "builder_primary",
+        "provider_id": "primary",
+        "openai_base_url": "https://primary.example/v1",
+        "api_key": "sk-primary",
+        "model": "gpt-5.4",
+    }
+    monkeypatch.setattr(
+        mms_opencode_launch,
+        "_run_opencode_health_check_async",
+        lambda check_fn: scheduled.append(check_fn),
+    )
+
+    monkeypatch.delenv("MMS_OPENCODE_HEALTHCHECK", raising=False)
+    mms_opencode_launch.opencode_gateway_health_check(
+        runtime,
+        runtime_routes=lambda _runtime, _model: [route],
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+    assert calls == []
+    assert len(scheduled) == 1
+
+    scheduled.pop()()
+    assert len(calls) == 1
+    assert calls[0]["id"] == "primary"
+
+    monkeypatch.setenv("MMS_OPENCODE_HEALTHCHECK", "1")
+    mms_opencode_launch.opencode_gateway_health_check(
+        runtime,
+        runtime_routes=lambda _runtime, _model: [route],
+        resolve_model=lambda runtime: runtime.get("model"),
+        provider_base_url=lambda _runtime: "https://default.example/v1",
+        gateway_health_check=lambda runtime: calls.append(runtime),
+    )
+    assert len(scheduled) == 0
+    assert len(calls) == 2
+    assert calls[1]["id"] == "primary"
+
+
+def test_committee_trace_footer_instructs_executor_to_reply_with_mission_hash():
+    import mms_opencode_agents
+
+    agents = mms_opencode_agents.opencode_committee_agent_configs(
+        {
+            "committee-host": "mms/gpt-5.5",
+            "committee-kimi": "mms/kimi-k2.7-code",
+        }
+    )
+
+    host_prompt = agents["committee-host"]["prompt"]
+    assert "MMS-REPLY: After fixing or accepting this review" in host_prompt
+    assert "report back to the human with the MMS-MISSION id/hash above" in host_prompt
+    assert "MMS-MISSION, MMS-TARGET, and MMS-REPLY forward verbatim" in host_prompt
 
 
 def test_gateway_ping_uses_runtime_health_timeout(monkeypatch):
@@ -3463,6 +3534,8 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "not committee-gate" in host_prompt_lower
     assert "unchanged mms-mission block in each member brief" in host_prompt_lower
     assert "repeat mms-mission plus mms-target at the very end" in host_prompt_lower
+    assert "mms-reply" in host_prompt_lower
+    assert "report back to the human with the mms-mission id/hash" in host_prompt_lower
     assert "permission_profile" in host_prompt_lower
     assert "decision modes are advisory, gate, estimate, review, and execution_packet" in host_prompt_lower
     assert "playbooks are domain checklists, not decision modes" in host_prompt_lower
@@ -3514,7 +3587,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert "mms-mode" in host_pro_prompt
     assert "mms-source" in host_pro_prompt
     assert "every member brief" in host_pro_prompt
-    assert "mms-target at the bottom" in host_pro_prompt
+    assert "mms-target, and mms-reply at the bottom" in host_pro_prompt
     assert "mms-target at the very end" in host_pro_prompt
     assert "advisory, gate, estimate, review, and execution_packet" in host_pro_prompt
     assert "decision_mode, playbook, artifact_mode, permission_profile" in host_pro_prompt
