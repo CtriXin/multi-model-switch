@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-LOOP_HOOK = SCRIPT_DIR / "nsr-loop-hook.py"
+LOOP_HOOK = Path(os.environ.get("NSR_LOOP_HOOK") or SCRIPT_DIR / "nsr-loop-hook.py")
 NSRCTL = SCRIPT_DIR / "nsrctl.py"
 STOP_EVENT_NAMES = {"stop"}
 EVENT_KEYS = ("hook_event_name", "hookEventName", "event_name", "event")

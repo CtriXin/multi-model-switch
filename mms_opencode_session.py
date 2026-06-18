@@ -55,25 +55,6 @@ def opencode_rtk_plugin_path(
     return opencode_plugin_path(module_file, "opencode-rtk.ts")
 
 
-def opencode_xmem_plugin_path(
-    runtime=None,
-    *,
-    module_file,
-    normalize_session_surface_disabled,
-    session_skill_disabled,
-    resolve_xmem_root,
-    xmem_cli_path,
-):
-    disabled = normalize_session_surface_disabled(
-        (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else None
-    )
-    if "opencode-xmem" in disabled.get("hooks", set()) or session_skill_disabled(disabled, "xmem"):
-        return ""
-    if not resolve_xmem_root() and not xmem_cli_path():
-        return ""
-    return opencode_plugin_path(module_file, "opencode-xmem.ts")
-
-
 def overlay_opencode_plugin(config_dir, plugin_path, target_name):
     if not plugin_path:
         return False
@@ -105,8 +86,6 @@ def overlay_opencode_session_assets(
     overlay_toon_session_entries,
     overlay_token_saver_session_entries,
     overlay_managed_dynamic_skill_entries,
-    overlay_xmem_session_entries,
-    overlay_opencode_xmem_plugin,
     overlay_codegraph_session_entries=None,
 ):
     if not config_dir or not session_home:
@@ -128,5 +107,3 @@ def overlay_opencode_session_assets(
     overlay_toon_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     overlay_token_saver_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     overlay_managed_dynamic_skill_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    overlay_xmem_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    overlay_opencode_xmem_plugin(config_dir, plugin_runtime)

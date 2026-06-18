@@ -22,9 +22,9 @@ def test_overlay_opencode_session_assets_accepts_managed_dynamic_skill_overlay(t
         overlay_toon_session_entries=record("toon"),
         overlay_token_saver_session_entries=record("token-saver"),
         overlay_managed_dynamic_skill_entries=record("managed-dynamic-skills"),
-        overlay_xmem_session_entries=record("xmem"),
-        overlay_opencode_xmem_plugin=record("opencode-xmem"),
         overlay_codegraph_session_entries=record("codegraph"),
     )
 
     assert "managed-dynamic-skills" in calls
+    assert "xmem" not in calls
+    assert "opencode-xmem" not in calls

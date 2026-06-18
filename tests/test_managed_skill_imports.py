@@ -81,7 +81,6 @@ def test_build_confirm_preview_catalog_includes_managed_dynamic_skills(monkeypat
     monkeypatch.setattr(mms_launchers, "_resolve_codegraph_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
-    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_nsr_root", lambda: "")

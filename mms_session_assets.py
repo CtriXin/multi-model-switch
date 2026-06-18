@@ -42,8 +42,6 @@ _MMS_MANAGED_NAMES = {
     "token-saver",
     "web-access",
     "weber",
-    "xmem",
-    "xmem opencode plugin",
 }
 
 _KIND_LABELS = {
@@ -60,14 +58,12 @@ _ASSET_SUMMARIES = {
     "hive": "多 agent 执行/评审入口，适合把复杂任务拆分给 worker。",
     "nsr": "长任务 continuation 钩子，降低目标中断；默认不挂 startup/prompt 噪音钩子。",
     "omc": "Claude 编排能力包，包含 team / verify loop 等更主动的工作流。",
-    "pilot": "规划和执行包生成入口，适合先拆任务、再交给其它执行器。",
+    "pilot": "规划和执行包生成入口；MCP 默认关闭，只有显式 opt-in 时才注入。",
     "rtk opencode plugin": "OpenCode 的 token 节省插件，自动压缩或改写高噪音命令输出。",
     "toon": "把结构化 JSON、状态包和 handoff 压成更省 token 的格式。",
     "token-saver": "长日志、大 diff、重复状态的省 token 工具；多数时候由 agent 自动使用。",
     "web-access": "联网和登录态浏览能力，适合搜索、网页读取、公司后台或需要真实 Chrome 的任务。",
     "weber": "网页任务路由器：帮 agent 判断该用本地 WebUI、登录态浏览器还是轻量抓取。",
-    "xmem": "跨项目记忆和事实索引能力；适合找历史决策、路径、部署和 bug 线索。",
-    "xmem opencode plugin": "OpenCode 会话启动/结束时轻量同步 xmem，不把知识正文硬塞进上下文。",
 }
 
 
@@ -439,7 +435,6 @@ def _managed_roots(home: str) -> list[dict[str, Any]]:
         ("agent-browser", "Skill", "_resolve_agent_browser_root"),
         ("toon", "Skill", "_resolve_toon_root"),
         ("token-saver", "Skill", "_resolve_token_saver_root"),
-        ("xmem", "Skill", "_resolve_xmem_root"),
         ("auto-github-contributor", "Skill", "_resolve_auto_github_contributor_root"),
         ("caveman", "能力包", "_resolve_caveman_root"),
         ("nsr", "能力包", "_resolve_nsr_root"),

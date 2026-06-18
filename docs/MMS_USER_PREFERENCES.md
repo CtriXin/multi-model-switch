@@ -58,7 +58,7 @@ caveman_level = "light"
 
 [session_surfaces.disabled]
 skills = ["agent-browser"]
-mcp = ["pilot"]
+mcp = []
 hooks = []
 
 [assets]
@@ -72,7 +72,6 @@ agent_browser = "~/my-skills/agent-browser"
 codegraph = "~/my-skills/codegraph"
 token_saver = "~/my-skills/token-saver"
 toon = "~/my-skills/toon"
-xmem = "~/my-skills/xmem"
 caveman = "~/my-packs/caveman"
 nsr = "~/my-packs/non-stop-run"
 ecc = "~/.mms/agent-packs/everything-claude-code"
@@ -136,15 +135,15 @@ Managed assets root layout:
   packages/<asset-name>/...
 ```
 
-Put symlinks here when possible. Launcher resolves this user override root first, then the current MMS package `assets/session-assets`, and only falls back to legacy `vendor/` paths when bundled assets are missing.
+Put symlinks here when possible. Launcher resolves this user override root first, then the current MMS package `assets/session-assets`, and only falls back to legacy `vendor/` paths when bundled assets are missing. xmem is intentionally absent from this allowlist: use the global xmem skill/hook instead of MMF dynamic copies.
 
 `[assets.roots]` accepts:
 
 ```text
-web_access, weber, agent_browser, codegraph, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor
+web_access, weber, agent_browser, codegraph, token_saver, toon, caveman, nsr, ecc, omc, auto_github_contributor
 ```
 
-Env vars like `MMS_WEB_ACCESS_ROOT`, `MMS_ECC_ROOT`, and `MMS_MANAGED_ASSETS_ROOT` still take priority over `preferences.toml`.
+Env vars like `MMS_WEB_ACCESS_ROOT`, `MMS_ECC_ROOT`, and `MMS_MANAGED_ASSETS_ROOT` still take priority over `preferences.toml`. Figma and Pilot MCP are default-off even when installed; enable them per launch environment with `MMS_ENABLE_MCP_FIGMA=1` / `MMS_ENABLE_FIGMA_MCP=1` or `MMS_ENABLE_MCP_PILOT=1` / `MMS_ENABLE_PILOT_MCP=1`.
 
 ## Denied / Ignored Keys
 
@@ -205,7 +204,6 @@ Common roots:
 ~/.mms/assets/session-assets/skills/agent-browser
 ~/.mms/assets/session-assets/skills/token-saver
 ~/.mms/assets/session-assets/skills/toon
-~/.mms/assets/session-assets/skills/xmem
 ~/.mms/hooks/nsr-stop-wrapper.py
 ~/.mms/hooks/nsr-loop-hook.py
 ~/.mms/hooks/nsrctl.py

@@ -178,6 +178,16 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - `preferences.toml` 会忽略 credentials、provider routes、account identity、proxy、OAuth、real HOME/XDG、Claude config 等非 allowlist 字段
 - 如必须写真实配置，仍走 human gate：`plan -> backup -> human double check -> audited write -> post-write human double check`
 
+## Hook / Skill Priority
+
+MMS dev channel 的动态 session assets 不应 shadow 用户全局 hook / skill。
+
+- 如果同名 global hook / skill 已存在，默认优先使用 global 版本；MMF 动态版本只能作为缺失时的 fallback。
+- xmem 是 global-only：不要在 MMS / MMF 中重新 bundle、安装、注入 xmem skill / hook / OpenCode plugin。
+- scmp / work / Feishu 防护 hook 已迁移到 mommy / state-core 约束域；不要作为 MMS session hook 单独注入。
+- NSR 暂时要求和 global 行为保持一致；修改 dev 分支 NSR 或 hook 注入逻辑时，必须检查本地 bundled payload 与 global hook/skill 的优先级和兼容性。
+- Figma / Pilot MCP 默认关闭；即使检测到已安装，也只能在显式 opt-in（例如 `MMS_ENABLE_MCP_FIGMA=1` 或 `MMS_ENABLE_MCP_PILOT=1`）时注入。
+
 ## 必须先停下来确认的情况
 
 遇到以下情况，agent 应先停止扩散改动范围，必要时直接向用户确认：
