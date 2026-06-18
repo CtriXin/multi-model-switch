@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -126,12 +127,14 @@ def load_default_approved_facts() -> dict[str, Any]:
     preview roots must not silently continue when the selected latest-approved
     bundle is missing or invalid.
     """
+    return copy.deepcopy(_load_default_approved_facts_shared())
+
+
+def _load_default_approved_facts_shared() -> dict[str, Any]:
+    """Read the cached default facts without per-call deep copy for hot paths."""
     try:
-        import mms_registry
-    except Exception:
-        return {}
-    try:
-        return mms_registry.load_latest_approved_bundle(include_secret=False).get("payloads", {}).get("capabilities") or {}
+        config_root, manifest_path, mtime_ns, size = _latest_approved_bundle_signature()
+        return _load_default_approved_facts_cached(config_root, manifest_path, mtime_ns, size)
     except Exception as exc:
         try:
             from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
@@ -144,6 +147,39 @@ def load_default_approved_facts() -> dict[str, Any]:
         except Exception:
             pass
     return {}
+
+
+def _latest_approved_bundle_signature() -> tuple[str, str, int, int]:
+    from mms_state_io import resolve_mms_config_dir
+
+    config_root = Path(resolve_mms_config_dir())
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    try:
+        stat = manifest_path.stat()
+        return str(config_root), str(manifest_path), int(stat.st_mtime_ns), int(stat.st_size)
+    except OSError:
+        return str(config_root), str(manifest_path), 0, -1
+
+
+@lru_cache(maxsize=8)
+def _load_default_approved_facts_cached(
+    config_root: str,
+    _manifest_path: str,
+    _mtime_ns: int,
+    _size: int,
+) -> dict[str, Any]:
+    import mms_registry
+
+    payload = mms_registry.load_latest_approved_bundle(
+        include_secret=False,
+        config_dir=config_root,
+    ).get("payloads", {}).get("capabilities") or {}
+    return copy.deepcopy(payload) if isinstance(payload, dict) else {}
+
+
+def clear_capability_resolver_caches() -> None:
+    """Clear process-local resolver caches; intended for tests and reload hooks."""
+    _load_default_approved_facts_cached.cache_clear()
 
 
 def load_default_model_policy() -> dict[str, Any]:
@@ -209,7 +245,7 @@ def resolve_model_capabilities(
 
     approved_payload = load_approved_facts(approved_facts_path)
     if approved_facts_path is None and approved_facts is None:
-        approved_payload = load_default_approved_facts()
+        approved_payload = _load_default_approved_facts_shared()
     if approved_facts:
         approved_payload = _deep_merge(approved_payload, dict(approved_facts))
     approved_caps = _approved_capabilities(model, approved_payload)

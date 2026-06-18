@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from mms_capability_resolver import CapabilityBundleError
+from mms_capability_resolver import clear_capability_resolver_caches
+from mms_capability_resolver import load_default_approved_facts
 from mms_capability_resolver import resolve_model_capabilities
 
 
@@ -321,6 +323,7 @@ def test_selected_root_missing_latest_approved_capabilities_fails_closed(monkeyp
 
 
 def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monkeypatch, tmp_path: Path) -> None:
+    clear_capability_resolver_caches()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
@@ -331,6 +334,74 @@ def test_stable_legacy_root_missing_latest_approved_capabilities_falls_back(monk
 
     assert caps["context_window_tokens"] == 8_192
     assert caps["sources"]["context_window_tokens"] == "conservative_fallback"
+
+
+def test_default_approved_capabilities_bundle_is_cached(monkeypatch, tmp_path: Path) -> None:
+    clear_capability_resolver_caches()
+    config_root = tmp_path / "mms-next"
+    manifest = config_root / "generated" / "model-registry.latest-approved.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}", encoding="utf-8")
+    calls = []
+
+    def fake_resolve_mms_config_dir() -> str:
+        return str(config_root)
+
+    def fake_root_mode(_config_root: str) -> str:
+        return "preview"
+
+    def fake_load_latest_approved_bundle(*, include_secret: bool = False, config_dir: str = "", **_kwargs):
+        calls.append((include_secret, config_dir))
+        return {
+            "payloads": {
+                "capabilities": {
+                    "cached-model": {
+                        "context_window_tokens": 123_456,
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr("mms_state_io.resolve_mms_config_dir", fake_resolve_mms_config_dir)
+    monkeypatch.setattr("mms_state_io.mms_config_root_mode", fake_root_mode)
+    monkeypatch.setattr("mms_registry.load_latest_approved_bundle", fake_load_latest_approved_bundle)
+
+    first = resolve_model_capabilities("cached-model")
+    second = resolve_model_capabilities("cached-model")
+    first["context_window_tokens"] = 1
+    third = resolve_model_capabilities("cached-model")
+
+    assert first["sources"]["context_window_tokens"] == "approved_facts"
+    assert second["context_window_tokens"] == 123_456
+    assert third["context_window_tokens"] == 123_456
+    assert calls == [(False, str(config_root))]
+    clear_capability_resolver_caches()
+
+
+def test_public_default_approved_capabilities_returns_copy(monkeypatch, tmp_path: Path) -> None:
+    clear_capability_resolver_caches()
+    config_root = tmp_path / "mms-next"
+    manifest = config_root / "generated" / "model-registry.latest-approved.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr("mms_state_io.resolve_mms_config_dir", lambda: str(config_root))
+    monkeypatch.setattr("mms_state_io.mms_config_root_mode", lambda _config_root: "preview")
+
+    def fake_load_latest_approved_bundle(*, include_secret: bool = False, config_dir: str = "", **_kwargs):
+        calls.append((include_secret, config_dir))
+        return {"payloads": {"capabilities": {"cached-model": {"context_window_tokens": 123_456}}}}
+
+    monkeypatch.setattr("mms_registry.load_latest_approved_bundle", fake_load_latest_approved_bundle)
+
+    first = load_default_approved_facts()
+    first["cached-model"]["context_window_tokens"] = 1
+    second = load_default_approved_facts()
+
+    assert second["cached-model"]["context_window_tokens"] == 123_456
+    assert calls == [(False, str(config_root))]
+    clear_capability_resolver_caches()
 
 
 
