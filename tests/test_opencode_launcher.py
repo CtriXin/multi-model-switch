@@ -3143,6 +3143,9 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     review_host_prompt = payload["agent"]["review-hub-host"]["prompt"]
     review_host_prompt_lower = review_host_prompt.lower()
     assert "review-hub aggregate" in review_host_prompt
+    assert "headless inline pr/mr review pack contract" in review_host_prompt_lower
+    assert "verdict: approve|comment|request_changes" in review_host_prompt_lower
+    assert "do not hydrate review-hub" in review_host_prompt_lower
     assert "mms-mission" in review_host_prompt_lower
     assert "mms-target" in review_host_prompt_lower
     assert "mms-mode" in review_host_prompt_lower
@@ -3152,11 +3155,13 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     assert "repeat mms-mission plus mms-target at the end" in review_host_prompt_lower
     assert "unchanged mms-mission block" in payload["agent"]["review-qwen"]["prompt"].lower()
     review_stable_prompt = payload["agent"]["review-hub-host-stable"]["prompt"].lower()
+    assert "headless inline pr/mr review pack contract" in review_stable_prompt
     assert "mms-mission" in review_stable_prompt
     assert "mms-target" in review_stable_prompt
     assert "mms-mode" in review_stable_prompt
     assert "mms-source" in review_stable_prompt
     assert "every reviewer brief" in review_stable_prompt
+    assert "headless inline pr/mr review pack contract" in payload["agent"]["review-qwen"]["prompt"].lower()
     assert payload["agent"]["review-qwen"]["permission"]["edit"] == "allow"
     review_mimo_route = next(route for route in runtime["opencode_routes"] if route["id"] == "review_mimo")
     assert review_mimo_route["provider_id"] == "mimo-direct-anthropic"
@@ -3522,6 +3527,9 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     host_prompt_lower = host_prompt.lower()
     assert "review-hub" not in host_prompt_lower
     assert "gate mode" in host_prompt_lower
+    assert "headless inline pr/mr review pack contract" in host_prompt_lower
+    assert "verdict: approve|comment|request_changes" in host_prompt_lower
+    assert "do not open external project files" in host_prompt_lower
     assert "estimate mode" in host_prompt_lower
     assert "committee_policy with decision_mode, playbook, artifact_mode" in host_prompt_lower
     assert "mms-mission" in host_prompt_lower
@@ -3575,6 +3583,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
         assert "host authority contract" in prompt_text
         assert "you are not the decision authority" in prompt_text
         assert authority_order in prompt_text
+        assert "headless inline pr/mr review pack contract" in prompt_text
         assert "never answer in a member's place" in prompt_text
         assert "never invent a member's missing" in prompt_text
         assert "aggregate losslessly" in prompt_text
@@ -3698,6 +3707,7 @@ def test_core_opencode_committee_profile_builds_general_committee_roster(monkeyp
     assert payload["agent"]["committee-deepseek-v4-pro"]["permission"]["task"] == "deny"
     assert "obey target project local instructions" in member_prompt
     assert "copy it unchanged" in member_prompt
+    assert "headless inline pr/mr review pack contract" in member_prompt
     assert "durable formal artifact" in member_prompt
     assert "follow the host-declared committee_policy" in member_prompt
     assert "decision_mode" in member_prompt

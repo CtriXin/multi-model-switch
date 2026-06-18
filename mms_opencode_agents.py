@@ -77,6 +77,27 @@ DEBATE_TRIGGER_CONTRACT = (
 )
 
 
+OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT = (
+    "Headless inline PR/MR review pack contract: if the user prompt already "
+    "contains a self-contained review pack, such as '# digger MMS Review Pack', "
+    "MMS_PACK.md, PR CHANGE PACK, Diff Summary, Changed Files, and Patch "
+    "Excerpt, treat the prompt itself as the source of truth. Do not ask for an "
+    "external request root, do not scan unrelated local repo instructions, do "
+    "not open external project files, and do not run "
+    "artifact-first dispatch, formal vote files, model-timing log extraction, "
+    "or a scorecard unless the pack explicitly asks for those workflows. For "
+    "automation gates, prefer a single-pass bounded review over tool loops: "
+    "review only the supplied pack, cite paths from the pack, and begin the "
+    "final answer with exactly one verdict line: "
+    "VERDICT: APPROVE|COMMENT|REQUEST_CHANGES. Use REQUEST_CHANGES only for "
+    "blocking runtime, correctness, security, or validation gaps; use COMMENT "
+    "for non-blocking findings or uncertainty; use APPROVE only when no material "
+    "issue is found. If committee delegation is explicitly required, dispatch at "
+    "most one concise member brief based only on the supplied pack and require "
+    "the member to answer without tools."
+)
+
+
 def opencode_lite_agent_configs(model_ref):
     """Return session-local OpenCode agents for the MMS lite lane."""
     if not model_ref:
@@ -729,6 +750,8 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
     def _reviewer_prompt(label):
         return (
             f"You are the {label} Review Hub reviewer. When given a request root, "
+            + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
+            "For inline packs, do not hydrate review-hub. "
             "run `review-hub reviewer <request-root>` with your model identity when "
             "needed, read the returned PROMPT.md and manifest.json, then execute that "
             "prompt. Do environment preflight first. If required MCP/tools/skills/auth "
@@ -763,6 +786,8 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
             "prompt": (
                 "You are a Review Hub execution host, not the original dispatcher. "
                 + OPENCODE_REVIEW_MISSION_CONTRACT + " "
+                + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
+                "For inline packs, do not hydrate review-hub or ask for a request root. "
                 "Default host route prefers fast domestic GLM/Kimi/Qwen and falls back through MMS route "
                 "resolution. Start by asking the user for a Review Hub request root "
                 "or short command such as `/review-hub <request-root>` if it was not "
@@ -802,6 +827,8 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
                 "Fallback Review Hub host. Continue only if the primary host is "
                 "unavailable or low-confidence. "
                 + OPENCODE_REVIEW_MISSION_CONTRACT + " "
+                + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
+                "For inline packs, do not hydrate review-hub or ask for a request root. "
                 "Preserve the same request root, model "
                 "selection, MMS-MISSION block, preflight-first behavior, and slot-only "
                 "write boundary. If no MMS-MISSION exists yet, create it before any "
@@ -1036,6 +1063,7 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
         + OPENCODE_REVIEW_MISSION_CONTRACT + " "
         "For any user request, restate the goal, classify the request type, and "
         "choose the right committee mode. "
+        + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
         + committee_policy_contract + " "
         "When dispatching, include the declared committee policy and the unchanged "
         "MMS-MISSION block in each member brief and adapt the requested output to "
@@ -1136,6 +1164,7 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
                 (
                     "Fallback committee host. Continue the same deliberation flow, "
                     + OPENCODE_REVIEW_MISSION_CONTRACT + " "
+                    + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
                     "preserve or create the MMS-MISSION block before delegation, "
                     "preserve selected members, re-read and obey target project local "
                     "instructions before dispatching, apply all committee decision "
@@ -1187,6 +1216,7 @@ def opencode_committee_agent_configs(agent_models, *, roster_config=None, agent_
             "that artifact exactly as assigned. "
             "If the host provides an MMS-MISSION block, copy it unchanged in your "
             "ballot, artifact, or chat response. "
+            + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
             "Follow the host-declared committee_policy, including decision_mode, "
             "playbook, artifact_mode, and permission_profile. Treat playbooks such "
             "as git_ci_security as evidence checklists, not as hidden decision "
