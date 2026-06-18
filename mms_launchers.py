@@ -89,6 +89,8 @@ from mms_opencode_session import (
     overlay_opencode_session_assets as _overlay_opencode_session_assets_impl,
     opencode_rtk_plugin_path as _opencode_rtk_plugin_path_impl,
     opencode_session_plugin_runtime as _opencode_session_plugin_runtime,
+    opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
+    opencode_nsr_plugin_path as _opencode_nsr_plugin_path_impl,
     overlay_opencode_plugin as _overlay_opencode_plugin_impl,
 )
 from mms_core import (
@@ -5629,6 +5631,9 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_toon_session_entries=_overlay_toon_session_entries,
         overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
         overlay_managed_dynamic_skill_entries=_overlay_managed_dynamic_skill_entries,
+        overlay_xmem_session_entries=_overlay_xmem_session_entries,
+        overlay_opencode_xmem_plugin=_overlay_opencode_xmem_plugin,
+        overlay_opencode_nsr_plugin=_overlay_opencode_nsr_plugin,
     )
 
 
@@ -11544,6 +11549,35 @@ def _opencode_rtk_plugin_enabled(runtime=None):
     return bool(_opencode_rtk_plugin_path(runtime))
 
 
+def _opencode_xmem_plugin_enabled(runtime=None):
+    return bool(_opencode_xmem_plugin_path(runtime))
+
+
+def _opencode_nsr_plugin_path(runtime=None):
+    # Keep OpenCode aligned with the repo-wide NSR toggle: if launch/runtime says
+    # NSR is disabled, do not overlay the experimental plugin even when the env
+    # opt-in is present.
+    if not _runtime_nsr_enabled(runtime):
+        return ""
+    return _opencode_nsr_plugin_path_impl(
+        runtime,
+        module_file=__file__,
+        normalize_session_surface_disabled=_normalize_session_surface_disabled,
+    )
+
+
+def _overlay_opencode_nsr_plugin(config_dir, runtime=None):
+    return _overlay_opencode_plugin_impl(
+        config_dir,
+        _opencode_nsr_plugin_path(runtime),
+        "mms-nsr.ts",
+    )
+
+
+def _opencode_nsr_plugin_enabled(runtime=None):
+    return bool(_opencode_nsr_plugin_path(runtime))
+
+
 def _build_opencode_config_payload(runtime, model_name=""):
     return _opencode_build_config_payload_impl(
         runtime,
@@ -11616,8 +11650,11 @@ def _opencode_gateway_env(runtime, model_info=None):
         resolve_codegraph_root=_resolve_codegraph_root,
         resolve_toon_root=_resolve_toon_root,
         resolve_token_saver_root=_resolve_token_saver_root,
+        resolve_xmem_root=_resolve_xmem_root,
         session_skill_disabled=_session_skill_disabled,
         opencode_rtk_plugin_enabled=_opencode_rtk_plugin_enabled,
+        opencode_xmem_plugin_enabled=_opencode_xmem_plugin_enabled,
+        opencode_nsr_plugin_enabled=_opencode_nsr_plugin_enabled,
     )
 
 

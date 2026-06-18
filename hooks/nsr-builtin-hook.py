@@ -299,6 +299,13 @@ def _handle(host: str, request: dict[str, Any]) -> dict[str, Any]:
         status = _clean(loop.get("status", "running")).lower()
         next_action = _clean(loop.get("next_action"))
         if status not in {"blocked", "complete"} and next_action:
+            # OpenCode already bounds synthetic continuation locally via the plugin's
+            # per-session cap. Bypassing the builtin identical-stop repeat guard here
+            # keeps the experimental OpenCode path from self-disabling after a single
+            # unchanged-state continuation while preserving the stricter guard for the
+            # native claude/codex Stop-hook flows.
+            if host == "opencode":
+                return {"decision": "block", "reason": _context_message(state, event="stop")}
             return _guarded_stop_block(session_id, state, _context_message(state, event="stop"))
         if _clear_stop_block_guard(state):
             _save_state(session_id, state)
