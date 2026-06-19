@@ -758,6 +758,7 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
     import mms_launchers
 
     mms_launchers._ensure_bridge_helpers()  # noqa: SLF001 - flywheel runner reuses launcher bridge setup.
+    mms_launchers._ensure_speed_stats()  # noqa: SLF001 - keep launcher lazy imports initialized.
     mms_launchers.gateway_health_check(runtime)
     api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
     provider_id = runtime.get("id", "")
@@ -812,6 +813,12 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
             effort = mms_launchers._runtime_reasoning_effort(runtime, default="medium")  # noqa: SLF001
             cmd += ["-c", f'model_reasoning_effort="{effort}"']
         cmd += [
+            "-c",
+            'model_providers.custom.name="custom"',
+            "-c",
+            'model_providers.custom.wire_api="responses"',
+            "-c",
+            "model_providers.custom.requires_openai_auth=true",
             "-c",
             f'openai_base_url="{bridge_base_url}"',
             "-c",
