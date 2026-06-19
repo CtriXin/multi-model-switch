@@ -446,6 +446,73 @@ provider = "dual-qwen"
     assert captured["model"] == "qwen3.7-max"
 
 
+def test_codex_headless_initializes_lazy_speed_stats(tmp_path, monkeypatch):
+    import mms_launchers
+
+    captured = {}
+    runtime = {
+        "id": "direct-qwen",
+        "api_key": "secret-qwen",
+        "openai_api_key": "secret-qwen",
+        "openai_base_url": "https://qwen.example/v1",
+        "protocols": ["openai_chat_completions"],
+        "preferred_transport": "openai_chat_completions",
+    }
+
+    @contextmanager
+    def fake_bridge(gateway_url, api_key, **kwargs):
+        captured["speed_scope"] = kwargs.get("speed_scope")
+        yield {"base_url": "http://127.0.0.1:9999", "api_key": "bridge-token"}
+
+    def fake_ensure_speed_stats():
+        mms_launchers.build_provider_speed_scope = lambda _runtime: {"provider": "direct-qwen"}
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", fake_ensure_speed_stats)
+    monkeypatch.setattr(mms_launchers, "gateway_health_check", lambda _runtime: None)
+    monkeypatch.setattr(mms_launchers, "_openai_base_url", lambda _runtime: _runtime["openai_base_url"])
+    monkeypatch.setattr(mms_launchers, "_probe_models", lambda _runtime, emit_output=False: {"models": ["qwen3.7-max"]})
+    monkeypatch.setattr(mms_launchers, "_is_gpt_model", lambda _model: False)
+    monkeypatch.setattr(mms_launchers, "_runtime_thinking_enabled", lambda _runtime: False)
+    monkeypatch.setattr(mms_launchers, "_runtime_reasoning_effort", lambda _runtime, default="medium": default)
+    monkeypatch.setattr(mms_launchers, "_rescue_bridge_kwargs", lambda: {})
+    monkeypatch.setattr(mms_launchers, "codex_chatcompletions_bridge", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_codex_provider_base_url", lambda base_url: f"{base_url}/v1")
+    monkeypatch.setattr(mms_launchers, "_codex_gateway_env", lambda _runtime, _base_url, model_info=None: {})
+
+    def fake_prepare_cli_command(cmd, env):
+        captured["cmd"] = cmd
+        return cmd, env, "codex"
+
+    monkeypatch.setattr(mms_launchers, "prepare_cli_command", fake_prepare_cli_command)
+    monkeypatch.setattr(
+        mms_flywheel.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}}),
+            stderr="",
+        ),
+    )
+
+    rc, _stdout, stderr = mms_flywheel._run_codex_headless(
+        runtime=runtime,
+        model="qwen3.7-max",
+        prompt="do it",
+        cwd=tmp_path,
+        sandbox="danger-full-access",
+    )
+
+    assert rc == 0
+    assert stderr == ""
+    assert captured["speed_scope"] == {"provider": "direct-qwen"}
+    assert "--ignore-user-config" in captured["cmd"]
+    assert 'model_providers.custom.name="custom"' in captured["cmd"]
+    assert 'model_providers.custom.wire_api="responses"' in captured["cmd"]
+    assert "model_providers.custom.requires_openai_auth=true" in captured["cmd"]
+
+
 def test_codex_headless_passes_primary_anthropic_protocol_to_bridge(tmp_path, monkeypatch):
     import mms_launchers
 

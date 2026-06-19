@@ -3894,6 +3894,11 @@ def _resolve_token_saver_root():
     return ""
 
 
+def _resolve_xmem_root():
+    # xmem is global-only now; MMS should not bundle or inject a session-local copy.
+    return ""
+
+
 def _resolve_auto_github_contributor_root():
     candidates = []
     explicit = str(os.environ.get("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT") or "").strip()
@@ -5635,6 +5640,14 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
         overlay_opencode_xmem_plugin=_overlay_opencode_xmem_plugin,
         overlay_opencode_nsr_plugin=_overlay_opencode_nsr_plugin,
     )
+
+
+def _overlay_xmem_session_entries(*_args, **_kwargs):
+    return None
+
+
+def _overlay_opencode_xmem_plugin(*_args, **_kwargs):
+    return None
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
@@ -11550,7 +11563,7 @@ def _opencode_rtk_plugin_enabled(runtime=None):
 
 
 def _opencode_xmem_plugin_enabled(runtime=None):
-    return bool(_opencode_xmem_plugin_path(runtime))
+    return False
 
 
 def _opencode_nsr_plugin_path(runtime=None):
