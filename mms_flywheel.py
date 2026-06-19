@@ -12,6 +12,7 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 try:  # Python 3.11+
     import tomllib
@@ -27,6 +28,11 @@ SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
 FAKE_RESPONSE_ENV = "MMS_FLYWHEEL_RUN_FAKE_RESPONSE"
 FAKE_JSONL_ENV = "MMS_FLYWHEEL_RUN_FAKE_JSONL"
 RUN_RESULT_SCHEMA = "mms.flywheel_run_result.v1"
+RUN_RESULT_ARTIFACT_SCHEMA = "mms.flywheel_run_artifact.v1"
+CACHE_TRANSPORT_EVIDENCE_SCHEMA = "cache_transport_evidence.v1"
+TRANSPORT_PROTOCOLS = {"anthropic_messages", "openai_chat_completions", "openai_responses"}
+OPENAI_FAMILY_PREFIXES = ("gpt-", "o1", "o3", "o4", "o5", "codex-")
+DOMESTIC_MODEL_MARKERS = ("qwen", "kimi", "deepseek", "glm", "minimax", "mimo", "moonshot", "doubao")
 
 DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
     "lanes": {
@@ -401,6 +407,7 @@ def resolve_flywheel_profile(
         "route_status": route_status,
         "selected_route": {"slot": selected_name, **_sanitize_route(selected_route)} if selected_route else {},
         "fallback_routes": fallbacks,
+        "selected_transport": _transport_evidence_for_route(selected_route, model) if selected_route else {},
         "thinking_mode": thinking,
         "reasoning_effort": effort,
         "max_context_tokens": context_tokens,
@@ -434,12 +441,142 @@ def _raw_selected_route(resolved: dict[str, Any]) -> dict[str, Any]:
 
 
 def _protocols_for_route(route: dict[str, Any]) -> list[str]:
-    protocols: list[str] = []
+    raw_protocols = route.get("protocols")
+    if isinstance(raw_protocols, str):
+        raw_protocols = [raw_protocols]
+    protocols: list[str] = [
+        str(item).strip()
+        for item in (raw_protocols or [])
+        if str(item).strip() in {"anthropic_messages", "openai_chat_completions"}
+    ]
     if str(route.get("anthropic_base_url") or "").strip():
         protocols.append("anthropic_messages")
     if str(route.get("openai_base_url") or "").strip():
         protocols.append("openai_chat_completions")
-    return protocols
+    return list(dict.fromkeys(protocols))
+
+
+def _is_openai_family_model(model: str) -> bool:
+    normalized = str(model or "").strip().lower()
+    if normalized.startswith(OPENAI_FAMILY_PREFIXES):
+        return True
+    return normalized.startswith(("openai/", "openai."))
+
+
+def _is_domestic_model(model: str) -> bool:
+    normalized = str(model or "").strip().lower()
+    return any(marker in normalized for marker in DOMESTIC_MODEL_MARKERS)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
+def _route_cache_sensitive(route: dict[str, Any]) -> bool:
+    hints = route.get("protocol_hints") if isinstance(route.get("protocol_hints"), dict) else {}
+    return (
+        _truthy(route.get("cache_sensitive_transport"))
+        or _truthy(route.get("cache_sensitive"))
+        or _truthy(hints.get("cache_sensitive_transport"))
+    )
+
+
+def _join_request_path(base_url: str, endpoint: str) -> str:
+    parts = urlsplit(str(base_url or "").strip())
+    path = parts.path.rstrip("/")
+    if endpoint == "messages":
+        if path.endswith("/v1/messages") or path.endswith("/messages"):
+            return path or "/messages"
+        if path.endswith("/v1"):
+            return f"{path}/messages"
+        return f"{path}/v1/messages" if path else "/v1/messages"
+    if endpoint == "responses":
+        if path.endswith("/v1/responses") or path.endswith("/responses"):
+            return path or "/responses"
+        if path.endswith("/v1"):
+            return f"{path}/responses"
+        return f"{path}/v1/responses" if path else "/v1/responses"
+    if path.endswith("/v1/chat/completions") or path.endswith("/chat/completions"):
+        return path or "/chat/completions"
+    if path.endswith("/v1"):
+        return f"{path}/chat/completions"
+    return f"{path}/v1/chat/completions" if path else "/v1/chat/completions"
+
+
+def _transport_request_path(route: dict[str, Any], protocol: str) -> str:
+    if protocol == "anthropic_messages":
+        base = str(route.get("anthropic_base_url") or route.get("openai_base_url") or route.get("base_url") or "").strip()
+        return _join_request_path(base, "messages")
+    if protocol == "openai_responses":
+        base = str(route.get("openai_base_url") or route.get("base_url") or "").strip()
+        return _join_request_path(base, "responses")
+    base = str(route.get("openai_base_url") or route.get("base_url") or "").strip()
+    return _join_request_path(base, "chat/completions")
+
+
+def _preferred_transport_for_route(route: dict[str, Any], model: str) -> str:
+    explicit = str(route.get("protocol") or route.get("preferred_protocol") or "").strip()
+    if explicit in TRANSPORT_PROTOCOLS:
+        return explicit
+    protocols = set(_protocols_for_route(route))
+    anthropic_url = str(route.get("anthropic_base_url") or "").strip()
+    openai_url = str(route.get("openai_base_url") or route.get("base_url") or "").strip()
+    if _is_openai_family_model(model):
+        if openai_url:
+            return "openai_responses"
+        if anthropic_url:
+            raise FlywheelConfigError(f"OpenAI-family model {model!r} requires an OpenAI-compatible endpoint")
+    if anthropic_url and (
+        "anthropic_messages" in protocols
+        or _route_cache_sensitive(route)
+        or _is_domestic_model(model)
+        or bool(openai_url)
+    ):
+        return "anthropic_messages"
+    if openai_url:
+        return "openai_chat_completions"
+    if anthropic_url:
+        return "anthropic_messages"
+    raise FlywheelConfigError("selected route has no usable transport endpoint")
+
+
+def _zero_cache_usage() -> dict[str, int]:
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cached_tokens": 0,
+    }
+
+
+def _transport_evidence_for_route(
+    route: dict[str, Any],
+    model: str,
+    *,
+    protocol: str | None = None,
+    fallback_used: bool = False,
+    fallback_reason: str = "",
+) -> dict[str, Any]:
+    selected_protocol = protocol or _preferred_transport_for_route(route, model)
+    return {
+        "schema": CACHE_TRANSPORT_EVIDENCE_SCHEMA,
+        "model": str(route.get("model_id") or model or "").strip(),
+        "provider_id": str(route.get("provider_id") or "").strip(),
+        "protocol": selected_protocol,
+        # Keep artifacts paste-safe: request_path is concrete, request_url is
+        # intentionally omitted because MMS provider endpoints can be private.
+        "request_url": "",
+        "request_path": _transport_request_path(route, selected_protocol),
+        "route_source": "mms:model-routes",
+        "provider_profile": str(route.get("provider_profile") or route.get("profile") or "").strip(),
+        "fallback_used": bool(fallback_used),
+        "fallback_reason": str(fallback_reason or ""),
+        "evidence_source": "resolved_route",
+        "usage": _zero_cache_usage(),
+    }
 
 
 def _launcher_effort(value: Any) -> str:
@@ -458,6 +595,12 @@ def _runtime_from_route(resolved: dict[str, Any], route: dict[str, Any]) -> dict
     api_key = str(route.get("api_key") or route.get("openai_api_key") or "").strip()
     openai_base_url = str(route.get("openai_base_url") or route.get("base_url") or "").strip()
     anthropic_base_url = str(route.get("anthropic_base_url") or "").strip()
+    model = str(route.get("model_id") or resolved.get("model") or "").strip()
+    preferred_transport = _preferred_transport_for_route(route, model)
+    if preferred_transport in {"openai_responses", "openai_chat_completions"} and not openai_base_url:
+        raise FlywheelConfigError(f"selected route {provider_id!r} has no OpenAI-compatible endpoint")
+    if preferred_transport == "anthropic_messages" and not (anthropic_base_url or openai_base_url):
+        raise FlywheelConfigError(f"selected route {provider_id!r} has no Anthropic-compatible endpoint")
     if not provider_id:
         raise FlywheelConfigError("selected route has no provider_id")
     if not api_key:
@@ -475,9 +618,12 @@ def _runtime_from_route(resolved: dict[str, Any], route: dict[str, Any]) -> dict
         "openai_base_url": openai_base_url,
         "anthropic_base_url": anthropic_base_url,
         "protocols": _protocols_for_route(route),
+        "preferred_transport": preferred_transport,
+        "transport_request_path": _transport_request_path(route, preferred_transport),
+        "cache_transport_evidence": _transport_evidence_for_route(route, model, protocol=preferred_transport),
         "supported_clis": ["codex", "opencode", "claude"],
         "role": "auto",
-        "model": str(route.get("model_id") or resolved.get("model") or "").strip(),
+        "model": model,
         "thinking_mode": str(resolved.get("thinking_mode") or "auto").strip().lower(),
         "native_fallback": True,
     }
@@ -508,6 +654,30 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     temp = path.with_name(f".{path.name}.tmp")
     temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temp.replace(path)
+
+
+def _preview_text(value: Any, *, limit: int = 4000) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...[truncated]"
+
+
+def _write_run_result_artifact(path: Path, result: dict[str, Any]) -> None:
+    metadata = {
+        key: value
+        for key, value in result.items()
+        if key not in {"agent_text", "stderr"} and value not in (None, "")
+    }
+    payload = {
+        "schema": RUN_RESULT_ARTIFACT_SCHEMA,
+        "result": metadata,
+        "output": {
+            "agent_text_preview": _preview_text(result.get("agent_text")),
+            "stderr_preview": _preview_text(result.get("stderr")),
+        },
+    }
+    _write_json(path, payload)
 
 
 def _artifact_dir(cwd: Path, explicit: str = "") -> Path:
@@ -589,7 +759,6 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
 
     mms_launchers._ensure_bridge_helpers()  # noqa: SLF001 - flywheel runner reuses launcher bridge setup.
     mms_launchers.gateway_health_check(runtime)
-    gateway_url = mms_launchers._openai_base_url(runtime)  # noqa: SLF001
     api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
     provider_id = runtime.get("id", "")
     provider_profile = str(runtime.get("profile") or runtime.get("provider_profile") or "")
@@ -600,7 +769,9 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
         advertised_models = [model] if model else []
 
     is_gpt = bool(mms_launchers._is_gpt_model(model))  # noqa: SLF001
-    bridge_factory = mms_launchers.codex_responses_bridge if is_gpt else mms_launchers.codex_chatcompletions_bridge
+    preferred_transport = str(runtime.get("preferred_transport") or "").strip()
+    if not preferred_transport:
+        preferred_transport = "openai_responses" if is_gpt else "openai_chat_completions"
     bridge_kwargs = {
         "model_name": model or "unknown",
         "advertised_models": advertised_models,
@@ -613,8 +784,23 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
         "no_proxy": runtime.get("no_proxy"),
         **mms_launchers._rescue_bridge_kwargs(),  # noqa: SLF001
     }
-    if is_gpt:
+    if preferred_transport == "anthropic_messages":
+        gateway_url = mms_launchers._anthropic_base_url(runtime)  # noqa: SLF001
+        if not gateway_url:
+            raise FlywheelConfigError("selected Anthropic transport has no anthropic_base_url")
+        bridge_factory = mms_launchers.codex_chatcompletions_bridge
+        bridge_kwargs["primary_protocol"] = "anthropic_messages"
+    elif is_gpt or preferred_transport == "openai_responses":
+        gateway_url = mms_launchers._openai_base_url(runtime)  # noqa: SLF001
+        if not gateway_url:
+            raise FlywheelConfigError("selected OpenAI Responses transport has no openai_base_url")
+        bridge_factory = mms_launchers.codex_responses_bridge
         bridge_kwargs["native_fallback_routes"] = mms_launchers._resolve_codex_responses_fallback_routes(runtime, model)  # noqa: SLF001
+    else:
+        gateway_url = mms_launchers._openai_base_url(runtime)  # noqa: SLF001
+        if not gateway_url:
+            raise FlywheelConfigError("selected OpenAI Chat transport has no openai_base_url")
+        bridge_factory = mms_launchers.codex_chatcompletions_bridge
 
     with bridge_factory(gateway_url, api_key, **bridge_kwargs) as bridge_cfg:
         bridge_base_url = mms_launchers._codex_provider_base_url(bridge_cfg["base_url"])  # noqa: SLF001
@@ -684,10 +870,13 @@ def run_flywheel_lane(
     )
     out_dir = _artifact_dir(workdir, artifact_dir)
     resolved_artifact = out_dir / "resolved-route.json"
+    run_result_artifact = out_dir / "run-result.json"
+    transport_evidence = runtime.get("cache_transport_evidence") if isinstance(runtime.get("cache_transport_evidence"), dict) else {}
     artifact_payload = {
         "schema": "mms.flywheel_resolved_route.v1",
         "resolved": resolved,
         "runtime": _sanitize_runtime(runtime),
+        "cache_transport_evidence": transport_evidence,
         "prompt_source": prompt_source,
         "forwarded_args": forwarded_args,
         "cwd": str(workdir),
@@ -707,6 +896,9 @@ def run_flywheel_lane(
         "provider_id": resolved.get("provider_id"),
         "artifact_dir": str(out_dir),
         "resolved_route_path": str(resolved_artifact),
+        "run_result_path": str(run_result_artifact),
+        "cache_transport_evidence": transport_evidence,
+        "transport_evidence": [transport_evidence] if transport_evidence else [],
         "exit_code": 0,
         "agent_text": "",
         "stderr": "",
@@ -716,6 +908,7 @@ def run_flywheel_lane(
             "cli": "codex",
             "args": _codex_exec_args(cwd=workdir, prompt="<prompt>", sandbox=sandbox),
         }
+        _write_run_result_artifact(run_result_artifact, result)
         return result
 
     fake_response = str(os.environ.get(FAKE_RESPONSE_ENV) or "")
@@ -723,10 +916,12 @@ def run_flywheel_lane(
     if fake_response:
         result["agent_text"] = fake_response
         result["fake_dispatch"] = True
+        _write_run_result_artifact(run_result_artifact, result)
         return result
     if fake_jsonl:
         result["agent_text"] = _extract_codex_agent_text(fake_jsonl)
         result["fake_dispatch"] = True
+        _write_run_result_artifact(run_result_artifact, result)
         return result
 
     rc, stdout_text, stderr_text = _run_codex_headless(
@@ -744,6 +939,7 @@ def run_flywheel_lane(
     result["status"] = "completed" if rc == 0 else "failed"
     result["agent_text"] = agent_text
     result["stderr"] = stderr_text
+    _write_run_result_artifact(run_result_artifact, result)
     return result
 
 

@@ -5883,7 +5883,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
 
 class _ResponsesToChatHandler(_ResponsesProxyHandler):
     """Local bridge: accepts Codex's /v1/responses requests,
-    translates to /v1/chat/completions, forwards to gateway."""
+    translates to the configured upstream transport, and forwards to gateway."""
 
     server_version = "MMSCodexChatBridge/0.1"
 
@@ -5962,6 +5962,25 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         provider_profile = getattr(self.server, "provider_profile", "")
         reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
         reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+        started_ms = _now_ms()
+        primary_protocol = str(getattr(self.server, "primary_protocol", "openai_chat_completions") or "openai_chat_completions")
+
+        if primary_protocol == "anthropic_messages":
+            messages_route = {
+                "provider_id": provider_id,
+                "provider_profile": provider_profile,
+                "protocol": "anthropic_messages",
+                "fallback_reason": "",
+            }
+            self._do_anthropic_messages_fallback(
+                payload,
+                model_name,
+                gateway_url,
+                gateway_key,
+                started_ms,
+                route=messages_route,
+            )
+            return
 
         # Translate Responses → Chat Completions request
         chat_messages = _responses_input_to_messages(
@@ -6010,7 +6029,6 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
         translator = _ChatCompletionsToResponsesTranslator(model_name)
-        started_ms = _now_ms()
         first_byte_ms = None
         output_tokens = None
         try:
@@ -6122,14 +6140,16 @@ def codex_chatcompletions_bridge(
     reasoning_effort="high",
     proxy_url="",
     no_proxy="",
+    primary_protocol="openai_chat_completions",
     rescue_fallback_model="",
     rescue_fallback_cli="",
     rescue_hot_fallback_enabled=None,
 ):
-    """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
+    """Local bridge for Codex: translates /v1/responses to chat or messages.
 
     Use this when the gateway only supports Chat Completions for non-GPT models
-    but Codex requires Responses API.
+    or when a cache-sensitive route must use Anthropic Messages while Codex
+    still requires Responses API.
     """
     _ensure_httpx()
     if httpx is None:
@@ -6151,6 +6171,11 @@ def codex_chatcompletions_bridge(
     server._last_reasoning_content = ""
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
+    server.primary_protocol = (
+        "anthropic_messages"
+        if str(primary_protocol or "").strip() == "anthropic_messages"
+        else "openai_chat_completions"
+    )
     _configure_bridge_rescue(server)
     if rescue_fallback_model:
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()

@@ -22,10 +22,11 @@ Phase 2 adds a headless worker/fixer runner:
 mmf flywheel run --lane worker --priority AI-P3 --cwd <worktree> --artifact-dir <run-dir> exec <prompt>
 ```
 
-`run` resolves the same profile, writes `<run-dir>/resolved-route.json`, then
-launches Codex headlessly through the selected MMS route. The command accepts
-Looper's Codex-shaped tail (`exec [--model <ignored>] <prompt>`). MMS owns the
-actual model/provider choice; Looper's `--model` is ignored.
+`run` resolves the same profile, writes `<run-dir>/resolved-route.json` and
+`<run-dir>/run-result.json`, then launches Codex headlessly through the selected
+MMS route. The command accepts Looper's Codex-shaped tail
+(`exec [--model <ignored>] <prompt>`). MMS owns the actual model/provider
+choice; Looper's `--model` is ignored.
 
 By default `run` prints only raw agent text to stdout. This preserves Looper's
 completion marker contract: if the agent prints
@@ -33,9 +34,35 @@ completion marker contract: if the agent prints
 parse. Use `--json` only for diagnostics, not as the Looper command output.
 
 `resolved-route.json` is safe for issue/PR evidence: it contains sanitized
-model/provider/runtime metadata, but not API keys, endpoint URLs, or proxy
-fields. The raw key and endpoint are used only in-process to launch the selected
-runtime.
+model/provider/runtime metadata and `cache_transport_evidence.v1`, but not API
+keys, endpoint URLs, or proxy fields. The transport evidence records the
+concrete upstream `request_path` (for example `/v1/messages`) while leaving
+`request_url` blank because MMS provider hosts can be private. The raw key and
+endpoint are used only in-process to launch the selected runtime.
+
+The runner also exposes the same evidence in the JSON result and
+`run-result.json`:
+
+```json
+{
+  "cache_transport_evidence": {
+    "schema": "cache_transport_evidence.v1",
+    "model": "qwen3.7-max",
+    "provider_id": "newapi-personal-tokyo",
+    "protocol": "anthropic_messages",
+    "request_url": "",
+    "request_path": "/v1/messages",
+    "fallback_used": false,
+    "fallback_reason": ""
+  }
+}
+```
+
+For non-OpenAI-family CN / dual-protocol / cache-sensitive routes, `run`
+defaults to `anthropic_messages` when `anthropic_base_url` exists. OpenAI-family
+models default to `openai_responses`. `openai_chat_completions` for
+cache-sensitive non-OpenAI routes is only valid as an audited fallback with a
+non-empty `fallback_reason`.
 
 ## Config Shape
 
@@ -61,7 +88,7 @@ default = "flywheel.fixer.default"
 "AI-P4" = "opencode-committee-fast"
 
 [flywheel.profiles."flywheel.worker.p3"]
-runtime = "opencode"
+runtime = "codex"
 model = "qwen3.7-max"
 provider = "direct-qwen"
 reasoning_effort = "high"
@@ -69,9 +96,9 @@ thinking_mode = "disable"
 max_context_tokens = 1000000
 ```
 
-Supported profile fields:
+Supported resolver profile fields:
 
-- `runtime` / `runtime_kind` / `cli`: `codex`, `opencode`, `opencode_profile`, or future runner ids.
+- `runtime` / `runtime_kind` / `cli`: `codex`, `opencode`, `opencode_profile`, or future runner ids. `mmf flywheel run` currently executes only `codex`; other runtimes are resolver-only until their runner adapters land.
 - `model` / `model_id`: MMS model route key or OpenCode profile id.
 - `provider` / `provider_id` / `route_provider` / `model_route_provider` / `channel`: optional provider override.
 - `thinking_mode`: `auto`, `enable`, or `disable`.
