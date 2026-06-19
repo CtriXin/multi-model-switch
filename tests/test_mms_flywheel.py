@@ -318,6 +318,65 @@ def test_flywheel_runtime_passes_ordered_native_fallback_routes_without_artifact
     assert "native_fallback_routes" not in serialized
 
 
+def test_flywheel_run_preserves_explicit_config_for_native_fallback_routes(tmp_path, monkeypatch):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    artifact_dir = tmp_path / "artifacts"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_flywheel_tier_routes(root)
+    explicit_config = tmp_path / "custom-flywheel.toml"
+    explicit_config.write_text(
+        """
+[lanes.worker]
+"AI-P3" = "flywheel.worker.custom"
+
+[profiles."flywheel.worker.custom"]
+runtime = "codex"
+model = "qwen3.7-max"
+provider = "direct-qwen"
+fallback_providers = ["us-cpa-local-codex"]
+
+[profiles."flywheel.worker.custom".fallback_model_by_provider]
+us-cpa-local-codex = "gpt-5.5"
+""".strip(),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_codex_headless(*, runtime, model, prompt, cwd, sandbox):
+        captured["runtime"] = runtime
+        captured["model"] = model
+        return (
+            0,
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "agent text"}}),
+            "",
+        )
+
+    monkeypatch.setattr(mms_flywheel, "_run_codex_headless", fake_run_codex_headless)
+
+    result = mms_flywheel.run_flywheel_lane(
+        lane="worker",
+        priority="AI-P3",
+        config_root=str(root),
+        config_path=str(explicit_config),
+        cwd=str(workdir),
+        artifact_dir=str(artifact_dir),
+        runner_args=["exec", "ship it"],
+    )
+
+    assert result["ok"] is True
+    assert captured["model"] == "qwen3.7-max"
+    assert [item["provider_id"] for item in captured["runtime"]["native_fallback_routes"]] == [
+        "us-cpa-local-codex",
+    ]
+    assert captured["runtime"]["native_fallback_routes"][0]["model"] == "gpt-5.5"
+    artifact = json.loads(Path(result["resolved_route_path"]).read_text(encoding="utf-8"))
+    assert artifact["resolved"]["profile_id"] == "flywheel.worker.custom"
+    assert artifact["resolved"]["config"]["config_path"] == str(explicit_config.resolve())
+    assert "native_fallback_routes" not in json.dumps(artifact, ensure_ascii=False)
+
+
 def test_resolve_worker_profile_from_mms_config(tmp_path):
     root = tmp_path / "mms-next"
     root.mkdir()

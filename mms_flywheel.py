@@ -629,6 +629,15 @@ def resolve_flywheel_profile(
         or selected_route.get("context_length")
     )
 
+    config_meta: dict[str, Any] = {
+        "root": str(root),
+        "sources": sources,
+        "route_path": str(route_file),
+        "lineup_path": str(lineup_file),
+    }
+    if config_path:
+        config_meta["config_path"] = str(Path(config_path).expanduser().resolve())
+
     resolved: dict[str, Any] = {
         "version": VERSION,
         "lane": lane,
@@ -644,12 +653,7 @@ def resolve_flywheel_profile(
         "thinking_mode": thinking,
         "reasoning_effort": effort,
         "max_context_tokens": context_tokens,
-        "config": {
-            "root": str(root),
-            "sources": sources,
-            "route_path": str(route_file),
-            "lineup_path": str(lineup_file),
-        },
+        "config": config_meta,
     }
     if profile_cfg.get("opencode_profile"):
         resolved["opencode_profile"] = str(profile_cfg["opencode_profile"])
@@ -662,6 +666,7 @@ def _native_fallback_routes_for_resolved(resolved: dict[str, Any]) -> list[dict[
     root = Path(str(config_meta.get("root") or "")).expanduser()
     route_path = Path(str(config_meta.get("route_path") or "")).expanduser()
     lineup_path = Path(str(config_meta.get("lineup_path") or "")).expanduser()
+    config_path = str(config_meta.get("config_path") or "").strip()
     profile_id = str(resolved.get("profile_id") or "").strip()
     model = str(resolved.get("model") or "").strip()
     selected_provider = str(resolved.get("provider_id") or "").strip()
@@ -670,7 +675,7 @@ def _native_fallback_routes_for_resolved(resolved: dict[str, Any]) -> list[dict[
     try:
         routes = _routes_from(route_path)
         lineup_routes = _routes_from(lineup_path)
-        config, _sources = _load_flywheel_config(root)
+        config, _sources = _load_flywheel_config(root, config_path)
         profile_cfg = _profile_config(config, profile_id, routes)
         _sanitized, raw_routes = _resolve_profile_fallbacks(
             root=root,

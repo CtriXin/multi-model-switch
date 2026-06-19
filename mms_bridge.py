@@ -449,6 +449,23 @@ def _gateway_route_payload(route, *, gateway_url, gateway_key, server):
     }
 
 
+def _normalized_bridge_protocol(route):
+    protocol = str((route or {}).get("protocol") or "").strip()
+    aliases = {
+        "responses": "openai_responses",
+        "openai": "openai_responses",
+        "openai_responses": "openai_responses",
+        "chat": "openai_chat_completions",
+        "chat_completions": "openai_chat_completions",
+        "openai_chat": "openai_chat_completions",
+        "openai_chat_completions": "openai_chat_completions",
+        "anthropic": "anthropic_messages",
+        "messages": "anthropic_messages",
+        "anthropic_messages": "anthropic_messages",
+    }
+    return aliases.get(protocol, protocol or "anthropic_messages")
+
+
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
 _DOMESTIC_MODEL_PREFIXES = ("glm", "kimi", "k2.6", "mimo", "qwen", "minimax", "deepseek")
 _DOMESTIC_THINKING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
@@ -5736,6 +5753,134 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             # fallback 也失败，返回 502
             self._json(502, {"error": {"message": str(exc)}})
 
+    def _do_openai_responses_fallback_route(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+        """Forward one mixed-protocol fallback route through OpenAI Responses."""
+        route = route if isinstance(route, dict) else {}
+        provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
+        provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+        route_payload = copy.deepcopy(payload)
+        route_payload["model"] = model_name
+        profile_id = apply_profile_body_patches(
+            route_payload,
+            protocol="responses",
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+            thinking_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+        )
+        if not profile_id and reasoning_enabled:
+            reasoning_payload = route_payload.get("reasoning")
+            next_reasoning = dict(reasoning_payload) if isinstance(reasoning_payload, dict) else {}
+            next_reasoning["effort"] = reasoning_effort
+            route_payload["reasoning"] = next_reasoning
+        elif not profile_id:
+            route_payload.pop("reasoning", None)
+
+        target_url = _build_gateway_url(gateway_url, "/responses")
+        fwd_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {gateway_key}",
+        }
+        apply_profile_auth_headers(
+            fwd_headers,
+            protocol="responses",
+            api_key=gateway_key,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+        )
+        fwd_headers.update(_copy_passthrough_headers(self.headers))
+
+        first_byte_ms = None
+        output_tokens = None
+        try:
+            with httpx.stream(
+                "POST",
+                target_url,
+                headers=fwd_headers,
+                json=route_payload,
+                timeout=300,
+                **_route_httpx_kwargs(self.server, route, target_url),
+            ) as response:
+                content_type = response.headers.get("content-type", "application/json")
+                if response.status_code >= 400:
+                    body_text = response.read().decode("utf-8", errors="replace")
+                    return {
+                        "sent": False,
+                        "status": response.status_code,
+                        "body": body_text,
+                        "url": target_url,
+                    }
+
+                if "text/event-stream" in content_type.lower():
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    for raw_line in response.iter_lines():
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        stripped = raw_line.strip()
+                        if stripped.startswith("data:"):
+                            data_str = stripped[5:].strip()
+                            if data_str and data_str != "[DONE]":
+                                try:
+                                    event_payload = json.loads(data_str)
+                                except json.JSONDecodeError:
+                                    event_payload = None
+                                extracted = _extract_output_tokens(event_payload)
+                                if extracted is not None:
+                                    output_tokens = extracted
+                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                        if raw_line == "":
+                            self.wfile.flush()
+                    self.close_connection = True
+                else:
+                    body_out = response.read()
+                    if not body_out:
+                        return {
+                            "sent": False,
+                            "status": 502,
+                            "body": "empty responses fallback body",
+                            "url": target_url,
+                            "failure_token": "invalid_text",
+                        }
+                    first_byte_ms = _now_ms()
+                    try:
+                        output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                    except Exception:
+                        output_tokens = None
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body_out)))
+                    self.end_headers()
+                    self.wfile.write(body_out)
+
+                _record_bridge_speed(
+                    model_name,
+                    started_ms=started_ms,
+                    first_byte_ms=first_byte_ms,
+                    output_tokens=output_tokens,
+                    provider_scope=getattr(self.server, "speed_scope", None),
+                    server=self.server,
+                )
+                return {"sent": True, "status": response.status_code, "url": target_url}
+        except Exception as exc:
+            token = _native_fallback_error_token(exc)
+            return {
+                "sent": False,
+                "status": 502,
+                "body": str(exc),
+                "url": target_url,
+                "failure_token": token,
+            }
+
     def _do_anthropic_messages_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
         """Codex Responses hot fallback through Anthropic Messages transport."""
         route = route if isinstance(route, dict) else {}
@@ -5773,6 +5918,49 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                 provider_profile = active_route.get("provider_profile") or getattr(self.server, "provider_profile", "")
                 is_last_route = route_index >= len(forward_routes) - 1
                 retry_statuses, _retry_tokens = _native_fallback_retry_sets(active_route)
+                active_protocol = _normalized_bridge_protocol(active_route)
+
+                if active_protocol == "openai_responses":
+                    result = self._do_openai_responses_fallback_route(
+                        payload,
+                        active_model,
+                        active_gateway_url,
+                        active_gateway_key,
+                        started_ms,
+                        route=active_route,
+                    )
+                    if result.get("sent"):
+                        return
+                    last_status = int(result.get("status") or 502)
+                    last_body = str(result.get("body") or "")
+                    last_target_url = str(result.get("url") or "")
+                    failure_token = str(result.get("failure_token") or "").strip()
+                    can_try_next = (
+                        (last_status in retry_statuses)
+                        or (failure_token and failure_token in _retry_tokens)
+                    )
+                    if not is_last_route and can_try_next:
+                        next_route = forward_routes[route_index + 1]
+                        _log_native_fallback(
+                            from_route=active_route,
+                            to_route=next_route,
+                            model_name=active_model,
+                            reason=failure_token or f"http_{last_status}",
+                            request_url=last_target_url,
+                        )
+                        continue
+                    break
+
+                if active_protocol == "openai_chat_completions":
+                    self._do_chatcompletions_fallback(
+                        payload,
+                        active_model,
+                        active_gateway_url,
+                        active_gateway_key,
+                        started_ms,
+                        route=active_route,
+                    )
+                    return
 
                 anthropic_payload = _responses_payload_to_anthropic_messages_payload(payload, active_model)
                 profile_id = apply_profile_body_patches(
