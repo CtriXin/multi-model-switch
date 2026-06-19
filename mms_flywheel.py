@@ -40,11 +40,18 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "default": "flywheel.worker.default",
             "AI-P0": "flywheel.worker.default",
             "AI-P1": "flywheel.worker.default",
-            "AI-P2": "flywheel.worker.default",
-            "AI-P3": "flywheel.worker.default",
-            "AI-P4": "flywheel.worker.default",
+            "AI-P2": "flywheel.worker.cn-glm",
+            "AI-P3": "flywheel.worker.cn-qwen",
+            "AI-P4": "flywheel.worker.cn-qwen",
         },
-        "fixer": {"default": "flywheel.fixer.default"},
+        "fixer": {
+            "default": "flywheel.fixer.default",
+            "AI-P0": "flywheel.fixer.default",
+            "AI-P1": "flywheel.fixer.default",
+            "AI-P2": "flywheel.fixer.cn-glm",
+            "AI-P3": "flywheel.fixer.cn-qwen",
+            "AI-P4": "flywheel.fixer.cn-qwen",
+        },
         "committee": {
             "default": "opencode-committee",
             "AI-P0": "opencode-committee-heavy",
@@ -59,11 +66,57 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "runtime": "codex",
             "model": "gpt-5.5",
             "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+        },
+        "flywheel.worker.cn-glm": {
+            "runtime": "codex",
+            "model": "glm-5.2",
+            "provider": "direct-zai",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
+                "newapi-company": "gpt-5.5",
+            },
+        },
+        "flywheel.worker.cn-qwen": {
+            "runtime": "codex",
+            "model": "qwen3.7-max",
+            "provider": "direct-qwen",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
+                "newapi-company": "gpt-5.5",
+            },
         },
         "flywheel.fixer.default": {
             "runtime": "codex",
             "model": "gpt-5.5",
             "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+        },
+        "flywheel.fixer.cn-glm": {
+            "runtime": "codex",
+            "model": "glm-5.2",
+            "provider": "direct-zai",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
+                "newapi-company": "gpt-5.5",
+            },
+        },
+        "flywheel.fixer.cn-qwen": {
+            "runtime": "codex",
+            "model": "qwen3.7-max",
+            "provider": "direct-qwen",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
+                "newapi-company": "gpt-5.5",
+            },
         },
     },
 }
@@ -232,6 +285,8 @@ def _sanitize_route(candidate: dict[str, Any]) -> dict[str, Any]:
         "thinking",
         "reasoning_effort",
         "effort",
+        "fallback_reason",
+        "allow_model_switch",
         # Intentionally omit endpoint URLs/proxy fields from the resolver output.
         # The resolver is safe to paste into tracker/PR comments and never emits keys.
     }
@@ -241,6 +296,180 @@ def _sanitize_route(candidate: dict[str, Any]) -> dict[str, Any]:
         if key in allowed and value not in (None, ""):
             safe[key] = value
     return safe
+
+
+def _merged_route_candidates(
+    routes: dict[str, Any],
+    lineup_routes: dict[str, Any],
+    model: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    entry = routes.get(model)
+    if not isinstance(entry, dict):
+        return []
+    meta_by_provider = _metadata_by_provider(lineup_routes.get(model))
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    for name, candidate in _route_candidates(entry):
+        candidate_provider = str(candidate.get("provider_id") or "").strip()
+        merged = {**meta_by_provider.get(candidate_provider, {}), **candidate}
+        candidates.append((name, merged))
+    return candidates
+
+
+def _find_route_candidate(
+    routes: dict[str, Any],
+    lineup_routes: dict[str, Any],
+    *,
+    model: str,
+    provider: str,
+) -> tuple[str, dict[str, Any]] | None:
+    provider = str(provider or "").strip()
+    if not provider:
+        return None
+    for name, candidate in _merged_route_candidates(routes, lineup_routes, model):
+        if str(candidate.get("provider_id") or "").strip() == provider:
+            return name, candidate
+    return None
+
+
+def _normalize_model_id(value: Any) -> str:
+    return str(value or "").strip().lower().replace("[1m]", "")
+
+
+def _provider_declares_model(provider: dict[str, Any], model: str) -> bool:
+    wanted = _normalize_model_id(model)
+    if not wanted:
+        return False
+    for key in ("models", "fallback_models", "extra_models"):
+        raw = provider.get(key)
+        if isinstance(raw, str):
+            raw = [raw]
+        for item in raw or []:
+            if _normalize_model_id(item) == wanted:
+                return True
+    return False
+
+
+def _provider_route_candidate_from_config(root: Path, *, model: str, provider_id: str) -> dict[str, Any] | None:
+    data = _load_toml(root / "config.toml")
+    providers = data.get("providers") if isinstance(data.get("providers"), list) else []
+    for provider in providers:
+        if not isinstance(provider, dict) or not provider.get("enabled", True):
+            continue
+        if str(provider.get("id") or "").strip() != provider_id:
+            continue
+        if not _provider_declares_model(provider, model):
+            return None
+        openai_base_url = str(
+            provider.get("openai_base_url")
+            or provider.get("default_openai_base_url")
+            or provider.get("base_url")
+            or ""
+        ).strip()
+        anthropic_base_url = str(
+            provider.get("anthropic_base_url")
+            or provider.get("default_anthropic_base_url")
+            or ""
+        ).strip()
+        api_key = str(provider.get("api_key") or provider.get("openai_api_key") or "").strip()
+        if not api_key or not (openai_base_url or anthropic_base_url):
+            return None
+        return {
+            "provider_id": provider_id,
+            "model_id": model,
+            "api_key": api_key,
+            "openai_base_url": openai_base_url,
+            "anthropic_base_url": anthropic_base_url,
+            "protocols": provider.get("protocols") or [],
+            "provider_profile": provider.get("provider_profile") or provider.get("profile") or "",
+            "proxy": provider.get("proxy") or "",
+            "no_proxy": provider.get("no_proxy") or "",
+        }
+    return None
+
+
+def _profile_fallback_providers(profile: dict[str, Any]) -> list[str]:
+    raw = profile.get("fallback_providers") or profile.get("fallback_order") or []
+    if isinstance(raw, str):
+        raw = [item.strip() for item in raw.replace(",", " ").split()]
+    providers: list[str] = []
+    for item in raw or []:
+        provider = str(item or "").strip()
+        if provider and provider not in providers:
+            providers.append(provider)
+    return providers
+
+
+def _profile_fallback_model_map(profile: dict[str, Any]) -> dict[str, str]:
+    raw = profile.get("fallback_model_by_provider") or profile.get("fallback_models_by_provider") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key).strip(): str(value).strip() for key, value in raw.items() if str(key).strip() and str(value).strip()}
+
+
+def _bridge_fallback_route(candidate: dict[str, Any], *, model: str, allow_model_switch: bool = False) -> dict[str, Any]:
+    provider_id = str(candidate.get("provider_id") or "").strip()
+    api_key = str(candidate.get("api_key") or candidate.get("openai_api_key") or "").strip()
+    anthropic_url = str(candidate.get("anthropic_base_url") or "").strip()
+    openai_url = str(candidate.get("openai_base_url") or candidate.get("base_url") or "").strip()
+    gateway_url = anthropic_url or openai_url
+    if not provider_id or not api_key or not gateway_url:
+        return {}
+    route = {
+        "provider_id": provider_id,
+        "provider_profile": str(candidate.get("provider_profile") or candidate.get("profile") or "").strip(),
+        "gateway_url": gateway_url.rstrip("/"),
+        "gateway_key": api_key,
+        "openai_url": openai_url.rstrip("/"),
+        "proxy_url": str(candidate.get("proxy") or "").strip(),
+        "no_proxy": str(candidate.get("no_proxy") or "").strip(),
+        "model": str(model or candidate.get("model_id") or candidate.get("model") or "").strip(),
+        "protocol": _preferred_transport_for_route(candidate, model),
+        "fallback_reason": "flywheel_ordered_fallback",
+        "try_next_on": [401, 403, 408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, "connect_error", "timeout", "invalid_json", "invalid_text"],
+    }
+    if allow_model_switch:
+        route["allow_model_switch"] = True
+    return {key: value for key, value in route.items() if value not in (None, "", [])}
+
+
+def _resolve_profile_fallbacks(
+    *,
+    root: Path,
+    routes: dict[str, Any],
+    lineup_routes: dict[str, Any],
+    profile_cfg: dict[str, Any],
+    model: str,
+    selected_provider: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    providers = _profile_fallback_providers(profile_cfg)
+    model_by_provider = _profile_fallback_model_map(profile_cfg)
+    if not providers:
+        return [], []
+
+    sanitized: list[dict[str, Any]] = []
+    raw_routes: list[dict[str, Any]] = []
+    for provider in providers:
+        fallback_model = model_by_provider.get(provider, model)
+        match = _find_route_candidate(routes, lineup_routes, model=fallback_model, provider=provider)
+        if match is not None:
+            _slot, candidate = match
+        else:
+            candidate = _provider_route_candidate_from_config(root, model=fallback_model, provider_id=provider)
+            if candidate is None:
+                continue
+        candidate_provider = str(candidate.get("provider_id") or "").strip()
+        if candidate_provider == selected_provider and fallback_model == model:
+            continue
+        allow_model_switch = fallback_model != model
+        display_candidate = dict(candidate)
+        display_candidate["fallback_reason"] = "flywheel_ordered_fallback"
+        if allow_model_switch:
+            display_candidate["allow_model_switch"] = True
+        sanitized.append({"slot": f"fallback-{len(sanitized) + 1}", **_sanitize_route(display_candidate)})
+        bridge_route = _bridge_fallback_route(candidate, model=fallback_model, allow_model_switch=allow_model_switch)
+        if bridge_route:
+            raw_routes.append(bridge_route)
+    return sanitized, raw_routes
 
 
 def _profile_value(profile: dict[str, Any], *keys: str) -> Any:
@@ -348,16 +577,12 @@ def resolve_flywheel_profile(
     selected_name = ""
     selected_route: dict[str, Any] = {}
     fallbacks: list[dict[str, Any]] = []
+    native_fallback_routes: list[dict[str, Any]] = []
     route_status = "not_applicable" if runtime == "opencode_profile" else "missing"
 
     if isinstance(entry, dict):
         route_status = "resolved"
-        meta_by_provider = _metadata_by_provider(meta_entry)
-        candidates = []
-        for name, candidate in _route_candidates(entry):
-            candidate_provider = str(candidate.get("provider_id") or "").strip()
-            merged = {**meta_by_provider.get(candidate_provider, {}), **candidate}
-            candidates.append((name, merged))
+        candidates = _merged_route_candidates(routes, lineup_routes, model)
         if not candidates:
             raise FlywheelConfigError(f"model route {model!r} has no usable candidates")
         selected_index = 0
@@ -371,7 +596,15 @@ def resolve_flywheel_profile(
                 raise FlywheelConfigError(f"model route {model!r} has no provider {provider!r}")
             selected_index = matches[0]
         selected_name, selected_route = candidates[selected_index]
-        fallbacks = [
+        ordered_fallbacks, native_fallback_routes = _resolve_profile_fallbacks(
+            root=root,
+            routes=routes,
+            lineup_routes=lineup_routes,
+            profile_cfg=profile_cfg,
+            model=model,
+            selected_provider=str(selected_route.get("provider_id") or provider or "").strip(),
+        )
+        fallbacks = ordered_fallbacks or [
             {"slot": name, **_sanitize_route(item)}
             for index, (name, item) in enumerate(candidates)
             if index != selected_index
@@ -422,6 +655,34 @@ def resolve_flywheel_profile(
         resolved["opencode_profile"] = str(profile_cfg["opencode_profile"])
     # Drop null-ish values while keeping explicit empty provider route objects out.
     return {key: value for key, value in resolved.items() if value not in (None, "")}
+
+
+def _native_fallback_routes_for_resolved(resolved: dict[str, Any]) -> list[dict[str, Any]]:
+    config_meta = resolved.get("config") if isinstance(resolved.get("config"), dict) else {}
+    root = Path(str(config_meta.get("root") or "")).expanduser()
+    route_path = Path(str(config_meta.get("route_path") or "")).expanduser()
+    lineup_path = Path(str(config_meta.get("lineup_path") or "")).expanduser()
+    profile_id = str(resolved.get("profile_id") or "").strip()
+    model = str(resolved.get("model") or "").strip()
+    selected_provider = str(resolved.get("provider_id") or "").strip()
+    if not root or not route_path or not profile_id or not model:
+        return []
+    try:
+        routes = _routes_from(route_path)
+        lineup_routes = _routes_from(lineup_path)
+        config, _sources = _load_flywheel_config(root)
+        profile_cfg = _profile_config(config, profile_id, routes)
+        _sanitized, raw_routes = _resolve_profile_fallbacks(
+            root=root,
+            routes=routes,
+            lineup_routes=lineup_routes,
+            profile_cfg=profile_cfg,
+            model=model,
+            selected_provider=selected_provider,
+        )
+        return raw_routes
+    except Exception:
+        return []
 
 
 def _raw_selected_route(resolved: dict[str, Any]) -> dict[str, Any]:
@@ -627,6 +888,10 @@ def _runtime_from_route(resolved: dict[str, Any], route: dict[str, Any]) -> dict
         "thinking_mode": str(resolved.get("thinking_mode") or "auto").strip().lower(),
         "native_fallback": True,
     }
+    native_fallback_routes = _native_fallback_routes_for_resolved(resolved)
+    if native_fallback_routes:
+        runtime["native_fallback_routes"] = native_fallback_routes
+        runtime["native_fallback_max"] = len(native_fallback_routes)
     effort = _launcher_effort(resolved.get("reasoning_effort"))
     if effort:
         runtime["reasoning_effort"] = effort
@@ -642,7 +907,16 @@ def _sanitize_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
     for key, value in (runtime or {}).items():
         if _is_secret_key(str(key)):
             continue
-        if key in {"api_key", "openai_api_key", "openai_base_url", "anthropic_base_url", "base_url", "proxy", "no_proxy"}:
+        if key in {
+            "api_key",
+            "openai_api_key",
+            "openai_base_url",
+            "anthropic_base_url",
+            "base_url",
+            "proxy",
+            "no_proxy",
+            "native_fallback_routes",
+        }:
             continue
         if value not in (None, ""):
             safe[key] = value
@@ -785,23 +1059,28 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
         "no_proxy": runtime.get("no_proxy"),
         **mms_launchers._rescue_bridge_kwargs(),  # noqa: SLF001
     }
+    native_fallback_routes = list(runtime.get("native_fallback_routes") or [])
     if preferred_transport == "anthropic_messages":
         gateway_url = mms_launchers._anthropic_base_url(runtime)  # noqa: SLF001
         if not gateway_url:
             raise FlywheelConfigError("selected Anthropic transport has no anthropic_base_url")
         bridge_factory = mms_launchers.codex_chatcompletions_bridge
         bridge_kwargs["primary_protocol"] = "anthropic_messages"
+        if native_fallback_routes:
+            bridge_kwargs["native_fallback_routes"] = native_fallback_routes
     elif is_gpt or preferred_transport == "openai_responses":
         gateway_url = mms_launchers._openai_base_url(runtime)  # noqa: SLF001
         if not gateway_url:
             raise FlywheelConfigError("selected OpenAI Responses transport has no openai_base_url")
         bridge_factory = mms_launchers.codex_responses_bridge
-        bridge_kwargs["native_fallback_routes"] = mms_launchers._resolve_codex_responses_fallback_routes(runtime, model)  # noqa: SLF001
+        bridge_kwargs["native_fallback_routes"] = native_fallback_routes or mms_launchers._resolve_codex_responses_fallback_routes(runtime, model)  # noqa: SLF001
     else:
         gateway_url = mms_launchers._openai_base_url(runtime)  # noqa: SLF001
         if not gateway_url:
             raise FlywheelConfigError("selected OpenAI Chat transport has no openai_base_url")
         bridge_factory = mms_launchers.codex_chatcompletions_bridge
+        if native_fallback_routes:
+            bridge_kwargs["native_fallback_routes"] = native_fallback_routes
 
     with bridge_factory(gateway_url, api_key, **bridge_kwargs) as bridge_cfg:
         bridge_base_url = mms_launchers._codex_provider_base_url(bridge_cfg["base_url"])  # noqa: SLF001
