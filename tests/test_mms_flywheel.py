@@ -67,6 +67,23 @@ def _seed_routes(root):
     _write_json(root / "model-routes.lineup.json", lineup)
 
 
+def _write_qwen_worker_config(root: Path, *, effort: str = "high"):
+    (root / "config.toml").write_text(
+        """
+[flywheel.lanes.worker]
+"AI-P3" = "flywheel.worker.p3"
+
+[flywheel.profiles."flywheel.worker.p3"]
+runtime = "codex"
+model = "qwen3.7-max"
+provider = "direct-qwen"
+reasoning_effort = "{effort}"
+thinking_mode = "enable"
+""".strip().format(effort=effort),
+        encoding="utf-8",
+    )
+
+
 def test_resolve_worker_profile_from_mms_config(tmp_path):
     root = tmp_path / "mms-next"
     root.mkdir()
@@ -174,3 +191,139 @@ def test_mms_core_dispatches_flywheel_command(tmp_path, capsys, monkeypatch):
     out = json.loads(capsys.readouterr().out)
     assert exc.value.code == 0
     assert out["result"]["profile_id"] == "opencode-committee-fast"
+
+
+def test_run_dry_run_writes_sanitized_resolved_route_artifact(tmp_path):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    artifact_dir = tmp_path / "artifacts"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_routes(root)
+    _write_qwen_worker_config(root, effort="max")
+
+    result = mms_flywheel.run_flywheel_lane(
+        lane="worker",
+        priority="AI-P3",
+        config_root=str(root),
+        cwd=str(workdir),
+        artifact_dir=str(artifact_dir),
+        runner_args=["exec", "--model", "ignored-by-mms", "do the task"],
+        dry_run=True,
+    )
+
+    artifact = Path(result["resolved_route_path"])
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert result["ok"] is True
+    assert result["status"] == "dry_run"
+    assert result["model"] == "qwen3.7-max"
+    assert result["provider_id"] == "direct-qwen"
+    assert payload["runtime"]["reasoning_effort"] == "xhigh"
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "secret-qwen" not in serialized
+    assert "https://qwen.example" not in serialized
+    assert "api_key" not in payload["runtime"]
+    assert "openai_base_url" not in payload["runtime"]
+
+
+def test_run_fake_response_emits_raw_looper_marker(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_routes(root)
+    _write_qwen_worker_config(root)
+    monkeypatch.setenv(
+        "MMS_FLYWHEEL_RUN_FAKE_RESPONSE",
+        'done\n__LOOPER_RESULT__={"summary":"ok","git_pr_lifecycle":{"prUrl":"https://github.com/CtriXin/EchoMind/pull/1"}}\n',
+    )
+
+    rc = mms_flywheel.handle_flywheel_command(
+        [
+            "run",
+            "--lane",
+            "worker",
+            "--priority",
+            "AI-P3",
+            "--config-root",
+            str(root),
+            "--cwd",
+            str(workdir),
+            "exec",
+            "--model",
+            "ignored",
+            "ship it",
+        ],
+        command_name="mmf flywheel",
+    )
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert 'done\n__LOOPER_RESULT__={"summary":"ok"' in out
+
+
+def test_run_invokes_codex_runner_with_raw_runtime_but_json_output_is_safe(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_routes(root)
+    _write_qwen_worker_config(root)
+    captured = {}
+
+    def fake_run_codex_headless(*, runtime, model, prompt, cwd, sandbox):
+        captured["runtime"] = runtime
+        captured["model"] = model
+        captured["prompt"] = prompt
+        captured["cwd"] = cwd
+        captured["sandbox"] = sandbox
+        return (
+            0,
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "agent text"}}),
+            "",
+        )
+
+    monkeypatch.setattr(mms_flywheel, "_run_codex_headless", fake_run_codex_headless)
+
+    rc = mms_flywheel.handle_flywheel_command(
+        [
+            "run",
+            "--lane",
+            "worker",
+            "--priority",
+            "AI-P3",
+            "--config-root",
+            str(root),
+            "--cwd",
+            str(workdir),
+            "--json",
+            "--",
+            "fix this",
+        ],
+        command_name="mmf flywheel",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["result"]["agent_text"] == "agent text"
+    assert captured["runtime"]["api_key"] == "secret-qwen"
+    assert captured["runtime"]["openai_base_url"] == "https://qwen.example/v1"
+    assert captured["model"] == "qwen3.7-max"
+    assert captured["prompt"] == "fix this"
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "secret-qwen" not in serialized
+    assert "https://qwen.example" not in serialized
+
+
+def test_run_rejects_committee_profile_for_headless_worker_runner(tmp_path):
+    root = tmp_path / "mms-next"
+    root.mkdir()
+
+    with pytest.raises(mms_flywheel.FlywheelConfigError, match="codex runtime only"):
+        mms_flywheel.run_flywheel_lane(
+            lane="committee",
+            priority="AI-P0",
+            config_root=str(root),
+            prompt="review",
+        )
