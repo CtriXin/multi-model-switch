@@ -24,6 +24,9 @@ _OPENCODE_SHARED_STATE_MIGRATION_MARKER = ".mms-shared-state-migration-v1"
 _OPENCODE_PROFILE_MARKER = ".mms/opencode-profile"
 _OPENCODE_ISOLATE_DATA_MARKER = ".mms/opencode-isolate-data"
 _OPENCODE_INCREMENTAL_SKIP_DIRS = {"log"}
+_BOOL_TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled"}
+_BOOL_FALSE_VALUES = {"0", "false", "no", "off", "disable", "disabled"}
+_OPENCODE_SHARED_CACHE_ENV = "MMS_OPENCODE_SHARED_CACHE"
 
 
 def _write_opencode_profile_marker(session_home, profile_slug):
@@ -51,6 +54,57 @@ def opencode_profile_state_slug(profile_id):
 def _opencode_isolate_data_enabled(env):
     raw = str(env.get("MMS_OPENCODE_ISOLATE_DATA") or os.environ.get("MMS_OPENCODE_ISOLATE_DATA") or "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
+
+
+def _boolish(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in _BOOL_TRUE_VALUES:
+        return True
+    if raw in _BOOL_FALSE_VALUES:
+        return False
+    return default
+
+
+def _opencode_external_skills_enabled(runtime, env):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if "opencode_external_skills" in runtime:
+        return _boolish(runtime.get("opencode_external_skills"), default=False)
+    return _boolish(env.get("MMS_OPENCODE_EXTERNAL_SKILLS"), default=False)
+
+
+def _opencode_real_home_enabled(runtime, env):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if "opencode_real_home" in runtime:
+        return _boolish(runtime.get("opencode_real_home"), default=False)
+    return _boolish(env.get("MMS_OPENCODE_REAL_HOME"), default=False)
+
+
+def _opencode_shared_cache_enabled(runtime, env):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if "opencode_shared_cache" in runtime:
+        return _boolish(runtime.get("opencode_shared_cache"), default=True)
+    if _OPENCODE_SHARED_CACHE_ENV in env:
+        return _boolish(env.get(_OPENCODE_SHARED_CACHE_ENV), default=True)
+    if _OPENCODE_SHARED_CACHE_ENV in os.environ:
+        return _boolish(os.environ.get(_OPENCODE_SHARED_CACHE_ENV), default=True)
+    return True
+
+
+def opencode_apply_external_skill_policy(env, runtime):
+    """Keep MMS-managed OpenCode from scanning global Claude/agent skills by default."""
+    if _opencode_external_skills_enabled(runtime, env):
+        env.pop("OPENCODE_DISABLE_EXTERNAL_SKILLS", None)
+        env.pop("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS", None)
+        env["MMS_OPENCODE_EXTERNAL_SKILLS"] = "1"
+        return env
+    env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] = "1"
+    env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] = "1"
+    env["MMS_OPENCODE_EXTERNAL_SKILLS"] = "0"
+    return env
 
 
 def _copy_missing_tree(src, dst):
@@ -133,6 +187,72 @@ def _opencode_legacy_profile_slug_from_session(session_dir):
 
 def _opencode_profile_state_root(real_user_path, profile_slug):
     return Path(real_user_path(".local", "share", "mms-opencode", "state", profile_slug))
+
+
+def _opencode_profile_cache_root(real_user_path, profile_slug):
+    return Path(real_user_path(".local", "share", "mms-opencode", "cache", profile_slug))
+
+
+def _opencode_link_shared_cache_dir(session_home, relative_path, target_dir):
+    link_path = Path(session_home, *Path(relative_path).parts)
+    target_dir = Path(target_dir)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if link_path.is_symlink():
+            if link_path.resolve() == target_dir.resolve():
+                return True
+            link_path.unlink()
+        elif link_path.exists():
+            if link_path.is_dir():
+                try:
+                    next(link_path.iterdir())
+                    return False
+                except StopIteration:
+                    link_path.rmdir()
+            else:
+                return False
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        link_path.symlink_to(target_dir, target_is_directory=True)
+        return True
+    except OSError:
+        return False
+
+
+def _materialize_opencode_shared_cache(env, session_home, cache_root, *, use_real_home):
+    """Share cold-start caches without exposing the real HOME tree."""
+    cache_root = Path(cache_root)
+    cache_root.mkdir(parents=True, exist_ok=True)
+    env[_OPENCODE_SHARED_CACHE_ENV] = "1"
+    env["MMS_OPENCODE_CACHE_ROOT"] = str(cache_root)
+
+    xdg_opencode_cache = cache_root / "xdg-cache" / "opencode"
+    if _opencode_link_shared_cache_dir(session_home, ".cache/opencode", xdg_opencode_cache):
+        env["MMS_OPENCODE_XDG_CACHE_SHARED"] = "1"
+    else:
+        env["MMS_OPENCODE_XDG_CACHE_SHARED"] = "0"
+
+    # With isolated HOME, OpenCode/Bun/npm otherwise rebuild per-session caches.
+    if use_real_home:
+        env["MMS_OPENCODE_HOME_CACHE_SHARED"] = "0"
+        return env
+
+    npm_cache = cache_root / "npm"
+    bun_cache = cache_root / "bun-install-cache"
+    darwin_cache = cache_root / "darwin-caches"
+    home_cache_shared = [
+        _opencode_link_shared_cache_dir(session_home, ".npm", npm_cache),
+        _opencode_link_shared_cache_dir(session_home, ".bun/install/cache", bun_cache),
+        _opencode_link_shared_cache_dir(session_home, "Library/Caches", darwin_cache),
+    ]
+    env["MMS_OPENCODE_HOME_CACHE_SHARED"] = "1" if all(home_cache_shared) else "0"
+    for key, value in (
+        ("npm_config_cache", str(npm_cache)),
+        ("NPM_CONFIG_CACHE", str(npm_cache)),
+        ("BUN_INSTALL_CACHE_DIR", str(bun_cache)),
+    ):
+        if not str(env.get(key) or "").strip():
+            env[key] = value
+    return env
 
 
 def _write_opencode_shared_state_marker(state_root, *, migrated, covered_mtime_ns=0):
@@ -601,14 +721,23 @@ def _migrate_opencode_data_to_shared_state(session_home, *, real_user_path):
 
 
 def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint, profile_id):
-    """Keep real HOME/config soft; share OpenCode data/state by profile."""
+    """Isolate OpenCode config/home by default while sharing profile data/state."""
     profile_slug = opencode_profile_state_slug(profile_id)
     real_home = real_user_path()
+    use_real_home = _boolish(env.get("MMS_OPENCODE_REAL_HOME"), default=False)
     state_root = _opencode_profile_state_root(real_user_path, profile_slug)
+    cache_root = _opencode_profile_cache_root(real_user_path, profile_slug)
     _write_opencode_profile_marker(session_home, profile_slug)
-    env["HOME"] = real_home
+    env["HOME"] = real_home if use_real_home else session_home
     env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
     env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")
+    if _opencode_shared_cache_enabled({}, env):
+        _materialize_opencode_shared_cache(env, session_home, cache_root, use_real_home=use_real_home)
+    else:
+        env["MMS_OPENCODE_SHARED_CACHE"] = "0"
+        env.pop("MMS_OPENCODE_CACHE_ROOT", None)
+        env.pop("MMS_OPENCODE_XDG_CACHE_SHARED", None)
+        env.pop("MMS_OPENCODE_HOME_CACHE_SHARED", None)
     if _opencode_isolate_data_enabled(env):
         _write_opencode_isolate_data_marker(session_home)
         env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
@@ -627,6 +756,8 @@ def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_hom
     env["MMS_HOME_ISOLATION_MODE"] = "soft"
     env["MMS_SOFT_HOME"] = "1"
     env["MMS_OPENCODE_SOFT_HOME"] = "1"
+    env["MMS_OPENCODE_HOME_ISOLATED"] = "0" if use_real_home else "1"
+    env["MMS_OPENCODE_REAL_HOME"] = "1" if use_real_home else "0"
     env["MMS_OPENCODE_PROFILE"] = profile_slug
     set_session_home_hint(env, session_home)
     return env
@@ -701,7 +832,14 @@ def opencode_gateway_env(
     clear_opencode_config_env(env)
     inject_real_home_hints(env)
     inject_selected_model_name(env, model, model_info=model_info)
+    use_real_home = (
+        _opencode_real_home_enabled(runtime, env)
+        or _opencode_external_skills_enabled(runtime, env)
+    )
+    env["MMS_OPENCODE_REAL_HOME"] = "1" if use_real_home else "0"
+    env[_OPENCODE_SHARED_CACHE_ENV] = "1" if _opencode_shared_cache_enabled(runtime, env) else "0"
     set_opencode_soft_home(env, session_home, profile_id=opencode_profile_id)
+    opencode_apply_external_skill_policy(env, runtime)
     if env.get("MMS_OPENCODE_MIGRATION_FAILED") != "1":
         cleanup_stale_sessions(sessions_dir)
 
@@ -807,6 +945,7 @@ def opencode_provider_export_env(
 
 
 __all__ = [
+    "opencode_apply_external_skill_policy",
     "opencode_export_config_path",
     "opencode_gateway_env",
     "opencode_global_export_env",
