@@ -16999,6 +16999,11 @@ def main():
         from mms_registry_cli import handle_registry_command
 
         raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
+    if len(argv) >= 1 and argv[0] == "flywheel":
+        set_language(_resolve_ui_language(None, lang_override))
+        from mms_flywheel import handle_flywheel_command
+
+        raise SystemExit(handle_flywheel_command(argv[1:], command_name=f"{current_command()} flywheel"))
     if _is_config_root_status_request(argv):
         _display_config_root(json_output="--json" in argv[2:])
         return
@@ -17215,6 +17220,7 @@ def main():
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} review-dispatch --root <artifact-root> 生成/启动 OpenCode Review Hub 派发\n"
+            f"  {current_command()} flywheel resolve --lane worker --priority AI-P3 --json  解析 Flywheel/Looper lane\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
             f"  {current_command()} usage ...       查看 usage 统计\n\n"
