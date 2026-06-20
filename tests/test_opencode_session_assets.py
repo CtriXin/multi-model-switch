@@ -81,3 +81,54 @@ def test_opencode_rtk_plugin_path_can_opt_in_by_env(tmp_path):
     )
 
     assert path == str(plugin)
+
+
+def test_opencode_rtk_plugin_path_runtime_disable_overrides_env_opt_in(tmp_path):
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "opencode-rtk.ts").write_text("export {}\n", encoding="utf-8")
+
+    path = opencode_rtk_plugin_path(
+        {"opencode_rtk": False},
+        module_file=str(tmp_path / "mms_launchers.py"),
+        normalize_session_surface_disabled=lambda _value: {"hooks": set()},
+        runtime_bool=lambda runtime, key, default: bool(runtime.get(key, default)),
+        env_bool=lambda key, default: True if key == "MMS_OPENCODE_RTK" else default,
+        which=lambda _name: "/usr/bin/rtk",
+    )
+
+    assert path == ""
+
+
+def test_opencode_rtk_plugin_path_disabled_surface_wins_over_runtime_opt_in(tmp_path):
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "opencode-rtk.ts").write_text("export {}\n", encoding="utf-8")
+
+    path = opencode_rtk_plugin_path(
+        {"opencode_rtk": True, "disabled_session_surfaces": {"hooks": {"opencode-rtk"}}},
+        module_file=str(tmp_path / "mms_launchers.py"),
+        normalize_session_surface_disabled=lambda value: value,
+        runtime_bool=lambda runtime, key, default: bool(runtime.get(key, default)),
+        env_bool=lambda _key, default: default,
+        which=lambda _name: "/usr/bin/rtk",
+    )
+
+    assert path == ""
+
+
+def test_opencode_rtk_plugin_path_requires_rtk_binary_even_when_enabled(tmp_path):
+    hooks_dir = tmp_path / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "opencode-rtk.ts").write_text("export {}\n", encoding="utf-8")
+
+    path = opencode_rtk_plugin_path(
+        {"opencode_rtk": True},
+        module_file=str(tmp_path / "mms_launchers.py"),
+        normalize_session_surface_disabled=lambda _value: {"hooks": set()},
+        runtime_bool=lambda runtime, key, default: bool(runtime.get(key, default)),
+        env_bool=lambda _key, default: default,
+        which=lambda _name: None,
+    )
+
+    assert path == ""
