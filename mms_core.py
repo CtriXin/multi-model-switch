@@ -684,10 +684,11 @@ MODEL_FAMILIES = [
     {"family": "Mimo",    "keywords": ("mimo",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
+    {"family": "StepFun", "keywords": ("stepfun", "step-"),                "category": "国产系"},
 ]
 KNOWN_MODEL_FAMILY_NAMES = {entry["family"] for entry in MODEL_FAMILIES}
-DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM"}
-DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "doubao", "seed", "bailian")
+DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM", "StepFun"}
+DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "stepfun", "step-", "doubao", "seed", "bailian")
 
 
 def _infer_model_family(model_name):
@@ -10277,7 +10278,7 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
 
 
 _OPENCODE_REVIEW_DEFAULT_TOKENS = ("qwen", "kimi", "glm", "deepseek", "mimo")
-_OPENCODE_REVIEW_DOMESTIC_TOKENS = ("qwen", "kimi", "glm", "minimax", "deepseek", "mimo")
+_OPENCODE_REVIEW_DOMESTIC_TOKENS = ("qwen", "kimi", "glm", "minimax", "deepseek", "mimo", "stepfun")
 _OPENCODE_COMMITTEE_DEFAULT_TOKENS = ("gpt-5.4",)
 _OPENCODE_COMMITTEE_OPTION_TOKENS = ("gpt-5.4", "gpt-5.5", "deepseek", "glm", "mimo", "kimi", "minimax")
 _OPENCODE_DEBATE_DEFAULT_TOKENS = ("gpt-5.4", "gpt-5.5", "deepseek")
@@ -10304,6 +10305,7 @@ _OPENCODE_REVIEW_FAMILY_ALIASES = {
     "ds": "DeepSeek",
     "mimo": "Mimo",
     "xiaomi": "Mimo",
+    "stepfun": "StepFun",
 }
 _OPENCODE_REVIEW_FAMILY_ORDER = {
     "Qwen": 0,
@@ -10312,6 +10314,7 @@ _OPENCODE_REVIEW_FAMILY_ORDER = {
     "MiniMax": 3,
     "DeepSeek": 4,
     "Mimo": 5,
+    "StepFun": 6,
 }
 
 
@@ -10869,7 +10872,7 @@ def _opencode_review_available_summary(cfg, default_provider, default_models):
         family = str(item.get("family") or "其他")
         by_family.setdefault(family, []).append(str(item.get("model") or ""))
     parts = []
-    for family in ("Qwen", "Kimi", "GLM", "MiniMax", "DeepSeek", "Mimo"):
+    for family in ("Qwen", "Kimi", "GLM", "MiniMax", "DeepSeek", "Mimo", "StepFun"):
         models = [item for item in by_family.get(family, []) if item]
         if not models:
             continue

@@ -210,6 +210,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert not any(str(item["id"]).startswith("load_balance.") for item in mapping)
     assert snapshot["ui"]["language"] == "zh"
     assert "Qwen" in snapshot["model_families"]
+    assert "StepFun" in snapshot["model_families"]
     assert snapshot["load_balance"]["default_profile"] == "daily"
     assert snapshot["load_balance"]["profiles"][0]["slots"]["heavy"]["provider_id"] == "webui-test-direct-qwen"
     assert "vision_sidecar" in snapshot["snippets"]

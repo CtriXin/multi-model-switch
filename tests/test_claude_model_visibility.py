@@ -120,6 +120,15 @@ def test_infer_model_family_recognizes_deepseek():
     assert category == "国产系"
 
 
+def test_infer_model_family_recognizes_stepfun():
+    import mms_core
+
+    family, category = mms_core._infer_model_family("step-3.7-flash")
+
+    assert family == "StepFun"
+    assert category == "国产系"
+
+
 def test_build_model_families_for_cli_keeps_deepseek_out_of_other(monkeypatch):
     import mms_core
 
@@ -145,6 +154,34 @@ def test_build_model_families_for_cli_keeps_deepseek_out_of_other(monkeypatch):
 
     family_names = [entry["family"] for entry in families]
     assert "DeepSeek" in family_names
+    assert "其他" not in family_names
+
+
+def test_build_model_families_for_cli_keeps_stepfun_out_of_other(monkeypatch):
+    import mms_core
+
+    provider = {
+        "id": "stepfun-provider",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "role": "auto",
+        "supported_clis": ["opencode"],
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_provider_has_configured_base_url", lambda _provider: True)
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_effective_models",
+        lambda _provider, _cached, _cfg=None: ["step-3.7-flash", "step-router-v1"],
+    )
+    monkeypatch.setattr(mms_core, "_provider_supports_model_for_cli", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_provider_label", lambda _provider: "StepFun")
+    monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"sources": {}})
+
+    families = mms_core._build_model_families_for_cli({}, "opencode", {}, [])
+
+    family_names = [entry["family"] for entry in families]
+    assert "StepFun" in family_names
     assert "其他" not in family_names
 
 
