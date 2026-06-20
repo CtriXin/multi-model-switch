@@ -826,6 +826,9 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
 
     env = mms_launchers._opencode_gateway_env(
         _runtime(opencode_profile="lite_pro_orchestrated"),
@@ -848,6 +851,7 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     assert env["MMS_OPENCODE_XDG_CACHE_SHARED"] == "1"
     assert env["MMS_OPENCODE_HOME_CACHE_SHARED"] == "1"
     assert env["NPM_CONFIG_CACHE"] == str(shared_cache / "npm")
+    assert env["npm_config_cache"] == str(shared_cache / "npm")
     assert env["BUN_INSTALL_CACHE_DIR"] == str(shared_cache / "bun-install-cache")
     assert (session_home / ".cache" / "opencode").is_symlink()
     assert (session_home / ".cache" / "opencode").resolve() == shared_cache / "xdg-cache" / "opencode"
@@ -891,6 +895,9 @@ def test_opencode_gateway_env_can_disable_shared_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
 
     env = mms_launchers._opencode_gateway_env(
         _runtime(opencode_profile="lite_pro_orchestrated", opencode_shared_cache=False),
@@ -900,6 +907,9 @@ def test_opencode_gateway_env_can_disable_shared_cache(monkeypatch, tmp_path):
     session_home = Path(env["MMS_SESSION_HOME"])
     assert env["MMS_OPENCODE_SHARED_CACHE"] == "0"
     assert "MMS_OPENCODE_CACHE_ROOT" not in env
+    assert "NPM_CONFIG_CACHE" not in env
+    assert "npm_config_cache" not in env
+    assert "BUN_INSTALL_CACHE_DIR" not in env
     assert not (session_home / ".cache" / "opencode").exists()
     assert not (session_home / ".npm").exists()
     assert not (session_home / ".bun" / "install" / "cache").exists()
