@@ -5982,6 +5982,16 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     break
 
                 if active_protocol == "openai_chat_completions":
+                    if is_last_route:
+                        self._do_chatcompletions_fallback(
+                            payload,
+                            active_model,
+                            active_gateway_url,
+                            active_gateway_key,
+                            started_ms,
+                            route=active_route,
+                        )
+                        return
                     result = self._do_chatcompletions_fallback(
                         payload,
                         active_model,
