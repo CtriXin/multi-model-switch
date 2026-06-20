@@ -956,6 +956,9 @@ def test_opencode_gateway_env_can_opt_into_external_skills(monkeypatch, tmp_path
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
 
     env = mms_launchers._opencode_gateway_env(
         _runtime(opencode_profile="lite_pro_orchestrated", opencode_external_skills=True),
@@ -971,6 +974,9 @@ def test_opencode_gateway_env_can_opt_into_external_skills(monkeypatch, tmp_path
     assert env["MMS_OPENCODE_SHARED_CACHE"] == "1"
     assert env["MMS_OPENCODE_XDG_CACHE_SHARED"] == "1"
     assert env["MMS_OPENCODE_HOME_CACHE_SHARED"] == "0"
+    assert "NPM_CONFIG_CACHE" not in env
+    assert "npm_config_cache" not in env
+    assert "BUN_INSTALL_CACHE_DIR" not in env
 
 
 def test_opencode_gateway_env_can_opt_into_real_home_without_external_skills(monkeypatch, tmp_path):
@@ -986,6 +992,9 @@ def test_opencode_gateway_env_can_opt_into_real_home_without_external_skills(mon
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("NPM_CONFIG_CACHE", "/tmp/inherited-npm")
+    monkeypatch.setenv("npm_config_cache", "/tmp/inherited-npm-lower")
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "/tmp/inherited-bun")
 
     env = mms_launchers._opencode_gateway_env(
         _runtime(opencode_profile="lite_pro_orchestrated", opencode_real_home=True),
@@ -1001,6 +1010,9 @@ def test_opencode_gateway_env_can_opt_into_real_home_without_external_skills(mon
     assert env["MMS_OPENCODE_SHARED_CACHE"] == "1"
     assert env["MMS_OPENCODE_XDG_CACHE_SHARED"] == "1"
     assert env["MMS_OPENCODE_HOME_CACHE_SHARED"] == "0"
+    assert "NPM_CONFIG_CACHE" not in env
+    assert "npm_config_cache" not in env
+    assert "BUN_INSTALL_CACHE_DIR" not in env
 
 
 def test_opencode_gateway_env_requires_explicit_profile(monkeypatch, tmp_path):

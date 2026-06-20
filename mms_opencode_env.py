@@ -239,6 +239,7 @@ def _materialize_opencode_shared_cache(env, session_home, cache_root, *, use_rea
     # With isolated HOME, OpenCode/Bun/npm otherwise rebuild per-session caches.
     if use_real_home:
         env["MMS_OPENCODE_HOME_CACHE_SHARED"] = "0"
+        _clear_opencode_shared_cache_bypass_env(env)
         return env
 
     npm_cache = cache_root / "npm"
@@ -260,14 +261,18 @@ def _materialize_opencode_shared_cache(env, session_home, cache_root, *, use_rea
     return env
 
 
+def _clear_opencode_shared_cache_bypass_env(env):
+    for key in _OPENCODE_SHARED_CACHE_BYPASS_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
 def _disable_opencode_shared_cache(env):
     env["MMS_OPENCODE_SHARED_CACHE"] = "0"
     env.pop("MMS_OPENCODE_CACHE_ROOT", None)
     env.pop("MMS_OPENCODE_XDG_CACHE_SHARED", None)
     env.pop("MMS_OPENCODE_HOME_CACHE_SHARED", None)
-    for key in _OPENCODE_SHARED_CACHE_BYPASS_ENV_KEYS:
-        env.pop(key, None)
-    return env
+    return _clear_opencode_shared_cache_bypass_env(env)
 
 
 def _write_opencode_shared_state_marker(state_root, *, migrated, covered_mtime_ns=0):
