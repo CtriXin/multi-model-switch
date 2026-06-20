@@ -27,6 +27,11 @@ _OPENCODE_INCREMENTAL_SKIP_DIRS = {"log"}
 _BOOL_TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled"}
 _BOOL_FALSE_VALUES = {"0", "false", "no", "off", "disable", "disabled"}
 _OPENCODE_SHARED_CACHE_ENV = "MMS_OPENCODE_SHARED_CACHE"
+_OPENCODE_SHARED_CACHE_BYPASS_ENV_KEYS = (
+    "npm_config_cache",
+    "NPM_CONFIG_CACHE",
+    "BUN_INSTALL_CACHE_DIR",
+)
 
 
 def _write_opencode_profile_marker(session_home, profile_slug):
@@ -238,6 +243,7 @@ def _materialize_opencode_shared_cache(env, session_home, cache_root, *, use_rea
 
     npm_cache = cache_root / "npm"
     bun_cache = cache_root / "bun-install-cache"
+    # Profile-scoped MMS cache, not real ~/Library/Caches; used by macOS Bun/OpenTUI lookups.
     darwin_cache = cache_root / "darwin-caches"
     home_cache_shared = [
         _opencode_link_shared_cache_dir(session_home, ".npm", npm_cache),
@@ -250,8 +256,17 @@ def _materialize_opencode_shared_cache(env, session_home, cache_root, *, use_rea
         ("NPM_CONFIG_CACHE", str(npm_cache)),
         ("BUN_INSTALL_CACHE_DIR", str(bun_cache)),
     ):
-        if not str(env.get(key) or "").strip():
-            env[key] = value
+        env[key] = value
+    return env
+
+
+def _disable_opencode_shared_cache(env):
+    env["MMS_OPENCODE_SHARED_CACHE"] = "0"
+    env.pop("MMS_OPENCODE_CACHE_ROOT", None)
+    env.pop("MMS_OPENCODE_XDG_CACHE_SHARED", None)
+    env.pop("MMS_OPENCODE_HOME_CACHE_SHARED", None)
+    for key in _OPENCODE_SHARED_CACHE_BYPASS_ENV_KEYS:
+        env.pop(key, None)
     return env
 
 
@@ -734,10 +749,7 @@ def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_hom
     if _opencode_shared_cache_enabled({}, env):
         _materialize_opencode_shared_cache(env, session_home, cache_root, use_real_home=use_real_home)
     else:
-        env["MMS_OPENCODE_SHARED_CACHE"] = "0"
-        env.pop("MMS_OPENCODE_CACHE_ROOT", None)
-        env.pop("MMS_OPENCODE_XDG_CACHE_SHARED", None)
-        env.pop("MMS_OPENCODE_HOME_CACHE_SHARED", None)
+        _disable_opencode_shared_cache(env)
     if _opencode_isolate_data_enabled(env):
         _write_opencode_isolate_data_marker(session_home)
         env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
