@@ -456,6 +456,117 @@ def test_anthropic_bridge_mixed_protocol_fallback_uses_openai_responses(monkeypa
     assert b"response.created" in handler.wfile.getvalue()
 
 
+def test_anthropic_bridge_chat_fallback_honors_try_next_on(monkeypatch):
+    import mms_bridge
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body=b"", headers=None, lines=None):
+            self.status_code = status_code
+            self._body = body
+            self.headers = headers or {"content-type": "application/json"}
+            self._lines = lines or []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self._body
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        if len(calls) == 1:
+            return FakeResponse(403, b'{"error":{"message":"primary blocked"}}')
+        if len(calls) == 2:
+            return FakeResponse(503, b'{"error":{"message":"chat unavailable"}}')
+        return FakeResponse(
+            200,
+            headers={"content-type": "text/event-stream"},
+            lines=[
+                'event: response.created',
+                'data: {"type":"response.created","response":{"id":"resp_after_chat"}}',
+                "",
+            ],
+        )
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_record_bridge_speed", lambda *args, **kwargs: None)
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.headers = {}
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        provider_id="direct-qwen",
+        provider_profile="",
+        gateway_key="qwen-key",
+        gateway_url="https://qwen.example/v1",
+        speed_scope={},
+        proxy_url="",
+        no_proxy="",
+        reasoning_enabled=True,
+        reasoning_effort="medium",
+        native_fallback_routes=[
+            {
+                "provider_id": "newapi-chat",
+                "provider_profile": "",
+                "gateway_url": "https://chat.example/v1",
+                "gateway_key": "chat-key",
+                "model": "gpt-5.5",
+                "protocol": "openai_chat_completions",
+                "allow_model_switch": True,
+                "try_next_on": [503],
+            },
+            {
+                "provider_id": "us-cpa-local-codex",
+                "provider_profile": "openai",
+                "gateway_url": "https://responses.example/v1",
+                "gateway_key": "responses-key",
+                "model": "gpt-5.5",
+                "protocol": "openai_responses",
+                "allow_model_switch": True,
+                "try_next_on": [503],
+            },
+        ],
+    )
+    captured = {"statuses": []}
+    handler.send_response = lambda code: captured["statuses"].append(code)
+    handler.send_header = lambda *args, **kwargs: None
+    handler.end_headers = lambda: None
+
+    handler._do_anthropic_messages_fallback(
+        {"model": "qwen3.7-max", "input": "hi", "stream": True},
+        "qwen3.7-max",
+        "https://qwen.example/v1",
+        "qwen-key",
+        0,
+        route={
+            "provider_id": "direct-qwen",
+            "provider_profile": "",
+            "protocol": "anthropic_messages",
+            "include_native_fallbacks": True,
+            "try_next_on": [403],
+        },
+    )
+
+    assert captured["statuses"] == [200]
+    assert [item[1] for item in calls] == [
+        "https://qwen.example/v1/messages",
+        "https://chat.example/v1/chat/completions",
+        "https://responses.example/v1/responses",
+    ]
+    assert calls[1][2]["json"]["model"] == "gpt-5.5"
+    assert calls[1][2]["headers"]["Authorization"] == "Bearer chat-key"
+    assert calls[2][2]["headers"]["Authorization"] == "Bearer responses-key"
+    assert b"resp_after_chat" in handler.wfile.getvalue()
+
+
 def test_responses_proxy_converts_terminal_403_to_fail_closed(monkeypatch):
     import mms_bridge
 

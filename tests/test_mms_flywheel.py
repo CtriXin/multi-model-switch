@@ -170,12 +170,14 @@ def _seed_flywheel_tier_routes(root):
                         "provider_id": "us-cpa-local-codex",
                         "model_id": "gpt-5.5",
                         "openai_base_url": "https://cpa.example/v1",
+                        "anthropic_base_url": "https://cpa-anthropic.example/v1",
                         "api_key": "secret-cpa",
                     },
                     {
                         "provider_id": "newapi-company",
                         "model_id": "gpt-5.5",
                         "openai_base_url": "https://company.example/v1",
+                        "anthropic_base_url": "https://company-anthropic.example/v1",
                         "api_key": "secret-company",
                     },
                     {
@@ -310,6 +312,8 @@ def test_flywheel_runtime_passes_ordered_native_fallback_routes_without_artifact
         "gpt-5.5",
         "gpt-5.5",
     ]
+    assert captured["runtime"]["native_fallback_routes"][2]["gateway_url"] == "https://cpa.example/v1"
+    assert captured["runtime"]["native_fallback_routes"][3]["gateway_url"] == "https://company.example/v1"
     assert captured["runtime"]["native_fallback_routes"][2]["allow_model_switch"] is True
     artifact = json.loads(Path(result["resolved_route_path"]).read_text(encoding="utf-8"))
     serialized = json.dumps(artifact, ensure_ascii=False)

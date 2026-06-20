@@ -5567,7 +5567,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             _bridge_error_logger.error("do_POST responses proxy error: %s", exc, exc_info=True)
             self._json(502, {"error": {"message": str(exc)}})
 
-    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None, return_result=False):
         """Responses API 不可用时，内部翻译为 Chat Completions 请求并转发。"""
         route = route if isinstance(route, dict) else {}
         provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
@@ -5652,6 +5652,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 )
                                 time.sleep(delay)
                                 continue
+                            if return_result:
+                                return {
+                                    "sent": False,
+                                    "status": response.status_code,
+                                    "body": last_body or "chat completions fallback rate limited",
+                                    "url": target_url,
+                                }
                             _record_bridge_blocking_failure(
                                 self.server,
                                 model_name=model_name,
@@ -5709,9 +5716,17 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                             provider_scope=getattr(self.server, "speed_scope", None),
                             server=self.server,
                         )
-                        return
+                        return {"sent": True, "status": 200, "url": target_url}
                     break
             if _chatcompletions_error_requests_messages(last_body) and gateway_url and gateway_key:
+                if return_result:
+                    return {
+                        "sent": False,
+                        "status": last_status,
+                        "body": last_body or "",
+                        "url": target_url if "target_url" in locals() else "",
+                        "failure_token": "invalid_text",
+                    }
                 messages_route = dict(route)
                 messages_route["protocol"] = "anthropic_messages"
                 messages_route["fallback_reason"] = "cache_sensitive_messages_retry"
@@ -5738,6 +5753,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     route=messages_route,
                 )
                 return
+            if return_result:
+                return {
+                    "sent": False,
+                    "status": last_status,
+                    "body": last_body or "chat completions fallback failed",
+                    "url": target_url if "target_url" in locals() else "",
+                }
             _record_bridge_blocking_failure(
                 self.server,
                 model_name=model_name,
@@ -5750,6 +5772,14 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             self._json(last_status, {"error": {"message": last_body or "chat completions fallback failed"}})
         except Exception as exc:
             _bridge_error_logger.error("fallback chatcompletions error: %s", exc, exc_info=True)
+            if return_result:
+                return {
+                    "sent": False,
+                    "status": 502,
+                    "body": str(exc),
+                    "url": target_url if "target_url" in locals() else "",
+                    "failure_token": _native_fallback_error_token(exc),
+                }
             # fallback 也失败，返回 502
             self._json(502, {"error": {"message": str(exc)}})
 
@@ -5952,15 +5982,36 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     break
 
                 if active_protocol == "openai_chat_completions":
-                    self._do_chatcompletions_fallback(
+                    result = self._do_chatcompletions_fallback(
                         payload,
                         active_model,
                         active_gateway_url,
                         active_gateway_key,
                         started_ms,
                         route=active_route,
+                        return_result=True,
                     )
-                    return
+                    if result and result.get("sent"):
+                        return
+                    last_status = int((result or {}).get("status") or 502)
+                    last_body = str((result or {}).get("body") or "")
+                    last_target_url = str((result or {}).get("url") or "")
+                    failure_token = str((result or {}).get("failure_token") or "").strip()
+                    can_try_next = (
+                        (last_status in retry_statuses)
+                        or (failure_token and failure_token in _retry_tokens)
+                    )
+                    if not is_last_route and can_try_next:
+                        next_route = forward_routes[route_index + 1]
+                        _log_native_fallback(
+                            from_route=active_route,
+                            to_route=next_route,
+                            model_name=active_model,
+                            reason=failure_token or f"http_{last_status}",
+                            request_url=last_target_url,
+                        )
+                        continue
+                    break
 
                 anthropic_payload = _responses_payload_to_anthropic_messages_payload(payload, active_model)
                 profile_id = apply_profile_body_patches(

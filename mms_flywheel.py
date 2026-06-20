@@ -411,7 +411,11 @@ def _bridge_fallback_route(candidate: dict[str, Any], *, model: str, allow_model
     api_key = str(candidate.get("api_key") or candidate.get("openai_api_key") or "").strip()
     anthropic_url = str(candidate.get("anthropic_base_url") or "").strip()
     openai_url = str(candidate.get("openai_base_url") or candidate.get("base_url") or "").strip()
-    gateway_url = anthropic_url or openai_url
+    protocol = _preferred_transport_for_route(candidate, model)
+    if protocol in {"openai_responses", "openai_chat_completions"}:
+        gateway_url = openai_url
+    else:
+        gateway_url = anthropic_url or openai_url
     if not provider_id or not api_key or not gateway_url:
         return {}
     route = {
@@ -423,7 +427,7 @@ def _bridge_fallback_route(candidate: dict[str, Any], *, model: str, allow_model
         "proxy_url": str(candidate.get("proxy") or "").strip(),
         "no_proxy": str(candidate.get("no_proxy") or "").strip(),
         "model": str(model or candidate.get("model_id") or candidate.get("model") or "").strip(),
-        "protocol": _preferred_transport_for_route(candidate, model),
+        "protocol": protocol,
         "fallback_reason": "flywheel_ordered_fallback",
         "try_next_on": [401, 403, 408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, "connect_error", "timeout", "invalid_json", "invalid_text"],
     }
