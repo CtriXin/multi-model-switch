@@ -4851,7 +4851,7 @@ def test_config_web_mmf_official_overrides_support_stepfun_effort(tmp_path):
     assert step_flash["context_window_tokens"] == 262_144
     assert step_flash["reasoning"] is True
     assert step_flash["thinking"] is True
-    assert step_flash["thinking_control"]["path"] == "output_config.effort"
+    assert step_flash["thinking_control"]["path"] == "reasoning_effort"
     assert step_flash["thinking_control"]["allowed"] == ["low", "medium", "high"]
     assert step_flash["reasoning_effort"] == "medium"
 

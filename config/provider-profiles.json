@@ -179,14 +179,6 @@
         "anthropic_messages": {
           "base_url": "https://api.stepfun.com",
           "request_path": "/v1/messages"
-        },
-        "step_plan_openai_chat": {
-          "base_url": "https://api.stepfun.com/step_plan/v1",
-          "request_path": "/chat/completions"
-        },
-        "step_plan_anthropic_messages": {
-          "base_url": "https://api.stepfun.com/step_plan",
-          "request_path": "/v1/messages"
         }
       }
     },
