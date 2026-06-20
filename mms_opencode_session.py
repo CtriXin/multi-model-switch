@@ -41,14 +41,16 @@ def opencode_rtk_plugin_path(
     env_bool=opencode_env_bool,
     which=shutil.which,
 ):
+    runtime = runtime if isinstance(runtime, dict) else {}
     disabled_hooks = normalize_session_surface_disabled(
-        (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else None
+        runtime.get("disabled_session_surfaces")
     ).get("hooks", set())
     if "opencode-rtk" in disabled_hooks:
         return ""
-    if not runtime_bool(runtime or {}, "opencode_rtk", True):
-        return ""
-    if not env_bool("MMS_OPENCODE_RTK", True):
+    if "opencode_rtk" in runtime:
+        if not runtime_bool(runtime, "opencode_rtk", False):
+            return ""
+    elif not env_bool("MMS_OPENCODE_RTK", False):
         return ""
     if not which("rtk"):
         return ""
