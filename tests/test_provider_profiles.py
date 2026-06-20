@@ -97,7 +97,7 @@ def test_mimo_relay_profile_resolution_prefers_protocol_specific_profile(monkeyp
         provider_id="xin",
         base_url="https://apple.clawopen.online",
         protocol="anthropic_messages",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_model_alias(
         "mimo-v2.5[1m]",
         protocol="anthropic_messages",
@@ -194,6 +194,17 @@ def test_stepfun_effort_profile_patches_openai_and_messages(monkeypatch, tmp_pat
     assert profile_id == "stepfun"
     assert chat_payload["reasoning_effort"] == "high"
 
+    default_payload = {"model": "step-3.7-flash", "messages": []}
+    profiles.apply_profile_body_patches(
+        default_payload,
+        protocol="openai_chat",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+        model_name="step-3.7-flash",
+        thinking_enabled=True,
+    )
+    assert default_payload["reasoning_effort"] == "high"
+
     messages_payload = {
         "model": "step-router-v1",
         "messages": [],
@@ -235,7 +246,9 @@ def test_stepfun_effort_profile_patches_openai_and_messages(monkeypatch, tmp_pat
     assert caps["thinking_supported"] is True
     assert caps["effort_supported"] is True
     assert set(caps["effort_allowed"]) == {"low", "medium", "high"}
-    assert caps["effort_default"] == "medium"
+    assert caps["effort_default"] == "high"
+    assert caps["effort_official_default"] == "medium"
+    assert caps["effort_recommended_default"] == "high"
     assert caps["effort_map"]["xhigh"] == "high"
     assert profiles.profile_context_window(
         "step-3.7-flash",
@@ -255,6 +268,23 @@ def test_stepfun_effort_profile_patches_openai_and_messages(monkeypatch, tmp_pat
     assert headers["Authorization"] == "Bearer sk-step"
 
 
+def test_kimi_k27_profile_keeps_thinking_enabled_when_disabled_requested(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    payload = {"model": "kimi-k2.7-code", "messages": []}
+
+    profile_id = profiles.apply_profile_body_patches(
+        payload,
+        protocol="anthropic_messages",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+        model_name="kimi-k2.7-code",
+        thinking_enabled=False,
+    )
+
+    assert profile_id == "kimi-code"
+    assert payload["thinking"] == {"type": "enabled"}
+
+
 def test_profile_context_window_and_references(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 
@@ -262,17 +292,17 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
         "mimo-v2.5-pro",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 262_144
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "mimo-v2.5-pro[1m]",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "mimo-v2.5[1m]",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 1_000_000
+    ) == 1_048_576
     assert profiles.profile_context_window(
         "mimo-v2.5",
         provider_id="mimo-direct-openai",

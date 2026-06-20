@@ -146,11 +146,14 @@ _COMPATIBILITY_PROFILE_SECTIONS = (
     "context_windows",
     "endpoints",
     "effort",
+    "input_modalities",
     "max_output_tokens",
     "match",
     "model_aliases",
     "model_overrides",
+    "output_modalities",
     "parameter_aliases",
+    "supports_vision",
     "thinking",
 )
 
@@ -338,6 +341,8 @@ def profile_thinking_capabilities(
     effort_allowed: set[str] = set()
     effort_map: dict[str, str] = {}
     effort_default = ""
+    effort_official_default = ""
+    effort_recommended_default = ""
     for config in effort.values():
         if not isinstance(config, dict) or not config.get("path"):
             continue
@@ -345,7 +350,11 @@ def profile_thinking_capabilities(
         if isinstance(config.get("map"), dict):
             effort_map.update({_lower(key): _lower(value) for key, value in config["map"].items() if _lower(key)})
         if not effort_default:
-            effort_default = _lower(config.get("default"))
+            effort_default = _lower(config.get("request_default") or config.get("recommended_default") or config.get("default"))
+        if not effort_official_default:
+            effort_official_default = _lower(config.get("official_default") or config.get("default"))
+        if not effort_recommended_default:
+            effort_recommended_default = _lower(config.get("recommended_default") or config.get("request_default") or config.get("default"))
     return {
         "profile": profile_id,
         "thinking_supported": bool(thinking.get("supported")),
@@ -353,6 +362,8 @@ def profile_thinking_capabilities(
         "effort_allowed": sorted(effort_allowed),
         "effort_map": effort_map,
         "effort_default": effort_default,
+        "effort_official_default": effort_official_default,
+        "effort_recommended_default": effort_recommended_default,
         "ui": thinking.get("ui") or "",
         "default_enabled": thinking.get("default_enabled"),
     }
@@ -448,15 +459,16 @@ def _apply_parameter_aliases(payload: dict[str, Any], profile: dict[str, Any], p
 
 
 def _normalize_effort(value: Any, config: dict[str, Any]) -> str:
-    raw = _lower(value or config.get("default") or "")
+    request_default = config.get("request_default") or config.get("recommended_default") or config.get("default")
+    raw = _lower(value or request_default or "")
     mapping = config.get("map") if isinstance(config.get("map"), dict) else {}
     if raw in mapping:
         raw = _lower(mapping[raw])
     allowed = [_lower(item) for item in (config.get("allowed") or []) if _lower(item)]
     if allowed and raw not in allowed:
-        default = _lower(config.get("default"))
+        default = _lower(request_default)
         return default if default in allowed else allowed[0]
-    return raw or _lower(config.get("default"))
+    return raw or _lower(request_default)
 
 
 def _normalize_budget(value: Any, config: dict[str, Any]) -> int | None:
@@ -508,12 +520,13 @@ def apply_profile_body_patches(
     if not profile:
         return ""
 
-    protocol_patches = (profile.get("body_patches") or {}).get(protocol)
+    effective_model = model_name or payload.get("model", "")
+    protocol_patches = _effective_section(profile, "body_patches", effective_model).get(protocol)
     if isinstance(protocol_patches, dict):
         if purpose and purpose != "default" and isinstance(protocol_patches.get(purpose), dict):
             _apply_patch_map(payload, protocol_patches[purpose])
         else:
-            thinking = _effective_section(profile, "thinking", model_name or payload.get("model", ""))
+            thinking = _effective_section(profile, "thinking", effective_model)
             effective_enabled = thinking_enabled
             if effective_enabled is None:
                 default_enabled = thinking.get("default_enabled")
@@ -522,10 +535,10 @@ def apply_profile_body_patches(
             if patch_key and isinstance(protocol_patches.get(patch_key), dict):
                 _apply_patch_map(payload, protocol_patches[patch_key])
 
-    effort_by_protocol = _effective_section(profile, "effort", model_name or payload.get("model", ""))
+    effort_by_protocol = _effective_section(profile, "effort", effective_model)
     effort_config = effort_by_protocol.get(protocol) if isinstance(effort_by_protocol.get(protocol), dict) else {}
     if effort_config.get("path"):
-        thinking = _effective_section(profile, "thinking", model_name or payload.get("model", ""))
+        thinking = _effective_section(profile, "thinking", effective_model)
         effective_enabled = thinking_enabled
         if effective_enabled is None:
             default_enabled = thinking.get("default_enabled")
@@ -537,10 +550,10 @@ def apply_profile_body_patches(
             if effort_value:
                 _set_path(payload, str(effort_config["path"]), effort_value)
 
-    budget_by_protocol = _effective_section(profile, "budget", model_name or payload.get("model", ""))
+    budget_by_protocol = _effective_section(profile, "budget", effective_model)
     budget_config = budget_by_protocol.get(protocol) if isinstance(budget_by_protocol.get(protocol), dict) else {}
     if budget_config.get("path"):
-        thinking = _effective_section(profile, "thinking", model_name or payload.get("model", ""))
+        thinking = _effective_section(profile, "thinking", effective_model)
         effective_enabled = thinking_enabled
         if effective_enabled is None:
             default_enabled = thinking.get("default_enabled")

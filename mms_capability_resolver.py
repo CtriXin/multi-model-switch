@@ -66,10 +66,13 @@ _PROFILE_CAPABILITY_SECTIONS = (
     "context_windows",
     "endpoints",
     "effort",
+    "input_modalities",
     "max_output_tokens",
     "model_aliases",
     "model_overrides",
+    "output_modalities",
     "parameter_aliases",
+    "supports_vision",
     "thinking",
 )
 
@@ -663,6 +666,15 @@ def _provider_profile_capabilities(
     if max_output_tokens is not None:
         caps["max_output_tokens"] = max_output_tokens
 
+    supports_vision = _longest_prefix_bool(_effective_section(profile, "supports_vision", model_name), model_name)
+    if supports_vision is None:
+        input_modalities = _longest_prefix_list(_effective_section(profile, "input_modalities", model_name), model_name)
+        if input_modalities:
+            normalized_modalities = {_lower(item) for item in input_modalities}
+            supports_vision = bool(normalized_modalities.intersection({"image", "video", "vision", "multimodal"}))
+    if supports_vision is not None:
+        caps["supports_vision"] = supports_vision
+
     thinking = _effective_section(profile, "thinking", model_name)
     if isinstance(thinking.get("supported"), bool):
         caps["supports_thinking"] = bool(thinking["supported"])
@@ -822,6 +834,36 @@ def _longest_prefix_int(values: Mapping[str, Any], model_name: str) -> int | Non
     return best_value
 
 
+def _longest_prefix_bool(values: Mapping[str, Any], model_name: str) -> bool | None:
+    model = _normalize_model(model_name)
+    best_len = 0
+    best_value: bool | None = None
+    for key, value in values.items():
+        key_l = _lower(key)
+        if not key_l or not model.startswith(key_l) or len(key_l) <= best_len:
+            continue
+        if not isinstance(value, bool):
+            continue
+        best_len = len(key_l)
+        best_value = value
+    return best_value
+
+
+def _longest_prefix_list(values: Mapping[str, Any], model_name: str) -> list[Any]:
+    model = _normalize_model(model_name)
+    best_len = 0
+    best_value: list[Any] = []
+    for key, value in values.items():
+        key_l = _lower(key)
+        if not key_l or not model.startswith(key_l) or len(key_l) <= best_len:
+            continue
+        if not isinstance(value, list):
+            continue
+        best_len = len(key_l)
+        best_value = copy.deepcopy(value)
+    return best_value
+
+
 def _profile_protocol_configs(section: Mapping[str, Any], protocol: str) -> list[Mapping[str, Any]]:
     if not isinstance(section, Mapping):
         return []
@@ -866,7 +908,10 @@ def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str, 
         "path": path,
         "control_type": _control_type_from_path(path),
     }
-    for key in ("allowed", "default", "map"):
+    for key in ("mode", "disable_supported"):
+        if key in thinking:
+            control[key] = copy.deepcopy(thinking[key])
+    for key in ("allowed", "default", "request_default", "official_default", "recommended_default", "map", "mode", "disable_supported"):
         if key in config:
             control[key] = copy.deepcopy(config[key])
     if _control_type_from_path(path) == "thinkingBudget":

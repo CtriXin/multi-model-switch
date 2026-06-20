@@ -1114,7 +1114,18 @@ def _truth_thinking_control(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     result: dict[str, Any] = {}
-    for key in ("supported", "control_type", "path", "default", "numeric_budget_tokens"):
+    for key in (
+        "supported",
+        "control_type",
+        "path",
+        "default",
+        "request_default",
+        "official_default",
+        "recommended_default",
+        "numeric_budget_tokens",
+        "mode",
+        "disable_supported",
+    ):
         if key in value:
             result[key] = copy.deepcopy(value[key])
     for key in ("allowed", "map"):
@@ -1192,6 +1203,14 @@ def _truth_caps_from_row(row: dict[str, Any], *, fields: set[str], source_path: 
     if effort_default and "reasoning_effort" in fields:
         caps["reasoning_effort"] = effort_default
         sources["reasoning_effort"] = _truth_field_source("reasoning_effort", row, source_path)
+    official_effort = _safe_text(row.get("official_reasoning_effort_default"))
+    if official_effort and "reasoning_effort" in fields:
+        caps["official_reasoning_effort"] = official_effort
+        sources["official_reasoning_effort"] = _truth_field_source("official_reasoning_effort", row, source_path)
+    recommended_effort = _safe_text(row.get("recommended_reasoning_effort_default") or row.get("reasoning_effort_default"))
+    if recommended_effort and "reasoning_effort" in fields:
+        caps["recommended_reasoning_effort"] = recommended_effort
+        sources["recommended_reasoning_effort"] = _truth_field_source("recommended_reasoning_effort", row, source_path)
 
     params = _truth_supported_parameters(row)
     if "tool_use" in fields and {"tools", "tool_choice", "parallel_tool_calls"}.intersection(params):
@@ -1515,6 +1534,14 @@ def _mmf_official_overrides_payload(
         effort_default = _safe_text(profile_caps.get("effort_default"))
         if effort_default:
             row["reasoning_effort_default"] = effort_default
+            has_profile_value = True
+        official_effort_default = _safe_text(profile_caps.get("effort_official_default"))
+        if official_effort_default:
+            row["official_reasoning_effort_default"] = official_effort_default
+            has_profile_value = True
+        recommended_effort_default = _safe_text(profile_caps.get("effort_recommended_default"))
+        if recommended_effort_default:
+            row["recommended_reasoning_effort_default"] = recommended_effort_default
             has_profile_value = True
         if has_profile_value:
             rows.append(row)
@@ -4155,6 +4182,10 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                     cap_payload["thinking_control"] = control
             if _safe_text(caps.get("reasoning_effort")):
                 cap_payload["reasoning_effort"] = _safe_text(caps.get("reasoning_effort")).lower()
+            if _safe_text(caps.get("official_reasoning_effort")):
+                cap_payload["official_reasoning_effort"] = _safe_text(caps.get("official_reasoning_effort")).lower()
+            if _safe_text(caps.get("recommended_reasoning_effort")):
+                cap_payload["recommended_reasoning_effort"] = _safe_text(caps.get("recommended_reasoning_effort")).lower()
             per_model_sources = source_map.get(model_id) if isinstance(source_map.get(model_id), dict) else {}
             if per_model_sources:
                 source_payload = entry.get("capability_sources") if isinstance(entry.get("capability_sources"), dict) else {}
@@ -4172,6 +4203,8 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                     "max_output_tokens",
                     "thinking_control",
                     "reasoning_effort",
+                    "official_reasoning_effort",
+                    "recommended_reasoning_effort",
                     "cache_sensitive_transport",
                 ):
                     source = source_for_field(per_model_sources, field)

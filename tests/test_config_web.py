@@ -4773,6 +4773,9 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
             "id": "demo",
             "models": [
                 {"id": "glm-5.2", "visible": True},
+                {"id": "gemini-3.1-pro-low", "visible": True},
+                {"id": "gpt-5.5", "visible": True},
+                {"id": "deepseek-v4-pro", "visible": True},
                 {"id": "kimi-k2.7-code", "visible": True},
                 {"id": "MiniMax-M3", "visible": True},
             ],
@@ -4785,6 +4788,7 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
             "thinking_control",
             "reasoning_effort",
             "one_m_context",
+            "vision",
         ],
         "refresh_sources": False,
         "mmf_official_overrides": True,
@@ -4799,7 +4803,7 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
     assert result["ok"] is True
     assert result["source_mode"] == "mmf_official_overrides"
     assert result["force_apply"] is True
-    assert result["matched_model_count"] == 3
+    assert result["matched_model_count"] == 6
     assert result["catalog_sources"][0]["source"] == "mmf_official_overrides"
     assert result["model_sources"]["glm-5.2"]["context_window_tokens"]["source_name"] == "MMF 官方覆盖"
 
@@ -4808,13 +4812,32 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
     assert glm["max_output_tokens"] == 131_072
     assert glm["reasoning_effort"] == "max"
 
+    gpt = result["model_capabilities"]["gpt-5.5"]
+    assert gpt["context_window_tokens"] == 1_000_000
+    assert gpt["max_output_tokens"] == 128_000
+    assert gpt["vision"] is True
+
+    gemini = result["model_capabilities"]["gemini-3.1-pro-low"]
+    assert gemini["context_window_tokens"] == 1_048_576
+    assert gemini["max_output_tokens"] == 65_536
+    assert gemini["reasoning_effort"] == "low"
+    assert gemini["official_reasoning_effort"] == "high"
+
+    deepseek = result["model_capabilities"]["deepseek-v4-pro"]
+    assert deepseek["context_window_tokens"] == 1_000_000
+    assert deepseek["max_output_tokens"] == 384_000
+
     kimi = result["model_capabilities"]["kimi-k2.7-code"]
     assert kimi["context_window_tokens"] == 262_144
     assert kimi["max_output_tokens"] == 32_768
+    assert kimi["vision"] is True
+    assert kimi["thinking_control"]["mode"] == "always_on"
+    assert kimi["thinking_control"]["disable_supported"] is False
 
     minimax = result["model_capabilities"]["MiniMax-M3"]
     assert minimax["context_window_tokens"] == 1_000_000
     assert minimax["max_output_tokens"] == 131_072
+    assert minimax["vision"] is True
     assert minimax["thinking_control"]["path"] == "thinking.type"
 
 
@@ -4830,6 +4853,8 @@ def test_config_web_mmf_official_overrides_support_stepfun_effort(tmp_path):
         },
         "fields": [
             "context_window_tokens",
+            "max_output_tokens",
+            "vision",
             "reasoning",
             "thinking",
             "thinking_control",
@@ -4851,15 +4876,21 @@ def test_config_web_mmf_official_overrides_support_stepfun_effort(tmp_path):
     assert step_flash["context_window_tokens"] == 262_144
     assert step_flash["reasoning"] is True
     assert step_flash["thinking"] is True
+    assert step_flash["vision"] is True
     assert step_flash["thinking_control"]["path"] == "reasoning_effort"
     assert step_flash["thinking_control"]["allowed"] == ["low", "medium", "high"]
-    assert step_flash["reasoning_effort"] == "medium"
+    assert step_flash["thinking_control"]["official_default"] == "medium"
+    assert step_flash["thinking_control"]["recommended_default"] == "high"
+    assert step_flash["reasoning_effort"] == "high"
+    assert step_flash["official_reasoning_effort"] == "medium"
+    assert step_flash["recommended_reasoning_effort"] == "high"
 
     step_router = result["model_capabilities"]["step-router-v1"]
     assert "context_window_tokens" not in step_router
+    assert step_router["max_output_tokens"] == 384_000
     assert step_router["reasoning"] is True
     assert step_router["thinking"] is True
-    assert step_router["reasoning_effort"] == "medium"
+    assert step_router["reasoning_effort"] == "high"
 
 
 def test_config_web_mmf_official_overrides_refreshes_provider_profile_cache(monkeypatch, tmp_path):

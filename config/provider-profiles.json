@@ -100,6 +100,39 @@
             "reasoning": "__delete__"
           }
         }
+      },
+      "max_output_tokens": {
+        "gpt-5.4": 128000,
+        "gpt-5.5": 128000
+      },
+      "supports_vision": {
+        "gpt-5": true,
+        "gpt-5.4": true,
+        "gpt-5.4-mini": true,
+        "gpt-5.5": true,
+        "gpt-5-pro": true
+      },
+      "input_modalities": {
+        "gpt-5": [
+          "text",
+          "image"
+        ],
+        "gpt-5.4": [
+          "text",
+          "image"
+        ],
+        "gpt-5.4-mini": [
+          "text",
+          "image"
+        ],
+        "gpt-5.5": [
+          "text",
+          "image"
+        ],
+        "gpt-5-pro": [
+          "text",
+          "image"
+        ]
       }
     },
     "stepfun": {
@@ -153,7 +186,10 @@
           ],
           "map": {
             "xhigh": "high"
-          }
+          },
+          "official_default": "medium",
+          "recommended_default": "high",
+          "request_default": "high"
         },
         "anthropic_messages": {
           "path": "output_config.effort",
@@ -165,7 +201,10 @@
           ],
           "map": {
             "xhigh": "high"
-          }
+          },
+          "official_default": "medium",
+          "recommended_default": "high",
+          "request_default": "high"
         }
       },
       "context_windows": {
@@ -179,7 +218,28 @@
         "anthropic_messages": {
           "base_url": "https://api.stepfun.com",
           "request_path": "/v1/messages"
+        },
+        "step_plan_openai_chat": {
+          "base_url": "https://api.stepfun.com/step_plan/v1",
+          "request_path": "/chat/completions"
+        },
+        "step_plan_anthropic_messages": {
+          "base_url": "https://api.stepfun.com/step_plan",
+          "request_path": "/v1/messages"
         }
+      },
+      "supports_vision": {
+        "step-3.7-flash": true
+      },
+      "input_modalities": {
+        "step-3.7-flash": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      "max_output_tokens": {
+        "step-router-v1": 384000
       }
     },
     "dashscope-openai": {
@@ -420,6 +480,32 @@
         "mimo-v2.5[1m]": 131072,
         "mimo-v2.5-pro": 131072,
         "mimo-v2.5": 131072
+      },
+      "supports_vision": {
+        "mimo-v2.5-pro[1m]": false,
+        "mimo-v2.5[1m]": true,
+        "mimo-v2.5-pro": false,
+        "mimo-v2.5": true
+      },
+      "input_modalities": {
+        "mimo-v2.5-pro[1m]": [
+          "text"
+        ],
+        "mimo-v2.5[1m]": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "mimo-v2.5-pro": [
+          "text"
+        ],
+        "mimo-v2.5": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ]
       }
     },
     "openrouter-xiaomi-mimo": {
@@ -555,10 +641,10 @@
         }
       },
       "context_windows": {
-        "mimo-v2.5-pro[1m]": 1000000,
-        "mimo-v2.5[1m]": 1000000,
-        "mimo-v2.5-pro": 262144,
-        "mimo-v2.5": 262144,
+        "mimo-v2.5-pro[1m]": 1048576,
+        "mimo-v2.5[1m]": 1048576,
+        "mimo-v2.5-pro": 1048576,
+        "mimo-v2.5": 1048576,
         "mimo-v2-pro": 262144,
         "mimo-v2-omni": 262144,
         "mimo-v2-flash": 262144
@@ -598,6 +684,32 @@
         "mimo-v2.5[1m]": 131072,
         "mimo-v2.5-pro": 131072,
         "mimo-v2.5": 131072
+      },
+      "supports_vision": {
+        "mimo-v2.5-pro[1m]": false,
+        "mimo-v2.5[1m]": true,
+        "mimo-v2.5-pro": false,
+        "mimo-v2.5": true
+      },
+      "input_modalities": {
+        "mimo-v2.5-pro[1m]": [
+          "text"
+        ],
+        "mimo-v2.5[1m]": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "mimo-v2.5-pro": [
+          "text"
+        ],
+        "mimo-v2.5": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ]
       }
     },
     "minimax": {
@@ -698,18 +810,15 @@
       "max_output_tokens": {
         "minimax-m3": 131072
       },
-      "effort": {
-        "responses": {
-          "path": "reasoning.effort",
-          "default": "none",
-          "allowed": [
-            "none",
-            "minimal",
-            "low",
-            "medium",
-            "high"
-          ]
-        }
+      "supports_vision": {
+        "minimax-m3": true
+      },
+      "input_modalities": {
+        "minimax-m3": [
+          "text",
+          "image",
+          "video"
+        ]
       }
     },
     "deepseek": {
@@ -828,6 +937,12 @@
           "base_url": "https://api.deepseek.com/anthropic",
           "request_path": "/v1/messages"
         }
+      },
+      "max_output_tokens": {
+        "deepseek-v4-pro": 384000,
+        "deepseek-v4-flash": 384000,
+        "deepseek-chat": 384000,
+        "deepseek-reasoner": 384000
       }
     },
     "kimi-code": {
@@ -889,7 +1004,8 @@
         "kimi-k2.6-code-preview": 262144,
         "k2.6": 262144,
         "k2.6-code-preview": 262144,
-        "kimi-k2.7-code": 262144
+        "kimi-k2.7-code": 262144,
+        "kimi-for-code": 262144
       },
       "api_formats": {
         "openai_chat": {
@@ -902,7 +1018,96 @@
         }
       },
       "max_output_tokens": {
-        "kimi-k2.7-code": 32768
+        "kimi-k2.7-code": 32768,
+        "kimi-for-code": 32768,
+        "kimi-for-coding": 32768,
+        "kimi-k2.5": 32768,
+        "kimi-k2.6": 32768,
+        "kimi-k2.6-code-preview": 32768,
+        "k2.6": 32768,
+        "k2.6-code-preview": 32768
+      },
+      "supports_vision": {
+        "kimi-for-code": true,
+        "kimi-for-coding": true,
+        "kimi-k2.5": true,
+        "kimi-k2.6": true,
+        "kimi-k2.6-code-preview": true,
+        "k2.6": true,
+        "k2.6-code-preview": true,
+        "kimi-k2.7-code": true
+      },
+      "input_modalities": {
+        "kimi-for-code": [
+          "text",
+          "image"
+        ],
+        "kimi-for-coding": [
+          "text",
+          "image"
+        ],
+        "kimi-k2.5": [
+          "text",
+          "image",
+          "video"
+        ],
+        "kimi-k2.6": [
+          "text",
+          "image",
+          "video"
+        ],
+        "kimi-k2.6-code-preview": [
+          "text",
+          "image",
+          "video"
+        ],
+        "k2.6": [
+          "text",
+          "image",
+          "video"
+        ],
+        "k2.6-code-preview": [
+          "text",
+          "image",
+          "video"
+        ],
+        "kimi-k2.7-code": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      "model_overrides": {
+        "kimi-k2.7-code": {
+          "thinking": {
+            "mode": "always_on",
+            "disable_supported": false
+          },
+          "body_patches": {
+            "openai_chat": {
+              "thinking_on": {
+                "thinking.type": "enabled"
+              },
+              "thinking_off": {
+                "thinking.type": "enabled"
+              },
+              "classify": {
+                "thinking.type": "enabled"
+              }
+            },
+            "anthropic_messages": {
+              "thinking_on": {
+                "thinking.type": "enabled"
+              },
+              "thinking_off": {
+                "thinking.type": "enabled"
+              },
+              "classify": {
+                "thinking.type": "enabled"
+              }
+            }
+          }
+        }
       }
     },
     "gemini": {
@@ -1050,7 +1255,59 @@
               }
             }
           }
+        },
+        "gemini-3.1-pro-low": {
+          "thinking": {
+            "roundtrip": "gemini_thinking_level"
+          },
+          "effort": {
+            "anthropic_messages": {
+              "path": "thinkingConfig.thinkingLevel",
+              "default": "high",
+              "official_default": "high",
+              "recommended_default": "low",
+              "request_default": "low",
+              "allowed": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "map": {
+                "none": "low",
+                "minimal": "low",
+                "xhigh": "high"
+              }
+            }
+          }
         }
+      },
+      "supports_vision": {
+        "gemini-3.5": true,
+        "gemini-3.1": true,
+        "gemini-3": true
+      },
+      "input_modalities": {
+        "gemini-3.5": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "pdf"
+        ],
+        "gemini-3.1": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "pdf"
+        ],
+        "gemini-3": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "pdf"
+        ]
       }
     },
     "glm": {
