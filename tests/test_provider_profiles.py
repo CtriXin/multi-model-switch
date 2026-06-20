@@ -177,6 +177,84 @@ def test_deepseek_effort_maps_xhigh_to_max_and_disables_cleanly(monkeypatch, tmp
     assert payload["output_config"] == {"format": "markdown"}
 
 
+def test_stepfun_effort_profile_patches_openai_and_messages(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    chat_payload = {"model": "step-3.7-flash", "messages": []}
+
+    profile_id = profiles.apply_profile_body_patches(
+        chat_payload,
+        protocol="openai_chat",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+        model_name="step-3.7-flash",
+        thinking_enabled=True,
+        reasoning_effort="xhigh",
+    )
+
+    assert profile_id == "stepfun"
+    assert chat_payload["reasoning_effort"] == "high"
+
+    messages_payload = {
+        "model": "step-router-v1",
+        "messages": [],
+        "output_config": {"format": "markdown"},
+    }
+    profile_id = profiles.apply_profile_body_patches(
+        messages_payload,
+        protocol="anthropic_messages",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/step_plan",
+        model_name="step-router-v1",
+        thinking_enabled=True,
+        reasoning_effort="medium",
+    )
+
+    assert profile_id == "stepfun"
+    assert messages_payload["output_config"] == {
+        "format": "markdown",
+        "effort": "medium",
+    }
+
+    profiles.apply_profile_body_patches(
+        messages_payload,
+        protocol="anthropic_messages",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/step_plan",
+        model_name="step-router-v1",
+        thinking_enabled=False,
+        reasoning_effort="high",
+    )
+    assert messages_payload["output_config"] == {"format": "markdown"}
+
+    caps = profiles.profile_thinking_capabilities(
+        "step-3.7-flash",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+    )
+    assert caps["profile"] == "stepfun"
+    assert caps["thinking_supported"] is True
+    assert caps["effort_supported"] is True
+    assert set(caps["effort_allowed"]) == {"low", "medium", "high"}
+    assert caps["effort_default"] == "medium"
+    assert caps["effort_map"]["xhigh"] == "high"
+    assert profiles.profile_context_window(
+        "step-3.7-flash",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/v1",
+    ) == 262_144
+
+    headers = {"Content-Type": "application/json"}
+    profiles.apply_profile_auth_headers(
+        headers,
+        protocol="anthropic_messages",
+        api_key="sk-step",
+        provider_id="stepfun",
+        base_url="https://api.stepfun.com/step_plan",
+        model_name="step-router-v1",
+    )
+    assert headers["Authorization"] == "Bearer sk-step"
+
+
 def test_profile_context_window_and_references(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 

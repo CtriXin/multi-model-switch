@@ -211,6 +211,7 @@ def resolve_model_capabilities(
     provider_id: str = "",
     base_url: str = "",
     profile_id: str = "",
+    protocol: str = "",
     manual_override: Mapping[str, Any] | None = None,
     approved_facts: Mapping[str, Any] | None = None,
     approved_facts_path: str | Path | None = None,
@@ -239,6 +240,7 @@ def resolve_model_capabilities(
         provider_id=provider_id,
         base_url=base_url,
         profile_id=profile_id,
+        protocol=protocol,
         provider_profiles=provider_profiles,
     )
     _apply_source(result, profile_caps, "provider_profile")
@@ -636,7 +638,8 @@ def _provider_profile_capabilities(
     provider_id: str,
     base_url: str,
     profile_id: str,
-    provider_profiles: Mapping[str, Any] | None,
+    protocol: str = "",
+    provider_profiles: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_profile_id, profile = _resolve_profile(
         model_name=model_name,
@@ -644,6 +647,7 @@ def _provider_profile_capabilities(
         provider_id=provider_id,
         base_url=base_url,
         profile_id=profile_id,
+        protocol=protocol,
         provider_profiles=provider_profiles,
     )
     if not profile:
@@ -663,7 +667,7 @@ def _provider_profile_capabilities(
     if isinstance(thinking.get("supported"), bool):
         caps["supports_thinking"] = bool(thinking["supported"])
 
-    control = _thinking_control_from_profile(profile, model_name)
+    control = _thinking_control_from_profile(profile, model_name, protocol=protocol)
     if control:
         caps["thinking_control"] = control
 
@@ -695,7 +699,8 @@ def _resolve_profile(
     provider_id: str,
     base_url: str,
     profile_id: str,
-    provider_profiles: Mapping[str, Any] | None,
+    protocol: str = "",
+    provider_profiles: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if provider_profiles is None:
         return resolve_provider_profile(
@@ -704,6 +709,7 @@ def _resolve_profile(
             base_url=base_url,
             model_name=model_name,
             profile_id=profile_id,
+            protocol=protocol,
         )
     payload = dict(provider_profiles)
     profiles = payload.get("profiles") if isinstance(payload.get("profiles"), Mapping) else payload
@@ -816,7 +822,22 @@ def _longest_prefix_int(values: Mapping[str, Any], model_name: str) -> int | Non
     return best_value
 
 
-def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str) -> dict[str, Any]:
+def _profile_protocol_configs(section: Mapping[str, Any], protocol: str) -> list[Mapping[str, Any]]:
+    if not isinstance(section, Mapping):
+        return []
+    requested = _normalize_protocol_token(protocol)
+    if requested:
+        matches = [
+            config
+            for key, config in section.items()
+            if _normalize_protocol_token(key) == requested and isinstance(config, Mapping)
+        ]
+        if matches:
+            return matches
+    return [config for config in section.values() if isinstance(config, Mapping)]
+
+
+def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str, *, protocol: str = "") -> dict[str, Any]:
     thinking = _effective_section(profile, "thinking", model_name)
     if thinking.get("supported") is False:
         return {"supported": False, "control_type": "none", "path": ""}
@@ -824,9 +845,7 @@ def _thinking_control_from_profile(profile: Mapping[str, Any], model_name: str) 
     configs_by_path: dict[str, dict[str, Any]] = {}
     for section_name in ("effort", "budget"):
         section = _effective_section(profile, section_name, model_name)
-        for config in section.values():
-            if not isinstance(config, Mapping):
-                continue
+        for config in _profile_protocol_configs(section, protocol):
             path = _clean(config.get("path"))
             if path:
                 configs_by_path.setdefault(path, dict(config))
@@ -882,6 +901,7 @@ def _select_thinking_path(paths: list[str]) -> str:
         "thinkingConfig.thinkingBudget",
         "thinking.type",
         "reasoning.effort",
+        "reasoning_effort",
         "output_config.effort",
         "thinking_budget",
     )

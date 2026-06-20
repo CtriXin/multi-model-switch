@@ -356,6 +356,33 @@ def test_opencode_model_config_maps_profile_thinking_and_effort(monkeypatch):
     assert model_config["variants"]["xhigh"]["reasoningEffort"] == "max"
 
 
+def test_opencode_stepfun_openai_effort_does_not_emit_output_config():
+    import mms_launchers
+
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="stepfun",
+            name="StepFun",
+            openai_base_url="https://api.stepfun.com/v1",
+            models=["step-3.7-flash"],
+            reasoning_effort="xhigh",
+            thinking_mode="enable",
+            opencode_lite_agents=False,
+        ),
+        "step-3.7-flash",
+    )
+    model_config = payload["provider"]["mms"]["models"]["step-3.7-flash"]
+
+    assert model_config["options"] == {"reasoningEffort": "high"}
+    assert "output_config" not in model_config["options"]
+    assert model_config["variants"]["low"] == {"reasoningEffort": "low"}
+    assert model_config["variants"]["medium"] == {"reasoningEffort": "medium"}
+    assert model_config["variants"]["high"] == {"reasoningEffort": "high"}
+    assert model_config["variants"]["xhigh"] == {"reasoningEffort": "high"}
+    for options in model_config["variants"].values():
+        assert "output_config" not in options
+
+
 def test_opencode_model_config_does_not_turn_non_request_effort_into_variant(monkeypatch):
     import mms_provider_profiles
     import mms_launchers

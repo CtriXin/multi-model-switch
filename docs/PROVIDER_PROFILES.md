@@ -57,6 +57,7 @@ Keep this policy route-scoped. The built-in `cpa-antigravity-gemini` profile car
 | Xiaomi MiMo | `https://api.xiaomimimo.com/v1` + `/chat/completions` | `https://api.xiaomimimo.com/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled; OpenAI format aliases output cap to `max_completion_tokens`; no GPT-style effort tier recorded |
 | MiniMax | `https://api.minimaxi.com/v1` + `/chat/completions` | `https://api.minimaxi.com/anthropic` + `/v1/messages` | OpenAI format can use `reasoning_split`; Anthropic format uses thinking blocks |
 | DeepSeek | `https://api.deepseek.com` + `/chat/completions` | `https://api.deepseek.com/anthropic` + `/v1/messages` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `high`/`max` |
+| StepFun | `https://api.stepfun.com/v1` + `/chat/completions`; Step Plan uses `https://api.stepfun.com/step_plan/v1` | `https://api.stepfun.com` + `/v1/messages`; Step Plan uses `https://api.stepfun.com/step_plan` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `low`/`medium`/`high` |
 | Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | `thinking.type` enabled/disabled; split assistant `tool_use` history must preserve both thinking blocks and `reasoning_content`; preserve normal client headers |
 | GLM / Z.ai | `https://api.z.ai/api/paas/v4/` + `/chat/completions` | `https://api.z.ai/api/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled |
 
@@ -95,6 +96,9 @@ documented 1048576 context / 131072 output limits for `mimo-v2.5-pro` and
 - DeepSeek pricing / context lengths: https://api-docs.deepseek.com/quick_start/pricing/
 - DeepSeek Claude Code integration: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 - DeepSeek Anthropic API: https://api-docs.deepseek.com/guides/anthropic_api
+- StepFun Step 3.7 Flash: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+- StepFun Step 3.7 Flash quickstart: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash-quickstart
+- StepFun Step Plan reasoning API: https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api
 - Kimi Code docs: https://www.kimi.com/code/docs/en/
 - Kimi Code third-party agents: https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html
 - Kimi K2.7 Code quickstart: https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart

@@ -388,7 +388,7 @@ def _opencode_model_key(model_name):
     return normalized
 
 
-def opencode_model_capabilities(runtime, model_name):
+def opencode_model_capabilities(runtime, model_name, *, protocol=""):
     runtime = runtime if isinstance(runtime, dict) else {}
     caps_map = runtime.get("model_capabilities")
     target = _opencode_model_key(model_name)
@@ -410,6 +410,7 @@ def opencode_model_capabilities(runtime, model_name):
                 or ""
             ),
             profile_id=str(runtime.get("profile") or runtime.get("provider_profile") or ""),
+            protocol=_opencode_profile_protocol(protocol) if protocol else "",
         )
     except (ImportError, KeyError, TypeError, ValueError):
         return {}
@@ -596,8 +597,8 @@ def _opencode_control_path_is_request_option(path):
     }
 
 
-def _opencode_options_from_capabilities(runtime, model_name, *, thinking_enabled=None, effort=""):
-    caps = opencode_model_capabilities(runtime, model_name)
+def _opencode_options_from_capabilities(runtime, model_name, *, protocol="", thinking_enabled=None, effort=""):
+    caps = opencode_model_capabilities(runtime, model_name, protocol=protocol)
     if not _opencode_capability_source_allowed(caps, "thinking_control"):
         return {}
     control = caps.get("thinking_control") if isinstance(caps.get("thinking_control"), dict) else {}
@@ -626,7 +627,7 @@ def opencode_model_request_options(
 ):
     """Build OpenCode model options from MMS capability/provider-profile data."""
     runtime = runtime if isinstance(runtime, dict) else {}
-    caps = opencode_model_capabilities(runtime, model_name)
+    caps = opencode_model_capabilities(runtime, model_name, protocol=protocol)
     if thinking_enabled is None:
         thinking_enabled = _opencode_runtime_thinking_enabled(runtime)
     effort = str(reasoning_effort or _opencode_runtime_effort(runtime, model_name, caps)).strip().lower()
@@ -656,6 +657,7 @@ def opencode_model_request_options(
     capability_options = _opencode_options_from_capabilities(
         runtime,
         model_name,
+        protocol=protocol,
         thinking_enabled=thinking_enabled,
         effort=effort,
     )
@@ -670,7 +672,7 @@ def _opencode_effort_variant_values(runtime, model_name, *, provider_id="", base
         if raw and raw != "auto" and raw not in values:
             values.append(raw)
 
-    caps = opencode_model_capabilities(runtime, model_name)
+    caps = opencode_model_capabilities(runtime, model_name, protocol=protocol)
     control = caps.get("thinking_control") if isinstance(caps.get("thinking_control"), dict) else {}
     path = str(control.get("path") or "").strip()
     if _opencode_capability_source_allowed(caps, "thinking_control") and _opencode_control_path_is_request_option(path):

@@ -102,6 +102,86 @@
         }
       }
     },
+    "stepfun": {
+      "label": "StepFun",
+      "match": {
+        "provider_id_contains": [
+          "stepfun"
+        ],
+        "base_url_contains": [
+          "api.stepfun.com"
+        ],
+        "model_prefixes": [
+          "step-3.7-flash",
+          "step-router-v1"
+        ],
+        "require_model_prefix": true
+      },
+      "references": [
+        "https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash",
+        "https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash-quickstart",
+        "https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.stepfun.com/v1",
+        "anthropic_base_url": "https://api.stepfun.com",
+        "step_plan_openai_base_url": "https://api.stepfun.com/step_plan/v1",
+        "step_plan_anthropic_base_url": "https://api.stepfun.com/step_plan"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ],
+        "anthropic_messages": [
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_and_effort",
+        "default_enabled": true,
+        "roundtrip": "reasoning_effort"
+      },
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "medium",
+          "allowed": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "map": {
+            "xhigh": "high"
+          }
+        },
+        "anthropic_messages": {
+          "path": "output_config.effort",
+          "default": "medium",
+          "allowed": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "map": {
+            "xhigh": "high"
+          }
+        }
+      },
+      "context_windows": {
+        "step-3.7-flash": 262144
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://api.stepfun.com/v1",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages": {
+          "base_url": "https://api.stepfun.com",
+          "request_path": "/v1/messages"
+        }
+      }
+    },
     "dashscope-openai": {
       "label": "Alibaba DashScope OpenAI-compatible",
       "match": {

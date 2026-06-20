@@ -4818,6 +4818,50 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
     assert minimax["thinking_control"]["path"] == "thinking.type"
 
 
+def test_config_web_mmf_official_overrides_support_stepfun_effort(tmp_path):
+    payload = {
+        "provider": {
+            "id": "stepfun",
+            "openai_base_url": "https://api.stepfun.com/v1",
+            "models": [
+                {"id": "step-3.7-flash", "visible": True},
+                {"id": "step-router-v1", "visible": True},
+            ],
+        },
+        "fields": [
+            "context_window_tokens",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "reasoning_effort",
+        ],
+        "refresh_sources": False,
+        "mmf_official_overrides": True,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["matched_model_count"] == 2
+    step_flash = result["model_capabilities"]["step-3.7-flash"]
+    assert step_flash["context_window_tokens"] == 262_144
+    assert step_flash["reasoning"] is True
+    assert step_flash["thinking"] is True
+    assert step_flash["thinking_control"]["path"] == "reasoning_effort"
+    assert step_flash["thinking_control"]["allowed"] == ["low", "medium", "high"]
+    assert step_flash["reasoning_effort"] == "medium"
+
+    step_router = result["model_capabilities"]["step-router-v1"]
+    assert "context_window_tokens" not in step_router
+    assert step_router["reasoning"] is True
+    assert step_router["thinking"] is True
+    assert step_router["reasoning_effort"] == "medium"
+
+
 def test_config_web_mmf_official_overrides_refreshes_provider_profile_cache(monkeypatch, tmp_path):
     import mms_provider_profiles
 
