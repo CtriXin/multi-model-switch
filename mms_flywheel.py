@@ -7,6 +7,8 @@ preserving Looper's raw completion-marker output contract.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+import io
 import json
 import os
 import subprocess
@@ -25,6 +27,16 @@ PRIORITIES = {"AI-P0", "AI-P1", "AI-P2", "AI-P3", "AI-P4"}
 EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 THINKING_MODES = {"auto", "enable", "disable"}
 SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
+SAFE_TOKEN_METADATA_KEYS = {
+    "MAX_CONTEXT_TOKENS",
+    "CONTEXT_TOKENS",
+    "MAX_OUTPUT_TOKENS",
+    "INPUT_TOKENS",
+    "OUTPUT_TOKENS",
+    "CACHE_READ_INPUT_TOKENS",
+    "CACHE_CREATION_INPUT_TOKENS",
+    "CACHED_TOKENS",
+}
 FAKE_RESPONSE_ENV = "MMS_FLYWHEEL_RUN_FAKE_RESPONSE"
 FAKE_JSONL_ENV = "MMS_FLYWHEEL_RUN_FAKE_JSONL"
 RUN_RESULT_SCHEMA = "mms.flywheel_run_result.v1"
@@ -42,7 +54,7 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "AI-P1": "flywheel.worker.default",
             "AI-P2": "flywheel.worker.cn-glm",
             "AI-P3": "flywheel.worker.cn-qwen",
-            "AI-P4": "flywheel.worker.cn-qwen",
+            "AI-P4": "flywheel.worker.cn-minimax",
         },
         "fixer": {
             "default": "flywheel.fixer.default",
@@ -50,7 +62,7 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "AI-P1": "flywheel.fixer.default",
             "AI-P2": "flywheel.fixer.cn-glm",
             "AI-P3": "flywheel.fixer.cn-qwen",
-            "AI-P4": "flywheel.fixer.cn-qwen",
+            "AI-P4": "flywheel.fixer.cn-minimax",
         },
         "committee": {
             "default": "opencode-committee",
@@ -69,7 +81,7 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
         },
         "flywheel.worker.cn-glm": {
-            "runtime": "codex",
+            "runtime": "claude",
             "model": "glm-5.2",
             "provider": "direct-zai",
             "reasoning_effort": "medium",
@@ -80,9 +92,20 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             },
         },
         "flywheel.worker.cn-qwen": {
-            "runtime": "codex",
+            "runtime": "claude",
             "model": "qwen3.7-max",
             "provider": "direct-qwen",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
+                "newapi-company": "gpt-5.5",
+            },
+        },
+        "flywheel.worker.cn-minimax": {
+            "runtime": "claude",
+            "model": "MiniMax-M3",
+            "provider": "direct-minimax",
             "reasoning_effort": "medium",
             "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
             "fallback_model_by_provider": {
@@ -97,7 +120,7 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
         },
         "flywheel.fixer.cn-glm": {
-            "runtime": "codex",
+            "runtime": "claude",
             "model": "glm-5.2",
             "provider": "direct-zai",
             "reasoning_effort": "medium",
@@ -108,9 +131,20 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             },
         },
         "flywheel.fixer.cn-qwen": {
-            "runtime": "codex",
+            "runtime": "claude",
             "model": "qwen3.7-max",
             "provider": "direct-qwen",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
+                "newapi-company": "gpt-5.5",
+            },
+        },
+        "flywheel.fixer.cn-minimax": {
+            "runtime": "claude",
+            "model": "MiniMax-M3",
+            "provider": "direct-minimax",
             "reasoning_effort": "medium",
             "fallback_providers": ["newapi-personal-tokyo", "newapi-tencent", "us-cpa-local-codex", "newapi-company"],
             "fallback_model_by_provider": {
@@ -267,6 +301,8 @@ def _metadata_by_provider(entry: Any) -> dict[str, dict[str, Any]]:
 
 def _is_secret_key(key: str) -> bool:
     upper = key.upper()
+    if upper in SAFE_TOKEN_METADATA_KEYS:
+        return False
     return any(marker in upper for marker in SECRET_MARKERS)
 
 
@@ -520,9 +556,9 @@ def _infer_runtime(profile_id: str, model: str) -> str:
     raw = f"{profile_id} {model}".lower()
     if "opencode-committee" in raw:
         return "opencode_profile"
-    if model.lower() in {"gpt-5.5", "gpt-5.4"}:
+    if _is_openai_family_model(model):
         return "codex"
-    return "opencode"
+    return "claude"
 
 
 def _select_profile(config: dict[str, Any], lane: str, priority: str, explicit_profile: str = "") -> str:
@@ -569,7 +605,7 @@ def resolve_flywheel_profile(
 
     profile_id = _select_profile(config, lane, priority, profile)
     profile_cfg = _profile_config(config, profile_id, routes)
-    model = str(_profile_value(profile_cfg, "model", "model_id") or "").strip()
+    model = str(_profile_value(profile_cfg, "model", "model_id", "model_name") or "").strip()
     if not model:
         raise FlywheelConfigError(f"flywheel profile {profile_id!r} has no model")
 
@@ -694,19 +730,67 @@ def _native_fallback_routes_for_resolved(resolved: dict[str, Any]) -> list[dict[
         return []
 
 
+def _route_has_launch_secret(route: dict[str, Any]) -> bool:
+    return bool(str(route.get("api_key") or route.get("openai_api_key") or "").strip())
+
+
+def _merge_launch_secret_route(route: dict[str, Any], secret_route: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(route)
+    for key in (
+        "api_key",
+        "openai_api_key",
+        "openai_base_url",
+        "anthropic_base_url",
+        "base_url",
+        "proxy",
+        "no_proxy",
+        "provider_profile",
+        "profile",
+        "protocols",
+        "model_id",
+    ):
+        value = secret_route.get(key)
+        if value not in (None, "", []):
+            merged[key] = value
+    return merged
+
+
+def _find_raw_route(path: Path, *, model: str, selected_slot: str, provider_id: str) -> dict[str, Any]:
+    routes = _routes_from(path)
+    entry = routes.get(model)
+    provider_id = str(provider_id or "").strip()
+    fallback_by_provider: dict[str, Any] = {}
+    for slot, candidate in _route_candidates(entry):
+        candidate_provider = str(candidate.get("provider_id") or "").strip()
+        if slot == selected_slot:
+            return dict(candidate)
+        if candidate_provider:
+            fallback_by_provider[candidate_provider] = candidate
+    if provider_id and provider_id in fallback_by_provider:
+        return dict(fallback_by_provider[provider_id])
+    return {}
+
+
 def _raw_selected_route(resolved: dict[str, Any]) -> dict[str, Any]:
     config = resolved.get("config") if isinstance(resolved.get("config"), dict) else {}
+    root = Path(str(config.get("root") or "")).expanduser()
     route_path = Path(str(config.get("route_path") or "")).expanduser()
     model = str(resolved.get("model") or "").strip()
+    provider_id = str(resolved.get("provider_id") or "").strip()
     selected = resolved.get("selected_route") if isinstance(resolved.get("selected_route"), dict) else {}
     selected_slot = str(selected.get("slot") or "").strip()
     if not route_path or not model or not selected_slot:
         return {}
-    routes = _routes_from(route_path)
-    entry = routes.get(model)
-    for slot, candidate in _route_candidates(entry):
-        if slot == selected_slot:
-            return dict(candidate)
+    route = _find_raw_route(route_path, model=model, selected_slot=selected_slot, provider_id=provider_id)
+    if _route_has_launch_secret(route):
+        return route
+    legacy_route_path = (root / "model-routes.json").expanduser() if root else Path()
+    if legacy_route_path and legacy_route_path.exists() and legacy_route_path.resolve() != route_path.resolve():
+        secret_route = _find_raw_route(legacy_route_path, model=model, selected_slot=selected_slot, provider_id=provider_id)
+        if _route_has_launch_secret(secret_route):
+            return _merge_launch_secret_route(route, secret_route)
+    if route:
+        return route
     raise FlywheelConfigError(f"selected route slot {selected_slot!r} not found for model {model!r}")
 
 
@@ -897,6 +981,9 @@ def _runtime_from_route(resolved: dict[str, Any], route: dict[str, Any]) -> dict
         "thinking_mode": str(resolved.get("thinking_mode") or "auto").strip().lower(),
         "native_fallback": True,
     }
+    context_tokens = _normalize_context(resolved.get("max_context_tokens"))
+    if context_tokens:
+        runtime["max_context_tokens"] = context_tokens
     native_fallback_routes = _native_fallback_routes_for_resolved(resolved)
     if native_fallback_routes:
         runtime["native_fallback_routes"] = native_fallback_routes
@@ -1126,6 +1213,144 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
         return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
+@contextmanager
+def _quiet_launcher_output():
+    stdout_buffer = io.StringIO()
+    stderr_buffer = io.StringIO()
+    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+        yield
+
+
+@contextmanager
+def _pushd(path: Path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def _claude_shell_model(model: str, mms_launchers: Any) -> tuple[str, str]:
+    if mms_launchers._is_claude_family_model_name(model):  # noqa: SLF001
+        return model, ""
+    return "claude-sonnet-4-6", model
+
+
+def _claude_print_args(*, cwd: Path, prompt: str, sandbox: str) -> list[str]:
+    args: list[str] = []
+    if sandbox in {"workspace-write", "danger-full-access"}:
+        args.extend(["--add-dir", str(cwd)])
+    if sandbox == "danger-full-access":
+        args.append("--dangerously-skip-permissions")
+    args.extend(["-p", prompt])
+    return args
+
+
+def _run_claude_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd: Path, sandbox: str) -> tuple[int, str, str]:
+    import mms_launchers
+
+    mms_launchers._ensure_bridge_helpers()  # noqa: SLF001 - flywheel runner reuses launcher bridge setup.
+    mms_launchers._ensure_speed_stats()  # noqa: SLF001 - keep launcher lazy imports initialized.
+    runtime = dict(runtime)
+    if sandbox == "danger-full-access":
+        runtime["bypass"] = True
+    provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip()
+    provider_profile = str(runtime.get("profile") or runtime.get("provider_profile") or "")
+    model = str(model or runtime.get("model") or "").strip()
+    if not model:
+        raise FlywheelConfigError("claude runtime requires a model")
+
+    with _pushd(cwd), _quiet_launcher_output():
+        mms_launchers.gateway_health_check(runtime)
+        try:
+            advertised_models = list(mms_launchers._probe_models(runtime, emit_output=False).get("models") or [])  # noqa: SLF001
+        except Exception:
+            advertised_models = [model]
+        speed_scope = mms_launchers.build_provider_speed_scope(runtime)
+        env_model, display_model = _claude_shell_model(model, mms_launchers)
+        anthropic_url, _detect_method = mms_launchers._resolve_anthropic_base_url(runtime, probe_model=model)  # noqa: SLF001
+        configured_anthropic = str(mms_launchers._anthropic_base_url(runtime) or "").strip()  # noqa: SLF001
+        openai_url = str(mms_launchers._openai_base_url(runtime) or "").strip()  # noqa: SLF001
+        bridge_url = str(anthropic_url or configured_anthropic or openai_url or "").strip().rstrip("/")
+        if not bridge_url:
+            raise FlywheelConfigError(f"claude runtime route {provider_id!r} has no usable endpoint")
+        if (anthropic_url or configured_anthropic) and not bridge_url.endswith("/v1"):
+            bridge_url += "/v1"
+
+        thinking_enabled = bool(mms_launchers._runtime_thinking_enabled(runtime))  # noqa: SLF001
+        reasoning_effort = mms_launchers._runtime_reasoning_effort(runtime, default="high")  # noqa: SLF001
+        native_fallback_routes = list(runtime.get("native_fallback_routes") or [])
+        context_window = int(runtime.get("max_context_tokens") or 0)
+        if context_window <= 0:
+            context_window = mms_launchers._effective_context_window(  # noqa: SLF001
+                model,
+                enable_claude_1m=mms_launchers._runtime_supports_claude_1m(runtime),  # noqa: SLF001
+                provider_id=provider_id,
+            )
+        model_capabilities = mms_launchers._runtime_model_capabilities(runtime, model)  # noqa: SLF001
+        vision_sidecar = mms_launchers._runtime_vision_sidecar(runtime)  # noqa: SLF001
+        if mms_launchers._model_capabilities_support_vision(model_capabilities, model) is True:  # noqa: SLF001
+            vision_sidecar = {}
+
+        bridge_kwargs = {
+            "heavy_model": model,
+            "advertised_models": advertised_models,
+            "speed_scope": speed_scope,
+            "route_status_paths": mms_launchers._claude_route_status_paths(),  # noqa: SLF001
+            "provider_id": provider_id,
+            "provider_profile": provider_profile,
+            "openai_url": openai_url or None,
+            "proxy_url": runtime.get("proxy"),
+            "no_proxy": runtime.get("no_proxy"),
+            "strip_upstream_user_agent": "cliproxyapi" in provider_id.lower(),
+            "minimal_claude_header_passthrough": mms_launchers._runtime_is_sensitive_claude_provider(runtime),  # noqa: SLF001
+            "reasoning_enabled": thinking_enabled,
+            "reasoning_effort": reasoning_effort,
+            "native_fallback_routes": native_fallback_routes,
+            "vision_sidecar": vision_sidecar,
+            "model_capabilities": model_capabilities,
+            "context_windows": mms_launchers._context_windows_for_models(  # noqa: SLF001
+                model,
+                enable_claude_1m=mms_launchers._runtime_supports_claude_1m(runtime),  # noqa: SLF001
+                provider_id=provider_id,
+            ),
+            "session_context_window": context_window,
+            **mms_launchers._rescue_bridge_kwargs(),  # noqa: SLF001
+        }
+        with mms_launchers._gateway_claude_bridge_context(bridge_url, runtime["api_key"], **bridge_kwargs) as bridge_cfg:  # noqa: SLF001
+            env = mms_launchers._claude_gateway_env(  # noqa: SLF001
+                runtime,
+                base_url=bridge_cfg["base_url"],
+                auth_token=bridge_cfg["api_key"],
+                heavy_model=env_model,
+                selected_model=env_model,
+                display_model=display_model,
+            )
+            env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+            env["CLAUDE_CODE_ATTRIBUTION_HEADER"] = "0"
+            env["API_TIMEOUT_MS"] = "3000000"
+            env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(context_window)
+            env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(context_window - 3000, 10000))
+            effort_env = mms_launchers._claude_code_effort_env_value(model, runtime)  # noqa: SLF001
+            if effort_env:
+                env["CLAUDE_CODE_EFFORT_LEVEL"] = effort_env
+            mms_launchers._apply_claude_shell_context_slots(  # noqa: SLF001
+                env,
+                context_window=context_window,
+                fallback_model=env.get("ANTHROPIC_MODEL") or env_model,
+                enable_1m=mms_launchers._runtime_supports_claude_1m(runtime),  # noqa: SLF001
+                provider_id=provider_id,
+            )
+            claude_bin = mms_launchers._resolve_real_home_command_path("claude", env) or "claude"  # noqa: SLF001
+            cmd = [claude_bin, *_claude_print_args(cwd=cwd, prompt=prompt, sandbox=sandbox)]
+            cmd, env, exe = mms_launchers.prepare_cli_command(cmd, env)
+            if not exe:
+                raise FlywheelConfigError("claude executable not found")
+            proc = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True, check=False)
+            return proc.returncode, proc.stdout or "", proc.stderr or ""
+
+
 def run_flywheel_lane(
     *,
     lane: str,
@@ -1154,8 +1379,11 @@ def run_flywheel_lane(
         lineup_path=lineup_path,
     )
     runtime_kind = str(resolved.get("runtime_kind") or "").strip()
-    if runtime_kind not in {"codex"}:
-        raise FlywheelConfigError(f"flywheel run currently supports codex runtime only, got {runtime_kind!r}")
+    model = str(resolved.get("model") or "")
+    if runtime_kind not in {"codex", "claude"}:
+        raise FlywheelConfigError(f"flywheel run currently supports codex/claude runtime only, got {runtime_kind!r}")
+    if runtime_kind == "codex" and not _is_openai_family_model(model):
+        raise FlywheelConfigError(f"codex runtime is limited to GPT/OpenAI-family models, got {model!r}; use runtime_kind='claude'")
     raw_route = _raw_selected_route(resolved)
     runtime = _runtime_from_route(resolved, raw_route)
     prompt_text, forwarded_args, prompt_source = _extract_prompt(
@@ -1200,8 +1428,12 @@ def run_flywheel_lane(
     }
     if dry_run:
         result["command_preview"] = {
-            "cli": "codex",
-            "args": _codex_exec_args(cwd=workdir, prompt="<prompt>", sandbox=sandbox),
+            "cli": runtime_kind,
+            "args": (
+                _codex_exec_args(cwd=workdir, prompt="<prompt>", sandbox=sandbox)
+                if runtime_kind == "codex"
+                else _claude_print_args(cwd=workdir, prompt="<prompt>", sandbox=sandbox)
+            ),
         }
         _write_run_result_artifact(run_result_artifact, result)
         return result
@@ -1219,14 +1451,15 @@ def run_flywheel_lane(
         _write_run_result_artifact(run_result_artifact, result)
         return result
 
-    rc, stdout_text, stderr_text = _run_codex_headless(
+    runner = _run_codex_headless if runtime_kind == "codex" else _run_claude_headless
+    rc, stdout_text, stderr_text = runner(
         runtime=runtime,
-        model=str(resolved.get("model") or ""),
+        model=model,
         prompt=prompt_text,
         cwd=workdir,
         sandbox=sandbox,
     )
-    agent_text = _extract_codex_agent_text(stdout_text)
+    agent_text = _extract_codex_agent_text(stdout_text) if runtime_kind == "codex" else stdout_text
     if not agent_text and stdout_text:
         agent_text = stdout_text
     result["exit_code"] = rc
