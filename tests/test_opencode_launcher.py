@@ -3304,6 +3304,11 @@ def test_core_opencode_review_profile_builds_review_hub_roster(monkeypatch):
     assert "headless inline pr/mr review pack contract" in review_host_prompt_lower
     assert "verdict: approve|comment|request_changes" in review_host_prompt_lower
     assert "do not hydrate review-hub" in review_host_prompt_lower
+    assert "not a general committee host" in review_host_prompt_lower
+    assert "not debate-host" in review_host_prompt_lower
+    assert "concrete artifact review" in review_host_prompt_lower
+    assert "formal votes" in review_host_prompt_lower
+    assert "crossfire" in review_host_prompt_lower
     assert "mms-mission" in review_host_prompt_lower
     assert "mms-target" in review_host_prompt_lower
     assert "mms-mode" in review_host_prompt_lower

@@ -508,3 +508,198 @@ def test_review_dispatch_fake_run_writes_multi_model_results(tmp_path, capsys):
     for result in payload["fake_results"]:
         verify_root = Path(result["verify_root"])
         assert (verify_root / "04-final-verdict.md").exists()
+
+
+def test_review_dispatch_execute_runs_workers_and_aggregate(tmp_path, monkeypatch, capsys):
+    import mms_review_dispatch
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    request_root_holder: dict[str, Path] = {}
+
+    def fake_run_review_hub(args):
+        if args[0] == "request":
+            request_root = Path(args[args.index("--out-dir") + 1])
+            request_root_holder["value"] = request_root
+            return {"ok": True, "request_root": str(request_root)}
+        if args[0] == "worker-plan":
+            request_root = request_root_holder["value"]
+            workers = [
+                {
+                    "order": 1,
+                    "model_name": "qwen3.7-max",
+                    "model_slug": "qwen3-7-max",
+                    "slot_root": str(request_root / "reviewers" / "qwen3-7-max"),
+                    "prompt_path": str(request_root / "reviewers" / "qwen3-7-max" / "PROMPT.md"),
+                    "manifest_path": str(request_root / "reviewers" / "qwen3-7-max" / "manifest.json"),
+                },
+                {
+                    "order": 2,
+                    "model_name": "kimi-k2.6",
+                    "model_slug": "kimi-k2-6",
+                    "slot_root": str(request_root / "reviewers" / "kimi-k2-6"),
+                    "prompt_path": str(request_root / "reviewers" / "kimi-k2-6" / "PROMPT.md"),
+                    "manifest_path": str(request_root / "reviewers" / "kimi-k2-6" / "manifest.json"),
+                },
+            ]
+            return {"ok": True, "worker_count": 2, "workers": workers}
+        if args[0] == "aggregate":
+            request_root = Path(args[args.index("--request") + 1])
+            return {
+                "ok": True,
+                "aggregate_path": str(request_root / "aggregate"),
+                "reviewers_total": 2,
+                "reviewers_complete": 2,
+                "reviewers_incomplete": 0,
+            }
+        raise AssertionError(args)
+
+    def fake_execute_workers(**kwargs):
+        evidence_root = kwargs["request_root"] / "runner" / "mms-execute" / "test"
+        evidence_root.mkdir(parents=True, exist_ok=True)
+        results = []
+        for index, worker in enumerate(kwargs["workers"], start=1):
+            stdout_path = evidence_root / f"worker-{index}.stdout.txt"
+            stderr_path = evidence_root / f"worker-{index}.stderr.txt"
+            stdout_path.write_text("ok\n", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            results.append(
+                {
+                    "order": index,
+                    "model": worker["model_name"],
+                    "agent": f"review-{worker['model_slug']}",
+                    "returncode": 0,
+                    "stdout_path": str(stdout_path),
+                    "stderr_path": str(stderr_path),
+                }
+            )
+        return {
+            "schema": mms_review_dispatch.REVIEW_DISPATCH_EXECUTE_SCHEMA,
+            "ok": True,
+            "mode": kwargs["mode"],
+            "evidence_root": str(evidence_root),
+            "worker_count": len(results),
+            "workers": results,
+            "errors": [],
+            "returncode": 0,
+        }
+
+    monkeypatch.setattr(mms_review_dispatch, "_run_review_hub", fake_run_review_hub)
+    monkeypatch.setattr(mms_review_dispatch, "_execute_review_workers", fake_execute_workers)
+
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "execute-review",
+            "--model",
+            "qwen3.7-max",
+            "--model",
+            "kimi-k2.6",
+            "--execute",
+            "--json",
+        ],
+        command_name="mmf",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["executed"] is True
+    assert payload["execute"]["mode"] == "workers"
+    assert payload["execute"]["worker_count"] == 2
+    assert payload["reviewers_complete"] == 2
+    assert payload["reviewers_incomplete"] == 0
+    assert payload["verdict"] == "complete"
+    for worker in payload["execute"]["workers"]:
+        assert worker["returncode"] == 0
+        assert Path(worker["stdout_path"]).exists()
+        assert Path(worker["stderr_path"]).exists()
+
+
+def test_review_dispatch_execute_reports_worker_failure(tmp_path, monkeypatch, capsys):
+    import mms_review_dispatch
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    request_root = root / ".mission" / "review-dispatch" / "opencode" / "execute-failure"
+
+    def fake_run_review_hub(args):
+        if args[0] == "request":
+            return {"ok": True, "request_root": str(request_root)}
+        if args[0] == "worker-plan":
+            return {
+                "ok": True,
+                "worker_count": 1,
+                "workers": [
+                    {
+                        "order": 1,
+                        "model_name": "qwen3.7-max",
+                        "model_slug": "qwen3-7-max",
+                        "slot_root": str(request_root / "reviewers" / "qwen3-7-max"),
+                    }
+                ],
+            }
+        if args[0] == "aggregate":
+            return {
+                "ok": True,
+                "aggregate_path": str(request_root / "aggregate"),
+                "reviewers_total": 1,
+                "reviewers_complete": 0,
+                "reviewers_incomplete": 1,
+            }
+        raise AssertionError(args)
+
+    def fake_execute_workers(**kwargs):
+        evidence_root = kwargs["request_root"] / "runner" / "mms-execute" / "failure"
+        evidence_root.mkdir(parents=True, exist_ok=True)
+        stderr_path = evidence_root / "worker-1.stderr.txt"
+        stderr_path.write_text("boom\n", encoding="utf-8")
+        stdout_path = evidence_root / "worker-1.stdout.txt"
+        stdout_path.write_text("", encoding="utf-8")
+        return {
+            "schema": mms_review_dispatch.REVIEW_DISPATCH_EXECUTE_SCHEMA,
+            "ok": False,
+            "mode": "workers",
+            "evidence_root": str(evidence_root),
+            "worker_count": 1,
+            "workers": [
+                {
+                    "order": 1,
+                    "model": "qwen3.7-max",
+                    "agent": "review-qwen3-7-max",
+                    "returncode": 7,
+                    "stdout_path": str(stdout_path),
+                    "stderr_path": str(stderr_path),
+                }
+            ],
+            "errors": ["opencode worker failed: model=qwen3.7-max exit=7"],
+            "returncode": 1,
+        }
+
+    monkeypatch.setattr(mms_review_dispatch, "_run_review_hub", fake_run_review_hub)
+    monkeypatch.setattr(mms_review_dispatch, "_execute_review_workers", fake_execute_workers)
+
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "execute-failure",
+            "--model",
+            "qwen3.7-max",
+            "--execute",
+            "--json",
+        ],
+        command_name="mmf",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert payload["ok"] is False
+    assert payload["execute"]["workers"][0]["returncode"] == 7
+    assert Path(payload["execute"]["workers"][0]["stderr_path"]).exists()
+    assert "opencode worker failed: model=qwen3.7-max exit=7" in payload["errors"]
+    assert payload["reviewers_incomplete"] == 1
+    assert payload["verdict"] == "incomplete"

@@ -1,12 +1,14 @@
 # OpenCode Launcher Profiles
 
-MMS now exposes four user-facing OpenCode profiles: `agent`, `review`, `omo`, and `raw`.
+MMS now exposes six user-facing OpenCode profiles: `agent`, `review`, `committee`, `debate`, `omo`, and `raw`.
 The older `lite_pro*` names are kept as hidden compatibility aliases only; they are no longer shown in CLI help, README examples, or the TUI selector.
 
 ## Decision
 
 - `agent` is the default/recommended mode. It resolves the MMS-generated session-local agent roster, keeps GPT-5.5 as coordinator/release gate, delegates long-running implementation to GPT-5.4, and uses domestic routes for read-only exploration, bug-hunt, and vision/context checks.
-- `review` is the Review Hub host mode. MMS resolves reviewer models before OpenCode starts, writes a session-local dynamic roster, then opens OpenCode TUI with a fast domestic host with GPT fallback that asks for a Review Hub request root and fans out to the preloaded reviewer agents.
+- `review` is the Review Hub artifact-review mode. MMS resolves a few reviewer models, preferably domestic/divergent ones, writes a session-local dynamic roster, then either opens OpenCode TUI with a Review Hub host or runs reviewer workers noninteractively through `review-dispatch --execute`.
+- `committee` is the decision/gate mode. It declares `committee_policy`, dispatches selected members, collects ballots/tally, and separates advisory, gate, estimate, review, and execution-packet decisions.
+- `debate` is the fork/proposition mode. It runs a bounded blind-seed -> crossfire -> revision mechanic and writes debate artifacts under `.ai/debate/<thread-id>/`.
 - `omo` uses the existing global OpenCode + OMO setup. MMS does not write or delete global OMO config.
 - `raw` is pure OpenCode with a session-local config and no OMO/custom agents.
 - `lite_pro`, `pro`, `pro_solo`, and `lite_pro_orchestrated` normalize to the same internal agent roster profile for backward compatibility.
@@ -19,8 +21,21 @@ The older `lite_pro*` names are kept as hidden compatibility aliases only; they 
 | --- | --- | --- | --- |
 | `agent` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Default agent roster: 5.5 coordinator/release gate, 5.4 executor, domestic read-only support |
 | `review` | `opencode --pure --agent review-hub-host -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Review Hub host: use MMS-selected dynamic reviewers, run same request root, aggregate slots |
+| `committee` | `opencode --pure --agent committee-host -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Decision/gate host: classify policy, dispatch members, tally ballots, synthesize next action |
+| `debate` | `opencode --pure --agent debate-host -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Structured fork/proposition debate: blind seed, crossfire, revision, resolution |
 | `omo` | `opencode` | Existing global OpenCode + OMO config | Global OMO/fanout lane |
 | `raw` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug/minimal fallback |
+
+Profile routing:
+
+| Need | Use profile |
+| --- | --- |
+| Implement, repair, or iterate code | `agent` |
+| Review a concrete PR, diff, request root, regression report, fix result, or release-risk packet | `review` |
+| Decide approve/reject/modify, quorum, release gate, risk acceptance, or formal/advisory ballots | `committee` |
+| Compare A vs B, decide whether to do X, or force structured disagreement before implementation | `debate` |
+| Use the user's existing global OpenCode/OMO environment | `omo` |
+| Debug minimal OpenCode route/config behavior | `raw` |
 
 Direct launch examples:
 
@@ -28,6 +43,8 @@ Direct launch examples:
 mms
 mms opencode --profile agent
 mms opencode --profile review
+mms opencode --profile committee
+mms opencode --profile debate
 mms opencode --profile omo
 mms opencode --profile raw
 ```
@@ -99,6 +116,16 @@ models = ["qwen", "kimi2.5", "minimax2.7", "glm5-turbo"]
 ```
 
 The host does not copy dispatcher context into memory. It expects a durable Review Hub request root, gives each preloaded reviewer the same request-root command, and relies on runner-local MCP/skills during each reviewer preflight.
+
+Automation should prefer noninteractive execution rather than launching a TUI:
+
+```bash
+mmf review-dispatch --execute --mode workers --json \
+  --root <repo-or-artifact-root> \
+  --model qwen3.7-max --model kimi-k2.6 --model MiniMax-M3
+```
+
+`--execute --mode workers` creates the request, creates the worker plan, resolves the generated `review` profile agents, runs one `opencode run --agent review-*` per reviewer, writes per-worker stdout/stderr evidence, runs `review-hub aggregate --write`, and returns JSON with `aggregate_path`, `reviewers_total`, `reviewers_complete`, `reviewers_incomplete`, and `verdict`.
 
 ### Review Mission Trace
 
