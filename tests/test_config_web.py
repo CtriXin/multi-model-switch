@@ -4989,3 +4989,57 @@ def test_config_web_mmf_official_overrides_do_not_downgrade_openrouter_capabilit
             assert caps.get(field) is not False
     for change in result["changes"]:
         assert change["after"] is not False
+
+
+def test_config_web_save_preserves_openrouter_vision_when_mmf_overlay_is_partial(tmp_path):
+    current_cfg = {
+        "providers": [
+            {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "openai_base_url": "https://openrouter.ai/api/v1",
+            }
+        ],
+        "provider": {"default": "openrouter"},
+    }
+    partial_mmf_caps = {
+        "reasoning": True,
+        "thinking": True,
+        "thinking_control": {"supported": True, "control_type": "thinking.type", "path": "thinking.type"},
+    }
+    payload = {
+        "draft": {
+            "provider_default": "openrouter",
+            "providers": [
+                {
+                    "id": "openrouter",
+                    "name": "OpenRouter",
+                    "enabled": True,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["opencode"],
+                    "openai_base_url": "https://openrouter.ai/api/v1",
+                    "models": [
+                        {
+                            "id": "qwen/qwen3.7-max",
+                            "visible": True,
+                            "capability_touched": True,
+                            "capabilities": {"vision": True, "tool_use": True, **partial_mmf_caps},
+                            "policy_capabilities": partial_mmf_caps,
+                        }
+                    ],
+                    "model_capabilities": {"qwen/qwen3.7-max": partial_mmf_caps},
+                }
+            ],
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(current_cfg, payload, config_path=str(tmp_path / "config.toml"))
+
+    caps = plan["model_policy"]["models"]["qwen/qwen3.7-max"]["capabilities"]
+    assert caps["vision"] is True
+    assert caps["tool_use"] is True
+    assert caps["reasoning"] is True
+    assert caps["thinking"] is True

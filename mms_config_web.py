@@ -4099,6 +4099,36 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             source = source_map.get("reasoning_effort")
         return sanitize_capability_source(source)
 
+    def positive_capability_overlays(value: Any) -> dict[str, Any]:
+        """Keep positive catalog facts when a later partial overlay omits them."""
+        if not isinstance(value, dict):
+            return {}
+        result: dict[str, Any] = {}
+        for key in (
+            "vision",
+            "tool_use",
+            "reasoning",
+            "thinking",
+            "supports_thinking",
+            "one_m_context",
+            "long_context",
+            "cache_sensitive",
+            "cache_sensitive_transport",
+        ):
+            if value.get(key) is True:
+                result[key] = True
+        for key in ("context_window_tokens", "max_context_tokens", "max_output_tokens", "official_max_output_tokens"):
+            tokens = _normalize_context_tokens(value.get(key))
+            if tokens:
+                result[key] = tokens
+        for key in ("reasoning_effort", "official_reasoning_effort", "recommended_reasoning_effort"):
+            text = _safe_text(value.get(key))
+            if text:
+                result[key] = text
+        if isinstance(value.get("thinking_control"), dict):
+            result["thinking_control"] = _truth_thinking_control(value["thinking_control"])
+        return result
+
     for provider in providers:
         if not isinstance(provider, dict):
             continue
@@ -4118,7 +4148,13 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                 continue
             row_policy_caps = row.get("policy_capabilities") if isinstance(row.get("policy_capabilities"), dict) else None
             if row_policy_caps is not None:
-                caps_map[model_id] = row_policy_caps
+                existing_caps = caps_map.get(model_id) if isinstance(caps_map.get(model_id), dict) else {}
+                row_caps = row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {}
+                caps_map[model_id] = {
+                    **existing_caps,
+                    **positive_capability_overlays(row_caps),
+                    **row_policy_caps,
+                }
             else:
                 caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
             if capability_touched and not touched:
