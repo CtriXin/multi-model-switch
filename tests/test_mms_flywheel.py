@@ -104,6 +104,111 @@ def _seed_dual_protocol_routes(root):
     _write_json(root / "model-routes.lineup.json", lineup)
 
 
+def _seed_flywheel_tier_routes(root):
+    router = {
+        "version": 1,
+        "routes": {
+            "qwen3.7-max": {
+                "primary": {
+                    "provider_id": "direct-qwen",
+                    "model_id": "qwen3.7-max",
+                    "anthropic_base_url": "https://qwen.example/v1",
+                    "openai_base_url": "https://qwen.example/v1",
+                    "api_key": "secret-qwen",
+                },
+                "fallbacks": [
+                    {
+                        "provider_id": "newapi-personal-tokyo",
+                        "model_id": "qwen3.7-max",
+                        "anthropic_base_url": "https://tokyo.example/v1",
+                        "openai_base_url": "https://tokyo.example/v1",
+                        "api_key": "secret-tokyo",
+                    },
+                    {
+                        "provider_id": "newapi-tencent",
+                        "model_id": "qwen3.7-max",
+                        "anthropic_base_url": "https://tencent.example/v1",
+                        "openai_base_url": "https://tencent.example/v1",
+                        "api_key": "secret-tencent",
+                    },
+                ],
+            },
+            "glm-5.2": {
+                "primary": {
+                    "provider_id": "direct-zai",
+                    "model_id": "glm-5.2",
+                    "anthropic_base_url": "https://glm.example/v1",
+                    "openai_base_url": "https://glm.example/v1",
+                    "api_key": "secret-glm",
+                },
+                "fallbacks": [
+                    {
+                        "provider_id": "newapi-personal-tokyo",
+                        "model_id": "glm-5.2",
+                        "anthropic_base_url": "https://tokyo.example/v1",
+                        "openai_base_url": "https://tokyo.example/v1",
+                        "api_key": "secret-tokyo",
+                    },
+                    {
+                        "provider_id": "newapi-tencent",
+                        "model_id": "glm-5.2",
+                        "anthropic_base_url": "https://tencent.example/v1",
+                        "openai_base_url": "https://tencent.example/v1",
+                        "api_key": "secret-tencent",
+                    },
+                ],
+            },
+            "gpt-5.5": {
+                "primary": {
+                    "provider_id": "uscrsopenai",
+                    "model_id": "gpt-5.5",
+                    "openai_base_url": "https://openai.example/v1",
+                    "api_key": "secret-openai",
+                },
+                "fallbacks": [
+                    {
+                        "provider_id": "us-cpa-local-codex",
+                        "model_id": "gpt-5.5",
+                        "openai_base_url": "https://cpa.example/v1",
+                        "anthropic_base_url": "https://cpa-anthropic.example/v1",
+                        "api_key": "secret-cpa",
+                    },
+                    {
+                        "provider_id": "newapi-company",
+                        "model_id": "gpt-5.5",
+                        "openai_base_url": "https://company.example/v1",
+                        "anthropic_base_url": "https://company-anthropic.example/v1",
+                        "api_key": "secret-company",
+                    },
+                    {
+                        "provider_id": "newapi-tencent",
+                        "model_id": "gpt-5.5",
+                        "openai_base_url": "https://tencent.example/v1",
+                        "api_key": "secret-tencent",
+                    },
+                ],
+            },
+        },
+    }
+    lineup = {"version": 1, "routes": router["routes"]}
+    _write_json(root / "model-routes.json", router)
+    _write_json(root / "model-routes.lineup.json", lineup)
+    (root / "config.toml").write_text(
+        """
+[[providers]]
+id = "newapi-personal-tokyo"
+enabled = true
+api_key = "secret-tokyo"
+openai_base_url = "https://tokyo.example/v1"
+anthropic_base_url = "https://tokyo.example/v1"
+protocols = ["anthropic_messages", "openai_chat_completions"]
+fallback_models = ["gpt-5.5", "qwen3.7-max", "glm-5.2"]
+supported_clis = ["codex"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+
 def _write_qwen_worker_config(root: Path, *, effort: str = "high"):
     (root / "config.toml").write_text(
         """
@@ -119,6 +224,161 @@ thinking_mode = "enable"
 """.strip().format(effort=effort),
         encoding="utf-8",
     )
+
+
+def test_default_worker_and_fixer_tiers_use_domestic_models_and_ordered_fallbacks(tmp_path):
+    root = tmp_path / "mms-next"
+    root.mkdir()
+    _seed_flywheel_tier_routes(root)
+
+    worker_p3 = mms_flywheel.resolve_flywheel_profile(lane="worker", priority="AI-P3", config_root=str(root))
+    worker_p4 = mms_flywheel.resolve_flywheel_profile(lane="worker", priority="AI-P4", config_root=str(root))
+    fixer_p4 = mms_flywheel.resolve_flywheel_profile(lane="fixer", priority="AI-P4", config_root=str(root))
+    worker_p2 = mms_flywheel.resolve_flywheel_profile(lane="worker", priority="AI-P2", config_root=str(root))
+    worker_p0 = mms_flywheel.resolve_flywheel_profile(lane="worker", priority="AI-P0", config_root=str(root))
+
+    assert worker_p3["profile_id"] == "flywheel.worker.cn-qwen"
+    assert worker_p3["model"] == "qwen3.7-max"
+    assert worker_p3["provider_id"] == "direct-qwen"
+    assert worker_p4["model"] == "qwen3.7-max"
+    assert fixer_p4["profile_id"] == "flywheel.fixer.cn-qwen"
+    assert fixer_p4["model"] == "qwen3.7-max"
+    assert worker_p2["profile_id"] == "flywheel.worker.cn-glm"
+    assert worker_p2["model"] == "glm-5.2"
+    assert [item["provider_id"] for item in worker_p3["fallback_routes"]] == [
+        "newapi-personal-tokyo",
+        "newapi-tencent",
+        "us-cpa-local-codex",
+        "newapi-company",
+    ]
+    assert [item["provider_id"] for item in worker_p0["fallback_routes"]] == [
+        "newapi-personal-tokyo",
+        "newapi-tencent",
+        "us-cpa-local-codex",
+        "newapi-company",
+    ]
+    assert [item["model_id"] for item in worker_p3["fallback_routes"]] == [
+        "qwen3.7-max",
+        "qwen3.7-max",
+        "gpt-5.5",
+        "gpt-5.5",
+    ]
+    assert worker_p3["fallback_routes"][2]["allow_model_switch"] is True
+    serialized = json.dumps(worker_p3, ensure_ascii=False)
+    assert "secret-" not in serialized
+    assert "https://" not in serialized
+
+
+def test_flywheel_runtime_passes_ordered_native_fallback_routes_without_artifact_leak(tmp_path, monkeypatch):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    artifact_dir = tmp_path / "artifacts"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_flywheel_tier_routes(root)
+    captured = {}
+
+    def fake_run_codex_headless(*, runtime, model, prompt, cwd, sandbox):
+        captured["runtime"] = runtime
+        captured["model"] = model
+        return (
+            0,
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "agent text"}}),
+            "",
+        )
+
+    monkeypatch.setattr(mms_flywheel, "_run_codex_headless", fake_run_codex_headless)
+
+    result = mms_flywheel.run_flywheel_lane(
+        lane="worker",
+        priority="AI-P3",
+        config_root=str(root),
+        cwd=str(workdir),
+        artifact_dir=str(artifact_dir),
+        runner_args=["exec", "ship it"],
+    )
+
+    assert result["ok"] is True
+    assert captured["model"] == "qwen3.7-max"
+    assert [item["provider_id"] for item in captured["runtime"]["native_fallback_routes"]] == [
+        "newapi-personal-tokyo",
+        "newapi-tencent",
+        "us-cpa-local-codex",
+        "newapi-company",
+    ]
+    assert [item["model"] for item in captured["runtime"]["native_fallback_routes"]] == [
+        "qwen3.7-max",
+        "qwen3.7-max",
+        "gpt-5.5",
+        "gpt-5.5",
+    ]
+    assert captured["runtime"]["native_fallback_routes"][2]["gateway_url"] == "https://cpa.example/v1"
+    assert captured["runtime"]["native_fallback_routes"][3]["gateway_url"] == "https://company.example/v1"
+    assert captured["runtime"]["native_fallback_routes"][2]["allow_model_switch"] is True
+    artifact = json.loads(Path(result["resolved_route_path"]).read_text(encoding="utf-8"))
+    serialized = json.dumps(artifact, ensure_ascii=False)
+    assert "secret-" not in serialized
+    assert "gateway_key" not in serialized
+    assert "native_fallback_routes" not in serialized
+
+
+def test_flywheel_run_preserves_explicit_config_for_native_fallback_routes(tmp_path, monkeypatch):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    artifact_dir = tmp_path / "artifacts"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_flywheel_tier_routes(root)
+    explicit_config = tmp_path / "custom-flywheel.toml"
+    explicit_config.write_text(
+        """
+[lanes.worker]
+"AI-P3" = "flywheel.worker.custom"
+
+[profiles."flywheel.worker.custom"]
+runtime = "codex"
+model = "qwen3.7-max"
+provider = "direct-qwen"
+fallback_providers = ["us-cpa-local-codex"]
+
+[profiles."flywheel.worker.custom".fallback_model_by_provider]
+us-cpa-local-codex = "gpt-5.5"
+""".strip(),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_codex_headless(*, runtime, model, prompt, cwd, sandbox):
+        captured["runtime"] = runtime
+        captured["model"] = model
+        return (
+            0,
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "agent text"}}),
+            "",
+        )
+
+    monkeypatch.setattr(mms_flywheel, "_run_codex_headless", fake_run_codex_headless)
+
+    result = mms_flywheel.run_flywheel_lane(
+        lane="worker",
+        priority="AI-P3",
+        config_root=str(root),
+        config_path=str(explicit_config),
+        cwd=str(workdir),
+        artifact_dir=str(artifact_dir),
+        runner_args=["exec", "ship it"],
+    )
+
+    assert result["ok"] is True
+    assert captured["model"] == "qwen3.7-max"
+    assert [item["provider_id"] for item in captured["runtime"]["native_fallback_routes"]] == [
+        "us-cpa-local-codex",
+    ]
+    assert captured["runtime"]["native_fallback_routes"][0]["model"] == "gpt-5.5"
+    artifact = json.loads(Path(result["resolved_route_path"]).read_text(encoding="utf-8"))
+    assert artifact["resolved"]["profile_id"] == "flywheel.worker.custom"
+    assert artifact["resolved"]["config"]["config_path"] == str(explicit_config.resolve())
+    assert "native_fallback_routes" not in json.dumps(artifact, ensure_ascii=False)
 
 
 def test_resolve_worker_profile_from_mms_config(tmp_path):
@@ -525,6 +785,9 @@ def test_codex_headless_passes_primary_anthropic_protocol_to_bridge(tmp_path, mo
         "anthropic_base_url": "https://qwen.example/v1",
         "protocols": ["anthropic_messages", "openai_chat_completions"],
         "preferred_transport": "anthropic_messages",
+        "native_fallback_routes": [
+            {"provider_id": "newapi-personal-tokyo", "gateway_url": "https://tokyo.example/v1", "gateway_key": "secret-tokyo"}
+        ],
     }
 
     @contextmanager
@@ -571,6 +834,7 @@ def test_codex_headless_passes_primary_anthropic_protocol_to_bridge(tmp_path, mo
     assert "agent_message" in stdout
     assert captured["gateway_url"] == "https://qwen.example/v1"
     assert captured["kwargs"]["primary_protocol"] == "anthropic_messages"
+    assert captured["kwargs"]["native_fallback_routes"] == runtime["native_fallback_routes"]
 
 
 def test_run_rejects_committee_profile_for_headless_worker_runner(tmp_path):

@@ -441,9 +441,29 @@ def _gateway_route_payload(route, *, gateway_url, gateway_key, server):
         "openai_url": str(route.get("openai_url") or getattr(server, "openai_url", "") or "").strip(),
         "proxy_url": str(route.get("proxy_url") or getattr(server, "proxy_url", "") or "").strip(),
         "no_proxy": str(route.get("no_proxy") or getattr(server, "no_proxy", "") or "").strip(),
+        "model": str(route.get("model") or "").strip(),
+        "allow_model_switch": bool(route.get("allow_model_switch")),
+        "protocol": str(route.get("protocol") or "").strip(),
         "fallback_reason": str(route.get("fallback_reason") or "primary"),
         "try_next_on": list(route.get("try_next_on") or []),
     }
+
+
+def _normalized_bridge_protocol(route):
+    protocol = str((route or {}).get("protocol") or "").strip()
+    aliases = {
+        "responses": "openai_responses",
+        "openai": "openai_responses",
+        "openai_responses": "openai_responses",
+        "chat": "openai_chat_completions",
+        "chat_completions": "openai_chat_completions",
+        "openai_chat": "openai_chat_completions",
+        "openai_chat_completions": "openai_chat_completions",
+        "anthropic": "anthropic_messages",
+        "messages": "anthropic_messages",
+        "anthropic_messages": "anthropic_messages",
+    }
+    return aliases.get(protocol, protocol or "anthropic_messages")
 
 
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
@@ -5547,7 +5567,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             _bridge_error_logger.error("do_POST responses proxy error: %s", exc, exc_info=True)
             self._json(502, {"error": {"message": str(exc)}})
 
-    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None, return_result=False):
         """Responses API 不可用时，内部翻译为 Chat Completions 请求并转发。"""
         route = route if isinstance(route, dict) else {}
         provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
@@ -5632,6 +5652,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 )
                                 time.sleep(delay)
                                 continue
+                            if return_result:
+                                return {
+                                    "sent": False,
+                                    "status": response.status_code,
+                                    "body": last_body or "chat completions fallback rate limited",
+                                    "url": target_url,
+                                }
                             _record_bridge_blocking_failure(
                                 self.server,
                                 model_name=model_name,
@@ -5689,9 +5716,17 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                             provider_scope=getattr(self.server, "speed_scope", None),
                             server=self.server,
                         )
-                        return
+                        return {"sent": True, "status": 200, "url": target_url}
                     break
             if _chatcompletions_error_requests_messages(last_body) and gateway_url and gateway_key:
+                if return_result:
+                    return {
+                        "sent": False,
+                        "status": last_status,
+                        "body": last_body or "",
+                        "url": target_url if "target_url" in locals() else "",
+                        "failure_token": "invalid_text",
+                    }
                 messages_route = dict(route)
                 messages_route["protocol"] = "anthropic_messages"
                 messages_route["fallback_reason"] = "cache_sensitive_messages_retry"
@@ -5718,6 +5753,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     route=messages_route,
                 )
                 return
+            if return_result:
+                return {
+                    "sent": False,
+                    "status": last_status,
+                    "body": last_body or "chat completions fallback failed",
+                    "url": target_url if "target_url" in locals() else "",
+                }
             _record_bridge_blocking_failure(
                 self.server,
                 model_name=model_name,
@@ -5730,20 +5772,29 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             self._json(last_status, {"error": {"message": last_body or "chat completions fallback failed"}})
         except Exception as exc:
             _bridge_error_logger.error("fallback chatcompletions error: %s", exc, exc_info=True)
+            if return_result:
+                return {
+                    "sent": False,
+                    "status": 502,
+                    "body": str(exc),
+                    "url": target_url if "target_url" in locals() else "",
+                    "failure_token": _native_fallback_error_token(exc),
+                }
             # fallback 也失败，返回 502
             self._json(502, {"error": {"message": str(exc)}})
 
-    def _do_anthropic_messages_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
-        """Codex Responses hot fallback through Anthropic Messages transport."""
+    def _do_openai_responses_fallback_route(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+        """Forward one mixed-protocol fallback route through OpenAI Responses."""
         route = route if isinstance(route, dict) else {}
         provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
         provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
         reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
         reasoning_effort = getattr(self.server, "reasoning_effort", "high")
-        anthropic_payload = _responses_payload_to_anthropic_messages_payload(payload, model_name)
+        route_payload = copy.deepcopy(payload)
+        route_payload["model"] = model_name
         profile_id = apply_profile_body_patches(
-            anthropic_payload,
-            protocol="anthropic_messages",
+            route_payload,
+            protocol="responses",
             provider_id=provider_id,
             profile_id=provider_profile,
             base_url=gateway_url,
@@ -5751,128 +5802,384 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             thinking_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
         )
-        if profile_id:
-            _canonicalize_domestic_anthropic_history(anthropic_payload, model_name)
-        if not profile_id and _is_domestic_model(model_name):
-            _apply_domestic_reasoning_controls(
-                anthropic_payload,
-                model_name,
-                thinking_enabled=reasoning_enabled,
-                reasoning_effort=reasoning_effort,
-            )
-        if not _normalize_model_name(model_name).startswith("claude-") and not _model_supports_anthropic_cache_control(model_name):
-            _strip_cache_control(anthropic_payload)
+        if not profile_id and reasoning_enabled:
+            reasoning_payload = route_payload.get("reasoning")
+            next_reasoning = dict(reasoning_payload) if isinstance(reasoning_payload, dict) else {}
+            next_reasoning["effort"] = reasoning_effort
+            route_payload["reasoning"] = next_reasoning
+        elif not profile_id:
+            route_payload.pop("reasoning", None)
 
+        target_url = _build_gateway_url(gateway_url, "/responses")
         fwd_headers = {
             "Content-Type": "application/json",
-            "x-api-key": gateway_key,
-            "anthropic-version": "2023-06-01",
+            "Authorization": f"Bearer {gateway_key}",
         }
         apply_profile_auth_headers(
             fwd_headers,
-            protocol="anthropic_messages",
+            protocol="responses",
             api_key=gateway_key,
             provider_id=provider_id,
             profile_id=provider_profile,
             base_url=gateway_url,
             model_name=model_name,
         )
-        claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(self.server, model_name)
-        fwd_headers.update(
-            _copy_passthrough_headers(
-                self.headers,
-                names=claude_passthrough,
-                prefixes=claude_passthrough_prefixes,
-            )
-        )
+        fwd_headers.update(_copy_passthrough_headers(self.headers))
 
-        translator = _AnthropicMessagesToResponsesTranslator(model_name)
         first_byte_ms = None
         output_tokens = None
         try:
-            last_body = None
-            last_status = 404
-            for target_url in _build_gateway_candidate_urls(gateway_url, "/messages"):
-                _bridge_error_logger.info(
-                    "FALLBACK to anthropic messages: model=%s url=%s", model_name, target_url
-                )
-                retry_remaining = 1
-                while True:
-                    with httpx.stream(
-                        "POST",
-                        target_url,
-                        headers=fwd_headers,
-                        json=anthropic_payload,
-                        timeout=300,
-                        **_route_httpx_kwargs(self.server, route, target_url),
-                    ) as response:
-                        if response.status_code == 429:
-                            last_status = response.status_code
-                            last_body = response.read().decode("utf-8", errors="replace")
-                            retry_after = response.headers.get("Retry-After")
-                            delay = _retry_after_delay_seconds(retry_after)
-                            if retry_remaining > 0 and delay > 0:
-                                retry_remaining -= 1
-                                _bridge_error_logger.warning(
-                                    "anthropic messages fallback rate limited: model=%s url=%s retry_after=%s",
-                                    model_name,
-                                    target_url,
-                                    retry_after,
-                                )
-                                time.sleep(delay)
-                                continue
-                            _record_bridge_blocking_failure(
-                                self.server,
-                                model_name=model_name,
-                                provider_id=provider_id,
-                                status_code=response.status_code,
-                                body_text=last_body,
-                                request_url=target_url,
-                                bridge_surface="codex_anthropic_messages_fallback",
-                            )
-                            self._json_with_headers(
-                                429,
-                                {"error": {"message": last_body or "anthropic messages fallback rate limited"}},
-                                extra_headers={"Retry-After": retry_after} if retry_after else None,
-                            )
-                            return
-                        if response.status_code >= 400:
-                            last_status = response.status_code
-                            last_body = response.read().decode("utf-8", errors="replace")
-                            break
+            with httpx.stream(
+                "POST",
+                target_url,
+                headers=fwd_headers,
+                json=route_payload,
+                timeout=300,
+                **_route_httpx_kwargs(self.server, route, target_url),
+            ) as response:
+                content_type = response.headers.get("content-type", "application/json")
+                if response.status_code >= 400:
+                    body_text = response.read().decode("utf-8", errors="replace")
+                    return {
+                        "sent": False,
+                        "status": response.status_code,
+                        "body": body_text,
+                        "url": target_url,
+                    }
 
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/event-stream")
-                        self.send_header("Cache-Control", "no-cache")
-                        self.send_header("Connection", "close")
-                        self.end_headers()
-
-                        for event_type, event_payload in _iter_sse_lines(response):
-                            if first_byte_ms is None:
-                                first_byte_ms = _now_ms()
-                            for event_name, response_payload in translator.process(event_type, event_payload):
-                                extracted = _extract_output_tokens(response_payload)
+                if "text/event-stream" in content_type.lower():
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    for raw_line in response.iter_lines():
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        stripped = raw_line.strip()
+                        if stripped.startswith("data:"):
+                            data_str = stripped[5:].strip()
+                            if data_str and data_str != "[DONE]":
+                                try:
+                                    event_payload = json.loads(data_str)
+                                except json.JSONDecodeError:
+                                    event_payload = None
+                                extracted = _extract_output_tokens(event_payload)
                                 if extracted is not None:
                                     output_tokens = extracted
-                                self._sse(event_name, response_payload)
-                        self.close_connection = True
-                        _record_bridge_speed(
-                            model_name,
-                            started_ms=started_ms,
-                            first_byte_ms=first_byte_ms,
-                            output_tokens=output_tokens,
-                            provider_scope=getattr(self.server, "speed_scope", None),
-                            server=self.server,
+                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                        if raw_line == "":
+                            self.wfile.flush()
+                    self.close_connection = True
+                else:
+                    body_out = response.read()
+                    if not body_out:
+                        return {
+                            "sent": False,
+                            "status": 502,
+                            "body": "empty responses fallback body",
+                            "url": target_url,
+                            "failure_token": "invalid_text",
+                        }
+                    first_byte_ms = _now_ms()
+                    try:
+                        output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                    except Exception:
+                        output_tokens = None
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body_out)))
+                    self.end_headers()
+                    self.wfile.write(body_out)
+
+                _record_bridge_speed(
+                    model_name,
+                    started_ms=started_ms,
+                    first_byte_ms=first_byte_ms,
+                    output_tokens=output_tokens,
+                    provider_scope=getattr(self.server, "speed_scope", None),
+                    server=self.server,
+                )
+                return {"sent": True, "status": response.status_code, "url": target_url}
+        except Exception as exc:
+            token = _native_fallback_error_token(exc)
+            return {
+                "sent": False,
+                "status": 502,
+                "body": str(exc),
+                "url": target_url,
+                "failure_token": token,
+            }
+
+    def _do_anthropic_messages_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+        """Codex Responses hot fallback through Anthropic Messages transport."""
+        route = route if isinstance(route, dict) else {}
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+
+        def _forward_routes():
+            primary = _gateway_route_payload(route, gateway_url=gateway_url, gateway_key=gateway_key, server=self.server)
+            routes = [primary]
+            if route.get("include_native_fallbacks"):
+                requested_model = _normalize_model_name(model_name)
+                for item in getattr(self.server, "native_fallback_routes", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    item_model = str(item.get("model") or "").strip()
+                    allow_model_switch = bool(item.get("allow_model_switch"))
+                    if item_model and not allow_model_switch and _normalize_model_name(item_model) != requested_model:
+                        continue
+                    next_route = _gateway_route_payload(item, gateway_url="", gateway_key="", server=self.server)
+                    if not next_route.get("gateway_url") or not next_route.get("gateway_key"):
+                        continue
+                    routes.append(next_route)
+            return routes
+
+        forward_routes = _forward_routes()
+        last_body = None
+        last_status = 404
+        last_target_url = ""
+        try:
+            for route_index, active_route in enumerate(forward_routes):
+                active_model = str(active_route.get("model") or model_name or "").strip()
+                active_gateway_url = active_route.get("gateway_url") or gateway_url
+                active_gateway_key = active_route.get("gateway_key") or gateway_key
+                provider_id = active_route.get("provider_id") or getattr(self.server, "provider_id", "")
+                provider_profile = active_route.get("provider_profile") or getattr(self.server, "provider_profile", "")
+                is_last_route = route_index >= len(forward_routes) - 1
+                retry_statuses, _retry_tokens = _native_fallback_retry_sets(active_route)
+                active_protocol = _normalized_bridge_protocol(active_route)
+
+                if active_protocol == "openai_responses":
+                    result = self._do_openai_responses_fallback_route(
+                        payload,
+                        active_model,
+                        active_gateway_url,
+                        active_gateway_key,
+                        started_ms,
+                        route=active_route,
+                    )
+                    if result.get("sent"):
+                        return
+                    last_status = int(result.get("status") or 502)
+                    last_body = str(result.get("body") or "")
+                    last_target_url = str(result.get("url") or "")
+                    failure_token = str(result.get("failure_token") or "").strip()
+                    can_try_next = (
+                        (last_status in retry_statuses)
+                        or (failure_token and failure_token in _retry_tokens)
+                    )
+                    if not is_last_route and can_try_next:
+                        next_route = forward_routes[route_index + 1]
+                        _log_native_fallback(
+                            from_route=active_route,
+                            to_route=next_route,
+                            model_name=active_model,
+                            reason=failure_token or f"http_{last_status}",
+                            request_url=last_target_url,
+                        )
+                        continue
+                    break
+
+                if active_protocol == "openai_chat_completions":
+                    if is_last_route:
+                        self._do_chatcompletions_fallback(
+                            payload,
+                            active_model,
+                            active_gateway_url,
+                            active_gateway_key,
+                            started_ms,
+                            route=active_route,
                         )
                         return
+                    result = self._do_chatcompletions_fallback(
+                        payload,
+                        active_model,
+                        active_gateway_url,
+                        active_gateway_key,
+                        started_ms,
+                        route=active_route,
+                        return_result=True,
+                    )
+                    if result and result.get("sent"):
+                        return
+                    last_status = int((result or {}).get("status") or 502)
+                    last_body = str((result or {}).get("body") or "")
+                    last_target_url = str((result or {}).get("url") or "")
+                    failure_token = str((result or {}).get("failure_token") or "").strip()
+                    can_try_next = (
+                        (last_status in retry_statuses)
+                        or (failure_token and failure_token in _retry_tokens)
+                    )
+                    if not is_last_route and can_try_next:
+                        next_route = forward_routes[route_index + 1]
+                        _log_native_fallback(
+                            from_route=active_route,
+                            to_route=next_route,
+                            model_name=active_model,
+                            reason=failure_token or f"http_{last_status}",
+                            request_url=last_target_url,
+                        )
+                        continue
                     break
+
+                anthropic_payload = _responses_payload_to_anthropic_messages_payload(payload, active_model)
+                profile_id = apply_profile_body_patches(
+                    anthropic_payload,
+                    protocol="anthropic_messages",
+                    provider_id=provider_id,
+                    profile_id=provider_profile,
+                    base_url=active_gateway_url,
+                    model_name=active_model,
+                    thinking_enabled=reasoning_enabled,
+                    reasoning_effort=reasoning_effort,
+                )
+                if profile_id:
+                    _canonicalize_domestic_anthropic_history(anthropic_payload, active_model)
+                if not profile_id and _is_domestic_model(active_model):
+                    _apply_domestic_reasoning_controls(
+                        anthropic_payload,
+                        active_model,
+                        thinking_enabled=reasoning_enabled,
+                        reasoning_effort=reasoning_effort,
+                    )
+                if not _normalize_model_name(active_model).startswith("claude-") and not _model_supports_anthropic_cache_control(active_model):
+                    _strip_cache_control(anthropic_payload)
+
+                fwd_headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": active_gateway_key,
+                    "anthropic-version": "2023-06-01",
+                }
+                apply_profile_auth_headers(
+                    fwd_headers,
+                    protocol="anthropic_messages",
+                    api_key=active_gateway_key,
+                    provider_id=provider_id,
+                    profile_id=provider_profile,
+                    base_url=active_gateway_url,
+                    model_name=active_model,
+                )
+                claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(self.server, active_model)
+                fwd_headers.update(
+                    _copy_passthrough_headers(
+                        self.headers,
+                        names=claude_passthrough,
+                        prefixes=claude_passthrough_prefixes,
+                    )
+                )
+
+                translator = _AnthropicMessagesToResponsesTranslator(active_model)
+                first_byte_ms = None
+                output_tokens = None
+                route_exhausted = False
+                for target_url in _build_gateway_candidate_urls(active_gateway_url, "/messages"):
+                    last_target_url = target_url
+                    _bridge_error_logger.info(
+                        "FALLBACK to anthropic messages: model=%s url=%s", active_model, target_url
+                    )
+                    retry_remaining = 1
+                    while True:
+                        with httpx.stream(
+                            "POST",
+                            target_url,
+                            headers=fwd_headers,
+                            json=anthropic_payload,
+                            timeout=300,
+                            **_route_httpx_kwargs(self.server, active_route, target_url),
+                        ) as response:
+                            if response.status_code == 429:
+                                last_status = response.status_code
+                                last_body = response.read().decode("utf-8", errors="replace")
+                                retry_after = response.headers.get("Retry-After")
+                                delay = _retry_after_delay_seconds(retry_after)
+                                if retry_remaining > 0 and delay > 0:
+                                    retry_remaining -= 1
+                                    _bridge_error_logger.warning(
+                                        "anthropic messages fallback rate limited: model=%s url=%s retry_after=%s",
+                                        active_model,
+                                        target_url,
+                                        retry_after,
+                                    )
+                                    time.sleep(delay)
+                                    continue
+                                if not is_last_route and response.status_code in retry_statuses:
+                                    next_route = forward_routes[route_index + 1]
+                                    _log_native_fallback(
+                                        from_route=active_route,
+                                        to_route=next_route,
+                                        model_name=active_model,
+                                        reason="http_429",
+                                        request_url=target_url,
+                                    )
+                                    route_exhausted = True
+                                    break
+                                _record_bridge_blocking_failure(
+                                    self.server,
+                                    model_name=active_model,
+                                    provider_id=provider_id,
+                                    status_code=response.status_code,
+                                    body_text=last_body,
+                                    request_url=target_url,
+                                    bridge_surface="codex_anthropic_messages_fallback",
+                                )
+                                self._json_with_headers(
+                                    429,
+                                    {"error": {"message": last_body or "anthropic messages fallback rate limited"}},
+                                    extra_headers={"Retry-After": retry_after} if retry_after else None,
+                                )
+                                return
+                            if response.status_code >= 400:
+                                last_status = response.status_code
+                                last_body = response.read().decode("utf-8", errors="replace")
+                                if not is_last_route and response.status_code in retry_statuses:
+                                    next_route = forward_routes[route_index + 1]
+                                    _log_native_fallback(
+                                        from_route=active_route,
+                                        to_route=next_route,
+                                        model_name=active_model,
+                                        reason=f"http_{response.status_code}",
+                                        request_url=target_url,
+                                    )
+                                    route_exhausted = True
+                                break
+
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/event-stream")
+                            self.send_header("Cache-Control", "no-cache")
+                            self.send_header("Connection", "close")
+                            self.end_headers()
+
+                            for event_type, event_payload in _iter_sse_lines(response):
+                                if first_byte_ms is None:
+                                    first_byte_ms = _now_ms()
+                                for event_name, response_payload in translator.process(event_type, event_payload):
+                                    extracted = _extract_output_tokens(response_payload)
+                                    if extracted is not None:
+                                        output_tokens = extracted
+                                    self._sse(event_name, response_payload)
+                            self.close_connection = True
+                            _record_bridge_speed(
+                                active_model,
+                                started_ms=started_ms,
+                                first_byte_ms=first_byte_ms,
+                                output_tokens=output_tokens,
+                                provider_scope=getattr(self.server, "speed_scope", None),
+                                server=self.server,
+                            )
+                            return
+                    if route_exhausted:
+                        break
+                if route_exhausted:
+                    continue
+                break
             _record_bridge_blocking_failure(
                 self.server,
                 model_name=model_name,
-                provider_id=provider_id,
+                provider_id=str((forward_routes[-1] if forward_routes else route).get("provider_id") or getattr(self.server, "provider_id", "")),
                 status_code=last_status,
                 body_text=last_body or "",
-                request_url=target_url if "target_url" in locals() else "",
+                request_url=last_target_url,
                 bridge_surface="codex_anthropic_messages_fallback",
             )
             self._json(last_status, {"error": {"message": last_body or "anthropic messages fallback failed"}})
@@ -5971,6 +6278,7 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
                 "provider_profile": provider_profile,
                 "protocol": "anthropic_messages",
                 "fallback_reason": "",
+                "include_native_fallbacks": True,
             }
             self._do_anthropic_messages_fallback(
                 payload,
@@ -6141,6 +6449,7 @@ def codex_chatcompletions_bridge(
     proxy_url="",
     no_proxy="",
     primary_protocol="openai_chat_completions",
+    native_fallback_routes=None,
     rescue_fallback_model="",
     rescue_fallback_cli="",
     rescue_hot_fallback_enabled=None,
@@ -6176,6 +6485,7 @@ def codex_chatcompletions_bridge(
         if str(primary_protocol or "").strip() == "anthropic_messages"
         else "openai_chat_completions"
     )
+    server.native_fallback_routes = list(native_fallback_routes or [])
     _configure_bridge_rescue(server)
     if rescue_fallback_model:
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
