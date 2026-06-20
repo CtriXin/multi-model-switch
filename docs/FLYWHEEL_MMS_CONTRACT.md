@@ -23,8 +23,9 @@ mmf flywheel run --lane worker --priority AI-P3 --cwd <worktree> --artifact-dir 
 ```
 
 `run` resolves the same profile, writes `<run-dir>/resolved-route.json` and
-`<run-dir>/run-result.json`, then launches Codex headlessly through the selected
-MMS route. The command accepts Looper's Codex-shaped tail
+`<run-dir>/run-result.json`, then launches the selected MMS runtime headlessly.
+OpenAI/GPT-family models use Codex CLI; non-GPT Anthropic-compatible worker/fixer
+routes use Claude CLI through MMS' Claude bridge. The command accepts Looper's Codex-shaped tail
 (`exec [--model <ignored>] <prompt>`). MMS owns the actual model/provider
 choice; Looper's `--model` is ignored.
 
@@ -39,6 +40,9 @@ keys, endpoint URLs, or proxy fields. The transport evidence records the
 concrete upstream `request_path` (for example `/v1/messages`) while leaving
 `request_url` blank because MMS provider hosts can be private. The raw key and
 endpoint are used only in-process to launch the selected runtime.
+If the preferred generated route export is sanitized, `run` may read the
+matching legacy secret-bearing route inside the same config root for launch-only
+credentials while keeping artifacts redacted.
 
 The runner also exposes the same evidence in the JSON result and
 `run-result.json`:
@@ -88,7 +92,7 @@ default = "flywheel.fixer.default"
 "AI-P4" = "opencode-committee-fast"
 
 [flywheel.profiles."flywheel.worker.p3"]
-runtime = "codex"
+runtime = "claude"
 model = "qwen3.7-max"
 provider = "direct-qwen"
 reasoning_effort = "high"
@@ -98,8 +102,8 @@ max_context_tokens = 1000000
 
 Supported resolver profile fields:
 
-- `runtime` / `runtime_kind` / `cli`: `codex`, `opencode`, `opencode_profile`, or future runner ids. `mmf flywheel run` currently executes only `codex`; other runtimes are resolver-only until their runner adapters land.
-- `model` / `model_id`: MMS model route key or OpenCode profile id.
+- `runtime` / `runtime_kind` / `cli`: `codex`, `claude`, `opencode`, `opencode_profile`, or future runner ids. `mmf flywheel run` executes `codex` for GPT/OpenAI-family worker/fixer routes and `claude` for non-GPT worker/fixer routes; committee profiles remain resolver-only here.
+- `model` / `model_id` / `model_name`: MMS model route key or OpenCode profile id.
 - `provider` / `provider_id` / `route_provider` / `model_route_provider` / `channel`: optional provider override.
 - `thinking_mode`: `auto`, `enable`, or `disable`.
 - `reasoning_effort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
@@ -111,6 +115,9 @@ If no Flywheel config exists, the resolver preserves current Flywheel behavior:
 
 - `worker`: `flywheel.worker.default` -> `codex`, `gpt-5.5`, `reasoning_effort=medium`.
 - `fixer`: `flywheel.fixer.default` -> `codex`, `gpt-5.5`, `reasoning_effort=medium`.
+- `worker/fixer AI-P2`: `claude`, `glm-5.2`, `reasoning_effort=medium`.
+- `worker/fixer AI-P3`: `claude`, `qwen3.7-max`, `reasoning_effort=medium`.
+- `worker/fixer AI-P4`: `claude`, `MiniMax-M3`, `reasoning_effort=medium`.
 - `committee`: `AI-P0 -> heavy`, `AI-P1 -> standard`, `AI-P2 -> light`, `AI-P3/P4 -> fast`.
 
 ## Remaining Follow-Up
