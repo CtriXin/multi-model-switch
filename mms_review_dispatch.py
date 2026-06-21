@@ -15,6 +15,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from mms_review_dispatch_execute import (
+    REVIEW_DISPATCH_EXECUTE_SCHEMA,
+    execute_review_workers as _execute_review_workers,
+)
+
 
 REVIEW_DISPATCH_SCHEMA = "mms.review_dispatch.v1"
 DEFAULT_REVIEW_FOCUS = ["code", "verification"]
@@ -25,8 +30,8 @@ BLOCKED_READINESS_STATES = {
     "ready-for-human",
 }
 REVIEW_MODEL_PRESETS: dict[str, list[str]] = {
-    "code_review": ["MiniMax-M3", "qwen3.7-max", "kimi-k2.6", "mimo-v2.5"],
-    "large_arch": ["gpt-5.4", "deepseek-v4-pro", "qwen3.7-max", "glm-5.1"],
+    "code_review": ["qwen3.7-max", "kimi-k2.6", "MiniMax-M3", "mimo-v2.5"],
+    "large_arch": ["qwen3.7-max", "kimi-k2.6", "glm-5.1", "deepseek-v4-pro", "MiniMax-M3"],
     "design_visual": ["mimo-v2.5", "kimi-k2.6", "qwen3.6-flash"],
     "domestic_cross": ["qwen3.7-max", "kimi-k2.6", "glm-5-turbo", "deepseek-v4-flash"],
     "fast_cheap": ["mimo-v2.5", "qwen3.6-flash", "deepseek-v4-flash"],
@@ -670,6 +675,50 @@ def _fake_reviewer_outputs(request_root: Path, workers: list[dict[str, Any]]) ->
     return results
 
 
+def _aggregate_verdict(aggregate: dict[str, Any] | None) -> str:
+    if not isinstance(aggregate, dict):
+        return "not_run"
+    explicit_verdict = str(aggregate.get("verdict") or "").strip()
+    if explicit_verdict:
+        return explicit_verdict
+    total = int(aggregate.get("reviewers_total") or 0)
+    incomplete = int(aggregate.get("reviewers_incomplete") or 0)
+    if total <= 0:
+        return "no_reviewers"
+    if incomplete:
+        return "incomplete"
+    return "complete_no_verdict"
+
+
+def _aggregate_errors(aggregate: dict[str, Any] | None) -> list[str]:
+    if not isinstance(aggregate, dict) or aggregate.get("ok", True):
+        return []
+    values = aggregate.get("errors")
+    if isinstance(values, list):
+        errors = [str(item) for item in values if str(item).strip()]
+    elif values:
+        errors = [str(values)]
+    else:
+        errors = []
+    for key in ("error", "message"):
+        value = str(aggregate.get(key) or "").strip()
+        if value:
+            errors.append(value)
+    if not errors:
+        errors.append("review-hub aggregate returned ok=false")
+    return [f"review-hub aggregate failed: {item}" for item in errors]
+
+
+def _copy_aggregate_summary(payload: dict[str, Any], aggregate: dict[str, Any] | None) -> None:
+    if not isinstance(aggregate, dict):
+        return
+    payload["aggregate_path"] = aggregate.get("aggregate_path")
+    payload["reviewers_total"] = int(aggregate.get("reviewers_total") or 0)
+    payload["reviewers_complete"] = int(aggregate.get("reviewers_complete") or 0)
+    payload["reviewers_incomplete"] = int(aggregate.get("reviewers_incomplete") or 0)
+    payload["verdict"] = _aggregate_verdict(aggregate)
+
+
 def build_review_dispatch(
     *,
     root: Path,
@@ -684,6 +733,11 @@ def build_review_dispatch(
     fake_run: bool,
     dry_run: bool,
     launch: bool,
+    execute: bool,
+    execute_mode: str,
+    host_agent: str,
+    host_timeout: int,
+    worker_timeout: int,
     allow_incomplete: bool,
     model_preset: str | None = None,
     model_text: list[str] | None = None,
@@ -775,6 +829,9 @@ def build_review_dispatch(
         "fake_run": fake_run,
         "dry_run": dry_run,
         "launched": False,
+        "executed": False,
+        "execute_requested": execute,
+        "execute_mode": execute_mode,
     }
     if dry_run:
         return payload
@@ -792,6 +849,40 @@ def build_review_dispatch(
         aggregate_result = _run_review_hub(["aggregate", "--request", str(request_root), "--write"])
         payload["fake_results"] = fake_results
         payload["aggregate"] = aggregate_result
+        _copy_aggregate_summary(payload, aggregate_result)
+
+    if execute:
+        execute_result = _execute_review_workers(
+            root=root,
+            request_root=request_root,
+            models=models,
+            workers=workers,
+            mode=execute_mode,
+            host_agent=host_agent,
+            host_timeout=host_timeout,
+            worker_timeout=worker_timeout,
+        )
+        payload["executed"] = True
+        payload["execute"] = execute_result
+        if not execute_result.get("ok"):
+            payload["ok"] = False
+            payload.setdefault("errors", []).extend(execute_result.get("errors") or ["review-dispatch execute failed"])
+        try:
+            aggregate_result = _run_review_hub(["aggregate", "--request", str(request_root), "--write"])
+        except Exception as exc:  # noqa: BLE001 - preserve worker evidence in JSON
+            aggregate_result = {"ok": False, "error": str(exc)}
+            payload["ok"] = False
+            payload.setdefault("errors", []).append(f"review-hub aggregate failed: {exc}")
+        payload["aggregate"] = aggregate_result
+        _copy_aggregate_summary(payload, aggregate_result)
+        if not aggregate_result.get("ok"):
+            payload["ok"] = False
+            payload.setdefault("errors", []).extend(_aggregate_errors(aggregate_result))
+        if int(payload.get("reviewers_incomplete") or 0) > 0:
+            payload["ok"] = False
+            payload.setdefault("errors", []).append(
+                f"reviewers incomplete: {payload.get('reviewers_incomplete')}/{payload.get('reviewers_total')}"
+            )
 
     if launch:
         completed = subprocess.run(launch_command, text=True, check=False)
@@ -824,12 +915,20 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
     parser.add_argument("--allow-incomplete", action="store_true", help="Do not fail on missing Mission Control artifacts")
     parser.add_argument("--dry-run", action="store_true", help="Print planned request/worker/OpenCode commands without writing")
     parser.add_argument("--fake-run", action="store_true", help="Write fake per-model reviewer outputs and aggregate them")
-    parser.add_argument("--launch", action="store_true", help="Launch MMS OpenCode review profile after writing request artifacts")
+    launch_group = parser.add_mutually_exclusive_group()
+    launch_group.add_argument("--launch", action="store_true", help="Launch MMS OpenCode review profile after writing request artifacts")
+    launch_group.add_argument("--execute", action="store_true", help="Run reviewer workers noninteractively and aggregate results")
+    parser.add_argument("--mode", choices=["workers", "host"], default="workers", help="Execution mode for --execute")
+    parser.add_argument("--host-agent", default="review-hub-host", help="OpenCode host agent for --execute --mode host")
+    parser.add_argument("--host-timeout", type=int, default=900, help="Timeout seconds for --execute --mode host")
+    parser.add_argument("--worker-timeout", type=int, default=900, help="Timeout seconds per reviewer worker")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     parser.add_argument("model_phrase", nargs="*", help="Free-form reviewer phrase, e.g. 使用 kimi2.5 minimaxm3")
     args = parser.parse_args(argv)
 
     try:
+        if args.execute and args.fake_run:
+            raise ValueError("--execute and --fake-run are separate paths; use one at a time")
         payload = build_review_dispatch(
             root=Path(args.root),
             title=args.title,
@@ -844,6 +943,11 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
             fake_run=args.fake_run,
             dry_run=args.dry_run,
             launch=args.launch,
+            execute=args.execute,
+            execute_mode=args.mode,
+            host_agent=args.host_agent,
+            host_timeout=args.host_timeout,
+            worker_timeout=args.worker_timeout,
             allow_incomplete=args.allow_incomplete,
             model_preset=args.model_preset,
             command_name=command_name,
@@ -858,6 +962,8 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
             print(f"review-dispatch ready: {payload.get('request_root')}")
             print("OpenCode command:")
             print(" ".join(shlex.quote(str(part)) for part in payload.get("opencode_launch_command", [])))
+            if payload.get("execute"):
+                print(f"execute evidence: {payload['execute'].get('evidence_root')}")
             if payload.get("aggregate"):
                 print(f"aggregate: {payload['aggregate'].get('aggregate_path')}")
         else:
@@ -869,6 +975,7 @@ def handle_review_dispatch_command(argv: list[str], *, command_name: str = "mms"
 
 __all__ = [
     "REVIEW_DISPATCH_SCHEMA",
+    "REVIEW_DISPATCH_EXECUTE_SCHEMA",
     "REVIEW_MODEL_PRESETS",
     "build_review_dispatch",
     "handle_review_dispatch_command",

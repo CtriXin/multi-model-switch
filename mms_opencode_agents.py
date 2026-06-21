@@ -751,6 +751,10 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
         return (
             f"You are the {label} Review Hub reviewer. When given a request root, "
             + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
+            "Your vertical is independent artifact review: inspect a concrete "
+            "PR, diff, request root, fix result, regression evidence, or release "
+            "risk packet and produce finding-first review artifacts. You are not "
+            "a committee voter, not a debate participant, and not an executor. "
             "For inline packs, do not hydrate review-hub. "
             "run `review-hub reviewer <request-root>` with your model identity when "
             "needed, read the returned PROMPT.md and manifest.json, then execute that "
@@ -784,10 +788,19 @@ def opencode_review_hub_agent_configs(agent_models, *, roster_config=None):
                 "external_directory": "ask",
             },
             "prompt": (
-                "You are a Review Hub execution host, not the original dispatcher. "
+                "You are a specialized Review Hub execution host, not a general "
+                "committee host and not debate-host. The Review profile vertical "
+                "is concrete artifact review: send one request root or inline "
+                "review pack to several domestic reviewer agents for divergent "
+                "finding-first opinions, then aggregate their slots. "
                 + OPENCODE_REVIEW_MISSION_CONTRACT + " "
                 + OPENCODE_HEADLESS_REVIEW_PACK_CONTRACT + " "
                 "For inline packs, do not hydrate review-hub or ask for a request root. "
+                "Do not run committee_policy, formal votes, gate ratification, "
+                "blind seed, crossfire, stance-shift, or debate resolution artifacts "
+                "inside Review. If the user needs approve/reject/modify or quorum, "
+                "hand off to committee; if the user needs A vs B direction setting, "
+                "hand off to debate. "
                 "Default host route prefers fast domestic GLM/Kimi/Qwen and falls back through MMS route "
                 "resolution. Start by asking the user for a Review Hub request root "
                 "or short command such as `/review-hub <request-root>` if it was not "
