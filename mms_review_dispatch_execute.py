@@ -92,7 +92,12 @@ def _agent_for_worker(worker: dict[str, Any], opencode_payload: dict[str, Any]) 
             continue
         if isinstance(config, dict) and str(config.get("model") or "").lower().endswith("/" + model_key):
             return str(name)
-    return candidates[0] if candidates else "review-hub-host"
+    available = ", ".join(sorted(str(name) for name in agents if str(name).startswith("review-")))
+    expected = ", ".join(candidates) or "<none>"
+    raise ValueError(
+        f"no OpenCode review agent found for model={model or '<unknown>'}; "
+        f"expected one of [{expected}], available=[{available or '<none>'}]"
+    )
 
 
 def _worker_prompt(request_root: Path, worker: dict[str, Any]) -> str:
@@ -238,24 +243,34 @@ def execute_review_workers(
         for index, worker in enumerate(workers, start=1):
             if not isinstance(worker, dict):
                 continue
-            agent = _agent_for_worker(worker, opencode_payload)
-            worker_env = dict(env)
-            worker_env["REVIEW_HUB_MODEL"] = str(worker.get("model_name") or "")
-            worker_env["MULTI_REVIEW_REVIEWER"] = str(worker.get("model_name") or "")
-            worker_env["REVIEW_HUB_REQUEST_ROOT"] = str(request_root)
-            worker_env["MMS_MODEL_NAME"] = str(worker.get("model_name") or "")
             model_slug = Path(str(worker.get("slot_root") or f"worker-{index}")).name or f"worker-{index}"
             stdout_path = evidence_root / f"opencode-worker-{index:02d}-{model_slug}.stdout.txt"
             stderr_path = evidence_root / f"opencode-worker-{index:02d}-{model_slug}.stderr.txt"
-            cmd = ["opencode", "run", "--pure", "--agent", agent, _worker_prompt(request_root, worker)]
-            returncode, timed_out, stdout, stderr = _run_process_with_evidence(
-                cmd,
-                cwd=root,
-                env=worker_env,
-                timeout=worker_timeout,
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
-            )
+            try:
+                agent = _agent_for_worker(worker, opencode_payload)
+            except ValueError as exc:
+                agent = ""
+                returncode = 127
+                timed_out = False
+                stdout = ""
+                stderr = str(exc)
+                _write_text(stdout_path, stdout)
+                _write_text(stderr_path, stderr + "\n")
+            else:
+                worker_env = dict(env)
+                worker_env["REVIEW_HUB_MODEL"] = str(worker.get("model_name") or "")
+                worker_env["MULTI_REVIEW_REVIEWER"] = str(worker.get("model_name") or "")
+                worker_env["REVIEW_HUB_REQUEST_ROOT"] = str(request_root)
+                worker_env["MMS_MODEL_NAME"] = str(worker.get("model_name") or "")
+                cmd = ["opencode", "run", "--pure", "--agent", agent, _worker_prompt(request_root, worker)]
+                returncode, timed_out, stdout, stderr = _run_process_with_evidence(
+                    cmd,
+                    cwd=root,
+                    env=worker_env,
+                    timeout=worker_timeout,
+                    stdout_path=stdout_path,
+                    stderr_path=stderr_path,
+                )
             results.append(
                 {
                     "order": index,
@@ -263,7 +278,7 @@ def execute_review_workers(
                     "agent": agent,
                     "returncode": returncode,
                     "timed_out": timed_out,
-                    "command": ["opencode", "run", "--pure", "--agent", agent, "<prompt>"],
+                    "command": ["opencode", "run", "--pure", "--agent", agent, "<prompt>"] if agent else [],
                     "stdout_path": str(stdout_path),
                     "stderr_path": str(stderr_path),
                     "stdout_tail": stdout[-1200:],
@@ -271,11 +286,13 @@ def execute_review_workers(
                 }
             )
 
-    errors = [
-        f"opencode worker failed: model={item.get('model')} exit={item.get('returncode')}"
-        for item in results
-        if item.get("returncode") != 0
-    ]
+    errors = []
+    for item in results:
+        if item.get("returncode") == 0:
+            continue
+        detail = str(item.get("stderr_tail") or "").strip().splitlines()
+        suffix = f": {detail[-1]}" if detail else ""
+        errors.append(f"opencode worker failed: model={item.get('model')} exit={item.get('returncode')}{suffix}")
     return {
         "schema": REVIEW_DISPATCH_EXECUTE_SCHEMA,
         "ok": not errors and bool(results),

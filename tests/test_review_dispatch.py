@@ -611,7 +611,7 @@ def test_review_dispatch_execute_runs_workers_and_aggregate(tmp_path, monkeypatc
     assert payload["execute"]["worker_count"] == 2
     assert payload["reviewers_complete"] == 2
     assert payload["reviewers_incomplete"] == 0
-    assert payload["verdict"] == "complete"
+    assert payload["verdict"] == "complete_no_verdict"
     for worker in payload["execute"]["workers"]:
         assert worker["returncode"] == 0
         assert Path(worker["stdout_path"]).exists()
@@ -703,3 +703,182 @@ def test_review_dispatch_execute_reports_worker_failure(tmp_path, monkeypatch, c
     assert "opencode worker failed: model=qwen3.7-max exit=7" in payload["errors"]
     assert payload["reviewers_incomplete"] == 1
     assert payload["verdict"] == "incomplete"
+
+
+def test_review_dispatch_execute_host_mode_is_plumbed(tmp_path, monkeypatch, capsys):
+    import mms_review_dispatch
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    request_root = root / ".mission" / "review-dispatch" / "opencode" / "execute-host"
+    seen: dict[str, object] = {}
+
+    def fake_run_review_hub(args):
+        if args[0] == "request":
+            return {"ok": True, "request_root": str(request_root)}
+        if args[0] == "worker-plan":
+            return {"ok": True, "worker_count": 1, "workers": []}
+        if args[0] == "aggregate":
+            return {
+                "ok": True,
+                "aggregate_path": str(request_root / "aggregate"),
+                "reviewers_total": 1,
+                "reviewers_complete": 1,
+                "reviewers_incomplete": 0,
+                "verdict": "host_complete",
+            }
+        raise AssertionError(args)
+
+    def fake_execute_workers(**kwargs):
+        seen.update(kwargs)
+        evidence_root = kwargs["request_root"] / "runner" / "mms-execute" / "host"
+        evidence_root.mkdir(parents=True, exist_ok=True)
+        stdout_path = evidence_root / "host.stdout.txt"
+        stderr_path = evidence_root / "host.stderr.txt"
+        stdout_path.write_text("ok\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return {
+            "schema": mms_review_dispatch.REVIEW_DISPATCH_EXECUTE_SCHEMA,
+            "ok": True,
+            "mode": "host",
+            "evidence_root": str(evidence_root),
+            "returncode": 0,
+            "stdout_path": str(stdout_path),
+            "stderr_path": str(stderr_path),
+            "errors": [],
+        }
+
+    monkeypatch.setattr(mms_review_dispatch, "_run_review_hub", fake_run_review_hub)
+    monkeypatch.setattr(mms_review_dispatch, "_execute_review_workers", fake_execute_workers)
+
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "execute-host",
+            "--model",
+            "qwen3.7-max",
+            "--execute",
+            "--mode",
+            "host",
+            "--host-agent",
+            "review-hub-host-stable",
+            "--host-timeout",
+            "33",
+            "--json",
+        ],
+        command_name="mmf",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["execute"]["mode"] == "host"
+    assert payload["verdict"] == "host_complete"
+    assert seen["mode"] == "host"
+    assert seen["host_agent"] == "review-hub-host-stable"
+    assert seen["host_timeout"] == 33
+
+
+def test_review_dispatch_execute_propagates_aggregate_ok_false(tmp_path, monkeypatch, capsys):
+    import mms_review_dispatch
+    from mms_review_dispatch import handle_review_dispatch_command
+
+    root = _mission_root(tmp_path)
+    request_root = root / ".mission" / "review-dispatch" / "opencode" / "aggregate-failure"
+
+    def fake_run_review_hub(args):
+        if args[0] == "request":
+            return {"ok": True, "request_root": str(request_root)}
+        if args[0] == "worker-plan":
+            return {"ok": True, "worker_count": 1, "workers": []}
+        if args[0] == "aggregate":
+            return {
+                "ok": False,
+                "aggregate_path": str(request_root / "aggregate"),
+                "reviewers_total": 1,
+                "reviewers_complete": 1,
+                "reviewers_incomplete": 0,
+                "error": "aggregate writer failed",
+            }
+        raise AssertionError(args)
+
+    def fake_execute_workers(**kwargs):
+        return {
+            "schema": mms_review_dispatch.REVIEW_DISPATCH_EXECUTE_SCHEMA,
+            "ok": True,
+            "mode": "workers",
+            "evidence_root": str(kwargs["request_root"] / "runner" / "mms-execute" / "ok"),
+            "worker_count": 0,
+            "workers": [],
+            "errors": [],
+            "returncode": 0,
+        }
+
+    monkeypatch.setattr(mms_review_dispatch, "_run_review_hub", fake_run_review_hub)
+    monkeypatch.setattr(mms_review_dispatch, "_execute_review_workers", fake_execute_workers)
+
+    code = handle_review_dispatch_command(
+        [
+            "--root",
+            str(root),
+            "--request-id",
+            "aggregate-failure",
+            "--model",
+            "qwen3.7-max",
+            "--execute",
+            "--json",
+        ],
+        command_name="mmf",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert payload["ok"] is False
+    assert payload["aggregate"]["ok"] is False
+    assert "review-hub aggregate failed: aggregate writer failed" in payload["errors"]
+    assert payload["verdict"] == "complete_no_verdict"
+
+
+def test_review_dispatch_execute_missing_agent_fails_closed(tmp_path, monkeypatch):
+    import mms_review_dispatch_execute
+
+    class FakeSmoke:
+        @staticmethod
+        def _build_temp_env(runtime, model_info, temp_root):
+            return {}, temp_root / "opencode.json", {"agent": {"review-hub-host": {"model": "mms/qwen3.7-max"}}}
+
+    def fake_resolve_profile(models, evidence_root):
+        return FakeSmoke(), {"model": "qwen3.7-max"}, {}
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("opencode run should not be called when reviewer agent is missing")
+
+    monkeypatch.setattr(mms_review_dispatch_execute, "_resolve_review_profile_for_execute", fake_resolve_profile)
+    monkeypatch.setattr(mms_review_dispatch_execute, "_run_process_with_evidence", fail_if_called)
+
+    request_root = tmp_path / "request"
+    result = mms_review_dispatch_execute.execute_review_workers(
+        root=tmp_path,
+        request_root=request_root,
+        models=["qwen3.7-max"],
+        workers=[
+            {
+                "model_name": "qwen3.7-max",
+                "model_slug": "qwen3-7-max",
+                "slot_root": str(request_root / "reviewers" / "qwen3-7-max"),
+            }
+        ],
+        mode="workers",
+        host_agent="review-hub-host",
+        host_timeout=30,
+        worker_timeout=30,
+    )
+
+    assert result["ok"] is False
+    assert result["workers"][0]["returncode"] == 127
+    assert result["workers"][0]["agent"] == ""
+    assert result["workers"][0]["command"] == []
+    assert "no OpenCode review agent found" in result["errors"][0]
+    assert "review-hub-host" in result["workers"][0]["stderr_tail"]

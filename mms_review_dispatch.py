@@ -678,13 +678,35 @@ def _fake_reviewer_outputs(request_root: Path, workers: list[dict[str, Any]]) ->
 def _aggregate_verdict(aggregate: dict[str, Any] | None) -> str:
     if not isinstance(aggregate, dict):
         return "not_run"
+    explicit_verdict = str(aggregate.get("verdict") or "").strip()
+    if explicit_verdict:
+        return explicit_verdict
     total = int(aggregate.get("reviewers_total") or 0)
     incomplete = int(aggregate.get("reviewers_incomplete") or 0)
     if total <= 0:
         return "no_reviewers"
     if incomplete:
         return "incomplete"
-    return str(aggregate.get("verdict") or "complete")
+    return "complete_no_verdict"
+
+
+def _aggregate_errors(aggregate: dict[str, Any] | None) -> list[str]:
+    if not isinstance(aggregate, dict) or aggregate.get("ok", True):
+        return []
+    values = aggregate.get("errors")
+    if isinstance(values, list):
+        errors = [str(item) for item in values if str(item).strip()]
+    elif values:
+        errors = [str(values)]
+    else:
+        errors = []
+    for key in ("error", "message"):
+        value = str(aggregate.get(key) or "").strip()
+        if value:
+            errors.append(value)
+    if not errors:
+        errors.append("review-hub aggregate returned ok=false")
+    return [f"review-hub aggregate failed: {item}" for item in errors]
 
 
 def _copy_aggregate_summary(payload: dict[str, Any], aggregate: dict[str, Any] | None) -> None:
@@ -855,6 +877,7 @@ def build_review_dispatch(
         _copy_aggregate_summary(payload, aggregate_result)
         if not aggregate_result.get("ok"):
             payload["ok"] = False
+            payload.setdefault("errors", []).extend(_aggregate_errors(aggregate_result))
         if int(payload.get("reviewers_incomplete") or 0) > 0:
             payload["ok"] = False
             payload.setdefault("errors", []).append(
