@@ -392,7 +392,10 @@ def opencode_model_config(runtime, model_name, *, context_window_resolver=None):
             "context": context_window,
             "output": opencode_model_output_limit(runtime, model),
         }
-    if model.lower() in OPENCODE_IMAGE_INPUT_MODELS:
+    from mms_config_web import _KNOWN_VISION_MODELS
+
+    normalized_model = model.lower()
+    if normalized_model in _KNOWN_VISION_MODELS or normalized_model in OPENCODE_IMAGE_INPUT_MODELS:
         config["attachment"] = True
         config["modalities"] = {
             "input": ["text", "image"],
