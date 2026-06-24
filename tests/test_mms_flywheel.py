@@ -185,6 +185,32 @@ def _seed_flywheel_tier_routes(root):
                     },
                 ],
             },
+            "kimi-for-coding": {
+                "primary": {
+                    "provider_id": "direct-kimi",
+                    "model_id": "kimi-for-coding",
+                    "anthropic_base_url": "https://kimi.example/coding",
+                    "openai_base_url": "https://kimi.example/v1",
+                    "api_key": "secret-kimi",
+                    "max_context_tokens": 262144,
+                },
+                "fallbacks": [
+                    {
+                        "provider_id": "newapi-personal-tokyo",
+                        "model_id": "kimi-for-coding",
+                        "anthropic_base_url": "https://tokyo.example/v1",
+                        "openai_base_url": "https://tokyo.example/v1",
+                        "api_key": "secret-tokyo",
+                    },
+                    {
+                        "provider_id": "newapi-company",
+                        "model_id": "kimi-for-coding",
+                        "anthropic_base_url": "https://company.example/v1",
+                        "openai_base_url": "https://company.example/v1",
+                        "api_key": "secret-company",
+                    },
+                ],
+            },
             "gpt-5.5": {
                 "primary": {
                     "provider_id": "uscrsopenai",
@@ -229,7 +255,7 @@ api_key = "secret-tokyo"
 openai_base_url = "https://tokyo.example/v1"
 anthropic_base_url = "https://tokyo.example/v1"
 protocols = ["anthropic_messages", "openai_chat_completions"]
-fallback_models = ["gpt-5.5", "qwen3.7-max", "glm-5.2", "MiniMax-M3"]
+fallback_models = ["gpt-5.5", "qwen3.7-max", "glm-5.2", "MiniMax-M3", "kimi-for-coding"]
 supported_clis = ["codex"]
 """.strip(),
         encoding="utf-8",
@@ -262,6 +288,8 @@ def test_default_worker_and_fixer_tiers_use_domestic_models_and_ordered_fallback
     worker_p4 = mms_flywheel.resolve_flywheel_profile(lane="worker", priority="AI-P4", config_root=str(root))
     fixer_p4 = mms_flywheel.resolve_flywheel_profile(lane="fixer", priority="AI-P4", config_root=str(root))
     worker_p2 = mms_flywheel.resolve_flywheel_profile(lane="worker", priority="AI-P2", config_root=str(root))
+    fixer_p2 = mms_flywheel.resolve_flywheel_profile(lane="fixer", priority="AI-P2", config_root=str(root))
+    explicit_glm = mms_flywheel.resolve_flywheel_profile(lane="worker", profile="flywheel.worker.cn-glm", config_root=str(root))
     worker_p0 = mms_flywheel.resolve_flywheel_profile(lane="worker", priority="AI-P0", config_root=str(root))
 
     assert worker_p3["profile_id"] == "flywheel.worker.cn-qwen"
@@ -275,9 +303,15 @@ def test_default_worker_and_fixer_tiers_use_domestic_models_and_ordered_fallback
     assert fixer_p4["profile_id"] == "flywheel.fixer.cn-minimax"
     assert fixer_p4["runtime_kind"] == "claude"
     assert fixer_p4["model"] == "MiniMax-M3"
-    assert worker_p2["profile_id"] == "flywheel.worker.cn-glm"
+    assert worker_p2["profile_id"] == "flywheel.worker.cn-kimi"
     assert worker_p2["runtime_kind"] == "claude"
-    assert worker_p2["model"] == "glm-5.2"
+    assert worker_p2["model"] == "kimi-for-coding"
+    assert worker_p2["provider_id"] == "direct-kimi"
+    assert fixer_p2["profile_id"] == "flywheel.fixer.cn-kimi"
+    assert fixer_p2["model"] == "kimi-for-coding"
+    assert explicit_glm["profile_id"] == "flywheel.worker.cn-glm"
+    assert explicit_glm["provider_id"] == "direct-zai"
+    assert explicit_glm["model"] == "glm-5.2"
     assert worker_p0["runtime_kind"] == "codex"
     assert [item["provider_id"] for item in worker_p3["fallback_routes"]] == [
         "newapi-personal-tokyo",
@@ -796,6 +830,109 @@ provider = "dual-qwen"
     assert captured["model"] == "qwen3.7-max"
 
 
+def test_run_result_promotes_verified_wire_evidence(tmp_path, monkeypatch):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_flywheel_tier_routes(root)
+
+    def fake_run_claude_headless(*, runtime, model, prompt, cwd, sandbox):
+        runtime["_wire_evidence_checked"] = True
+        runtime["_wire_evidence"] = {
+            "schema": "cache_transport_evidence.v1",
+            "model": "qwen3.7-max",
+            "requested_model": "claude-sonnet-4-6",
+            "served_model": "qwen3.7-max",
+            "expected_model": "qwen3.7-max",
+            "provider_id": "direct-qwen",
+            "protocol": "anthropic_messages",
+            "request_url": "",
+            "request_path": "/apps/anthropic/v1/messages",
+            "route_source": "mms:wire",
+            "fallback_used": False,
+            "fallback_reason": "",
+            "evidence_source": "wire_response",
+            "request_count": 1,
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cached_tokens": 0,
+            },
+        }
+        return (0, "agent text", "")
+
+    monkeypatch.setattr(mms_flywheel, "_run_claude_headless", fake_run_claude_headless)
+
+    result = mms_flywheel.run_flywheel_lane(
+        lane="worker",
+        priority="AI-P3",
+        config_root=str(root),
+        cwd=str(workdir),
+        runner_args=["exec", "fix this"],
+    )
+
+    assert result["ok"] is True
+    assert result["served_model"] == "qwen3.7-max"
+    assert result["usage"]["input_tokens"] == 12
+    assert result["cache_transport_evidence"]["evidence_source"] == "wire_response"
+    assert result["model_provenance"]["verified"] is True
+    artifact = json.loads(Path(result["run_result_path"]).read_text(encoding="utf-8"))
+    assert artifact["result"]["model_provenance"]["status"] == "verified"
+
+
+def test_run_result_fails_closed_on_wire_model_mismatch(tmp_path, monkeypatch):
+    root = tmp_path / "mms-next"
+    workdir = tmp_path / "work"
+    root.mkdir()
+    workdir.mkdir()
+    _seed_flywheel_tier_routes(root)
+
+    def fake_run_claude_headless(*, runtime, model, prompt, cwd, sandbox):
+        runtime["_wire_evidence_checked"] = True
+        runtime["_wire_evidence"] = {
+            "schema": "cache_transport_evidence.v1",
+            "model": "claude-sonnet-4-6",
+            "requested_model": "claude-sonnet-4-6",
+            "served_model": "claude-sonnet-4-6",
+            "expected_model": "qwen3.7-max",
+            "provider_id": "direct-qwen",
+            "protocol": "anthropic_messages",
+            "request_url": "",
+            "request_path": "/apps/anthropic/v1/messages",
+            "route_source": "mms:wire",
+            "fallback_used": False,
+            "fallback_reason": "",
+            "evidence_source": "wire_response",
+            "request_count": 1,
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cached_tokens": 0,
+            },
+        }
+        return (0, "agent text", "")
+
+    monkeypatch.setattr(mms_flywheel, "_run_claude_headless", fake_run_claude_headless)
+
+    result = mms_flywheel.run_flywheel_lane(
+        lane="worker",
+        priority="AI-P3",
+        config_root=str(root),
+        cwd=str(workdir),
+        runner_args=["exec", "fix this"],
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "wire_evidence_failed"
+    assert result["wire_evidence_error"] == "served_model_mismatch"
+    assert result["model_provenance"]["served_model"] == "claude-sonnet-4-6"
+
+
 def test_run_uses_legacy_secret_route_when_generated_route_is_sanitized(tmp_path, monkeypatch):
     root = tmp_path / "mms-next"
     workdir = tmp_path / "work"
@@ -953,11 +1090,12 @@ def test_claude_headless_uses_bridge_with_thinking_effort_and_context(tmp_path, 
     assert captured["bridge_gateway_url"] == "https://qwen.example/v1"
     assert captured["bridge_api_key"] == "secret-qwen"
     assert captured["bridge_kwargs"]["heavy_model"] == "qwen3.7-max"
+    assert captured["bridge_kwargs"]["force_heavy_model"] is True
     assert captured["bridge_kwargs"]["reasoning_enabled"] is False
     assert captured["bridge_kwargs"]["reasoning_effort"] == "xhigh"
     assert captured["bridge_kwargs"]["native_fallback_routes"] == runtime["native_fallback_routes"]
-    assert captured["env_kwargs"]["selected_model"] == "claude-sonnet-4-6"
-    assert captured["env_kwargs"]["display_model"] == "qwen3.7-max"
+    assert captured["env_kwargs"]["selected_model"] == "qwen3.7-max"
+    assert captured["env_kwargs"]["display_model"] == ""
     assert captured["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "777000"
     assert captured["env"]["CLAUDE_CODE_EFFORT_LEVEL"] == "max"
     assert captured["context_kwargs"]["context_window"] == 777000

@@ -2221,6 +2221,97 @@ def _extract_usage(payload):
     return inp, out
 
 
+def _extract_usage_detail(payload):
+    """Extract a paste-safe token usage snapshot from common provider payloads."""
+    detail = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cached_tokens": 0,
+    }
+    if not isinstance(payload, dict):
+        return detail
+    usage_candidates = []
+    for container in (payload, payload.get("response", {}), payload.get("message", {})):
+        if isinstance(container, dict):
+            usage = container.get("usage")
+            if isinstance(usage, dict):
+                usage_candidates.append(usage)
+    for usage in usage_candidates:
+        for target, keys in {
+            "input_tokens": ("input_tokens", "prompt_tokens"),
+            "output_tokens": ("output_tokens", "completion_tokens"),
+            "cache_read_input_tokens": ("cache_read_input_tokens",),
+            "cache_creation_input_tokens": ("cache_creation_input_tokens",),
+            "cached_tokens": ("cached_tokens", "cache_read_tokens", "cache_tokens"),
+        }.items():
+            for key in keys:
+                value = usage.get(key)
+                if isinstance(value, (int, float)):
+                    detail[target] = max(detail[target], int(value))
+        prompt_details = usage.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached = prompt_details.get("cached_tokens")
+            if isinstance(cached, (int, float)):
+                detail["cached_tokens"] = max(detail["cached_tokens"], int(cached))
+    return detail
+
+
+def _extract_response_model(payload):
+    if not isinstance(payload, dict):
+        return ""
+    for container in (payload, payload.get("message", {}), payload.get("response", {})):
+        if isinstance(container, dict):
+            model = str(container.get("model") or "").strip()
+            if model:
+                return model
+    return ""
+
+
+def _merge_wire_usage(server, detail):
+    if not server or not isinstance(detail, dict):
+        return
+    current = getattr(server, "wire_usage", None)
+    if not isinstance(current, dict):
+        current = _extract_usage_detail({})
+    for key in current:
+        value = detail.get(key)
+        if isinstance(value, (int, float)):
+            current[key] = max(int(current.get(key) or 0), int(value))
+    server.wire_usage = current
+
+
+def _record_wire_response(
+    server,
+    payload,
+    *,
+    request_model="",
+    provider_id="",
+    protocol="",
+    request_path="",
+    fallback_used=False,
+    fallback_reason="",
+):
+    if not server:
+        return
+    model = _extract_response_model(payload)
+    if model:
+        server.last_response_model = model
+    if request_model:
+        server.last_requested_model = request_model
+    if provider_id:
+        server.last_provider_id = provider_id
+    if protocol:
+        server.last_protocol = protocol
+    if request_path:
+        server.last_request_path = request_path
+    server.last_fallback_used = bool(fallback_used)
+    if fallback_reason:
+        server.last_fallback_reason = fallback_reason
+    _merge_wire_usage(server, _extract_usage_detail(payload))
+
+
 def _accumulate_usage(server, payload):
     """累加到 server 级 session 统计。"""
     inp, out = _extract_usage(payload)
@@ -2264,6 +2355,7 @@ def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens
         server.session_request_count += 1
         server.session_output_tokens += (output_tokens or 0)
         server.session_input_tokens += (input_tokens or 0)
+        server.last_requested_model = str(model_name or "")
     if first_byte_ms is None:
         return
     total_ms = max(0.0, _now_ms() - started_ms)
@@ -3559,7 +3651,9 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         incoming_model = payload.get("model") if isinstance(payload, dict) else ""
         if heavy_model and "model" in payload:
             heavy_base_model = str(heavy_model or "").replace(_ONE_M_CONTEXT_SUFFIX, "").strip()
-            if _is_claude_shell_model(incoming_model):
+            if getattr(self.server, "force_heavy_model", False):
+                payload["model"] = heavy_model
+            elif _is_claude_shell_model(incoming_model):
                 payload["model"] = heavy_model
             elif (
                 _model_requests_mimo_1m_context(
@@ -3841,6 +3935,14 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 else:
                     path_suffix = path
                 target_url = _gw + path_suffix
+                metrics_model = str(route_payload.get("model") or "")
+                request_path = _fallback_safe_url(target_url)
+                self.server.last_requested_model = metrics_model
+                self.server.last_provider_id = str(route_provider_id or "")
+                self.server.last_protocol = "anthropic_messages"
+                self.server.last_request_path = request_path
+                self.server.last_fallback_used = route_index > 0
+                self.server.last_fallback_reason = str(route.get("fallback_reason") or "") if route_index > 0 else ""
 
                 fwd_headers = {
                     "Content-Type": "application/json",
@@ -3876,7 +3978,6 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 if has_routing:
                     stream = False
                     route_payload["stream"] = False
-                metrics_model = str(route_payload.get("model") or "")
                 route_started_ms = _now_ms()
                 first_byte_ms = None
                 output_tokens = None
@@ -3974,6 +4075,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                         except json.JSONDecodeError:
                                             event_payload = None
                                         if event_payload:
+                                            _record_wire_response(
+                                                self.server,
+                                                event_payload,
+                                                request_model=metrics_model,
+                                                provider_id=route_provider_id,
+                                                protocol="anthropic_messages",
+                                                request_path=request_path,
+                                                fallback_used=route_index > 0,
+                                                fallback_reason=str(route.get("fallback_reason") or "") if route_index > 0 else "",
+                                            )
                                             extracted = _extract_output_tokens(event_payload)
                                             if extracted is not None:
                                                 output_tokens = extracted
@@ -4084,6 +4195,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             response_payload = json.loads(body_out.decode("utf-8"))
                         except Exception:
                             response_payload = None
+                        _record_wire_response(
+                            self.server,
+                            response_payload,
+                            request_model=metrics_model,
+                            provider_id=route_provider_id,
+                            protocol="anthropic_messages",
+                            request_path=request_path,
+                            fallback_used=route_index > 0,
+                            fallback_reason=str(route.get("fallback_reason") or "") if route_index > 0 else "",
+                        )
                         self.server._last_reasoning_content = _anthropic_response_reasoning_content(response_payload)
                     if body_out:
                         try:
@@ -6497,6 +6618,7 @@ def codex_chatcompletions_bridge(
     server.session_output_tokens = 0
     server.session_request_count = 0
     server.session_start_time = time.time()
+    server.wire_usage = _extract_usage_detail({})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -6505,6 +6627,7 @@ def codex_chatcompletions_bridge(
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
+            "_server": server,
         }
     finally:
         try:
@@ -6562,6 +6685,11 @@ def codex_responses_bridge(
         server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     if rescue_hot_fallback_enabled is not None:
         server.rescue_hot_fallback_enabled = bool(rescue_hot_fallback_enabled)
+    server.session_input_tokens = 0
+    server.session_output_tokens = 0
+    server.session_request_count = 0
+    server.session_start_time = time.time()
+    server.wire_usage = _extract_usage_detail({})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -6570,6 +6698,7 @@ def codex_responses_bridge(
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
+            "_server": server,
         }
     finally:
         try:
@@ -6603,6 +6732,7 @@ def gateway_claude_bridge(
     native_fallback_routes=None,
     vision_sidecar=None,
     model_capabilities=None,
+    force_heavy_model=False,
     rescue_fallback_model="",
     rescue_fallback_cli="",
     rescue_hot_fallback_enabled=None,
@@ -6651,6 +6781,7 @@ def gateway_claude_bridge(
     server.native_fallback_routes = list(native_fallback_routes or [])
     server.vision_sidecar = dict(vision_sidecar or {})
     server.model_capabilities = dict(model_capabilities or {})
+    server.force_heavy_model = bool(force_heavy_model)
     _configure_bridge_rescue(server)
     if rescue_fallback_model:
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
@@ -6667,6 +6798,7 @@ def gateway_claude_bridge(
     server.session_output_tokens = 0
     server.session_request_count = 0
     server.session_start_time = time.time()
+    server.wire_usage = _extract_usage_detail({})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
