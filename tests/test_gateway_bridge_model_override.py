@@ -16,6 +16,7 @@ def _run_gateway_bridge_once(
     system: str | list[dict] | None = None,
     vision_sidecar: dict | None = None,
     model_capabilities: dict | None = None,
+    force_heavy_model: bool = False,
 ) -> dict:
     import mms_bridge
 
@@ -86,6 +87,7 @@ def _run_gateway_bridge_once(
         strip_upstream_user_agent=False,
         vision_sidecar=vision_sidecar or {},
         model_capabilities=model_capabilities or {},
+        force_heavy_model=force_heavy_model,
     )
     handler.send_response = lambda code: captured.setdefault("status", code)
     handler.send_header = lambda *args, **kwargs: None
@@ -108,6 +110,18 @@ def test_gateway_bridge_preserves_explicit_non_claude_model_selection(monkeypatc
 
     assert captured["status"] == 200
     assert captured["json"]["model"] == "mimo-v2.5-pro"
+
+
+def test_gateway_bridge_force_heavy_model_overrides_any_incoming_model(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "mimo-v2.5-pro",
+        heavy_model="qwen3.7-max",
+        force_heavy_model=True,
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "qwen3.7-max"
 
 
 def test_gateway_bridge_strips_claude_code_billing_system_cache_buster(monkeypatch):

@@ -52,7 +52,7 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "default": "flywheel.worker.default",
             "AI-P0": "flywheel.worker.default",
             "AI-P1": "flywheel.worker.default",
-            "AI-P2": "flywheel.worker.cn-glm",
+            "AI-P2": "flywheel.worker.cn-kimi",
             "AI-P3": "flywheel.worker.cn-qwen",
             "AI-P4": "flywheel.worker.cn-minimax",
         },
@@ -60,7 +60,7 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "default": "flywheel.fixer.default",
             "AI-P0": "flywheel.fixer.default",
             "AI-P1": "flywheel.fixer.default",
-            "AI-P2": "flywheel.fixer.cn-glm",
+            "AI-P2": "flywheel.fixer.cn-kimi",
             "AI-P3": "flywheel.fixer.cn-qwen",
             "AI-P4": "flywheel.fixer.cn-minimax",
         },
@@ -89,6 +89,16 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "fallback_model_by_provider": {
                 "us-cpa-local-codex": "gpt-5.5",
                 "newapi-company": "gpt-5.5",
+            },
+        },
+        "flywheel.worker.cn-kimi": {
+            "runtime": "claude",
+            "model": "kimi-for-coding",
+            "provider": "direct-kimi",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-company", "us-cpa-local-codex"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
             },
         },
         "flywheel.worker.cn-qwen": {
@@ -128,6 +138,16 @@ DEFAULT_FLYWHEEL_CONFIG: dict[str, Any] = {
             "fallback_model_by_provider": {
                 "us-cpa-local-codex": "gpt-5.5",
                 "newapi-company": "gpt-5.5",
+            },
+        },
+        "flywheel.fixer.cn-kimi": {
+            "runtime": "claude",
+            "model": "kimi-for-coding",
+            "provider": "direct-kimi",
+            "reasoning_effort": "medium",
+            "fallback_providers": ["newapi-personal-tokyo", "newapi-company", "us-cpa-local-codex"],
+            "fallback_model_by_provider": {
+                "us-cpa-local-codex": "gpt-5.5",
             },
         },
         "flywheel.fixer.cn-qwen": {
@@ -906,6 +926,107 @@ def _zero_cache_usage() -> dict[str, int]:
     }
 
 
+def _usage_total(usage: dict[str, Any]) -> int:
+    total = 0
+    for key in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "cached_tokens"):
+        try:
+            total += max(int(usage.get(key) or 0), 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _normalize_model_identity(model: str) -> str:
+    normalized = str(model or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    return normalized.replace("[1m]", "").strip()
+
+
+def _model_identity_matches(expected: str, served: str) -> bool:
+    expected_norm = _normalize_model_identity(expected)
+    served_norm = _normalize_model_identity(served)
+    return bool(expected_norm and served_norm and expected_norm == served_norm)
+
+
+def _bridge_wire_evidence_from_server(
+    server: Any,
+    *,
+    expected_model: str,
+    provider_id: str,
+    protocol: str,
+    request_path: str,
+) -> dict[str, Any]:
+    usage = dict(getattr(server, "wire_usage", {}) or {}) if server is not None else {}
+    if not usage:
+        usage = _zero_cache_usage()
+    for key, value in list(usage.items()):
+        try:
+            usage[key] = max(int(value or 0), 0)
+        except (TypeError, ValueError):
+            usage[key] = 0
+    for key, fallback_attr in {
+        "input_tokens": "session_input_tokens",
+        "output_tokens": "session_output_tokens",
+    }.items():
+        try:
+            usage[key] = max(int(usage.get(key) or 0), int(getattr(server, fallback_attr, 0) or 0))
+        except (TypeError, ValueError):
+            pass
+    served_model = str(getattr(server, "last_response_model", "") or "").strip() if server is not None else ""
+    requested_model = str(getattr(server, "last_requested_model", "") or expected_model or "").strip() if server is not None else expected_model
+    request_count = 0
+    if server is not None:
+        try:
+            request_count = max(int(getattr(server, "session_request_count", 0) or 0), 0)
+        except (TypeError, ValueError):
+            request_count = 0
+    source = "wire_response" if served_model and _usage_total(usage) > 0 else "wire_response_missing"
+    return {
+        "schema": CACHE_TRANSPORT_EVIDENCE_SCHEMA,
+        "model": served_model or requested_model or expected_model,
+        "requested_model": requested_model,
+        "served_model": served_model,
+        "expected_model": expected_model,
+        "provider_id": str(getattr(server, "last_provider_id", "") or provider_id or "").strip() if server is not None else provider_id,
+        "protocol": str(getattr(server, "last_protocol", "") or protocol or "").strip() if server is not None else protocol,
+        "request_url": "",
+        "request_path": str(getattr(server, "last_request_path", "") or request_path or "").strip() if server is not None else request_path,
+        "route_source": "mms:wire",
+        "provider_profile": "",
+        "fallback_used": bool(getattr(server, "last_fallback_used", False)) if server is not None else False,
+        "fallback_reason": str(getattr(server, "last_fallback_reason", "") or "").strip() if server is not None else "",
+        "evidence_source": source,
+        "request_count": request_count,
+        "usage": usage,
+    }
+
+
+def _wire_evidence_verified(evidence: dict[str, Any], expected_model: str) -> tuple[bool, str]:
+    served_model = str(evidence.get("served_model") or evidence.get("model") or "").strip()
+    if not served_model:
+        return False, "missing_served_model"
+    if not _model_identity_matches(expected_model, served_model):
+        return False, "served_model_mismatch"
+    usage = evidence.get("usage") if isinstance(evidence.get("usage"), dict) else {}
+    if _usage_total(usage) <= 0:
+        return False, "missing_nonzero_usage"
+    return True, "verified"
+
+
+def _model_provenance(evidence: dict[str, Any], expected_model: str) -> dict[str, Any]:
+    verified, reason = _wire_evidence_verified(evidence, expected_model)
+    return {
+        "schema": "mms.flywheel_model_provenance.v1",
+        "expected_model": expected_model,
+        "served_model": str(evidence.get("served_model") or evidence.get("model") or "").strip(),
+        "evidence_source": str(evidence.get("evidence_source") or ""),
+        "usage_total": _usage_total(evidence.get("usage") if isinstance(evidence.get("usage"), dict) else {}),
+        "verified": verified,
+        "status": reason,
+    }
+
+
 def _transport_evidence_for_route(
     route: dict[str, Any],
     model: str,
@@ -1210,6 +1331,19 @@ def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd
         if not exe:
             raise FlywheelConfigError("codex executable not found")
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
+        runtime["_wire_evidence_checked"] = True
+        evidence = _bridge_wire_evidence_from_server(
+            bridge_cfg.get("_server"),
+            expected_model=model,
+            provider_id=provider_id,
+            protocol=preferred_transport,
+            request_path=str(runtime.get("transport_request_path") or ""),
+        )
+        runtime["_wire_evidence"] = evidence
+        sink = runtime.get("_wire_evidence_sink") if isinstance(runtime.get("_wire_evidence_sink"), dict) else None
+        if sink is not None:
+            sink["checked"] = True
+            sink["evidence"] = evidence
         return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
@@ -1234,6 +1368,8 @@ def _pushd(path: Path):
 def _claude_shell_model(model: str, mms_launchers: Any) -> tuple[str, str]:
     if mms_launchers._is_claude_family_model_name(model):  # noqa: SLF001
         return model, ""
+    if _is_domestic_model(model):
+        return model, ""
     return "claude-sonnet-4-6", model
 
 
@@ -1252,7 +1388,9 @@ def _run_claude_headless(*, runtime: dict[str, Any], model: str, prompt: str, cw
 
     mms_launchers._ensure_bridge_helpers()  # noqa: SLF001 - flywheel runner reuses launcher bridge setup.
     mms_launchers._ensure_speed_stats()  # noqa: SLF001 - keep launcher lazy imports initialized.
+    wire_evidence_sink = runtime.get("_wire_evidence_sink") if isinstance(runtime.get("_wire_evidence_sink"), dict) else None
     runtime = dict(runtime)
+    runtime.pop("_wire_evidence_sink", None)
     if sandbox == "danger-full-access":
         runtime["bypass"] = True
     provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip()
@@ -1310,6 +1448,7 @@ def _run_claude_headless(*, runtime: dict[str, Any], model: str, prompt: str, cw
             "native_fallback_routes": native_fallback_routes,
             "vision_sidecar": vision_sidecar,
             "model_capabilities": model_capabilities,
+            "force_heavy_model": True,
             "context_windows": mms_launchers._context_windows_for_models(  # noqa: SLF001
                 model,
                 enable_claude_1m=mms_launchers._runtime_supports_claude_1m(runtime),  # noqa: SLF001
@@ -1348,6 +1487,18 @@ def _run_claude_headless(*, runtime: dict[str, Any], model: str, prompt: str, cw
             if not exe:
                 raise FlywheelConfigError("claude executable not found")
             proc = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True, check=False)
+            runtime["_wire_evidence_checked"] = True
+            evidence = _bridge_wire_evidence_from_server(
+                bridge_cfg.get("_server"),
+                expected_model=model,
+                provider_id=provider_id,
+                protocol=str(runtime.get("preferred_transport") or "anthropic_messages"),
+                request_path=str(runtime.get("transport_request_path") or ""),
+            )
+            runtime["_wire_evidence"] = evidence
+            if wire_evidence_sink is not None:
+                wire_evidence_sink["checked"] = True
+                wire_evidence_sink["evidence"] = evidence
             return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
@@ -1451,6 +1602,8 @@ def run_flywheel_lane(
         _write_run_result_artifact(run_result_artifact, result)
         return result
 
+    wire_evidence_sink: dict[str, Any] = {}
+    runtime["_wire_evidence_sink"] = wire_evidence_sink
     runner = _run_codex_headless if runtime_kind == "codex" else _run_claude_headless
     rc, stdout_text, stderr_text = runner(
         runtime=runtime,
@@ -1459,6 +1612,18 @@ def run_flywheel_lane(
         cwd=workdir,
         sandbox=sandbox,
     )
+    wire_checked = bool(runtime.get("_wire_evidence_checked") or wire_evidence_sink.get("checked"))
+    if wire_checked:
+        wire_evidence = runtime.get("_wire_evidence") if isinstance(runtime.get("_wire_evidence"), dict) else {}
+        if not wire_evidence and isinstance(wire_evidence_sink.get("evidence"), dict):
+            wire_evidence = wire_evidence_sink["evidence"]
+        if wire_evidence:
+            transport_evidence = wire_evidence
+            result["cache_transport_evidence"] = wire_evidence
+            result["transport_evidence"] = [wire_evidence]
+            result["served_model"] = wire_evidence.get("served_model") or wire_evidence.get("model")
+            result["usage"] = wire_evidence.get("usage")
+            result["model_provenance"] = _model_provenance(wire_evidence, model)
     agent_text = _extract_codex_agent_text(stdout_text) if runtime_kind == "codex" else stdout_text
     if not agent_text and stdout_text:
         agent_text = stdout_text
@@ -1467,6 +1632,13 @@ def run_flywheel_lane(
     result["status"] = "completed" if rc == 0 else "failed"
     result["agent_text"] = agent_text
     result["stderr"] = stderr_text
+    provenance = result.get("model_provenance") if isinstance(result.get("model_provenance"), dict) else {}
+    if rc == 0 and wire_checked and not provenance.get("verified"):
+        result["ok"] = False
+        result["status"] = "wire_evidence_failed"
+        result["wire_evidence_error"] = provenance.get("status") or "missing_wire_evidence"
+        detail = f"flywheel wire evidence failed: {result['wire_evidence_error']}"
+        result["stderr"] = f"{stderr_text.rstrip()}\n{detail}\n".lstrip()
     _write_run_result_artifact(run_result_artifact, result)
     return result
 
