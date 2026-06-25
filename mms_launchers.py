@@ -2415,11 +2415,16 @@ def _claude_gateway_home():
     return os.path.join(sessions_dir, str(os.getpid()))
 
 
-def _claude_route_status_paths():
+def _claude_route_status_paths(*, gateway_home=None):
+    # 优先用当前 launch 显式传入的 gateway_home（per-PID 会话隔离），
+    # 不读 ambient MMS_SESSION_HOME env（继承链不可靠，多 session 会串改）。
+    gh = str(gateway_home or "").strip()
+    if gh:
+        return [os.path.join(gh, ".config", "mms", "route_status.json")]
     if str(os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR") or "").strip():
         return [os.path.join(_resolve_mms_config_dir(), "route_status.json")]
-    gateway_home = _claude_gateway_home()
-    return [os.path.join(gateway_home, ".config", "mms", "route_status.json")]
+    fallback = _claude_gateway_home()
+    return [os.path.join(fallback, ".config", "mms", "route_status.json")]
 
 
 def _anthropic_cache_key(provider_id, configured_url):
@@ -9303,7 +9308,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
             _print_launch_step_done("gateway 健康检查", step_start)
 
         speed_scope = build_provider_speed_scope(runtime)
-        route_status_paths = _claude_route_status_paths()
+        route_status_paths = _claude_route_status_paths(gateway_home=_claude_gateway_home())
         probe_result = runtime.get("_launch_prefetched_probe")
         if probe_result is None:
             try:
@@ -10586,7 +10591,7 @@ def _claude_gateway_env(
         stale_callback=_finalize_claude_slot,
         timings=_timings,
     )
-    route_status_path = _claude_route_status_paths()[0]
+    route_status_path = _claude_route_status_paths(gateway_home=gateway_home)[0]
     os.makedirs(gateway_home, exist_ok=True)
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
     agent_pack = _runtime_agent_pack(runtime)
