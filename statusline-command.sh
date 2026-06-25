@@ -134,12 +134,12 @@ pick_route_status_file() {
     [ -n "$best_path" ] && echo "$best_path"
 }
 
-_ROUTE_STATUS="$(pick_route_status_file)"
+# per-session 优先：MMS launch 时注入 MMS_ROUTE_STATUS_PATH 指向本 session 隔离文件
+_ROUTE_STATUS="${MMS_ROUTE_STATUS_PATH:-$(pick_route_status_file)}"
 route_tag=""
 if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]] && [ -n "$_ROUTE_STATUS" ] && [ -f "$_ROUTE_STATUS" ]; then
     route_age=$(( $(date +%s) - $(stat -f %m "$_ROUTE_STATUS" 2>/dev/null || echo 0) ))
     if [ "$route_age" -lt 600 ]; then
-        r_tier=$(jq -r '.tier // empty' "$_ROUTE_STATUS" 2>/dev/null)
         r_model=$(jq -r '.model // empty' "$_ROUTE_STATUS" 2>/dev/null)
         r_ctx=$(jq -r '.context_window_tokens // .context_window_size // empty' "$_ROUTE_STATUS" 2>/dev/null)
         if [ -n "$r_ctx" ] && [ "$r_ctx" != "null" ] && [ "$r_ctx" -gt 0 ] 2>/dev/null; then
@@ -147,13 +147,7 @@ if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]] && [ -n "$_ROUTE_STATUS" ] 
         fi
         if [ -n "$r_model" ]; then
             r_model_short=$(echo "$r_model" | sed 's/^claude-//;s/-[0-9]*-[0-9]*$//;s/-[0-9]*$//')
-            case "$r_tier" in
-                heavy)  route_tag="▲ ${r_model_short}" ;;
-                medium) route_tag="● ${r_model_short}" ;;
-                light)  route_tag="▼ ${r_model_short}" ;;
-                *)      route_tag="→ ${r_model_short}" ;;
-            esac
-            model_short="${route_tag}"
+            model_short="${r_model_short}"
         fi
     fi
 fi
@@ -268,29 +262,13 @@ ORANGE=$'\033[38;5;208m'
 PURPLE=$'\033[38;5;141m'
 TEAL=$'\033[38;5;80m'
 
-if [ -n "$route_tag" ]; then
-    case "$route_tag" in
-        ▼*)  MODEL_C="${BOLD}${GREEN}"  ;;
-        ●*)  MODEL_C="${BOLD}${YELLOW}" ;;
-        ▲*)  MODEL_C="${BOLD}${PURPLE}" ;;
-        *)
-              case "$route_tag" in
-                  *opus*)   MODEL_C="${BOLD}${PURPLE}" ;;
-                  *sonnet*) MODEL_C="${BOLD}${TEAL}"   ;;
-                  *haiku*)  MODEL_C="${BOLD}${GREEN}"  ;;
-                  *gpt*)    MODEL_C="${BOLD}${CYAN}"   ;;
-                  *kimi*)   MODEL_C="${BOLD}${YELLOW}" ;;
-                  *)        MODEL_C="${BOLD}${CYAN}"   ;;
-              esac ;;
-    esac
-else
-    case "$model_short" in
-        *Opus*)   MODEL_C="${BOLD}${PURPLE}" ;;
-        *Sonnet*) MODEL_C="${BOLD}${TEAL}"   ;;
-        *Haiku*)  MODEL_C="${BOLD}${GREEN}"  ;;
-        *)        MODEL_C="${BOLD}${CYAN}"   ;;
-    esac
-fi
+case "$model_short" in
+    *[Oo]pus*|*[Gg]lm*)   MODEL_C="${BOLD}${PURPLE}" ;;
+    *[Ss]onnet*)          MODEL_C="${BOLD}${TEAL}"   ;;
+    *[Hh]aiku*)           MODEL_C="${BOLD}${GREEN}"  ;;
+    *[Gg]pt*|*[Kk]imi*)   MODEL_C="${BOLD}${YELLOW}" ;;
+    *)                    MODEL_C="${BOLD}${CYAN}"   ;;
+esac
 
 if   [ "$pct" -ge 80 ]; then BAR_C="${RED}"
 elif [ "$pct" -ge 50 ]; then BAR_C="${YELLOW}"
