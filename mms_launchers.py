@@ -1319,6 +1319,7 @@ def _session_guard_process_identity(pid):
             capture_output=True,
             text=True,
             check=False,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
         )
     except Exception:
         return ""
@@ -1341,7 +1342,14 @@ def _session_guard_pid_alive(pid, *, identity=""):
     except PermissionError:
         return True
     if identity:
-        return _session_guard_process_identity(normalized_pid) == str(identity or "").strip()
+        current_identity = _session_guard_process_identity(normalized_pid)
+        if current_identity == str(identity or "").strip():
+            return True
+        # Older markers used locale-dependent `ps lstart` text. Different
+        # terminals can format the same live process differently, so never
+        # delete an otherwise alive session only because the identity text
+        # does not match.
+        return True
     return True
 
 
@@ -1359,7 +1367,8 @@ def _write_session_guard_marker(session_home, *, account_id="", runtime_kind="",
     os.makedirs(os.path.dirname(marker_path), exist_ok=True)
     with locked_state_file(marker_path):
         marker = _load_json_dict_unlocked(marker_path)
-        launcher_pid = int(marker.get("launcher_pid") or os.getpid())
+        launcher_pid = os.getpid()
+        launcher_identity = _session_guard_process_identity(launcher_pid)
         marker.update(
             {
                 "account_id": str(account_id or marker.get("account_id") or "").strip(),
@@ -1367,8 +1376,8 @@ def _write_session_guard_marker(session_home, *, account_id="", runtime_kind="",
                 "session_home": str(session_home or ""),
                 "launcher_pid": launcher_pid,
                 "launcher_identity": str(
-                    marker.get("launcher_identity")
-                    or _session_guard_process_identity(launcher_pid)
+                    launcher_identity
+                    or marker.get("launcher_identity")
                     or ""
                 ).strip(),
                 "updated_at": _guard_utc_now(),
@@ -2352,6 +2361,9 @@ _CLAUDE_OAUTH_ENV_PREFIX_BLOCKLIST = (
 _OPENAI_ENV_PREFIX_BLOCKLIST = (
     "OPENAI_",
 )
+_HEADROOM_ENV_PREFIX_BLOCKLIST = (
+    "HEADROOM_",
+)
 _RUNTIME_PROXY_ENV_KEYS = (
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -2943,9 +2955,9 @@ def repair_current_session_claude_settings(session_claude_dir):
 
 
 def _strip_agent_im_hooks(hooks_data):
-    # Inherit hooks from global settings as-is
-    # Users control what's in their ~/.claude/settings.json
-    return hooks_data if isinstance(hooks_data, dict) else None
+    # MMF owns Claude routing for gateway sessions; inherited Headroom hooks can
+    # re-point Claude Code at the global proxy and shadow the selected bridge.
+    return _filter_hook_commands(hooks_data, _is_headroom_hook_command)
 
 
 def _merge_claude_hook_groups(existing_groups, template_groups):
@@ -4053,6 +4065,13 @@ def _is_mms_managed_hook_command(command_text):
         "oh-my-claudecode",
     )
     return any(marker in command_text for marker in markers)
+
+
+def _is_headroom_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    return "headroom" in command_text
 
 
 def _is_retired_personal_policy_hook_command(command_text):
@@ -6979,6 +6998,30 @@ def _write_claude_session_settings(
     return settings_data, settings_path
 
 
+def _validate_claude_session_settings(settings_path, required_env):
+    if not settings_path or not os.path.isabs(str(settings_path)):
+        return
+    settings_path = str(settings_path)
+    loaded = _load_json_dict_unlocked(settings_path)
+    env_data = loaded.get("env") if isinstance(loaded, dict) else None
+    if not isinstance(env_data, dict):
+        raise RuntimeError(f"Claude session settings missing env: {settings_path}")
+    missing = [
+        key
+        for key in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "MMS_ROUTE_STATUS_PATH")
+        if not str(env_data.get(key) or "").strip()
+    ]
+    if missing:
+        raise RuntimeError(
+            f"Claude session settings missing required env {', '.join(missing)}: {settings_path}"
+        )
+    for key, expected in (required_env or {}).items():
+        if key not in env_data:
+            raise RuntimeError(f"Claude session settings missing required env {key}: {settings_path}")
+        if str(env_data.get(key) or "") != str(expected or ""):
+            raise RuntimeError(f"Claude session settings env mismatch for {key}: {settings_path}")
+
+
 def _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir):
     account_settings = _load_claude_settings_from_dir(account_claude_dir)
     seeded_settings = _sanitize_claude_inherited_settings_payload(
@@ -7207,6 +7250,10 @@ def _scrub_claude_oauth_env(env):
 
 def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
     env = _scrub_claude_oauth_env(env)
+    for key in list(env.keys()):
+        normalized = str(key or "").strip()
+        if any(normalized.startswith(prefix) for prefix in _HEADROOM_ENV_PREFIX_BLOCKLIST):
+            env.pop(key, None)
     if strip_openai:
         for key in list(env.keys()):
             normalized = str(key or "").strip()
@@ -9768,13 +9815,16 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
 
     claude_bin = _resolve_real_home_command_path("claude", env) or "claude"
     cmd = [claude_bin]
+    session_home = env.get("HOME")
+    settings_path = os.path.join(session_home, ".claude", "settings.json") if session_home else ""
+    if settings_path:
+        cmd += ["--settings", settings_path]
     if runtime.get("bypass"):
         cmd += ["--add-dir", os.path.realpath(_safe_getcwd())]
         cmd.append("--dangerously-skip-permissions")
     if extra_args:
         cmd += list(extra_args)
     console.print("[dim]⏳ 正在启动 Claude CLI...[/dim]")
-    session_home = env.get("HOME")
     exit_callback = None
     if session_home:
         exit_callback = lambda exit_code: _finalize_claude_slot(session_home, exit_code=exit_code)
@@ -10801,7 +10851,7 @@ def _claude_gateway_env(
             _load_real_claude_settings(),
             _load_claude_settings_from_dir(persistent_gateway_claude_dir),
         )
-        _write_claude_session_settings(
+        _settings_data, settings_path = _write_claude_session_settings(
             gw_claude_dir,
             required_env=required_settings_env,
             default_env=default_settings_env,
@@ -10813,6 +10863,7 @@ def _claude_gateway_env(
             enable_omc=enable_omc,
             disabled_session_surfaces=disabled_session_surfaces,
         )
+        _validate_claude_session_settings(settings_path, required_settings_env)
     with _timed_launch_step(_timings, "overlay session assets"):
         _overlay_caveman_session_entries(
             gw_claude_dir,

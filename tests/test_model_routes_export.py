@@ -874,6 +874,53 @@ def test_export_model_routes_keeps_antigravity_bridge_models(monkeypatch, tmp_pa
     assert routes["claude-sonnet-4-6"]["primary"]["provider_id"] == "us-cpa-local-antigravity"
 
 
+def test_export_model_routes_keeps_future_claude_models(monkeypatch, tmp_path):
+    import mms_router
+
+    models = [
+        "claude-opus-4-6",
+        "claude-opus-4-8",
+        "claude-opus-4-9",
+        "claude-qwen-proxy",
+        "claude-sonnet-4-6",
+    ]
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "maxcc": {
+                "id": "maxcc",
+                "provider_name": "maxcc",
+                "anthropic_base_url": "https://api.bestmax.cc/v1",
+                "openai_base_url": "https://api.bestmax.cc/v1",
+                "api_key": "sk-maxcc",
+                "models": models,
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+
+    cfg = {
+        "provider": {"default": "maxcc"},
+        "providers": [
+            {
+                "id": "maxcc",
+                "role": "auto",
+                "priority": 100,
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["claude", "codex", "opencode"],
+                "models": models,
+            }
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True)
+
+    assert routes["claude-opus-4-8"]["primary"]["provider_id"] == "maxcc"
+    assert routes["claude-opus-4-9"]["primary"]["provider_id"] == "maxcc"
+    assert "claude-qwen-proxy" not in routes
+
+
 def test_export_model_routes_uses_startup_safe_probe_when_requested(monkeypatch, tmp_path):
     import mms_core
     import mms_router

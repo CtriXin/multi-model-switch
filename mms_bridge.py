@@ -3562,6 +3562,11 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         # Translate /v1/responses → /v1/messages so gateway only sees Messages API
         if path_bare == "/v1/responses":
             path = "/v1/messages" + path[len("/v1/responses"):]
+            path_bare = path.split("?")[0]
+
+        if path_bare == "/v1/messages/count_tokens":
+            self._json(200, {"input_tokens": _count_tokens_approx(payload)})
+            return
 
         # ── debug: 记录每次 bridge 收到的请求 ──
         _lb_debug_paths = [os.path.join(resolve_mms_config_dir(), "lb_debug.log")]

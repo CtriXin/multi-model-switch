@@ -29,6 +29,45 @@ def test_default_mms_keeps_openrouter_claude_visible():
     ]
 
 
+def test_provider_model_patch_keeps_current_and_future_claude_selectors():
+    import mms_core
+
+    provider = {
+        "id": "maxcc",
+        "fallback_models": [
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-opus-5-0",
+            "claude-fable-5",
+            "claude-qwen3-coder",
+            "claude-legacy-2-1",
+            "claude-haiku-3-5",
+        ],
+        "extra_models": [],
+        "hidden_models": [],
+    }
+
+    patched = mms_core._apply_provider_model_patch(
+        provider,
+        {
+            "raw_models": provider["fallback_models"],
+            "models": provider["fallback_models"],
+            "base_source": "approved",
+        },
+    )
+
+    assert patched["models"] == [
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-opus-5-0",
+        "claude-fable-5",
+    ]
+
+
 def test_builtin_scene_catalog_is_removed_from_launcher_surface():
     import mms_core
 

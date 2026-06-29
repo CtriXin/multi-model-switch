@@ -771,6 +771,56 @@ def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claud
     assert "mcpServers" not in result
 
 
+def test_build_claude_session_settings_strips_headroom_runtime_hooks(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+
+    result = mms_launchers._build_claude_session_settings(
+        {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup|resume",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/Users/xin/.local/bin/headroom init hook ensure --profile init-user",
+                            },
+                            {"type": "command", "command": "/bin/echo keep"},
+                        ],
+                    }
+                ]
+            },
+            "env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787",
+                "HEADROOM_PORT": "8787",
+            },
+            "enabledPlugins": {"headroom@headroom-marketplace": True},
+        },
+        required_env={
+            "ANTHROPIC_BASE_URL": "http://127.0.0.1:50105",
+            "ANTHROPIC_AUTH_TOKEN": "bridge-token",
+            "MMS_ROUTE_STATUS_PATH": "/tmp/route-status.json",
+        },
+    )
+
+    commands = [
+        hook.get("command")
+        for groups in (result.get("hooks") or {}).values()
+        for group in groups
+        for hook in group.get("hooks", [])
+        if isinstance(hook, dict)
+    ]
+    assert "/bin/echo keep" in commands
+    assert not any("headroom" in str(command).lower() for command in commands)
+    assert result["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:50105"
+    assert "HEADROOM_PORT" not in result["env"]
+    assert "enabledPlugins" not in result
+
+
 def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -3107,7 +3157,11 @@ def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch,
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(
+        mms_launchers,
+        "_claude_route_status_paths",
+        lambda *args, **kwargs: [str(tmp_path / "route-status.json")],
+    )
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -3122,6 +3176,9 @@ def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch,
     assert env["ECC_PLUGIN_ROOT"] == str(ecc_root)
     assert env["ECC_HOOK_PROFILE"] == "standard"
     settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "ANTHROPIC_API_KEY" not in settings["env"]
+    assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "bridge-token"
     assert settings["env"]["CLAUDE_PLUGIN_ROOT"] == str(ecc_root)
     assert settings["env"]["ECC_PLUGIN_ROOT"] == str(ecc_root)
     session_start_commands = [
@@ -3167,7 +3224,7 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -3234,7 +3291,7 @@ def test_claude_gateway_env_exposes_agent_rules_diagnostics(monkeypatch, tmp_pat
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -3292,7 +3349,7 @@ def test_claude_gateway_env_materializes_session_toon_skill_and_export(monkeypat
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: str(toon_script))
     monkeypatch.setattr(mms_launchers, "_SESSION_REAL_HOME_WRAPPER_COMMANDS", ())
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -3537,6 +3594,86 @@ def test_cleanup_stale_sessions_respects_launch_cap(tmp_path):
 
     remaining = sorted(item.name for item in sessions_dir.iterdir())
     assert len(remaining) == 2
+
+
+def test_cleanup_stale_sessions_keeps_live_legacy_locale_identity(monkeypatch, tmp_path):
+    import mms_launchers
+
+    sessions_dir = tmp_path / "sessions"
+    session_home = sessions_dir / "1234"
+    session_home.mkdir(parents=True)
+    marker_path = session_home / mms_launchers._SESSION_GUARD_MARKER_NAME
+    marker_path.write_text(
+        json.dumps(
+            {
+                "launcher_pid": 1234,
+                "launcher_identity": "/opt/homebrew/Ce 五  6月/26 21:29:13 2026",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_kill(pid, sig):
+        if int(pid) == 1234:
+            return None
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(mms_launchers.os, "kill", fake_kill)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_session_guard_process_identity",
+        lambda _pid: "/opt/homebrew/Ce Fri Jun 26 21:29:13 2026",
+    )
+
+    mms_launchers._cleanup_stale_sessions(str(sessions_dir))
+
+    assert session_home.exists()
+
+
+def test_write_session_guard_marker_refreshes_launcher_identity(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "sessions" / "2222"
+    session_home.mkdir(parents=True)
+    marker_path = session_home / mms_launchers._SESSION_GUARD_MARKER_NAME
+    marker_path.write_text(
+        json.dumps({"launcher_pid": 1111, "launcher_identity": "legacy-locale"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mms_launchers.os, "getpid", lambda: 2222)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_session_guard_process_identity",
+        lambda pid: f"canonical-{pid}",
+    )
+
+    mms_launchers._write_session_guard_marker(str(session_home), account_id="relay-a", runtime_kind="api_key")
+
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert marker["launcher_pid"] == 2222
+    assert marker["launcher_identity"] == "canonical-2222"
+    assert marker["account_id"] == "relay-a"
+
+
+def test_validate_claude_session_settings_requires_auth_env(tmp_path):
+    import mms_launchers
+
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://relay.example.com"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="ANTHROPIC_AUTH_TOKEN"):
+        mms_launchers._validate_claude_session_settings(
+            str(settings_path),
+            {
+                "ANTHROPIC_AUTH_TOKEN": "bridge-token",
+                "ANTHROPIC_BASE_URL": "https://relay.example.com",
+                "MMS_ROUTE_STATUS_PATH": str(tmp_path / "route_status.json"),
+            },
+        )
 
 
 def test_claude_guard_runtime_uses_gateway_home_for_api_key(monkeypatch, tmp_path):
@@ -3806,6 +3943,10 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
     assert captured["prepare_kwargs"]["auth_token"] == "bridge-token"
     assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
     assert captured["prepare_kwargs"]["display_model"] == "mimo-v2.5-pro"
+    assert captured["cmd"][1:3] == [
+        "--settings",
+        str(tmp_path / "session" / ".claude" / "settings.json"),
+    ]
     assert captured["exec_kwargs"]["bridge_info"]["base_url"] == "http://127.0.0.1:4567/v1"
 
 
@@ -5481,6 +5622,8 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-parent")
     monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-haiku-4-5")
+    monkeypatch.setenv("HEADROOM_PORT", "8787")
+    monkeypatch.setenv("HEADROOM_MODE", "token")
 
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
@@ -5491,7 +5634,7 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_claude_gateway_home", lambda: str(gateway_home))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
@@ -5504,6 +5647,8 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     assert env["ANTHROPIC_AUTH_TOKEN"] == "bridge-token"
     assert env["ANTHROPIC_BASE_URL"] == "https://relay.example.com"
     assert "ANTHROPIC_API_KEY" not in env
+    assert "HEADROOM_PORT" not in env
+    assert "HEADROOM_MODE" not in env
     assert env["CLAUDE_CODE_SUBAGENT_MODEL"] != "claude-haiku-4-5"
 
 
@@ -5570,7 +5715,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(
         mms_launchers,
         "_session_managed_mcp_servers",
@@ -5648,7 +5793,7 @@ def test_claude_gateway_env_does_not_restore_project_scoped_resume_pointer_on_ne
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(
         mms_launchers,
         "list_indexed_sessions",
@@ -5735,7 +5880,7 @@ def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer_on_new_l
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
-    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(
         mms_launchers,
         "list_indexed_sessions",
@@ -5984,6 +6129,48 @@ def test_gateway_bridge_post_disables_trust_env_and_respects_runtime_proxy(monke
     assert captured["url"] == "https://relay.example.com/v1/messages"
     assert captured["kwargs"]["trust_env"] is False
     assert captured["kwargs"]["proxy"] == "http://127.0.0.1:15721"
+
+
+def test_gateway_bridge_handles_count_tokens_locally(monkeypatch):
+    import mms_bridge
+
+    def fake_post(*_args, **_kwargs):
+        raise AssertionError("count_tokens must not be forwarded upstream")
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(post=fake_post))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    raw_body = json.dumps(
+        {
+            "model": "MiniMax-M3",
+            "system": [{"type": "text", "text": "stable prefix"}],
+            "messages": [{"role": "user", "content": "hi from claude code"}],
+        }
+    ).encode("utf-8")
+
+    captured = {}
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.path = "/v1/messages/count_tokens?beta=true"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "authorization": "Bearer bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+    )
+    handler._json = lambda code, payload: captured.update({"code": code, "payload": payload})
+    handler.send_response = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("send_response should not be called"))
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["code"] == 200
+    assert captured["payload"]["input_tokens"] >= 1
 
 
 def test_gateway_bridge_preserves_qwen_anthropic_cache_control(monkeypatch):

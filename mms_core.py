@@ -7622,6 +7622,16 @@ def _derived_model_aliases(base_models, provider=None):
     return aliases
 
 
+def _is_legacy_claude_model_selector(model_id):
+    tail = str(model_id or "").strip().lower().rsplit("/", 1)[-1]
+    if not tail.startswith("claude-"):
+        return False
+    if tail.startswith("claude-legacy-"):
+        return True
+    major = re.search(r"-(\d+)(?:[-.]|$)", tail)
+    return bool(major and int(major.group(1)) < 4)
+
+
 def _apply_provider_model_patch(provider, base_result):
     result = dict(base_result)
     base_models = _normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
@@ -7654,15 +7664,10 @@ def _apply_provider_model_patch(provider, base_result):
 
     # 过滤 claude- 前缀国产别名和旧版 Claude 模型
     _DOMESTIC_KW = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
-    _CLAUDE_KEEP = {
-        "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-sonnet-4-6",
-        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
-        "claude-haiku-4-5-20251001",
-    }
     effective_models = [
         m for m in effective_models
         if not (m.startswith("claude-") and any(kw in m.lower() for kw in _DOMESTIC_KW))
-        and not (m.startswith("claude-") and m not in _CLAUDE_KEEP)
+        and not _is_legacy_claude_model_selector(m)
     ]
 
     hidden_applied = [model_id for model_id in effective_models if model_id.lower() in hidden_requested_lower]
