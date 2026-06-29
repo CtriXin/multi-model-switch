@@ -10806,6 +10806,26 @@ def _claude_gateway_env(
                 or best_model
             ),
         )
+    settings_context_window = _effective_context_window(
+        *[m for m in (display_model, selected_model, heavy_model, medium_model, light_model, best_model) if m],
+        enable_claude_1m=enable_claude_1m,
+        provider_id=provider_id,
+    )
+    required_settings_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(settings_context_window)
+    required_settings_env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(settings_context_window - 3000, 10000))
+    _apply_claude_shell_context_slots(
+        required_settings_env,
+        context_window=settings_context_window,
+        fallback_model=(
+            required_settings_env.get("ANTHROPIC_MODEL")
+            or selected_model
+            or heavy_model
+            or best_model
+            or "claude-sonnet-4-6"
+        ),
+        enable_1m=enable_claude_1m,
+        provider_id=provider_id,
+    )
     with _timed_launch_step(_timings, "write session settings"):
         host_context_env = _install_host_context_env(
             {},
@@ -10929,6 +10949,21 @@ def _claude_gateway_env(
                 or heavy_model
                 or best_model,
             )
+        env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(settings_context_window)
+        env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(settings_context_window - 3000, 10000))
+        _apply_claude_shell_context_slots(
+            env,
+            context_window=settings_context_window,
+            fallback_model=(
+                env.get("ANTHROPIC_MODEL")
+                or selected_model
+                or heavy_model
+                or best_model
+                or "claude-sonnet-4-6"
+            ),
+            enable_1m=enable_claude_1m,
+            provider_id=provider_id,
+        )
         if not sensitive_provider:
             env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
         env = _configure_agent_pack_session_env(env, agent_pack=agent_pack)

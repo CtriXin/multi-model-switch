@@ -3248,6 +3248,75 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
 
 
+def test_claude_gateway_env_persists_1m_routed_shell_slots(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_prepare_claude_session_tree",
+        lambda _home, claude_dir, **_kwargs: os.makedirs(claude_dir, exist_ok=True),
+    )
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "claude-sonnet-4-6")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda *args, **kwargs: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "_get_model_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
+
+    env = mms_launchers._claude_gateway_env(
+        {
+            "id": "direct-zai",
+            "api_key": "sk-runtime",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "claude_1m_mode": "auto",
+        },
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        heavy_model="claude-sonnet-4-6",
+        selected_model="claude-sonnet-4-6",
+        display_model="glm-5.2",
+    )
+
+    settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    settings_env = settings["env"]
+    one_m_slots = (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    )
+    for key in one_m_slots:
+        assert env[key] == "claude-sonnet-4-6[1m]"
+        assert settings_env[key] == "claude-sonnet-4-6[1m]"
+    assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-sonnet-4-6"
+    assert settings_env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-sonnet-4-6"
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1000000"
+    assert settings_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1000000"
+    assert env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "997000"
+    assert settings_env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "997000"
+    assert env["MMS_MODEL_NAME"] == "glm-5.2"
+    assert settings_env["MMS_MODEL_NAME"] == "glm-5.2"
+
+
 def test_claude_gateway_env_exposes_agent_rules_diagnostics(monkeypatch, tmp_path):
     import mms_launchers
 
