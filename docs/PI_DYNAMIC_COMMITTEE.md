@@ -77,11 +77,32 @@ python3 scripts/pi_committee.py \
 
 ## Parent 集成
 
-Parent 只需要完成两件事：
+Codex 或 Claude 可以显式调用 repo-local `$pi-committee` skill source。该 skill 位于 `assets/session-assets/skills/pi-committee/`，`allow_implicit_invocation` 为 `false`。当前实现不会自动注册或注入这个新 skill；Parent 必须明确读取该 `SKILL.md`，或直接调用它的 runner。这样既不安装进 `~/.codex/skills`、`~/.claude/skills`，也不修改 preferences、launcher 或 OpenCode。
+
+Parent adapter 可以直接派发任务并输出 `mms.pi_committee.parent_packet.v1`：
+
+```bash
+python3 scripts/pi_committee_parent.py \
+  --config-root /explicit/path/to/mms-config-root \
+  --task-file /path/to/mission.md \
+  --cwd /path/to/target-repo \
+  --output /path/to/parent-packet.json
+```
+
+也可以把已有 raw result 转成 parent packet，不发起 provider call：
+
+```bash
+python3 scripts/pi_committee_parent.py \
+  --result /path/to/pi-committee-result.json \
+  --output /path/to/parent-packet.json
+```
+
+Parent packet 保留完整 public plan、所有原始 member response、flattened evidence index、route health、failure/raw/fallback 状态和 synthesis contract。Parent 需要完成三件事：
 
 1. 生成 mission text 并调用 sidecar。
-2. 读取 `mms.pi_committee.result.v1`，根据各成员的 `verdict/findings/evidence` 做最终 synthesis。
+2. 完整读取 parent packet，包括失败和 raw response。
+3. 根据 `synthesis_contract` 输出 committee health、共识、分歧、独立发现、风险、建议和 confidence。
 
-Sidecar 本身不绑定 Codex 或 Claude，也不负责替 parent 做最终决策。这样可以随时更换 parent，worker runtime 不需要改名或重配。
+Adapter 不用 string similarity 假装推断 semantic consensus，也不会调用第八个 synthesis model。最终判断始终属于当前 Codex/Claude parent，因此可以随时更换 parent，worker runtime 不需要改名或重配。
 
 每个成功结果都包含 `cache_transport_evidence.v1`；发生 route fallback 时，每次 attempt 也保留独立 evidence。结果不会包含 API key。
