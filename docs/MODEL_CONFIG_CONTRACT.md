@@ -298,7 +298,7 @@ source-overlay surface, not the downstream source of truth:
 |---|---|
 | DeepSeek | `deepseek-v4-flash`, `deepseek-v4-pro` |
 | MiMo | `mimo-v2.5`, `mimo-v2.5-pro` |
-| Kimi | `kimi-for-coding`, `kimi-k2.5`, `K2.6` |
+| Kimi | `k3`, `k3[1m]`, `kimi-k3`, `kimi-for-coding`, `kimi-for-coding-highspeed`, `kimi-k2.7-code`, `kimi-k2.5`, `K2.6` |
 | Qwen | `qwen3-coder-plus`, `qwen3.5-plus`, `qwen3.6-plus` |
 | GLM | `glm-5-turbo`, `glm-5.1` |
 | MiniMax | `MiniMax-M2.7` |
@@ -306,7 +306,7 @@ source-overlay surface, not the downstream source of truth:
 | Claude / Antigravity | `claude-sonnet-4-6`, `claude-opus-4-6-thinking` |
 | GPT / OpenAI | `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.4`, `gpt-5.5`, `gpt-image-2` |
 
-`K2.6` is intentionally classified under the Kimi family by policy. `gpt-5.3-codex-spark`
+`k3` and `K2.6` are intentionally classified under the Kimi family by policy. `gpt-5.3-codex-spark`
 uses the CPA local Codex channel (`us-cpa-local-codex`). The old Gemini preview
 surface (`gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, `gemini-3.1-pro-preview`)
 is retired from the official policy surface; current Gemini 3.5/3.1 access goes

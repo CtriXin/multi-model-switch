@@ -1976,6 +1976,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "function selectProvider(index)" in html
+    assert "activeProvider=next;renderProviders()" in html
+    assert "activeProvider=Number(el.dataset.i);renderAll()" not in html
     assert "['claude','codex','opencode','pi','agy']" in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
     assert "这里直接改 MMS 启动会读取的模型能力" in html
@@ -2004,6 +2007,9 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function providerEntries()" in html
     assert "a.p.enabled?-1:1" in html
     assert "renderProviderList();renderTestSelectors();" in html
+    assert "function selectProvider(index)" in html
+    assert "activeProvider=next;renderProviders()" in html
+    assert "activeProvider=Number(el.dataset.i);renderAll()" not in html
     assert "通道修改已暂存，生成保存预览后再写入" in html
 
 
@@ -4576,6 +4582,7 @@ def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, t
             "id": "demo",
             "models": [
                 {"id": "minimax-m3[1m]", "visible": True, "capabilities": {"vision": False}},
+                {"id": "moonshotai/kimi-k3", "visible": True, "capabilities": {"vision": False}},
             ],
         },
         "fields": ["context_window_tokens", "max_output_tokens", "vision", "tool_use", "reasoning", "one_m_context"],
@@ -4606,6 +4613,21 @@ def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, t
                         "max_completion_tokens": 512000,
                     },
                     "supported_parameters": ["tools", "tool_choice", "reasoning", "include_reasoning", "max_tokens"],
+                },
+                {
+                    "id": "moonshotai/kimi-k3",
+                    "name": "Kimi K3",
+                    "canonical_slug": "moonshotai/kimi-k3-20260715",
+                    "context_length": 1048576,
+                    "architecture": {
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                    },
+                    "top_provider": {
+                        "context_length": 1048576,
+                        "max_completion_tokens": None,
+                    },
+                    "supported_parameters": ["tools", "tool_choice", "reasoning", "reasoning_effort", "include_reasoning", "max_tokens"],
                 }
             ]
         },
@@ -4619,7 +4641,7 @@ def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, t
 
     assert result["ok"] is True
     assert result["source_mode"] == "openrouter_catalog"
-    assert result["matched_model_count"] == 1
+    assert result["matched_model_count"] == 2
     caps = result["model_capabilities"]["minimax-m3[1m]"]
     assert caps["context_window_tokens"] == 1048576
     assert caps["max_output_tokens"] == 512000
@@ -4628,6 +4650,13 @@ def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, t
     assert caps["reasoning"] is True
     assert caps["one_m_context"] is True
     assert result["model_sources"]["minimax-m3[1m]"]["context_window_tokens"]["source_layer"] == "provider_catalog"
+    kimi_caps = result["model_capabilities"]["moonshotai/kimi-k3"]
+    assert kimi_caps["context_window_tokens"] == 1048576
+    assert "max_output_tokens" not in kimi_caps
+    assert kimi_caps["vision"] is True
+    assert kimi_caps["tool_use"] is True
+    assert kimi_caps["reasoning"] is True
+    assert kimi_caps["one_m_context"] is True
     assert result["catalog_sources"][0]["source"] == "openrouter"
     assert "不是厂商官方真值" in result["note"]
 
@@ -4768,7 +4797,9 @@ def test_config_web_reasoning_effort_and_control_are_saved_to_model_policy(tmp_p
 
 
 
-def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
+def test_config_web_mmf_official_overrides_use_provider_profiles(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
     payload = {
         "provider": {
             "id": "demo",
@@ -4777,6 +4808,8 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
                 {"id": "gemini-3.1-pro-low", "visible": True},
                 {"id": "gpt-5.5", "visible": True},
                 {"id": "deepseek-v4-pro", "visible": True},
+                {"id": "k3", "visible": True},
+                {"id": "k3[1m]", "visible": True},
                 {"id": "kimi-k2.7-code", "visible": True},
                 {"id": "MiniMax-M3", "visible": True},
             ],
@@ -4804,7 +4837,7 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
     assert result["ok"] is True
     assert result["source_mode"] == "mmf_official_overrides"
     assert result["force_apply"] is True
-    assert result["matched_model_count"] == 6
+    assert result["matched_model_count"] == 8
     assert result["catalog_sources"][0]["source"] == "mmf_official_overrides"
     assert result["model_sources"]["glm-5.2"]["context_window_tokens"]["source_name"] == "MMF 官方覆盖"
 
@@ -4827,6 +4860,21 @@ def test_config_web_mmf_official_overrides_use_provider_profiles(tmp_path):
     deepseek = result["model_capabilities"]["deepseek-v4-pro"]
     assert deepseek["context_window_tokens"] == 1_000_000
     assert deepseek["max_output_tokens"] == 384_000
+
+    k3 = result["model_capabilities"]["k3"]
+    assert k3["context_window_tokens"] == 262_144
+    assert k3["max_output_tokens"] == 131_072
+    assert k3["vision"] is True
+    assert k3["reasoning_effort"] == "max"
+    assert k3["thinking_control"]["path"] == "reasoning_effort"
+    assert k3["thinking_control"]["mode"] == "always_on"
+    assert k3["thinking_control"]["disable_supported"] is False
+
+    k3_one_m = result["model_capabilities"]["k3[1m]"]
+    assert k3_one_m["context_window_tokens"] == 1_048_576
+    assert k3_one_m["max_output_tokens"] == 1_048_576
+    assert k3_one_m["vision"] is True
+    assert k3_one_m["reasoning_effort"] == "max"
 
     kimi = result["model_capabilities"]["kimi-k2.7-code"]
     assert kimi["context_window_tokens"] == 262_144

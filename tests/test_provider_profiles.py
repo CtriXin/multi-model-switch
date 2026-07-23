@@ -285,6 +285,104 @@ def test_kimi_k27_profile_keeps_thinking_enabled_when_disabled_requested(monkeyp
     assert payload["thinking"] == {"type": "enabled"}
 
 
+def test_kimi_k3_profile_uses_reasoning_effort_without_k2_thinking_patch(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    payload = {"model": "k3", "messages": [], "thinking": {"type": "enabled"}}
+
+    profile_id = profiles.apply_profile_body_patches(
+        payload,
+        protocol="anthropic_messages",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+        model_name="k3",
+        thinking_enabled=True,
+        reasoning_effort="high",
+    )
+
+    assert profile_id == "kimi-code"
+    assert profiles.resolve_provider_profile(provider_id="demo", model_name="k3")[0] == "kimi-code"
+    assert payload["reasoning_effort"] == "max"
+    assert "thinking" not in payload
+    disabled_payload = {"model": "k3", "messages": [], "thinking": {"type": "disabled"}}
+    profiles.apply_profile_body_patches(
+        disabled_payload,
+        protocol="anthropic_messages",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+        model_name="k3",
+        thinking_enabled=False,
+        reasoning_effort="low",
+    )
+    assert disabled_payload["reasoning_effort"] == "max"
+    assert "thinking" not in disabled_payload
+    assert profiles.profile_context_window(
+        "k3",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 262_144
+    assert profiles.profile_context_window(
+        "k3[1m]",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 1_048_576
+    assert profiles.profile_context_window(
+        "kimi-k3",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    ) == 1_048_576
+    caps = profiles.profile_thinking_capabilities(
+        "k3",
+        provider_id="kimi",
+        base_url="https://api.kimi.com/coding/",
+    )
+    assert caps["profile"] == "kimi-code"
+    assert caps["thinking_supported"] is True
+    assert caps["effort_allowed"] == ["max"]
+    assert caps["effort_default"] == "max"
+    assert caps["effort_map"]["high"] == "max"
+
+
+def test_openrouter_kimi_k3_profile_aliases_to_moonshot_wire_model(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    payload = {"model": "k3", "messages": []}
+
+    profile_id = profiles.apply_profile_body_patches(
+        payload,
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        model_name="k3",
+        thinking_enabled=True,
+        reasoning_effort="low",
+    )
+
+    assert profile_id == "openrouter-moonshot-kimi-k3"
+    assert payload["reasoning_effort"] == "max"
+    assert profiles.profile_model_alias(
+        "k3",
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == "moonshotai/kimi-k3"
+    assert profiles.profile_model_alias(
+        "k3[1m]",
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == "moonshotai/kimi-k3"
+    assert profiles.profile_model_alias(
+        "moonshotai/kimi-k3",
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == "moonshotai/kimi-k3"
+    assert profiles.profile_context_window(
+        "moonshotai/kimi-k3",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == 1_048_576
+
+
 def test_profile_context_window_and_references(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 

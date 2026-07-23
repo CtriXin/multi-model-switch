@@ -221,15 +221,20 @@ def _profile_match_score(profile_id: str, profile: dict[str, Any], *, provider_i
     model_matched = any(model_l.startswith(token) for token in model_prefixes)
     require_model_prefix = bool(match.get("require_model_prefix") or match.get("provider_base_requires_model_prefix"))
     allow_provider_base_match = not (require_model_prefix and model_prefixes and not model_matched)
+    provider_base_matched = False
 
     for item in match.get("provider_id_contains") or []:
         token = _lower(item)
         if allow_provider_base_match and token and token in provider_l:
+            provider_base_matched = True
             score = max(score, 70)
     for item in match.get("base_url_contains") or []:
         token = _lower(item)
         if allow_provider_base_match and token and token in base_l:
+            provider_base_matched = True
             score = max(score, 90)
+    if match.get("require_provider_or_base") and not provider_base_matched:
+        return 0
     for token in model_prefixes:
         if token and model_l.startswith(token):
             score = max(score, 50)
@@ -483,6 +488,23 @@ def _normalize_budget(value: Any, config: dict[str, Any]) -> int | None:
         return None
 
 
+def _profile_forces_thinking_enabled(thinking: dict[str, Any]) -> bool:
+    mode = _lower(thinking.get("mode"))
+    if mode in {"always_on", "required", "force_on"}:
+        return True
+    return thinking.get("disable_supported") is False
+
+
+def _effective_thinking_enabled(thinking: dict[str, Any], requested: bool | None) -> bool | None:
+    effective = requested
+    if effective is None:
+        default_enabled = thinking.get("default_enabled")
+        effective = default_enabled if isinstance(default_enabled, bool) else None
+    if _profile_forces_thinking_enabled(thinking):
+        return True
+    return effective
+
+
 def _relay_model_profile_hint(*, provider_id: str, base_url: str, model_name: str) -> str:
     provider_l = _lower(provider_id)
     base_l = _lower(base_url)
@@ -527,10 +549,7 @@ def apply_profile_body_patches(
             _apply_patch_map(payload, protocol_patches[purpose])
         else:
             thinking = _effective_section(profile, "thinking", effective_model)
-            effective_enabled = thinking_enabled
-            if effective_enabled is None:
-                default_enabled = thinking.get("default_enabled")
-                effective_enabled = default_enabled if isinstance(default_enabled, bool) else None
+            effective_enabled = _effective_thinking_enabled(thinking, thinking_enabled)
             patch_key = "thinking_on" if effective_enabled is True else "thinking_off" if effective_enabled is False else ""
             if patch_key and isinstance(protocol_patches.get(patch_key), dict):
                 _apply_patch_map(payload, protocol_patches[patch_key])
@@ -539,10 +558,7 @@ def apply_profile_body_patches(
     effort_config = effort_by_protocol.get(protocol) if isinstance(effort_by_protocol.get(protocol), dict) else {}
     if effort_config.get("path"):
         thinking = _effective_section(profile, "thinking", effective_model)
-        effective_enabled = thinking_enabled
-        if effective_enabled is None:
-            default_enabled = thinking.get("default_enabled")
-            effective_enabled = default_enabled if isinstance(default_enabled, bool) else None
+        effective_enabled = _effective_thinking_enabled(thinking, thinking_enabled)
         if effective_enabled is False:
             _delete_path(payload, str(effort_config["path"]))
         else:
@@ -554,10 +570,7 @@ def apply_profile_body_patches(
     budget_config = budget_by_protocol.get(protocol) if isinstance(budget_by_protocol.get(protocol), dict) else {}
     if budget_config.get("path"):
         thinking = _effective_section(profile, "thinking", effective_model)
-        effective_enabled = thinking_enabled
-        if effective_enabled is None:
-            default_enabled = thinking.get("default_enabled")
-            effective_enabled = default_enabled if isinstance(default_enabled, bool) else None
+        effective_enabled = _effective_thinking_enabled(thinking, thinking_enabled)
         if effective_enabled is False:
             _delete_path(payload, str(budget_config["path"]))
         else:

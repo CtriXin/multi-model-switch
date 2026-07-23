@@ -96,6 +96,9 @@ _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
     "gpt-5.4",
     "gpt-5.5",
+    "k3",
+    "k3[1m]",
+    "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
     "kimi-k2.5",
@@ -118,6 +121,8 @@ _REASONING_HINTS = (
     "o3-",
     "o4-",
     "qwen3",
+    "k3",
+    "kimi-k3",
     "kimi-k2",
     "glm-5",
     "deepseek",
@@ -1020,11 +1025,17 @@ def _truth_model_index_key(value: Any) -> str:
 
 
 def _truth_model_index_keys(value: Any) -> list[str]:
+    raw = _safe_text(value).lower()
     text = _truth_normalize_model_key(value)
-    if not text:
+    if not raw and not text:
         return []
-    tail = text.rsplit("/", 1)[-1] if "/" in text else text
-    return list(dict.fromkeys([text, tail]))
+    keys: list[str] = []
+    for item in (raw, text):
+        if not item:
+            continue
+        tail = item.rsplit("/", 1)[-1] if "/" in item else item
+        keys.extend([item, tail])
+    return list(dict.fromkeys(keys))
 
 
 def _truth_model_ids_from_provider(provider: dict[str, Any]) -> list[str]:
@@ -4150,9 +4161,10 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             if row_policy_caps is not None:
                 existing_caps = caps_map.get(model_id) if isinstance(caps_map.get(model_id), dict) else {}
                 row_caps = row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {}
+                preserved_caps = positive_capability_overlays(row_caps) if existing_caps else {}
                 caps_map[model_id] = {
                     **existing_caps,
-                    **positive_capability_overlays(row_caps),
+                    **preserved_caps,
                     **row_policy_caps,
                 }
             else:

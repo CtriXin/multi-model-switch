@@ -770,14 +770,19 @@ def _profile_match_score(profile_id: str, profile: Mapping[str, Any], *, provide
     model_matched = any(model_l.startswith(token) for token in model_prefixes)
     require_model_prefix = bool(match.get("require_model_prefix") or match.get("provider_base_requires_model_prefix"))
     allow_provider_base_match = not (require_model_prefix and model_prefixes and not model_matched)
+    provider_base_matched = False
     for item in match.get("provider_id_contains") or []:
         token = _lower(item)
         if allow_provider_base_match and token and token in provider_l:
+            provider_base_matched = True
             score = max(score, 70)
     for item in match.get("base_url_contains") or []:
         token = _lower(item)
         if allow_provider_base_match and token and token in base_l:
+            provider_base_matched = True
             score = max(score, 90)
+    if match.get("require_provider_or_base") and not provider_base_matched:
+        return 0
     for token in model_prefixes:
         if token and model_l.startswith(token):
             score = max(score, 50)
@@ -933,8 +938,10 @@ def _thinking_patch_paths(body_patches: Mapping[str, Any]) -> list[str]:
         for patch in protocol_patches.values():
             if not isinstance(patch, Mapping):
                 continue
-            for path in patch:
+            for path, value in patch.items():
                 path_s = _clean(path)
+                if value == "__delete__":
+                    continue
                 if "thinking" in _lower(path_s) and path_s not in paths:
                     paths.append(path_s)
     return paths

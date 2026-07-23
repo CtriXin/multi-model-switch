@@ -74,7 +74,7 @@ TOP_SOURCE_COMPANIES = [
         "id": "moonshot-kimi",
         "company": "Moonshot AI",
         "brand": "Kimi",
-        "families": ["kimi-*", "kimi-for-coding"],
+        "families": ["kimi-*", "k3", "k3[1m]", "kimi-for-coding", "kimi-for-coding-highspeed"],
         "source_kind": "hybrid",
         "oauth_native": True,
         "default_adapter": "provider_api",
@@ -85,6 +85,8 @@ TOP_SOURCE_COMPANIES = [
             "https://www.kimi.com/coding/en",
             "https://www.kimi.com/coding/docs/en/",
             "https://www.kimi.com/code/docs/en/third-party-agents.html",
+            "https://platform.kimi.com/docs/guide/kimi-k3-quickstart",
+            "https://platform.kimi.com/docs/guide/claude-code-kimi",
         ],
     },
     {
@@ -241,8 +243,8 @@ PROVIDER_TEMPLATES = {
         "supported_clis": ["claude", "opencode", "qwen", "kimi"],
         "priority": 80,
         "default_openai_base_url": "https://api.moonshot.cn/v1",
-        "default_anthropic_base_url": "https://api.moonshot.ai/anthropic/",
-        "note": "Kimi / Moonshot 来源模板，同时支持 OpenAI（.cn）和 Anthropic（.ai）协议；当前默认不直接暴露给 codex。",
+        "default_anthropic_base_url": "https://api.moonshot.cn/anthropic",
+        "note": "Kimi / Moonshot 来源模板，同时支持 OpenAI 与 Anthropic 兼容协议；Moonshot API 用 kimi-k3，Kimi Code 1M selector 用 k3[1m]，当前默认不直接暴露给 codex。",
     },
     "kimi-codingplan": {
         "id": "kimi-codingplan",

@@ -219,9 +219,15 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
     "deepseek-v4-pro": 384000,
     "gpt-5.3-codex": 128000,
     "gpt-5.3-codex-spark": 32000,
+    "k3": 131072,
+    "k3[1m]": 1048576,
+    "kimi-k3": 1048576,
     "k2.6": 32768,
     "k2.6-code-preview": 32768,
     "kimi-for-coding": 32768,
+    "kimi-for-coding-highspeed": 32768,
+    "kimi-k2.7-code": 32768,
+    "kimi-k2.7-code-highspeed": 32768,
     "kimi-k2.6": 32768,
     "kimi-k2.6-code-preview": 32768,
     "mimo-v2-flash": 65536,
@@ -239,6 +245,9 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
 _PI_MODEL_CONTEXT_WINDOW_HINTS = {
     "gpt-5.3-codex": 400000,
     "gpt-5.3-codex-spark": 128000,
+    "k3": 262144,
+    "k3[1m]": 1048576,
+    "kimi-k3": 1048576,
     "qwen3.6-flash": 1000000,
     "qwen3.7-max": 1000000,
 }
@@ -248,7 +257,11 @@ _PI_MODEL_INPUT_HINTS = {
     "claude-sonnet-4-6": ["text", "image"],
     "gpt-5.3-codex": ["text", "image"],
     "gpt-5.3-codex-spark": ["text", "image"],
+    "k3": ["text", "image"],
+    "k3[1m]": ["text", "image"],
+    "kimi-k3": ["text", "image"],
     "kimi-for-coding": ["text", "image"],
+    "kimi-for-coding-highspeed": ["text", "image"],
     "minimax-m2.7": ["text"],
     "qwen3.6-flash": ["text", "image"],
     "qwen3.7-max": ["text"],
@@ -496,6 +509,53 @@ def _pi_model_input_types(model_name):
     return ["text"]
 
 
+def _pi_is_kimi_k3_selector(model_name):
+    leaf = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    return leaf in {"k3", "k3[1m]", "kimi-k3"}
+
+
+def _pi_profile_capability_overlay(runtime, model_name, *, provider_id, base_url, profile_id):
+    if not _pi_is_kimi_k3_selector(model_name):
+        return {}
+    try:
+        profile_caps = resolve_model_capabilities(
+            model_name,
+            runtime=runtime,
+            provider_id=provider_id,
+            base_url=base_url,
+            profile_id=profile_id,
+            approved_facts={},
+            model_policy={},
+        )
+    except Exception:
+        return {}
+    control = profile_caps.get("thinking_control") if isinstance(profile_caps.get("thinking_control"), dict) else {}
+    if str(control.get("path") or "").strip() != "reasoning_effort":
+        return {}
+    return profile_caps
+
+
+def _pi_apply_profile_capability_overlay(caps, profile_caps):
+    if not profile_caps:
+        return caps
+    merged = copy.deepcopy(caps if isinstance(caps, dict) else {})
+    sources = merged.setdefault("sources", {})
+    profile_sources = profile_caps.get("sources") if isinstance(profile_caps.get("sources"), dict) else {}
+    for field in (
+        "context_window_tokens",
+        "max_output_tokens",
+        "supports_thinking",
+        "thinking_control",
+        "expected_protocol",
+        "protocol_hints",
+    ):
+        if profile_sources.get(field) != "provider_profile":
+            continue
+        merged[field] = copy.deepcopy(profile_caps.get(field))
+        sources[field] = "provider_profile"
+    return merged
+
+
 def _pi_model_capabilities(runtime, model_name):
     runtime = runtime if isinstance(runtime, dict) else {}
     provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip()
@@ -507,6 +567,16 @@ def _pi_model_capabilities(runtime, model_name):
         provider_id=provider_id,
         base_url=base_url,
         profile_id=profile_id,
+    )
+    caps = _pi_apply_profile_capability_overlay(
+        caps,
+        _pi_profile_capability_overlay(
+            runtime,
+            model_name,
+            provider_id=provider_id,
+            base_url=base_url,
+            profile_id=profile_id,
+        ),
     )
 
     needs_reference = any(
@@ -695,7 +765,9 @@ def _pi_pick_protocol(runtime, model_name):
     variant_by_protocol = {item["protocol"]: item for item in variants}
     caps = _pi_model_capabilities(runtime, model_name)
     normalized_model = _pi_normalize_model_key(model_name)
-    if "anthropic_messages" in available and normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-")):
+    if "anthropic_messages" in available and (
+        normalized_model.startswith("k3") or normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-"))
+    ):
         return variant_by_protocol["anthropic_messages"], caps
     if "openai_chat_completions" in available and normalized_model.startswith(("deepseek", "mimo-")):
         return variant_by_protocol["openai_chat_completions"], caps

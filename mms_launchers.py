@@ -349,8 +349,15 @@ _MODEL_CONTEXT_WINDOWS = {
     "claude-sonnet-4-6": 1_000_000,
     "claude-haiku-4-5-20251001": 200_000,
     "claude-haiku-4-5": 200_000,
-    # Kimi / K2 — K2.5/K2.6 系列均为 256K (262144)
+    # Kimi — Kimi API `kimi-k3` is 1M; Kimi Code plain `k3` is 256K, `k3[1m]` opts into 1M.
+    "k3": 262_144,
+    "k3[1m]": 1_048_576,
+    "kimi-k3": 1_048_576,
+    "moonshotai/kimi-k3": 1_048_576,
     "kimi-for-coding": 262_144,
+    "kimi-for-coding-highspeed": 262_144,
+    "kimi-k2.7-code": 262_144,
+    "kimi-k2.7-code-highspeed": 262_144,
     "kimi-k2.5": 262_144,
     "kimi-k2.6": 262_144,
     "kimi-k2.6-code-preview": 262_144,
@@ -389,12 +396,14 @@ _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
+    "k3": 1_048_576,
     "mimo-v2.5-pro": 1_000_000,
     "mimo-v2.5": 1_000_000,
 }
 _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
     # The base wire model can support 1M in some surfaces, but Claude Code must
     # opt in with the selector suffix before MMS advertises that large window.
+    "k3": 262_144,
     "mimo-v2.5-pro": 262_144,
     "mimo-v2.5": 262_144,
 }
@@ -466,6 +475,17 @@ def _capability_context_window(model_name, *, provider_id=None, accepted_sources
     if accepted_sources is not None and source not in set(accepted_sources):
         return None
     return _coerce_context_window(caps.get("context_window_tokens"))
+
+
+def _plain_kimi_k3_profile_context_window(model_name, *, provider_id=None):
+    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    if normalized != "k3":
+        return None
+    profiled = profile_context_window("k3", provider_id=provider_id or "")
+    safe_base = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get("k3")
+    if profiled is not None and safe_base is not None and profiled <= safe_base:
+        return profiled
+    return None
 
 
 def _capability_max_output_tokens(model_name, *, provider_id=None, accepted_sources=None):
@@ -601,6 +621,20 @@ def _lookup_context_window(model_name, provider_id=None):
     if model_exact is not None:
         return model_exact
 
+    profile_safe_selector_window = None
+    if not has_1m_suffix:
+        profile_safe_selector_window = _plain_kimi_k3_profile_context_window(
+            clean,
+            provider_id=provider_id,
+        )
+    if profile_safe_selector_window is not None:
+        return profile_safe_selector_window
+
+    if has_1m_suffix:
+        suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
+        if suffixed_window is not None:
+            return suffixed_window
+
     # User policy is the preferred surface for context size. It must win before
     # the legacy MiMo safe-base guard that otherwise caps plain model names.
     policy_window = _capability_context_window(
@@ -611,11 +645,7 @@ def _lookup_context_window(model_name, provider_id=None):
     if policy_window is not None:
         return policy_window
 
-    if has_1m_suffix:
-        suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
-        if suffixed_window is not None:
-            return suffixed_window
-    else:
+    if not has_1m_suffix:
         # Latest-approved capability facts are the WebUI/runtime truth after
         # preview publish. Keep the MiMo safe-base branch as a fallback only, or
         # the UI can show 1M while Claude launch still receives 262K.
@@ -3365,6 +3395,8 @@ def _runtime_reasoning_effort(runtime, default="high"):
 
 def _claude_code_effort_env_value(model_name, runtime):
     model = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    if model.startswith("k3") or model.startswith("kimi-k3"):
+        return "max"
     if not model.startswith("glm"):
         return ""
     raw = str((runtime or {}).get("reasoning_effort") or "").strip().lower()
@@ -3373,6 +3405,22 @@ def _claude_code_effort_env_value(model_name, runtime):
     if raw in {"low", "medium", "high"}:
         return "high"
     return ""
+
+
+def _is_kimi_k3_claude_env_model(model_name):
+    model = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    return model == "kimi-k3" or model == "k3" or model.startswith("k3[")
+
+
+def _apply_claude_context_env_overrides(env, *, context_window, model_names=()):
+    window = _coerce_context_window(context_window)
+    if window is None:
+        return env
+    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(window)
+    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(window - 3000, 10000))
+    if any(_is_kimi_k3_claude_env_model(model) for model in model_names):
+        env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(window)
+    return env
 
 
 def _runtime_vision_sidecar(runtime):
@@ -8814,8 +8862,11 @@ def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
         enable_claude_1m=enable_claude_1m,
         provider_id=(runtime or {}).get("id"),
     )
-    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
-    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
+    _apply_claude_context_env_overrides(
+        env,
+        context_window=ctx_window,
+        model_names=(resolved_model,),
+    )
     return env
 
 
@@ -9801,8 +9852,11 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
         enable_claude_1m=enable_claude_1m,
         provider_id=(runtime or {}).get("id"),
     )
-    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
-    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
+    _apply_claude_context_env_overrides(
+        env,
+        context_window=ctx_window,
+        model_names=_real_models,
+    )
     _apply_claude_shell_context_slots(
         env,
         context_window=ctx_window,
@@ -11980,6 +12034,17 @@ def get_export_env(cli, runtime, model_info=None):
         effort_env = _claude_code_effort_env_value(_resolve_model(model_info or runtime), runtime)
         if effort_env:
             exports["CLAUDE_CODE_EFFORT_LEVEL"] = effort_env
+        model = _resolve_model(model_info or runtime)
+        ctx_window = _effective_context_window(
+            model,
+            enable_claude_1m=_runtime_supports_claude_1m(runtime),
+            provider_id=runtime.get("id"),
+        )
+        _apply_claude_context_env_overrides(
+            exports,
+            context_window=ctx_window,
+            model_names=(model,),
+        )
     elif cli == "codex":
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
