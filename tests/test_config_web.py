@@ -4576,6 +4576,45 @@ def test_config_web_capability_truth_refresh_uses_structured_source(monkeypatch,
     assert result["model_sources"]["mimo-v2.5"]["vision"]["source_layer"] == "official"
 
 
+def test_config_web_qwen38_official_truth_keeps_unverified_specs_unknown(tmp_path):
+    payload = {
+        "provider": {
+            "id": "demo",
+            "models": [{"id": "qwen3.8-max-preview", "visible": True}],
+        },
+        "fields": [
+            "context_window_tokens",
+            "max_output_tokens",
+            "vision",
+            "tool_use",
+            "reasoning",
+            "thinking",
+            "thinking_control",
+            "one_m_context",
+        ],
+        "refresh_sources": False,
+    }
+
+    result = mms_config_web.refresh_model_capability_truth(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is True
+    assert result["matched_model_count"] == 1
+    caps = result["model_capabilities"]["qwen3.8-max-preview"]
+    assert caps["tool_use"] is True
+    assert caps["thinking"] is True
+    assert caps["reasoning"] is True
+    assert caps["thinking_control"]["path"] == "enable_thinking"
+    assert "context_window_tokens" not in caps
+    assert "max_output_tokens" not in caps
+    assert "vision" not in caps
+    assert "one_m_context" not in caps
+    assert result["model_sources"]["qwen3.8-max-preview"]["tool_use"]["source_layer"] == "official"
+
+
 def test_config_web_capability_refresh_can_use_openrouter_catalog(monkeypatch, tmp_path):
     payload = {
         "provider": {

@@ -1098,7 +1098,13 @@ def _truth_evidence_urls(row: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(urls))[:6]
 
 
-def _truth_field_source(field: str, row: dict[str, Any], source_path: str = "") -> dict[str, Any]:
+def _truth_field_source(
+    field: str,
+    row: dict[str, Any],
+    source_path: str = "",
+    *,
+    source_layer_override: str = "",
+) -> dict[str, Any]:
     confidence = _safe_text(row.get("confidence") or "structured")
     source_layer = _safe_text(row.get("source_layer")).lower()
     source_name = _safe_text(row.get("source_name"))
@@ -1106,8 +1112,8 @@ def _truth_field_source(field: str, row: dict[str, Any], source_path: str = "") 
     if not checked_at:
         ref = _truth_first_provider_ref(row)
         checked_at = _safe_text(ref.get("checked_at")) if isinstance(ref, dict) else ""
-    layer = source_layer or "official"
-    if field == "tool_use" or "provider_catalog" in confidence or "openrouter" in confidence:
+    layer = source_layer_override or source_layer or "official"
+    if not source_layer_override and (field == "tool_use" or "provider_catalog" in confidence or "openrouter" in confidence):
         layer = "provider_catalog"
     result = {
         "source_layer": layer,
@@ -1223,8 +1229,18 @@ def _truth_caps_from_row(row: dict[str, Any], *, fields: set[str], source_path: 
         caps["recommended_reasoning_effort"] = recommended_effort
         sources["recommended_reasoning_effort"] = _truth_field_source("recommended_reasoning_effort", row, source_path)
 
+    official_capabilities = row.get("official_capabilities") if isinstance(row.get("official_capabilities"), dict) else {}
+    if "tool_use" in fields and official_capabilities.get("function_calling") is True:
+        caps["tool_use"] = True
+        sources["tool_use"] = _truth_field_source(
+            "tool_use",
+            row,
+            source_path,
+            source_layer_override="official",
+        )
+
     params = _truth_supported_parameters(row)
-    if "tool_use" in fields and {"tools", "tool_choice", "parallel_tool_calls"}.intersection(params):
+    if "tool_use" in fields and "tool_use" not in caps and {"tools", "tool_choice", "parallel_tool_calls"}.intersection(params):
         caps["tool_use"] = True
         sources["tool_use"] = _truth_field_source("tool_use", row, source_path)
     if "reasoning" in fields and {"reasoning", "reasoning_effort", "include_reasoning"}.intersection(params):
