@@ -41,6 +41,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lens", action="append", default=[])
     parser.add_argument("--max-concurrency", type=int, default=mms_pi_committee.DEFAULT_MAX_CONCURRENCY)
     parser.add_argument("--timeout", type=int, default=mms_pi_committee.DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument(
+        "--kimi-attempt-timeout",
+        type=int,
+        default=mms_pi_committee.DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS,
+        help="Maximum seconds for one Kimi route attempt; 0 disables the per-route cap.",
+    )
+    parser.add_argument(
+        "--max-bundle-age-days",
+        type=int,
+        default=mms_pi_committee.DEFAULT_MAX_BUNDLE_AGE_DAYS,
+        help="Reject older timestamped bundles; 0 disables freshness enforcement.",
+    )
+    parser.add_argument("--idle-timeout", type=int, default=mms_pi_committee.DEFAULT_IDLE_TIMEOUT_SECONDS)
+    parser.add_argument("--max-output-bytes", type=int, default=mms_pi_committee.DEFAULT_MAX_OUTPUT_BYTES)
+    parser.add_argument("--max-repeated-events", type=int, default=mms_pi_committee.DEFAULT_MAX_REPEATED_EVENTS)
+    parser.add_argument(
+        "--committee-timeout",
+        type=int,
+        default=mms_pi_committee.DEFAULT_COMMITTEE_TIMEOUT_SECONDS,
+        help="Whole-committee budget; 0 auto-sizes by concurrency waves.",
+    )
+    parser.add_argument("--quorum-successes", type=int, default=mms_pi_committee.DEFAULT_QUORUM_SUCCESSES)
+    parser.add_argument("--quorum-grace", type=int, default=mms_pi_committee.DEFAULT_QUORUM_GRACE_SECONDS)
     parser.add_argument("--dry-run", action="store_true", help="Plan only; no Pi provider calls.")
     parser.add_argument("--compact", action="store_true", help="Emit compact JSON.")
     parser.add_argument("--output", help="Optional parent packet JSON path.")
@@ -81,6 +104,14 @@ def _build_packet(args: argparse.Namespace) -> dict:
         lenses=lenses,
         max_concurrency=args.max_concurrency,
         timeout_seconds=args.timeout,
+        kimi_attempt_timeout_seconds=args.kimi_attempt_timeout,
+        max_bundle_age_days=args.max_bundle_age_days,
+        idle_timeout_seconds=args.idle_timeout,
+        max_output_bytes=args.max_output_bytes,
+        max_repeated_events=args.max_repeated_events,
+        committee_timeout_seconds=args.committee_timeout,
+        quorum_successes=args.quorum_successes,
+        quorum_grace_seconds=args.quorum_grace,
         dry_run=args.dry_run,
     )
 
