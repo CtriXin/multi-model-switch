@@ -1025,6 +1025,36 @@ def _write_pi_settings_config(agent_dir):
     return settings_path
 
 
+def _seed_pi_trust_store(agent_dir):
+    """Seed the isolated agentDir's trust.json so project trust follows the session.
+
+    Mirrors the `_ensure_claude_project_trust` idea: mmf isolates pi's HOME and
+    PI_CODING_AGENT_DIR per PID, so pi's trust store is a fresh file under the
+    per-PID session home. Without seeding, pi re-prompts project trust every
+    new PID for any cwd that has `.agents/skills` (e.g. ~/feature-update).
+
+    Trust the real user home tree so commonly used project roots are covered
+    without re-prompting. Only writes when no decision exists yet, so an
+    explicit `/trust` choice inside pi still wins for that PID.
+    """
+    try:
+        trust_path = os.path.join(agent_dir, "trust.json")
+        if os.path.exists(trust_path):
+            return
+        trust_root = _real_user_path()
+        if not trust_root:
+            return
+        os.makedirs(os.path.dirname(trust_path), exist_ok=True)
+        atomic_write_text(
+            trust_path,
+            json.dumps({trust_root: True}, indent=2) + "\n",
+            mode=0o600,
+        )
+    except Exception:
+        # Best-effort: never block launch on trust seeding.
+        return
+
+
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     launchers = _launchers_module()
@@ -1053,6 +1083,7 @@ def _pi_gateway_env(runtime, model_info=None):
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
+    _seed_pi_trust_store(agent_dir)
     env["PI_CODING_AGENT_DIR"] = agent_dir
     env["PI_CODING_AGENT_SESSION_DIR"] = session_dir
     env["PI_TELEMETRY"] = "0"
