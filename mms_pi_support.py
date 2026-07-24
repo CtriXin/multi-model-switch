@@ -953,12 +953,21 @@ def _write_pi_settings_config(agent_dir):
     return settings_path
 
 
+def _pi_gateway_root():
+    """Keep Pi state inside the config root selected for this MMS launch."""
+    launchers = _launchers_module()
+    # Supplying the resolved real home preserves normal stable-root behavior
+    # while allowing MMS_CONFIG_ROOT/MMS_CONFIG_DIR to take precedence.
+    config_root = launchers._selected_mms_config_root({"MMS_REAL_HOME": _real_user_path()})
+    return os.path.join(config_root, "pi-gateway")
+
+
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     launchers = _launchers_module()
     requested_model = _resolve_model(model_info or runtime)
     model = _pi_effective_selected_model(runtime, requested_model)
-    gateway_base = _real_user_path(".config", "mms", "pi-gateway")
+    gateway_base = _pi_gateway_root()
     os.makedirs(gateway_base, exist_ok=True)
     sessions_dir = os.path.join(gateway_base, "s")
     session_home = os.path.join(sessions_dir, str(os.getpid()))
@@ -1019,7 +1028,12 @@ def _pi_provider_export_env(runtime, model):
     effective_model = _pi_effective_selected_model(runtime, model or runtime.get("model"))
     provider_ref = _opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
     model_ref = _opencode_config_slug(effective_model or runtime.get("model"), "model")
-    agent_dir = _real_user_path(".config", "mms", "pi-gateway", "exports", f"{provider_ref}-{model_ref}", "agent")
+    agent_dir = os.path.join(
+        _pi_gateway_root(),
+        "exports",
+        f"{provider_ref}-{model_ref}",
+        "agent",
+    )
     session_dir = os.path.join(agent_dir, "sessions")
     models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, effective_model)
     settings_path = _write_pi_settings_config(agent_dir)
