@@ -17,6 +17,12 @@ class _FakeConsole:
         return None
 
 
+class _FakePrompt:
+    @staticmethod
+    def ask(*args, **kwargs):
+        return ""
+
+
 class _CollectingConsole:
     def __init__(self):
         self.items = []
@@ -111,3 +117,35 @@ def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, 
     assert tables[0].rows[0][0][0] == "claude"
     assert tables[0].rows[0][0][1] == "999999"
     assert stale.exists()
+
+
+def test_select_provider_for_models_initializes_rich_before_render(monkeypatch):
+    import mms_core
+
+    console = _CollectingConsole()
+
+    def _fake_ensure_rich():
+        mms_core.Table = _FakeTable
+        mms_core.Prompt = _FakePrompt
+
+    monkeypatch.setattr(mms_core, "Table", None)
+    monkeypatch.setattr(mms_core, "Prompt", None)
+    monkeypatch.setattr(mms_core, "_ensure_rich", _fake_ensure_rich)
+    monkeypatch.setattr(mms_core, "console", console)
+    monkeypatch.setattr(
+        mms_core,
+        "_list_manage_targets",
+        lambda _cfg: [
+            {
+                "kind": "provider",
+                "title": "Demo",
+                "id": "demo",
+                "default_label": "是",
+                "status": "ok",
+            }
+        ],
+    )
+
+    assert mms_core._select_provider_for_models({"providers": []}) is None
+    assert mms_core.Table is _FakeTable
+    assert any(isinstance(item, _FakeTable) for item in console.items)

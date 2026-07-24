@@ -6779,6 +6779,7 @@ def _manage_provider_models(cfg, provider_id):
 
 
 def _select_provider_for_models(cfg):
+    _ensure_rich()
     providers = [item for item in _list_manage_targets(cfg) if item.get("kind") == "provider"]
     if not providers:
         console.print("[yellow]当前还没有可管理的网关通道[/yellow]")
@@ -6834,6 +6835,7 @@ def _recent_models_for_provider(provider_id):
 def _pick_manual_models(models):
     if not models:
         return []
+    _ensure_rich()
     table = Table(title="选择要预热的模型", show_lines=True)
     table.add_column("#", style="cyan", width=4)
     table.add_column("模型", style="green")
@@ -6929,6 +6931,7 @@ def _warm_model_request(provider, model_name):
 
 
 def handle_warm_command(cfg, argv):
+    _ensure_rich()
     if argv and argv[0] in {"-h", "--help"}:
         console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} warm [provider_id]"))
         console.print("[dim]不带参数时先选通道，再选择最近使用 / 手动选择 / 全部模型。[/dim]")
@@ -7008,6 +7011,7 @@ def handle_warm_command(cfg, argv):
 
 
 def handle_models_command(cfg, argv):
+    _ensure_rich()
     if argv and argv[0] in {"-h", "--help"}:
         console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} ls [provider_id]"))
         console.print("[dim]不带参数时先选通道，再进入模型列表与测速页。[/dim]")
