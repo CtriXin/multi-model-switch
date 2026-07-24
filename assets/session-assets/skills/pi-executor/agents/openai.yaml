@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pi Executor"
+  short_description: "隔离运行可写 Pi 模型并由 Host 验证 patch"
+  default_prompt: "Use $pi-executor to run one or more explicit models in isolated git worktrees from a bounded executor pack, then inspect the parent intake packet."
+policy:
+  allow_implicit_invocation: false

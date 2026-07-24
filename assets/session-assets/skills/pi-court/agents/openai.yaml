@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pi Court"
+  short_description: "角色化多模型法庭，覆盖设计、产品、开发、测试与交叉质询"
+  default_prompt: "Use $pi-court to convene a role-aware Pi court for this task and synthesize cross-functional evidence."
+policy:
+  allow_implicit_invocation: false
