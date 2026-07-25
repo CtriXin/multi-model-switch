@@ -5,13 +5,18 @@ github: https://github.com/eze-is/web-access
 description:
   所有联网操作必须通过此 skill 处理，包括：搜索、网页抓取、登录后操作、网络交互等。
   触发场景：用户要求搜索信息、查看网页内容、访问需要登录的网站、操作网页界面、抓取社交媒体内容（小红书、微博、推特等）、读取动态渲染页面、以及任何需要真实浏览器环境的网络任务。
-  安全边界：隔离 HOME 下不得直接启动个人 Chrome；必须连接已启动 Chrome 或用 mms-chrome-host。
 metadata:
   author: 一泽Eze
-  version: "2.5.0"
+  version: "2.5.3-mmf.1"
 ---
 
 # web-access Skill
+
+## Weber / MMF Integration
+
+`web-access` is a browser backend. When an agent enters through Weber/Webber, Weber chooses whether to use this backend; when an agent explicitly loads `web-access`, it may proceed directly.
+
+For MMF, Codex, and other isolated sessions, export `WEB_ACCESS_HOST_HOME` (or `HOST_HOME` / `REAL_HOME`) as the host user's home directory before running the precheck. Browser discovery then reads the host `DevToolsActivePort`, while the agent never copies the host Chrome profile or cookie database. If the session HOME is isolated and no host-home handoff is available, `check-deps.mjs` hard-fails rather than guessing a Chrome profile or starting a browser.
 
 ## 前置检查
 
@@ -21,23 +26,24 @@ metadata:
 node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 ```
 
-未通过时引导用户完成设置：
-- **Node.js 22+**：必需（使用原生 WebSocket）。版本低于 22 可用但需安装 `ws` 模块。
-- **Chrome remote-debugging**：在 Chrome 地址栏打开 `chrome://inspect/#remote-debugging`，勾选 **"Allow remote debugging for this browser instance"** 即可，可能需要重启浏览器。
+**Node.js 22+** 必需（使用原生 WebSocket）。
+
+按脚本输出处理：
+- `exit 0` → 继续
+- `exit 2` → 需询问用户偏好，写入 `${CLAUDE_SKILL_DIR}/config.env` 的 `WEB_ACCESS_BROWSER`
+- `exit 1` → 按 stdout 错误信息处理。若提示包含「Agent 处理顺序」，按其步骤执行（如先用系统命令打开浏览器后重跑），自动可解则不打扰用户；仍失败再向用户求助
+
+支持参数 `--browser <chrome|edge>` 表达本次临时覆盖（不写 config.env）。
+
+切换浏览器时，proxy 是长驻进程，需先 `pkill -f cdp-proxy.mjs` 再重跑 check-deps。
+
+**隔离环境硬规则：** 已有登录态的任务必须先通过 `check-deps.mjs` 连接宿主 Chrome。不得从隔离 HOME 启动个人 Chrome binary，也不得回退到 Playwright 独立 Profile；必须命令启动时使用 `mms-chrome-host`。
 
 检查通过后并必须在回复中向用户直接展示以下须知，再启动 CDP Proxy 执行操作：
 
 ```
 温馨提示：部分站点对浏览器自动化操作检测严格，存在账号封禁风险。已内置防护措施但无法完全避免，Agent 继续操作即视为接受。
 ```
-
-
-### 隔离 HOME / Keychain 安全规则
-
-- 如果 agent shell 的 `HOME` 是隔离目录（例如 `.config/mms/codex-gateway/s/*`），禁止直接启动用户的个人 Chrome：不要运行 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`，也不要在隔离 `HOME` 下裸跑 `open -a "Google Chrome"`。这会让 Chrome 使用宿主 profile 但找不到宿主 Keychain，造成钥匙串弹窗、登录态解密失败和高 CPU。
-- 需要登录态时，只连接已经由用户/宿主环境启动的 Chrome；若 Chrome 未连接，引导用户在地址栏打开 `chrome://inspect/#remote-debugging` 并启用 **Allow remote debugging for this browser instance**。
-- 必须由命令启动个人 Chrome 时，使用宿主环境启动器：`mms-chrome-host`（MMS session 内置）或 `~/.local/bin/mms-chrome-host`。不要从隔离 `HOME` 直接启动 Chrome binary。
-- 不需要登录态时，使用 Playwright/agent-browser 或显式临时 `--user-data-dir`；不要复用用户个人 profile。
 
 ## 浏览哲学
 
@@ -77,15 +83,15 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 
 浏览网页时，**先了解页面结构，再决定下一步动作**。不需要提前规划所有步骤。
 
-### 补充：本地 Chrome 资源
+### 补充：本地浏览器资源
 
-用户指向**本人访问过的页面**（"我之前看的那个讲 X 的文章"、"上次打开过的 XX 面板"）或**组织内部系统**（"我们的 XX 平台"、"公司那个 YY 系统"等公网搜不到的目标）时，检索本地 Chrome 书签/历史：
+用户指向**本人访问过的页面**（"我之前看的那个讲 X 的文章"、"上次打开过的 XX 面板"）或**组织内部系统**（"我们的 XX 平台"、"公司那个 YY 系统"等公网搜不到的目标）时，检索本地浏览器（Chrome / Edge）书签/历史：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" [关键词...] [--only bookmarks|history] [--limit N] [--since 1d|7h|YYYY-MM-DD] [--sort recent|visits]
+node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" [关键词...] [--only bookmarks|history] [--browser chrome|edge] [--limit N] [--since 1d|7h|YYYY-MM-DD] [--sort recent|visits]
 ```
 
-关键词空格分词、多词 AND，匹配 title + url（可省略）；`--since` / `--sort` 仅作用于历史；默认按最近访问倒序，`--sort visits` 按访问次数排序（适合"高频访问的网站"这类场景）。
+关键词空格分词、多词 AND，匹配 title + url（可省略）；默认遍历所有已安装的 Chromium 系浏览器（Chrome、Edge），`--browser` 限定单一来源；`--since` / `--sort` 仅作用于历史；默认按最近访问倒序，`--sort visits` 按访问次数排序（适合"高频访问的网站"这类场景）。
 
 ### 程序化操作与 GUI 交互
 
@@ -98,9 +104,19 @@ node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" [关键词...] [--only bookmarks
 
 **站点内交互产生的链接是可靠的**：通过用户视角中的可交互单元（卡片、条目、按钮）进行的站点内交互，自然到达的 URL 天然携带平台所需的完整上下文。而手动构造的 URL 可能缺失隐式必要参数，导致被拦截、返回错误页面、甚至触发反爬。
 
+## 表格与写入安全
+
+在线表格、后台表单和 canvas 编辑器写入前，必须：
+
+1. 用 `/new` 创建自己的后台 tab，不操作或关闭已有 tab。
+2. 读取实际 tab 名、sheetId/tabId、表头与目标行；任务描述和真实 schema 不一致时停止并要求确认。
+3. 先调用 `/viewport` 确认 CSS 坐标与 `devicePixelRatio`；截图物理像素不能直接传给 `/clickAtPosition`。
+4. 需要真实输入时使用 `/clickAtPosition`、`/key`、`/insertText`，不自行绕过 Proxy 直连 Chrome。
+5. 内部 JS API 无报错不代表持久化。必须回读单元格或页面值确认；误写必须立即撤销/恢复并再次回读。
+
 ## 浏览器 CDP 模式
 
-通过 CDP Proxy 直连用户日常 Chrome，天然携带登录态，无需启动独立浏览器。
+通过 CDP Proxy 直连用户日常浏览器（Chrome / Edge / Chromium 等 Chromium 系），天然携带登录态，无需启动独立浏览器。
 若无用户明确要求，不主动操作用户已有 tab，所有操作都在自己创建的后台 tab 中进行，保持对用户环境的最小侵入。不关闭用户 tab 的前提下，完成任务后关闭自己创建的 tab，保持环境整洁。
 
 ### 启动
@@ -109,7 +125,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" [关键词...] [--only bookmarks
 node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 ```
 
-脚本会依次检查 Node.js、Chrome 端口，并确保 Proxy 已连接（未运行则自动启动并等待）。Proxy 启动后持续运行。
+脚本会依次检查 Node.js、浏览器调试端口，并确保 Proxy 已连接（未运行则自动启动并等待）。Proxy 启动后持续运行。
 
 ### Proxy API
 
@@ -119,8 +135,8 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 # 列出用户已打开的 tab
 curl -s http://localhost:3456/targets
 
-# 创建新后台 tab（自动等待加载）
-curl -s "http://localhost:3456/new?url=https://example.com"
+# 创建新后台 tab（自动等待加载）— URL 走 POST body，避免目标 URL 含 query 时被切分
+curl -s -X POST --data-raw 'https://example.com' http://localhost:3456/new
 
 # 页面信息
 curl -s "http://localhost:3456/info?target=ID"
@@ -131,8 +147,8 @@ curl -s -X POST "http://localhost:3456/eval?target=ID" -d 'document.title'
 # 捕获页面渲染状态（含视频当前帧）
 curl -s "http://localhost:3456/screenshot?target=ID&file=/tmp/shot.png"
 
-# 导航、后退
-curl -s "http://localhost:3456/navigate?target=ID&url=URL"
+# 导航（URL 走 POST body，target 走 query）、后退
+curl -s -X POST --data-raw 'https://example.com' "http://localhost:3456/navigate?target=ID"
 curl -s "http://localhost:3456/back?target=ID"
 
 # 点击（POST body 为 CSS 选择器）— JS el.click()，简单快速，覆盖大多数场景
@@ -159,7 +175,9 @@ curl -s "http://localhost:3456/close?target=ID"
 - **`/click`**：在当前 tab 内直接点击用户视角中的可交互单元，简单直接，串行处理。适合需要在同一页面内连续操作的场景，如点击展开、翻页、进入详情等。
 - **`/new` + 完整 URL**：使用目标链接的完整地址（包含所有URL参数），在新 tab 中打开。适合需要同时访问多个页面的场景。
 
-很多网站的链接包含会话相关的参数（如 token），这些参数是正常访问所必需的。提取 URL 时应保留完整地址，不要裁剪或省略参数。
+很多网站的链接包含会话相关的参数（如 token），这些参数是正常访问所必需的。提取 URL 时应保留完整地址，不要裁剪或省略参数。URL 通过 POST body 原样传入 `/new` 或 `/navigate`。
+
+> **v2.5.3 迁移提示**：若引用的站点经验文件（`references/site-patterns/*.md`）或其它脚本中仍含 `GET /new?url=...` 或 `/navigate?target=...&url=...` 的旧写法，调用会收到迁移指引。按 [`references/migration-2.5.3.md`](references/migration-2.5.3.md) 就地改写为 POST body 后再使用，并顺手把该站点经验文件更新掉。
 
 ### 媒体资源提取
 
@@ -175,24 +193,26 @@ curl -s "http://localhost:3456/close?target=ID"
 
 ### 视频内容获取
 
-用户 Chrome 真实渲染，截图可捕获当前视频帧。核心能力：通过 `/eval` 操控 `<video>` 元素（获取时长、seek 到任意时间点、播放/暂停/全屏），配合 `/screenshot` 采帧，可对视频内容进行离散采样分析。
+用户浏览器真实渲染，截图可捕获当前视频帧。核心能力：通过 `/eval` 操控 `<video>` 元素（获取时长、seek 到任意时间点、播放/暂停/全屏），配合 `/screenshot` 采帧，可对视频内容进行离散采样分析。
 
 ### 登录判断
 
-用户日常 Chrome 天然携带登录态，大多数常用网站已登录。
+用户日常浏览器天然携带登录态，大多数常用网站已登录。
 
 登录判断的核心问题只有一个：**目标内容拿到了吗？**
 
 打开页面后先尝试获取目标内容。只有当确认**目标内容无法获取**且判断登录能解决时，才告知用户：
-> "当前页面在未登录状态下无法获取[具体内容]，请在你的 Chrome 中登录 [网站名]，完成后告诉我继续。"
+> "当前页面在未登录状态下无法获取[具体内容]，请在你的浏览器中登录 [网站名]，完成后告诉我继续。"
 
 登录完成后无需重启任何东西，直接刷新页面继续。
 
 ### 任务结束
 
+写入任务的结果必须说明目标 URL、tab 名和 tabId、写入行列、回读值，以及是否有已回滚异常。
+
 用 `/close` 关闭自己创建的 tab，必须保留用户原有的 tab 不受影响。
 
-Proxy 持续运行，不建议主动停止——重启后需要在 Chrome 中重新授权 CDP 连接。
+Proxy 持续运行，不建议主动停止——重启后需要在浏览器中重新授权 CDP 连接。
 
 ## 并行调研：子 Agent 分治策略
 
@@ -202,7 +222,7 @@ Proxy 持续运行，不建议主动停止——重启后需要在 Chrome 中重
 - **速度**：多子 Agent 并行，总耗时约等于单个子任务时长
 - **上下文保护**：抓取内容不进入主 Agent 上下文，主 Agent 只接收摘要，节省 token
 
-**并行 CDP 操作**：每个子 Agent 在当前用户浏览器实例中，自行创建所需的后台 tab（`/new`），自行操作，任务结束自行关闭（`/close`）。所有子 Agent 共享一个 Chrome、一个 Proxy，通过不同 targetId 操作不同 tab，无竞态风险。
+**并行 CDP 操作**：每个子 Agent 在当前用户浏览器实例中，自行创建所需的后台 tab（`/new`），自行操作，任务结束自行关闭（`/close`）。所有子 Agent 共享一个浏览器、一个 Proxy，通过不同 targetId 操作不同 tab，无竞态风险。
 
 **子 Agent Prompt 写法：目标导向，而非步骤指令**
 - 必须在子 Agent prompt 中写 `必须加载 web-access skill 并遵循指引` ，子 Agent 会自动加载 skill，无需在 prompt 中复制 skill 内容或指定路径。

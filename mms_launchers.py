@@ -3751,7 +3751,8 @@ def _resolve_omc_root():
 
 
 def _resolve_web_access_root():
-    candidates = []
+    # Installer maintains this as a symlink to the bundled web-access source.
+    candidates = [_real_user_path("auto-skills", "installed-skills", "web-access")]
     explicit = str(os.environ.get("MMS_WEB_ACCESS_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))

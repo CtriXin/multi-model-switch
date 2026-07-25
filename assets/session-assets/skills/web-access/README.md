@@ -31,20 +31,28 @@ AI Agent 原本的联网能力（WebSearch、WebFetch）缺少调度策略和浏
 
 ---
 
-## v2.5.0 能力
+## v2.5.2 能力
 
 | 能力 | 说明 |
 |------|------|
 | 联网工具自动选择 | WebSearch / WebFetch / curl / Jina / CDP，按场景自主判断，可任意组合 |
-| CDP Proxy 浏览器操作 | 直连用户日常 Chrome，天然携带登录态，支持动态页面、交互操作、视频截帧 |
+| CDP Proxy 浏览器操作 | 直连用户日常浏览器（Chrome / Edge / Chromium 系），天然携带登录态，支持动态页面、交互操作、视频截帧 |
 | 三种点击方式 | `/click`（JS click）、`/clickAt`（CDP 真实鼠标事件）、`/setFiles`（文件上传） |
-| 本地 Chrome 书签/历史检索 | `find-url.mjs` 查询公网搜不到的目标（内部系统）或用户访问过的页面，支持关键词/时间窗/访问频度排序 |
+| 本地浏览器书签/历史检索 | `find-url.mjs` 跨 Chrome / Edge 查询公网搜不到的目标（内部系统）或用户访问过的页面，支持关键词/时间窗/访问频度排序 |
 | 并行分治 | 多目标时分发子 Agent 并行执行，共享一个 Proxy，tab 级隔离 |
 | 站点经验积累 | 按域名存储操作经验（URL 模式、平台特征、已知陷阱），跨 session 复用 |
 | 媒体提取 | 从 DOM 直取图片/视频 URL，或对视频任意时间点截帧分析 |
 
-**v2.5.0 更新：**
+**v2.5.2 更新：**
+- **Microsoft Edge 支持** — CDP Proxy 不再绑定 Chrome，新增 Edge 适配（及 Chromium、Chrome Canary 等 Chromium 系，通过同一套自动发现机制接入）。在 `edge://inspect/#remote-debugging` 勾选 "Allow remote debugging for this browser instance" 即可
+- **浏览器偏好持久化** — 新增 `config.env`（gitignored，首次运行从模板创建），通过 `WEB_ACCESS_BROWSER` 固定默认浏览器；多浏览器同时开启 toggle 时 Agent 会询问偏好。也支持单次覆盖 `--browser <chrome|edge>`
+- **不擅自降级** — 偏好/指定的浏览器没启动或没开 toggle 时硬错并给出明确处理步骤，不会悄悄连到别的浏览器；proxy 首次成功连接后 pin 住浏览器 id，避免运行中漂移
+- **find-url 也支持 Edge** — 本地书签/历史检索默认遍历 Chrome 与 Edge，可用 `--browser <chrome|edge>` 限定单一浏览器
+
+<details><summary>v2.5.0 更新</summary>
+
 - **本地 Chrome 资源检索** — 新增 `scripts/find-url.mjs`，从本地 Chrome 书签/历史按关键词/时间窗/访问频度定位 URL。典型场景：用户提到组织内部系统（"我们的 XX 平台"等公网搜不到的目标）、回查之前访问过但不记得地址的页面、查看最近高频访问网站等（场景感谢 @MVPGFC 在 #60 提出）
+</details>
 
 <details><summary>v2.4.3 更新</summary>
 
@@ -103,10 +111,35 @@ git clone https://github.com/eze-is/web-access ~/.claude/skills/web-access
 
 ## 前置配置（CDP 模式）
 
-CDP 模式需要 **Node.js 22+** 和 Chrome 开启远程调试：
+CDP 模式需要 **Node.js 22+** 和浏览器（Chrome / Edge）开启远程调试：
 
-1. Chrome 地址栏打开 `chrome://inspect/#remote-debugging`
+1. 在你想用的浏览器地址栏打开对应 inspect 页面：
+   - Chrome：`chrome://inspect/#remote-debugging`
+   - Edge：`edge://inspect/#remote-debugging`
 2. 勾选 **Allow remote debugging for this browser instance**（可能需要重启浏览器）
+
+### 浏览器偏好（config.env）
+
+skill 长期偏好保存在 `${CLAUDE_SKILL_DIR}/config.env`（首次运行自动从 `config.env.template` 创建，gitignored）：
+
+```bash
+# 留空 = 每次启动都询问偏好；设值 = 固定使用该浏览器
+WEB_ACCESS_BROWSER=edge
+```
+
+合法值：`chrome` / `edge`
+
+**临时用别的浏览器**（不修改 config.env）：
+
+```bash
+node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --browser chrome
+```
+
+**切换浏览器**（proxy 已连接旧的）：
+
+```bash
+pkill -f cdp-proxy.mjs && node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
+```
 
 环境检查（Agent 运行时会自动完成前置检查，无需手动执行）：
 
@@ -118,14 +151,14 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 
 ## CDP Proxy API
 
-Proxy 通过 WebSocket 直连 Chrome（兼容 `chrome://inspect` 方式，无需命令行参数启动），提供 HTTP API：
+Proxy 通过 WebSocket 直连浏览器（兼容 `chrome://inspect` / `edge://inspect` 方式，无需命令行参数启动），提供 HTTP API：
 
 ```bash
 # 启动（Agent 会自动管理 Proxy 生命周期，无需手动启动）
 node "${CLAUDE_SKILL_DIR}/scripts/cdp-proxy.mjs" &
 
 # 页面操作
-curl -s "http://localhost:3456/new?url=https://example.com"     # 新建 tab
+curl -s -X POST --data-raw 'https://example.com' http://localhost:3456/new  # 新建 tab（v2.5.3 起 URL 走 POST body）
 curl -s -X POST "http://localhost:3456/eval?target=ID" -d 'document.title'  # 执行 JS
 curl -s -X POST "http://localhost:3456/click?target=ID" -d 'button.submit'  # JS 点击
 curl -s -X POST "http://localhost:3456/clickAt?target=ID" -d '.upload-btn'  # 真实鼠标点击

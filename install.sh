@@ -3632,6 +3632,23 @@ install_toon_installed_skills_mirror() {
     return 0
 }
 
+install_web_access_canonical_links() {
+    local source_skill_dir="$MMS_HOME/vendor/web-access"
+    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
+    [ -d "$source_skill_dir" ] || return 0
+    mkdir -p "$mirror_dir" "$REAL_HOME/.codex/skills" "$REAL_HOME/.claude/skills" "$REAL_HOME/.agents/skills"
+    local canonical="$mirror_dir/web-access"
+    for target in "$canonical" "$REAL_HOME/.codex/skills/web-access" "$REAL_HOME/.claude/skills/web-access" "$REAL_HOME/.agents/skills/web-access"; do
+        if [ -e "$target" ] && [ ! -L "$target" ]; then
+            echo "⚠ $(t "检测到自定义 web-access，跳过覆盖" "Detected custom web-access, skipping overwrite"): $target"
+            continue
+        fi
+        rm -f "$target"
+        ln -s "$source_skill_dir" "$target"
+    done
+    echo "✓ $(t "已安装统一 web-access 入口" "Installed canonical web-access entrypoints")"
+}
+
 install_optional_token_saver() {
     echo ""
     echo "$(t "正在安装 Token Saver..." "Installing Token Saver...")"
@@ -4324,6 +4341,7 @@ if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
     install_optional_codegraph || true
 fi
 if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
+    install_web_access_canonical_links || true
     install_optional_token_saver || true
 fi
 if [ "$INSTALL_TOON" -eq 1 ]; then

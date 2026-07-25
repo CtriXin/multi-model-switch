@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-// find-url - 从本地 Chrome 书签/历史中检索 URL
+// find-url - 从本地 Chromium 系浏览器（Chrome / Edge）书签/历史中检索 URL
 // 用于定位公网搜索覆盖不到的目标（组织内部系统、SSO 后台、内网域名等）。
 //
 // 用法：
 //   node find-url.mjs [关键词...] [--only bookmarks|history] [--limit N] [--since 1d|7h|YYYY-MM-DD]
 //
-//   <关键词>            空格分词、多词 AND，匹配 title + url；可省略
-//   --only <source>     限定数据源（bookmarks / history），默认两者都查
-//   --limit N           条数上限，默认 20；0 = 不限
-//   --since <window>    时间窗（仅作用于历史）。1d / 7h / 30m 或 YYYY-MM-DD
-//   --sort recent|visits  历史排序：按最近访问 / 按访问次数，默认 recent
+//   <关键词>             空格分词、多词 AND，匹配 title + url；可省略
+//   --only <source>      限定数据源（bookmarks / history），默认两者都查
+//   --browser <id>       限定浏览器（chrome / edge），默认遍历所有已安装的
+//   --limit N            条数上限，默认 20；0 = 不限
+//   --since <window>     时间窗（仅作用于历史）。1d / 7h / 30m 或 YYYY-MM-DD
+//   --sort recent|visits 历史排序：按最近访问 / 按访问次数，默认 recent
 //
 // 示例：
 //   node find-url.mjs 财务小智
@@ -17,6 +18,7 @@
 //   node find-url.mjs github --since 7d --only history
 //   node find-url.mjs --since 7d --only history --sort visits   # 最近一周高频网站
 //   node find-url.mjs --since 2d --only history --limit 0
+//   node find-url.mjs github --browser edge                     # 只查 Edge
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,13 +27,14 @@ import { execFileSync } from 'node:child_process';
 
 // --- 参数解析 -----------------------------------------------------------
 function parseArgs(argv) {
-  const a = { keywords: [], only: null, limit: 20, since: null, sort: 'recent' };
+  const a = { keywords: [], only: null, browser: null, limit: 20, since: null, sort: 'recent' };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
-    if (v === '--only')        a.only  = argv[++i];
-    else if (v === '--limit')  a.limit = parseInt(argv[++i], 10);
-    else if (v === '--since')  a.since = parseSince(argv[++i]);
-    else if (v === '--sort')   a.sort  = argv[++i];
+    if (v === '--only')         a.only    = argv[++i];
+    else if (v === '--browser') a.browser = argv[++i];
+    else if (v === '--limit')   a.limit   = parseInt(argv[++i], 10);
+    else if (v === '--since')   a.since   = parseSince(argv[++i]);
+    else if (v === '--sort')    a.sort    = argv[++i];
     else if (v === '-h' || v === '--help') { printUsage(); process.exit(0); }
     else if (v.startsWith('--')) die(`未知参数: ${v}`);
     else a.keywords.push(v);
@@ -56,16 +59,31 @@ function parseSince(s) {
 }
 
 function die(msg) { console.error(msg); process.exit(1); }
-function printUsage() { console.error(fs.readFileSync(new URL(import.meta.url)).toString().split('\n').slice(1, 19).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); }
+function printUsage() { console.error(fs.readFileSync(new URL(import.meta.url)).toString().split('\n').slice(1, 21).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); }
 
-// --- Chrome 用户数据目录（跨平台） ---------------------------------------
-function getChromeDataDir() {
+// --- 浏览器用户数据目录（跨平台 + 多浏览器） -----------------------------
+// 加新浏览器：只改这里
+function knownBrowserDataDirs() {
   const home = os.homedir();
+  const localAppData = process.env.LOCALAPPDATA || '';
   switch (os.platform()) {
-    case 'darwin': return path.join(home, 'Library/Application Support/Google/Chrome');
-    case 'linux':  return path.join(home, '.config/google-chrome');
-    case 'win32':  return path.join(process.env.LOCALAPPDATA || '', 'Google/Chrome/User Data');
-    default: return null;
+    case 'darwin':
+      return [
+        { id: 'chrome', label: 'Chrome', dir: path.join(home, 'Library/Application Support/Google/Chrome') },
+        { id: 'edge',   label: 'Edge',   dir: path.join(home, 'Library/Application Support/Microsoft Edge') },
+      ];
+    case 'linux':
+      return [
+        { id: 'chrome', label: 'Chrome', dir: path.join(home, '.config/google-chrome') },
+        { id: 'edge',   label: 'Edge',   dir: path.join(home, '.config/microsoft-edge') },
+      ];
+    case 'win32':
+      return [
+        { id: 'chrome', label: 'Chrome', dir: path.join(localAppData, 'Google/Chrome/User Data') },
+        { id: 'edge',   label: 'Edge',   dir: path.join(localAppData, 'Microsoft/Edge/User Data') },
+      ];
+    default:
+      return [];
   }
 }
 
@@ -81,7 +99,7 @@ function listProfiles(dataDir) {
 }
 
 // --- 书签检索 -----------------------------------------------------------
-function searchBookmarks(profileDir, profileName, keywords) {
+function searchBookmarks(profileDir, profileName, browserLabel, keywords) {
   const file = path.join(profileDir, 'Bookmarks');
   if (!fs.existsSync(file)) return [];
   let data;
@@ -95,7 +113,7 @@ function searchBookmarks(profileDir, profileName, keywords) {
     if (node.type === 'url') {
       const hay = `${node.name || ''} ${node.url || ''}`.toLowerCase();
       if (needles.every(n => hay.includes(n))) {
-        out.push({ profile: profileName, name: node.name || '', url: node.url || '', folder: trail.join(' / ') });
+        out.push({ browser: browserLabel, profile: profileName, name: node.name || '', url: node.url || '', folder: trail.join(' / ') });
       }
     }
     if (Array.isArray(node.children)) {
@@ -110,10 +128,10 @@ function searchBookmarks(profileDir, profileName, keywords) {
 // --- 历史检索（SQLite 运行时锁定，需 copy 到 tmp） ------------------------
 const WEBKIT_EPOCH_DIFF_US = 11644473600000000n;  // 1601→1970 微秒差
 
-function searchHistory(profileDir, profileName, keywords, since, limit, sort) {
+function searchHistory(profileDir, profileName, browserLabel, keywords, since, limit, sort) {
   const src = path.join(profileDir, 'History');
   if (!fs.existsSync(src)) return [];
-  const tmp = path.join(os.tmpdir(), `chrome-history-${process.pid}-${Date.now()}.sqlite`);
+  const tmp = path.join(os.tmpdir(), `browser-history-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.sqlite`);
   try {
     fs.copyFileSync(src, tmp);
     const conds = ['last_visit_time > 0'];
@@ -138,7 +156,7 @@ function searchHistory(profileDir, profileName, keywords, since, limit, sort) {
     const raw = execFileSync('sqlite3', ['-separator', '\t', tmp, sql], { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024 });
     return raw.trim().split('\n').filter(Boolean).map(line => {
       const [title, url, visit, visit_count] = line.split('\t');
-      return { profile: profileName, title, url, visit, visit_count: parseInt(visit_count, 10) };
+      return { browser: browserLabel, profile: profileName, title, url, visit, visit_count: parseInt(visit_count, 10) };
     });
   } catch (e) {
     if (e.code === 'ENOENT') die('未找到 sqlite3 命令。macOS/Linux 通常自带；Windows 可用 `winget install sqlite.sqlite` 或从 https://sqlite.org/download.html 下载后加入 PATH。');
@@ -152,22 +170,31 @@ function searchHistory(profileDir, profileName, keywords, since, limit, sort) {
 // 用 `|` 作字段分隔符；字段内含 `|` 的替换成 `│`（全宽竖线）避免歧义
 const clean = s => String(s ?? '').replaceAll('|', '│').trim();
 
-function printBookmarks(items, multiProfile) {
+function originTag(item, showBrowser, showProfile) {
+  if (showBrowser && showProfile) return '@' + clean(item.browser) + '-' + clean(item.profile);
+  if (showBrowser) return '@' + clean(item.browser);
+  if (showProfile) return '@' + clean(item.profile);
+  return null;
+}
+
+function printBookmarks(items, showBrowser, showProfile) {
   console.log(`[书签] ${items.length} 条`);
   for (const b of items) {
     const segs = [clean(b.name) || '(无标题)', clean(b.url)];
     if (b.folder) segs.push(clean(b.folder));
-    if (multiProfile) segs.push('@' + clean(b.profile));
+    const tag = originTag(b, showBrowser, showProfile);
+    if (tag) segs.push(tag);
     console.log('  ' + segs.join(' | '));
   }
 }
 
-function printHistory(items, multiProfile, sortLabel) {
+function printHistory(items, showBrowser, showProfile, sortLabel) {
   console.log(`[历史] ${items.length} 条（${sortLabel}）`);
   for (const h of items) {
     const segs = [clean(h.title) || '(无标题)', clean(h.url), h.visit];
     if (h.visit_count > 1) segs.push(`visits=${h.visit_count}`);
-    if (multiProfile) segs.push('@' + clean(h.profile));
+    const tag = originTag(h, showBrowser, showProfile);
+    if (tag) segs.push(tag);
     console.log('  ' + segs.join(' | '));
   }
 }
@@ -175,23 +202,33 @@ function printHistory(items, multiProfile, sortLabel) {
 // --- main ---------------------------------------------------------------
 const args = parseArgs(process.argv.slice(2));
 
-const dataDir = getChromeDataDir();
-if (!dataDir || !fs.existsSync(dataDir)) die('未找到 Chrome 用户数据目录');
+let browsers = knownBrowserDataDirs().filter(b => fs.existsSync(b.dir));
+if (args.browser) {
+  const filtered = browsers.filter(b => b.id === args.browser);
+  if (!filtered.length) {
+    const available = browsers.map(b => b.id).join('、') || '无';
+    die(`未找到浏览器 ${args.browser} 的用户数据目录（已检测到：${available}）`);
+  }
+  browsers = filtered;
+}
+if (!browsers.length) die('未找到任何浏览器（Chrome / Edge）的用户数据目录');
 
-const profiles = listProfiles(dataDir);
 const doBookmarks = args.only !== 'history';
 const doHistory   = args.only !== 'bookmarks';
 
 const bookmarks = [];
 const history = [];
-for (const p of profiles) {
-  const pDir = path.join(dataDir, p.dir);
-  if (!fs.existsSync(pDir)) continue;
-  if (doBookmarks) bookmarks.push(...searchBookmarks(pDir, p.name, args.keywords));
-  if (doHistory)   history.push(...searchHistory(pDir, p.name, args.keywords, args.since, args.limit === 0 ? 0 : args.limit * 2, args.sort));
+for (const browser of browsers) {
+  const profiles = listProfiles(browser.dir);
+  for (const p of profiles) {
+    const pDir = path.join(browser.dir, p.dir);
+    if (!fs.existsSync(pDir)) continue;
+    if (doBookmarks) bookmarks.push(...searchBookmarks(pDir, p.name, browser.label, args.keywords));
+    if (doHistory)   history.push(...searchHistory(pDir, p.name, browser.label, args.keywords, args.since, args.limit === 0 ? 0 : args.limit * 2, args.sort));
+  }
 }
 
-// 历史跨 profile 合并后按指定 sort 重排 + 切顶
+// 历史跨 profile/浏览器 合并后按指定 sort 重排 + 切顶
 if (args.sort === 'visits') {
   history.sort((a, b) => (b.visit_count || 0) - (a.visit_count || 0) || (b.visit || '').localeCompare(a.visit || ''));
 } else {
@@ -200,14 +237,16 @@ if (args.sort === 'visits') {
 const bookmarksOut = args.limit === 0 ? bookmarks : bookmarks.slice(0, args.limit);
 const historyOut   = args.limit === 0 ? history   : history.slice(0, args.limit);
 
-// 仅当结果真的横跨多个 profile 时，才输出 @profile 标注（空 profile 不算）
+// 仅当结果真的横跨多个 browser/profile 时才输出 @ 标注（避免单源场景噪音）
+const seenBrowsers = new Set([...bookmarksOut, ...historyOut].map(x => x.browser));
 const seenProfiles = new Set([...bookmarksOut, ...historyOut].map(x => x.profile));
+const showBrowser = seenBrowsers.size > 1;
 const showProfile = seenProfiles.size > 1;
 
 const sortLabel = args.sort === 'visits' ? '按访问次数' : '按最近访问';
-if (doBookmarks) printBookmarks(bookmarksOut, showProfile);
+if (doBookmarks) printBookmarks(bookmarksOut, showBrowser, showProfile);
 if (doBookmarks && doHistory) console.log();
-if (doHistory)   printHistory(historyOut, showProfile, sortLabel);
+if (doHistory)   printHistory(historyOut, showBrowser, showProfile, sortLabel);
 
 if (!args.keywords.length && doBookmarks && !doHistory) {
   console.error('\n提示：书签无时间维度，无关键词查询无意义。加关键词或切换 --only history。');
