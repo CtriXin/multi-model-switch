@@ -450,6 +450,46 @@ def test_pi_mimo_openai_provider_disables_developer_role(monkeypatch, tmp_path):
     assert provider["compat"]["supportsDeveloperRole"] is False
 
 
+def test_pi_deepseek_openai_provider_disables_developer_role(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["deepseek-reasoner"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-deepseek-relay",
+            "name": "NewAPI DeepSeek Relay",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com",
+            "anthropic_base_url": "https://relay.example.com",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "deepseek-reasoner"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert provider["compat"]["supportsDeveloperRole"] is False
+
+
 def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
     import mms_launchers
 

@@ -181,6 +181,7 @@ _PI_OPENAI_PROFILE_COMPAT = {
     },
     "deepseek": {
         "requiresReasoningContentOnAssistantMessages": True,
+        "supportsDeveloperRole": False,
         "thinkingFormat": "deepseek",
     },
     "glm": {
