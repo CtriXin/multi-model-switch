@@ -56,14 +56,14 @@
     "configured_model_count_including_selectors": 37
   },
   "summary": {
-    "total": 39,
+    "total": 40,
     "official_exact_or_base_alias": 35,
     "needs_official_alias_evidence": 3,
-    "official_partial": 1,
+    "official_partial": 2,
     "one_million_yes": 19,
     "vision_yes_or_image": 22,
-    "thinking_yes": 32,
-    "thinking_control_captured": 32,
+    "thinking_yes": 33,
+    "thinking_control_captured": 33,
     "official_max_output_captured": 16,
     "openrouter_referenced": 33,
     "openrouter_catalog_total_models_at_capture": 358
@@ -5698,6 +5698,38 @@
         "completion": "USD per output token",
         "input_cache_write": "USD per cached input token write"
       }
+    },
+    {
+      "alias": "qwen3.8-max-preview",
+      "routed_model_id": "qwen3.8-max-preview",
+      "vendor": "Alibaba Model Studio / Qwen",
+      "canonical_model_id": "qwen3.8-max-preview",
+      "alias_status": "official_exact",
+      "confidence": "official_partial",
+      "official_context_window_tokens": null,
+      "official_max_output_tokens": null,
+      "supports_vision": null,
+      "supports_thinking": true,
+      "one_million_context": null,
+      "evidence": [
+        {
+          "url": "https://help.aliyun.com/document_detail/3026903.html",
+          "official": true,
+          "checked_at": "2026-07-23"
+        }
+      ],
+      "official_capabilities": {
+        "function_calling": true,
+        "token_plan_only": true
+      },
+      "thinking_control": {
+        "supported": true,
+        "control_type": "enable_thinking / reasoning.effort",
+        "path": "enable_thinking",
+        "disable_supported": "unknown",
+        "notes": "The official Text Generation page says all Qwen3-and-later models support thinking: OpenAI-compatible requests use enable_thinking, while Responses API uses reasoning.effort. It does not state an exact context window, max output, or direct image-input capability for qwen3.8-max-preview."
+      },
+      "notes": "The user-supplied official document names qwen3.8-max-preview as a highest-reasoning model available only through Token Plan. It confirms Thinking and Function Calling for the Qwen3 family, but directs exact context details to Model Marketplace. Keep context, 1M, max output, and direct vision unknown until an exact model specification is published."
     }
   ],
   "sources": {

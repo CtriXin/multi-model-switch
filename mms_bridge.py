@@ -467,20 +467,22 @@ def _normalized_bridge_protocol(route):
 
 
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
-_DOMESTIC_MODEL_PREFIXES = ("glm", "kimi", "k2.6", "mimo", "qwen", "minimax", "deepseek")
+_DOMESTIC_MODEL_PREFIXES = ("glm", "kimi", "k3", "k2.6", "mimo", "qwen", "minimax", "deepseek")
 _DOMESTIC_THINKING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
-_DOMESTIC_THINKING_ALLOW_PREFIXES = ("glm", "kimi", "k2.5", "k2.6", "minimax", "deepseek")
+_DOMESTIC_THINKING_ALLOW_PREFIXES = ("glm", "kimi", "k3", "k2.5", "k2.6", "minimax", "deepseek")
 _DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
 _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
-_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES = ("kimi", "k2.", "mimo")
-_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo", "kimi", "k2.")
+_DOMESTIC_ANTHROPIC_HISTORY_COALESCE_PREFIXES = ("kimi", "k3", "k2.", "mimo")
+_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo", "kimi", "k3", "k2.")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES = {
     "gpt-5.3-codex",
     "gpt-5.4",
     "gpt-5.5",
+    "k3",
+    "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
     "kimi-k2.5",

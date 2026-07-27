@@ -220,9 +220,15 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
     "deepseek-v4-pro": 384000,
     "gpt-5.3-codex": 128000,
     "gpt-5.3-codex-spark": 32000,
+    "k3": 131072,
+    "k3[1m]": 1048576,
+    "kimi-k3": 1048576,
     "k2.6": 32768,
     "k2.6-code-preview": 32768,
     "kimi-for-coding": 32768,
+    "kimi-for-coding-highspeed": 32768,
+    "kimi-k2.7-code": 32768,
+    "kimi-k2.7-code-highspeed": 32768,
     "kimi-k2.6": 32768,
     "kimi-k2.6-code-preview": 32768,
     "mimo-v2-flash": 65536,
@@ -240,6 +246,9 @@ _PI_MODEL_MAX_TOKENS_HINTS = {
 _PI_MODEL_CONTEXT_WINDOW_HINTS = {
     "gpt-5.3-codex": 400000,
     "gpt-5.3-codex-spark": 128000,
+    "k3": 262144,
+    "k3[1m]": 1048576,
+    "kimi-k3": 1048576,
     "qwen3.6-flash": 1000000,
     "qwen3.7-max": 1000000,
 }
@@ -249,7 +258,11 @@ _PI_MODEL_INPUT_HINTS = {
     "claude-sonnet-4-6": ["text", "image"],
     "gpt-5.3-codex": ["text", "image"],
     "gpt-5.3-codex-spark": ["text", "image"],
+    "k3": ["text", "image"],
+    "k3[1m]": ["text", "image"],
+    "kimi-k3": ["text", "image"],
     "kimi-for-coding": ["text", "image"],
+    "kimi-for-coding-highspeed": ["text", "image"],
     "minimax-m2.7": ["text"],
     "qwen3.6-flash": ["text", "image"],
     "qwen3.7-max": ["text"],
@@ -497,6 +510,53 @@ def _pi_model_input_types(model_name):
     return ["text"]
 
 
+def _pi_is_kimi_k3_selector(model_name):
+    leaf = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    return leaf in {"k3", "k3[1m]", "kimi-k3"}
+
+
+def _pi_profile_capability_overlay(runtime, model_name, *, provider_id, base_url, profile_id):
+    if not _pi_is_kimi_k3_selector(model_name):
+        return {}
+    try:
+        profile_caps = resolve_model_capabilities(
+            model_name,
+            runtime=runtime,
+            provider_id=provider_id,
+            base_url=base_url,
+            profile_id=profile_id,
+            approved_facts={},
+            model_policy={},
+        )
+    except Exception:
+        return {}
+    control = profile_caps.get("thinking_control") if isinstance(profile_caps.get("thinking_control"), dict) else {}
+    if str(control.get("path") or "").strip() != "reasoning_effort":
+        return {}
+    return profile_caps
+
+
+def _pi_apply_profile_capability_overlay(caps, profile_caps):
+    if not profile_caps:
+        return caps
+    merged = copy.deepcopy(caps if isinstance(caps, dict) else {})
+    sources = merged.setdefault("sources", {})
+    profile_sources = profile_caps.get("sources") if isinstance(profile_caps.get("sources"), dict) else {}
+    for field in (
+        "context_window_tokens",
+        "max_output_tokens",
+        "supports_thinking",
+        "thinking_control",
+        "expected_protocol",
+        "protocol_hints",
+    ):
+        if profile_sources.get(field) != "provider_profile":
+            continue
+        merged[field] = copy.deepcopy(profile_caps.get(field))
+        sources[field] = "provider_profile"
+    return merged
+
+
 def _pi_model_capabilities(runtime, model_name):
     runtime = runtime if isinstance(runtime, dict) else {}
     provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip()
@@ -508,6 +568,16 @@ def _pi_model_capabilities(runtime, model_name):
         provider_id=provider_id,
         base_url=base_url,
         profile_id=profile_id,
+    )
+    caps = _pi_apply_profile_capability_overlay(
+        caps,
+        _pi_profile_capability_overlay(
+            runtime,
+            model_name,
+            provider_id=provider_id,
+            base_url=base_url,
+            profile_id=profile_id,
+        ),
     )
 
     needs_reference = any(
@@ -696,7 +766,9 @@ def _pi_pick_protocol(runtime, model_name):
     variant_by_protocol = {item["protocol"]: item for item in variants}
     caps = _pi_model_capabilities(runtime, model_name)
     normalized_model = _pi_normalize_model_key(model_name)
-    if "anthropic_messages" in available and normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-")):
+    if "anthropic_messages" in available and (
+        normalized_model.startswith("k3") or normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-"))
+    ):
         return variant_by_protocol["anthropic_messages"], caps
     if "openai_chat_completions" in available and normalized_model.startswith(("deepseek", "mimo-")):
         return variant_by_protocol["openai_chat_completions"], caps
@@ -954,6 +1026,38 @@ def _write_pi_settings_config(agent_dir):
     return settings_path
 
 
+def _seed_pi_trust_store(agent_dir, project_dir):
+    """Seed the isolated agentDir's trust.json so project trust follows the session.
+
+    Mirrors the `_ensure_claude_project_trust` idea: mmf isolates pi's HOME and
+    PI_CODING_AGENT_DIR per PID, so pi's trust store is a fresh file under the
+    per-PID session home. Without seeding, pi re-prompts project trust every
+    new PID for any cwd that has `.agents/skills` (e.g. ~/feature-update).
+
+    Trust only the selected launch cwd. Never seed the whole real HOME tree:
+    that would silently trust unrelated present and future repositories.
+    Only writes when no decision exists yet, so an explicit `/trust` choice
+    inside pi still wins for that PID.
+    """
+    try:
+        trust_path = os.path.join(agent_dir, "trust.json")
+        if os.path.exists(trust_path):
+            return
+        trust_root = os.path.realpath(str(project_dir or "").strip())
+        real_home = os.path.realpath(_real_user_path())
+        if not trust_root or trust_root == real_home:
+            return
+        os.makedirs(os.path.dirname(trust_path), exist_ok=True)
+        atomic_write_text(
+            trust_path,
+            json.dumps({trust_root: True}, indent=2) + "\n",
+            mode=0o600,
+        )
+    except Exception:
+        # Best-effort: never block launch on trust seeding.
+        return
+
+
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     launchers = _launchers_module()
@@ -982,6 +1086,7 @@ def _pi_gateway_env(runtime, model_info=None):
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
+    _seed_pi_trust_store(agent_dir, os.getcwd())
     env["PI_CODING_AGENT_DIR"] = agent_dir
     env["PI_CODING_AGENT_SESSION_DIR"] = session_dir
     env["PI_TELEMETRY"] = "0"

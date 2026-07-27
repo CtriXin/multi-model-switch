@@ -472,6 +472,8 @@ def test_install_script_copies_bundled_provider_profiles():
     assert 'copy_dir_safely "$SOURCE_DIR/config" "$MMS_HOME/config"' in text
     assert profile_path.exists()
     assert "glm-5.2" in profile_text
+    assert "openrouter-moonshot-kimi-k3" in profile_text
+    assert "kimi-k3" in profile_text
     assert "kimi-k2.7-code" in profile_text
     assert "minimax-m3" in profile_text
 
