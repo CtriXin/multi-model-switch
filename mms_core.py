@@ -15979,7 +15979,7 @@ def _split_cli_prefixed_resume_ref(session_ref):
     prefix, rest = ref.split(":", 1)
     prefix = prefix.strip().lower()
     rest = rest.strip()
-    if prefix in {"codex", "claude"} and rest:
+    if prefix in {"codex", "claude", "pi"} and rest:
         return prefix, rest
     return "", ref
 
@@ -16097,10 +16097,34 @@ def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
     return None, None, f"找不到 Claude session: {ref}"
 
 
+def _resolve_pi_resume_ref(session_ref, *, allow_passthrough=False):
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None, None, "session id 不能为空"
+    from mms_session_catalog import resolve_catalog_ref
+
+    session_id, record, error = resolve_catalog_ref(ref, cli="pi")
+    if session_id:
+        return session_id, record, None
+    if allow_passthrough:
+        return ref, {"session_id": ref, "_unindexed": True}, None
+    return None, None, f"Pi {error or f'找不到 session: {ref}'}"
+
+
+def _validated_pi_session_path(session_record):
+    source_path = str((session_record or {}).get("source_path") or "").strip()
+    if not source_path.lower().endswith(".jsonl"):
+        return None, "Pi session source 必须是 .jsonl 文件"
+    resolved = os.path.realpath(os.path.expanduser(source_path))
+    if not os.path.isfile(resolved):
+        return None, f"Pi session source 不存在或不是文件: {source_path}"
+    return resolved, None
+
+
 def _resolve_resume_target(session_ref, cli_hint="auto"):
     prefix_cli, ref = _split_cli_prefixed_resume_ref(session_ref)
     cli_hint = prefix_cli or str(cli_hint or "auto").strip().lower()
-    if cli_hint not in {"auto", "codex", "claude"}:
+    if cli_hint not in {"auto", "codex", "claude", "pi"}:
         return None, None, None, f"不支持的 CLI: {cli_hint}"
     if cli_hint == "codex":
         session_id, record, error = _resolve_codex_resume_ref(ref, allow_passthrough=True)
@@ -16108,15 +16132,29 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
     if cli_hint == "claude":
         session_id, record, error = _resolve_claude_resume_ref(ref, allow_passthrough=True)
         return "claude", session_id, record, error
+    if cli_hint == "pi":
+        # Pi's native --session option requires a JSONL path, not an opaque
+        # session id. Fail closed unless the catalog resolved a real record.
+        session_id, record, error = _resolve_pi_resume_ref(ref, allow_passthrough=False)
+        return "pi", session_id, record, error
 
     codex_id, codex_record, codex_error = _resolve_codex_resume_ref(ref, allow_passthrough=False)
     claude_id, claude_record, claude_error = _resolve_claude_resume_ref(ref)
-    if codex_id and not claude_id:
-        return "codex", codex_id, codex_record, None
-    if claude_id and not codex_id:
-        return "claude", claude_id, claude_record, None
-    if codex_id and claude_id:
-        return None, None, None, f"session id 同时匹配 Codex 和 Claude，请使用 codex:{ref} 或 claude:{ref}"
+    pi_id, pi_record, pi_error = _resolve_pi_resume_ref(ref)
+    matches = [
+        (name, session_id, record)
+        for name, session_id, record in (
+            ("codex", codex_id, codex_record),
+            ("claude", claude_id, claude_record),
+            ("pi", pi_id, pi_record),
+        )
+        if session_id
+    ]
+    if len(matches) == 1:
+        return matches[0][0], matches[0][1], matches[0][2], None
+    if len(matches) > 1:
+        prefixes = " / ".join(f"{name}:{ref}" for name, _session_id, _record in matches)
+        return None, None, None, f"session id 同时匹配多个 CLI，请使用 {prefixes}"
     uuid_cli = _uuid_resume_cli_hint(ref)
     if uuid_cli == "codex":
         # Codex UUIDs are usually v7 and may not have been written back into
@@ -16125,7 +16163,7 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
     if uuid_cli == "claude":
         # Claude Code prints v4 session UUIDs in "claude --resume <id>".
         return "claude", ref, {"session_id": ref, "_unindexed": True}, None
-    return None, None, None, codex_error or claude_error or f"找不到 session: {ref}"
+    return None, None, None, codex_error or claude_error or pi_error or f"找不到 session: {ref}"
 
 
 def _uuid_resume_cli_hint(session_ref):
@@ -16270,7 +16308,7 @@ def _resolve_resume_runtime_and_model(
     requested_model = str(args.model or "").strip()
     if requested_model:
         model_info = {"model": requested_model}
-    elif cli == "claude" and _session_resume_model(session_record):
+    elif cli in {"claude", "pi"} and _session_resume_model(session_record):
         model_info = {"model": _session_resume_model(session_record)}
     else:
         last_by_cli, _scene_counts = _get_scene_usage()
@@ -16322,11 +16360,11 @@ def _resolve_resume_runtime_and_model(
 def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, lang_override=None):
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} resume",
-        description="通过 Codex/Claude session id 一键恢复 MMS 托管会话",
+        description="通过 Codex/Claude/Pi session id 一键恢复 MMS 托管会话",
     )
-    parser.add_argument("session_ref", help="session id、前缀，或 codex:<id> / claude:<id>")
+    parser.add_argument("session_ref", help="session id、前缀，或 codex:<id> / claude:<id> / pi:<id>")
     parser.add_argument("prompt", nargs="*", help="恢复后追加给 CLI 的可选 prompt；若 prompt 以 -- 开头请先写 --")
-    parser.add_argument("--cli", choices=["auto", "codex", "claude"], default="auto", help="强制指定恢复目标 CLI")
+    parser.add_argument("--cli", choices=["auto", "codex", "claude", "pi"], default="auto", help="强制指定恢复目标 CLI")
     parser.add_argument("--provider", help="临时指定 provider")
     parser.add_argument("--account", help="临时指定官方账号档案")
     parser.add_argument("--model", help="临时指定恢复时使用的模型")
@@ -16341,7 +16379,7 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     if error:
         console.print(f"[red]{error}[/red]")
         raise SystemExit(1)
-    if cli not in {"codex", "claude"} or not session_id:
+    if cli not in {"codex", "claude", "pi"} or not session_id:
         console.print(f"[red]无法识别 session: {args.session_ref}[/red]")
         raise SystemExit(1)
 
@@ -16391,6 +16429,12 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
         staged_resume_files = _stage_claude_catalog_resume_files(session_record, project_path, runtime)
     if cli == "claude":
         extra_args = ["--resume", session_id] + list(args.prompt or [])
+    elif cli == "pi":
+        source_path, source_error = _validated_pi_session_path(session_record)
+        if source_error:
+            console.print(f"[red]{source_error}[/red]")
+            raise SystemExit(1)
+        extra_args = ["--session", source_path] + list(args.prompt or [])
     else:
         extra_args = ["resume", session_id] + list(args.prompt or [])
 
@@ -17220,7 +17264,7 @@ def main():
             f"  {current_command()} warm [id]       预热模型缓存\n"
             f"  {current_command()} cache ...       查看或调整模型 cache 异步刷新窗口\n"
             f"  {current_command()} session ...     查看托管 session\n"
-            f"  {current_command()} resume <id>     通过 Codex/Claude session id 恢复托管 CLI\n"
+            f"  {current_command()} resume <id>     通过 Codex/Claude/Pi session id 恢复托管 CLI\n"
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} registry ...    刷新/查看本地 model registry source truth\n"
             f"  {current_command()} migrate config-v2 [--json]  只读 config v2 migration / promotion human gate\n"

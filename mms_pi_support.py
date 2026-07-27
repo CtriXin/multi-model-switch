@@ -1026,6 +1026,20 @@ def _write_pi_settings_config(agent_dir):
     return settings_path
 
 
+def _pi_gateway_root():
+    """Keep Pi state inside the config root selected for this MMS launch."""
+    launchers = _launchers_module()
+    config_root = launchers._selected_mms_config_root(
+        {"MMS_REAL_HOME": _real_user_path()}
+    )
+    return os.path.join(config_root, "pi-gateway")
+
+
+def _pi_session_dir():
+    """Return the persistent, config-root-scoped Pi session directory."""
+    return os.path.join(_pi_gateway_root(), "sessions")
+
+
 def _seed_pi_trust_store(agent_dir, project_dir):
     """Seed the isolated agentDir's trust.json so project trust follows the session.
 
@@ -1063,7 +1077,7 @@ def _pi_gateway_env(runtime, model_info=None):
     launchers = _launchers_module()
     requested_model = _resolve_model(model_info or runtime)
     model = _pi_effective_selected_model(runtime, requested_model)
-    gateway_base = _real_user_path(".config", "mms", "pi-gateway")
+    gateway_base = _pi_gateway_root()
     os.makedirs(gateway_base, exist_ok=True)
     sessions_dir = os.path.join(gateway_base, "s")
     session_home = os.path.join(sessions_dir, str(os.getpid()))
@@ -1082,7 +1096,7 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_SOFT_HOME"] = "1"
 
     agent_dir = os.path.join(session_home, ".pi", "agent")
-    session_dir = os.path.join(agent_dir, "sessions")
+    session_dir = _pi_session_dir()
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
@@ -1125,8 +1139,13 @@ def _pi_provider_export_env(runtime, model):
     effective_model = _pi_effective_selected_model(runtime, model or runtime.get("model"))
     provider_ref = _opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
     model_ref = _opencode_config_slug(effective_model or runtime.get("model"), "model")
-    agent_dir = _real_user_path(".config", "mms", "pi-gateway", "exports", f"{provider_ref}-{model_ref}", "agent")
-    session_dir = os.path.join(agent_dir, "sessions")
+    agent_dir = os.path.join(
+        _pi_gateway_root(),
+        "exports",
+        f"{provider_ref}-{model_ref}",
+        "agent",
+    )
+    session_dir = _pi_session_dir()
     models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, effective_model)
     settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)

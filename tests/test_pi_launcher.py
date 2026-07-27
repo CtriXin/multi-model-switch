@@ -51,6 +51,22 @@ def test_runtime_resolver_uses_repo_pi_wrapper(monkeypatch, tmp_path):
     assert resolved == str(wrapper)
 
 
+def test_pi_gateway_root_and_sessions_honor_explicit_mms_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_pi_support
+
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_selected_mms_config_root",
+        lambda _env: str(preview_root),
+    )
+
+    assert mms_pi_support._pi_gateway_root() == str(preview_root / "pi-gateway")
+    assert mms_pi_support._pi_session_dir() == str(preview_root / "pi-gateway" / "sessions")
+
+
 def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -63,6 +79,8 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setattr(mms_launchers, "_selected_mms_config_root", lambda _env: str(preview_root))
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_launchers, "_scrub_inherited_runtime_env", lambda env, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_inject_real_home_hints", lambda env, include_xdg=False: env)
@@ -106,8 +124,11 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert captured["env"]["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert captured["env"]["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
     assert captured["env"]["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
+    assert captured["env"]["PI_CODING_AGENT_SESSION_DIR"] == str(
+        preview_root / "pi-gateway" / "sessions"
+    )
 
-    models_path = real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
+    models_path = preview_root / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-a"]
     assert provider["api"] == "openai-responses"
@@ -116,12 +137,13 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
     settings_payload = json.loads(
-        (real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "settings.json").read_text(
+        (preview_root / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "settings.json").read_text(
             encoding="utf-8"
         )
     )
     assert settings_payload["retry"] == {"enabled": True, "maxRetries": 8, "baseDelayMs": 1000}
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
+    assert not (real_home / ".config" / "mms" / "pi-gateway").exists()
 
 
 def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):

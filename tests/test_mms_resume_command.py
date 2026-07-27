@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 
 class _FakeConsole:
     def __init__(self):
@@ -17,6 +19,7 @@ def test_split_cli_prefixed_resume_ref():
 
     assert mms_core._split_cli_prefixed_resume_ref("codex:abc") == ("codex", "abc")
     assert mms_core._split_cli_prefixed_resume_ref("Claude: session-1 ") == ("claude", "session-1")
+    assert mms_core._split_cli_prefixed_resume_ref("pi: session-2 ") == ("pi", "session-2")
     assert mms_core._split_cli_prefixed_resume_ref("other:abc") == ("", "other:abc")
 
 
@@ -120,6 +123,11 @@ def test_resolve_resume_target_requires_prefix_when_ambiguous(monkeypatch):
         "_resolve_claude_resume_ref",
         lambda ref, allow_passthrough=False: ("same-id", {"session_id": "same-id"}, None),
     )
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_pi_resume_ref",
+        lambda ref, allow_passthrough=False: (None, None, f"找不到 Pi session: {ref}"),
+    )
 
     cli, session_id, record, error = mms_core._resolve_resume_target("same")
 
@@ -143,6 +151,11 @@ def test_resolve_resume_target_uses_uuid_version_hint_when_unindexed(monkeypatch
         "_resolve_claude_resume_ref",
         lambda ref, allow_passthrough=False: (None, None, f"找不到 Claude session: {ref}"),
     )
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_pi_resume_ref",
+        lambda ref, allow_passthrough=False: (None, None, f"找不到 Pi session: {ref}"),
+    )
 
     cli, session_id, record, error = mms_core._resolve_resume_target(
         "2ea6c1bc-8632-4d5c-94ba-672b4a744871"
@@ -159,6 +172,37 @@ def test_resolve_resume_target_uses_uuid_version_hint_when_unindexed(monkeypatch
     assert cli == "codex"
     assert session_id == "019e3990-4e86-7591-abca-d59641c6173a"
     assert record["_unindexed"] is True
+
+
+def test_resolve_resume_target_finds_pi_catalog_record(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_codex_resume_ref",
+        lambda ref, allow_passthrough=False: (None, None, f"找不到 Codex session: {ref}"),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_claude_resume_ref",
+        lambda ref, allow_passthrough=False: (None, None, f"找不到 Claude session: {ref}"),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_pi_resume_ref",
+        lambda ref, allow_passthrough=False: (
+            "pi-session",
+            {"session_id": "pi-session", "source_path": "/tmp/pi-session.jsonl"},
+            None,
+        ),
+    )
+
+    cli, session_id, record, error = mms_core._resolve_resume_target("pi-session")
+
+    assert error is None
+    assert cli == "pi"
+    assert session_id == "pi-session"
+    assert record["source_path"] == "/tmp/pi-session.jsonl"
 
 
 def test_resolve_resume_runtime_infers_legacy_claude_provider(monkeypatch):
@@ -309,6 +353,122 @@ def test_handle_resume_command_passes_codex_resume_args(monkeypatch):
     assert captured["once"] is True
     assert captured["model_info"] == {"model": "gpt-5.4"}
     assert captured["extra_args"] == ["resume", "codex-session", "continue work"]
+
+
+def test_handle_resume_command_passes_pi_session_path(monkeypatch, tmp_path):
+    import mms_core
+
+    captured = {}
+    project = tmp_path / "project"
+    project.mkdir()
+    session_path = tmp_path / "pi-session.jsonl"
+    session_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(mms_core, "console", _FakeConsole())
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_resume_target",
+        lambda session_ref, cli_hint="auto": (
+            "pi",
+            "pi-session",
+            {
+                "session_id": "pi-session",
+                "source_path": str(session_path),
+                "project_path": str(project),
+                "model": "qwen3.6-plus",
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda cfg: cfg)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda cfg=None, cli_override=None: "zh-CN")
+    monkeypatch.setattr(mms_core, "set_language", lambda language: None)
+    monkeypatch.setattr(mms_core, "ensure_provider_credentials", lambda cfg: {"id": "provider-a"})
+    monkeypatch.setattr(mms_core, "ensure_models_ready", lambda cfg, provider: (provider, ["qwen3.6-plus"]))
+    monkeypatch.setattr(mms_core.os, "chdir", lambda path: captured.setdefault("chdir", path))
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_resume_runtime_and_model",
+        lambda *args, **kwargs: (
+            {"id": "provider-a", "runtime_kind": "provider", "auth_mode": "api_key"},
+            ["qwen3.6-plus"],
+            "pi",
+            {"model": "qwen3.6-plus"},
+        ),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_launch_with_tracking",
+        lambda cli, model_info, runtime, once=False, extra_args=None: captured.update(
+            {"cli": cli, "model_info": model_info, "extra_args": extra_args}
+        ),
+    )
+
+    mms_core.handle_resume_command(
+        ["pi:pi-session", "继续"],
+        preloaded_command_cfg={"recommend": {"models": ["qwen3.6-plus"]}},
+    )
+
+    assert captured["chdir"] == str(project)
+    assert captured["cli"] == "pi"
+    assert captured["model_info"] == {"model": "qwen3.6-plus"}
+    assert captured["extra_args"] == ["--session", str(session_path), "继续"]
+
+
+def test_explicit_pi_resume_fails_closed_when_catalog_misses(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_pi_resume_ref",
+        lambda ref, allow_passthrough=False: (
+            None,
+            None,
+            f"Pi 找不到 session: {ref}",
+        ),
+    )
+
+    cli, session_id, record, error = mms_core._resolve_resume_target(
+        "missing-session",
+        cli_hint="pi",
+    )
+
+    assert cli == "pi"
+    assert session_id is None
+    assert record is None
+    assert error == "Pi 找不到 session: missing-session"
+
+
+@pytest.mark.parametrize(
+    "source_path, expected_error",
+    [
+        ("", "必须是 .jsonl 文件"),
+        ("/tmp/pi-session.txt", "必须是 .jsonl 文件"),
+        ("/tmp/missing-pi-session.jsonl", "不存在或不是文件"),
+    ],
+)
+def test_pi_resume_validates_native_session_path(source_path, expected_error):
+    import mms_core
+
+    resolved, error = mms_core._validated_pi_session_path(
+        {"source_path": source_path}
+    )
+
+    assert resolved is None
+    assert expected_error in error
+
+
+def test_pi_resume_accepts_existing_jsonl_path(tmp_path):
+    import mms_core
+
+    source = tmp_path / "session.jsonl"
+    source.write_text("{}\n", encoding="utf-8")
+
+    resolved, error = mms_core._validated_pi_session_path(
+        {"source_path": str(source)}
+    )
+
+    assert resolved == str(source.resolve())
+    assert error is None
 
 
 def test_handle_resume_command_select_model_sets_provider(monkeypatch):
