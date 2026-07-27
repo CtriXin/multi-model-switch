@@ -1,6 +1,22 @@
 import json
 from pathlib import Path
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_pi_capability_bundle(monkeypatch):
+    import mms_launchers
+
+    real_resolve = mms_launchers._pi_support.resolve_model_capabilities
+
+    def resolve_without_default_bundle(*args, **kwargs):
+        kwargs.setdefault("approved_facts", {})
+        kwargs.setdefault("model_policy", {})
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(mms_launchers._pi_support, "resolve_model_capabilities", resolve_without_default_bundle)
+
 
 def test_core_pi_cli_is_visible_and_provider_compat_is_implied():
     import mms_core
@@ -553,6 +569,79 @@ def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
     assert provider["models"][0]["maxTokens"] == 32_768
 
 
+def test_pi_kimi_k3_exports_1m_context_and_anthropic_protocol(monkeypatch, tmp_path):
+    import mms_capability_resolver
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {
+            "models": {
+                "k3": {
+                    "capabilities": {
+                        "context_window_tokens": 1_000_000,
+                        "supports_thinking": True,
+                        "thinking_control": {
+                            "path": "thinking.type",
+                            "supported": True,
+                        },
+                    }
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["k3[1m]", "k3", "kimi-for-coding-highspeed"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "kimi-direct",
+            "name": "Kimi Direct",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-kimi",
+            "openai_base_url": "https://api.kimi.com/coding/v1",
+            "anthropic_base_url": "https://api.kimi.com/coding",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "k3[1m]"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    model_by_id = {item["id"]: item for item in provider["models"]}
+    assert provider["api"] == "anthropic-messages"
+    assert model_by_id["k3[1m]"]["input"] == ["text", "image"]
+    assert model_by_id["k3[1m]"]["contextWindow"] == 1_048_576
+    assert model_by_id["k3[1m]"]["maxTokens"] == 1_048_576
+    assert model_by_id["k3[1m]"]["reasoning"] is True
+    assert model_by_id["k3"]["input"] == ["text", "image"]
+    assert model_by_id["k3"]["contextWindow"] == 262_144
+    assert model_by_id["k3"]["maxTokens"] == 131_072
+    assert model_by_id["k3"]["reasoning"] is True
+    assert model_by_id["kimi-for-coding-highspeed"]["contextWindow"] == 262_144
+    assert model_by_id["kimi-for-coding-highspeed"]["maxTokens"] == 32_768
+
+
 def test_pi_normalizes_anthropic_base_url_before_export(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -816,6 +905,43 @@ def test_pi_reopens_deprecated_antigravity_gemini_alias_when_replacement_availab
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
     assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low", "gemini-3-pro-high"]
+
+
+def test_pi_trust_store_scopes_trust_to_launch_project(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    project = real_home / "project"
+    agent_dir = tmp_path / "session" / ".pi" / "agent"
+    project.mkdir(parents=True)
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_pi_support._seed_pi_trust_store(str(agent_dir), str(project))
+
+    payload = json.loads((agent_dir / "trust.json").read_text(encoding="utf-8"))
+    assert payload == {str(project.resolve()): True}
+    assert str(real_home.resolve()) not in payload
+
+
+def test_pi_trust_store_does_not_auto_trust_real_home(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    agent_dir = tmp_path / "session" / ".pi" / "agent"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_pi_support._seed_pi_trust_store(str(agent_dir), str(real_home))
+
+    assert not (agent_dir / "trust.json").exists()
 
 
 def test_pi_exposed_model_names_recover_antigravity_opus_after_retry_hardening(monkeypatch):

@@ -245,7 +245,11 @@ def test_opencode_config_uses_openai_compatible_provider():
     reasoner = provider["models"]["deepseek-reasoner"]
     if "limit" in reasoner:
         assert isinstance(reasoner["limit"]["context"], int)
-        assert reasoner["limit"]["output"] == mms_launchers.OPENCODE_DEFAULT_OUTPUT_LIMIT
+        expected_output_limit = (
+            mms_launchers._capability_max_output_tokens("deepseek-reasoner", provider_id="deepseek")
+            or mms_launchers.OPENCODE_DEFAULT_OUTPUT_LIMIT
+        )
+        assert reasoner["limit"]["output"] == expected_output_limit
 
 
 def test_opencode_config_keeps_local_rtk_plugin_out_of_json(monkeypatch):
@@ -354,6 +358,52 @@ def test_opencode_model_config_maps_profile_thinking_and_effort(monkeypatch):
     }
     assert model_config["variants"]["high"]["reasoningEffort"] == "high"
     assert model_config["variants"]["xhigh"]["reasoningEffort"] == "max"
+
+
+def test_opencode_kimi_k3_uses_profile_effort_not_stale_generic_thinking(monkeypatch):
+    import mms_capability_resolver
+    import mms_launchers
+
+    monkeypatch.setattr(mms_capability_resolver, "_load_default_approved_facts_shared", lambda: {})
+    monkeypatch.setattr(
+        mms_capability_resolver,
+        "load_default_model_policy",
+        lambda: {
+            "models": {
+                "k3": {
+                    "capabilities": {
+                        "context_window_tokens": 1_000_000,
+                        "supports_thinking": True,
+                        "thinking_control": {
+                            "path": "thinking.type",
+                            "supported": True,
+                        },
+                    }
+                }
+            }
+        },
+    )
+
+    payload = mms_launchers._build_opencode_config_payload(
+        _runtime(
+            id="kimi",
+            name="Kimi Code",
+            provider_profile="kimi-code",
+            models=["k3"],
+            openai_base_url="https://api.kimi.com/coding/v1",
+            anthropic_base_url="https://api.kimi.com/coding/",
+            protocols=["anthropic_messages", "openai_chat_completions"],
+            reasoning_effort="low",
+            thinking_mode="disable",
+            opencode_lite_agents=False,
+        ),
+        "k3",
+    )
+    model_config = payload["provider"]["mms"]["models"]["k3"]
+
+    assert model_config["limit"]["context"] == 262_144
+    assert model_config["options"] == {"reasoningEffort": "max"}
+    assert "thinking" not in json.dumps(model_config)
 
 
 def test_opencode_stepfun_openai_effort_does_not_emit_output_config():

@@ -58,7 +58,7 @@ Keep this policy route-scoped. The built-in `cpa-antigravity-gemini` profile car
 | MiniMax | `https://api.minimaxi.com/v1` + `/chat/completions` | `https://api.minimaxi.com/anthropic` + `/v1/messages` | OpenAI format can use `reasoning_split`; Anthropic format uses thinking blocks |
 | DeepSeek | `https://api.deepseek.com` + `/chat/completions` | `https://api.deepseek.com/anthropic` + `/v1/messages` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `high`/`max` |
 | StepFun | `https://api.stepfun.com/v1` + `/chat/completions`; Step Plan uses `https://api.stepfun.com/step_plan/v1` | `https://api.stepfun.com` + `/v1/messages`; Step Plan uses `https://api.stepfun.com/step_plan` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `low`/`medium`/`high` |
-| Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | `thinking.type` enabled/disabled; split assistant `tool_use` history must preserve both thinking blocks and `reasoning_content`; preserve normal client headers |
+| Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions`; Moonshot API uses `https://api.moonshot.cn/v1` | `https://api.kimi.com/coding/` + `/v1/messages`; Moonshot API uses `https://api.moonshot.cn/anthropic` | K3 uses top-level `reasoning_effort=max`; Kimi Code plain `k3` is 256K and `k3[1m]` opts into 1M, while Moonshot API `kimi-k3` is 1M; K2.7 Code keeps `thinking.type` enabled/disabled; split assistant `tool_use` history must preserve both thinking blocks and `reasoning_content`; preserve normal client headers |
 | GLM / Z.ai | `https://api.z.ai/api/paas/v4/` + `/chat/completions` | `https://api.z.ai/api/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled |
 
 MiMo context is route-scoped. Direct MiMo OpenAI-compatible `/v1` and
@@ -101,8 +101,11 @@ documented 1048576 context / 131072 output limits for `mimo-v2.5-pro` and
 - StepFun Step Plan reasoning API: https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api
 - Kimi Code docs: https://www.kimi.com/code/docs/en/
 - Kimi Code third-party agents: https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html
+- Kimi K3 quickstart: https://platform.kimi.com/docs/guide/kimi-k3-quickstart
+- Kimi models overview: https://platform.kimi.com/docs/api/models-overview
+- Kimi reasoning effort: https://platform.kimi.com/docs/guide/use-thinking-effort
+- Kimi Claude Code integration: https://platform.kimi.com/docs/guide/claude-code-kimi
 - Kimi K2.7 Code quickstart: https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart
-- Kimi K2 thinking model guide: https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model
 - Kimi K2.7 Code pricing: https://platform.kimi.ai/docs/pricing/chat-k27-code
 - Z.ai API introduction: https://docs.z.ai/api-reference/introduction
 - Z.ai GLM-4.6 guide: https://docs.z.ai/guides/llm/glm-4.6

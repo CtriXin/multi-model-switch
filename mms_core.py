@@ -680,7 +680,7 @@ MODEL_FAMILIES = [
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
     {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
-    {"family": "Kimi",    "keywords": ("kimi", "k2.6-code-preview", "k2.6"), "category": "国产系"},
+    {"family": "Kimi",    "keywords": ("kimi", "k3", "k2.6-code-preview", "k2.6"), "category": "国产系"},
     {"family": "Mimo",    "keywords": ("mimo",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
@@ -1184,13 +1184,16 @@ VALID_ROLES = set(ROLE_WEIGHTS.keys())
 _REASONING_MODEL_HINTS = (
     "claude-opus", "claude-sonnet", "gpt-5", "o1-", "o3-", "o4-",
     "gemini-2.5-pro", "gemini-3", "qwen3-max", "qwen3-coder",
-    "kimi-k2.5", "kimi-for-coding", "glm-5", "glm-4.7",
+    "k3", "kimi-k3", "kimi-k2.5", "kimi-for-coding", "glm-5", "glm-4.7",
     "minimax-m2", "deepseek-reasoner", "doubao-thinking",
 )
 _TOOL_USE_FAMILIES = {"Claude", "GPT", "Gemini", "Qwen", "Kimi", "GLM", "MiniMax"}
 _VISION_CAPABLE_MODEL_NAMES = {
     "mimo-v2.5",
     "mimo-v2-omni",
+    "k3",
+    "k3[1m]",
+    "kimi-k3",
     "k2.6",
     "k2.6-code-preview",
     "kimi-k2.5",
@@ -4628,6 +4631,8 @@ def _vision_sidecar_model_candidates_for_provider(provider_id):
     generic = [
         "mimo-v2.5",
         "mimo-v2-omni",
+        "kimi-k3",
+        "k3",
         "K2.6",
         "K2.6-code-preview",
         "kimi-k2.5",
@@ -4637,7 +4642,7 @@ def _vision_sidecar_model_candidates_for_provider(provider_id):
     if "mimo" in normalized:
         return ["mimo-v2.5", "mimo-v2-omni"]
     if "kimi" in normalized:
-        return ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
+        return ["kimi-k3", "k3", "K2.6", "K2.6-code-preview", "kimi-k2.5"]
     if "qwen" in normalized:
         return ["qwen3.6-plus", "qwen3.6-flash"]
     return generic
@@ -4674,6 +4679,8 @@ def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", exp
     preferred_pairs = [
         ("mimo-direct-anthropic", "mimo-v2.5"),
         ("direct-mimo", "mimo-v2.5"),
+        ("direct-kimi", "kimi-k3"),
+        ("direct-kimi", "k3"),
         ("direct-kimi", "K2.6"),
         ("newapi-personal-kimi", "K2.6-code-preview"),
         ("newapi-personal-kimi", "kimi-k2.5"),

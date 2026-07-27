@@ -81,6 +81,19 @@
           }
         }
       },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "thinking.type": "__delete__"
+          },
+          "thinking_off": {
+            "thinking.type": "__delete__"
+          },
+          "classify": {
+            "thinking.type": "__delete__"
+          }
+        }
+      },
       "context_windows": {
         "gpt-5": 1000000,
         "gpt-5.4": 1000000,
@@ -566,6 +579,109 @@
         }
       }
     },
+    "openrouter-moonshot-kimi-k3": {
+      "label": "OpenRouter Moonshot Kimi K3",
+      "match": {
+        "provider_id_contains": [
+          "openrouter"
+        ],
+        "base_url_contains": [
+          "openrouter.ai"
+        ],
+        "model_prefixes": [
+          "kimi-k3",
+          "k3"
+        ],
+        "require_provider_or_base": true,
+        "require_model_prefix": true
+      },
+      "references": [
+        "https://openrouter.ai/api/v1/models",
+        "https://openrouter.ai/moonshotai/kimi-k3",
+        "https://platform.kimi.com/docs/guide/kimi-k3-quickstart",
+        "https://platform.kimi.com/docs/api/models-overview"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://openrouter.ai/api/v1"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_and_effort",
+        "default_enabled": true,
+        "roundtrip": "reasoning_content",
+        "mode": "always_on",
+        "disable_supported": false
+      },
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "max",
+          "official_default": "max",
+          "recommended_default": "max",
+          "request_default": "max",
+          "allowed": [
+            "max"
+          ],
+          "map": {
+            "minimal": "max",
+            "low": "max",
+            "medium": "max",
+            "high": "max",
+            "xhigh": "max"
+          }
+        }
+      },
+      "context_windows": {
+        "kimi-k3": 1048576,
+        "k3": 1048576,
+        "k3[1m]": 1048576
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://openrouter.ai/api/v1",
+          "request_path": "/chat/completions"
+        }
+      },
+      "supports_vision": {
+        "kimi-k3": true,
+        "k3": true,
+        "k3[1m]": true
+      },
+      "input_modalities": {
+        "kimi-k3": [
+          "text",
+          "image"
+        ],
+        "k3": [
+          "text",
+          "image"
+        ],
+        "k3[1m]": [
+          "text",
+          "image"
+        ]
+      },
+      "model_aliases": {
+        "openai_chat": {
+          "kimi-k3": {
+            "target": "moonshotai/kimi-k3"
+          },
+          "k3": {
+            "target": "moonshotai/kimi-k3",
+            "match_target": false
+          },
+          "k3[1m]": {
+            "target": "moonshotai/kimi-k3",
+            "match_target": false
+          }
+        }
+      }
+    },
     "mimo": {
       "label": "Xiaomi MiMo",
       "match": {
@@ -956,14 +1072,19 @@
         ],
         "model_prefixes": [
           "kimi",
-          "k2."
+          "k2.",
+          "k3"
         ]
       },
       "references": [
         "https://www.kimi.com/code/docs/en/",
         "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html",
         "https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart",
-        "https://platform.kimi.ai/docs/guide/agent-support"
+        "https://platform.kimi.ai/docs/guide/agent-support",
+        "https://platform.kimi.com/docs/guide/kimi-k3-quickstart",
+        "https://platform.kimi.com/docs/api/models-overview",
+        "https://platform.kimi.com/docs/guide/use-thinking-effort",
+        "https://platform.kimi.com/docs/guide/claude-code-kimi"
       ],
       "endpoints": {
         "openai_base_url": "https://api.kimi.com/coding/v1",
@@ -998,14 +1119,18 @@
         }
       },
       "context_windows": {
+        "kimi-k3": 1048576,
+        "k3": 262144,
         "kimi-for-coding": 262144,
+        "kimi-for-coding-highspeed": 262144,
         "kimi-k2.5": 262144,
         "kimi-k2.6": 262144,
         "kimi-k2.6-code-preview": 262144,
         "k2.6": 262144,
         "k2.6-code-preview": 262144,
         "kimi-k2.7-code": 262144,
-        "kimi-for-code": 262144
+        "kimi-for-code": 262144,
+        "k3[1m]": 1048576
       },
       "api_formats": {
         "openai_chat": {
@@ -1018,31 +1143,51 @@
         }
       },
       "max_output_tokens": {
+        "kimi-k3": 1048576,
+        "k3": 131072,
         "kimi-k2.7-code": 32768,
         "kimi-for-code": 32768,
         "kimi-for-coding": 32768,
+        "kimi-for-coding-highspeed": 32768,
         "kimi-k2.5": 32768,
         "kimi-k2.6": 32768,
         "kimi-k2.6-code-preview": 32768,
         "k2.6": 32768,
-        "k2.6-code-preview": 32768
+        "k2.6-code-preview": 32768,
+        "k3[1m]": 1048576
       },
       "supports_vision": {
+        "kimi-k3": true,
+        "k3": true,
         "kimi-for-code": true,
         "kimi-for-coding": true,
+        "kimi-for-coding-highspeed": true,
         "kimi-k2.5": true,
         "kimi-k2.6": true,
         "kimi-k2.6-code-preview": true,
         "k2.6": true,
         "k2.6-code-preview": true,
-        "kimi-k2.7-code": true
+        "kimi-k2.7-code": true,
+        "k3[1m]": true
       },
       "input_modalities": {
+        "kimi-k3": [
+          "text",
+          "image"
+        ],
+        "k3": [
+          "text",
+          "image"
+        ],
         "kimi-for-code": [
           "text",
           "image"
         ],
         "kimi-for-coding": [
+          "text",
+          "image"
+        ],
+        "kimi-for-coding-highspeed": [
           "text",
           "image"
         ],
@@ -1075,9 +1220,149 @@
           "text",
           "image",
           "video"
+        ],
+        "k3[1m]": [
+          "text",
+          "image"
         ]
       },
       "model_overrides": {
+        "kimi-k3": {
+          "thinking": {
+            "ui": "thinking_and_effort",
+            "roundtrip": "reasoning_content",
+            "mode": "always_on",
+            "disable_supported": false
+          },
+          "effort": {
+            "openai_chat": {
+              "path": "reasoning_effort",
+              "default": "max",
+              "official_default": "max",
+              "recommended_default": "max",
+              "request_default": "max",
+              "allowed": [
+                "max"
+              ],
+              "map": {
+                "minimal": "max",
+                "low": "max",
+                "medium": "max",
+                "high": "max",
+                "xhigh": "max"
+              }
+            },
+            "anthropic_messages": {
+              "path": "reasoning_effort",
+              "default": "max",
+              "official_default": "max",
+              "recommended_default": "max",
+              "request_default": "max",
+              "allowed": [
+                "max"
+              ],
+              "map": {
+                "minimal": "max",
+                "low": "max",
+                "medium": "max",
+                "high": "max",
+                "xhigh": "max"
+              }
+            }
+          },
+          "body_patches": {
+            "openai_chat": {
+              "thinking_on": {
+                "thinking.type": "__delete__"
+              },
+              "thinking_off": {
+                "thinking.type": "__delete__"
+              },
+              "classify": {
+                "thinking.type": "__delete__"
+              }
+            },
+            "anthropic_messages": {
+              "thinking_on": {
+                "thinking.type": "__delete__"
+              },
+              "thinking_off": {
+                "thinking.type": "__delete__"
+              },
+              "classify": {
+                "thinking.type": "__delete__"
+              }
+            }
+          }
+        },
+        "k3": {
+          "thinking": {
+            "ui": "thinking_and_effort",
+            "roundtrip": "reasoning_content",
+            "mode": "always_on",
+            "disable_supported": false
+          },
+          "effort": {
+            "openai_chat": {
+              "path": "reasoning_effort",
+              "default": "max",
+              "official_default": "max",
+              "recommended_default": "max",
+              "request_default": "max",
+              "allowed": [
+                "max"
+              ],
+              "map": {
+                "minimal": "max",
+                "low": "max",
+                "medium": "max",
+                "high": "max",
+                "xhigh": "max"
+              }
+            },
+            "anthropic_messages": {
+              "path": "reasoning_effort",
+              "default": "max",
+              "official_default": "max",
+              "recommended_default": "max",
+              "request_default": "max",
+              "allowed": [
+                "max"
+              ],
+              "map": {
+                "minimal": "max",
+                "low": "max",
+                "medium": "max",
+                "high": "max",
+                "xhigh": "max"
+              }
+            }
+          },
+          "body_patches": {
+            "openai_chat": {
+              "thinking_on": {
+                "thinking.type": "__delete__"
+              },
+              "thinking_off": {
+                "thinking.type": "__delete__"
+              },
+              "classify": {
+                "thinking.type": "__delete__"
+              }
+            },
+            "anthropic_messages": {
+              "thinking_on": {
+                "thinking.type": "__delete__"
+              },
+              "thinking_off": {
+                "thinking.type": "__delete__"
+              },
+              "classify": {
+                "thinking.type": "__delete__"
+              }
+            }
+          }
+        },
         "kimi-k2.7-code": {
           "thinking": {
             "mode": "always_on",
@@ -1104,6 +1389,74 @@
               },
               "classify": {
                 "thinking.type": "enabled"
+              }
+            }
+          }
+        },
+        "k3[1m]": {
+          "thinking": {
+            "ui": "thinking_and_effort",
+            "roundtrip": "reasoning_content",
+            "mode": "always_on",
+            "disable_supported": false
+          },
+          "effort": {
+            "openai_chat": {
+              "path": "reasoning_effort",
+              "default": "max",
+              "official_default": "max",
+              "recommended_default": "max",
+              "request_default": "max",
+              "allowed": [
+                "max"
+              ],
+              "map": {
+                "minimal": "max",
+                "low": "max",
+                "medium": "max",
+                "high": "max",
+                "xhigh": "max"
+              }
+            },
+            "anthropic_messages": {
+              "path": "reasoning_effort",
+              "default": "max",
+              "official_default": "max",
+              "recommended_default": "max",
+              "request_default": "max",
+              "allowed": [
+                "max"
+              ],
+              "map": {
+                "minimal": "max",
+                "low": "max",
+                "medium": "max",
+                "high": "max",
+                "xhigh": "max"
+              }
+            }
+          },
+          "body_patches": {
+            "openai_chat": {
+              "thinking_on": {
+                "thinking.type": "__delete__"
+              },
+              "thinking_off": {
+                "thinking.type": "__delete__"
+              },
+              "classify": {
+                "thinking.type": "__delete__"
+              }
+            },
+            "anthropic_messages": {
+              "thinking_on": {
+                "thinking.type": "__delete__"
+              },
+              "thinking_off": {
+                "thinking.type": "__delete__"
+              },
+              "classify": {
+                "thinking.type": "__delete__"
               }
             }
           }
