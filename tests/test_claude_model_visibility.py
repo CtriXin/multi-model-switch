@@ -518,22 +518,23 @@ def test_runtime_with_vision_sidecar_policy_beats_stale_runtime_capability(monke
     assert "vision_sidecar" not in runtime
 
 
-def test_runtime_with_vision_sidecar_prefers_direct_mimo_before_kimi(monkeypatch):
+def test_runtime_with_vision_sidecar_prefers_qwen_for_text_only_glm(monkeypatch):
     import mms_core
 
     cfg = {
         "providers": [
-            {"id": "mimo-direct-anthropic", "enabled": True},
+            {"id": "direct-qwen", "enabled": True},
             {"id": "direct-kimi", "enabled": True},
         ]
     }
     providers = {
-        "mimo-direct-anthropic": {
-            "id": "mimo-direct-anthropic",
+        "direct-qwen": {
+            "id": "direct-qwen",
             "enabled": True,
-            "api_key": "sk-mimo",
-            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic/",
+            "api_key": "sk-qwen",
+            "anthropic_base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic/",
             "supported_clis": ["claude"],
+            "fallback_models": ["qwen3.6-plus"],
         },
         "direct-kimi": {
             "id": "direct-kimi",
@@ -548,9 +549,30 @@ def test_runtime_with_vision_sidecar_prefers_direct_mimo_before_kimi(monkeypatch
 
     runtime = mms_core._runtime_with_vision_sidecar(cfg, {"id": "glm", "auth_mode": "api_key"})
 
-    assert runtime["vision_sidecar"]["provider_id"] == "mimo-direct-anthropic"
-    assert runtime["vision_sidecar"]["model"] == "mimo-v2.5"
-    assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic"
+    assert runtime["vision_sidecar"]["provider_id"] == "direct-qwen"
+    assert runtime["vision_sidecar"]["model"] == "qwen3.6-plus"
+    assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+
+
+def test_runtime_with_vision_sidecar_uses_minimax_m3_only_when_route_lists_it(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [{"id": "minimax-codingplan", "enabled": True}]}
+    minimax = {
+        "id": "minimax-codingplan",
+        "enabled": True,
+        "api_key": "sk-minimax",
+        "anthropic_base_url": "https://api.minimaxi.com/anthropic/",
+        "supported_clis": ["claude"],
+        "fallback_models": ["MiniMax-M3"],
+    }
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda _cfg, _pid: minimax)
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda *_args, **_kwargs: None)
+
+    runtime = mms_core._runtime_with_vision_sidecar(cfg, {"id": "glm", "auth_mode": "api_key"})
+
+    assert runtime["vision_sidecar"]["provider_id"] == "minimax-codingplan"
+    assert runtime["vision_sidecar"]["model"] == "MiniMax-M3"
 
 
 def test_runtime_with_vision_sidecar_skips_missing_mimo_and_uses_available_kimi(monkeypatch):

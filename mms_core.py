@@ -4629,22 +4629,21 @@ def _config_truthy(value, default=False):
 def _vision_sidecar_model_candidates_for_provider(provider_id):
     normalized = str(provider_id or "").strip().lower()
     generic = [
-        "mimo-v2.5",
-        "mimo-v2-omni",
+        "qwen3.6-plus",
+        "qwen3.6-flash",
         "kimi-k3",
         "k3",
         "K2.6",
         "K2.6-code-preview",
         "kimi-k2.5",
-        "qwen3.6-flash",
-        "qwen3.6-plus",
+        "MiniMax-M3",
     ]
-    if "mimo" in normalized:
-        return ["mimo-v2.5", "mimo-v2-omni"]
     if "kimi" in normalized:
         return ["kimi-k3", "k3", "K2.6", "K2.6-code-preview", "kimi-k2.5"]
     if "qwen" in normalized:
         return ["qwen3.6-plus", "qwen3.6-flash"]
+    if "minimax" in normalized:
+        return ["MiniMax-M3"]
     return generic
 
 
@@ -4677,17 +4676,19 @@ def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", exp
         return pairs
 
     preferred_pairs = [
-        ("mimo-direct-anthropic", "mimo-v2.5"),
-        ("direct-mimo", "mimo-v2.5"),
+        ("direct-qwen", "qwen3.6-plus"),
+        ("newapi-tencent", "qwen3.6-plus"),
+        ("newapi-personal-qwen", "qwen3.6-plus"),
+        ("newapi-personal-tokyo", "qwen3.6-plus"),
         ("direct-kimi", "kimi-k3"),
         ("direct-kimi", "k3"),
         ("direct-kimi", "K2.6"),
         ("newapi-personal-kimi", "K2.6-code-preview"),
         ("newapi-personal-kimi", "kimi-k2.5"),
-        ("direct-qwen", "qwen3.6-plus"),
-        ("newapi-personal-qwen", "qwen3.6-plus"),
-        ("newapi-personal-tokyo", "K2.6"),
         ("xin", "K2.6"),
+        ("minimax-codingplan", "MiniMax-M3"),
+        ("minimax-cn", "MiniMax-M3"),
+        ("minimax-en", "MiniMax-M3"),
     ]
     for provider_id, model in preferred_pairs:
         _append(provider_id, model)
@@ -4727,12 +4728,16 @@ def _runtime_with_vision_sidecar(cfg, runtime, selected_model=""):
         [explicit_provider_id]
         if explicit_provider_id
         else [
-            "mimo-direct-anthropic",
-            "direct-mimo",
+            "direct-qwen",
+            "newapi-tencent",
+            "newapi-personal-qwen",
+            "newapi-personal-tokyo",
             "direct-kimi",
             "newapi-personal-kimi",
-            "newapi-personal-tokyo",
             "xin",
+            "minimax-codingplan",
+            "minimax-cn",
+            "minimax-en",
         ]
     )
     providers = cfg.get("providers", []) if isinstance(cfg, dict) else []
