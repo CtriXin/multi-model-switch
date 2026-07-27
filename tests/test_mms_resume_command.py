@@ -412,6 +412,30 @@ def test_handle_resume_command_passes_pi_session_path(monkeypatch, tmp_path):
     assert captured["extra_args"] == ["--session", str(session_path), "继续"]
 
 
+def test_explicit_pi_resume_fails_closed_when_catalog_misses(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_pi_resume_ref",
+        lambda ref, allow_passthrough=False: (
+            None,
+            None,
+            f"Pi 找不到 session: {ref}",
+        ),
+    )
+
+    cli, session_id, record, error = mms_core._resolve_resume_target(
+        "missing-session",
+        cli_hint="pi",
+    )
+
+    assert cli == "pi"
+    assert session_id is None
+    assert record is None
+    assert error == "Pi 找不到 session: missing-session"
+
+
 def test_handle_resume_command_select_model_sets_provider(monkeypatch):
     import mms_core
 

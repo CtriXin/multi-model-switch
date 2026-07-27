@@ -16116,7 +16116,9 @@ def _resolve_resume_target(session_ref, cli_hint="auto"):
         session_id, record, error = _resolve_claude_resume_ref(ref, allow_passthrough=True)
         return "claude", session_id, record, error
     if cli_hint == "pi":
-        session_id, record, error = _resolve_pi_resume_ref(ref, allow_passthrough=True)
+        # Pi's native --session option requires a JSONL path, not an opaque
+        # session id. Fail closed unless the catalog resolved a real record.
+        session_id, record, error = _resolve_pi_resume_ref(ref, allow_passthrough=False)
         return "pi", session_id, record, error
 
     codex_id, codex_record, codex_error = _resolve_codex_resume_ref(ref, allow_passthrough=False)
