@@ -845,6 +845,43 @@ def test_pi_reopens_deprecated_antigravity_gemini_alias_when_replacement_availab
     assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low", "gemini-3-pro-high"]
 
 
+def test_pi_trust_store_scopes_trust_to_launch_project(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    project = real_home / "project"
+    agent_dir = tmp_path / "session" / ".pi" / "agent"
+    project.mkdir(parents=True)
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_pi_support._seed_pi_trust_store(str(agent_dir), str(project))
+
+    payload = json.loads((agent_dir / "trust.json").read_text(encoding="utf-8"))
+    assert payload == {str(project.resolve()): True}
+    assert str(real_home.resolve()) not in payload
+
+
+def test_pi_trust_store_does_not_auto_trust_real_home(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    agent_dir = tmp_path / "session" / ".pi" / "agent"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_pi_support._seed_pi_trust_store(str(agent_dir), str(real_home))
+
+    assert not (agent_dir / "trust.json").exists()
+
+
 def test_pi_exposed_model_names_recover_antigravity_opus_after_retry_hardening(monkeypatch):
     import mms_launchers
 
