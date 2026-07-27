@@ -39,6 +39,9 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
 DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 12
 DEFAULT_REMIND_SECONDS = 1800
+DEFAULT_PROBE_ATTEMPTS = 2
+DEFAULT_PROBE_RETRY_DELAY_SECONDS = 0.4
+DEFAULT_ALERT_CONFIRMATION_RUNS = 2
 WATCHDOG_DIR_NAME = "health-watchdog"
 STATE_FILE_NAME = "state.json"
 LATEST_FILE_NAME = "latest.json"
@@ -83,7 +86,7 @@ _SECRET_VALUE_PATTERNS = (
 )
 
 OLD_ROUTE_MARKERS = {
-    "http://82.156.121.141:4001": "xin fallback should use https://apple.clawopen.online",
+    "https://apple.clawopen.online": "newapi-tencent retired domain; use http://82.156.121.141:4001",
     "http://82.156.121.141:3000/openai": "privateopenai should use https://privateopenai.clawopen.online/openai",
     "http://161.33.197.51:4001": "tokyo newapi should use https://newapi.evilsngx.ccwu.cc",
     "http://cpabundle.ccwu.cc/codex/v1": "codex should use https://codex.evilsngx.ccwu.cc/v1",
@@ -504,80 +507,114 @@ def url_host_port(url: str) -> tuple[str, int] | None:
     return parsed.hostname, int(port)
 
 
-def tcp_tls_check(name: str, url: str, timeout: int, failure_level: str = "critical") -> CheckResult:
+def tcp_tls_check(
+    name: str,
+    url: str,
+    timeout: int,
+    failure_level: str = "critical",
+    attempts: int = DEFAULT_PROBE_ATTEMPTS,
+    retry_delay: float = DEFAULT_PROBE_RETRY_DELAY_SECONDS,
+) -> CheckResult:
     start = time.time()
     hp = url_host_port(url)
     if not hp:
         return CheckResult("endpoint", name, "critical", "fail", "invalid url", url=url)
     host, port = hp
-    try:
-        with socket.create_connection((host, port), timeout=timeout) as sock:
-            if urllib.parse.urlsplit(url).scheme == "https":
-                ctx = ssl.create_default_context()
-                with ctx.wrap_socket(sock, server_hostname=host):
-                    pass
-    except Exception as exc:
-        return CheckResult(
-            "endpoint",
-            name,
-            failure_level,
-            "fail",
-            f"{type(exc).__name__}: {exc}",
-            latency_ms=int((time.time() - start) * 1000),
-            url=url,
-        )
+    attempt_count = max(1, int(attempts))
+    last_exc: Exception | None = None
+    for attempt in range(1, attempt_count + 1):
+        if attempt > 1 and retry_delay > 0:
+            time.sleep(retry_delay)
+        try:
+            with socket.create_connection((host, port), timeout=timeout) as sock:
+                if urllib.parse.urlsplit(url).scheme == "https":
+                    ctx = ssl.create_default_context()
+                    with ctx.wrap_socket(sock, server_hostname=host):
+                        pass
+            detail = "tcp/tls reachable"
+            if attempt > 1:
+                detail += f" after retry {attempt}/{attempt_count}"
+            return CheckResult(
+                "endpoint",
+                name,
+                "info",
+                "ok",
+                detail,
+                latency_ms=int((time.time() - start) * 1000),
+                url=url,
+            )
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
     return CheckResult(
         "endpoint",
         name,
-        "info",
-        "ok",
-        "tcp/tls reachable",
+        failure_level,
+        "fail",
+        f"{type(last_exc).__name__}: {last_exc}; attempts={attempt_count}",
         latency_ms=int((time.time() - start) * 1000),
         url=url,
     )
 
 
-def http_get_json(name: str, url: str, api_key: str, timeout: int, failure_level: str = "critical") -> tuple[CheckResult, set[str]]:
+def http_get_json(
+    name: str,
+    url: str,
+    api_key: str,
+    timeout: int,
+    failure_level: str = "critical",
+    attempts: int = DEFAULT_PROBE_ATTEMPTS,
+    retry_delay: float = DEFAULT_PROBE_RETRY_DELAY_SECONDS,
+) -> tuple[CheckResult, set[str]]:
     start = time.time()
     req = urllib.request.Request(url, headers=auth_header(api_key), method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            raw = response.read(800_000)
+    attempt_count = max(1, int(attempts))
+    last_exc: Exception | None = None
+    for attempt in range(1, attempt_count + 1):
+        if attempt > 1 and retry_delay > 0:
+            time.sleep(retry_delay)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                raw = response.read(800_000)
+                latency = int((time.time() - start) * 1000)
+                models = parse_model_ids(raw)
+                detail = f"HTTP {response.status}; models={len(models)}"
+                if attempt > 1:
+                    detail += f"; recovered after retry {attempt}/{attempt_count}"
+                level = "info" if models else "warning"
+                status = "ok" if response.status < 400 else "fail"
+                return CheckResult("models_endpoint", name, level, status, detail, latency, url), models
+        except urllib.error.HTTPError as exc:
+            raw = exc.read(800)
             latency = int((time.time() - start) * 1000)
-            models = parse_model_ids(raw)
-            detail = f"HTTP {response.status}; models={len(models)}"
-            level = "info" if models else "warning"
-            status = "ok" if response.status < 400 else "fail"
-            return CheckResult("models_endpoint", name, level, status, detail, latency, url), models
-    except urllib.error.HTTPError as exc:
-        raw = exc.read(800)
-        latency = int((time.time() - start) * 1000)
-        level = "warning" if exc.code == 404 else failure_level
-        return (
-            CheckResult(
-                "models_endpoint",
-                name,
-                level,
-                "fail",
-                f"HTTP {exc.code}; {raw.decode('utf-8', 'replace')[:180]}",
-                latency,
-                url,
-            ),
-            set(),
-        )
-    except Exception as exc:
-        return (
-            CheckResult(
-                "models_endpoint",
-                name,
-                failure_level,
-                "fail",
-                f"{type(exc).__name__}: {exc}",
-                int((time.time() - start) * 1000),
-                url,
-            ),
-            set(),
-        )
+            level = "warning" if exc.code == 404 else failure_level
+            return (
+                CheckResult(
+                    "models_endpoint",
+                    name,
+                    level,
+                    "fail",
+                    f"HTTP {exc.code}; {raw.decode('utf-8', 'replace')[:180]}",
+                    latency,
+                    url,
+                ),
+                set(),
+            )
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
+    return (
+        CheckResult(
+            "models_endpoint",
+            name,
+            failure_level,
+            "fail",
+            f"{type(last_exc).__name__}: {last_exc}; attempts={attempt_count}",
+            int((time.time() - start) * 1000),
+            url,
+        ),
+        set(),
+    )
 
 
 def parse_model_ids(raw: bytes) -> set[str]:
@@ -645,6 +682,8 @@ def endpoint_checks(
     routes_payload: dict[str, Any],
     providers: dict[str, dict[str, Any]],
     timeout: int,
+    attempts: int = DEFAULT_PROBE_ATTEMPTS,
+    retry_delay: float = DEFAULT_PROBE_RETRY_DELAY_SECONDS,
 ) -> tuple[list[CheckResult], dict[tuple[str, str], set[str]]]:
     results: list[CheckResult] = []
     model_sets: dict[tuple[str, str], set[str]] = {}
@@ -664,8 +703,16 @@ def endpoint_checks(
     for (provider_id, endpoint), (route, _endpoint) in sorted(seen.items()):
         base = str(route.get("openai_base_url") or route.get("anthropic_base_url") or endpoint)
         failure_level = "critical" if provider_id in primary_providers else "warning"
-        results.append(tcp_tls_check(provider_id, base, timeout, failure_level=failure_level))
-        result, models = http_get_json(provider_id, endpoint, str(route.get("api_key") or ""), timeout, failure_level=failure_level)
+        results.append(tcp_tls_check(provider_id, base, timeout, failure_level=failure_level, attempts=attempts, retry_delay=retry_delay))
+        result, models = http_get_json(
+            provider_id,
+            endpoint,
+            str(route.get("api_key") or ""),
+            timeout,
+            failure_level=failure_level,
+            attempts=attempts,
+            retry_delay=retry_delay,
+        )
         results.append(result)
         model_sets[(provider_id, endpoint)] = models
     return results, model_sets
@@ -678,6 +725,16 @@ def model_presence_checks(
     policy_payload: dict[str, Any],
 ) -> list[CheckResult]:
     allowed = model_policy_allowed(policy_payload)
+    if not allowed:
+        return [
+            CheckResult(
+                "model_presence",
+                "policy_models",
+                "info",
+                "ok",
+                "no policy allowed_models configured; skipped model-list presence checks",
+            )
+        ]
     missing: list[str] = []
     checked = 0
     skipped_claude = 0
@@ -711,7 +768,66 @@ def model_presence_checks(
     return [CheckResult("model_presence", "policy_models", "info", "ok", detail)]
 
 
-def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -> dict[str, Any]:
+def normalized_failure_kind(item: dict[str, Any]) -> str:
+    detail = str(item.get("detail") or "").lower()
+    if "timed out" in detail or "timeout" in detail:
+        return "timeout"
+    if "network is unreachable" in detail:
+        return "network_unreachable"
+    if "nodename nor servname" in detail or "name or service not known" in detail:
+        return "dns_unresolved"
+    if "connection refused" in detail:
+        return "connection_refused"
+    if "connection reset" in detail or "reset by peer" in detail:
+        return "connection_reset"
+    http_match = re.search(r"http\s+(\d{3})", detail)
+    if http_match:
+        return f"http_{http_match.group(1)}"
+    return detail.split(";", 1)[0].strip()[:80] or "unknown"
+
+
+def collapse_provider_connectivity_failures(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    collapsed: list[dict[str, Any]] = []
+    index_by_key: dict[tuple[str, str, str, str], int] = {}
+    for item in failures:
+        scope = str(item.get("scope") or "")
+        if item.get("status") != "fail" or scope not in {"endpoint", "models_endpoint"}:
+            collapsed.append(item)
+            continue
+        key = (
+            str(item.get("name") or ""),
+            str(item.get("level") or ""),
+            str(item.get("status") or ""),
+            normalized_failure_kind(item),
+        )
+        existing_index = index_by_key.get(key)
+        if existing_index is None:
+            merged = dict(item)
+            merged["_merged_scopes"] = [scope]
+            index_by_key[key] = len(collapsed)
+            collapsed.append(merged)
+            continue
+        merged = dict(collapsed[existing_index])
+        scopes = list(merged.get("_merged_scopes") or [])
+        if scope not in scopes:
+            scopes.append(scope)
+        merged["_merged_scopes"] = scopes
+        merged["scope"] = "provider_connectivity"
+        merged["detail"] = f"{normalized_failure_kind(item)} across " + "/".join(scopes)
+        merged["latency_ms"] = max(int(merged.get("latency_ms") or 0), int(item.get("latency_ms") or 0))
+        collapsed[existing_index] = merged
+    for item in collapsed:
+        item.pop("_merged_scopes", None)
+    return collapsed
+
+
+def build_report(
+    config_dir: Path,
+    timeout: int,
+    require_bundle: bool = False,
+    attempts: int = DEFAULT_PROBE_ATTEMPTS,
+    retry_delay: float = DEFAULT_PROBE_RETRY_DELAY_SECONDS,
+) -> dict[str, Any]:
     bundle = load_verified_latest_bundle(config_dir)
     results: list[CheckResult] = []
     payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
@@ -745,11 +861,11 @@ def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -
     else:
         providers = {}
     results.extend(route_source_checks(config_dir, routes_payload, policy_payload))
-    endpoint_results, model_sets = endpoint_checks(routes_payload, providers, timeout)
+    endpoint_results, model_sets = endpoint_checks(routes_payload, providers, timeout, attempts=attempts, retry_delay=retry_delay)
     results.extend(endpoint_results)
     results.extend(model_presence_checks(routes_payload, providers, model_sets, policy_payload))
 
-    failures = [item.to_dict() for item in results if item.status != "ok"]
+    failures = collapse_provider_connectivity_failures([item.to_dict() for item in results if item.status != "ok"])
     critical = [item for item in failures if item.get("level") == "critical"]
     warning = [item for item in failures if item.get("level") == "warning"]
     status = "critical" if critical else ("warning" if warning else "ok")
@@ -778,33 +894,71 @@ def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -
 def report_fingerprint(report: dict[str, Any]) -> str:
     relevant = {
         "status": report.get("status"),
-        "failures": [
-            {
-                "scope": item.get("scope"),
-                "name": item.get("name"),
-                "level": item.get("level"),
-                "status": item.get("status"),
-                "detail": item.get("detail"),
-                "url": item.get("url"),
-            }
-            for item in report.get("failures") or []
-        ],
+        "failures": sorted(
+            [normalized_fingerprint_item(item) for item in report.get("failures") or []],
+            key=lambda item: (
+                str(item.get("scope")),
+                str(item.get("name")),
+                str(item.get("level")),
+                str(item.get("status")),
+                str(item.get("detail")),
+                str(item.get("url")),
+            ),
+        ),
     }
     return hashlib.sha256(json.dumps(relevant, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def should_notify(report: dict[str, Any], state: dict[str, Any], remind_seconds: int, notify_ok: bool) -> tuple[bool, str]:
+def normalized_fingerprint_item(item: dict[str, Any]) -> dict[str, Any]:
+    scope = str(item.get("scope") or "")
+    if scope in {"endpoint", "models_endpoint", "provider_connectivity"}:
+        return {
+            "scope": "provider_connectivity",
+            "name": item.get("name"),
+            "level": item.get("level"),
+            "status": item.get("status"),
+            "detail": normalized_failure_kind(item),
+        }
+    return {
+        "scope": item.get("scope"),
+        "name": item.get("name"),
+        "level": item.get("level"),
+        "status": item.get("status"),
+        "detail": item.get("detail"),
+        "url": item.get("url"),
+    }
+
+
+def report_failure_streak(report: dict[str, Any], state: dict[str, Any]) -> int:
+    status = str(report.get("status") or "unknown")
+    if status == "ok":
+        return 0
+    fingerprint = report_fingerprint(report)
     previous_status = str(state.get("last_status") or "")
     previous_fingerprint = str(state.get("last_fingerprint") or "")
+    previous_streak = int(state.get("current_failure_streak") or 0)
+    if previous_status == status and previous_fingerprint == fingerprint:
+        return previous_streak + 1
+    return 1
+
+
+def alert_active(state: dict[str, Any]) -> bool:
+    return bool(state.get("alert_active"))
+
+
+def should_notify(report: dict[str, Any], state: dict[str, Any], remind_seconds: int, notify_ok: bool) -> tuple[bool, str]:
     previous_notify = float(state.get("last_notified_at_epoch") or 0)
     fingerprint = report_fingerprint(report)
     status = str(report.get("status") or "unknown")
     now = time.time()
     if status == "ok":
-        if notify_ok and previous_status and previous_status != "ok":
+        if notify_ok and alert_active(state):
             return True, "recovered"
         return False, "ok_silent"
-    if fingerprint != previous_fingerprint:
+    streak = report_failure_streak(report, state)
+    if streak < DEFAULT_ALERT_CONFIRMATION_RUNS:
+        return False, f"pending_confirmation_{streak}/{DEFAULT_ALERT_CONFIRMATION_RUNS}"
+    if fingerprint != str(state.get("last_alert_fingerprint") or "") or status != str(state.get("last_alert_status") or ""):
         return True, "new_failure"
     if now - previous_notify >= remind_seconds:
         return True, "reminder"
@@ -828,6 +982,8 @@ def status_label(status: str) -> tuple[str, str, str]:
 
 
 def reason_label(reason: str) -> str:
+    if reason.startswith("pending_confirmation_"):
+        return "等待二次确认"
     return {
         "new_failure": "发现新异常",
         "reminder": "异常仍未恢复",
@@ -844,6 +1000,7 @@ def scope_label(scope: str) -> str:
         "policy": "白名单",
         "endpoint": "端口/域名",
         "models_endpoint": "模型列表",
+        "provider_connectivity": "Provider 连通性",
         "model_presence": "模型可用性",
     }.get(scope, scope or "未知")
 
@@ -936,19 +1093,35 @@ def send_feishu(webhook_url: str, secret: str, card: dict[str, Any], timeout: in
 
 
 def update_state(state_path: Path, report: dict[str, Any], notification: dict[str, Any]) -> None:
+    previous = read_json(state_path)
+    fingerprint = report_fingerprint(report)
+    status = str(report.get("status") or "unknown")
+    failure_streak = report_failure_streak(report, previous)
     state = {
         "schema": "mms_health_watchdog_state.v1",
         "updated_at": iso_now(),
-        "last_status": report.get("status"),
-        "last_fingerprint": report_fingerprint(report),
+        "last_status": status,
+        "last_fingerprint": fingerprint,
         "last_report_at": report.get("checked_at"),
+        "current_failure_streak": failure_streak,
         "last_notification": notification,
     }
+    if status == "ok":
+        state["alert_active"] = False
+    else:
+        state["alert_active"] = bool(previous.get("alert_active"))
+        if notification.get("sent"):
+            state["alert_active"] = True
+            state["last_alert_fingerprint"] = fingerprint
+            state["last_alert_status"] = status
+        else:
+            for key in ("last_alert_fingerprint", "last_alert_status"):
+                if previous.get(key):
+                    state[key] = previous.get(key)
     if notification.get("sent"):
         state["last_notified_at_epoch"] = time.time()
         state["last_notified_at"] = iso_now()
     else:
-        previous = read_json(state_path)
         if previous.get("last_notified_at_epoch"):
             state["last_notified_at_epoch"] = previous.get("last_notified_at_epoch")
             state["last_notified_at"] = previous.get("last_notified_at")
@@ -960,6 +1133,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--config-dir", default=str(default_config_dir()))
     parser.add_argument("--env-file", default="")
     parser.add_argument("--timeout-sec", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--probe-attempts", type=int, default=DEFAULT_PROBE_ATTEMPTS)
+    parser.add_argument("--probe-retry-delay-sec", type=float, default=DEFAULT_PROBE_RETRY_DELAY_SECONDS)
     parser.add_argument("--remind-sec", type=int, default=DEFAULT_REMIND_SECONDS)
     parser.add_argument("--dry-run", action="store_true", help="Do not send Feishu notification or write report/state files")
     parser.add_argument("--notify-ok", action="store_true", help="Notify when recovering to OK")
@@ -978,7 +1153,13 @@ def main(argv: list[str]) -> int:
     load_env_file(env_file)
 
     require_bundle = resolve_require_bundle(args, config_dir)
-    report = build_report(config_dir, max(1, int(args.timeout_sec)), require_bundle=require_bundle)
+    report = build_report(
+        config_dir,
+        max(1, int(args.timeout_sec)),
+        require_bundle=require_bundle,
+        attempts=max(1, int(args.probe_attempts)),
+        retry_delay=max(0.0, float(args.probe_retry_delay_sec)),
+    )
     latest_path = watchdog_dir / LATEST_FILE_NAME
     state_path = watchdog_dir / STATE_FILE_NAME
     log_path = config_dir / "logs" / LOG_FILE_NAME
@@ -999,6 +1180,8 @@ def main(argv: list[str]) -> int:
             notification.update({"sent": False, "detail": "MMS_FEISHU_WEBHOOK_URL is not set"})
     elif args.dry_run:
         notification["detail"] = "dry_run"
+    else:
+        notification["detail"] = reason
 
     if not args.dry_run:
         write_json_atomic(latest_path, report)

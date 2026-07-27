@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import copy
 from urllib.parse import urlsplit
 
 from mms_opencode_agents import (
@@ -388,18 +389,19 @@ def _opencode_model_key(model_name):
     return normalized
 
 
-def opencode_model_capabilities(runtime, model_name, *, protocol=""):
+def _opencode_is_kimi_k3_selector(model_name):
+    leaf = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    return leaf in {"k3", "k3[1m]", "kimi-k3"}
+
+
+def _opencode_profile_capability_overlay(runtime, model_name, *, protocol=""):
+    if not _opencode_is_kimi_k3_selector(model_name):
+        return {}
     runtime = runtime if isinstance(runtime, dict) else {}
-    caps_map = runtime.get("model_capabilities")
-    target = _opencode_model_key(model_name)
-    if isinstance(caps_map, dict) and target:
-        for key, value in caps_map.items():
-            if _opencode_model_key(key) == target and isinstance(value, dict):
-                return value
     try:
         from mms_capability_resolver import resolve_model_capabilities
 
-        return resolve_model_capabilities(
+        profile_caps = resolve_model_capabilities(
             model_name,
             runtime=runtime,
             provider_id=str(runtime.get("id") or runtime.get("provider_id") or ""),
@@ -411,6 +413,67 @@ def opencode_model_capabilities(runtime, model_name, *, protocol=""):
             ),
             profile_id=str(runtime.get("profile") or runtime.get("provider_profile") or ""),
             protocol=_opencode_profile_protocol(protocol) if protocol else "",
+            approved_facts={},
+            model_policy={},
+        )
+    except (ImportError, KeyError, TypeError, ValueError):
+        return {}
+    control = profile_caps.get("thinking_control") if isinstance(profile_caps.get("thinking_control"), dict) else {}
+    if str(control.get("path") or "").strip() != "reasoning_effort":
+        return {}
+    return profile_caps
+
+
+def _opencode_apply_profile_capability_overlay(caps, profile_caps):
+    if not profile_caps:
+        return caps
+    merged = copy.deepcopy(caps if isinstance(caps, dict) else {})
+    sources = merged.setdefault("sources", {})
+    profile_sources = profile_caps.get("sources") if isinstance(profile_caps.get("sources"), dict) else {}
+    for field in (
+        "context_window_tokens",
+        "max_output_tokens",
+        "supports_vision",
+        "supports_thinking",
+        "thinking_control",
+        "expected_protocol",
+        "protocol_hints",
+        "body_patch_aliases",
+    ):
+        if profile_sources.get(field) != "provider_profile":
+            continue
+        merged[field] = copy.deepcopy(profile_caps.get(field))
+        sources[field] = "provider_profile"
+    return merged
+
+
+def opencode_model_capabilities(runtime, model_name, *, protocol=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    caps_map = runtime.get("model_capabilities")
+    target = _opencode_model_key(model_name)
+    if isinstance(caps_map, dict) and target:
+        for key, value in caps_map.items():
+            if _opencode_model_key(key) == target and isinstance(value, dict):
+                return value
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        caps = resolve_model_capabilities(
+            model_name,
+            runtime=runtime,
+            provider_id=str(runtime.get("id") or runtime.get("provider_id") or ""),
+            base_url=str(
+                runtime.get("anthropic_base_url")
+                or runtime.get("openai_base_url")
+                or runtime.get("base_url")
+                or ""
+            ),
+            profile_id=str(runtime.get("profile") or runtime.get("provider_profile") or ""),
+            protocol=_opencode_profile_protocol(protocol) if protocol else "",
+        )
+        return _opencode_apply_profile_capability_overlay(
+            caps,
+            _opencode_profile_capability_overlay(runtime, model_name, protocol=protocol),
         )
     except (ImportError, KeyError, TypeError, ValueError):
         return {}

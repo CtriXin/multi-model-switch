@@ -298,21 +298,27 @@ source-overlay surface, not the downstream source of truth:
 |---|---|
 | DeepSeek | `deepseek-v4-flash`, `deepseek-v4-pro` |
 | MiMo | `mimo-v2.5`, `mimo-v2.5-pro` |
-| Kimi | `kimi-for-coding`, `kimi-k2.5`, `K2.6` |
-| Qwen | `qwen3-coder-plus`, `qwen3.5-plus`, `qwen3.6-plus` |
+| Kimi | `k3`, `k3[1m]`, `kimi-k3`, `kimi-for-coding`, `kimi-for-coding-highspeed`, `kimi-k2.7-code`, `kimi-k2.5`, `K2.6` |
+| Qwen | `qwen3-coder-plus`, `qwen3.5-plus`, `qwen3.6-plus`, `qwen3.8-max-preview` |
 | GLM | `glm-5-turbo`, `glm-5.1` |
 | MiniMax | `MiniMax-M2.7` |
 | Gemini / Antigravity | `gemini-3-flash-agent(high)`, `gemini-3-flash-agent(medium)`, `gemini-3-flash-agent(low)`, `gemini-3-flash-agent(none)`, `gemini-3.1-flash-lite`, `gemini-3.1-pro-low` |
 | Claude / Antigravity | `claude-sonnet-4-6`, `claude-opus-4-6-thinking` |
 | GPT / OpenAI | `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.4`, `gpt-5.5`, `gpt-image-2` |
 
-`K2.6` is intentionally classified under the Kimi family by policy. `gpt-5.3-codex-spark`
+`k3` and `K2.6` are intentionally classified under the Kimi family by policy. `gpt-5.3-codex-spark`
 uses the CPA local Codex channel (`us-cpa-local-codex`). The old Gemini preview
 surface (`gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, `gemini-3.1-pro-preview`)
 is retired from the official policy surface; current Gemini 3.5/3.1 access goes
 through the CPA Antigravity provider (`us-cpa-local-antigravity`). Agent Soul is
 not narrowed by this execution whitelist so its draw/image and Jimeng-specific
 surfaces can stay project-owned until explicitly migrated.
+
+`qwen3.8-max-preview` is a source-backed partial Qwen entry: Model Studio confirms
+the model ID, Token Plan availability, Thinking, and Function Calling, but its Text
+Generation page does not publish an exact context window, max output, or direct
+image-input capability. Consumers must keep those fields unknown rather than infer
+`1M` or Vision from adjacent Qwen models; OpenRouter absence is not negative evidence.
 
 ## Consumer Rules
 
