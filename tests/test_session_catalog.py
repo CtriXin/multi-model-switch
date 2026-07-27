@@ -306,3 +306,82 @@ def test_session_catalog_resolves_prefix(monkeypatch, tmp_path):
     assert error is None
     assert session_id == "019e9000-aaaa-7000-8000-000000000000"
     assert record["cli"] == "codex"
+
+
+def test_session_catalog_scans_current_and_legacy_pi_sessions(monkeypatch, tmp_path):
+    import mms_session_catalog
+
+    pi_root = tmp_path / "pi-gateway"
+    current_path = pi_root / "sessions" / "current.jsonl"
+    legacy_path = pi_root / "s" / "1234" / ".pi" / "agent" / "sessions" / "legacy.jsonl"
+    current_path.parent.mkdir(parents=True)
+    legacy_path.parent.mkdir(parents=True)
+    session_id = "019fa700-aaaa-7000-8000-000000000001"
+    current_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "version": 3,
+                        "id": session_id,
+                        "timestamp": "2026-07-27T01:00:00Z",
+                        "cwd": str(tmp_path / "project"),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "model_change",
+                        "timestamp": "2026-07-27T01:01:00Z",
+                        "provider": "mms-relay-a",
+                        "modelId": "qwen3.6-plus",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "message",
+                        "timestamp": "2026-07-27T01:02:00Z",
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "恢复 Pi 会话"}],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "type": "session",
+                "version": 3,
+                "id": "019fa700-bbbb-7000-8000-000000000002",
+                "timestamp": "2026-07-26T01:00:00Z",
+                "cwd": str(tmp_path / "legacy-project"),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_session_catalog, "claude_project_roots", lambda: [])
+    monkeypatch.setattr(mms_session_catalog, "codex_roots", lambda: [])
+    monkeypatch.setattr(mms_session_catalog, "pi_roots", lambda: [pi_root])
+
+    rows = mms_session_catalog.list_session_records(cli="pi")
+
+    assert {row["session_id"] for row in rows} == {
+        session_id,
+        "019fa700-bbbb-7000-8000-000000000002",
+    }
+    current = next(row for row in rows if row["session_id"] == session_id)
+    assert current["model"] == "qwen3.6-plus"
+    assert current["provider_id"] == "mms-relay-a"
+    assert current["title"] == "恢复 Pi 会话"
+    preview = mms_session_catalog.preview_session_record(
+        session_id,
+        cli="pi",
+        record=current,
+    )
+    assert preview["items"][0]["text"] == "恢复 Pi 会话"

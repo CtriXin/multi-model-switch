@@ -1,7 +1,7 @@
 """Read-only session catalog for MMS-managed CLI resume history.
 
 The catalog intentionally stores no new state.  It scans existing Claude and
-Codex resume files and normalizes them into one shape so UI/CLI surfaces can
+Codex/Pi resume files and normalizes them into one shape so UI/CLI surfaces can
 search by CLI, project, title, or session id.
 """
 
@@ -83,6 +83,23 @@ def codex_roots() -> list[Path]:
     roots.extend((home / ".config" / "mms" / "codex-gateway" / "s").glob("*/.codex"))
     roots.extend((home / ".config" / "mms" / "accounts").glob("*/.codex"))
     roots.extend((home / ".config" / "mms" / "accounts").glob("*/s/*/.codex"))
+    return [path for path in _dedupe_paths(roots) if path.exists()]
+
+
+def pi_roots() -> list[Path]:
+    """Return current and legacy Pi history roots without reading auth state."""
+    home = _real_user_home()
+    roots: list[Path] = []
+    try:
+        roots.append(Path(resolve_mms_config_dir()) / "pi-gateway")
+    except Exception:
+        pass
+    roots.extend(
+        [
+            home / ".config" / "mms-next" / "pi-gateway",
+            home / ".config" / "mms" / "pi-gateway",
+        ]
+    )
     return [path for path in _dedupe_paths(roots) if path.exists()]
 
 
@@ -169,6 +186,7 @@ def _record_priority(record: dict) -> int:
         "codex-index": 3,
         "claude-jsonl": 2,
         "codex-jsonl": 2,
+        "pi-jsonl": 2,
     }.get(kind, 1)
 
 
@@ -440,6 +458,91 @@ def _codex_jsonl_records(root: Path) -> Iterable[dict]:
             }
 
 
+def _pi_jsonl_summary(path: Path) -> dict:
+    session_id = ""
+    cwd = ""
+    title = ""
+    model = ""
+    provider_id = ""
+    created_at = ""
+    updated_at = _mtime_iso(path)
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle):
+                if index >= 1000:
+                    break
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                timestamp = str(payload.get("timestamp") or "").strip()
+                if timestamp:
+                    created_at = created_at or timestamp
+                    updated_at = timestamp
+                kind = str(payload.get("type") or "").strip()
+                if kind == "session":
+                    session_id = session_id or str(payload.get("id") or "").strip()
+                    cwd = cwd or str(payload.get("cwd") or "").strip()
+                elif kind == "model_change":
+                    model = _model_value(payload.get("modelId")) or model
+                    provider_id = str(payload.get("provider") or provider_id).strip()
+                elif kind == "message":
+                    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+                    if not title and str(message.get("role") or "") == "user":
+                        title = _title_candidate(message.get("content"), limit=120)
+                    if str(message.get("role") or "") == "assistant":
+                        model = _model_value(message.get("model")) or model
+                        provider_id = str(message.get("provider") or provider_id).strip()
+    except OSError:
+        pass
+    if not session_id:
+        match = re.search(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            path.name,
+        )
+        session_id = match.group(0) if match else ""
+    return {
+        "session_id": session_id,
+        "cwd": cwd,
+        "title": title,
+        "model": model,
+        "provider_id": provider_id,
+        "created_at": created_at or updated_at,
+        "updated_at": updated_at,
+    }
+
+
+def _pi_jsonl_records(root: Path) -> Iterable[dict]:
+    candidates = list((root / "sessions").rglob("*.jsonl"))
+    candidates.extend((root / "s").glob("*/.pi/agent/sessions/**/*.jsonl"))
+    for jsonl_path in _dedupe_paths(candidates):
+        summary = _pi_jsonl_summary(jsonl_path)
+        session_id = str(summary.get("session_id") or "").strip()
+        if not session_id:
+            continue
+        cwd = str(summary.get("cwd") or "")
+        model = str(summary.get("model") or "")
+        yield {
+            "cli": "pi",
+            "session_id": session_id,
+            "project_path": cwd,
+            "project_name": _project_name(cwd),
+            "cwd": cwd,
+            "provider_id": str(summary.get("provider_id") or ""),
+            "model": model,
+            "model_source": "Pi 原始记录" if model else "",
+            "created_at": str(summary.get("created_at") or ""),
+            "updated_at": str(summary.get("updated_at") or ""),
+            "title": str(summary.get("title") or ""),
+            "status": "raw",
+            "source_kind": "pi-jsonl",
+            "source_path": str(jsonl_path),
+            "_root": str(root),
+        }
+
+
 def list_session_records(cli: str = "all", query: str = "", limit: int | None = None) -> list[dict]:
     cli = str(cli or "all").strip().lower()
     query = " ".join(str(query or "").lower().split())
@@ -452,6 +555,9 @@ def list_session_records(cli: str = "all", query: str = "", limit: int | None = 
         for root in codex_roots():
             records.extend(_codex_index_records(root))
             records.extend(_codex_jsonl_records(root))
+    if cli in {"all", "pi"}:
+        for root in pi_roots():
+            records.extend(_pi_jsonl_records(root))
     merged = _merge_records(records)
     if query:
         tokens = query.split()
@@ -527,6 +633,12 @@ def _message_preview_from_payload(payload: dict, *, cli: str, line_number: int) 
             text = _short_text(body.get("content") or payload.get("content"), limit=2200)
         else:
             return None
+    elif cli == "pi":
+        if kind != "message":
+            return None
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        role = _normalized_role(message.get("role"))
+        text = _short_text(message.get("content"), limit=2200)
     else:
         return None
     if not text:
