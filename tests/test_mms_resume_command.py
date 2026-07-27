@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 
 class _FakeConsole:
     def __init__(self):
@@ -434,6 +436,39 @@ def test_explicit_pi_resume_fails_closed_when_catalog_misses(monkeypatch):
     assert session_id is None
     assert record is None
     assert error == "Pi 找不到 session: missing-session"
+
+
+@pytest.mark.parametrize(
+    "source_path, expected_error",
+    [
+        ("", "必须是 .jsonl 文件"),
+        ("/tmp/pi-session.txt", "必须是 .jsonl 文件"),
+        ("/tmp/missing-pi-session.jsonl", "不存在或不是文件"),
+    ],
+)
+def test_pi_resume_validates_native_session_path(source_path, expected_error):
+    import mms_core
+
+    resolved, error = mms_core._validated_pi_session_path(
+        {"source_path": source_path}
+    )
+
+    assert resolved is None
+    assert expected_error in error
+
+
+def test_pi_resume_accepts_existing_jsonl_path(tmp_path):
+    import mms_core
+
+    source = tmp_path / "session.jsonl"
+    source.write_text("{}\n", encoding="utf-8")
+
+    resolved, error = mms_core._validated_pi_session_path(
+        {"source_path": str(source)}
+    )
+
+    assert resolved == str(source.resolve())
+    assert error is None
 
 
 def test_handle_resume_command_select_model_sets_provider(monkeypatch):

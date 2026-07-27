@@ -16104,6 +16104,16 @@ def _resolve_pi_resume_ref(session_ref, *, allow_passthrough=False):
     return None, None, f"Pi {error or f'找不到 session: {ref}'}"
 
 
+def _validated_pi_session_path(session_record):
+    source_path = str((session_record or {}).get("source_path") or "").strip()
+    if not source_path.lower().endswith(".jsonl"):
+        return None, "Pi session source 必须是 .jsonl 文件"
+    resolved = os.path.realpath(os.path.expanduser(source_path))
+    if not os.path.isfile(resolved):
+        return None, f"Pi session source 不存在或不是文件: {source_path}"
+    return resolved, None
+
+
 def _resolve_resume_target(session_ref, cli_hint="auto"):
     prefix_cli, ref = _split_cli_prefixed_resume_ref(session_ref)
     cli_hint = prefix_cli or str(cli_hint or "auto").strip().lower()
@@ -16413,8 +16423,11 @@ def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, 
     if cli == "claude":
         extra_args = ["--resume", session_id] + list(args.prompt or [])
     elif cli == "pi":
-        source_path = str((session_record or {}).get("source_path") or "").strip()
-        extra_args = ["--session", source_path or session_id] + list(args.prompt or [])
+        source_path, source_error = _validated_pi_session_path(session_record)
+        if source_error:
+            console.print(f"[red]{source_error}[/red]")
+            raise SystemExit(1)
+        extra_args = ["--session", source_path] + list(args.prompt or [])
     else:
         extra_args = ["resume", session_id] + list(args.prompt or [])
 
