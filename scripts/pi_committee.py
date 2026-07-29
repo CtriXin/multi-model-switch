@@ -39,7 +39,40 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--require", action="append", default=["text"], dest="required_capabilities")
     parser.add_argument("--lens", action="append", default=[], help="Optional lens list; repeat for multiple members.")
     parser.add_argument("--max-concurrency", type=int, default=mms_pi_committee.DEFAULT_MAX_CONCURRENCY)
-    parser.add_argument("--timeout", type=int, default=mms_pi_committee.DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=mms_pi_committee.DEFAULT_TIMEOUT_SECONDS,
+        help="Per-member wall budget in seconds; shared by route attempts.",
+    )
+    parser.add_argument(
+        "--kimi-attempt-timeout",
+        type=int,
+        default=mms_pi_committee.DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS,
+        help="Maximum seconds for one Kimi route attempt; 0 lets one route use the whole member budget.",
+    )
+    parser.add_argument(
+        "--max-bundle-age-days",
+        type=int,
+        default=mms_pi_committee.DEFAULT_MAX_BUNDLE_AGE_DAYS,
+        help="Fail closed when a timestamped latest-approved bundle is older; 0 disables freshness enforcement.",
+    )
+    parser.add_argument("--idle-timeout", type=int, default=mms_pi_committee.DEFAULT_IDLE_TIMEOUT_SECONDS)
+    parser.add_argument("--max-output-bytes", type=int, default=mms_pi_committee.DEFAULT_MAX_OUTPUT_BYTES)
+    parser.add_argument("--max-repeated-events", type=int, default=mms_pi_committee.DEFAULT_MAX_REPEATED_EVENTS)
+    parser.add_argument(
+        "--committee-timeout",
+        type=int,
+        default=mms_pi_committee.DEFAULT_COMMITTEE_TIMEOUT_SECONDS,
+        help="Whole-committee budget; 0 auto-sizes by member wall budget and concurrency waves.",
+    )
+    parser.add_argument(
+        "--quorum-successes",
+        type=int,
+        default=mms_pi_committee.DEFAULT_QUORUM_SUCCESSES,
+        help="Cancel remaining workers after this many successes plus grace; 0 disables early stop.",
+    )
+    parser.add_argument("--quorum-grace", type=int, default=mms_pi_committee.DEFAULT_QUORUM_GRACE_SECONDS)
     parser.add_argument("--dry-run", action="store_true", help="Verify bundle and emit the dynamic plan without launching Pi.")
     parser.add_argument("--output", help="Optional result JSON path. Parent directories are created locally.")
     return parser
@@ -70,6 +103,14 @@ def main(argv: list[str] | None = None) -> int:
             lenses=lenses,
             max_concurrency=args.max_concurrency,
             timeout_seconds=args.timeout,
+            kimi_attempt_timeout_seconds=args.kimi_attempt_timeout,
+            max_bundle_age_days=args.max_bundle_age_days,
+            idle_timeout_seconds=args.idle_timeout,
+            max_output_bytes=args.max_output_bytes,
+            max_repeated_events=args.max_repeated_events,
+            committee_timeout_seconds=args.committee_timeout,
+            quorum_successes=args.quorum_successes,
+            quorum_grace_seconds=args.quorum_grace,
             dry_run=args.dry_run,
         )
     except (mms_pi_committee.CommitteeError, OSError, ValueError) as exc:

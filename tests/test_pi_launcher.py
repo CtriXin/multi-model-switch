@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+import subprocess
+import textwrap
 
 import pytest
 
@@ -65,6 +68,56 @@ def test_pi_gateway_root_and_sessions_honor_explicit_mms_config_root(monkeypatch
 
     assert mms_pi_support._pi_gateway_root() == str(preview_root / "pi-gateway")
     assert mms_pi_support._pi_session_dir() == str(preview_root / "pi-gateway" / "sessions")
+
+
+def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
+    wrapper = Path(__file__).resolve().parents[1] / "scripts" / "pi-cli-wrapper.sh"
+    bin_dir = tmp_path / "bin"
+    cache_dir = tmp_path / "pi-npx"
+    log_path = tmp_path / "npx.log"
+    bin_dir.mkdir()
+    fake_npx = bin_dir / "npx"
+    fake_npx.write_text(
+        textwrap.dedent(
+            """\
+            #!/bin/sh
+            set -eu
+            printf '%s\\n' "$*" >> "$FAKE_NPX_LOG"
+            case " $* " in
+              *" --version "*)
+                mkdir -p "$FAKE_PI_CACHE/_npx/hash/node_modules/.bin"
+                printf '#!/bin/sh\\nexit 0\\n' > "$FAKE_PI_CACHE/_npx/hash/node_modules/.bin/pi"
+                chmod +x "$FAKE_PI_CACHE/_npx/hash/node_modules/.bin/pi"
+                exit 0
+                ;;
+            esac
+            exit 0
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_npx.chmod(0o755)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+            "MMS_PI_NPX_CACHE": str(cache_dir),
+            "MMS_PI_NPX_INSTALL_LOCK_TIMEOUT": "10",
+            "FAKE_NPX_LOG": str(log_path),
+            "FAKE_PI_CACHE": str(cache_dir),
+        }
+    )
+
+    processes = [
+        subprocess.Popen([str(wrapper), "--probe", str(index)], env=env)
+        for index in range(4)
+    ]
+    for process in processes:
+        assert process.wait(timeout=15) == 0
+
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert sum("--version" in call for call in calls) == 1
+    assert sum("--probe" in call for call in calls) == 4
 
 
 def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp_path):

@@ -19,6 +19,11 @@ def _result_fixture() -> dict:
         "mission_id": "pi-parent-test",
         "status": "partial",
         "elapsed_ms": 1234,
+        "watchdog": {
+            "member_wall_timeout_seconds": 600,
+            "committee_timeout_seconds": 1260,
+            "committee_stop_reason": "completed",
+        },
         "summary": {"members": 3, "succeeded": 2, "failed": 1},
         "plan": {
             "mission_id": "pi-parent-test",
@@ -108,8 +113,17 @@ def _result_fixture() -> dict:
                 "family": "GLM",
                 "lens": "verification",
                 "status": "failed",
+                "terminal_reason": "request_error",
                 "error": "request_error",
-                "attempts": [{"provider_id": "glm-provider", "status": "request_error", "error": "upstream"}],
+                "attempts": [
+                    {
+                        "provider_id": "glm-provider",
+                        "status": "request_error",
+                        "terminal_reason": "request_error",
+                        "error": "upstream",
+                        "watchdog": {"elapsed_ms": 700},
+                    }
+                ],
             },
         ],
     }
@@ -129,15 +143,117 @@ def test_build_parent_packet_is_lossless_and_synthesis_ready() -> None:
         "structured_responses": 1,
         "raw_responses": 1,
         "fallback_members": 1,
+        "coverage_ratio": 0.5,
+        "required_successes_for_synthesis": 2,
+        "synthesis_coverage_met": True,
         "status_counts": {"failed": 1, "missing_result": 1, "success": 2},
         "family_counts": {"GLM": 1, "GPT": 1, "Qwen": 1},
     }
     assert packet["opinions"][0]["response"]["findings"][0]["extra"] == "preserve me"
     assert packet["opinions"][1]["response"] == {"raw_text": "malformed but useful opinion"}
+    assert packet["mission"]["watchdog"]["committee_timeout_seconds"] == 1260
+    assert packet["failures"][0]["terminal_reason"] == "request_error"
+    assert packet["route_health"][2]["attempts"][0]["watchdog"] == {"elapsed_ms": 700}
     assert packet["evidence_index"][0]["evidence_id"] == "member-01-finding-01"
     assert {item["status"] for item in packet["failures"]} == {"failed", "missing_result"}
     assert packet["synthesis_contract"]["owner"] == "current_parent"
     assert packet["synthesis_contract"]["semantic_grouping"] == "parent_reasoning_required"
+    assert packet["synthesis_readiness"] == {
+        "reason": "sufficient_coverage",
+        "coverage_met": True,
+        "coverage_ratio": 0.5,
+        "required_coverage_ratio": 0.5,
+        "required_successes": 2,
+    }
+
+
+def _coverage_result(planned_members: int, successes: int) -> dict:
+    result = _result_fixture()
+    result["status"] = "partial" if successes < planned_members else "success"
+    result["plan"]["members"] = [
+        {
+            "member_id": f"member-{index:02d}",
+            "model": f"model-{index}",
+            "family": f"Family-{index}",
+            "lens": "verification",
+            "route_chain": [{"provider_id": f"provider-{index}"}],
+        }
+        for index in range(1, planned_members + 1)
+    ]
+    result["results"] = [
+        {
+            "member_id": f"member-{index:02d}",
+            "model": f"model-{index}",
+            "family": f"Family-{index}",
+            "lens": "verification",
+            "status": "success",
+            "response": {"raw_text": "opinion"},
+            "fallback_used": False,
+            "attempts": [],
+        }
+        for index in range(1, successes + 1)
+    ]
+    return result
+
+
+def test_one_of_seven_is_not_ready_for_synthesis() -> None:
+    packet = mms_pi_parent.build_parent_packet(_coverage_result(7, 1))
+
+    assert packet["ready_for_synthesis"] is False
+    assert packet["synthesis_readiness"]["reason"] == "insufficient_coverage"
+    assert packet["synthesis_readiness"]["required_successes"] == 4
+    assert packet["committee_health"]["coverage_ratio"] == pytest.approx(1 / 7, abs=1e-6)
+
+
+def test_four_of_seven_meets_synthesis_coverage_floor() -> None:
+    packet = mms_pi_parent.build_parent_packet(_coverage_result(7, 4))
+
+    assert packet["ready_for_synthesis"] is True
+    assert packet["synthesis_readiness"]["reason"] == "sufficient_coverage"
+    assert packet["synthesis_readiness"]["required_successes"] == 4
+
+
+def test_skipped_fallback_is_not_counted_as_fallback_member() -> None:
+    result = _coverage_result(1, 0)
+    result["status"] = "failed"
+    result["results"] = [
+        {
+            "member_id": "member-01",
+            "model": "model-1",
+            "family": "Family-1",
+            "lens": "verification",
+            "status": "failed",
+            "terminal_reason": "wall_timeout",
+            "error": "direct-kimi:wall_timeout",
+            "fallback_used": True,
+            "fallback_skipped_reason": "no_budget_remaining",
+            "attempts": [
+                {
+                    "provider_id": "direct-kimi",
+                    "fallback_position": 0,
+                    "started": True,
+                    "budget_seconds": 900,
+                    "status": "wall_timeout",
+                    "terminal_reason": "wall_timeout",
+                },
+                {
+                    "provider_id": "newapi-tokyo",
+                    "fallback_position": 1,
+                    "started": False,
+                    "budget_seconds": 0,
+                    "status": "skipped",
+                    "terminal_reason": "no_budget_remaining",
+                },
+            ],
+        }
+    ]
+
+    packet = mms_pi_parent.build_parent_packet(result)
+
+    assert packet["committee_health"]["fallback_members"] == 0
+    assert packet["opinions"][0]["fallback_used"] is False
+    assert packet["route_health"][0]["fallback_skipped_reason"] == "no_budget_remaining"
+    assert packet["route_health"][0]["attempts"][1]["started"] is False
 
 
 def test_dry_run_packet_is_not_ready_for_synthesis() -> None:
@@ -254,3 +370,5 @@ def test_bundled_skill_is_explicit_and_runner_locates_parent_cli() -> None:
     assert completed.returncode == 0, completed.stderr
     assert "--result" in completed.stdout
     assert "--config-root" in completed.stdout
+    assert "--kimi-attempt-timeout" in completed.stdout
+    assert "--max-bundle-age-days" in completed.stdout

@@ -1,5 +1,7 @@
 # Pi Dynamic Committee
 
+For role-aware design/product/development/testing deliberation, use the opt-in [Pi Court](PI_COURT.md). For writable delegation, use the separate [Pi Executor](PI_EXECUTOR.md). This committee remains read-only by design.
+
 ## 结论
 
 MMS 提供一个独立、opt-in 的 Pi committee sidecar。它不经过 OpenCode，不注册到 `mms` 默认 launcher，也不读写默认全局配置。Codex、Claude 或普通脚本都可以把它当作同一个 JSON-in/JSON-out worker pool 使用。
@@ -16,7 +18,45 @@ MMS 提供一个独立、opt-in 的 Pi committee sidecar。它不经过 OpenCode
 - 每个 worker 使用临时 `HOME`、`XDG_*`、Pi agent/session 目录；任务结束自动删除。
 - API key 通过临时 environment variable 交给 Pi，`models.json` 只保存 `$ENV_NAME` 引用。
 - 默认工具只有 `read,grep,find,ls`，并关闭 session、context files、extensions、skills、prompt templates 和 themes。
-- Pi 通过仓库已有的 `scripts/pi-cli-wrapper.sh` 启动；首次运行只会把 npm package cache 放到本仓库 `.ai/cache/pi-npx`，不会做 global install。
+- Pi 通过仓库已有的 `scripts/pi-cli-wrapper.sh` 启动；首次运行只会把 npm package cache 放到本仓库 `.ai/cache/pi-npx`，不会做 global install。冷缓存下 wrapper 会先用 repo-local install lock 做一次轻量 prewarm，避免多 worker 同时让 `npx` 填充同一个 shared cache。
+
+## Worker watchdog
+
+Pi worker 是 agentic session，不是一次短 completion。实测中，读取 diff 和多个文件后再输出结构化评审，单个正常调用可以超过 110s；因此不能把短暂无 stdout 当成 provider 故障，也不能因为一批 `anthropic_messages` route 同时命中旧的 180s 上限，就把协议本身判坏。
+
+当前默认值按“慢但健康”校准：
+
+- member wall timeout：`900s`；同一 member 的 route fallback 共享这段预算。这个值来自重型 agentic review 的实测校准，不代表每个模型都能在 900s 内完成。
+- Kimi route-attempt timeout：默认每条 route 最多 `300s`，并按剩余 attempt 数公平收窄；Tokyo 超时后仍为 Tencent/direct 保留实际执行窗口。`--kimi-attempt-timeout 0` 可在明确的历史复现实验中关闭该 cap。
+- no-output idle timeout：`300s`。Pi JSON event 或 stderr 任意新字节都会刷新 activity；短于这个阈值的静默 provider call 不会被误杀。
+- retained stream tail / single event：`2 MiB`。累计的正常 newline-delimited Pi events 可以超过此值，runtime 只保留 bounded tail；只有单个无法分帧的 event/line 超限才返回 `output_limit`。这避免 `message_update` 的增长快照把健康 worker 误判为输出洪水。
+- exact consecutive repeated events：`32`；达到后返回 `repetition_limit`。
+- committee timeout：默认 `0=auto`，实际值为 `member wall × concurrency waves + 60s`。默认 7 member、并发 4 时是 `1860s`，确保第二波仍有完整 member budget。
+- quorum：默认 `0=disabled`。只有调用方显式设置 `--quorum-successes N` 时，达到 N 个成功并经过 `--quorum-grace` 后才取消剩余 worker；默认不会把一个成功意见当作委员会结论。
+
+每个 Pi 子进程都在独立 POSIX process group 中运行。watchdog 先向整个 group 发 `SIGTERM`，grace 结束后仍在原 group 的 descendant 会收到 `SIGKILL`；Pi 自身的 SIGTERM handler 也会清理它登记的 detached children。主动 `setsid()` 逃离原 group 的任意第三方进程不属于 OS process-group 保证范围。stream reader 与 supervisor 之间使用 bounded queue，极端输出会 backpressure 到 pipe，不会形成 unbounded Python queue。结果和 Parent packet 会保留 `terminal_reason`、elapsed、stdout/stderr bytes、repeat peak、是否 terminate/force-kill，以及 committee stop reason。即使 global deadline 或 opt-in quorum 触发，也会返回所有已完成结果和被取消 member 的明确状态。
+
+同一 member 的多个 route attempt 共享 wall budget，但不再用 `max(1, remaining)` 强行制造一秒 fallback。Kimi 的每个 attempt 还受独立 cap 约束，第一条 route 的 `wall_timeout` 不再等同于 member budget 耗尽。剩余预算不足一秒时，未启动的 route 会记录为 `status=skipped`、`terminal_reason=no_budget_remaining`、`started=false`、`budget_seconds=0`；它不会被标成 provider `wall_timeout`，也不会进入 `fallback_members`。真正启动的 attempt 会记录 `started=true` 和实际分配的 `budget_seconds`。
+
+timestamped latest-approved bundle 默认必须在 `30` 天 freshness window 内。校验顺序是 hash verification → bundle age gate → model selection；旧 root 中 hash 正确但已经漂移的 `kimi-k2.x` 不会再进入 provider dispatch。`--max-bundle-age-days 0` 只用于调用方明确要求的历史 replay。public plan 会保留 resolved `config_root`、manifest path、revision、age 和 freshness status，方便区分 Host 选错 root 与 provider/model 故障。
+
+可按单次 mission 调整，而不写任何全局配置：
+
+```bash
+python3 scripts/pi_committee_parent.py \
+  --config-root /explicit/path/to/mms-config-root \
+  --task-file /path/to/mission.md \
+  --cwd /path/to/target-repo \
+  --timeout 900 \
+  --kimi-attempt-timeout 300 \
+  --max-bundle-age-days 30 \
+  --idle-timeout 300 \
+  --max-output-bytes 2097152 \
+  --max-repeated-events 32 \
+  --committee-timeout 0
+```
+
+不建议仅因某个 protocol 较慢就缩短它的 timeout。应先看 member `watchdog` 和 attempt `cache_transport_evidence`，区分 `request_error`、真实 idle、wall budget 不足和输出异常。
 
 ## 使用方式
 
@@ -69,7 +109,7 @@ python3 scripts/pi_committee.py \
 ## Frontier 选择规则
 
 - MiniMax、GPT、Qwen、DeepSeek、GLM：先比较可识别的 model version，再比较同版本 variant。Qwen 默认 `max > plus > flash`；DeepSeek 默认 `flash > pro`。
-- Kimi：优先滚动的 `kimi-for-coding` channel；Gemini 优先滚动的 `flash-agent(high)` channel。
+- Kimi：优先 fresh bundle 中最新版本，例如真实模型 id `k3` 会排在 `kimi-k2.8-code` / `kimi-k2.7-code` 前；同版本再优先 coding/code 系列，不把旧 `kimi-for-coding` alias 固定成永久 champion。Pi committee 会把 Kimi route chain 重排为 Tokyo primary、Tencent fallback、direct later，并限制单 route 不能吞完整个 member budget。Gemini 优先滚动的 `flash-agent(high)` channel。
 - 同级时再参考 policy favorite/tier、context window、可用 route 数量。
 - unavailable、policy-hidden、非对话模型或无法生成 Pi route 的模型会 fail closed，不会偷用 global OAuth/default account。
 
@@ -77,7 +117,7 @@ python3 scripts/pi_committee.py \
 
 ## Parent 集成
 
-Codex 或 Claude 可以显式调用 repo-local `$pi-committee` skill source。该 skill 位于 `assets/session-assets/skills/pi-committee/`，`allow_implicit_invocation` 为 `false`。当前实现不会自动注册或注入这个新 skill；Parent 必须明确读取该 `SKILL.md`，或直接调用它的 runner。这样既不安装进 `~/.codex/skills`、`~/.claude/skills`，也不修改 preferences、launcher 或 OpenCode。
+Codex 或 Claude 可以显式调用 shared `$pi-committee` skill source；仓库内 `assets/session-assets/skills/pi-committee/` 保留可发布镜像，Codex/Claude discovery entry 使用 symlink 指向 canonical shared skill。`allow_implicit_invocation` 仍为 `false`，Parent 必须显式触发。该安装方式不修改 preferences、launcher、OpenCode 或真实 MMS config。
 
 Parent adapter 可以直接派发任务并输出 `mms.pi_committee.parent_packet.v1`：
 
@@ -97,11 +137,11 @@ python3 scripts/pi_committee_parent.py \
   --output /path/to/parent-packet.json
 ```
 
-Parent packet 保留完整 public plan、所有原始 member response、flattened evidence index、route health、failure/raw/fallback 状态和 synthesis contract。Parent 需要完成三件事：
+Parent packet 保留完整 public plan、所有原始 member response、flattened evidence index、route health、failure/raw/fallback 状态和 synthesis contract。`ready_for_synthesis` 不是“有一个成功就算 ready”：默认要求成功数达到 planned member 的 `50%`（向上取整），且多成员委员会至少需要两个成功；因此 `7` 人委员会至少 `4` 人成功，`1/7` 会明确返回 `insufficient_coverage`。Parent 需要完成三件事：
 
 1. 生成 mission text 并调用 sidecar。
 2. 完整读取 parent packet，包括失败和 raw response。
-3. 根据 `synthesis_contract` 输出 committee health、共识、分歧、独立发现、风险、建议和 confidence。
+3. 仅在 `ready_for_synthesis=true` 时，根据 `synthesis_contract` 输出 committee health、共识、分歧、独立发现、风险、建议和 confidence；否则只报告覆盖不足与失败证据。
 
 Adapter 不用 string similarity 假装推断 semantic consensus，也不会调用第八个 synthesis model。最终判断始终属于当前 Codex/Claude parent，因此可以随时更换 parent，worker runtime 不需要改名或重配。
 

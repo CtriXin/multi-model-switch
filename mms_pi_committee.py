@@ -12,22 +12,32 @@ import contextlib
 import json
 import os
 import re
-import subprocess
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 import mms_consumer_bundle
+import mms_pi_watchdog
 
 
 DEFAULT_MEMBER_COUNT = 4
 DEFAULT_MIN_FAMILIES = 3
 DEFAULT_MAX_CONCURRENCY = 4
-DEFAULT_TIMEOUT_SECONDS = 180
+DEFAULT_TIMEOUT_SECONDS = 900
+DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS = 300
+DEFAULT_MAX_BUNDLE_AGE_DAYS = 30
+DEFAULT_IDLE_TIMEOUT_SECONDS = 300
+DEFAULT_MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+DEFAULT_MAX_REPEATED_EVENTS = 32
+DEFAULT_COMMITTEE_TIMEOUT_SECONDS = 0
+DEFAULT_COMMITTEE_TIMEOUT_GRACE_SECONDS = 60
+DEFAULT_QUORUM_SUCCESSES = 0
+DEFAULT_QUORUM_GRACE_SECONDS = 30
 DEFAULT_SELECTION_PROFILE = "frontier"
 DEFAULT_FRONTIER_FAMILIES = (
     "MiniMax",
@@ -48,6 +58,9 @@ DEFAULT_LENSES = (
 )
 READ_ONLY_TOOLS = "read,grep,find,ls"
 _OPENAI_FAMILY_PREFIXES = ("gpt-", "o1", "o3", "o4", "codex-")
+_KIMI_PRIMARY_PROVIDER_KEYWORDS = ("tokyo",)
+_KIMI_FALLBACK_PROVIDER_KEYWORDS = ("tencent",)
+_KIMI_DIRECT_PROVIDER_KEYWORDS = ("direct-kimi", "direct_kimi")
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{8,}\b"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
@@ -102,9 +115,15 @@ class MemberSpec:
     member_id: str
     lens: str
     candidate: ModelCandidate
+    domain: str = ""
+    role_id: str = ""
+    role_card: str = field(default="", repr=False)
+    role_card_source: str = ""
+    role_card_sha256: str = ""
+    required_domain: bool = False
 
     def public(self) -> dict[str, Any]:
-        return {
+        payload = {
             "member_id": self.member_id,
             "lens": self.lens,
             "model": self.candidate.model,
@@ -112,6 +131,17 @@ class MemberSpec:
             "context_window_tokens": self.candidate.context_window_tokens,
             "route_chain": [binding.public() for binding in self.candidate.route_chain],
         }
+        if self.domain:
+            payload["domain"] = self.domain
+        if self.role_id:
+            payload["role_id"] = self.role_id
+        if self.role_card_source:
+            payload["role_card_source"] = self.role_card_source
+        if self.role_card_sha256:
+            payload["role_card_sha256"] = self.role_card_sha256
+        if self.domain:
+            payload["required_domain"] = self.required_domain
+        return payload
 
 
 @dataclass(frozen=True)
@@ -122,7 +152,76 @@ class PreparedAttempt:
     selected_model: str
 
 
-def load_catalog(config_root: str | os.PathLike[str]) -> dict[str, Any]:
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _bundle_timestamp(manifest: Mapping[str, Any]) -> datetime | None:
+    raw = str(manifest.get("generated_at") or "").strip()
+    if raw:
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc).astimezone(timezone.utc)
+    revision = str(manifest.get("bundle_revision") or "").strip()
+    match = re.search(r"(?:^|_)bundle_(\d{14})(?:_|$)", f"_{revision}")
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _bundle_freshness(bundle: Mapping[str, Any], *, max_bundle_age_days: int) -> dict[str, Any]:
+    manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), Mapping) else {}
+    revision = str(manifest.get("bundle_revision") or "").strip()
+    generated_at = _bundle_timestamp(manifest)
+    payload: dict[str, Any] = {
+        "status": "unknown",
+        "bundle_revision": revision,
+        "generated_at": "",
+        "age_seconds": 0,
+        "age_days": 0.0,
+        "max_age_days": max_bundle_age_days,
+    }
+    if generated_at is None:
+        return payload
+    age_seconds = max(0, int((_utc_now() - generated_at).total_seconds()))
+    payload.update(
+        {
+            "status": (
+                "freshness_disabled"
+                if max_bundle_age_days == 0
+                else ("stale" if age_seconds > max_bundle_age_days * 86400 else "fresh")
+            ),
+            "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
+            "age_seconds": age_seconds,
+            "age_days": round(age_seconds / 86400, 3),
+        }
+    )
+    return payload
+
+
+def public_bundle_metadata(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    freshness = bundle.get("freshness") if isinstance(bundle.get("freshness"), Mapping) else {}
+    return {
+        "config_root": str(bundle.get("config_root") or ""),
+        "manifest_path": str(bundle.get("manifest_path") or ""),
+        "revision": str(freshness.get("bundle_revision") or ""),
+        "freshness": dict(freshness),
+    }
+
+
+def load_catalog(
+    config_root: str | os.PathLike[str],
+    *,
+    max_bundle_age_days: int = DEFAULT_MAX_BUNDLE_AGE_DAYS,
+) -> dict[str, Any]:
+    if max_bundle_age_days < 0:
+        raise CommitteeError("max bundle age must be zero (disabled) or greater")
     root = Path(config_root).expanduser()
     try:
         bundle = mms_consumer_bundle.load_verified_consumer_bundle(
@@ -137,6 +236,14 @@ def load_catalog(config_root: str | os.PathLike[str]) -> dict[str, Any]:
     router = payloads.get("router") if isinstance(payloads.get("router"), dict) else {}
     if not isinstance(router.get("routes"), dict) or not router["routes"]:
         raise CommitteeError("verified latest-approved Router has no model routes")
+    freshness = _bundle_freshness(bundle, max_bundle_age_days=max_bundle_age_days)
+    bundle["freshness"] = freshness
+    if freshness["status"] == "stale":
+        raise CommitteeError(
+            "latest-approved bundle is stale: "
+            f"{freshness['bundle_revision']} is {freshness['age_days']:.1f} days old "
+            f"(limit {max_bundle_age_days} days); select a current explicit config root"
+        )
     return bundle
 
 
@@ -188,6 +295,19 @@ def build_candidates(
             )
         )
     return candidates, excluded
+
+
+def load_candidates(
+    config_root: str | os.PathLike[str],
+    *,
+    required_capabilities: Sequence[str] = ("text",),
+    max_bundle_age_days: int = DEFAULT_MAX_BUNDLE_AGE_DAYS,
+) -> tuple[dict[str, Any], list[ModelCandidate], dict[str, str]]:
+    bundle = load_catalog(config_root, max_bundle_age_days=max_bundle_age_days)
+    bundle_root = Path(str(bundle.get("config_root") or config_root)).expanduser()
+    with _scoped_mms_config_root(bundle_root):
+        candidates, excluded = build_candidates(bundle, required_capabilities=required_capabilities)
+    return bundle, candidates, excluded
 
 
 def select_members(
@@ -251,16 +371,18 @@ def plan_committee(
     required_capabilities: Sequence[str] = ("text",),
     lenses: Sequence[str] = DEFAULT_LENSES,
     mission_id: str | None = None,
+    max_bundle_age_days: int = DEFAULT_MAX_BUNDLE_AGE_DAYS,
 ) -> tuple[dict[str, Any], list[MemberSpec], dict[str, Any]]:
     task_text = str(task or "").strip()
     if not task_text:
         raise CommitteeError("task must not be empty")
     if explicit_models and additional_models:
         raise CommitteeError("--model cannot be combined with additional models")
-    bundle = load_catalog(config_root)
-    bundle_root = Path(str(bundle.get("config_root") or config_root)).expanduser()
-    with _scoped_mms_config_root(bundle_root):
-        candidates, excluded = build_candidates(bundle, required_capabilities=required_capabilities)
+    bundle, candidates, excluded = load_candidates(
+        config_root,
+        required_capabilities=required_capabilities,
+        max_bundle_age_days=max_bundle_age_days,
+    )
     members = select_members(
         candidates,
         count=count,
@@ -282,6 +404,7 @@ def plan_committee(
         "task": task_text,
         "route_source": f"mms:latest-approved:{manifest.get('bundle_revision') or ''}",
         "component_revisions": dict(bundle.get("component_revisions") or {}),
+        "bundle": public_bundle_metadata(bundle),
         "selection": {
             "requested_count": effective_count,
             "profile": effective_profile,
@@ -324,11 +447,16 @@ def run_committee(
     lenses: Sequence[str] = DEFAULT_LENSES,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    kimi_attempt_timeout_seconds: int = DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS,
+    max_bundle_age_days: int = DEFAULT_MAX_BUNDLE_AGE_DAYS,
+    idle_timeout_seconds: int = DEFAULT_IDLE_TIMEOUT_SECONDS,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+    max_repeated_events: int = DEFAULT_MAX_REPEATED_EVENTS,
+    committee_timeout_seconds: int = DEFAULT_COMMITTEE_TIMEOUT_SECONDS,
+    quorum_successes: int = DEFAULT_QUORUM_SUCCESSES,
+    quorum_grace_seconds: int = DEFAULT_QUORUM_GRACE_SECONDS,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    target_cwd = Path(cwd).expanduser().resolve()
-    if not target_cwd.is_dir():
-        raise CommitteeError(f"worker cwd is not a directory: {target_cwd}")
     plan, members, _bundle = plan_committee(
         config_root=config_root,
         task=task,
@@ -340,58 +468,181 @@ def run_committee(
         additional_models=additional_models,
         required_capabilities=required_capabilities,
         lenses=lenses,
+        max_bundle_age_days=max_bundle_age_days,
     )
-    if dry_run:
-        return {
-            "schema": "mms.pi_committee.result.v1",
-            "mission_id": plan["mission_id"],
-            "status": "dry_run",
-            "plan": plan,
-            "results": [],
-        }
+    return run_preplanned_committee(
+        config_root=config_root,
+        plan=plan,
+        members=members,
+        cwd=cwd,
+        max_concurrency=max_concurrency,
+        timeout_seconds=timeout_seconds,
+        kimi_attempt_timeout_seconds=kimi_attempt_timeout_seconds,
+        idle_timeout_seconds=idle_timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        max_repeated_events=max_repeated_events,
+        committee_timeout_seconds=committee_timeout_seconds,
+        quorum_successes=quorum_successes,
+        quorum_grace_seconds=quorum_grace_seconds,
+        dry_run=dry_run,
+    )
+
+
+def run_preplanned_committee(
+    *,
+    config_root: str | os.PathLike[str],
+    plan: Mapping[str, Any],
+    members: Sequence[MemberSpec],
+    cwd: str | os.PathLike[str],
+    max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    kimi_attempt_timeout_seconds: int = DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS,
+    idle_timeout_seconds: int = DEFAULT_IDLE_TIMEOUT_SECONDS,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+    max_repeated_events: int = DEFAULT_MAX_REPEATED_EVENTS,
+    committee_timeout_seconds: int = DEFAULT_COMMITTEE_TIMEOUT_SECONDS,
+    quorum_successes: int = DEFAULT_QUORUM_SUCCESSES,
+    quorum_grace_seconds: int = DEFAULT_QUORUM_GRACE_SECONDS,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    target_cwd = Path(cwd).expanduser().resolve()
+    if not target_cwd.is_dir():
+        raise CommitteeError(f"worker cwd is not a directory: {target_cwd}")
+    if not members:
+        raise CommitteeError("preplanned committee must contain at least one member")
+    member_ids = [str(member.member_id).strip() for member in members]
+    if any(not member_id for member_id in member_ids) or len(set(member_ids)) != len(member_ids):
+        raise CommitteeError("preplanned committee member ids must be non-empty and unique")
+    effective_plan = dict(plan)
+    task = str(effective_plan.get("task") or "").strip()
+    if not task:
+        raise CommitteeError("preplanned committee task must not be empty")
+    if not str(effective_plan.get("mission_id") or "").strip():
+        raise CommitteeError("preplanned committee mission id must not be empty")
+    if not str(effective_plan.get("route_source") or "").strip():
+        raise CommitteeError("preplanned committee route source must not be empty")
+    effective_plan["members"] = [member.public() for member in members]
     if max_concurrency < 1:
         raise CommitteeError("max concurrency must be at least 1")
     if timeout_seconds < 1:
         raise CommitteeError("timeout must be at least 1 second")
+    if kimi_attempt_timeout_seconds < 0:
+        raise CommitteeError("Kimi attempt timeout must be zero (disabled) or greater")
+    if idle_timeout_seconds < 1:
+        raise CommitteeError("idle timeout must be at least 1 second")
+    if max_output_bytes < 1:
+        raise CommitteeError("max output bytes must be at least 1")
+    if max_repeated_events < 2:
+        raise CommitteeError("max repeated events must be at least 2")
+    if committee_timeout_seconds < 0:
+        raise CommitteeError("committee timeout must be zero (auto) or greater")
+    if quorum_successes < 0 or quorum_successes > len(members):
+        raise CommitteeError("quorum successes must be zero or no greater than member count")
+    if quorum_grace_seconds < 0:
+        raise CommitteeError("quorum grace must not be negative")
+
+    worker_count = min(max_concurrency, len(members))
+    wave_count = (len(members) + worker_count - 1) // worker_count
+    effective_committee_timeout = committee_timeout_seconds or (
+        timeout_seconds * wave_count + DEFAULT_COMMITTEE_TIMEOUT_GRACE_SECONDS
+    )
+    watchdog_config = {
+        "member_wall_timeout_seconds": timeout_seconds,
+        "kimi_attempt_timeout_seconds": kimi_attempt_timeout_seconds,
+        "idle_timeout_seconds": idle_timeout_seconds,
+        "max_output_bytes": max_output_bytes,
+        "max_repeated_events": max_repeated_events,
+        "committee_timeout_seconds": effective_committee_timeout,
+        "committee_timeout_mode": "explicit" if committee_timeout_seconds else "auto_by_concurrency_waves",
+        "quorum_successes": quorum_successes,
+        "quorum_grace_seconds": quorum_grace_seconds,
+    }
+    effective_plan["watchdog"] = watchdog_config
+    if dry_run:
+        return {
+            "schema": "mms.pi_committee.result.v1",
+            "mission_id": effective_plan["mission_id"],
+            "status": "dry_run",
+            "watchdog": {**watchdog_config, "committee_stop_reason": "not_started"},
+            "plan": effective_plan,
+            "results": [],
+        }
 
     prepared = _prepare_members(members, config_root=Path(config_root).expanduser())
-    worker_count = min(max_concurrency, len(members))
     started = time.monotonic()
     results: list[dict[str, Any]] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as pool:
-        futures = {
+    cancellation = mms_pi_watchdog.CancellationController()
+    committee_deadline = started + effective_committee_timeout
+    quorum_deadline: float | None = None
+    succeeded = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="pi-committee") as pool:
+        future_to_member = {
             pool.submit(
                 _run_member,
                 member,
                 prepared[member.member_id],
-                task=str(task).strip(),
+                task=task,
                 cwd=target_cwd,
                 timeout_seconds=timeout_seconds,
-                route_source=plan["route_source"],
-            ): member.member_id
+                kimi_attempt_timeout_seconds=kimi_attempt_timeout_seconds,
+                idle_timeout_seconds=idle_timeout_seconds,
+                max_output_bytes=max_output_bytes,
+                max_repeated_events=max_repeated_events,
+                cancellation=cancellation,
+                route_source=effective_plan["route_source"],
+            ): member
             for member in members
         }
-        for future in concurrent.futures.as_completed(futures):
-            member_id = futures[future]
-            try:
-                results.append(future.result())
-            except Exception as exc:
-                results.append(
-                    {
-                        "member_id": member_id,
-                        "status": "worker_error",
-                        "error": _redact_text(str(exc), _all_api_keys(members)),
-                    }
-                )
+        pending = set(future_to_member)
+        while pending:
+            now = time.monotonic()
+            if not cancellation.is_cancelled():
+                if now >= committee_deadline:
+                    cancellation.cancel("committee_timeout")
+                elif quorum_deadline is not None and now >= quorum_deadline:
+                    cancellation.cancel("quorum_reached")
+            if cancellation.is_cancelled():
+                for future in pending:
+                    future.cancel()
+            next_deadline = committee_deadline
+            if quorum_deadline is not None:
+                next_deadline = min(next_deadline, quorum_deadline)
+            wait_seconds = min(0.1, max(0.001, next_deadline - time.monotonic()))
+            done, pending = concurrent.futures.wait(
+                pending,
+                timeout=wait_seconds,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                member = future_to_member[future]
+                if future.cancelled():
+                    result = _cancelled_member_result(member, cancellation.reason or "cancelled")
+                else:
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = {
+                            **_member_identity(member),
+                            "status": "worker_error",
+                            "terminal_reason": "worker_error",
+                            "error": _redact_text(str(exc), _all_api_keys(members)),
+                        }
+                results.append(result)
+                if result.get("status") == "success":
+                    succeeded += 1
+                    if quorum_successes and succeeded >= quorum_successes and quorum_deadline is None:
+                        quorum_deadline = time.monotonic() + quorum_grace_seconds
     results.sort(key=lambda item: str(item.get("member_id") or ""))
     succeeded = sum(1 for item in results if item.get("status") == "success")
+    stop_reason = cancellation.reason or "completed"
     return {
         "schema": "mms.pi_committee.result.v1",
-        "mission_id": plan["mission_id"],
+        "mission_id": effective_plan["mission_id"],
         "status": "success" if succeeded == len(results) else ("partial" if succeeded else "failed"),
         "elapsed_ms": int((time.monotonic() - started) * 1000),
         "summary": {"members": len(results), "succeeded": succeeded, "failed": len(results) - succeeded},
-        "plan": plan,
+        "watchdog": {**watchdog_config, "committee_stop_reason": stop_reason},
+        "plan": effective_plan,
         "results": results,
     }
 
@@ -467,16 +718,48 @@ def _run_member(
     task: str,
     cwd: Path,
     timeout_seconds: int,
+    idle_timeout_seconds: int,
+    max_output_bytes: int,
+    max_repeated_events: int,
+    cancellation: mms_pi_watchdog.CancellationController,
     route_source: str,
+    kimi_attempt_timeout_seconds: int = DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     errors: list[str] = []
     attempt_records: list[dict[str, Any]] = []
+    fallback_used = False
+    fallback_skipped_reason = ""
+    last_terminal_reason = "no_route_attempts"
     all_keys = [attempt.binding.api_key for attempt in attempts]
     for index, attempt in enumerate(attempts):
-        remaining = max(1, int(deadline - time.monotonic()))
-        result = _run_attempt(member, attempt, task=task, cwd=cwd, timeout_seconds=remaining)
+        if cancellation.is_cancelled():
+            return _redact_object(_cancelled_member_result(member, cancellation.reason), all_keys)
+        remaining_float = deadline - time.monotonic()
+        if remaining_float < 1:
+            fallback_skipped_reason = "no_budget_remaining" if index > 0 else ""
+            attempt_records.extend(_skipped_attempt_records(attempts[index:], "no_budget_remaining"))
+            break
+        remaining = int(remaining_float)
+        attempt_timeout = _attempt_timeout_seconds(
+            member,
+            remaining_seconds=remaining,
+            attempts_left=len(attempts) - index,
+            kimi_attempt_timeout_seconds=kimi_attempt_timeout_seconds,
+        )
         route_fallback = index > 0
+        fallback_used = fallback_used or route_fallback or bool(attempt.binding.protocol_fallback_reason)
+        result = _run_attempt(
+            member,
+            attempt,
+            task=task,
+            cwd=cwd,
+            timeout_seconds=attempt_timeout,
+            idle_timeout_seconds=idle_timeout_seconds,
+            max_output_bytes=max_output_bytes,
+            max_repeated_events=max_repeated_events,
+            cancellation=cancellation,
+        )
         fallback_reason = "; ".join(errors) if route_fallback else ""
         if attempt.binding.protocol_fallback_reason:
             fallback_reason = "; ".join(
@@ -493,11 +776,17 @@ def _run_member(
         attempt_records.append(
             {
                 "provider_id": attempt.binding.provider_id,
+                "fallback_position": attempt.binding.fallback_position,
+                "started": True,
+                "budget_seconds": attempt_timeout,
                 "status": result.get("status"),
+                "terminal_reason": result.get("terminal_reason", result.get("status")),
                 "error": result.get("error", ""),
+                "watchdog": result.get("watchdog", {}),
                 "cache_transport_evidence": evidence,
             }
         )
+        last_terminal_reason = str(result.get("terminal_reason") or result.get("status") or "unknown")
         if result["status"] == "success":
             result.pop("_usage", None)
             result["fallback_used"] = evidence["fallback_used"]
@@ -506,22 +795,59 @@ def _run_member(
             result["attempts"] = attempt_records
             return _redact_object(result, all_keys)
         errors.append(f"{attempt.binding.provider_id}:{result.get('status')}")
+        if cancellation.is_cancelled():
+            break
         if time.monotonic() >= deadline:
+            if index + 1 < len(attempts):
+                fallback_skipped_reason = "no_budget_remaining"
+                attempt_records.extend(_skipped_attempt_records(attempts[index + 1 :], "no_budget_remaining"))
             break
     return _redact_object(
         {
-            "member_id": member.member_id,
-            "model": member.candidate.model,
-            "family": member.candidate.family,
-            "lens": member.lens,
+            **_member_identity(member),
             "status": "failed",
+            "terminal_reason": last_terminal_reason,
             "error": "; ".join(errors) or "no route attempts were available",
-            "fallback_used": len(errors) > 1,
-            "fallback_reason": "; ".join(errors[:-1]),
+            "fallback_used": fallback_used,
+            "fallback_reason": "; ".join(errors[:-1]) if fallback_used else "",
+            "fallback_skipped_reason": fallback_skipped_reason,
             "attempts": attempt_records,
         },
         all_keys,
     )
+
+
+def _attempt_timeout_seconds(
+    member: MemberSpec,
+    *,
+    remaining_seconds: int,
+    attempts_left: int,
+    kimi_attempt_timeout_seconds: int,
+) -> int:
+    remaining = max(1, int(remaining_seconds))
+    if member.candidate.family != "Kimi" or kimi_attempt_timeout_seconds == 0:
+        return remaining
+    fair_share = max(1, remaining // max(1, attempts_left))
+    return max(1, min(remaining, kimi_attempt_timeout_seconds, fair_share))
+
+
+def _skipped_attempt_records(
+    attempts: Sequence[PreparedAttempt],
+    terminal_reason: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "provider_id": attempt.binding.provider_id,
+            "fallback_position": attempt.binding.fallback_position,
+            "started": False,
+            "budget_seconds": 0,
+            "status": "skipped",
+            "terminal_reason": terminal_reason,
+            "error": "",
+            "watchdog": {},
+        }
+        for attempt in attempts
+    ]
 
 
 def _run_attempt(
@@ -531,6 +857,10 @@ def _run_attempt(
     task: str,
     cwd: Path,
     timeout_seconds: int,
+    idle_timeout_seconds: int,
+    max_output_bytes: int,
+    max_repeated_events: int,
+    cancellation: mms_pi_watchdog.CancellationController,
 ) -> dict[str, Any]:
     started = time.monotonic()
     root = Path(__file__).resolve().parent
@@ -545,6 +875,10 @@ def _run_attempt(
         session_dir.mkdir(parents=True, exist_ok=True)
         _write_private_json(agent_dir / "models.json", attempt.models_payload)
         _write_private_json(agent_dir / "settings.json", {})
+        role_prompt_path: Path | None = None
+        if member.role_card:
+            role_prompt_path = temp_root / "court-role.md"
+            _write_private_text(role_prompt_path, _role_system_prompt(member))
         env_name = _credential_env_name(member.member_id, attempt.binding.fallback_position)
         env = _isolated_env(temp_root)
         env.update(
@@ -575,59 +909,96 @@ def _run_attempt(
             READ_ONLY_TOOLS,
             "--thinking",
             "off",
-            "-p",
-            prompt,
         ]
-        try:
-            completed = subprocess.run(
-                cmd,
-                cwd=cwd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return {"status": "timeout", "elapsed_ms": int((time.monotonic() - started) * 1000)}
-    message, parse_error = _parse_pi_stream(completed.stdout)
+        if role_prompt_path is not None:
+            cmd.extend(["--append-system-prompt", str(role_prompt_path)])
+        cmd.extend(["-p", prompt])
+        outcome = mms_pi_watchdog.run_process(
+            cmd,
+            cwd=cwd,
+            env=env,
+            policy=mms_pi_watchdog.WatchdogPolicy(
+                wall_timeout_seconds=timeout_seconds,
+                idle_timeout_seconds=min(idle_timeout_seconds, timeout_seconds),
+                max_output_bytes=max_output_bytes,
+                max_repeated_events=max_repeated_events,
+            ),
+            cancellation=cancellation,
+        )
+    watchdog = outcome.public()
+    if outcome.terminal_reason != "completed":
+        return {
+            "status": outcome.terminal_reason,
+            "terminal_reason": outcome.terminal_reason,
+            "elapsed_ms": outcome.elapsed_ms,
+            "error": outcome.stderr[-800:] if outcome.terminal_reason == "launch_error" else "",
+            "watchdog": watchdog,
+        }
+    message, parse_error = _parse_pi_stream(outcome.stdout)
     text = _message_text(message)
-    if completed.returncode != 0:
+    if outcome.returncode != 0:
         return {
             "status": "launch_error",
+            "terminal_reason": "launch_error",
             "elapsed_ms": int((time.monotonic() - started) * 1000),
-            "error": str(message.get("errorMessage") or completed.stderr[-800:] or parse_error or "Pi exited non-zero"),
+            "error": str(message.get("errorMessage") or outcome.stderr[-800:] or parse_error or "Pi exited non-zero"),
+            "watchdog": watchdog,
         }
     if str(message.get("stopReason") or "").strip().lower() == "error":
         return {
             "status": "request_error",
+            "terminal_reason": "request_error",
             "elapsed_ms": int((time.monotonic() - started) * 1000),
             "error": str(message.get("errorMessage") or "Pi request failed"),
+            "watchdog": watchdog,
         }
     if not text:
-        return {"status": "empty_response", "elapsed_ms": int((time.monotonic() - started) * 1000)}
+        return {
+            "status": "empty_response",
+            "terminal_reason": "empty_response",
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "watchdog": watchdog,
+        }
     parsed = _parse_response_object(text)
     return {
-        "member_id": member.member_id,
-        "model": member.candidate.model,
-        "family": member.candidate.family,
-        "lens": member.lens,
+        **_member_identity(member),
         "status": "success",
+        "terminal_reason": "completed",
         "elapsed_ms": int((time.monotonic() - started) * 1000),
         "provider_id": attempt.binding.provider_id,
         "protocol": attempt.binding.protocol,
         "response": parsed if parsed is not None else {"raw_text": text},
+        "watchdog": watchdog,
         "_usage": _normalize_usage(message.get("usage")),
     }
 
 
+def _cancelled_member_result(member: MemberSpec, reason: str) -> dict[str, Any]:
+    terminal_reason = str(reason or "cancelled").strip() or "cancelled"
+    return {
+        **_member_identity(member),
+        "status": "failed",
+        "terminal_reason": terminal_reason,
+        "error": terminal_reason,
+        "fallback_used": False,
+        "fallback_reason": "",
+        "attempts": [],
+    }
+
+
 def _worker_prompt(task: str, member: MemberSpec) -> str:
+    assignments = [f"Your assigned lens: {member.lens}"]
+    if member.domain:
+        assignments.append(f"Your assigned domain: {member.domain}")
+    if member.role_id:
+        assignments.append(f"Your assigned role: {member.role_id}")
+    assignment_text = "\n".join(assignments)
     return f"""You are an independent read-only committee member.
 
 Mission:
 {task}
 
-Your assigned lens: {member.lens}
+{assignment_text}
 
 Rules:
 - Inspect only. Do not edit files, run shell commands, or invoke other agents.
@@ -641,8 +1012,40 @@ Required JSON shape:
   "confidence": 0.0,
   "findings": [{{"claim": "...", "evidence": ["path or fact"], "severity": "low|medium|high"}}],
   "risks": ["..."],
-  "recommendation": "..."
+  "recommendation": "...",
+  "role_payload": {{}}
 }}
+""".strip()
+
+
+def _member_identity(member: MemberSpec) -> dict[str, Any]:
+    identity = {
+        "member_id": member.member_id,
+        "model": member.candidate.model,
+        "family": member.candidate.family,
+        "lens": member.lens,
+    }
+    if member.domain:
+        identity["domain"] = member.domain
+        identity["required_domain"] = member.required_domain
+    if member.role_id:
+        identity["role_id"] = member.role_id
+    if member.role_card_sha256:
+        identity["role_card_sha256"] = member.role_card_sha256
+    return identity
+
+
+def _role_system_prompt(member: MemberSpec) -> str:
+    return f"""Canonical role card ({member.role_id}):
+
+{member.role_card.strip()}
+
+Pi Court adapter contract:
+- Apply the role card's method, gates, and evidence discipline only within the assigned domain and mission.
+- Remain an independent read-only court seat. Do not edit files, run shell commands, or invoke other agents.
+- The committee JSON envelope requested by the user prompt has precedence over any role-specific output shape.
+- Put useful role-specific fields under top-level role_payload; keep verdict, confidence, findings, risks, and recommendation populated.
+- Do not claim domain expertise, testing, or evidence that was not actually inspected.
 """.strip()
 
 
@@ -652,6 +1055,7 @@ def _build_route_chain(model: str, route_group: Mapping[str, Any], profile: Mapp
         raise CommitteeError("route primary is missing")
     chain_rows: list[Mapping[str, Any]] = [primary]
     chain_rows.extend(item for item in route_group.get("fallbacks") or [] if isinstance(item, Mapping))
+    chain_rows = _order_route_rows(model, chain_rows)
     bindings: list[RouteBinding] = []
     for position, row in enumerate(chain_rows):
         try:
@@ -664,6 +1068,30 @@ def _build_route_chain(model: str, route_group: Mapping[str, Any], profile: Mapp
             if position == 0:
                 raise
     return tuple(bindings)
+
+
+def _order_route_rows(model: str, rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    if _infer_family(model) != "Kimi":
+        return list(rows)
+    return [
+        row
+        for _index, row in sorted(enumerate(rows), key=lambda item: (_kimi_provider_rank(item[1]), item[0]))
+    ]
+
+
+def _kimi_provider_rank(row: Mapping[str, Any]) -> int:
+    provider_id = str(row.get("provider_id") or "").strip().lower()
+    profile = str(row.get("provider_profile") or row.get("profile") or "").strip().lower()
+    identity = f"{provider_id} {profile}"
+    if any(keyword in identity for keyword in _KIMI_PRIMARY_PROVIDER_KEYWORDS):
+        return 0
+    if any(keyword in identity for keyword in _KIMI_FALLBACK_PROVIDER_KEYWORDS):
+        return 1
+    if any(keyword in identity for keyword in _KIMI_DIRECT_PROVIDER_KEYWORDS):
+        return 3
+    if "kimi" in identity and "direct" in identity:
+        return 3
+    return 2
 
 
 def _pi_binding_block_reason(model: str, binding: RouteBinding) -> str:
@@ -954,11 +1382,13 @@ def _frontier_model_sort_key(candidate: ModelCandidate) -> tuple[Any, ...]:
     channel_rank = 1
     if candidate.family == "Kimi":
         if lower == "kimi-for-coding":
-            channel_rank = 0
-        elif lower == "kimi-for-code":
             channel_rank = 1
-        else:
+        elif lower == "kimi-for-code":
             channel_rank = 2
+        elif "code" in lower or "coding" in lower:
+            channel_rank = 0
+        else:
+            channel_rank = 3
     elif candidate.family == "Gemini":
         if re.fullmatch(r"gemini-\d+(?:\.\d+)?-flash-agent\(high\)", lower):
             channel_rank = 0
@@ -973,7 +1403,10 @@ def _frontier_model_sort_key(candidate: ModelCandidate) -> tuple[Any, ...]:
     elif candidate.family == "GPT":
         variant_rank = 0 if lower.startswith("gpt-") else (1 if lower.startswith("codex-") else 2)
     tier_rank = {"primary": 0, "preferred": 0, "secondary": 1, "fallback": 2}.get(candidate.tier, 1)
-    family_rank = (channel_rank, version, variant_rank) if candidate.family in {"Kimi", "Gemini"} else (version, variant_rank, channel_rank)
+    if candidate.family == "Gemini":
+        family_rank = (channel_rank, version, variant_rank)
+    else:
+        family_rank = (version, channel_rank, variant_rank) if candidate.family == "Kimi" else (version, variant_rank, channel_rank)
     return (
         *family_rank,
         0 if candidate.favorite else 1,
@@ -1012,13 +1445,15 @@ def _candidate_sort_key(candidate: ModelCandidate) -> tuple[Any, ...]:
 
 def _infer_family(model: str) -> str:
     normalized = model.lower()
+    if re.fullmatch(r"k\d+(?:\.\d+)*(?:-[a-z0-9-]+)?", normalized):
+        return "Kimi"
     families = (
         ("Claude", ("claude",)),
         ("GPT", ("gpt", "codex", "o1", "o3", "o4")),
         ("Gemini", ("gemini",)),
         ("DeepSeek", ("deepseek",)),
         ("Qwen", ("qwen",)),
-        ("Kimi", ("kimi", "k2.6")),
+        ("Kimi", ("kimi",)),
         ("MiMo", ("mimo",)),
         ("MiniMax", ("minimax",)),
         ("GLM", ("glm",)),
@@ -1186,6 +1621,12 @@ def _write_private_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.chmod(0o600)
 
 
+def _write_private_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value.rstrip() + "\n", encoding="utf-8")
+    path.chmod(0o600)
+
+
 def _patch_wire_model(provider: dict[str, Any], logical_model: str, wire_model: str) -> str:
     models = provider.get("models") if isinstance(provider.get("models"), list) else []
     if not models:
@@ -1287,12 +1728,17 @@ def _dedupe(values: Sequence[str]) -> list[str]:
 
 __all__ = [
     "CommitteeError",
+    "DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS",
     "DEFAULT_LENSES",
+    "DEFAULT_MAX_BUNDLE_AGE_DAYS",
     "ModelCandidate",
     "RouteBinding",
     "build_candidates",
+    "load_candidates",
     "load_catalog",
     "plan_committee",
+    "public_bundle_metadata",
     "run_committee",
+    "run_preplanned_committee",
     "select_members",
 ]
