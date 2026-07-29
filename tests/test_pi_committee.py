@@ -305,7 +305,9 @@ def test_dry_run_selects_frontier_members_without_secrets(tmp_path: Path) -> Non
     )
 
     assert result["status"] == "dry_run"
-    assert result["plan"]["selection"]["profile"] == "frontier"
+    assert result["plan"]["selection"]["profile"] == "balanced"
+    assert result["plan"]["selection"]["seed"] == result["plan"]["mission_id"]
+    assert all(member["family"] != "Gemini" for member in result["plan"]["members"])
     members = result["plan"]["members"]
     assert [member["member_id"] for member in members] == ["member-01", "member-02", "member-03", "member-04"]
     assert len({member["family"] for member in members}) >= 3
@@ -328,19 +330,19 @@ def test_dry_run_selects_frontier_members_without_secrets(tmp_path: Path) -> Non
     assert "sk-qwen-test-secret" not in rendered
 
 
-def test_default_frontier_reproduces_current_seven_family_roster(tmp_path: Path) -> None:
+def test_explicit_frontier_reproduces_current_six_family_roster(tmp_path: Path) -> None:
     root = _write_bundle(tmp_path / "config")
 
     plan, _members, _bundle = mms_pi_committee.plan_committee(
         config_root=root,
         task="Select current family champions",
+        selection_profile="frontier",
     )
 
     assert [item["model"] for item in plan["members"]] == [
         "MiniMax-M3",
         "gpt-5.5",
         "k3",
-        "gemini-3-flash-agent(high)",
         "qwen3.7-max",
         "deepseek-v4-flash",
         "glm-5.2",
@@ -352,7 +354,7 @@ def test_default_frontier_reproduces_current_seven_family_roster(tmp_path: Path)
         "newapi-tokyo-secondary-test-provider",
     ]
     assert plan["selection"]["target_families"] == list(mms_pi_committee.DEFAULT_FRONTIER_FAMILIES)
-    assert plan["selection"]["requested_count"] == 7
+    assert plan["selection"]["requested_count"] == 6
 
 
 def test_frontier_can_add_temporary_family_and_model_without_named_agents(tmp_path: Path) -> None:
@@ -361,16 +363,17 @@ def test_frontier_can_add_temporary_family_and_model_without_named_agents(tmp_pa
     plan, _members, _bundle = mms_pi_committee.plan_committee(
         config_root=root,
         task="Expand this mission",
+        selection_profile="frontier",
         frontier_families=(*mms_pi_committee.DEFAULT_FRONTIER_FAMILIES, "Claude"),
         additional_models=("qwen3.7-plus",),
     )
 
-    assert [item["member_id"] for item in plan["members"]] == [f"member-{index:02d}" for index in range(1, 10)]
+    assert [item["member_id"] for item in plan["members"]] == [f"member-{index:02d}" for index in range(1, 9)]
     assert plan["members"][-2]["model"] == "claude-sonnet-test"
     assert plan["members"][-1]["model"] == "qwen3.7-plus"
 
 
-def test_balanced_profile_preserves_generic_diversity_mode(tmp_path: Path) -> None:
+def test_balanced_profile_uses_seeded_tiers_and_excludes_gemini(tmp_path: Path) -> None:
     root = _write_bundle(tmp_path / "config")
 
     plan, _members, _bundle = mms_pi_committee.plan_committee(
@@ -379,11 +382,15 @@ def test_balanced_profile_preserves_generic_diversity_mode(tmp_path: Path) -> No
         selection_profile="balanced",
         count=4,
         min_families=3,
+        mission_id="pi-balanced-seed",
     )
 
     assert plan["selection"]["profile"] == "balanced"
+    assert plan["selection"]["seed"] == "pi-balanced-seed"
     assert plan["selection"]["target_families"] == []
     assert len({item["family"] for item in plan["members"]}) >= 3
+    assert all(item["family"] != "Gemini" for item in plan["members"])
+    assert all(item["selection_tier"] in {"primary", "secondary"} for item in plan["members"])
 
 
 def test_explicit_models_bind_to_generic_members_in_requested_order(tmp_path: Path) -> None:
@@ -761,6 +768,57 @@ def test_kimi_attempt_cap_preserves_tokyo_fallback_after_tokyo_timeout(
     assert [attempt["budget_seconds"] for attempt in result["attempts"]] == [300, 300]
 
 
+def test_model_backup_runs_after_primary_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = _write_bundle(tmp_path / "config")
+    _bundle, candidates, _excluded = mms_pi_committee.load_candidates(root)
+    primary = next(item for item in candidates if item.model == "glm-5.2")
+    backup = next(item for item in candidates if item.model == "glm-5.1")
+    member = mms_pi_committee.MemberSpec(
+        member_id="member-01",
+        lens="verification",
+        candidate=replace(primary, route_chain=(primary.route_chain[0],)),
+        fallback_candidate=replace(backup, route_chain=(backup.route_chain[0],)),
+    )
+    attempts = mms_pi_committee._prepare_members((member,), config_root=root)[member.member_id]
+    calls = []
+
+    def fake_run_attempt(active_member, attempt, **_kwargs):
+        calls.append(active_member.candidate.model)
+        if active_member.candidate.model == "glm-5.2":
+            return {"status": "request_error", "terminal_reason": "request_error", "watchdog": {}}
+        return {
+            **mms_pi_committee._member_identity(active_member),
+            "status": "success",
+            "terminal_reason": "completed",
+            "watchdog": {},
+            "_usage": {},
+        }
+
+    monkeypatch.setattr(mms_pi_committee, "_run_attempt", fake_run_attempt)
+    result = mms_pi_committee._run_member(
+        member,
+        attempts,
+        task="Verify backup",
+        cwd=tmp_path,
+        timeout_seconds=30,
+        idle_timeout_seconds=10,
+        max_output_bytes=1024,
+        max_repeated_events=8,
+        cancellation=mms_pi_watchdog.CancellationController(),
+        route_source="test",
+    )
+
+    assert calls == ["glm-5.2", "glm-5.1"]
+    assert result["status"] == "success"
+    assert result["model"] == "glm-5.2"
+    assert result["executed_model"] == "glm-5.1"
+    assert result["fallback_used"] is True
+    assert result["attempts"][1]["model_fallback"] is True
+
+
 def test_committee_deadline_cancels_workers_and_preserves_all_member_results(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -901,7 +959,11 @@ def test_frontier_requires_pinned_gpt_5_5(tmp_path: Path) -> None:
     root = _write_bundle(tmp_path / "config", hidden_models=("gpt-5.5",))
 
     with pytest.raises(mms_pi_committee.CommitteeError, match="frontier GPT model is unavailable: gpt-5.5"):
-        mms_pi_committee.plan_committee(config_root=root, task="GPT must be pinned")
+        mms_pi_committee.plan_committee(
+            config_root=root,
+            task="GPT must be pinned",
+            selection_profile="frontier",
+        )
 
 
 def test_cli_dry_run_is_json_only_and_does_not_launch_pi(tmp_path: Path) -> None:

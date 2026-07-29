@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -38,17 +39,22 @@ DEFAULT_COMMITTEE_TIMEOUT_SECONDS = 0
 DEFAULT_COMMITTEE_TIMEOUT_GRACE_SECONDS = 60
 DEFAULT_QUORUM_SUCCESSES = 0
 DEFAULT_QUORUM_GRACE_SECONDS = 30
-DEFAULT_SELECTION_PROFILE = "frontier"
+DEFAULT_SELECTION_PROFILE = "balanced"
 DEFAULT_GPT_MODEL = "gpt-5.5"
 DEFAULT_FRONTIER_FAMILIES = (
     "MiniMax",
     "GPT",
     "Kimi",
-    "Gemini",
     "Qwen",
     "DeepSeek",
     "GLM",
 )
+# Prefer proven lower-cost models for ordinary reviews when they are available.
+BALANCED_SECONDARY_MODEL_PREFERENCES = {
+    "Qwen": ("qwen3.6-plus",),
+    "GLM": ("glm-5.1",),
+    "Kimi": ("kimi-for-coding",),
+}
 DEFAULT_LENSES = (
     "architecture",
     "failure-risk",
@@ -114,6 +120,8 @@ class MemberSpec:
     member_id: str
     lens: str
     candidate: ModelCandidate
+    selection_tier: str = "primary"
+    fallback_candidate: ModelCandidate | None = None
     domain: str = ""
     role_id: str = ""
     role_card: str = field(default="", repr=False)
@@ -127,8 +135,10 @@ class MemberSpec:
             "lens": self.lens,
             "model": self.candidate.model,
             "family": self.candidate.family,
+            "selection_tier": self.selection_tier,
             "context_window_tokens": self.candidate.context_window_tokens,
             "route_chain": [binding.public() for binding in self.candidate.route_chain],
+            "fallback_model": self.fallback_candidate.model if self.fallback_candidate else "",
         }
         if self.domain:
             payload["domain"] = self.domain
@@ -145,6 +155,7 @@ class MemberSpec:
 
 @dataclass(frozen=True)
 class PreparedAttempt:
+    candidate: ModelCandidate
     binding: RouteBinding
     models_payload: Mapping[str, Any]
     provider_ref: str
@@ -320,19 +331,21 @@ def select_members(
     frontier_families: Sequence[str] = DEFAULT_FRONTIER_FAMILIES,
     additional_models: Sequence[str] = (),
     lenses: Sequence[str] = DEFAULT_LENSES,
+    selection_seed: str = "",
 ) -> list[MemberSpec]:
     if count is not None and count < 1:
         raise CommitteeError("member count must be at least 1")
     if not lenses:
         raise CommitteeError("at least one review lens is required")
     by_model = {candidate.model: candidate for candidate in candidates}
+    selected_rows: list[tuple[ModelCandidate, ModelCandidate | None, str]]
     if explicit_models:
         requested = _dedupe(explicit_models)
         missing = [model for model in requested if model not in by_model]
         if missing:
             raise CommitteeError("requested models are unavailable: " + ", ".join(missing))
         effective_count = count if count is not None else len(requested)
-        selected = [by_model[model] for model in requested[:effective_count]]
+        selected_rows = [(by_model[model], None, "explicit") for model in requested[:effective_count]]
     else:
         profile = str(selection_profile or "").strip().lower()
         if profile == "frontier":
@@ -343,18 +356,30 @@ def select_members(
                 count=count,
             )
             effective_count = count if count is not None else len(selected)
+            selected_rows = [(candidate, None, "primary") for candidate in selected]
         elif profile == "balanced":
             if additional_models:
                 raise CommitteeError("additional models require the frontier selection profile")
             effective_count = count if count is not None else DEFAULT_MEMBER_COUNT
-            selected = _select_diverse(candidates, count=effective_count, min_families=min_families)
+            selected_rows = _select_balanced_tiers(
+                candidates,
+                count=effective_count,
+                min_families=min_families,
+                seed=selection_seed,
+            )
         else:
             raise CommitteeError(f"unknown selection profile: {selection_profile}")
-    if len(selected) < effective_count:
-        raise CommitteeError(f"only {len(selected)} eligible models are available for {effective_count} members")
+    if len(selected_rows) < effective_count:
+        raise CommitteeError(f"only {len(selected_rows)} eligible models are available for {effective_count} members")
     return [
-        MemberSpec(member_id=f"member-{index:02d}", lens=lenses[(index - 1) % len(lenses)], candidate=candidate)
-        for index, candidate in enumerate(selected, start=1)
+        MemberSpec(
+            member_id=f"member-{index:02d}",
+            lens=lenses[(index - 1) % len(lenses)],
+            candidate=candidate,
+            fallback_candidate=fallback_candidate,
+            selection_tier=selection_tier,
+        )
+        for index, (candidate, fallback_candidate, selection_tier) in enumerate(selected_rows, start=1)
     ]
 
 
@@ -383,6 +408,7 @@ def plan_committee(
         required_capabilities=required_capabilities,
         max_bundle_age_days=max_bundle_age_days,
     )
+    effective_mission_id = mission_id or f"pi-{uuid.uuid4().hex[:12]}"
     members = select_members(
         candidates,
         count=count,
@@ -392,6 +418,7 @@ def plan_committee(
         frontier_families=frontier_families,
         additional_models=additional_models,
         lenses=lenses,
+        selection_seed=effective_mission_id,
     )
     effective_count = len(members)
     manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), Mapping) else {}
@@ -400,7 +427,7 @@ def plan_committee(
     effective_frontier_families = list(_dedupe(_canonical_family(family) for family in frontier_families))
     plan = {
         "schema": "mms.pi_committee.plan.v1",
-        "mission_id": mission_id or f"pi-{uuid.uuid4().hex[:12]}",
+        "mission_id": effective_mission_id,
         "task": task_text,
         "route_source": f"mms:latest-approved:{manifest.get('bundle_revision') or ''}",
         "component_revisions": dict(bundle.get("component_revisions") or {}),
@@ -408,6 +435,7 @@ def plan_committee(
         "selection": {
             "requested_count": effective_count,
             "profile": effective_profile,
+            "seed": effective_mission_id if effective_profile == "balanced" else "",
             "min_families": min_families,
             "selected_families": selected_families,
             "eligible_models": len(candidates),
@@ -651,12 +679,19 @@ def _prepare_members(members: Sequence[MemberSpec], *, config_root: Path) -> dic
     prepared: dict[str, tuple[PreparedAttempt, ...]] = {}
     with _scoped_mms_config_root(config_root):
         for member in members:
-            attempts = tuple(_prepare_attempt(member, binding) for binding in member.candidate.route_chain)
+            candidate_chain = [member.candidate]
+            if member.fallback_candidate is not None:
+                candidate_chain.append(member.fallback_candidate)
+            attempts = tuple(
+                _prepare_attempt(member, candidate, binding)
+                for candidate in candidate_chain
+                for binding in candidate.route_chain
+            )
             prepared[member.member_id] = attempts
     return prepared
 
 
-def _prepare_attempt(member: MemberSpec, binding: RouteBinding) -> PreparedAttempt:
+def _prepare_attempt(member: MemberSpec, candidate: ModelCandidate, binding: RouteBinding) -> PreparedAttempt:
     import mms_pi_support
 
     runtime: dict[str, Any] = {
@@ -664,18 +699,18 @@ def _prepare_attempt(member: MemberSpec, binding: RouteBinding) -> PreparedAttem
         "provider_id": binding.provider_id,
         "name": binding.provider_id,
         "api_key": binding.api_key,
-        "model": member.candidate.model,
+        "model": candidate.model,
         "provider_profile": binding.provider_profile,
-        "_launch_prefetched_probe": {"models": [member.candidate.model]},
+        "_launch_prefetched_probe": {"models": [candidate.model]},
     }
     if binding.protocol == "anthropic_messages":
         runtime["anthropic_base_url"] = binding.base_url
     else:
         runtime["openai_base_url"] = binding.base_url
     try:
-        payload, provider_ref = mms_pi_support._pi_build_models_payload(runtime, member.candidate.model)
+        payload, provider_ref = mms_pi_support._pi_build_models_payload(runtime, candidate.model)
     except RuntimeError as exc:
-        raise CommitteeError(f"Pi payload preparation failed for {member.candidate.model}: {exc}") from exc
+        raise CommitteeError(f"Pi payload preparation failed for {candidate.model}: {exc}") from exc
     payload = json.loads(json.dumps(payload))
     provider = payload.get("providers", {}).get(provider_ref)
     if not isinstance(provider, dict):
@@ -683,24 +718,25 @@ def _prepare_attempt(member: MemberSpec, binding: RouteBinding) -> PreparedAttem
     configured_protocol = _pi_api_protocol(provider.get("api"))
     if configured_protocol != binding.protocol:
         raise CommitteeError(
-            f"Pi payload protocol drift for {member.candidate.model}: "
+            f"Pi payload protocol drift for {candidate.model}: "
             f"planned {binding.protocol}, configured {configured_protocol or 'unknown'}"
         )
     configured_url, configured_path = _request_target(str(provider.get("baseUrl") or ""), configured_protocol)
     if configured_url != binding.request_url or configured_path != binding.request_path:
         raise CommitteeError(
-            f"Pi payload request target drift for {member.candidate.model}: "
+            f"Pi payload request target drift for {candidate.model}: "
             f"planned {binding.request_path}, configured {configured_path}"
         )
     env_name = _credential_env_name(member.member_id, binding.fallback_position)
     provider["apiKey"] = f"${env_name}"
-    selected_model = _patch_wire_model(provider, member.candidate.model, binding.wire_model)
+    selected_model = _patch_wire_model(provider, candidate.model, binding.wire_model)
     return PreparedAttempt(
+        candidate=candidate,
         binding=binding,
         models_payload=payload,
         provider_ref=provider_ref,
         selected_model=selected_model,
-        thinking_level=_highest_thinking_level(provider, member.candidate.model, selected_model),
+        thinking_level=_highest_thinking_level(provider, candidate.model, selected_model),
     )
 
 
@@ -764,10 +800,23 @@ def _run_member(
             attempts_left=len(attempts) - index,
             kimi_attempt_timeout_seconds=kimi_attempt_timeout_seconds,
         )
-        route_fallback = index > 0
-        fallback_used = fallback_used or route_fallback or bool(attempt.binding.protocol_fallback_reason)
+        has_model_backup = any(
+            next_attempt.candidate.model != member.candidate.model
+            for next_attempt in attempts[index + 1:]
+        )
+        if has_model_backup:
+            attempt_timeout = min(attempt_timeout, max(1, remaining // 2))
+        model_fallback = attempt.candidate.model != member.candidate.model
+        route_fallback = attempt.binding.fallback_position > 0
+        fallback_used = fallback_used or route_fallback or model_fallback or bool(attempt.binding.protocol_fallback_reason)
+        active_member = member if not model_fallback else MemberSpec(
+            member_id=member.member_id,
+            lens=member.lens,
+            candidate=attempt.candidate,
+            selection_tier="backup",
+        )
         result = _run_attempt(
-            member,
+            active_member,
             attempt,
             task=task,
             cwd=cwd,
@@ -783,16 +832,18 @@ def _run_member(
                 item for item in (fallback_reason, attempt.binding.protocol_fallback_reason) if item
             )
         evidence = _transport_evidence(
-            member,
+            active_member,
             attempt.binding,
             route_source=route_source,
-            fallback_used=route_fallback or bool(attempt.binding.protocol_fallback_reason),
+            fallback_used=model_fallback or route_fallback or bool(attempt.binding.protocol_fallback_reason),
             fallback_reason=fallback_reason,
             usage=result.get("_usage", {}),
         )
         attempt_records.append(
             {
                 "provider_id": attempt.binding.provider_id,
+                "model": attempt.candidate.model,
+                "model_fallback": model_fallback,
                 "fallback_position": attempt.binding.fallback_position,
                 "started": True,
                 "budget_seconds": attempt_timeout,
@@ -806,6 +857,8 @@ def _run_member(
         last_terminal_reason = str(result.get("terminal_reason") or result.get("status") or "unknown")
         if result["status"] == "success":
             result.pop("_usage", None)
+            result.update(_member_identity(member))
+            result["executed_model"] = attempt.candidate.model
             result["fallback_used"] = evidence["fallback_used"]
             result["fallback_reason"] = evidence["fallback_reason"]
             result["cache_transport_evidence"] = evidence
@@ -1335,6 +1388,58 @@ def _select_diverse(candidates: Sequence[ModelCandidate], *, count: int, min_fam
             selected.append(candidate)
             selected_models.add(candidate.model)
     return selected
+
+
+def _select_balanced_tiers(
+    candidates: Sequence[ModelCandidate],
+    *,
+    count: int,
+    min_families: int,
+    seed: str,
+) -> list[tuple[ModelCandidate, ModelCandidate | None, str]]:
+    # Gemini is explicitly excluded from the ordinary balanced profile.
+    eligible = [candidate for candidate in candidates if candidate.family != "Gemini"]
+    by_family: dict[str, list[ModelCandidate]] = {}
+    for candidate in eligible:
+        by_family.setdefault(candidate.family, []).append(candidate)
+    if len(by_family) < min_families:
+        raise CommitteeError(f"only {len(by_family)} eligible families are available for {min_families} required")
+
+    # Select distinct families first; the mission seed makes the lineup reproducible.
+    family_names = sorted(
+        by_family,
+        key=lambda family: hashlib.sha256(f"{seed}:family:{family}".encode("utf-8")).digest(),
+    )[:count]
+    selected = []
+    for family in family_names:
+        ranked = sorted(by_family[family], key=_frontier_model_sort_key)
+        primary = ranked[0]
+        secondary = _balanced_secondary_candidate(primary.family, ranked)
+        if secondary is None or secondary.model == primary.model:
+            selected.append((primary, None, "primary"))
+            continue
+        digest = hashlib.sha256(f"{seed}:{primary.family}".encode("utf-8")).digest()
+        use_secondary = bool(digest[0] & 1)
+        selected.append(
+            (secondary, primary, "secondary") if use_secondary else (primary, secondary, "primary")
+        )
+    return selected
+
+
+def _balanced_secondary_candidate(family: str, ranked: Sequence[ModelCandidate]) -> ModelCandidate | None:
+    if not ranked:
+        return None
+    by_model = {candidate.model.lower(): candidate for candidate in ranked}
+    for preferred in BALANCED_SECONDARY_MODEL_PREFERENCES.get(family, ()):
+        candidate = by_model.get(preferred.lower())
+        if candidate is not None:
+            return candidate
+    for candidate in ranked[1:]:
+        # Highspeed Kimi is intentionally excluded from ordinary cost-balanced work.
+        if candidate.family == "Kimi" and "highspeed" in candidate.model.lower():
+            continue
+        return candidate
+    return None
 
 
 def _select_frontier(
