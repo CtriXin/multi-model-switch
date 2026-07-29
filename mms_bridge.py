@@ -4906,6 +4906,44 @@ def _chat_delta_reasoning_content(delta):
     return "".join(parts)
 
 
+def _custom_tool_input_prefix(arguments):
+    """Return the safely decoded prefix of the Chat function's ``input`` string."""
+    match = re.search(r'"input"\s*:\s*"', str(arguments or ""))
+    if not match:
+        return ""
+
+    encoded = str(arguments)[match.end():]
+    decoded = []
+    index = 0
+    escapes = {
+        '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f",
+        "n": "\n", "r": "\r", "t": "\t",
+    }
+    while index < len(encoded):
+        character = encoded[index]
+        if character == '"':
+            break
+        if character != "\\":
+            decoded.append(character)
+            index += 1
+            continue
+        if index + 1 >= len(encoded):
+            break
+        escape = encoded[index + 1]
+        if escape == "u":
+            sequence = encoded[index + 2:index + 6]
+            if len(sequence) != 4 or not re.fullmatch(r"[0-9a-fA-F]{4}", sequence):
+                break
+            decoded.append(chr(int(sequence, 16)))
+            index += 6
+            continue
+        if escape not in escapes:
+            break
+        decoded.append(escapes[escape])
+        index += 2
+    return "".join(decoded)
+
+
 class _ChatCompletionsToResponsesTranslator:
     """Translate Chat Completions streaming chunks to Responses API SSE events.
     Matches the real OpenAI Responses API format that Codex expects."""
@@ -5071,6 +5109,7 @@ class _ChatCompletionsToResponsesTranslator:
                         "item_id": f"fc_{uuid.uuid4().hex[:24]}",
                         "name": tc_name,
                         "arguments": "",
+                        "custom_input_emitted": "",
                     }
                     # Close text part if open
                     if self.text_part_added:
@@ -5088,11 +5127,25 @@ class _ChatCompletionsToResponsesTranslator:
 
                 args_delta = tc.get("function", {}).get("arguments", "")
                 if args_delta:
-                    self.tool_calls[idx]["arguments"] += args_delta
-                    if self.tool_calls[idx]["name"] not in self.custom_tool_names:
+                    tc_info = self.tool_calls[idx]
+                    tc_info["arguments"] += args_delta
+                    if tc_info["name"] in self.custom_tool_names:
+                        input_prefix = _custom_tool_input_prefix(tc_info["arguments"])
+                        emitted = tc_info["custom_input_emitted"]
+                        if input_prefix.startswith(emitted) and input_prefix != emitted:
+                            input_delta = input_prefix[len(emitted):]
+                            tc_info["custom_input_emitted"] = input_prefix
+                            outgoing.append(("response.custom_tool_call_input.delta", {
+                                "type": "response.custom_tool_call_input.delta",
+                                "item_id": tc_info["item_id"],
+                                "output_index": self.output_index + idx,
+                                "delta": input_delta,
+                                "sequence_number": self._seq_num(),
+                            }))
+                    else:
                         outgoing.append(("response.function_call_arguments.delta", {
                             "type": "response.function_call_arguments.delta",
-                            "item_id": self.tool_calls[idx]["item_id"],
+                            "item_id": tc_info["item_id"],
                             "output_index": self.output_index + idx,
                             "delta": args_delta,
                             "sequence_number": self._seq_num(),

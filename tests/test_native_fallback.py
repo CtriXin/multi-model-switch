@@ -87,6 +87,11 @@ def test_chatcompletions_translator_returns_codex_custom_tool_events():
     )
 
     assert any(
+        event_name == "response.custom_tool_call_input.delta"
+        and payload["delta"] == 'await tools.exec_command({cmd: "pwd"})'
+        for event_name, payload in events
+    )
+    assert any(
         event_name == "response.custom_tool_call_input.done"
         and payload["input"] == 'await tools.exec_command({cmd: "pwd"})'
         for event_name, payload in events
@@ -95,6 +100,51 @@ def test_chatcompletions_translator_returns_codex_custom_tool_events():
         event_name == "response.output_item.done"
         and payload["item"]["type"] == "custom_tool_call"
         and payload["item"]["name"] == "exec"
+        for event_name, payload in events
+    )
+
+
+def test_chatcompletions_translator_streams_decoded_custom_tool_input_chunks():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator(
+        "gpt-5.6-terra",
+        custom_tool_names={"exec"},
+    )
+    first_events = translator.process_chunk(
+        {
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_exec",
+                        "function": {"name": "exec", "arguments": '{"input":"printf \\u4f60'},
+                    }],
+                },
+                "finish_reason": None,
+            }]
+        }
+    )
+    second_events = translator.process_chunk(
+        {
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {"arguments": '\\u597d\\n\\"quoted\\""}'},
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }]
+        }
+    )
+
+    events = first_events + second_events
+    deltas = [payload["delta"] for event_name, payload in events if event_name == "response.custom_tool_call_input.delta"]
+    assert "".join(deltas) == 'printf 你好\n"quoted"'
+    assert any(
+        event_name == "response.custom_tool_call_input.done"
+        and payload["input"] == 'printf 你好\n"quoted"'
         for event_name, payload in events
     )
 
