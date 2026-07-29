@@ -12,6 +12,7 @@ from mms_capability_resolver import resolve_model_capabilities
 from mms_core import _model_supports_vision, _probe_models
 from mms_opencode_config import opencode_config_slug as _opencode_config_slug
 from mms_provider_profiles import resolve_provider_profile
+from mms_provider_profiles import profile_thinking_capabilities
 from mms_state_io import atomic_write_text
 
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
@@ -147,8 +148,60 @@ def _pi_npx_cache_dir():
     return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
 
 
+def _pi_project_directories(project_dir):
+    current = Path(project_dir).resolve()
+    directories = []
+    while True:
+        directories.append(current)
+        if (current / ".git").exists() or current.parent == current:
+            return directories
+        current = current.parent
+
+
+def _pi_materialize_skill_overlay(session_home, project_dir):
+    """Merge Pi skill roots so project skills keep their existing precedence."""
+    overlay_dir = Path(session_home) / ".pi" / "skills-overlay"
+    try:
+        overlay_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return ""
+
+    sources = [(Path(_real_user_path(".agents", "skills")), False)]
+    for directory in reversed(_pi_project_directories(project_dir)):
+        sources.extend(
+            [
+                (directory / ".pi" / "skills", True),
+                (directory / ".agents" / "skills", False),
+            ]
+        )
+
+    linked = 0
+    for source_dir, include_markdown in sources:
+        if not source_dir.is_dir():
+            continue
+        try:
+            entries = list(source_dir.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name.startswith(".") or (entry.is_file() and not include_markdown):
+                continue
+            destination = overlay_dir / entry.name
+            try:
+                if destination.is_symlink() or destination.is_file():
+                    destination.unlink()
+                elif destination.exists():
+                    continue
+                destination.symlink_to(entry)
+                linked += 1
+            except OSError:
+                continue
+    return str(overlay_dir) if linked else ""
+
+
 def _pi_settings_payload():
     payload = {
+        "quietStartup": True,
         "retry": {
             "enabled": True,
             "maxRetries": 8,
@@ -811,23 +864,70 @@ def _pi_model_compat(model_name, protocol):
     return compat
 
 
-def _pi_model_thinking_level_map(profile_id, protocol, model_name, caps):
-    if str(protocol or "").strip() != "openai_chat_completions":
-        return {}
-    if str(profile_id or "").strip() != "deepseek":
-        return {}
+def _pi_model_thinking_level_map(runtime, profile_id, protocol, model_name, caps):
+    """Expose only Pi levels with a distinct, source-backed upstream meaning."""
     if not bool(caps.get("supports_thinking")):
         return {}
-    normalized = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
-    if not normalized.startswith("deepseek"):
+
+    protocol_name = str(protocol or "").strip()
+    profile_id = str(profile_id or "").strip()
+    if protocol_name == "anthropic_messages" and _pi_is_kimi_k3_selector(model_name):
+        # K3 accepts Pi's max level on the Anthropic route and has no lower tier.
+        return {
+            "off": None,
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": None,
+            "xhigh": None,
+            "max": "max",
+        }
+    if protocol_name not in {"responses", "openai_chat_completions"}:
         return {}
-    return {
-        "minimal": None,
-        "low": None,
-        "medium": None,
-        "high": "high",
-        "xhigh": "max",
-    }
+
+    if profile_id == "deepseek":
+        return {
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": "high",
+            "xhigh": "max",
+        }
+
+    profile_caps = profile_thinking_capabilities(
+        model_name,
+        runtime=runtime,
+        provider_id=str(runtime.get("id") or runtime.get("provider_id") or ""),
+        base_url=str(_openai_base_url(runtime) or _anthropic_base_url(runtime) or ""),
+        profile_id=profile_id,
+    )
+    if not profile_caps.get("thinking_supported"):
+        return {}
+
+    allowed = set(profile_caps.get("effort_allowed") or [])
+    effort_map = profile_caps.get("effort_map") if isinstance(profile_caps.get("effort_map"), dict) else {}
+    if allowed:
+        levels = ("minimal", "low", "medium", "high", "xhigh", "max")
+        result = {
+            level: (str(effort_map.get(level) or level) if level in allowed else None)
+            for level in levels
+        }
+        if profile_id == "openrouter-moonshot-kimi-k3":
+            # K3 is always-on and exposes only its vendor-defined max effort.
+            result["off"] = None
+        return result
+
+    if profile_id in {"dashscope-openai", "glm"}:
+        # These profiles expose a Thinking toggle, not comparable effort tiers.
+        return {
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": "high",
+            "xhigh": None,
+            "max": None,
+        }
+    return {}
 
 
 def _pi_effective_selected_model(runtime, model_name):
@@ -905,7 +1005,13 @@ def _pi_model_entry(runtime, model_name):
     }
     if bool(caps.get("supports_thinking")):
         entry["reasoning"] = True
-    thinking_level_map = _pi_model_thinking_level_map(profile_id, variant["protocol"], model_name, caps)
+    thinking_level_map = _pi_model_thinking_level_map(
+        runtime,
+        profile_id,
+        variant["protocol"],
+        model_name,
+        caps,
+    )
     if thinking_level_map:
         entry["thinkingLevelMap"] = thinking_level_map
     model_compat = _pi_model_compat(model_name, variant["protocol"])
@@ -1109,6 +1215,9 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_PROVIDER"] = provider_ref
     env["MMS_PI_SELECTED_MODEL"] = model
     env["MMS_PI_NPX_CACHE"] = _pi_npx_cache_dir()
+    skill_overlay = _pi_materialize_skill_overlay(session_home, os.getcwd())
+    if skill_overlay:
+        env["MMS_PI_SKILLS_OVERLAY"] = skill_overlay
     wrapper_path = launchers._pi_wrapper_path()
     if wrapper_path:
         env["MMS_PI_BIN"] = wrapper_path
@@ -1180,6 +1289,9 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
     cmd = ["pi", "--provider", provider_ref]
     if model:
         cmd += ["--model", model]
+    skill_overlay = str(env.get("MMS_PI_SKILLS_OVERLAY") or "").strip()
+    if skill_overlay:
+        cmd += ["--no-skills", "--skill", skill_overlay]
 
     thinking_mode = str(runtime.get("thinking_mode") or "").strip().lower()
     reasoning_effort = str(runtime.get("reasoning_effort") or "").strip().lower()
