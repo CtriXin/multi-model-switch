@@ -199,7 +199,8 @@ def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
 
     calls = log_path.read_text(encoding="utf-8").splitlines()
     assert sum("--version" in call for call in calls) == 1
-    assert sum("--probe" in call for call in calls) == 4
+    # Once prewarmed, the wrapper executes the cached binary directly.
+    assert sum("--probe" in call for call in calls) == 0
 
 
 def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp_path):

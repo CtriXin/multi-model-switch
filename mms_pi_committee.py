@@ -39,6 +39,7 @@ DEFAULT_COMMITTEE_TIMEOUT_GRACE_SECONDS = 60
 DEFAULT_QUORUM_SUCCESSES = 0
 DEFAULT_QUORUM_GRACE_SECONDS = 30
 DEFAULT_SELECTION_PROFILE = "frontier"
+DEFAULT_GPT_MODEL = "gpt-5.5"
 DEFAULT_FRONTIER_FAMILIES = (
     "MiniMax",
     "GPT",
@@ -58,9 +59,7 @@ DEFAULT_LENSES = (
 )
 READ_ONLY_TOOLS = "read,grep,find,ls"
 _OPENAI_FAMILY_PREFIXES = ("gpt-", "o1", "o3", "o4", "codex-")
-_KIMI_PRIMARY_PROVIDER_KEYWORDS = ("tokyo",)
-_KIMI_FALLBACK_PROVIDER_KEYWORDS = ("tencent",)
-_KIMI_DIRECT_PROVIDER_KEYWORDS = ("direct-kimi", "direct_kimi")
+_TOKYO_PROVIDER_KEYWORD = "tokyo"
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{8,}\b"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
@@ -150,6 +149,7 @@ class PreparedAttempt:
     models_payload: Mapping[str, Any]
     provider_ref: str
     selected_model: str
+    thinking_level: str = ""
 
 
 def _utc_now() -> datetime:
@@ -700,6 +700,7 @@ def _prepare_attempt(member: MemberSpec, binding: RouteBinding) -> PreparedAttem
         models_payload=payload,
         provider_ref=provider_ref,
         selected_model=selected_model,
+        thinking_level=_highest_thinking_level(provider, member.candidate.model, selected_model),
     )
 
 
@@ -709,6 +710,22 @@ def _pi_api_protocol(api: Any) -> str:
         "openai-responses": "openai_responses",
         "openai-completions": "openai_chat_completions",
     }.get(str(api or "").strip(), "")
+
+
+def _highest_thinking_level(provider: Mapping[str, Any], logical_model: str, wire_model: str) -> str:
+    models = provider.get("models") if isinstance(provider.get("models"), list) else []
+    for row in models:
+        if not isinstance(row, Mapping):
+            continue
+        names = {str(row.get("name") or ""), str(row.get("id") or "")}
+        if not names.intersection({logical_model, wire_model}):
+            continue
+        level_map = row.get("thinkingLevelMap") if isinstance(row.get("thinkingLevelMap"), Mapping) else {}
+        for level in ("max", "xhigh", "high", "medium", "low", "minimal"):
+            mapped = str(level_map.get(level) or "").strip()
+            if mapped:
+                return level
+    return ""
 
 
 def _run_member(
@@ -907,9 +924,9 @@ def _run_attempt(
             "--no-themes",
             "--tools",
             READ_ONLY_TOOLS,
-            "--thinking",
-            "off",
         ]
+        if attempt.thinking_level:
+            cmd.extend(["--thinking", attempt.thinking_level])
         if role_prompt_path is not None:
             cmd.extend(["--append-system-prompt", str(role_prompt_path)])
         cmd.extend(["-p", prompt])
@@ -1071,27 +1088,16 @@ def _build_route_chain(model: str, route_group: Mapping[str, Any], profile: Mapp
 
 
 def _order_route_rows(model: str, rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    if _infer_family(model) != "Kimi":
+    if not _requires_tokyo_route(model):
         return list(rows)
-    return [
-        row
-        for _index, row in sorted(enumerate(rows), key=lambda item: (_kimi_provider_rank(item[1]), item[0]))
-    ]
+    tokyo_routes = [row for row in rows if _TOKYO_PROVIDER_KEYWORD in str(row.get("provider_id") or "").lower()]
+    if not tokyo_routes:
+        raise CommitteeError(f"Tokyo route is required for non-GPT model {model}")
+    return tokyo_routes
 
 
-def _kimi_provider_rank(row: Mapping[str, Any]) -> int:
-    provider_id = str(row.get("provider_id") or "").strip().lower()
-    profile = str(row.get("provider_profile") or row.get("profile") or "").strip().lower()
-    identity = f"{provider_id} {profile}"
-    if any(keyword in identity for keyword in _KIMI_PRIMARY_PROVIDER_KEYWORDS):
-        return 0
-    if any(keyword in identity for keyword in _KIMI_FALLBACK_PROVIDER_KEYWORDS):
-        return 1
-    if any(keyword in identity for keyword in _KIMI_DIRECT_PROVIDER_KEYWORDS):
-        return 3
-    if "kimi" in identity and "direct" in identity:
-        return 3
-    return 2
+def _requires_tokyo_route(model: str) -> bool:
+    return not str(model or "").strip().lower().startswith(_OPENAI_FAMILY_PREFIXES)
 
 
 def _pi_binding_block_reason(model: str, binding: RouteBinding) -> str:
@@ -1349,10 +1355,15 @@ def _select_frontier(
     if missing_families:
         raise CommitteeError("frontier families are unavailable: " + ", ".join(missing_families))
 
-    selected = [
-        sorted(by_family[family], key=_frontier_model_sort_key)[0]
-        for family in target_families
-    ]
+    selected = []
+    for family in target_families:
+        if family == "GPT":
+            gpt = by_model.get(DEFAULT_GPT_MODEL)
+            if gpt is None:
+                raise CommitteeError(f"frontier GPT model is unavailable: {DEFAULT_GPT_MODEL}")
+            selected.append(gpt)
+        else:
+            selected.append(sorted(by_family[family], key=_frontier_model_sort_key)[0])
     extra_names = _dedupe(additional_models)
     missing_models = [model for model in extra_names if model not in by_model]
     if missing_models:

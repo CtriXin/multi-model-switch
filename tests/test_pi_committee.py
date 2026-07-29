@@ -201,6 +201,13 @@ def _write_bundle(
                         "model_id": model,
                     },
                     {
+                        "provider_id": "newapi-tokyo-secondary-test-provider",
+                        "anthropic_base_url": "https://tokyo-secondary-kimi.example.test",
+                        "openai_base_url": "",
+                        "api_key": "sk-kimi-tokyo-secondary-test-secret-123456",
+                        "model_id": model,
+                    },
+                    {
                         "provider_id": "newapi-tencent-test-provider",
                         "anthropic_base_url": "https://tencent-kimi.example.test",
                         "openai_base_url": "",
@@ -209,6 +216,19 @@ def _write_bundle(
                     },
                 ],
             }
+    # The committee policy fails closed unless every non-GPT member has a Tokyo route.
+    for model, route_group in routes.items():
+        if model.lower().startswith(("gpt-", "o1", "o3", "o4", "codex-")):
+            continue
+        route_rows = [route_group["primary"], *route_group.get("fallbacks", [])]
+        if any("tokyo" in str(row.get("provider_id") or "").lower() for row in route_rows):
+            continue
+        primary = dict(route_group["primary"])
+        primary["provider_id"] = "newapi-tokyo-test-provider"
+        primary["anthropic_base_url"] = "https://tokyo.example.test"
+        primary["openai_base_url"] = ""
+        primary["api_key"] = "sk-tokyo-test-secret-123456"
+        route_group["fallbacks"] = [primary, *route_group.get("fallbacks", [])]
     lineup_routes = {
         model: {"primary": {"provider_id": row["provider_id"], "model_id": row["model_id"], "max_context_tokens": 200_000}}
         for model, row in MODELS.items()
@@ -329,8 +349,7 @@ def test_default_frontier_reproduces_current_seven_family_roster(tmp_path: Path)
     assert kimi_member["family"] == "Kimi"
     assert [route["provider_id"] for route in kimi_member["route_chain"]] == [
         "newapi-tokyo-test-provider",
-        "newapi-tencent-test-provider",
-        "direct-kimi-test-provider",
+        "newapi-tokyo-secondary-test-provider",
     ]
     assert plan["selection"]["target_families"] == list(mms_pi_committee.DEFAULT_FRONTIER_FAMILIES)
     assert plan["selection"]["requested_count"] == 7
@@ -442,6 +461,30 @@ def test_prepared_pi_payload_uses_env_reference_and_wire_model(tmp_path: Path) -
     assert MODELS["claude-sonnet-test"]["api_key"] not in json.dumps(attempt.models_payload)
 
 
+def test_prepared_attempt_uses_highest_source_backed_thinking_level(tmp_path: Path) -> None:
+    root = _write_bundle(tmp_path / "config")
+
+    _plan, members, _bundle = mms_pi_committee.plan_committee(
+        config_root=root,
+        task="Inspect",
+        count=1,
+        explicit_models=["gpt-5.5"],
+    )
+    gpt_attempt = mms_pi_committee._prepare_members(members, config_root=root)["member-01"][0]
+
+    _plan, members, _bundle = mms_pi_committee.plan_committee(
+        config_root=root,
+        task="Inspect",
+        count=1,
+        explicit_models=["k3"],
+    )
+    k3_attempt = mms_pi_committee._prepare_members(members, config_root=root)["member-01"][0]
+
+    assert gpt_attempt.thinking_level == "xhigh"
+    assert k3_attempt.thinking_level == "max"
+    assert mms_pi_committee._highest_thinking_level({"models": [{"id": "unknown"}]}, "unknown", "unknown") == ""
+
+
 def test_worker_launch_is_isolated_read_only_and_emits_transport_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -506,6 +549,7 @@ def test_worker_launch_is_isolated_read_only_and_emits_transport_evidence(
     assert "--no-session" in captured["cmd"]
     assert "--no-context-files" in captured["cmd"]
     assert "--no-extensions" in captured["cmd"]
+    assert "--thinking" not in captured["cmd"]
     assert captured["cmd"][captured["cmd"].index("--tools") + 1] == "read,grep,find,ls"
     assert captured["policy"].wall_timeout_seconds == 899
     assert captured["policy"].idle_timeout_seconds == 300
@@ -533,7 +577,7 @@ def test_role_card_is_appended_as_private_system_prompt(
         config_root=root,
         task="Inspect",
         count=1,
-        explicit_models=["glm-test"],
+        explicit_models=["k3"],
     )
     member = replace(
         members[0],
@@ -588,6 +632,7 @@ def test_role_card_is_appended_as_private_system_prompt(
     )
 
     assert "--append-system-prompt" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--thinking") + 1] == "max"
     assert "Canonical role card (qa)" in captured["role_prompt"]
     assert "committee JSON envelope" in captured["role_prompt"]
     assert result["domain"] == "testing"
@@ -645,7 +690,7 @@ def test_exhausted_member_budget_skips_fallback_without_counting_it(
     assert result["attempts"][0]["started"] is True
     assert result["attempts"][0]["budget_seconds"] == 900
     assert result["attempts"][1] == {
-        "provider_id": "newapi-tencent-test-provider",
+        "provider_id": "newapi-tokyo-secondary-test-provider",
         "fallback_position": 1,
         "started": False,
         "budget_seconds": 0,
@@ -656,7 +701,7 @@ def test_exhausted_member_budget_skips_fallback_without_counting_it(
     }
 
 
-def test_kimi_attempt_cap_preserves_tencent_fallback_after_tokyo_timeout(
+def test_kimi_attempt_cap_preserves_tokyo_fallback_after_tokyo_timeout(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -708,7 +753,7 @@ def test_kimi_attempt_cap_preserves_tencent_fallback_after_tokyo_timeout(
 
     assert calls == [
         ("newapi-tokyo-test-provider", 300),
-        ("newapi-tencent-test-provider", 300),
+        ("newapi-tokyo-secondary-test-provider", 300),
     ]
     assert result["status"] == "success"
     assert result["fallback_used"] is True
@@ -792,18 +837,15 @@ def test_quorum_is_opt_in_and_cancels_only_after_grace(
     assert result["summary"] == {"members": 3, "succeeded": 1, "failed": 2}
 
 
-def test_openai_chat_route_records_audited_fallback_reason(tmp_path: Path) -> None:
-    root = _write_bundle(tmp_path / "config")
-    plan, _members, _bundle = mms_pi_committee.plan_committee(
-        config_root=root,
-        task="Inspect transport",
-        count=1,
-        explicit_models=["glm-test"],
+def test_openai_chat_route_records_audited_fallback_reason() -> None:
+    protocol, _base_url, reason = mms_pi_committee._select_protocol(
+        "glm-test",
+        anthropic_url="",
+        openai_url="https://glm.example.test/v1",
     )
 
-    route = plan["members"][0]["route_chain"][0]
-    assert route["protocol"] == "openai_chat_completions"
-    assert route["protocol_fallback_reason"]
+    assert protocol == "openai_chat_completions"
+    assert reason
 
 
 def test_url_redaction_removes_userinfo_query_and_fragment() -> None:
@@ -812,7 +854,7 @@ def test_url_redaction_removes_userinfo_query_and_fragment() -> None:
     assert mms_pi_committee._redact_url(value) == "https://example.test/v1/messages"
 
 
-def test_pi_blocked_fallback_route_is_removed_from_member_chain() -> None:
+def test_pi_blocked_tokyo_route_fails_closed_without_tencent_fallback() -> None:
     route_group = {
         "primary": {
             "provider_id": "newapi-tencent",
@@ -830,9 +872,36 @@ def test_pi_blocked_fallback_route_is_removed_from_member_chain() -> None:
         ],
     }
 
-    chain = mms_pi_committee._build_route_chain("gemini-3-flash-agent(high)", route_group, {})
+    with pytest.raises(mms_pi_committee.CommitteeError, match="Pi route is blocked"):
+        mms_pi_committee._build_route_chain("gemini-3-flash-agent(high)", route_group, {})
 
-    assert [binding.provider_id for binding in chain] == ["newapi-tencent"]
+
+def test_non_gpt_without_tokyo_route_is_excluded(tmp_path: Path) -> None:
+    root = _write_bundle(tmp_path / "config")
+    router_path = root / "generated" / "model-routes.json"
+    router = json.loads(router_path.read_text(encoding="utf-8"))
+    router["routes"]["glm-test"]["fallbacks"] = []
+    router["routes"]["glm-test"]["primary"]["provider_id"] = "newapi-tencent-test-provider"
+    _write_json(router_path, router)
+    manifest_path = root / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["router"]["sha256"] = _sha256(router_path)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(mms_pi_committee.CommitteeError, match="requested models are unavailable"):
+        mms_pi_committee.plan_committee(
+            config_root=root,
+            task="Tokyo is required",
+            count=1,
+            explicit_models=["glm-test"],
+        )
+
+
+def test_frontier_requires_pinned_gpt_5_5(tmp_path: Path) -> None:
+    root = _write_bundle(tmp_path / "config", hidden_models=("gpt-5.5",))
+
+    with pytest.raises(mms_pi_committee.CommitteeError, match="frontier GPT model is unavailable: gpt-5.5"):
+        mms_pi_committee.plan_committee(config_root=root, task="GPT must be pinned")
 
 
 def test_cli_dry_run_is_json_only_and_does_not_launch_pi(tmp_path: Path) -> None:

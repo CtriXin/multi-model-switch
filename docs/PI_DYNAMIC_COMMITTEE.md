@@ -8,7 +8,7 @@ MMS 提供一个独立、opt-in 的 Pi committee sidecar。它不经过 OpenCode
 
 成员没有固定模型身份。每次 mission 创建 `member-01`、`member-02` 等临时成员，再从显式选定的 MMS latest-approved bundle 中动态绑定 model、provider、URL 和 API key。
 
-默认 `frontier` profile 会在每次 mission 启动时，从当前 bundle 为以下家族各选一个 champion：`MiniMax / GPT / Kimi / Gemini / Qwen / DeepSeek / GLM`。它保存的是选择规则，不是七个命名 agent；bundle 中出现更新版本后会重新计算。`model-policy` 的 visible/hide 规则仍然是硬约束。
+默认 `frontier` profile 会在每次 mission 启动时，从当前 bundle 为以下家族各选一个 champion：`MiniMax / GPT / Kimi / Gemini / Qwen / DeepSeek / GLM`。它保存的是选择规则，不是七个命名 agent；除 GPT 固定选择 `gpt-5.5` 外，bundle 中出现更新版本后会重新计算。`model-policy` 的 visible/hide 规则仍然是硬约束。
 
 ## 安全边界
 
@@ -19,6 +19,8 @@ MMS 提供一个独立、opt-in 的 Pi committee sidecar。它不经过 OpenCode
 - API key 通过临时 environment variable 交给 Pi，`models.json` 只保存 `$ENV_NAME` 引用。
 - 默认工具只有 `read,grep,find,ls`，并关闭 session、context files、extensions、skills、prompt templates 和 themes。
 - Pi 通过仓库已有的 `scripts/pi-cli-wrapper.sh` 启动；首次运行只会把 npm package cache 放到本仓库 `.ai/cache/pi-npx`，不会做 global install。冷缓存下 wrapper 会先用 repo-local install lock 做一次轻量 prewarm，避免多 worker 同时让 `npx` 填充同一个 shared cache。
+- 非 GPT member 只接受 provider id 含 `tokyo` 的 route；缺少可用 Tokyo route 或 Tokyo route 被 Pi runtime 拦截时 fail closed，不会改走 Tencent 或 direct。GPT 保留 bundle 中的 OpenAI route chain，frontier 默认固定为 `gpt-5.5`。
+- effort 不再统一关闭。committee 从 Pi 生成的 `thinkingLevelMap` 选择最高 source-backed level：`max > xhigh > high > medium > low > minimal`；例如 `k3` 使用 `max`、`gpt-5.5` 使用 `xhigh`。没有 map 时省略 `--thinking`，不伪造 level，也不传 `off`。
 
 ## Worker watchdog
 
@@ -27,7 +29,7 @@ Pi worker 是 agentic session，不是一次短 completion。实测中，读取 
 当前默认值按“慢但健康”校准：
 
 - member wall timeout：`900s`；同一 member 的 route fallback 共享这段预算。这个值来自重型 agentic review 的实测校准，不代表每个模型都能在 900s 内完成。
-- Kimi route-attempt timeout：默认每条 route 最多 `300s`，并按剩余 attempt 数公平收窄；Tokyo 超时后仍为 Tencent/direct 保留实际执行窗口。`--kimi-attempt-timeout 0` 可在明确的历史复现实验中关闭该 cap。
+- Kimi route-attempt timeout：默认每条 Tokyo route 最多 `300s`，并按剩余 attempt 数公平收窄；Tokyo 超时后只会尝试 bundle 中另一条 Tokyo route，不会切到 Tencent/direct。`--kimi-attempt-timeout 0` 可在明确的历史复现实验中关闭该 cap。
 - no-output idle timeout：`300s`。Pi JSON event 或 stderr 任意新字节都会刷新 activity；短于这个阈值的静默 provider call 不会被误杀。
 - retained stream tail / single event：`2 MiB`。累计的正常 newline-delimited Pi events 可以超过此值，runtime 只保留 bounded tail；只有单个无法分帧的 event/line 超限才返回 `output_limit`。这避免 `message_update` 的增长快照把健康 worker 误判为输出洪水。
 - exact consecutive repeated events：`32`；达到后返回 `repetition_limit`。
@@ -36,7 +38,7 @@ Pi worker 是 agentic session，不是一次短 completion。实测中，读取 
 
 每个 Pi 子进程都在独立 POSIX process group 中运行。watchdog 先向整个 group 发 `SIGTERM`，grace 结束后仍在原 group 的 descendant 会收到 `SIGKILL`；Pi 自身的 SIGTERM handler 也会清理它登记的 detached children。主动 `setsid()` 逃离原 group 的任意第三方进程不属于 OS process-group 保证范围。stream reader 与 supervisor 之间使用 bounded queue，极端输出会 backpressure 到 pipe，不会形成 unbounded Python queue。结果和 Parent packet 会保留 `terminal_reason`、elapsed、stdout/stderr bytes、repeat peak、是否 terminate/force-kill，以及 committee stop reason。即使 global deadline 或 opt-in quorum 触发，也会返回所有已完成结果和被取消 member 的明确状态。
 
-同一 member 的多个 route attempt 共享 wall budget，但不再用 `max(1, remaining)` 强行制造一秒 fallback。Kimi 的每个 attempt 还受独立 cap 约束，第一条 route 的 `wall_timeout` 不再等同于 member budget 耗尽。剩余预算不足一秒时，未启动的 route 会记录为 `status=skipped`、`terminal_reason=no_budget_remaining`、`started=false`、`budget_seconds=0`；它不会被标成 provider `wall_timeout`，也不会进入 `fallback_members`。真正启动的 attempt 会记录 `started=true` 和实际分配的 `budget_seconds`。
+同一 member 的多个 route attempt 共享 wall budget，但不再用 `max(1, remaining)` 强行制造一秒 fallback。Kimi 的每个 Tokyo attempt 还受独立 cap 约束，第一条 route 的 `wall_timeout` 不再等同于 member budget 耗尽。剩余预算不足一秒时，未启动的 route 会记录为 `status=skipped`、`terminal_reason=no_budget_remaining`、`started=false`、`budget_seconds=0`；它不会被标成 provider `wall_timeout`，也不会进入 `fallback_members`。真正启动的 attempt 会记录 `started=true` 和实际分配的 `budget_seconds`。
 
 timestamped latest-approved bundle 默认必须在 `30` 天 freshness window 内。校验顺序是 hash verification → bundle age gate → model selection；旧 root 中 hash 正确但已经漂移的 `kimi-k2.x` 不会再进入 provider dispatch。`--max-bundle-age-days 0` 只用于调用方明确要求的历史 replay。public plan 会保留 resolved `config_root`、manifest path、revision、age 和 freshness status，方便区分 Host 选错 root 与 provider/model 故障。
 
@@ -108,8 +110,8 @@ python3 scripts/pi_committee.py \
 
 ## Frontier 选择规则
 
-- MiniMax、GPT、Qwen、DeepSeek、GLM：先比较可识别的 model version，再比较同版本 variant。Qwen 默认 `max > plus > flash`；DeepSeek 默认 `flash > pro`。
-- Kimi：优先 fresh bundle 中最新版本，例如真实模型 id `k3` 会排在 `kimi-k2.8-code` / `kimi-k2.7-code` 前；同版本再优先 coding/code 系列，不把旧 `kimi-for-coding` alias 固定成永久 champion。Pi committee 会把 Kimi route chain 重排为 Tokyo primary、Tencent fallback、direct later，并限制单 route 不能吞完整个 member budget。Gemini 优先滚动的 `flash-agent(high)` channel。
+- GPT 固定选择 `gpt-5.5`；缺少该 model 时 frontier fail closed，不会静默升级到其他 GPT 版本。MiniMax、Qwen、DeepSeek、GLM：先比较可识别的 model version，再比较同版本 variant。Qwen 默认 `max > plus > flash`；DeepSeek 默认 `flash > pro`。
+- Kimi：优先 fresh bundle 中最新版本，例如真实模型 id `k3` 会排在 `kimi-k2.8-code` / `kimi-k2.7-code` 前；同版本再优先 coding/code 系列，不把旧 `kimi-for-coding` alias 固定成永久 champion。所有非 GPT family 的 route chain 只保留 Tokyo route，并限制 Kimi 单 route 不能吞完整个 member budget。Gemini 优先滚动的 `flash-agent(high)` channel。
 - 同级时再参考 policy favorite/tier、context window、可用 route 数量。
 - unavailable、policy-hidden、非对话模型或无法生成 Pi route 的模型会 fail closed，不会偷用 global OAuth/default account。
 
