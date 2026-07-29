@@ -26,6 +26,108 @@ def test_responses_json_parse_error_uses_chatcompletions_fallback():
     ) is False
 
 
+def test_chatcompletions_projection_keeps_codex_additional_tools():
+    import mms_bridge
+
+    tools, custom_tool_names = mms_bridge._responses_additional_tools_to_chat(
+        [
+            {
+                "type": "additional_tools",
+                "tools": [
+                    {
+                        "type": "custom",
+                        "name": "exec",
+                        "description": "Execute the host tool script.",
+                    },
+                    {
+                        "type": "function",
+                        "name": "wait",
+                        "description": "Wait for a running command.",
+                        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}},
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert custom_tool_names == {"exec"}
+    assert [tool["function"]["name"] for tool in tools] == ["exec", "wait"]
+    assert tools[0]["function"]["parameters"] == {
+        "type": "object",
+        "properties": {"input": {"type": "string"}},
+        "required": ["input"],
+        "additionalProperties": False,
+    }
+
+
+def test_chatcompletions_translator_returns_codex_custom_tool_events():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator(
+        "gpt-5.6-terra",
+        custom_tool_names={"exec"},
+    )
+    events = translator.process_chunk(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_exec",
+                                "function": {"name": "exec", "arguments": '{"input":"await tools.exec_command({cmd: \\"pwd\\"})"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+    )
+
+    assert any(
+        event_name == "response.custom_tool_call_input.done"
+        and payload["input"] == 'await tools.exec_command({cmd: "pwd"})'
+        for event_name, payload in events
+    )
+    assert any(
+        event_name == "response.output_item.done"
+        and payload["item"]["type"] == "custom_tool_call"
+        and payload["item"]["name"] == "exec"
+        for event_name, payload in events
+    )
+
+
+def test_responses_input_maps_custom_tool_history_to_chat_tool_messages():
+    import mms_bridge
+
+    messages = mms_bridge._responses_input_to_messages(
+        "",
+        [
+            {"type": "custom_tool_call", "call_id": "call_exec", "name": "exec", "input": "await tools.exec_command({cmd: 'pwd'})"},
+            {"type": "custom_tool_call_output", "call_id": "call_exec", "output": "/tmp"},
+        ],
+    )
+
+    assert messages == [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_exec",
+                    "type": "function",
+                    "function": {
+                        "name": "exec",
+                        "arguments": '{"input": "await tools.exec_command({cmd: \'pwd\'})"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_exec", "content": "/tmp"},
+    ]
+
+
 def test_resolve_native_fallback_routes_finds_same_vendor_direct():
     from mms_native_fallback import resolve_native_fallback_routes
 

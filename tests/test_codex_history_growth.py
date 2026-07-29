@@ -30,6 +30,20 @@ def _lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8").splitlines()
 
 
+def test_codex_gateway_root_uses_mmf_preview_config_root(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_selected_mms_config_root", lambda _env: str(preview_root))
+
+    assert mms_launchers._codex_gateway_root() == str(real_home / ".config" / "mms" / "codex-gateway")
+
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    assert mms_launchers._codex_gateway_root() == str(preview_root / "codex-gateway")
+
+
 def test_seed_codex_bounded_resume_caps_files_and_directories(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 

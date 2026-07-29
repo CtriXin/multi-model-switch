@@ -11043,12 +11043,21 @@ def _claude_gateway_env(
     return env
 
 
+def _codex_gateway_root():
+    """Keep MMF Codex gateway state inside its selected preview root."""
+    command_name = str(os.environ.get("MMS_COMMAND_NAME") or "").strip().lower()
+    preview_mode = str(os.environ.get("MMS_PREVIEW_MODE") or "").strip().lower()
+    if command_name == "mmf" or preview_mode == "mmf":
+        return os.path.join(_selected_mms_config_root({}), "codex-gateway")
+    return _real_user_path(".config", "mms", "codex-gateway")
+
+
 def _codex_gateway_env(runtime, base_url, model_info=None):
     """为 gateway api_key 模式创建隔离 session，并复用稳定 CODEX_HOME。"""
     import json as _json
     openai_key = runtime.get("openai_api_key") or runtime["api_key"]
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
-    gateway_base = _real_user_path(".config", "mms", "codex-gateway")
+    gateway_base = _codex_gateway_root()
     gateway_codex_dir = os.path.join(gateway_base, ".codex")
     os.makedirs(gateway_base, exist_ok=True)
 

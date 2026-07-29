@@ -4596,20 +4596,23 @@ def _responses_input_to_messages(instructions, input_items, model_name="", *, se
                 )
             continue
 
-        if item_type == "function_call":
+        if item_type in {"function_call", "custom_tool_call"}:
             if item_reasoning_content:
                 pending_reasoning_content = item_reasoning_content
+            arguments = item.get("arguments", "{}")
+            if item_type == "custom_tool_call":
+                arguments = json.dumps({"input": str(item.get("input") or "")})
             pending_tool_calls.append({
                 "id": item.get("call_id", item.get("id", "")),
                 "type": "function",
                 "function": {
                     "name": item.get("name", ""),
-                    "arguments": item.get("arguments", "{}"),
+                    "arguments": arguments,
                 },
             })
             continue
 
-        if item_type == "function_call_output":
+        if item_type in {"function_call_output", "custom_tool_call_output"}:
             # Flush any pending tool_calls first
             if pending_tool_calls:
                 messages.append(_assistant_message({"role": "assistant", "tool_calls": list(pending_tool_calls)}))
@@ -4697,6 +4700,74 @@ def _responses_tools_to_chat(tools):
                 },
             })
     return converted
+
+
+def _responses_additional_tools_to_chat(input_items):
+    """Project Codex's nested tool envelope onto Chat Completions functions.
+
+    Codex sends its local tools inside an ``additional_tools`` input item rather
+    than the top-level Responses ``tools`` array. Native Responses providers
+    understand that envelope, but a Chat Completions fallback otherwise loses
+    every local shell/filesystem tool before it reaches the model.
+    """
+    converted = []
+    custom_tool_names = set()
+    seen_names = set()
+
+    def add_function(name, description, parameters):
+        name = str(name or "").strip()
+        if not name or name in seen_names:
+            return
+        seen_names.add(name)
+        converted.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": str(description or ""),
+                "parameters": parameters if isinstance(parameters, dict) else {"type": "object", "properties": {}},
+            },
+        })
+
+    for item in input_items or []:
+        if not isinstance(item, dict) or item.get("type") != "additional_tools":
+            continue
+        for tool in item.get("tools") or []:
+            if not isinstance(tool, dict):
+                continue
+            tool_type = str(tool.get("type") or "")
+            if tool_type == "function":
+                add_function(tool.get("name"), tool.get("description"), tool.get("parameters"))
+            elif tool_type == "custom":
+                name = str(tool.get("name") or "").strip()
+                if not name:
+                    continue
+                custom_tool_names.add(name)
+                add_function(
+                    name,
+                    f"{str(tool.get('description') or '').strip()}\n\nPass the raw custom-tool input in the `input` field.",
+                    {
+                        "type": "object",
+                        "properties": {"input": {"type": "string"}},
+                        "required": ["input"],
+                        "additionalProperties": False,
+                    },
+                )
+    return converted, custom_tool_names
+
+
+def _merge_chat_tools(*tool_sets):
+    """Keep the first declaration for each tool name across transport forms."""
+    merged = []
+    names = set()
+    for tool_set in tool_sets:
+        for tool in tool_set or []:
+            function = tool.get("function") if isinstance(tool, dict) else None
+            name = str(function.get("name") or "").strip() if isinstance(function, dict) else ""
+            if not name or name in names:
+                continue
+            names.add(name)
+            merged.append(tool)
+    return merged
 
 
 def _chat_messages_to_anthropic_payload(chat_messages, model_name, *, stream=True, max_tokens=None):
@@ -4819,8 +4890,9 @@ class _ChatCompletionsToResponsesTranslator:
     """Translate Chat Completions streaming chunks to Responses API SSE events.
     Matches the real OpenAI Responses API format that Codex expects."""
 
-    def __init__(self, model_name, response_id=None):
+    def __init__(self, model_name, response_id=None, custom_tool_names=None):
         self.model_name = model_name
+        self.custom_tool_names = set(custom_tool_names or ())
         self.response_id = response_id or f"resp_{uuid.uuid4().hex[:24]}"
         self.msg_item_id = f"msg_{uuid.uuid4().hex[:24]}"
         self.reasoning_item_id = f"rs_{uuid.uuid4().hex[:24]}"
@@ -4878,14 +4950,28 @@ class _ChatCompletionsToResponsesTranslator:
         return item
 
     def _tool_call_output_item(self, tc_info, *, status="completed"):
-        item = {
-            "type": "function_call",
-            "id": tc_info["item_id"],
-            "call_id": tc_info["id"],
-            "name": tc_info["name"],
-            "arguments": tc_info["arguments"],
-            "status": status,
-        }
+        if tc_info["name"] in self.custom_tool_names:
+            try:
+                input_text = str(json.loads(tc_info["arguments"]).get("input") or "")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                input_text = tc_info["arguments"]
+            item = {
+                "type": "custom_tool_call",
+                "id": tc_info["item_id"],
+                "call_id": tc_info["id"],
+                "name": tc_info["name"],
+                "input": input_text,
+                "status": status,
+            }
+        else:
+            item = {
+                "type": "function_call",
+                "id": tc_info["item_id"],
+                "call_id": tc_info["id"],
+                "name": tc_info["name"],
+                "arguments": tc_info["arguments"],
+                "status": status,
+            }
         reasoning_content = self._normalized_reasoning_content()
         if reasoning_content:
             item["reasoning_content"] = reasoning_content
@@ -4972,30 +5058,25 @@ class _ChatCompletionsToResponsesTranslator:
                         self.output_index += 1
                         self.text_part_added = False
 
+                    item = self._tool_call_output_item(self.tool_calls[idx], status="in_progress")
                     outgoing.append(("response.output_item.added", {
                         "type": "response.output_item.added",
                         "output_index": self.output_index + idx,
-                        "item": {
-                            "type": "function_call",
-                            "id": self.tool_calls[idx]["item_id"],
-                            "call_id": tc_id,
-                            "name": tc_name,
-                            "arguments": "",
-                            "status": "in_progress",
-                        },
+                        "item": item,
                         "sequence_number": self._seq_num(),
                     }))
 
                 args_delta = tc.get("function", {}).get("arguments", "")
                 if args_delta:
                     self.tool_calls[idx]["arguments"] += args_delta
-                    outgoing.append(("response.function_call_arguments.delta", {
-                        "type": "response.function_call_arguments.delta",
-                        "item_id": self.tool_calls[idx]["item_id"],
-                        "output_index": self.output_index + idx,
-                        "delta": args_delta,
-                        "sequence_number": self._seq_num(),
-                    }))
+                    if self.tool_calls[idx]["name"] not in self.custom_tool_names:
+                        outgoing.append(("response.function_call_arguments.delta", {
+                            "type": "response.function_call_arguments.delta",
+                            "item_id": self.tool_calls[idx]["item_id"],
+                            "output_index": self.output_index + idx,
+                            "delta": args_delta,
+                            "sequence_number": self._seq_num(),
+                        }))
 
         # Finish
         if finish_reason is not None:
@@ -5004,11 +5085,23 @@ class _ChatCompletionsToResponsesTranslator:
 
             # Close open tool calls
             for idx, tc_info in sorted(self.tool_calls.items()):
-                outgoing.append(("response.function_call_arguments.done", {
-                    "type": "response.function_call_arguments.done",
+                if tc_info["name"] in self.custom_tool_names:
+                    try:
+                        input_text = str(json.loads(tc_info["arguments"]).get("input") or "")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        input_text = tc_info["arguments"]
+                    event_name = "response.custom_tool_call_input.done"
+                    value_key = "input"
+                    value = input_text
+                else:
+                    event_name = "response.function_call_arguments.done"
+                    value_key = "arguments"
+                    value = tc_info["arguments"]
+                outgoing.append((event_name, {
+                    "type": event_name,
                     "item_id": tc_info["item_id"],
                     "output_index": self.output_index + idx,
-                    "arguments": tc_info["arguments"],
+                    value_key: value,
                     "sequence_number": self._seq_num(),
                 }))
                 outgoing.append(("response.output_item.done", {
@@ -5717,7 +5810,11 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         max_output_tokens = _responses_max_output_tokens(payload)
         if max_output_tokens is not None:
             chat_payload["max_tokens"] = max_output_tokens
-        chat_tools = _responses_tools_to_chat(payload.get("tools"))
+        additional_tools, custom_tool_names = _responses_additional_tools_to_chat(payload.get("input"))
+        chat_tools = _merge_chat_tools(
+            _responses_tools_to_chat(payload.get("tools")),
+            additional_tools,
+        )
         if chat_tools:
             chat_payload["tools"] = chat_tools
         apply_profile_body_patches(
@@ -5746,7 +5843,10 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         )
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
-        translator = _ChatCompletionsToResponsesTranslator(model_name)
+        translator = _ChatCompletionsToResponsesTranslator(
+            model_name,
+            custom_tool_names=custom_tool_names,
+        )
         first_byte_ms = None
         output_tokens = None
         try:
@@ -6434,7 +6534,11 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         max_output_tokens = _responses_max_output_tokens(payload)
         if max_output_tokens is not None:
             chat_payload["max_tokens"] = max_output_tokens
-        chat_tools = _responses_tools_to_chat(payload.get("tools"))
+        additional_tools, custom_tool_names = _responses_additional_tools_to_chat(payload.get("input"))
+        chat_tools = _merge_chat_tools(
+            _responses_tools_to_chat(payload.get("tools")),
+            additional_tools,
+        )
         if chat_tools:
             chat_payload["tools"] = chat_tools
         apply_profile_body_patches(
@@ -6465,7 +6569,10 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
         )
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
-        translator = _ChatCompletionsToResponsesTranslator(model_name)
+        translator = _ChatCompletionsToResponsesTranslator(
+            model_name,
+            custom_tool_names=custom_tool_names,
+        )
         first_byte_ms = None
         output_tokens = None
         try:
