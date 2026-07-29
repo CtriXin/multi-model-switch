@@ -18,6 +18,22 @@
   </details>
 </div>
 
+> **CtriXin distribution**：本仓库 fork 自
+> [`eze-is/web-access`](https://github.com/eze-is/web-access)，保留原作者与 MIT
+> 归属，并加入 MMF host-home 隔离、真实输入安全和广告位 source-fidelity
+> 验收。上游关系、版本基线与同步策略见 [UPSTREAM.md](./UPSTREAM.md)。
+
+> **本机广告位审计扩展**：广告位 source-fidelity 任务使用 canonical 最新目录
+> `~/auto-skills/CtriXin-repo/chrome-extensions/ad-placement-inspector/`。运行
+> `scripts/check-ad-placement-inspector.mjs --url <url> --manifest <source-manifest> --evidence-dir <dir>`
+> 会同时核验真实 Chrome、extension manifest 版本/build hash、页面 handshake，并由 extension
+> 对目标 tab 逐广告位检查 source-bound manifest；只有 `allPass=true` 才通过，同时产出
+> JSON 和截图证据。
+>
+> **批量验收**：先创建一个 task-owned tab；随后每个 case 使用
+> `--target <targetId>` 复用该 tab。脚本会在同一 tab 内导航和验收，避免每条 case 新建 tab
+> 或触发额外的 CDP 授权提示；完成后只关闭这个 task-owned tab。
+
 <img width="879" height="376" alt="image" src="https://github.com/user-attachments/assets/a87fd816-a0b5-4264-b01c-9466eae90723" />
 
 <p align="center">
@@ -118,6 +134,8 @@ CDP 模式需要 **Node.js 22+** 和浏览器（Chrome / Edge）开启远程调�
    - Edge：`edge://inspect/#remote-debugging`
 2. 勾选 **Allow remote debugging for this browser instance**（可能需要重启浏览器）
 
+在 MMF/Codex 等隔离会话中，先设置 `WEB_ACCESS_HOST_HOME` 指向宿主用户目录。若 Chrome 已在固定端口开启远程调试但未生成 `DevToolsActivePort`，`check-deps.mjs` 会把 `9222`、`9229`、`9333` 的监听端口交给任务专属 proxy；proxy 只建立一条最终 WebSocket，并用 `Browser.getVersion` 验证 CDP 和浏览器身份。TCP 能连接本身不会被误判为可用 CDP，也不会额外触发一次 Chrome 授权弹窗。
+
 ### 浏览器偏好（config.env）
 
 skill 长期偏好保存在 `${CLAUDE_SKILL_DIR}/config.env`（首次运行自动从 `config.env.template` 创建，gitignored）：
@@ -138,7 +156,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs" --browser chrome
 **切换浏览器**（proxy 已连接旧的）：
 
 ```bash
-pkill -f cdp-proxy.mjs && node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
+ps -axo pid=,command= | rg '/web-access/scripts/cdp-proxy.mjs'
+# 核对脚本路径后，只 kill 上一步确认的精确 PID，再运行：
+node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 ```
 
 环境检查（Agent 运行时会自动完成前置检查，无需手动执行）：

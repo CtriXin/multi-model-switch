@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = path.join(SKILL_ROOT, 'config.env');
+const FALLBACK_PORTS = [9222, 9229, 9333];
 
 function isIsolatedHome(home) {
   return /\/(?:\.mmf|\.config\/mms|\.config\/mmf|gateway\/s|sessions)\//.test(home || '');
@@ -69,8 +70,7 @@ export function knownBrowsers() {
   }
 }
 
-// TCP 端口监听检测
-// 用 TCP connect 而非 WebSocket，避免触发浏览器的远程调试授权弹窗。
+// TCP 端口监听检测。仅用于快速排除未监听端口，不能证明它是 CDP。
 export function checkPort(port, host = '127.0.0.1', timeoutMs = 2000) {
   return new Promise((resolve) => {
     const socket = net.createConnection(port, host);
@@ -78,6 +78,18 @@ export function checkPort(port, host = '127.0.0.1', timeoutMs = 2000) {
     socket.once('connect', () => { clearTimeout(timer); socket.destroy(); resolve(true); });
     socket.once('error',   () => { clearTimeout(timer); resolve(false); });
   });
+}
+
+export function productMatchesBrowser(product, browserId) {
+  const value = String(product || '').toLowerCase();
+  switch (browserId) {
+    case 'chrome': return value.startsWith('chrome/');
+    case 'chromium': return value.startsWith('chromium/');
+    case 'edge': return value.startsWith('edg/');
+    // Browser.getVersion cannot reliably distinguish Chrome Canary from Chrome.
+    case 'chrome-canary': return false;
+    default: return false;
+  }
 }
 
 // 读 config.env 文件（不写入 process.env，分清来源）
@@ -99,7 +111,7 @@ function readConfig() {
   return cfg;
 }
 
-// 返回所有开了 toggle 且端口活的浏览器
+// DevToolsActivePort gives the target WebSocket path; the proxy performs the CDP handshake.
 async function detectAll() {
   const result = [];
   for (const browser of knownBrowsers()) {
@@ -127,10 +139,21 @@ export async function selectBrowser(override = null) {
   const detected = await detectAll();
   const configured = readConfig().WEB_ACCESS_BROWSER || null;
 
+  // Browser toggles in isolated sessions may not leave DevToolsActivePort in the host profile.
+  // Treat a fixed listener as a candidate; cdp-proxy verifies Browser.getVersion on its one real connection.
+  const matchingFallback = async (browserId) => {
+    const fallback = await findFallbackPort();
+    const browser = knownBrowsers().find((item) => item.id === browserId);
+    if (!fallback || !browser) return null;
+    return { ...browser, ...fallback };
+  };
+
   // 1. 命令行 override（最高优先，单次有效）
   if (override) {
     const match = detected.find(b => b.id === override);
     if (match) return { kind: 'ok', browser: match, source: 'override', detected, configured, override };
+    const fallback = await matchingFallback(override);
+    if (fallback) return { kind: 'ok', browser: fallback, source: 'fallback', detected, configured, override };
     return { kind: 'mismatch', source: 'override', detected, configured, override };
   }
 
@@ -138,6 +161,8 @@ export async function selectBrowser(override = null) {
   if (configured) {
     const match = detected.find(b => b.id === configured);
     if (match) return { kind: 'ok', browser: match, source: 'preference', detected, configured };
+    const fallback = await matchingFallback(configured);
+    if (fallback) return { kind: 'ok', browser: fallback, source: 'fallback', detected, configured };
     return { kind: 'mismatch', source: 'preference', detected, configured };
   }
 
@@ -148,12 +173,10 @@ export async function selectBrowser(override = null) {
   return { kind: 'ambiguous', detected, configured };
 }
 
-// 兜底：扫描常用固定端口
-// 适用场景：用户手动 --remote-debugging-port=9222 启动浏览器，
-// 此时 DevToolsActivePort 可能不在默认 user-data-dir。
+// 兜底：扫描常用固定端口。它只是连接候选，CDP proxy 会在同一条最终连接上验证。
 export async function findFallbackPort() {
-  for (const port of [9222, 9229, 9333]) {
-    if (await checkPort(port)) return port;
+  for (const port of FALLBACK_PORTS) {
+    if (await checkPort(port)) return { port, wsPath: null };
   }
   return null;
 }

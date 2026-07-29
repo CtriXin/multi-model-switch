@@ -5,7 +5,7 @@
 - 地址：`http://localhost:3456`
 - 启动：`node ~/.claude/skills/web-access/scripts/cdp-proxy.mjs &`
 - 启动后持续运行，不建议主动停止（重启需 Chrome 重新授权）
-- 强制停止：`pkill -f cdp-proxy.mjs`
+- 停止：先用 `ps -axo pid=,command=` 核对脚本路径，再只 `kill <精确 PID>`。
 
 ## API 端点
 
@@ -95,6 +95,15 @@ curl -s -X POST "http://localhost:3456/insertText?target=ID" --data-binary '待�
 读取 CSS 视口和设备倍率，避免 canvas 坐标与截图像素混用。
 ```bash
 curl -s "http://localhost:3456/viewport?target=ID"
+```
+
+### POST /setViewport?target=ID
+为通过 `/new` 创建的 task-owned tab 下发 CDP 设备视口。拒绝用户已有 tab；不会建立新的 Chrome
+连接。Mobile source-bound 广告验收由检查器自动调用，通常不需要手工执行。
+```bash
+curl -s -X POST "http://localhost:3456/setViewport?target=ID" \
+  -H 'content-type: application/json' \
+  -d '{"width":390,"height":844,"deviceScaleFactor":1,"mobile":true}'
 ```
 
 ### POST /setFiles?target=ID
