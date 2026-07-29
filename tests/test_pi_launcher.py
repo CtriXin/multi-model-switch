@@ -1331,6 +1331,15 @@ def test_pi_blocks_20260530_live_failures():
         assert mms_launchers._pi_model_available_for_runtime(runtime, model_name) is False
 
 
+def test_pi_tokyo_gemini_high_is_unblocked_after_live_smoke():
+    import mms_launchers
+
+    runtime = {"id": "newapi-personal-tokyo", "protocols": ["anthropic_messages"]}
+
+    assert mms_launchers._pi_model_block_reason(runtime, "gemini-3-flash-agent(high)") == ""
+    assert "upstream 500" in mms_launchers._pi_model_block_reason(runtime, "gemini-3.1-pro-low")
+
+
 def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
     import mms_launchers
 

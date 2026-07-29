@@ -337,7 +337,6 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
         "anthropic/claude-opus-4.7": "2026-05-28 live Pi smoke returned key-limit 403 on this relay",
         "claude-opus-4-6": "2026-05-28 live Pi smoke returned model_not_found on this relay",
         "claude-opus-4-6-thinking": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
-        "gemini-3-flash-agent(high)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3-flash-agent(low)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3-flash-agent(medium)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
         "gemini-3.1-flash-lite": "2026-05-28 live Pi smoke returned upstream 500 on this relay",

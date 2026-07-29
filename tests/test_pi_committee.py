@@ -860,20 +860,20 @@ def test_pi_blocked_tokyo_route_fails_closed_without_tencent_fallback() -> None:
             "provider_id": "newapi-tencent",
             "anthropic_base_url": "https://primary.example.test",
             "api_key": "sk-primary-test-secret-123456",
-            "model_id": "gemini-3-flash-agent(high)",
+            "model_id": "gemini-3.1-pro-low",
         },
         "fallbacks": [
             {
                 "provider_id": "newapi-personal-tokyo",
                 "anthropic_base_url": "https://blocked.example.test",
                 "api_key": "sk-blocked-test-secret-123456",
-                "model_id": "gemini-3-flash-agent(high)",
+                "model_id": "gemini-3.1-pro-low",
             }
         ],
     }
 
     with pytest.raises(mms_pi_committee.CommitteeError, match="Pi route is blocked"):
-        mms_pi_committee._build_route_chain("gemini-3-flash-agent(high)", route_group, {})
+        mms_pi_committee._build_route_chain("gemini-3.1-pro-low", route_group, {})
 
 
 def test_non_gpt_without_tokyo_route_is_excluded(tmp_path: Path) -> None:
