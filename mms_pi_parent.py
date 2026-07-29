@@ -8,6 +8,7 @@ of the current Codex or Claude parent; this module never launches a synthesizer.
 from __future__ import annotations
 
 import copy
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -17,6 +18,8 @@ import mms_pi_committee
 
 RESULT_SCHEMA = "mms.pi_committee.result.v1"
 PARENT_PACKET_SCHEMA = "mms.pi_committee.parent_packet.v1"
+MIN_SYNTHESIS_COVERAGE_RATIO = 0.5
+MIN_SYNTHESIS_SUCCESSES = 2
 
 
 class ParentPacketError(ValueError):
@@ -70,7 +73,8 @@ def build_parent_packet(result: Mapping[str, Any]) -> dict[str, Any]:
             structured_count += 1
         elif response_format == "raw_text":
             raw_count += 1
-        if bool(row.get("fallback_used")):
+        fallback_used = _fallback_was_used(row)
+        if fallback_used:
             fallback_count += 1
 
         normalized_findings = _normalize_findings(
@@ -92,9 +96,18 @@ def build_parent_packet(result: Mapping[str, Any]) -> dict[str, Any]:
             "risks": _string_list(response.get("risks")),
             "recommendation": str(response.get("recommendation") or "").strip(),
             "response": copy.deepcopy(response),
-            "fallback_used": bool(row.get("fallback_used")),
+            "fallback_used": fallback_used,
             "fallback_reason": str(row.get("fallback_reason") or "").strip(),
+            "fallback_skipped_reason": str(row.get("fallback_skipped_reason") or "").strip(),
+            "terminal_reason": str(row.get("terminal_reason") or "").strip(),
+            "watchdog": copy.deepcopy(_mapping(row.get("watchdog"))),
         }
+        for field in ("domain", "role_id", "role_card_source", "role_card_sha256"):
+            value = str(row.get(field) or planned.get(field) or "").strip()
+            if value:
+                opinion[field] = value
+        if opinion.get("domain"):
+            opinion["required_domain"] = bool(row.get("required_domain", planned.get("required_domain", False)))
         if row.get("error"):
             opinion["error"] = str(row.get("error"))
         opinions.append(opinion)
@@ -110,6 +123,8 @@ def build_parent_packet(result: Mapping[str, Any]) -> dict[str, Any]:
                     "model": model,
                     "status": status,
                     "error": str(row.get("error") or "").strip(),
+                    "terminal_reason": str(row.get("terminal_reason") or "").strip(),
+                    "fallback_skipped_reason": str(row.get("fallback_skipped_reason") or "").strip(),
                     "attempts": copy.deepcopy(health["attempts"]),
                 }
             )
@@ -130,18 +145,35 @@ def build_parent_packet(result: Mapping[str, Any]) -> dict[str, Any]:
             )
             status_counts["missing_result"] += 1
     succeeded = status_counts.get("success", 0)
-    ready_for_synthesis = result_status != "dry_run" and succeeded > 0
+    planned_count = len(planned_rows)
+    required_successes = _required_synthesis_successes(planned_count)
+    coverage_ratio = succeeded / planned_count if planned_count else 0.0
+    coverage_met = planned_count > 0 and succeeded >= required_successes
+    ready_for_synthesis = result_status != "dry_run" and coverage_met
+    readiness_reason = (
+        "dry_run"
+        if result_status == "dry_run"
+        else ("sufficient_coverage" if coverage_met else "insufficient_coverage")
+    )
     mission_id = str(result.get("mission_id") or plan.get("mission_id") or "").strip()
     return {
         "schema": PARENT_PACKET_SCHEMA,
         "status": result_status,
         "ready_for_synthesis": ready_for_synthesis,
+        "synthesis_readiness": {
+            "reason": readiness_reason,
+            "coverage_met": coverage_met,
+            "coverage_ratio": round(coverage_ratio, 6),
+            "required_coverage_ratio": MIN_SYNTHESIS_COVERAGE_RATIO,
+            "required_successes": required_successes,
+        },
         "mission": {
             "mission_id": mission_id,
             "task": str(plan.get("task") or "").strip(),
             "route_source": str(plan.get("route_source") or "").strip(),
             "elapsed_ms": _non_negative_int(result.get("elapsed_ms")),
             "selection": copy.deepcopy(_mapping(plan.get("selection"))),
+            "watchdog": copy.deepcopy(_mapping(result.get("watchdog"))),
         },
         "committee_plan": copy.deepcopy(plan),
         "committee_health": {
@@ -152,6 +184,9 @@ def build_parent_packet(result: Mapping[str, Any]) -> dict[str, Any]:
             "structured_responses": structured_count,
             "raw_responses": raw_count,
             "fallback_members": fallback_count,
+            "coverage_ratio": round(coverage_ratio, 6),
+            "required_successes_for_synthesis": required_successes,
+            "synthesis_coverage_met": coverage_met,
             "status_counts": dict(sorted(status_counts.items())),
             "family_counts": dict(sorted(family_counts.items())),
         },
@@ -159,7 +194,7 @@ def build_parent_packet(result: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_index": evidence_index,
         "route_health": route_health,
         "failures": failures,
-        "synthesis_contract": _synthesis_contract(),
+        "synthesis_contract": synthesis_contract(),
         "source_result_schema": RESULT_SCHEMA,
     }
 
@@ -179,6 +214,14 @@ def run_parent_committee(
     lenses: Sequence[str] = mms_pi_committee.DEFAULT_LENSES,
     max_concurrency: int = mms_pi_committee.DEFAULT_MAX_CONCURRENCY,
     timeout_seconds: int = mms_pi_committee.DEFAULT_TIMEOUT_SECONDS,
+    kimi_attempt_timeout_seconds: int = mms_pi_committee.DEFAULT_KIMI_ATTEMPT_TIMEOUT_SECONDS,
+    max_bundle_age_days: int = mms_pi_committee.DEFAULT_MAX_BUNDLE_AGE_DAYS,
+    idle_timeout_seconds: int = mms_pi_committee.DEFAULT_IDLE_TIMEOUT_SECONDS,
+    max_output_bytes: int = mms_pi_committee.DEFAULT_MAX_OUTPUT_BYTES,
+    max_repeated_events: int = mms_pi_committee.DEFAULT_MAX_REPEATED_EVENTS,
+    committee_timeout_seconds: int = mms_pi_committee.DEFAULT_COMMITTEE_TIMEOUT_SECONDS,
+    quorum_successes: int = mms_pi_committee.DEFAULT_QUORUM_SUCCESSES,
+    quorum_grace_seconds: int = mms_pi_committee.DEFAULT_QUORUM_GRACE_SECONDS,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Run the existing committee runtime and return a parent packet."""
@@ -196,6 +239,14 @@ def run_parent_committee(
         lenses=lenses,
         max_concurrency=max_concurrency,
         timeout_seconds=timeout_seconds,
+        kimi_attempt_timeout_seconds=kimi_attempt_timeout_seconds,
+        max_bundle_age_days=max_bundle_age_days,
+        idle_timeout_seconds=idle_timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        max_repeated_events=max_repeated_events,
+        committee_timeout_seconds=committee_timeout_seconds,
+        quorum_successes=quorum_successes,
+        quorum_grace_seconds=quorum_grace_seconds,
         dry_run=dry_run,
     )
     return build_parent_packet(result)
@@ -253,8 +304,13 @@ def _route_health(
         attempts.append(
             {
                 "provider_id": str(attempt.get("provider_id") or evidence.get("provider_id") or "").strip(),
+                "fallback_position": _non_negative_int(attempt.get("fallback_position")),
+                "started": bool(attempt.get("started", str(attempt.get("status") or "").lower() != "skipped")),
+                "budget_seconds": _non_negative_int(attempt.get("budget_seconds")),
                 "status": str(attempt.get("status") or "unknown").strip().lower(),
+                "terminal_reason": str(attempt.get("terminal_reason") or "").strip(),
                 "error": str(attempt.get("error") or "").strip(),
+                "watchdog": copy.deepcopy(_mapping(attempt.get("watchdog"))),
                 "protocol": str(evidence.get("protocol") or "").strip(),
                 "request_path": str(evidence.get("request_path") or "").strip(),
                 "fallback_used": bool(evidence.get("fallback_used")),
@@ -265,8 +321,13 @@ def _route_health(
         attempts.append(
             {
                 "provider_id": str(row.get("provider_id") or evidence.get("provider_id") or "").strip(),
+                "fallback_position": 0,
+                "started": True,
+                "budget_seconds": 0,
                 "status": status,
+                "terminal_reason": str(row.get("terminal_reason") or "").strip(),
                 "error": str(row.get("error") or "").strip(),
+                "watchdog": copy.deepcopy(_mapping(row.get("watchdog"))),
                 "protocol": str(evidence.get("protocol") or row.get("protocol") or "").strip(),
                 "request_path": str(evidence.get("request_path") or "").strip(),
                 "fallback_used": bool(evidence.get("fallback_used")),
@@ -276,13 +337,50 @@ def _route_health(
         "member_id": member_id,
         "model": model,
         "status": status,
+        "terminal_reason": str(row.get("terminal_reason") or "").strip(),
+        "watchdog": copy.deepcopy(_mapping(row.get("watchdog"))),
         "planned_routes": len(planned.get("route_chain") or []),
-        "fallback_used": bool(row.get("fallback_used")),
+        "fallback_used": _fallback_was_used(row),
+        "fallback_skipped_reason": str(row.get("fallback_skipped_reason") or "").strip(),
         "attempts": attempts,
     }
 
 
-def _synthesis_contract() -> dict[str, Any]:
+def _fallback_was_used(row: Mapping[str, Any]) -> bool:
+    raw_attempts = row.get("attempts")
+    if not isinstance(raw_attempts, list) or not raw_attempts:
+        return bool(row.get("fallback_used"))
+    has_explicit_start_state = any(
+        isinstance(attempt, Mapping) and ("started" in attempt or str(attempt.get("status") or "").lower() == "skipped")
+        for attempt in raw_attempts
+    )
+    if not has_explicit_start_state:
+        return bool(row.get("fallback_used"))
+    for index, attempt in enumerate(raw_attempts):
+        if not isinstance(attempt, Mapping):
+            continue
+        status = str(attempt.get("status") or "").strip().lower()
+        started = bool(attempt.get("started", status != "skipped")) and status != "skipped"
+        if not started:
+            continue
+        evidence = _mapping(attempt.get("cache_transport_evidence"))
+        if index > 0 or bool(evidence.get("fallback_used")):
+            return True
+    return False
+
+
+def _required_synthesis_successes(planned_members: int) -> int:
+    if planned_members <= 0:
+        return 1
+    if planned_members == 1:
+        return 1
+    return min(
+        planned_members,
+        max(MIN_SYNTHESIS_SUCCESSES, math.ceil(planned_members * MIN_SYNTHESIS_COVERAGE_RATIO)),
+    )
+
+
+def synthesis_contract() -> dict[str, Any]:
     return {
         "owner": "current_parent",
         "semantic_grouping": "parent_reasoning_required",
@@ -296,6 +394,7 @@ def _synthesis_contract() -> dict[str, Any]:
             "confidence",
         ],
         "rules": [
+            "Do not synthesize when ready_for_synthesis is false; report insufficient coverage instead.",
             "Inspect every opinion, including raw_text and failed members.",
             "Call a claim consensus only when at least two independent members support it.",
             "Cite member_id and evidence_id for synthesized claims.",
@@ -313,6 +412,11 @@ def _synthesis_contract() -> dict[str, Any]:
             "confidence": 0.0,
         },
     }
+
+
+def _synthesis_contract() -> dict[str, Any]:
+    """Backward-compatible private alias for older local callers."""
+    return synthesis_contract()
 
 
 def _response_object(value: Any) -> dict[str, Any]:
@@ -360,4 +464,5 @@ __all__ = [
     "ParentPacketError",
     "build_parent_packet",
     "run_parent_committee",
+    "synthesis_contract",
 ]
