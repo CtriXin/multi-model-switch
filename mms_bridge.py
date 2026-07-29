@@ -4555,6 +4555,26 @@ def _responses_reasoning_item_text(item):
     return "\n\n".join(parts).strip()
 
 
+def _responses_tool_output_text(output):
+    """Normalize Responses function/custom tool outputs for Chat history."""
+    if isinstance(output, str):
+        return output
+    if isinstance(output, list):
+        parts = []
+        for part in output:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and part.get("type") in {"input_text", "output_text", "text"}:
+                parts.append(str(part.get("text") or ""))
+        if parts:
+            return "\n".join(parts)
+    if isinstance(output, dict):
+        text = output.get("text")
+        if isinstance(text, str):
+            return text
+    return json.dumps(output, ensure_ascii=False)
+
+
 def _responses_input_to_messages(instructions, input_items, model_name="", *, session_reasoning_content=""):
     """Convert Responses API 'input' array to Chat Completions 'messages'."""
     messages = []
@@ -4620,7 +4640,7 @@ def _responses_input_to_messages(instructions, input_items, model_name="", *, se
             messages.append({
                 "role": "tool",
                 "tool_call_id": item.get("call_id", ""),
-                "content": str(item.get("output", "")),
+                "content": _responses_tool_output_text(item.get("output", "")),
             })
             pending_reasoning_content = ""
             continue

@@ -106,7 +106,11 @@ def test_responses_input_maps_custom_tool_history_to_chat_tool_messages():
         "",
         [
             {"type": "custom_tool_call", "call_id": "call_exec", "name": "exec", "input": "await tools.exec_command({cmd: 'pwd'})"},
-            {"type": "custom_tool_call_output", "call_id": "call_exec", "output": "/tmp"},
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "call_exec",
+                "output": [{"type": "input_text", "text": "/tmp"}],
+            },
         ],
     )
 
