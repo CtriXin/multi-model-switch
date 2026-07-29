@@ -8,7 +8,7 @@ MMS 提供一个独立、opt-in 的 Pi committee sidecar。它不经过 OpenCode
 
 成员没有固定模型身份。每次 mission 创建 `member-01`、`member-02` 等临时成员，再从显式选定的 MMS latest-approved bundle 中动态绑定 model、provider、URL 和 API key。
 
-默认 `frontier` profile 会在每次 mission 启动时，从当前 bundle 为以下家族各选一个 champion：`MiniMax / GPT / Kimi / Gemini / Qwen / DeepSeek / GLM`。它保存的是选择规则，不是七个命名 agent；除 GPT 固定选择 `gpt-5.5` 外，bundle 中出现更新版本后会重新计算。`model-policy` 的 visible/hide 规则仍然是硬约束。
+默认 `balanced` profile 面向普通 review：它从非 Gemini 的可用 family 中用 mission seed 可复现地选择不同 family，并在每个 family 的 primary / cost-aware secondary 之间选择；未选中的同家族模型会作为失败后的 model backup。当前 cost-aware secondary 偏好为 `qwen3.6-plus`、`glm-5.1`、`kimi-for-coding`，明确不使用 `kimi-for-coding-highspeed`。高风险 review 可显式传 `--selection-profile frontier`，从 `MiniMax / GPT / Kimi / Qwen / DeepSeek / GLM` 各选择当前 champion。`model-policy` 的 visible/hide 规则仍然是硬约束。
 
 ## 安全边界
 
