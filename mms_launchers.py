@@ -3412,13 +3412,23 @@ def _is_kimi_k3_claude_env_model(model_name):
     return model == "kimi-k3" or model == "k3" or model.startswith("k3[")
 
 
+def _is_glm_5_2_claude_env_model(model_name):
+    model = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    return model == "glm-5.2"
+
+
 def _apply_claude_context_env_overrides(env, *, context_window, model_names=()):
     window = _coerce_context_window(context_window)
     if window is None:
         return env
     env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(window)
     env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(window - 3000, 10000))
-    if any(_is_kimi_k3_claude_env_model(model) for model in model_names):
+    needs_explicit_context_cap = any(
+        _is_kimi_k3_claude_env_model(model)
+        or (window >= 1_000_000 and _is_glm_5_2_claude_env_model(model))
+        for model in model_names
+    )
+    if needs_explicit_context_cap:
         env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(window)
     return env
 

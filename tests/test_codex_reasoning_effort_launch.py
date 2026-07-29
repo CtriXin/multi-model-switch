@@ -58,6 +58,35 @@ def test_get_export_env_for_claude_kimi_k3_sets_effort_and_context(monkeypatch):
     assert exports["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "1045576"
 
 
+def test_claude_glm_1m_context_sets_client_cap_without_selector():
+    import mms_launchers
+
+    env = {}
+    mms_launchers._apply_claude_context_env_overrides(
+        env,
+        context_window=1_000_000,
+        model_names=("glm-5.2",),
+    )
+
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1000000"
+    assert env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1000000"
+    assert env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] == "997000"
+    assert all("[1m]" not in value for value in env.values())
+
+
+def test_claude_glm_below_1m_does_not_override_client_cap():
+    import mms_launchers
+
+    env = {}
+    mms_launchers._apply_claude_context_env_overrides(
+        env,
+        context_window=200_000,
+        model_names=("glm-5.2",),
+    )
+
+    assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" not in env
+
+
 def test_default_gpt_reasoning_effort_uses_xhigh_for_source_checkout(monkeypatch):
     import mms_launchers
 

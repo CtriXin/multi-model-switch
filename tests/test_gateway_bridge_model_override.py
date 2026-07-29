@@ -194,6 +194,20 @@ def test_gateway_bridge_uses_configured_mimo_context_for_beta(monkeypatch):
     assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]
 
 
+def test_gateway_bridge_keeps_glm_base_model_for_one_m_context(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6[1m]",
+        heavy_model="glm-5.2",
+        context_windows={"glm-5.2": 1_000_000},
+        session_context_window=1_000_000,
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "glm-5.2"
+    assert "[1m]" not in captured["json"]["model"]
+
+
 def test_gateway_bridge_rejects_known_text_only_model_image_input_before_upstream(monkeypatch):
     image_messages = [
         {
