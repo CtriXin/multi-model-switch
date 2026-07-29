@@ -9,6 +9,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 
+def test_responses_json_parse_error_uses_chatcompletions_fallback():
+    import mms_bridge
+
+    assert mms_bridge._should_try_chatcompletions_fallback(
+        400,
+        '{"error":{"message":"Request body must be valid JSON"}}',
+    ) is True
+    assert mms_bridge._should_try_chatcompletions_fallback(
+        400,
+        '{"error":{"message":"input is required"}}',
+    ) is False
+    assert mms_bridge._should_try_chatcompletions_fallback(
+        422,
+        '{"error":{"message":"Request body must be valid JSON"}}',
+    ) is False
+
+
 def test_resolve_native_fallback_routes_finds_same_vendor_direct():
     from mms_native_fallback import resolve_native_fallback_routes
 

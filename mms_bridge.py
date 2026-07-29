@@ -2100,6 +2100,7 @@ def _should_try_chatcompletions_fallback(status_code, body_text):
     unsupported_markers = (
         "messages array is required",
         "field messages is required",
+        "request body must be valid json",
         "unsupported path",
         "route /",
         "not found",
