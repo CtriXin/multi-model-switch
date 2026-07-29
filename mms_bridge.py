@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import copy
@@ -2108,6 +2109,22 @@ def _should_try_chatcompletions_fallback(status_code, body_text):
     return any(marker in lower for marker in unsupported_markers)
 
 
+def _should_cache_chatcompletions_fallback(status_code, body_text):
+    """Cache only proven endpoint incompatibility, never a malformed-request 400."""
+    if status_code in (404, 405, 410, 501):
+        return True
+    if status_code != 400:
+        return False
+    lower = (body_text or "").lower()
+    return any(marker in lower for marker in (
+        "messages array is required",
+        "field messages is required",
+        "unsupported path",
+        "route /",
+        "not found",
+    ))
+
+
 def _chatcompletions_error_requests_messages(body_text):
     lower = str(body_text or "").lower()
     return (
@@ -2188,6 +2205,65 @@ def _append_incident_log(
             with open(incident_path, "a", encoding="utf-8") as f:
                 f.write(line + "\n")
     except Exception:
+        pass
+
+
+def _chat_fallback_wire_summary(payload):
+    """Create a prompt-free fingerprint for an outbound Chat fallback body."""
+    try:
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        json.loads(encoded.decode("utf-8"))
+    except (TypeError, ValueError, UnicodeError) as exc:
+        return {"json_valid": False, "serialization_error": type(exc).__name__}
+
+    messages = payload.get("messages") if isinstance(payload, dict) else []
+    tools = payload.get("tools") if isinstance(payload, dict) else []
+    return {
+        "json_valid": True,
+        "body_bytes": len(encoded),
+        "body_sha256": hashlib.sha256(encoded).hexdigest(),
+        "message_count": len(messages) if isinstance(messages, list) else 0,
+        "tool_count": len(tools) if isinstance(tools, list) else 0,
+    }
+
+
+def _append_chat_fallback_wire_evidence(*, event, model_name, provider_id, target_url, payload, status_code=None, response_body=""):
+    """Write opt-in, secret-free fallback evidence outside MMS config roots."""
+    evidence_path = str(os.environ.get("MMS_BRIDGE_WIRE_LOG_PATH") or "").strip()
+    if not evidence_path:
+        return
+    try:
+        response_bytes = str(response_body or "").encode("utf-8", errors="replace")
+        try:
+            json.loads(response_bytes.decode("utf-8"))
+            response_json_valid = True
+        except (TypeError, ValueError, UnicodeError):
+            response_json_valid = False
+        entry = {
+            "ts": int(time.time()),
+            "event": str(event or ""),
+            "model": str(model_name or ""),
+            "provider_id": str(provider_id or ""),
+            "request_path": urlsplit(str(target_url or "")).path or "/",
+            "status_code": status_code,
+            "request": _chat_fallback_wire_summary(payload),
+            "response": {
+                "body_bytes": len(response_bytes),
+                "body_sha256": hashlib.sha256(response_bytes).hexdigest() if response_bytes else "",
+                "json_valid": response_json_valid,
+            },
+        }
+        parent = os.path.dirname(os.path.abspath(evidence_path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(evidence_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+    except OSError:
         pass
 
 
@@ -5715,7 +5791,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                             continue
                         if _should_try_chatcompletions_fallback(response.status_code, body_text):
                             response.close()
-                            if provider_id:
+                            if provider_id and _should_cache_chatcompletions_fallback(response.status_code, body_text):
                                 _record_bridge_fallback(provider_id, model_name, route_gateway_url)
                             self._do_chatcompletions_fallback(
                                 payload,
@@ -5929,6 +6005,13 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                 _bridge_error_logger.info(
                     "FALLBACK to chatcompletions: model=%s url=%s", model_name, target_url
                 )
+                _append_chat_fallback_wire_evidence(
+                    event="chat_fallback_request",
+                    model_name=model_name,
+                    provider_id=provider_id,
+                    target_url=target_url,
+                    payload=chat_payload,
+                )
                 retry_remaining = 1
                 while True:
                     with httpx.stream(
@@ -5979,6 +6062,15 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         if response.status_code >= 400:
                             last_status = response.status_code
                             last_body = response.read().decode("utf-8", errors="replace")
+                            _append_chat_fallback_wire_evidence(
+                                event="chat_fallback_response",
+                                model_name=model_name,
+                                provider_id=provider_id,
+                                target_url=target_url,
+                                payload=chat_payload,
+                                status_code=last_status,
+                                response_body=last_body,
+                            )
                             break
 
                         self.send_response(200)

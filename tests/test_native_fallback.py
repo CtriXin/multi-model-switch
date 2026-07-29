@@ -24,6 +24,46 @@ def test_responses_json_parse_error_uses_chatcompletions_fallback():
         422,
         '{"error":{"message":"Request body must be valid JSON"}}',
     ) is False
+    assert mms_bridge._should_cache_chatcompletions_fallback(
+        400,
+        '{"error":{"message":"Request body must be valid JSON"}}',
+    ) is False
+    assert mms_bridge._should_cache_chatcompletions_fallback(404, "not found") is True
+
+
+def test_chat_fallback_wire_evidence_is_opt_in_and_prompt_free(monkeypatch, tmp_path):
+    import mms_bridge
+
+    evidence_path = tmp_path / "chat-fallback.jsonl"
+    monkeypatch.delenv("MMS_BRIDGE_WIRE_LOG_PATH", raising=False)
+    mms_bridge._append_chat_fallback_wire_evidence(
+        event="chat_fallback_request",
+        model_name="gpt-test",
+        provider_id="test-provider",
+        target_url="https://relay.example/v1/chat/completions",
+        payload={"messages": [{"role": "user", "content": "secret prompt"}], "tools": []},
+    )
+    assert not evidence_path.exists()
+
+    monkeypatch.setenv("MMS_BRIDGE_WIRE_LOG_PATH", str(evidence_path))
+    payload = {"messages": [{"role": "user", "content": "secret prompt"}], "tools": []}
+    mms_bridge._append_chat_fallback_wire_evidence(
+        event="chat_fallback_response",
+        model_name="gpt-test",
+        provider_id="test-provider",
+        target_url="https://relay.example/v1/chat/completions",
+        payload=payload,
+        status_code=400,
+        response_body='{"error":{"message":"Invalid JSON"}}',
+    )
+
+    entry = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert entry["request_path"] == "/v1/chat/completions"
+    assert entry["status_code"] == 400
+    assert entry["request"]["json_valid"] is True
+    assert entry["request"]["message_count"] == 1
+    assert entry["response"]["json_valid"] is True
+    assert "secret prompt" not in evidence_path.read_text(encoding="utf-8")
 
 
 def test_chatcompletions_projection_keeps_codex_additional_tools():
