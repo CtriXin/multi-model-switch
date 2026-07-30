@@ -21,6 +21,24 @@ def isolate_pi_capability_bundle(monkeypatch):
     monkeypatch.setattr(mms_launchers._pi_support, "resolve_model_capabilities", resolve_without_default_bundle)
 
 
+def test_pi_policy_context_override_beats_provider_profile_default():
+    import mms_pi_support
+
+    result = mms_pi_support._pi_apply_profile_capability_overlay(
+        {
+            "context_window_tokens": 1_048_576,
+            "sources": {"context_window_tokens": "model_policy"},
+        },
+        {
+            "context_window_tokens": 262_144,
+            "sources": {"context_window_tokens": "provider_profile"},
+        },
+    )
+
+    assert result["context_window_tokens"] == 1_048_576
+    assert result["sources"]["context_window_tokens"] == "model_policy"
+
+
 def test_core_pi_cli_is_visible_and_provider_compat_is_implied():
     import mms_core
 

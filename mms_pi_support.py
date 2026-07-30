@@ -604,6 +604,9 @@ def _pi_apply_profile_capability_overlay(caps, profile_caps):
     ):
         if profile_sources.get(field) != "provider_profile":
             continue
+        # A WebUI policy choice must override the provider's conservative default.
+        if sources.get(field) in {"model_policy", "manual_override"}:
+            continue
         merged[field] = copy.deepcopy(profile_caps.get(field))
         sources[field] = "provider_profile"
     return merged
