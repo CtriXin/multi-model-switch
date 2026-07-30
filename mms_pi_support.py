@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -146,6 +147,14 @@ def _pi_retry_extension_path():
 
 def _pi_npx_cache_dir():
     return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
+
+
+def _pi_global_executable():
+    """Use an active global Pi install when available; the wrapper owns fallback."""
+    candidate = shutil.which("pi")
+    if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return ""
 
 
 def _pi_project_directories(project_dir):
@@ -1217,6 +1226,9 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_PROVIDER"] = provider_ref
     env["MMS_PI_SELECTED_MODEL"] = model
     env["MMS_PI_NPX_CACHE"] = _pi_npx_cache_dir()
+    global_pi = _pi_global_executable()
+    if global_pi:
+        env["MMS_PI_EXECUTABLE"] = global_pi
     skill_overlay = _pi_materialize_skill_overlay(session_home, os.getcwd())
     if skill_overlay:
         env["MMS_PI_SKILLS_OVERLAY"] = skill_overlay
@@ -1273,6 +1285,9 @@ def _pi_provider_export_env(runtime, model):
     wrapper_path = launchers._pi_wrapper_path()
     if wrapper_path:
         exports["MMS_PI_BIN"] = wrapper_path
+    global_pi = _pi_global_executable()
+    if global_pi:
+        exports["MMS_PI_EXECUTABLE"] = global_pi
     return exports
 
 

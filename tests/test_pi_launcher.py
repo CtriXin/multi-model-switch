@@ -21,6 +21,17 @@ def isolate_pi_capability_bundle(monkeypatch):
     monkeypatch.setattr(mms_launchers._pi_support, "resolve_model_capabilities", resolve_without_default_bundle)
 
 
+def test_pi_global_executable_uses_path_binary(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    binary = tmp_path / "pi"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setattr(mms_pi_support.shutil, "which", lambda name: str(binary) if name == "pi" else None)
+
+    assert mms_pi_support._pi_global_executable() == str(binary)
+
+
 def test_pi_policy_context_override_beats_provider_profile_default():
     import mms_pi_support
 
