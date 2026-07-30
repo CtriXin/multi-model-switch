@@ -34,5 +34,18 @@ export default function (pi) {
         },
       };
     }
+
+    // The CRS relay intermittently rejects otherwise valid Responses tool payloads.
+    if (
+      provider.startsWith("mms-uscrsopenai") &&
+      /invalid character ['"]?\\(?:t|x[0-9a-f]{2})['"]? in string literal/i.test(errorMessage)
+    ) {
+      return {
+        message: {
+          ...message,
+          errorMessage: `internal_error transient relay parser retry: ${errorMessage}`,
+        },
+      };
+    }
   });
 }
