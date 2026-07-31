@@ -34,5 +34,19 @@ export default function (pi) {
         },
       };
     }
+
+    // NewAPI intermittently rejects an already-valid Pi request while decoding
+    // tool history. Limit retries to its known parser signatures and provider.
+    if (
+      provider.startsWith("mms-newapi-personal-tokyo") &&
+      /invalid character .* in string (literal|escape code)/i.test(errorMessage)
+    ) {
+      return {
+        message: {
+          ...message,
+          errorMessage: `internal_error transient relay parser retry: ${errorMessage}`,
+        },
+      };
+    }
   });
 }

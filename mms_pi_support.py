@@ -830,6 +830,10 @@ def _pi_pick_protocol(runtime, model_name):
     variant_by_protocol = {item["protocol"]: item for item in variants}
     caps = _pi_model_capabilities(runtime, model_name)
     normalized_model = _pi_normalize_model_key(model_name)
+    if "openai_chat_completions" in available and normalized_model.startswith(("glm-", "k3")):
+        # Active GLM/K3 CRS channels accept OpenAI-compatible requests; avoid
+        # routing them through NewAPI's incompatible Anthropic adapter.
+        return variant_by_protocol["openai_chat_completions"], caps
     if "anthropic_messages" in available and (
         normalized_model.startswith("k3") or normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-"))
     ):
