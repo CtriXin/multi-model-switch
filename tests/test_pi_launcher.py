@@ -933,7 +933,9 @@ def test_pi_kimi_k3_exports_1m_context_and_openai_protocol(monkeypatch, tmp_path
     monkeypatch.setattr(
         mms_launchers,
         "_probe_models",
-        lambda runtime, emit_output=False: {"models": ["k3[1m]", "k3", "kimi-for-coding-highspeed"]},
+        lambda runtime, emit_output=False: {
+            "models": ["k3[1m]", "k3", "kimi-k3", "kimi-for-coding-highspeed"]
+        },
     )
 
     exports = mms_launchers.get_export_env(
@@ -949,7 +951,7 @@ def test_pi_kimi_k3_exports_1m_context_and_openai_protocol(monkeypatch, tmp_path
             "protocols": ["anthropic_messages", "openai_chat_completions"],
             "supported_clis": ["pi"],
         },
-        model_info={"model": "k3[1m]"},
+        model_info={"model": "kimi-k3"},
     )
 
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
@@ -961,6 +963,10 @@ def test_pi_kimi_k3_exports_1m_context_and_openai_protocol(monkeypatch, tmp_path
     }
     assert provider["api"] == "openai-completions"
     assert provider["baseUrl"] == "https://api.kimi.com/coding/v1"
+    assert model_by_id["kimi-k3"]["input"] == ["text", "image"]
+    assert model_by_id["kimi-k3"]["contextWindow"] == 1_048_576
+    assert model_by_id["kimi-k3"]["maxTokens"] == 1_048_576
+    assert model_by_id["kimi-k3"]["reasoning"] is True
     assert model_by_id["k3[1m]"]["input"] == ["text", "image"]
     assert model_by_id["k3[1m]"]["contextWindow"] == 1_048_576
     assert model_by_id["k3[1m]"]["maxTokens"] == 1_048_576
