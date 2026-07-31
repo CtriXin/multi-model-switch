@@ -140,6 +140,38 @@ def test_chatcompletions_translator_returns_codex_custom_tool_events():
         event_name == "response.output_item.done"
         and payload["item"]["type"] == "custom_tool_call"
         and payload["item"]["name"] == "exec"
+        and payload["item"]["id"].startswith("ctc_")
+        for event_name, payload in events
+    )
+
+
+def test_chatcompletions_translator_keeps_function_call_id_prefix():
+    import mms_bridge
+
+    translator = mms_bridge._ChatCompletionsToResponsesTranslator("gpt-5.6-terra")
+    events = translator.process_chunk(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_wait",
+                                "function": {"name": "wait", "arguments": '{"id":"job-1"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+    )
+
+    assert any(
+        event_name == "response.output_item.done"
+        and payload["item"]["type"] == "function_call"
+        and payload["item"]["id"].startswith("fc_")
         for event_name, payload in events
     )
 
