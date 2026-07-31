@@ -537,6 +537,46 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
     assert openai_models[0]["maxTokens"] == 128_000
 
 
+def test_pi_glm_dual_protocol_prefers_openai(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["glm-5.2"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "NewAPI Tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com/v1",
+            "anthropic_base_url": "https://relay.example.com/anthropic",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "glm-5.2"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert [item["id"] for item in provider["models"]] == ["glm-5.2"]
+
+
 def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -855,7 +895,7 @@ def test_pi_kimi_family_uses_builtin_max_token_hint(monkeypatch, tmp_path):
     assert provider["models"][0]["maxTokens"] == 32_768
 
 
-def test_pi_kimi_k3_exports_1m_context_and_anthropic_protocol(monkeypatch, tmp_path):
+def test_pi_kimi_k3_exports_1m_context_and_openai_protocol(monkeypatch, tmp_path):
     import mms_capability_resolver
     import mms_launchers
 
@@ -893,7 +933,9 @@ def test_pi_kimi_k3_exports_1m_context_and_anthropic_protocol(monkeypatch, tmp_p
     monkeypatch.setattr(
         mms_launchers,
         "_probe_models",
-        lambda runtime, emit_output=False: {"models": ["k3[1m]", "k3", "kimi-for-coding-highspeed"]},
+        lambda runtime, emit_output=False: {
+            "models": ["k3[1m]", "k3", "kimi-k3", "kimi-for-coding-highspeed"]
+        },
     )
 
     exports = mms_launchers.get_export_env(
@@ -909,33 +951,36 @@ def test_pi_kimi_k3_exports_1m_context_and_anthropic_protocol(monkeypatch, tmp_p
             "protocols": ["anthropic_messages", "openai_chat_completions"],
             "supported_clis": ["pi"],
         },
-        model_info={"model": "k3[1m]"},
+        model_info={"model": "kimi-k3"},
     )
 
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
-    model_by_id = {item["id"]: item for item in provider["models"]}
-    assert provider["api"] == "anthropic-messages"
+    model_by_id = {
+        item["id"]: item
+        for payload_provider in payload["providers"].values()
+        for item in payload_provider["models"]
+    }
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://api.kimi.com/coding/v1"
+    assert model_by_id["kimi-k3"]["input"] == ["text", "image"]
+    assert model_by_id["kimi-k3"]["contextWindow"] == 1_048_576
+    assert model_by_id["kimi-k3"]["maxTokens"] == 1_048_576
+    assert model_by_id["kimi-k3"]["reasoning"] is True
     assert model_by_id["k3[1m]"]["input"] == ["text", "image"]
     assert model_by_id["k3[1m]"]["contextWindow"] == 1_048_576
     assert model_by_id["k3[1m]"]["maxTokens"] == 1_048_576
     assert model_by_id["k3[1m]"]["reasoning"] is True
-    assert model_by_id["k3[1m]"]["thinkingLevelMap"] == {
-        "off": None,
-        "minimal": None,
-        "low": None,
-        "medium": None,
-        "high": None,
-        "xhigh": None,
-        "max": "max",
-    }
     assert model_by_id["k3"]["input"] == ["text", "image"]
     assert model_by_id["k3"]["contextWindow"] == 262_144
     assert model_by_id["k3"]["maxTokens"] == 131_072
     assert model_by_id["k3"]["reasoning"] is True
-    assert model_by_id["k3"]["thinkingLevelMap"] == model_by_id["k3[1m]"]["thinkingLevelMap"]
     assert model_by_id["kimi-for-coding-highspeed"]["contextWindow"] == 262_144
     assert model_by_id["kimi-for-coding-highspeed"]["maxTokens"] == 32_768
+    anthropic_provider = next(
+        item for item in payload["providers"].values() if item["api"] == "anthropic-messages"
+    )
+    assert [item["id"] for item in anthropic_provider["models"]] == ["kimi-for-coding-highspeed"]
 
 
 def test_pi_tokyo_k3_anthropic_export_exposes_only_max(monkeypatch, tmp_path):
