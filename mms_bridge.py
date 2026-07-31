@@ -5180,9 +5180,10 @@ class _ChatCompletionsToResponsesTranslator:
                 if idx not in self.tool_calls:
                     tc_id = tc.get("id", f"call_{uuid.uuid4().hex[:24]}")
                     tc_name = tc.get("function", {}).get("name", "")
+                    item_id_prefix = "ctc" if tc_name in self.custom_tool_names else "fc"
                     self.tool_calls[idx] = {
                         "id": tc_id,
-                        "item_id": f"fc_{uuid.uuid4().hex[:24]}",
+                        "item_id": f"{item_id_prefix}_{uuid.uuid4().hex[:24]}",
                         "name": tc_name,
                         "arguments": "",
                         "custom_input_emitted": "",

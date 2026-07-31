@@ -76,3 +76,101 @@ console.log(JSON.stringify({ normalizedPayload, unchangedPayload: unchangedPaylo
     assert retry_messages[2].startswith("internal_error transient relay parser retry:")
     assert retry_messages[3] is None
     assert retry_messages[4] is None
+
+
+def test_pi_retry_extension_drops_poisoned_reasoning_signatures_after_encrypted_content_error():
+    extension_path = Path(__file__).resolve().parents[1] / "scripts" / "pi-retry-extension.mjs"
+    script = r"""
+const { default: extension } = await import(process.argv[1]);
+
+const handlers = {};
+extension({ on(name, callback) { handlers[name] = callback; } });
+
+const provider = "crs-openai";
+const ctx = { model: { provider } };
+const now = Date.now();
+const buildMessages = () => [
+  { role: "user", content: [{ type: "text", text: "hi" }] },
+  {
+    role: "assistant",
+    provider,
+    timestamp: now - 5000,
+    content: [
+      { type: "thinking", thinking: "old", thinkingSignature: JSON.stringify({ type: "reasoning", id: "rs_old", encrypted_content: "aaa" }) },
+      { type: "text", text: "old answer" },
+    ],
+  },
+  {
+    role: "assistant",
+    provider: "other-provider",
+    timestamp: now - 5000,
+    content: [
+      { type: "thinking", thinking: "foreign", thinkingSignature: JSON.stringify({ type: "reasoning", id: "rs_foreign" }) },
+    ],
+  },
+];
+
+// Before any failure the context hook must be a no-op.
+const beforeFailure = handlers.context({ messages: buildMessages() }, ctx) ?? null;
+
+const errorMessage =
+  'OpenAI API error (400): {"message":"The encrypted content for item rs_old could not be verified. ' +
+  'Reason: Encrypted content could not be decrypted or parsed.","type":"invalid_request_error",' +
+  '"param":null,"code":"invalid_encrypted_content"}';
+const retried = handlers.message_end(
+  { message: { role: "assistant", stopReason: "error", provider, errorMessage } },
+  ctx,
+);
+
+// A fresh reasoning item produced after the failure belongs to the new upstream
+// account and must survive.
+const messages = buildMessages();
+messages.push({
+  role: "assistant",
+  provider,
+  timestamp: Date.now() + 60000,
+  content: [
+    { type: "thinking", thinking: "new", thinkingSignature: JSON.stringify({ type: "reasoning", id: "rs_new" }) },
+  ],
+});
+const afterFailure = handlers.context({ messages }, ctx);
+
+const signatures = afterFailure.messages.map((message) =>
+  Array.isArray(message.content)
+    ? message.content
+        .filter((block) => block.type === "thinking")
+        .map((block) => (block.thinkingSignature === undefined ? null : "kept"))
+    : [],
+);
+const otherProviderUntouched = handlers.context(
+  { messages: buildMessages() },
+  { model: { provider: "unrelated-provider" } },
+) ?? null;
+
+console.log(JSON.stringify({
+  beforeFailure,
+  retriedErrorMessage: retried?.message?.errorMessage ?? null,
+  signatures,
+  thinkingTextKept: afterFailure.messages[1].content[0].thinking,
+  textBlockKept: afterFailure.messages[1].content[1].text,
+  otherProviderUntouched,
+}));
+"""
+
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", script, str(extension_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    output = json.loads(result.stdout)
+    assert output["beforeFailure"] is None
+    assert output["retriedErrorMessage"].startswith(
+        "internal_error transient encrypted reasoning retry:"
+    )
+    # user message, poisoned assistant, foreign-provider assistant, post-failure assistant
+    assert output["signatures"] == [[], [None], ["kept"], ["kept"]]
+    assert output["thinkingTextKept"] == "old"
+    assert output["textBlockKept"] == "old answer"
+    assert output["otherProviderUntouched"] is None
