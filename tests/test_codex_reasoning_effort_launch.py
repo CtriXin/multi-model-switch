@@ -9,6 +9,12 @@ def test_runtime_reasoning_helpers_normalize_values():
     assert mms_launchers._runtime_thinking_enabled({"thinking_mode": "disable"}) is False
     assert mms_launchers._runtime_thinking_enabled({"thinking_mode": "enable"}) is True
     assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "xhigh"}) == "xhigh"
+    assert mms_launchers._runtime_reasoning_effort(
+        {"reasoning_effort": "max"}, model_name="gpt-5.6-luna"
+    ) == "max"
+    assert mms_launchers._runtime_reasoning_effort(
+        {"reasoning_effort": "max"}, model_name="gpt-5.5"
+    ) == "xhigh"
     assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "weird"}) == "high"
     assert mms_launchers._claude_code_effort_env_value("glm-5.2", {"reasoning_effort": "xhigh"}) == "max"
     assert mms_launchers._claude_code_effort_env_value("k3[1m]", {}) == "max"
@@ -155,8 +161,9 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
         lambda runtime, model: [{"provider_id": "codex-fallback", "gateway_url": "https://fallback.test/v1"}],
     )
 
-    def fake_select_reasoning_effort_tui(default="medium"):
+    def fake_select_reasoning_effort_tui(default="medium", **kwargs):
         captured["default_effort"] = default
+        captured["options"] = kwargs.get("options")
         return "xhigh"
 
     monkeypatch.setattr(mms_tui, "select_reasoning_effort_tui", fake_select_reasoning_effort_tui)
@@ -190,6 +197,7 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
         {"provider_id": "codex-fallback", "gateway_url": "https://fallback.test/v1"}
     ]
     assert captured["default_effort"] == "xhigh"
+    assert [value for value, _label in captured["options"]] == ["low", "medium", "high", "xhigh"]
     assert '-c' in captured["cmd"]
     assert 'model_reasoning_effort="xhigh"' in captured["cmd"]
     assert captured["force_subprocess"] is True

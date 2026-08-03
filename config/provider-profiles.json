@@ -70,6 +70,21 @@
             }
           }
         },
+        "gpt-5.6": {
+          "effort": {
+            "responses": {
+              "allowed": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
+        },
         "gpt-5-pro": {
           "effort": {
             "responses": {

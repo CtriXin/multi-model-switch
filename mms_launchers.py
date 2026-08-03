@@ -122,6 +122,7 @@ from mms_project_store import (
     write_slot_marker,
 )
 from mms_provider_profiles import profile_context_window, resolve_provider_profile
+from mms_reasoning_effort import model_supports_max_reasoning_effort
 import mms_pi_support as _pi_support
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
@@ -3382,15 +3383,25 @@ def _runtime_thinking_enabled(runtime):
     return _normalize_thinking_mode((runtime or {}).get("thinking_mode", "enable")) == "enable"
 
 
-def _normalize_reasoning_effort(value, default="high"):
+def _normalize_reasoning_effort(value, default="high", *, model_name=""):
     raw = str(value or "").strip().lower()
-    if raw in {"low", "medium", "high", "xhigh"}:
+    allowed = {"low", "medium", "high", "xhigh"}
+    if model_supports_max_reasoning_effort(model_name):
+        allowed.add("max")
+    if raw in allowed:
         return raw
+    if raw == "max":
+        return "xhigh"
     return default if default in {"low", "medium", "high", "xhigh"} else "high"
 
 
-def _runtime_reasoning_effort(runtime, default="high"):
-    return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
+def _runtime_reasoning_effort(runtime, default="high", *, model_name=""):
+    model_name = model_name or (runtime or {}).get("model", "")
+    return _normalize_reasoning_effort(
+        (runtime or {}).get("reasoning_effort", default),
+        default=default,
+        model_name=model_name,
+    )
 
 
 def _claude_code_effort_env_value(model_name, runtime):
@@ -9488,7 +9499,11 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
         _thinking_enabled = _runtime_thinking_enabled(runtime)
         _gpt_default_effort = _default_gpt_reasoning_effort()
         if "reasoning_effort" in runtime:
-            _reasoning_effort = _runtime_reasoning_effort(runtime, default=_gpt_default_effort)
+            _reasoning_effort = _runtime_reasoning_effort(
+                runtime,
+                default=_gpt_default_effort,
+                model_name=probe_model,
+            )
         elif _gpt_openai_url and _is_gpt_model(probe_model):
             from mms_tui import select_reasoning_effort_tui as _sel_effort_claude
             _reasoning_effort = _sel_effort_claude(default=_gpt_default_effort)
@@ -11517,7 +11532,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         bridge_label = f"模型 {model}" if model else "当前模型"
         console.print(f"[dim]{bridge_label} 通过本地 Chat Completions bridge 启动 Codex...[/dim]")
         bridge_thinking_enabled = _runtime_thinking_enabled(runtime)
-        bridge_reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
+        bridge_reasoning_effort = _runtime_reasoning_effort(runtime, default="high", model_name=model)
         rescue_bridge_kwargs = _rescue_bridge_kwargs()
         with codex_chatcompletions_bridge(
             gateway_url,
@@ -11564,10 +11579,16 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
     thinking_enabled = _runtime_thinking_enabled(runtime)
     gpt_default_effort = _default_gpt_reasoning_effort()
     if "reasoning_effort" in runtime:
-        reasoning_effort = _runtime_reasoning_effort(runtime, default=gpt_default_effort)
+        reasoning_effort = _runtime_reasoning_effort(runtime, default=gpt_default_effort, model_name=model)
     else:
-        from mms_tui import select_reasoning_effort_tui as _sel_effort
-        reasoning_effort = _sel_effort(default=gpt_default_effort)
+        from mms_tui import (
+            _reasoning_effort_options_for_model,
+            select_reasoning_effort_tui as _sel_effort,
+        )
+        reasoning_effort = _sel_effort(
+            default=gpt_default_effort,
+            options=_reasoning_effort_options_for_model(model),
+        )
     console.print(f"[dim]thinking: {'on' if thinking_enabled else 'off'} · effort: {reasoning_effort}[/dim]")
     native_fallback_routes = _resolve_codex_responses_fallback_routes(runtime, model)
     if native_fallback_routes:

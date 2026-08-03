@@ -14,6 +14,11 @@ sys.path.insert(0, str(REPO_ROOT))
 import mms_flywheel
 
 
+def test_launcher_effort_preserves_model_specific_max():
+    assert mms_flywheel._launcher_effort("max", "gpt-5.6-luna") == "max"
+    assert mms_flywheel._launcher_effort("max", "gpt-5.5") == "xhigh"
+
+
 def _write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")

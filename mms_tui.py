@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from math import pow
 from mms_fake_upstream import status_payload as _fake_upstream_status_payload
 from mms_i18n import pick as _L, get_language as _get_language
+from mms_reasoning_effort import model_supports_max_reasoning_effort
 from mms_state_io import resolve_mms_config_dir
 
 # CJK locale 下 ambiguous-width 字符渲染为 2 列
@@ -4405,6 +4406,14 @@ _EFFORT_OPTIONS = [
     ("high",   "High   — 深度思考，慢但更准"),
     ("xhigh",  "XHigh  — 更深推理，最慢但更稳"),
 ]
+_MAX_EFFORT_OPTION = ("max", "Max    — 模型支持时的最高推理")
+
+
+def _reasoning_effort_options_for_model(model_info=None):
+    options = list(_EFFORT_OPTIONS)
+    if model_supports_max_reasoning_effort(model_info):
+        options.append(_MAX_EFFORT_OPTION)
+    return options
 
 
 def _confirm_model_tokens(model_info):
@@ -4567,9 +4576,11 @@ def _confirm_profile_capabilities(model_info, runtime=None):
 
 
 def _confirm_effort_values(profile_caps, model_tokens):
-    values = [value for value, _label in _EFFORT_OPTIONS]
     allowed = set(profile_caps.get("effort_allowed") or [])
     effort_map = profile_caps.get("effort_map") if isinstance(profile_caps.get("effort_map"), dict) else {}
+    values = [value for value, _label in _EFFORT_OPTIONS]
+    if model_supports_max_reasoning_effort(model_tokens):
+        values.append("max")
     if allowed:
         filtered = [
             value for value in values
@@ -4577,12 +4588,15 @@ def _confirm_effort_values(profile_caps, model_tokens):
         ]
         return filtered or values
     if not any(_confirm_is_gpt_like_token(token) for token in model_tokens):
-        return [value for value in values if value != "xhigh"]
+        return [value for value in values if value not in {"xhigh", "max"}]
+    if not model_supports_max_reasoning_effort(model_tokens):
+        return [value for value in values if value != "max"]
     return values
 
 
-def select_reasoning_effort_tui(default="high"):
-    """选择 GPT reasoning effort。返回 'low' / 'medium' / 'high' / 'xhigh'，Esc 返回 default。"""
+def select_reasoning_effort_tui(default="high", *, options=None):
+    """选择 GPT reasoning effort。Esc 返回 default。"""
+    options = list(options or _EFFORT_OPTIONS)
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -4590,7 +4604,7 @@ def select_reasoning_effort_tui(default="high"):
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
 
-        default_idx = next((i for i, (v, _) in enumerate(_EFFORT_OPTIONS) if v == default), 1)
+        default_idx = next((i for i, (v, _) in enumerate(options) if v == default), 1)
         sel = default_idx
 
         while True:
@@ -4600,7 +4614,7 @@ def select_reasoning_effort_tui(default="high"):
             stdscr.addstr(1, 2, title, curses.color_pair(1) | curses.A_BOLD)
             stdscr.addstr(2, 2, "─" * min(40, max_w - 4), curses.color_pair(2))
 
-            for i, (_, label) in enumerate(_EFFORT_OPTIONS):
+            for i, (_, label) in enumerate(options):
                 row = 4 + i
                 if row >= max_y - 1:
                     break
@@ -4616,11 +4630,11 @@ def select_reasoning_effort_tui(default="high"):
 
             key = stdscr.getch()
             if key == curses.KEY_UP:
-                sel = (sel - 1) % len(_EFFORT_OPTIONS)
+                sel = (sel - 1) % len(options)
             elif key == curses.KEY_DOWN:
-                sel = (sel + 1) % len(_EFFORT_OPTIONS)
+                sel = (sel + 1) % len(options)
             elif key in (10, 13):
-                return _EFFORT_OPTIONS[sel][0]
+                return options[sel][0]
             elif key == 27:
                 return default
 
