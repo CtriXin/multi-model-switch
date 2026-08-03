@@ -1054,12 +1054,17 @@ def _transport_evidence_for_route(
     }
 
 
-def _launcher_effort(value: Any) -> str:
+def _launcher_effort(value: Any, model_name: Any = "") -> str:
     raw = str(value or "").strip().lower()
     if raw in {"low", "medium", "high", "xhigh"}:
         return raw
     if raw == "max":
-        return "xhigh"
+        try:
+            from mms_reasoning_effort import model_supports_max_reasoning_effort
+
+            return "max" if model_supports_max_reasoning_effort(model_name) else "xhigh"
+        except Exception:
+            return "xhigh"
     if raw in {"none", "minimal"}:
         return "low"
     return raw
@@ -1109,7 +1114,7 @@ def _runtime_from_route(resolved: dict[str, Any], route: dict[str, Any]) -> dict
     if native_fallback_routes:
         runtime["native_fallback_routes"] = native_fallback_routes
         runtime["native_fallback_max"] = len(native_fallback_routes)
-    effort = _launcher_effort(resolved.get("reasoning_effort"))
+    effort = _launcher_effort(resolved.get("reasoning_effort"), resolved.get("model"))
     if effort:
         runtime["reasoning_effort"] = effort
     for key in ("proxy", "no_proxy", "provider_profile", "profile"):
@@ -1248,6 +1253,8 @@ def _codex_exec_args(*, cwd: Path, prompt: str, sandbox: str) -> list[str]:
 def _run_codex_headless(*, runtime: dict[str, Any], model: str, prompt: str, cwd: Path, sandbox: str) -> tuple[int, str, str]:
     import mms_launchers
 
+    runtime = dict(runtime)
+    runtime.setdefault("model", model)
     mms_launchers._ensure_bridge_helpers()  # noqa: SLF001 - flywheel runner reuses launcher bridge setup.
     mms_launchers._ensure_speed_stats()  # noqa: SLF001 - keep launcher lazy imports initialized.
     mms_launchers.gateway_health_check(runtime)
@@ -1390,6 +1397,7 @@ def _run_claude_headless(*, runtime: dict[str, Any], model: str, prompt: str, cw
     mms_launchers._ensure_speed_stats()  # noqa: SLF001 - keep launcher lazy imports initialized.
     wire_evidence_sink = runtime.get("_wire_evidence_sink") if isinstance(runtime.get("_wire_evidence_sink"), dict) else None
     runtime = dict(runtime)
+    runtime.setdefault("model", model)
     runtime.pop("_wire_evidence_sink", None)
     if sandbox == "danger-full-access":
         runtime["bypass"] = True
