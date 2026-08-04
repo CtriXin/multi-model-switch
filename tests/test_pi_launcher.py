@@ -399,6 +399,7 @@ def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacem
         lambda *parts: str(real_home.joinpath(*parts)),
     )
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers._pi_support, "_pi_materialize_skill_overlay", lambda *_args: "")
     monkeypatch.setattr(mms_launchers, "_scrub_inherited_runtime_env", lambda env, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_inject_real_home_hints", lambda env, include_xdg=False: env)
     monkeypatch.setattr(mms_launchers, "_inject_host_capability_hints", lambda env: env)
@@ -708,7 +709,7 @@ def test_pi_profile_derived_effort_maps_expose_only_truthful_levels():
         "medium": "medium",
         "high": "high",
         "xhigh": "xhigh",
-        "max": None,
+        "max": "max",
     }
 
     kimi_map = mms_launchers._pi_model_thinking_level_map(
