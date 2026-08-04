@@ -32,6 +32,68 @@ def test_pi_global_executable_uses_path_binary(monkeypatch, tmp_path):
     assert mms_pi_support._pi_global_executable() == str(binary)
 
 
+def test_glint_pi_bridge_requires_glint_pane_and_managed_extension(monkeypatch, tmp_path):
+    import mms_pi_support
+
+    real_home = tmp_path / "real-home"
+    bridge = real_home / ".pi" / "agent" / "extensions" / "glint-agent-bridge.ts"
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    pane_env = {
+        "GLINT_PANE_ID": "workspace:pane",
+        "GLINT_AGENT_SOCK": "/tmp/glint.sock",
+    }
+
+    assert mms_pi_support._glint_pi_bridge_path(pane_env) == ""
+    bridge.parent.mkdir(parents=True)
+    bridge.write_text("export default function () {}\n", encoding="utf-8")
+    assert mms_pi_support._glint_pi_bridge_path(pane_env) == ""
+
+    bridge.write_text("// Glint pi extension\n", encoding="utf-8")
+    assert mms_pi_support._glint_pi_bridge_path(pane_env) == str(bridge)
+    assert mms_pi_support._glint_pi_bridge_path({"GLINT_PANE_ID": "workspace:pane"}) == ""
+
+
+def test_launch_pi_adds_glint_bridge_as_explicit_extension(monkeypatch):
+    import mms_pi_support
+
+    captured = {}
+    bridge = "/tmp/glint-agent-bridge.ts"
+    env = {
+        "MMS_PI_PROVIDER": "mms-relay-a",
+        "MMS_PI_SELECTED_MODEL": "gpt-5.4",
+    }
+    monkeypatch.setattr(mms_pi_support, "_pi_gateway_env", lambda *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_pi_support, "_pi_effective_selected_model", lambda *_args: "gpt-5.4")
+    monkeypatch.setattr(mms_pi_support, "_glint_pi_bridge_path", lambda _env: bridge)
+    monkeypatch.setattr(
+        mms_pi_support,
+        "_exec_or_run",
+        lambda cmd, launch_env, once: captured.update(cmd=cmd, env=launch_env, once=once),
+    )
+
+    mms_pi_support.launch_pi(
+        {"model": "gpt-5.4"},
+        {"id": "relay-a", "auth_mode": "api_key"},
+        once=True,
+    )
+
+    assert captured["cmd"] == [
+        "pi",
+        "--provider",
+        "mms-relay-a",
+        "--model",
+        "gpt-5.4",
+        "--extension",
+        bridge,
+    ]
+    assert captured["env"] == env
+    assert captured["once"] is True
+
+
 def test_pi_policy_context_override_beats_provider_profile_default():
     import mms_pi_support
 

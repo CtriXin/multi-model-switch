@@ -145,6 +145,27 @@ def _pi_retry_extension_path():
     return ""
 
 
+def _glint_pi_bridge_path(env):
+    """Return Glint's managed Pi bridge only for a Glint-owned pane."""
+    env = env if isinstance(env, dict) else {}
+    if not str(env.get("GLINT_PANE_ID") or "").strip():
+        return ""
+    if not str(env.get("GLINT_AGENT_SOCK") or "").strip():
+        return ""
+
+    extension_path = Path(
+        _real_user_path(".pi", "agent", "extensions", "glint-agent-bridge.ts")
+    )
+    try:
+        if not extension_path.is_file():
+            return ""
+        if "Glint pi extension" not in extension_path.read_text(encoding="utf-8"):
+            return ""
+    except (OSError, UnicodeError):
+        return ""
+    return str(extension_path)
+
+
 def _pi_npx_cache_dir():
     return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
 
@@ -1312,6 +1333,10 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
     cmd = ["pi", "--provider", provider_ref]
     if model:
         cmd += ["--model", model]
+    glint_bridge = _glint_pi_bridge_path(env)
+    if glint_bridge:
+        # MMS isolates PI_CODING_AGENT_DIR, so load the global Glint bridge explicitly.
+        cmd += ["--extension", glint_bridge]
     skill_overlay = str(env.get("MMS_PI_SKILLS_OVERLAY") or "").strip()
     if skill_overlay:
         cmd += ["--no-skills", "--skill", skill_overlay]
