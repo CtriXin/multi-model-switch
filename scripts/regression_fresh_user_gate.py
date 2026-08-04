@@ -64,6 +64,7 @@ _PYTEST_TARGETS = [
     "tests/test_reset_mms_install.py",
     "tests/test_install_script_paths.py",
     "tests/test_nsr_bundled_wrapper.py",
+    "tests/test_pi_launcher.py",
     "tests/test_mms_installer_runtime.py",
     "tests/test_command_smoke.py",
 ]
@@ -76,6 +77,8 @@ _QUICK_PYTEST_TARGETS = [
     "tests/test_mms_resume_command.py::test_handle_resume_command_passes_claude_resume_args_and_project",
     "tests/test_install_script_paths.py",
     "tests/test_nsr_bundled_wrapper.py",
+    "tests/test_pi_launcher.py::test_glint_pi_bridge_requires_glint_pane_and_managed_extension",
+    "tests/test_pi_launcher.py::test_launch_pi_adds_glint_bridge_as_explicit_extension",
 ]
 
 _SCENARIO_MATRIX = [
