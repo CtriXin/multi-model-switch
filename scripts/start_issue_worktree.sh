@@ -107,6 +107,10 @@ main() {
   info "creating $worktree_path on $branch"
   git -C "$REPO_ROOT" worktree add -b "$branch" "$worktree_path" HEAD
 
+  # TB-09.1:fresh worktree 自动就位(node_modules symlink 契约 + hook 兼容),fail-soft 不挡创建
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/worktree-post-create.sh" "$REPO_ROOT" "$worktree_path" \
+    || info "worktree-post-create 警告(不阻断;见上)"
+
   cat <<EOF
 
 Created issue worktree.
