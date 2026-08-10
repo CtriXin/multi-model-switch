@@ -4009,6 +4009,13 @@ def _copy_existing_provider(
     elif endpoint and not endpoint.startswith("/"):
         endpoint = "/" + endpoint
     provider["models_endpoint"] = endpoint or "/models"
+    if "secret_ref" in provider_payload:
+        # New providers may reuse an existing preview secret without resubmitting its value.
+        secret_ref = _safe_text(provider_payload.get("secret_ref"))
+        if secret_ref and not _is_redacted_secret_token(secret_ref):
+            provider["secret_ref"] = secret_ref
+        else:
+            provider.pop("secret_ref", None)
     if "openai_base_url" in provider_payload or "base_url" in provider_payload:
         openai_base = _safe_text(provider_payload.get("openai_base_url") or provider_payload.get("base_url"))
         if (

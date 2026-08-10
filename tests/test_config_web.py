@@ -613,6 +613,46 @@ def test_config_web_plan_removes_approved_selector_from_fallback_models(tmp_path
     assert plan["summary"]["will_write_config"] is True
 
 
+def test_config_web_plan_preserves_new_provider_secret_ref(tmp_path):
+    payload = {
+        "draft": {
+            "provider_default": "newapi-company",
+            "providers": [
+                {
+                    "id": "newapi-company",
+                    "name": "Company NewAPI",
+                    "enabled": True,
+                    "role": "auto",
+                    "priority": 10,
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude", "codex", "opencode", "pi"],
+                    "openai_base_url": "https://chat.adsconflux.xyz/openapi/v1",
+                    "anthropic_base_url": "https://chat.adsconflux.xyz/openapi/v1",
+                    "models_endpoint": "/models",
+                    "fallback_models": ["gpt-5.5"],
+                    "hidden_models": [],
+                    "models": [{"id": "gpt-5.5", "visible": True}],
+                    "secret_ref": "pending-webui:newapi_company:api_key",
+                    "update_credentials": False,
+                }
+            ],
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(
+        {"providers": []},
+        payload,
+        config_path=str(tmp_path / "mms-next" / "config.toml"),
+        command_name="mmf",
+    )
+
+    provider = plan["config"]["providers"][0]
+    assert provider["secret_ref"] == "pending-webui:newapi_company:api_key"
+    assert "api_key" not in provider
+    assert "openai_api_key" not in provider
+    assert plan["credential_updates"] == []
+
+
 def test_config_web_bundle_runtime_exposes_derived_aliases_for_hiding():
     cfg = {
         "providers": [
