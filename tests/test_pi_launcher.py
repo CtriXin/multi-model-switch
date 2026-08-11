@@ -239,6 +239,43 @@ def test_pi_gateway_root_and_sessions_honor_explicit_mms_config_root(monkeypatch
 
     assert mms_pi_support._pi_gateway_root() == str(preview_root / "pi-gateway")
     assert mms_pi_support._pi_session_dir() == str(preview_root / "pi-gateway" / "sessions")
+    assert mms_pi_support._pi_shared_agent_bin() == str(preview_root / "pi-gateway" / "agent-bin")
+
+
+def test_pi_shared_agent_bin_link_is_reused_across_sessions(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_pi_support
+
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_selected_mms_config_root",
+        lambda _env: str(preview_root),
+    )
+
+    shared_bin = mms_pi_support._pi_shared_agent_bin()
+
+    sessions_dir = preview_root / "pi-gateway" / "s"
+    sessions_dir.mkdir(parents=True)
+
+    first_agent = sessions_dir / "111" / ".pi" / "agent"
+    mms_pi_support._pi_link_shared_agent_bin(str(first_agent))
+    assert os.path.islink(str(first_agent / "bin"))
+    assert os.readlink(str(first_agent / "bin")) == shared_bin
+
+    tool_marker = first_agent / "bin" / "rg"
+    tool_marker.write_text("binary")
+
+    second_agent = sessions_dir / "222" / ".pi" / "agent"
+    mms_pi_support._pi_link_shared_agent_bin(str(second_agent))
+    assert os.path.islink(str(second_agent / "bin"))
+    assert os.readlink(str(second_agent / "bin")) == shared_bin
+    assert (second_agent / "bin" / "rg").read_text() == "binary"
+
+    import shutil
+    shutil.rmtree(str(sessions_dir / "111"))
+    assert (Path(shared_bin) / "rg").exists(), "shared bin must survive per-PID cleanup"
 
 
 def test_pi_wrapper_serializes_cold_npx_prewarm(tmp_path):
@@ -600,6 +637,46 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
     assert openai_models[0]["maxTokens"] == 128_000
 
 
+def test_pi_qwen38_dual_protocol_prefers_openai(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["qwen3.8-max-preview"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-personal-tokyo",
+            "name": "NewAPI Tokyo",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com/v1",
+            "anthropic_base_url": "https://relay.example.com/anthropic",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "qwen3.8-max-preview"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert [item["id"] for item in provider["models"]] == ["qwen3.8-max-preview"]
+
+
 def test_pi_glm_dual_protocol_prefers_openai(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -875,6 +952,47 @@ def test_pi_mimo_openai_provider_disables_developer_role(monkeypatch, tmp_path):
     assert provider["api"] == "openai-completions"
     assert provider["baseUrl"] == "https://relay.example.com/v1"
     assert provider["compat"]["supportsDeveloperRole"] is False
+
+
+def test_pi_dashscope_openai_provider_disables_developer_role(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["qwen3.8-max-preview"]},
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "newapi-qwen-relay",
+            "name": "NewAPI Qwen Relay",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-relay",
+            "openai_base_url": "https://relay.example.com",
+            "anthropic_base_url": "https://relay.example.com",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "qwen3.8-max-preview"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert provider["api"] == "openai-completions"
+    assert provider["baseUrl"] == "https://relay.example.com/v1"
+    assert provider["compat"]["supportsDeveloperRole"] is False
+    assert provider["compat"]["thinkingFormat"] == "qwen"
 
 
 def test_pi_deepseek_openai_provider_disables_developer_role(monkeypatch, tmp_path):

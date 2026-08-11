@@ -260,6 +260,7 @@ _PI_ADAPTIVE_CLAUDE_MODELS = {
 
 _PI_OPENAI_PROFILE_COMPAT = {
     "dashscope-openai": {
+        "supportsDeveloperRole": False,
         "thinkingFormat": "qwen",
     },
     "deepseek": {
@@ -852,10 +853,15 @@ def _pi_pick_protocol(runtime, model_name):
     caps = _pi_model_capabilities(runtime, model_name)
     normalized_model = _pi_normalize_model_key(model_name)
     if "openai_chat_completions" in available and (
-        normalized_model.startswith("glm-") or _pi_is_kimi_k3_selector(normalized_model)
+        normalized_model.startswith("glm-")
+        or _pi_is_kimi_k3_selector(normalized_model)
+        or normalized_model.startswith(("qwen3.7", "qwen3.8"))
     ):
-        # Active GLM/K3 CRS channels accept OpenAI-compatible requests; avoid
-        # routing K3 aliases through NewAPI's incompatible Anthropic adapter.
+        # GLM/K3 CRS channels accept OpenAI-compatible requests. Newer Qwen
+        # tiers (3.7+/3.8+) are not in the bridge thinking-allow list, so Pi
+        # (which bypasses the bridge) would forward thinking payloads to a
+        # NewAPI Anthropic adapter that intermittently drops the stop reason;
+        # the OpenAI path carries enable_thinking via dashscope-openai compat.
         return variant_by_protocol["openai_chat_completions"], caps
     if "anthropic_messages" in available and (
         normalized_model.startswith("k3") or normalized_model.startswith(("claude-", "qwen", "kimi-", "gemini-"))
@@ -1184,6 +1190,19 @@ def _pi_session_dir():
     return os.path.join(_pi_gateway_root(), "sessions")
 
 
+def _pi_shared_agent_bin():
+    """Gateway-level shared tools dir, survives per-PID session cleanup.
+
+    Pi auto-installs tools (e.g. ripgrep) into ``<agent_dir>/bin``. Because each
+    launch gets a fresh per-PID ``agent_dir`` under ``s/<pid>`` and stale ones are
+    reaped by ``_cleanup_stale_sessions``, those downloads are thrown away every
+    launch and re-fetched. Pointing every session's ``agent_dir/bin`` at this
+    shared dir (via symlink) lets the first install be reused by later sessions.
+    Lives directly under ``pi-gateway`` (not under ``s/``) so cleanup never touches it.
+    """
+    return os.path.join(_pi_gateway_root(), "agent-bin")
+
+
 def _seed_pi_trust_store(agent_dir, project_dir):
     """Seed the isolated agentDir's trust.json so project trust follows the session.
 
@@ -1216,6 +1235,31 @@ def _seed_pi_trust_store(agent_dir, project_dir):
         return
 
 
+def _pi_link_shared_agent_bin(agent_dir):
+    """Link ``<agent_dir>/bin`` to the gateway-level shared tools dir.
+
+    Pi auto-downloads tools (ripgrep, etc.) into ``<agent_dir>/bin``. The per-PID
+    ``agent_dir`` is removed when its session is reaped, so those downloads are
+    re-fetched on every launch. Symlinking ``bin`` at a shared gateway dir means
+    the first download is reused by all later sessions. Best-effort: any failure
+    leaves pi free to create its own ``bin``.
+    """
+    try:
+        shared_bin = _pi_shared_agent_bin()
+        os.makedirs(shared_bin, exist_ok=True)
+        link_path = os.path.join(agent_dir, "bin")
+        if os.path.islink(link_path) or os.path.exists(link_path):
+            return
+        os.makedirs(agent_dir, exist_ok=True)
+        try:
+            os.symlink(shared_bin, link_path)
+        except OSError:
+            # Symlink failed (e.g. cross-device): leave pi to manage its own bin.
+            return
+    except Exception:
+        return
+
+
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     launchers = _launchers_module()
@@ -1240,6 +1284,7 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_SOFT_HOME"] = "1"
 
     agent_dir = os.path.join(session_home, ".pi", "agent")
+    _pi_link_shared_agent_bin(agent_dir)
     session_dir = _pi_session_dir()
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     settings_path = _write_pi_settings_config(agent_dir)
