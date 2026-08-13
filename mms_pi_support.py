@@ -145,6 +145,21 @@ def _pi_retry_extension_path():
     return ""
 
 
+def _pi_vision_extension_path():
+    """Vision relay extension: lets non-multimodal main models see images via a
+    configured vision model (MiniMax-M3/kimi/gpt-5.5 fallback). Same injection
+    pattern as pi-retry-extension; discovered dynamically from the models.json
+    that mms materializes per session."""
+    extension_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "scripts",
+        "pi-vision-extension.ts",
+    )
+    if os.path.isfile(extension_path):
+        return extension_path
+    return ""
+
+
 def _glint_pi_bridge_path(env):
     """Return Glint's managed Pi bridge only for a Glint-owned pane."""
     env = env if isinstance(env, dict) else {}
@@ -238,9 +253,13 @@ def _pi_settings_payload():
             "baseDelayMs": 1000,
         }
     }
-    extension_path = _pi_retry_extension_path()
-    if extension_path:
-        payload["extensions"] = [extension_path]
+    extensions = []
+    for _path_fn in (_pi_retry_extension_path, _pi_vision_extension_path):
+        _extension_path = _path_fn()
+        if _extension_path:
+            extensions.append(_extension_path)
+    if extensions:
+        payload["extensions"] = extensions
     return payload
 
 
