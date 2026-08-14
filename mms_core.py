@@ -17131,6 +17131,13 @@ def main():
             from mms_review_dispatch import handle_review_dispatch_command
 
             raise SystemExit(handle_review_dispatch_command(argv[1:], command_name=current_command()))
+        if command == "closeout":
+            # TB-46: explicit opt-in state-core closeout reference binding.
+            # Only an explicit `mms closeout` invocation reaches state-core;
+            # never wired to Stop/SessionEnd (see docs/STATE_CORE_CLOSEOUT_BINDING.md).
+            from mms_state_core_closeout import handle_closeout_command
+
+            raise SystemExit(handle_closeout_command(argv[1:], command_name=current_command()))
         if command == "guard":
             handle_guard_command(argv[1:], bootstrap_cfg=bootstrap_cfg)
             return
@@ -17288,6 +17295,7 @@ def main():
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} review-dispatch --root <artifact-root> 生成/启动 OpenCode Review Hub 派发\n"
+            f"  {current_command()} closeout --task-id <id> --root <repo>  显式 state-core 收口(read-back completion_ref；绝不接 Stop)\n"
             f"  {current_command()} flywheel resolve/run --lane worker --priority AI-P3  解析/运行 Flywheel lane\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
