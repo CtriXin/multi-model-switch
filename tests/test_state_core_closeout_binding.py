@@ -278,6 +278,10 @@ class CloseoutAdapterContractTests(unittest.TestCase):
                 "status": "passed", "task_id": "task-a",
                 "completion_ref": ref, "errors": [7],
             }),
+            "extra-field": json.dumps({
+                "status": "passed", "task_id": "task-a",
+                "completion_ref": ref, "errors": [], "warning": "hidden",
+            }),
         }
         for label, verify_stdout in invalid_verify_payloads.items():
             with self.subTest(label=label):
@@ -399,6 +403,9 @@ class CloseoutAdapterContractTests(unittest.TestCase):
             "fatal: wrapper failed",
             "error: cannot reach done; blockers: ['missing evidence']",
             "warning\nfatal: multiline",
+            " ",
+            "\n",
+            "\t\r\n",
         ):
             with self.subTest(stage="closeout", stderr=stderr):
                 with mock.patch.object(
@@ -425,6 +432,75 @@ class CloseoutAdapterContractTests(unittest.TestCase):
                 self.assertEqual("verify_failed", result.status)
                 self.assertEqual("verify_success_stderr", result.reason)
                 self.assertFalse(result.verified)
+
+    def test_duplicate_json_members_fail_closed_in_both_success_payloads(self) -> None:
+        revision = "c" * 64
+        ref = _completion_ref("task-a", revision)
+        close_pairs = [
+            ("status", "done"),
+            ("task_id", "task-a"),
+            ("completion_ref", ref),
+            ("revision_sha256", revision),
+            ("state_path", "/tmp/root/.state/task-a/task-state.json"),
+        ]
+        close_conflicts = {
+            "status": "failed",
+            "task_id": "task-b",
+            "completion_ref": _completion_ref("task-a", "d" * 64),
+            "revision_sha256": "d" * 64,
+        }
+
+        def raw_object(pairs: list[tuple[str, object]]) -> str:
+            return "{" + ",".join(
+                f"{json.dumps(key)}:{json.dumps(value)}" for key, value in pairs
+            ) + "}"
+
+        for key, conflict in close_conflicts.items():
+            for order in ("before", "after"):
+                with self.subTest(stage="closeout", key=key, order=order):
+                    duplicate = [(key, conflict)]
+                    pairs = duplicate + close_pairs if order == "before" else close_pairs + duplicate
+                    with mock.patch.object(
+                        adapter,
+                        "_run_cli",
+                        return_value=subprocess.CompletedProcess(
+                            [], 0, raw_object(pairs), ""
+                        ),
+                    ):
+                        result = adapter.closeout_task(
+                            task_id="task-a", root="/tmp/root", cli=Path("/fake/cli.py")
+                        )
+                    self.assertEqual("error", result.status)
+                    self.assertEqual("invalid_closeout_stdout", result.reason)
+
+        close_payload = raw_object(close_pairs)
+        verify_pairs = [
+            ("status", "passed"),
+            ("task_id", "task-a"),
+            ("completion_ref", ref),
+            ("errors", []),
+        ]
+        verify_conflicts = {
+            "status": "failed",
+            "task_id": "task-b",
+            "completion_ref": _completion_ref("task-a", "d" * 64),
+            "errors": ["fatal"],
+        }
+        for key, conflict in verify_conflicts.items():
+            for order in ("before", "after"):
+                with self.subTest(stage="verify", key=key, order=order):
+                    duplicate = [(key, conflict)]
+                    pairs = duplicate + verify_pairs if order == "before" else verify_pairs + duplicate
+                    calls = [
+                        subprocess.CompletedProcess([], 0, close_payload, ""),
+                        subprocess.CompletedProcess([], 0, raw_object(pairs), ""),
+                    ]
+                    with mock.patch.object(adapter, "_run_cli", side_effect=calls):
+                        result = adapter.closeout_task(
+                            task_id="task-a", root="/tmp/root", cli=Path("/fake/cli.py")
+                        )
+                    self.assertEqual("verify_failed", result.status)
+                    self.assertEqual("invalid_verify_stdout", result.reason)
 
     def test_nonzero_verify_with_malformed_errors_never_crashes_or_splits(self) -> None:
         revision = "c" * 64
@@ -572,6 +648,24 @@ class CloseoutAdapterContractTests(unittest.TestCase):
                 status, reason, blockers = adapter._classify_closeout_failure(
                     f"error: cannot reach done; blockers: {suffix}"
                 )
+                self.assertEqual("error", status)
+                self.assertEqual("cli_rejected_unknown", reason)
+                self.assertTrue(blockers)
+
+    def test_whitespace_tainted_blocker_envelopes_are_unknown_errors(self) -> None:
+        canonical = "error: cannot reach done; blockers: ['missing evidence']"
+        tainted = (
+            "error: cannot reach done; blockers:  ['missing evidence']",
+            "error: cannot reach done; blockers: ['missing evidence'] ",
+            " " + canonical,
+            canonical + " ",
+            "\n" + canonical + "\n",
+            canonical + "\n\n",
+            "\u2003" + canonical,
+        )
+        for stderr in tainted:
+            with self.subTest(stderr=repr(stderr)):
+                status, reason, blockers = adapter._classify_closeout_failure(stderr)
                 self.assertEqual("error", status)
                 self.assertEqual("cli_rejected_unknown", reason)
                 self.assertTrue(blockers)

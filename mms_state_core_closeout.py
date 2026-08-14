@@ -64,6 +64,23 @@ _PICKUP_DEFAULT_REL = ".agent.local/continuity/pickup.json"
 _CLOSEOUT_TIMEOUT_DEFAULT = 60  # seconds
 
 
+class _DuplicateJsonKey(ValueError):
+    """Raised when an untrusted JSON object repeats a member name."""
+
+
+def _strict_json_loads(raw: str) -> Any:
+    """Parse JSON while rejecting contradictory duplicate object members."""
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise _DuplicateJsonKey(f"duplicate JSON member: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(raw, object_pairs_hook=unique_object)
+
+
 @dataclass
 class CloseoutResult:
     """Machine-readable result of one closeout attempt.
@@ -204,7 +221,16 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
     masquerade as a business gate blocker (TB-46 host-review P1-2).
     """
     text = stderr or ""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    # Preserve the producer envelope byte-for-byte except for one optional
+    # terminal line ending from print(..., file=sys.stderr). Leading/trailing
+    # spaces, extra blank lines, and embedded CR/LF are wrapper-tainted.
+    if text.endswith("\r\n"):
+        line = text[:-2]
+    elif text.endswith("\n"):
+        line = text[:-1]
+    else:
+        line = text
+    canonical_line = line if line and "\n" not in line and "\r" not in line else None
 
     # Resolution/corruption errors take precedence. A task id or path is
     # untrusted text and may itself contain words from the blocker grammar.
@@ -215,29 +241,29 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
         r"error: pointer chain detected at .+ — corruption",
         r"error: corruption: both task-state\.json and pointer exist at .+",
     )
-    if len(lines) == 1 and any(
-        re.fullmatch(pattern, lines[0]) for pattern in path_error_patterns
+    if canonical_line is not None and any(
+        re.fullmatch(pattern, canonical_line) for pattern in path_error_patterns
     ):
         return "error", "task_or_root_unresolved", []
 
     # Only state-core's anchored stderr grammar is a business-gate rejection.
-    if len(lines) == 1 and re.fullmatch(
+    if canonical_line is not None and re.fullmatch(
             r"error: cannot reach done from (?:intake|scoped|executing|blocked); "
             r"transition to verifying first",
-            lines[0],
+            canonical_line,
         ):
         return "blocked", "phase_not_verifying", []
 
     blocker_match = (
         re.fullmatch(
-            r"error: cannot (?:advance to|reach) done; blockers: (.+)", lines[0]
+            r"error: cannot (?:advance to|reach) done; blockers: (.+)", canonical_line
         )
-        if len(lines) == 1
+        if canonical_line is not None
         else None
     )
     blocker_line = blocker_match.group(1) if blocker_match else None
     if blocker_line is not None:
-        after = blocker_line.strip()
+        after = blocker_line
         parsed: object = None
         try:
             parsed = ast.literal_eval(after)
@@ -335,7 +361,7 @@ def closeout_task(
             ),
         )
 
-    if proc.stderr.strip():
+    if proc.stderr:
         return CloseoutResult(
             status="error",
             task_id=task_id,
@@ -343,14 +369,14 @@ def closeout_task(
             reason="closeout_success_stderr",
             hint=(
                 "closeout exited 0 but emitted stderr; success envelope is contradictory "
-                f"(state-core stderr: {proc.stderr.strip()})"
+                f"(state-core stderr: {proc.stderr!r})"
             ),
         )
 
     # success path: parse + verify completion_ref
     try:
-        payload = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
+        payload = _strict_json_loads(proc.stdout)
+    except (json.JSONDecodeError, _DuplicateJsonKey) as exc:
         return CloseoutResult(status="error", task_id=task_id, root=root,
                               reason="invalid_closeout_stdout",
                               hint=f"closeout exited 0 but stdout was not JSON: {exc}")
@@ -407,19 +433,19 @@ def closeout_task(
                               completion_ref=completion_ref,
                               reason="verify_invoke_failed", hint=str(exc))
 
-    if vproc.returncode == 0 and vproc.stderr.strip():
+    if vproc.returncode == 0 and vproc.stderr:
         return CloseoutResult(
             status="verify_failed",
             task_id=task_id,
             root=root,
             completion_ref=completion_ref,
             reason="verify_success_stderr",
-            blockers=[vproc.stderr.strip()],
+            blockers=[repr(vproc.stderr)],
         )
 
     try:
-        vpayload = json.loads(vproc.stdout)
-    except json.JSONDecodeError as exc:
+        vpayload = _strict_json_loads(vproc.stdout)
+    except (json.JSONDecodeError, _DuplicateJsonKey) as exc:
         return CloseoutResult(
             status="verify_failed",
             task_id=task_id,
@@ -450,6 +476,8 @@ def closeout_task(
     if not isinstance(vpayload, dict):
         contract_errors.append("verify-completion payload must be an object")
     else:
+        if set(vpayload) != {"status", "task_id", "completion_ref", "errors"}:
+            contract_errors.append("verify-completion payload keys are not canonical")
         if vpayload.get("status") != "passed":
             contract_errors.append("verify-completion status is not passed")
         if vpayload.get("task_id") != task_id:

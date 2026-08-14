@@ -60,7 +60,8 @@ adapter 会独立重算 `completion_ref=sha256(task_id:revision_sha256)`，再�
 adapter 不复制指针解析，因此不把 `state_path` 带进最终可信 compact receipt。
 
 **success envelope 硬规则**：`closeout` 或 `verify-completion` 在 exit 0 时只要 stderr 非空就
-fail closed；closeout JSON 必须恰好是 canonical 五字段，多出 `errors` 等矛盾字段也拒绝。
+fail closed（包括只有空白字符）；closeout/verify JSON 的 key set 必须恰好等于 canonical
+producer contract，任意层级的 duplicate member 或多出 `errors`/warning 等矛盾字段也拒绝。
 
 **error vs blocked 的硬规则**（host-review P1-2）：只有 state-core 明确拒绝 phase 或 done-gate 内容时才报 `blocked`；路径 / 指针 / CLI / 文件异常一律报 `error`。理由：把“任务不存在 / root 指错”伪装成“业务 gate blocker”会误导下游以为是任务未过门，而其实是查不到任务。
 done-gate blockers 仅接受 state-core 当前输出的 canonical Python `list[str]` repr；注释、尾逗号、
