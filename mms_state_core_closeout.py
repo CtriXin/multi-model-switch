@@ -58,6 +58,7 @@ EXIT_CLI_UNAVAILABLE = 3    # state-core cli.py missing / no closeout subcommand
 EXIT_ERROR = 4              # subprocess crash / timeout / unexpected
 
 _COMPLETION_PREFIX = "completion:sha256:"
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _PICKUP_DEFAULT_REL = ".agent.local/continuity/pickup.json"
 _CLOSEOUT_TIMEOUT_DEFAULT = 60  # seconds
 
@@ -213,33 +214,26 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
         r"error: pointer chain detected at .+ — corruption",
         r"error: corruption: both task-state\.json and pointer exist at .+",
     )
-    if any(
-        re.fullmatch(pattern, line)
-        for pattern in path_error_patterns
-        for line in lines
+    if len(lines) == 1 and any(
+        re.fullmatch(pattern, lines[0]) for pattern in path_error_patterns
     ):
         return "error", "task_or_root_unresolved", []
 
     # Only state-core's anchored stderr grammar is a business-gate rejection.
-    if any(
-        re.fullmatch(
+    if len(lines) == 1 and re.fullmatch(
             r"error: cannot reach done from .+; transition to verifying first",
-            line,
-        )
-        for line in lines
-    ):
+            lines[0],
+        ):
         return "blocked", "phase_not_verifying", []
 
-    blocker_line = next(
-        (
-            match.group(1)
-            for line in lines
-            if (match := re.fullmatch(
-                r"error: cannot (?:advance to|reach) done; blockers: (.+)", line
-            ))
-        ),
-        None,
+    blocker_match = (
+        re.fullmatch(
+            r"error: cannot (?:advance to|reach) done; blockers: (.+)", lines[0]
+        )
+        if len(lines) == 1
+        else None
     )
+    blocker_line = blocker_match.group(1) if blocker_match else None
     if blocker_line is not None:
         after = blocker_line.strip()
         blockers: list[str] = []
@@ -348,10 +342,26 @@ def closeout_task(
                               hint="closeout exited 0 but stdout was not a JSON object")
 
     completion_ref = payload.get("completion_ref")
-    if not isinstance(completion_ref, str) or not completion_ref.startswith(_COMPLETION_PREFIX):
+    revision_sha256 = payload.get("revision_sha256")
+    state_path = payload.get("state_path")
+    closeout_contract_errors: list[str] = []
+    if payload.get("status") != "done":
+        closeout_contract_errors.append("closeout status is not done")
+    if payload.get("task_id") != task_id:
+        closeout_contract_errors.append("closeout task_id mismatch")
+    if not isinstance(completion_ref, str) or not re.fullmatch(
+        rf"{re.escape(_COMPLETION_PREFIX)}[0-9a-f]{{64}}", completion_ref
+    ):
+        closeout_contract_errors.append("closeout completion_ref is invalid")
+    if not isinstance(revision_sha256, str) or not _SHA256_RE.fullmatch(revision_sha256):
+        closeout_contract_errors.append("closeout revision_sha256 is invalid")
+    if not isinstance(state_path, str) or not state_path.strip():
+        closeout_contract_errors.append("closeout state_path is invalid")
+    if closeout_contract_errors:
         return CloseoutResult(status="error", task_id=task_id, root=root,
-                              reason="invalid_completion_ref",
-                              hint="closeout succeeded but emitted no valid completion_ref")
+                              reason="closeout_payload_contract_failed",
+                              blockers=closeout_contract_errors,
+                              hint="closeout exited 0 but its receipt payload was incomplete or contradictory")
 
     verify_args = ["verify-completion", "--task-id", task_id, "--root", root,
                    "--completion-ref", completion_ref]
@@ -379,7 +389,13 @@ def closeout_task(
         )
 
     if vproc.returncode != 0:
-        errors = vpayload.get("errors", []) if isinstance(vpayload, dict) else []
+        raw_errors = vpayload.get("errors") if isinstance(vpayload, dict) else None
+        errors = (
+            raw_errors
+            if isinstance(raw_errors, list)
+            and all(isinstance(item, str) for item in raw_errors)
+            else []
+        )
         return CloseoutResult(
             status="verify_failed",
             task_id=task_id,
@@ -400,7 +416,11 @@ def closeout_task(
         if vpayload.get("completion_ref") != completion_ref:
             contract_errors.append("verify-completion completion_ref mismatch")
         errors = vpayload.get("errors")
-        if errors not in (None, []):
+        if not isinstance(errors, list) or not all(
+            isinstance(item, str) for item in errors
+        ):
+            contract_errors.append("verify-completion errors must be an array of strings")
+        elif errors:
             contract_errors.append("verify-completion returned errors")
     if contract_errors:
         return CloseoutResult(
@@ -417,8 +437,8 @@ def closeout_task(
         task_id=task_id,
         root=root,
         completion_ref=completion_ref,
-        revision_sha256=payload.get("revision_sha256"),
-        state_path=payload.get("state_path"),
+        revision_sha256=revision_sha256,
+        state_path=state_path,
         verified=True,
     )
 

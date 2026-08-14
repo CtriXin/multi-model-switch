@@ -229,7 +229,13 @@ class CloseoutAdapterContractTests(unittest.TestCase):
         """Exit 0 alone is not proof: the read-back payload must bind the
         requested task and the exact completion receipt and explicitly pass."""
         ref = "completion:sha256:" + "a" * 64
-        close_payload = json.dumps({"completion_ref": ref})
+        close_payload = json.dumps({
+            "status": "done",
+            "task_id": "task-a",
+            "completion_ref": ref,
+            "revision_sha256": "c" * 64,
+            "state_path": "/tmp/root/.state/task-a/task-state.json",
+        })
         invalid_verify_payloads = {
             "empty": "",
             "malformed": "not-json",
@@ -246,6 +252,21 @@ class CloseoutAdapterContractTests(unittest.TestCase):
                 "status": "passed", "task_id": "task-a",
                 "completion_ref": "completion:sha256:" + "b" * 64,
                 "errors": [],
+            }),
+            "missing-errors": json.dumps({
+                "status": "passed", "task_id": "task-a", "completion_ref": ref,
+            }),
+            "null-errors": json.dumps({
+                "status": "passed", "task_id": "task-a",
+                "completion_ref": ref, "errors": None,
+            }),
+            "scalar-errors": json.dumps({
+                "status": "passed", "task_id": "task-a",
+                "completion_ref": ref, "errors": "none",
+            }),
+            "mixed-errors": json.dumps({
+                "status": "passed", "task_id": "task-a",
+                "completion_ref": ref, "errors": [7],
             }),
         }
         for label, verify_stdout in invalid_verify_payloads.items():
@@ -274,6 +295,70 @@ class CloseoutAdapterContractTests(unittest.TestCase):
         self.assertEqual("error", result.status)
         self.assertEqual("invalid_closeout_stdout", result.reason)
         self.assertFalse(result.verified)
+
+    def test_closeout_exit_zero_requires_full_receipt_payload_contract(self) -> None:
+        ref = "completion:sha256:" + "a" * 64
+        base = {
+            "status": "done",
+            "task_id": "task-a",
+            "completion_ref": ref,
+            "revision_sha256": "c" * 64,
+            "state_path": "/tmp/root/.state/task-a/task-state.json",
+        }
+        invalid_payloads = []
+        for key, value in (
+            ("status", "failed"),
+            ("task_id", "task-b"),
+            ("completion_ref", "completion:sha256:short"),
+            ("revision_sha256", "short"),
+            ("state_path", ""),
+        ):
+            payload = dict(base)
+            payload[key] = value
+            invalid_payloads.append(payload)
+        for missing in tuple(base):
+            payload = dict(base)
+            del payload[missing]
+            invalid_payloads.append(payload)
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                with mock.patch.object(
+                    adapter,
+                    "_run_cli",
+                    return_value=subprocess.CompletedProcess(
+                        [], 0, json.dumps(payload), ""
+                    ),
+                ):
+                    result = adapter.closeout_task(
+                        task_id="task-a", root="/tmp/root", cli=Path("/fake/cli.py")
+                    )
+                self.assertEqual("error", result.status)
+                self.assertEqual("closeout_payload_contract_failed", result.reason)
+                self.assertFalse(result.verified)
+
+    def test_nonzero_verify_with_malformed_errors_never_crashes_or_splits(self) -> None:
+        ref = "completion:sha256:" + "a" * 64
+        close_payload = json.dumps({
+            "status": "done", "task_id": "task-a", "completion_ref": ref,
+            "revision_sha256": "c" * 64,
+            "state_path": "/tmp/root/.state/task-a/task-state.json",
+        })
+        for errors in (None, "failure", 7, {"detail": "failure"}, [7]):
+            with self.subTest(errors=errors):
+                calls = [
+                    subprocess.CompletedProcess([], 0, close_payload, ""),
+                    subprocess.CompletedProcess(
+                        [], 1, json.dumps({"status": "failed", "errors": errors}), ""
+                    ),
+                ]
+                with mock.patch.object(adapter, "_run_cli", side_effect=calls):
+                    result = adapter.closeout_task(
+                        task_id="task-a", root="/tmp/root", cli=Path("/fake/cli.py")
+                    )
+                self.assertEqual("verify_failed", result.status)
+                self.assertEqual(
+                    ["verify-completion returned non-zero"], result.blockers
+                )
 
     def test_failure_classifier_does_not_trust_keywords_inside_missing_path(self) -> None:
         malicious_paths = (
@@ -335,6 +420,19 @@ class CloseoutAdapterContractTests(unittest.TestCase):
         self.assertEqual("error", status)
         self.assertEqual("cli_rejected_unknown", reason)
         self.assertTrue(blockers)
+
+    def test_multiline_wrapper_failure_cannot_become_business_blocked(self) -> None:
+        for gate_line in (
+            "error: cannot reach done from intake; transition to verifying first",
+            "error: cannot reach done; blockers: ['missing evidence']",
+        ):
+            with self.subTest(gate_line=gate_line):
+                status, reason, blockers = adapter._classify_closeout_failure(
+                    "fatal: wrapper transport failed\n" + gate_line
+                )
+                self.assertEqual("error", status)
+                self.assertEqual("cli_rejected_unknown", reason)
+                self.assertTrue(blockers)
 
 
 class CloseoutBoundaryStaticTests(unittest.TestCase):
