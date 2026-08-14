@@ -23,6 +23,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import mms_state_core_closeout as adapter
 
@@ -223,6 +224,86 @@ class CloseoutAdapterContractTests(unittest.TestCase):
         # and a non-done result must still surface verified:false explicitly
         blocked = adapter.CloseoutResult(status="missing_task_id")
         self.assertIn('"verified": false', blocked.to_compact_json())
+
+    def test_verify_exit_zero_requires_full_success_payload_contract(self) -> None:
+        """Exit 0 alone is not proof: the read-back payload must bind the
+        requested task and the exact completion receipt and explicitly pass."""
+        ref = "completion:sha256:" + "a" * 64
+        close_payload = json.dumps({"completion_ref": ref})
+        invalid_verify_payloads = {
+            "empty": "",
+            "malformed": "not-json",
+            "scalar": "[]",
+            "failed": json.dumps({
+                "status": "failed", "task_id": "task-a",
+                "completion_ref": ref, "errors": [],
+            }),
+            "task-mismatch": json.dumps({
+                "status": "passed", "task_id": "task-b",
+                "completion_ref": ref, "errors": [],
+            }),
+            "ref-mismatch": json.dumps({
+                "status": "passed", "task_id": "task-a",
+                "completion_ref": "completion:sha256:" + "b" * 64,
+                "errors": [],
+            }),
+        }
+        for label, verify_stdout in invalid_verify_payloads.items():
+            with self.subTest(label=label):
+                calls = [
+                    subprocess.CompletedProcess([], 0, close_payload, ""),
+                    subprocess.CompletedProcess([], 0, verify_stdout, ""),
+                ]
+                with mock.patch.object(adapter, "_run_cli", side_effect=calls):
+                    result = adapter.closeout_task(
+                        task_id="task-a", root="/tmp/root", cli=Path("/fake/cli.py")
+                    )
+                self.assertEqual("verify_failed", result.status, result.to_compact_json())
+                self.assertNotEqual(0, result.exit_code())
+                self.assertFalse(result.verified)
+
+    def test_closeout_exit_zero_scalar_payload_fails_closed(self) -> None:
+        with mock.patch.object(
+            adapter,
+            "_run_cli",
+            return_value=subprocess.CompletedProcess([], 0, "[]", ""),
+        ):
+            result = adapter.closeout_task(
+                task_id="task-a", root="/tmp/root", cli=Path("/fake/cli.py")
+            )
+        self.assertEqual("error", result.status)
+        self.assertEqual("invalid_closeout_stdout", result.reason)
+        self.assertFalse(result.verified)
+
+    def test_failure_classifier_does_not_trust_keywords_inside_missing_path(self) -> None:
+        malicious_paths = (
+            "/tmp/.state/blockers: fake/task-state.json",
+            "/tmp/.state/cannot reach done from intake; transition to verifying first/task-state.json",
+        )
+        for path in malicious_paths:
+            with self.subTest(path=path):
+                status, reason, blockers = adapter._classify_closeout_failure(
+                    f"FileNotFoundError: [Errno 2] No such file or directory: '{path}'"
+                )
+                self.assertEqual("error", status)
+                self.assertEqual("task_or_root_unresolved", reason)
+                self.assertEqual([], blockers)
+
+    def test_blocker_detail_with_comma_remains_one_item(self) -> None:
+        status, reason, blockers = adapter._classify_closeout_failure(
+            "error: cannot advance to done; blockers: ['missing alpha, beta']"
+        )
+        self.assertEqual("blocked", status)
+        self.assertEqual("done_gate_blockers", reason)
+        self.assertEqual(["missing alpha, beta"], blockers)
+
+    def test_unanchored_blocker_keyword_is_unknown_error(self) -> None:
+        status, reason, blockers = adapter._classify_closeout_failure(
+            "unexpected wrapper failure blockers: ['not authoritative']"
+        )
+        self.assertEqual("error", status)
+        self.assertEqual("cli_rejected_unknown", reason)
+        self.assertTrue(blockers)
 
 
 class CloseoutBoundaryStaticTests(unittest.TestCase):

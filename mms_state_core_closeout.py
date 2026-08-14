@@ -40,8 +40,10 @@ task_id / root resolution priority
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -200,26 +202,60 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
     masquerade as a business gate blocker (TB-46 host-review P1-2).
     """
     text = stderr or ""
-    # identified phase rejection → legitimate "not ready yet"
-    if "transition to verifying first" in text or "cannot reach done from" in text:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    # Resolution/corruption errors take precedence. A task id or path is
+    # untrusted text and may itself contain words from the blocker grammar.
+    path_error_markers = (
+        "pointer target does not exist:",
+        "has empty target",
+        "pointer chain detected",
+        "corruption: both task-state.json and pointer exist",
+    )
+    if (
+        ("No such file or directory" in text and ".state/" in text)
+        or any(marker in text for marker in path_error_markers)
+    ):
+        return "error", "task_or_root_unresolved", []
+
+    # Only state-core's anchored stderr grammar is a business-gate rejection.
+    if any(
+        re.fullmatch(
+            r"error: cannot reach done from .+; transition to verifying first",
+            line,
+        )
+        for line in lines
+    ):
         return "blocked", "phase_not_verifying", []
-    # identified done-gate content rejection → blocked with the real blockers
-    if "blockers:" in text:
-        after = text.split("blockers:", 1)[1].strip()
+
+    blocker_line = next(
+        (
+            match.group(1)
+            for line in lines
+            if (match := re.fullmatch(
+                r"error: cannot (?:advance to|reach) done; blockers: (.+)", line
+            ))
+        ),
+        None,
+    )
+    if blocker_line is not None:
+        after = blocker_line.strip()
         blockers: list[str] = []
         try:
             parsed = json.loads(after)
-            if isinstance(parsed, list):
-                blockers = [str(x) for x in parsed]
+            if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
+                blockers = parsed
         except json.JSONDecodeError:
-            stripped = after.strip("[]' \n")
-            blockers = [
-                p.strip().strip("'\"") for p in stripped.split(",") if p.strip()
-            ] or [after]
+            try:
+                parsed = ast.literal_eval(after)
+                if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
+                    blockers = parsed
+            except (SyntaxError, ValueError):
+                pass
+        # Never comma-split an opaque blocker: commas are valid detail text.
+        if not blockers:
+            blockers = [after]
         return "blocked", "done_gate_blockers", blockers
-    # missing task-state.json / wrong root / bad or missing DIRECT_TO pointer
-    if "No such file or directory" in text and ".state/" in text:
-        return "error", "task_or_root_unresolved", []
     # any other non-zero (unknown CLI error, state JSON corruption, etc.)
     return "error", "cli_rejected_unknown", [text.strip()] if text.strip() else []
 
@@ -304,6 +340,10 @@ def closeout_task(
         return CloseoutResult(status="error", task_id=task_id, root=root,
                               reason="invalid_closeout_stdout",
                               hint=f"closeout exited 0 but stdout was not JSON: {exc}")
+    if not isinstance(payload, dict):
+        return CloseoutResult(status="error", task_id=task_id, root=root,
+                              reason="invalid_closeout_stdout",
+                              hint="closeout exited 0 but stdout was not a JSON object")
 
     completion_ref = payload.get("completion_ref")
     if not isinstance(completion_ref, str) or not completion_ref.startswith(_COMPLETION_PREFIX):
@@ -324,12 +364,20 @@ def closeout_task(
                               completion_ref=completion_ref,
                               reason="verify_invoke_failed", hint=str(exc))
 
+    try:
+        vpayload = json.loads(vproc.stdout)
+    except json.JSONDecodeError as exc:
+        return CloseoutResult(
+            status="verify_failed",
+            task_id=task_id,
+            root=root,
+            completion_ref=completion_ref,
+            reason="invalid_verify_stdout",
+            blockers=[f"verify-completion stdout was not JSON: {exc}"],
+        )
+
     if vproc.returncode != 0:
-        try:
-            vpayload = json.loads(vproc.stdout)
-            errors = vpayload.get("errors", []) if isinstance(vpayload, dict) else []
-        except json.JSONDecodeError:
-            errors = [vproc.stderr.strip()] if vproc.stderr.strip() else []
+        errors = vpayload.get("errors", []) if isinstance(vpayload, dict) else []
         return CloseoutResult(
             status="verify_failed",
             task_id=task_id,
@@ -337,6 +385,29 @@ def closeout_task(
             completion_ref=completion_ref,
             reason="completion_ref_did_not_read_back",
             blockers=[str(e) for e in errors] or ["verify-completion returned non-zero"],
+        )
+
+    contract_errors: list[str] = []
+    if not isinstance(vpayload, dict):
+        contract_errors.append("verify-completion payload must be an object")
+    else:
+        if vpayload.get("status") != "passed":
+            contract_errors.append("verify-completion status is not passed")
+        if vpayload.get("task_id") != task_id:
+            contract_errors.append("verify-completion task_id mismatch")
+        if vpayload.get("completion_ref") != completion_ref:
+            contract_errors.append("verify-completion completion_ref mismatch")
+        errors = vpayload.get("errors")
+        if errors not in (None, []):
+            contract_errors.append("verify-completion returned errors")
+    if contract_errors:
+        return CloseoutResult(
+            status="verify_failed",
+            task_id=task_id,
+            root=root,
+            completion_ref=completion_ref,
+            reason="verify_payload_contract_failed",
+            blockers=contract_errors,
         )
 
     return CloseoutResult(
