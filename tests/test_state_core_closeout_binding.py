@@ -163,6 +163,67 @@ class CloseoutAdapterContractTests(unittest.TestCase):
         )
         self.assertEqual(adapter.EXIT_CLI_UNAVAILABLE, rc)
 
+    # ── P1-2: path / pointer failures must NOT masquerade as done-gate blocked ──
+    def test_missing_task_state_is_error_not_blocked(self) -> None:
+        """A task whose task-state.json does not exist is a path failure, not a
+        business gate blocker. Must be ``error`` (exit 4), never ``blocked``."""
+        with tempfile.TemporaryDirectory() as root:
+            result = adapter.closeout_task(
+                task_id="never-created", root=str(root), cli=self.cli,
+            )
+            self.assertEqual("error", result.status, result.to_compact_json())
+            self.assertEqual("task_or_root_unresolved", result.reason)
+            self.assertEqual([], result.blockers)
+            self.assertEqual(adapter.EXIT_ERROR, result.exit_code())
+
+    def test_wrong_root_is_error_not_blocked(self) -> None:
+        """An explicit root with no .state tree is a path failure → error, not blocked."""
+        with tempfile.TemporaryDirectory() as empty:
+            result = adapter.closeout_task(
+                task_id="anything", root=str(empty), cli=self.cli,
+            )
+            self.assertEqual("error", result.status)
+            self.assertEqual("task_or_root_unresolved", result.reason)
+            self.assertNotEqual(adapter.EXIT_BLOCKED, result.exit_code())
+
+    def test_direct_to_pointer_business_root_succeeds(self) -> None:
+        """business root + valid DIRECT_TO pointer must close out successfully.
+        pickup.root / launch roots that only hold a pointer are legitimate."""
+        with tempfile.TemporaryDirectory() as real_root, tempfile.TemporaryDirectory() as launch_root:
+            _make_closeout_ready_task(self.cli, Path(real_root), "dt-task")
+            sync = _run_cli(
+                self.cli, "sync-pointer", "--launch", str(launch_root),
+                "--task-id", "dt-task", "--root", str(real_root),
+                "--at", "2026-08-14T00:00:00Z", root=Path(real_root),
+            )
+            self.assertEqual(0, sync.returncode, sync.stderr)
+            # launch root has NO task-state.json, only a DIRECT_TO pointer
+            self.assertFalse(
+                (Path(launch_root) / ".state" / "dt-task" / "task-state.json").exists()
+            )
+            result = adapter.closeout_task(
+                task_id="dt-task", root=str(launch_root), cli=self.cli,
+            )
+            self.assertEqual("done", result.status, result.to_compact_json())
+            self.assertTrue(result.verified)
+
+    def test_done_result_compact_json_keeps_verified_flag(self) -> None:
+        """Regression (host-review P1-1): compact JSON used to drop
+        ``verified=false``. A done result must surface ``verified: true``."""
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            _make_closeout_ready_task(self.cli, root_path, "json-task")
+            result = adapter.closeout_task(
+                task_id="json-task", root=str(root_path), cli=self.cli,
+            )
+            self.assertEqual("done", result.status)
+            compact = result.to_compact_json()
+            self.assertIn('"verified": true', compact)
+            self.assertIn('"completion_ref"', compact)
+        # and a non-done result must still surface verified:false explicitly
+        blocked = adapter.CloseoutResult(status="missing_task_id")
+        self.assertIn('"verified": false', blocked.to_compact_json())
+
 
 class CloseoutBoundaryStaticTests(unittest.TestCase):
     """Static + behavioral invariants that prove the binding is opt-in only and
@@ -239,6 +300,20 @@ class CloseoutBoundaryStaticTests(unittest.TestCase):
         for forbidden in ("transcript", "chat_history", "messages", "prompt"):
             self.assertNotIn(forbidden, src,
                              f"adapter must not parse {forbidden} (no chat-text guessing)")
+
+    # ── P1-1: no verify escape hatch (done must always read-back completion_ref) ──
+    def test_binding_rejects_no_verify_flag(self) -> None:
+        """--no-verify must not exist on the formal mms closeout binding."""
+        import inspect
+        # the library function has no verify parameter at all
+        self.assertNotIn("verify", inspect.signature(adapter.closeout_task).parameters)
+        # the binding parser rejects --no-verify
+        with self.assertRaises(SystemExit):
+            adapter.handle_closeout_command(
+                ["--task-id", "t", "--root", "/tmp/x", "--no-verify"],
+                command_name="mms",
+            )
+
 
 
 class PickupPointerResolutionTests(unittest.TestCase):

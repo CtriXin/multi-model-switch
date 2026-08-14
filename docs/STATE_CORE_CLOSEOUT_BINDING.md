@@ -22,6 +22,10 @@ mms closeout --task-id <id> --root <repo-root> [--actor <name>] [--at <iso8601>]
 
 由正式的 finish 入口(work-done / 显式 human 指令)在 agent 明确宣布任务结束时调用。调用即表示"请求进入 state-core done-gate",不表示任务已经 done——done 由 state-core done-gate 唯一裁决。
 
+### root 可以是 launch / business root
+
+`--root` 传的可以是真实 state root,也可以是只持有 `DIRECT_TO`/`MOVED_TO` 指针的 launch / business root(state-core `read` 会自动跟随指针)。这是合法用法——pickup.root 常是 launch repo。但当指针缺失、target 不存在、或显式 root 指错时,adapter 报 `status=error`(`reason=task_or_root_unresolved`,exit 4),**不**报 `blocked`(host-review P1-2)。
+
 ### task_id / root 解析优先级(fail closed)
 
 1. 显式 argv(`--task-id` / `--root`)
@@ -42,14 +46,20 @@ state-core CLI 本身的定位:`--state-core-root` argv(authoritative,指向不�
 
 | status | exit | 含义 |
 |---|---|---|
-| `done` | 0 | closeout 成功且 `completion_ref` read-back 通过 |
+| `done` | 0 | closeout 成功且 `completion_ref` read-back 通过（verify 是强制的，无 escape hatch） |
 | `blocked` | 1 | done-gate / phase 拒绝(`reason=phase_not_verifying` 或 `done_gate_blockers`),phase 不变,blockers 原样带出 |
 | `verify_failed` | 1 | closeout 本身成功但 `completion_ref` read-back 失败(视为未完成,不得宣称 done) |
 | `missing_task_id` / `missing_root` | 2 | 解析失败,fail closed,未触碰任何 state |
 | `cli_unavailable` | 3 | state-core CLI 找不到(含显式 override 指向不存在路径) |
-| `error` | 4 | subprocess crash / timeout / stdout 异常,不推断任何 phase |
+| `error` | 4 | task-state.json 缺失 / root 指错 / DIRECT_TO 指针缺或坏 / subprocess crash / timeout / stdout 异常——**不是** done-gate blocker，不推断任何 phase |
 
-每次调用在 stdout 输出 compact JSON(machine-readable),人读的 hint/blockers 在 stderr。
+每次调用在 stdout 输出 compact JSON（machine-readable，含 `verified` 布尔），人读的 hint/blockers 在 stderr。
+
+**error vs blocked 的硬规则**（host-review P1-2）：只有 state-core 明确拒绝 phase 或 done-gate 内容时才报 `blocked`；路径 / 指针 / CLI / 文件异常一律报 `error`。理由：把“任务不存在 / root 指错”伪装成“业务 gate blocker”会误导下游以为是任务未过门，而其实是查不到任务。
+
+### 关于 `--no-verify`
+
+**不存在。** 正式 `mms closeout` 没有跳过 read-back 的 escape：成功声明必须引用本 `closeout` 返回并 verify 过的 `completion_ref`（host-review P1-1）。
 
 ## fresh session 生效边界
 

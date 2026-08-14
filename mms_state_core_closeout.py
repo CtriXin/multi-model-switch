@@ -15,7 +15,10 @@ What this module is
   as a global hard hook on any session.
 - Deterministic failure: missing task id / missing root / stale completion /
   done-gate rejection / CLI unavailable each produce a distinct non-zero exit;
-  error/abort/timeout never infer ``done`` or ``blocked``.
+  error/abort/timeout never infer ``done`` or ``blocked``. Only *identified*
+  phase / done-gate rejections are reported as ``blocked``; a missing task,
+  wrong root, or bad DIRECT_TO pointer is reported as ``error`` so a path
+  failure can never masquerade as a business gate blocker.
 
 Hard boundaries (frozen by the consume contract)
 -------------------------------------------------
@@ -89,7 +92,8 @@ class CloseoutResult:
         }.get(self.status, EXIT_ERROR)
 
     def to_compact_json(self) -> str:
-        payload = {k: v for k, v in asdict(self).items() if v not in (None, [], False)}
+        # keep booleans (verified flag is meaningful); drop only None / empty lists
+        payload = {k: v for k, v in asdict(self).items() if v is not None and v != []}
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
@@ -187,24 +191,37 @@ def resolve_root(*, argv_value: str | None = None,
 # Core closeout
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _parse_blockers(stderr: str) -> tuple[str, list[str]]:
-    """Classify a non-zero ``closeout`` stderr into (reason, blockers)."""
+def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
+    """Classify a non-zero ``closeout`` stderr into (status, reason, blockers).
+
+    Only *identified* phase / done-gate rejections are ``blocked``. Everything
+    else (missing task-state.json, wrong root, bad DIRECT_TO pointer, JSON parse
+    errors, unknown CLI errors) is ``error`` so a path/pointer failure can never
+    masquerade as a business gate blocker (TB-46 host-review P1-2).
+    """
     text = stderr or ""
+    # identified phase rejection → legitimate "not ready yet"
     if "transition to verifying first" in text or "cannot reach done from" in text:
-        return "phase_not_verifying", []
+        return "blocked", "phase_not_verifying", []
+    # identified done-gate content rejection → blocked with the real blockers
     if "blockers:" in text:
-        # state-core prints e.g.  error: cannot advance to done; blockers: ['a', 'b']
         after = text.split("blockers:", 1)[1].strip()
+        blockers: list[str] = []
         try:
             parsed = json.loads(after)
             if isinstance(parsed, list):
-                return "done_gate_blockers", [str(x) for x in parsed]
+                blockers = [str(x) for x in parsed]
         except json.JSONDecodeError:
             stripped = after.strip("[]' \n")
-            return "done_gate_blockers", [
+            blockers = [
                 p.strip().strip("'\"") for p in stripped.split(",") if p.strip()
             ] or [after]
-    return "cli_error", [text.strip()] if text.strip() else []
+        return "blocked", "done_gate_blockers", blockers
+    # missing task-state.json / wrong root / bad or missing DIRECT_TO pointer
+    if "No such file or directory" in text and ".state/" in text:
+        return "error", "task_or_root_unresolved", []
+    # any other non-zero (unknown CLI error, state JSON corruption, etc.)
+    return "error", "cli_rejected_unknown", [text.strip()] if text.strip() else []
 
 
 def _run_cli(cli: Path, args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -224,14 +241,14 @@ def closeout_task(
     cli: Path | None = None,
     actor: str | None = None,
     at: str | None = None,
-    verify: bool = True,
     timeout: int = _CLOSEOUT_TIMEOUT_DEFAULT,
 ) -> CloseoutResult:
     """Run one explicit closeout against state-core and read-back the result.
 
-    The adapter performs no direct ``task-state.json`` access. On success it
-    read-backs ``completion_ref`` via ``verify-completion`` so a stale/tampered
-    receipt cannot be reported as done.
+    The adapter performs no direct ``task-state.json`` access. A successful
+    closeout is **always** followed by a ``verify-completion`` read-back — there
+    is no opt-out, so no code path can emit ``status=done`` without a verified
+    ``completion_ref`` (TB-46 consume contract; host-review P1-1).
     """
     resolved_cli = cli or resolve_state_core_cli()
     if resolved_cli is None:
@@ -258,14 +275,26 @@ def closeout_task(
                               reason="cli_invoke_failed", hint=str(exc))
 
     if proc.returncode != 0:
-        reason, blockers = _parse_blockers(proc.stderr)
+        status, reason, blockers = _classify_closeout_failure(proc.stderr)
+        if status == "blocked":
+            return CloseoutResult(
+                status="blocked",
+                task_id=task_id,
+                root=root,
+                reason=reason,
+                blockers=blockers,
+                hint="phase preserved; resolve done-gate blockers or advance to verifying before retrying",
+            )
+        # path / pointer / CLI exception — NOT a business gate blocker
         return CloseoutResult(
-            status="blocked",
+            status="error",
             task_id=task_id,
             root=root,
             reason=reason,
-            blockers=blockers,
-            hint="phase preserved; resolve blockers or advance to verifying before retrying",
+            hint=(
+                "no state inferred; check task id / root / DIRECT_TO pointer "
+                f"(state-core stderr: {proc.stderr.strip() or 'empty'})"
+            ),
         )
 
     # success path: parse + verify completion_ref
@@ -281,17 +310,6 @@ def closeout_task(
         return CloseoutResult(status="error", task_id=task_id, root=root,
                               reason="invalid_completion_ref",
                               hint="closeout succeeded but emitted no valid completion_ref")
-
-    if not verify:
-        return CloseoutResult(
-            status="done",
-            task_id=task_id,
-            root=root,
-            completion_ref=completion_ref,
-            revision_sha256=payload.get("revision_sha256"),
-            state_path=payload.get("state_path"),
-            verified=False,
-        )
 
     verify_args = ["verify-completion", "--task-id", task_id, "--root", root,
                    "--completion-ref", completion_ref]
@@ -352,8 +370,6 @@ def _build_parser(command_name: str) -> argparse.ArgumentParser:
     p.add_argument("--at", help="ISO timestamp recorded on the completion receipt")
     p.add_argument("--pickup", default=_PICKUP_DEFAULT_REL,
                    help=f"handover pickup.json path (default: {_PICKUP_DEFAULT_REL})")
-    p.add_argument("--no-verify", action="store_true",
-                   help="skip completion_ref read-back (NOT recommended for real closeout)")
     p.add_argument("--timeout", type=int, default=_CLOSEOUT_TIMEOUT_DEFAULT,
                    help=f"per-CLI-invocation timeout in seconds (default {_CLOSEOUT_TIMEOUT_DEFAULT})")
     p.add_argument("--json", dest="as_json", action="store_true", default=True,
@@ -417,7 +433,6 @@ def handle_closeout_command(argv: list[str], *, command_name: str = "mms") -> in
         cli=resolved_cli,
         actor=args.actor,
         at=args.at,
-        verify=not args.no_verify,
         timeout=args.timeout,
     )
     _emit(result, args.as_json)
