@@ -206,15 +206,17 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
 
     # Resolution/corruption errors take precedence. A task id or path is
     # untrusted text and may itself contain words from the blocker grammar.
-    path_error_markers = (
-        "pointer target does not exist:",
-        "has empty target",
-        "pointer chain detected",
-        "corruption: both task-state.json and pointer exist",
+    path_error_patterns = (
+        r"(?:error|FileNotFoundError): \[Errno 2\] No such file or directory: ['\"].*[/\\]\.state[/\\].*['\"]",
+        r"error: pointer target does not exist: .+ \(from (?:DIRECT_TO|MOVED_TO) at .+\)",
+        r"error: pointer (?:DIRECT_TO|MOVED_TO) at .+ has empty target",
+        r"error: pointer chain detected at .+ — corruption",
+        r"error: corruption: both task-state\.json and pointer exist at .+",
     )
-    if (
-        ("No such file or directory" in text and ".state/" in text)
-        or any(marker in text for marker in path_error_markers)
+    if any(
+        re.fullmatch(pattern, line)
+        for pattern in path_error_patterns
+        for line in lines
     ):
         return "error", "task_or_root_unresolved", []
 

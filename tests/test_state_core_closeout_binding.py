@@ -297,6 +297,37 @@ class CloseoutAdapterContractTests(unittest.TestCase):
         self.assertEqual("done_gate_blockers", reason)
         self.assertEqual(["missing alpha, beta"], blockers)
 
+    def test_path_marker_text_inside_real_blocker_remains_blocked(self) -> None:
+        marker_details = (
+            "pointer target does not exist: /tmp/x",
+            "pointer DIRECT_TO at /tmp/x has empty target",
+            "pointer chain detected at /tmp/x — corruption",
+            "corruption: both task-state.json and pointer exist at /tmp/x",
+        )
+        for detail in marker_details:
+            with self.subTest(detail=detail):
+                status, reason, blockers = adapter._classify_closeout_failure(
+                    f"error: cannot reach done; blockers: ['{detail}']"
+                )
+                self.assertEqual("blocked", status)
+                self.assertEqual("done_gate_blockers", reason)
+                self.assertEqual([detail], blockers)
+
+    def test_canonical_pointer_errors_match_only_full_stderr_lines(self) -> None:
+        errors = (
+            "error: pointer target does not exist: /tmp/x/task-state.json "
+            "(from DIRECT_TO at /tmp/launch)",
+            "error: pointer DIRECT_TO at /tmp/launch has empty target",
+            "error: pointer chain detected at /tmp/x — corruption",
+            "error: corruption: both task-state.json and pointer exist at /tmp/x",
+        )
+        for stderr in errors:
+            with self.subTest(stderr=stderr):
+                status, reason, blockers = adapter._classify_closeout_failure(stderr)
+                self.assertEqual("error", status)
+                self.assertEqual("task_or_root_unresolved", reason)
+                self.assertEqual([], blockers)
+
     def test_unanchored_blocker_keyword_is_unknown_error(self) -> None:
         status, reason, blockers = adapter._classify_closeout_failure(
             "unexpected wrapper failure blockers: ['not authoritative']"
