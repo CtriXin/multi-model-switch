@@ -434,6 +434,41 @@ class CloseoutAdapterContractTests(unittest.TestCase):
                 self.assertEqual("cli_rejected_unknown", reason)
                 self.assertTrue(blockers)
 
+    def test_phase_rejection_accepts_only_canonical_nonverifying_phases(self) -> None:
+        for phase in ("intake", "scoped", "executing", "blocked"):
+            status, reason, blockers = adapter._classify_closeout_failure(
+                f"error: cannot reach done from {phase}; transition to verifying first"
+            )
+            self.assertEqual("blocked", status)
+            self.assertEqual("phase_not_verifying", reason)
+            self.assertEqual([], blockers)
+        for phase in ("banana", "verifying", "done", "intake injected"):
+            with self.subTest(phase=phase):
+                status, reason, blockers = adapter._classify_closeout_failure(
+                    f"error: cannot reach done from {phase}; transition to verifying first"
+                )
+                self.assertEqual("error", status)
+                self.assertEqual("cli_rejected_unknown", reason)
+                self.assertTrue(blockers)
+
+    def test_malformed_blocker_suffix_is_unknown_error_not_business_blocked(self) -> None:
+        malformed = (
+            "[]",
+            "['']",
+            "[7]",
+            "'scalar'",
+            "{'detail': 'x'}",
+            "['unterminated'",
+        )
+        for suffix in malformed:
+            with self.subTest(suffix=suffix):
+                status, reason, blockers = adapter._classify_closeout_failure(
+                    f"error: cannot reach done; blockers: {suffix}"
+                )
+                self.assertEqual("error", status)
+                self.assertEqual("cli_rejected_unknown", reason)
+                self.assertTrue(blockers)
+
 
 class CloseoutBoundaryStaticTests(unittest.TestCase):
     """Static + behavioral invariants that prove the binding is opt-in only and

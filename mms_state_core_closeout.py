@@ -221,7 +221,8 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
 
     # Only state-core's anchored stderr grammar is a business-gate rejection.
     if len(lines) == 1 and re.fullmatch(
-            r"error: cannot reach done from .+; transition to verifying first",
+            r"error: cannot reach done from (?:intake|scoped|executing|blocked); "
+            r"transition to verifying first",
             lines[0],
         ):
         return "blocked", "phase_not_verifying", []
@@ -236,22 +237,25 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
     blocker_line = blocker_match.group(1) if blocker_match else None
     if blocker_line is not None:
         after = blocker_line.strip()
-        blockers: list[str] = []
+        parsed: object = None
         try:
             parsed = json.loads(after)
-            if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
-                blockers = parsed
         except json.JSONDecodeError:
             try:
                 parsed = ast.literal_eval(after)
-                if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
-                    blockers = parsed
             except (SyntaxError, ValueError):
-                pass
-        # Never comma-split an opaque blocker: commas are valid detail text.
-        if not blockers:
-            blockers = [after]
-        return "blocked", "done_gate_blockers", blockers
+                parsed = None
+        if (
+            isinstance(parsed, list)
+            and parsed
+            and all(isinstance(item, str) and item.strip() for item in parsed)
+        ):
+            # Never comma-split blocker details: commas are valid detail text.
+            return "blocked", "done_gate_blockers", parsed
+        # Canonical state-core always emits a non-empty list[str]. A matching
+        # prefix with malformed suffix is unknown CLI/wrapper output, not proof
+        # of a business blocker.
+        return "error", "cli_rejected_unknown", [text.strip()]
     # any other non-zero (unknown CLI error, state JSON corruption, etc.)
     return "error", "cli_rejected_unknown", [text.strip()] if text.strip() else []
 
