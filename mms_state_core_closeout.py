@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -239,17 +240,18 @@ def _classify_closeout_failure(stderr: str) -> tuple[str, str, list[str]]:
         after = blocker_line.strip()
         parsed: object = None
         try:
-            parsed = json.loads(after)
-        except json.JSONDecodeError:
-            try:
-                parsed = ast.literal_eval(after)
-            except (SyntaxError, ValueError):
-                parsed = None
+            parsed = ast.literal_eval(after)
+        except (SyntaxError, ValueError):
+            parsed = None
         if (
             isinstance(parsed, list)
             and parsed
             and all(isinstance(item, str) and item.strip() for item in parsed)
+            and after == repr(parsed)
         ):
+            # state-core emits Python's canonical list repr. Merely equivalent
+            # Python literals (comments, trailing commas, implicit string
+            # concatenation) are wrapper-tainted, not business-gate evidence.
             # Never comma-split blocker details: commas are valid detail text.
             return "blocked", "done_gate_blockers", parsed
         # Canonical state-core always emits a non-empty list[str]. A matching
@@ -333,6 +335,18 @@ def closeout_task(
             ),
         )
 
+    if proc.stderr.strip():
+        return CloseoutResult(
+            status="error",
+            task_id=task_id,
+            root=root,
+            reason="closeout_success_stderr",
+            hint=(
+                "closeout exited 0 but emitted stderr; success envelope is contradictory "
+                f"(state-core stderr: {proc.stderr.strip()})"
+            ),
+        )
+
     # success path: parse + verify completion_ref
     try:
         payload = json.loads(proc.stdout)
@@ -349,6 +363,11 @@ def closeout_task(
     revision_sha256 = payload.get("revision_sha256")
     state_path = payload.get("state_path")
     closeout_contract_errors: list[str] = []
+    expected_payload_keys = {
+        "status", "task_id", "completion_ref", "revision_sha256", "state_path",
+    }
+    if set(payload) != expected_payload_keys:
+        closeout_contract_errors.append("closeout payload keys are not canonical")
     if payload.get("status") != "done":
         closeout_contract_errors.append("closeout status is not done")
     if payload.get("task_id") != task_id:
@@ -359,6 +378,14 @@ def closeout_task(
         closeout_contract_errors.append("closeout completion_ref is invalid")
     if not isinstance(revision_sha256, str) or not _SHA256_RE.fullmatch(revision_sha256):
         closeout_contract_errors.append("closeout revision_sha256 is invalid")
+    elif isinstance(completion_ref, str):
+        expected_ref = _COMPLETION_PREFIX + hashlib.sha256(
+            f"{task_id}:{revision_sha256}".encode("utf-8")
+        ).hexdigest()
+        if completion_ref != expected_ref:
+            closeout_contract_errors.append(
+                "closeout completion_ref does not bind task_id and revision_sha256"
+            )
     if not isinstance(state_path, str) or not state_path.strip():
         closeout_contract_errors.append("closeout state_path is invalid")
     if closeout_contract_errors:
@@ -379,6 +406,16 @@ def closeout_task(
         return CloseoutResult(status="verify_failed", task_id=task_id, root=root,
                               completion_ref=completion_ref,
                               reason="verify_invoke_failed", hint=str(exc))
+
+    if vproc.returncode == 0 and vproc.stderr.strip():
+        return CloseoutResult(
+            status="verify_failed",
+            task_id=task_id,
+            root=root,
+            completion_ref=completion_ref,
+            reason="verify_success_stderr",
+            blockers=[vproc.stderr.strip()],
+        )
 
     try:
         vpayload = json.loads(vproc.stdout)
@@ -442,7 +479,12 @@ def closeout_task(
         root=root,
         completion_ref=completion_ref,
         revision_sha256=revision_sha256,
-        state_path=state_path,
+        # state_path may legitimately resolve through DIRECT_TO/MOVED_TO to a
+        # different root. The adapter cannot bind that path without duplicating
+        # state-core pointer resolution, so it deliberately does not surface it
+        # as trusted receipt evidence. task/revision/ref are cryptographically
+        # cross-bound above and then verified by state-core read-back.
+        state_path=None,
         verified=True,
     )
 

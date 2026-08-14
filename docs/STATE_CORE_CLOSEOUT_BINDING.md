@@ -51,11 +51,20 @@ state-core CLI 本身的定位:`--state-core-root` argv(authoritative,指向不�
 | `verify_failed` | 1 | closeout 本身成功但 `completion_ref` read-back 失败(视为未完成,不得宣称 done) |
 | `missing_task_id` / `missing_root` | 2 | 解析失败,fail closed,未触碰任何 state |
 | `cli_unavailable` | 3 | state-core CLI 找不到(含显式 override 指向不存在路径) |
-| `error` | 4 | task-state.json 缺失 / root 指错 / DIRECT_TO 指针缺或坏 / subprocess crash / timeout / stdout 异常——**不是** done-gate blocker，不推断任何 phase |
+| `error` | 4 | task-state.json 缺失 / root 指错 / DIRECT_TO 指针缺或坏 / subprocess crash / timeout / stdout 异常 / exit-0 伴随 stderr——**不是** done-gate blocker，不推断任何 phase |
 
 每次调用在 stdout 输出 compact JSON（machine-readable，含 `verified` 布尔），人读的 hint/blockers 在 stderr。
+成功收据只把互相绑定的 `task_id` / `revision_sha256` / `completion_ref` 当作可信证据：
+adapter 会独立重算 `completion_ref=sha256(task_id:revision_sha256)`，再调
+`verify-completion` read-back。state-core 输出的 `state_path` 可能经 DIRECT_TO/MOVED_TO 跨 root，
+adapter 不复制指针解析，因此不把 `state_path` 带进最终可信 compact receipt。
+
+**success envelope 硬规则**：`closeout` 或 `verify-completion` 在 exit 0 时只要 stderr 非空就
+fail closed；closeout JSON 必须恰好是 canonical 五字段，多出 `errors` 等矛盾字段也拒绝。
 
 **error vs blocked 的硬规则**（host-review P1-2）：只有 state-core 明确拒绝 phase 或 done-gate 内容时才报 `blocked`；路径 / 指针 / CLI / 文件异常一律报 `error`。理由：把“任务不存在 / root 指错”伪装成“业务 gate blocker”会误导下游以为是任务未过门，而其实是查不到任务。
+done-gate blockers 仅接受 state-core 当前输出的 canonical Python `list[str]` repr；注释、尾逗号、
+隐式字符串拼接或 JSON 双引号等“可解析但非 canonical”的 suffix 一律当 wrapper/CLI 异常。
 
 ### 关于 `--no-verify`
 
@@ -97,6 +106,7 @@ python3 <state-core>/src/cli.py read --task-id <id> --root <repo>
 5. task id / root 缺失 → fail closed(exit 2),不猜状态。
 6. cli unavailable → exit 3。
 7. 静态:adapter 无文件写原语(`open(`/`.write_text(`/`.write_bytes(`/`json.dump(`)、无 `set --next-action/--runner/--owner`、无聊天文本解析面。
+8. exit-0 payload 字段互绑、stderr 为空；非 canonical blocker literal 不能升格为 business `blocked`。
 
 ## 非目标(红线重申)
 
