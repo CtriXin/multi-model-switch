@@ -1763,7 +1763,8 @@
         "glm-4.6": 200000,
         "glm-4.5": 200000,
         "glm-4.5-air": 200000,
-        "glm-5.2": 1000000
+        "glm-5.2": 1000000,
+        "glm-5.3": 1000000
       },
       "api_formats": {
         "openai_chat": {
@@ -1791,10 +1792,28 @@
         "glm-5.1": 128000,
         "glm-5": 128000,
         "glm-5-turbo": 128000,
-        "glm-5.2": 131072
+        "glm-5.2": 131072,
+        "glm-5.3": 131072
       },
       "model_overrides": {
         "glm-5.2": {
+          "effort": {
+            "claude_code_env": {
+              "path": "CLAUDE_CODE_EFFORT_LEVEL",
+              "default": "max",
+              "allowed": [
+                "high",
+                "max"
+              ],
+              "map": {
+                "low": "high",
+                "medium": "high",
+                "xhigh": "max"
+              }
+            }
+          }
+        },
+        "glm-5.3": {
           "effort": {
             "claude_code_env": {
               "path": "CLAUDE_CODE_EFFORT_LEVEL",
