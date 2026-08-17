@@ -407,7 +407,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     models_path = preview_root / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-a"]
-    assert provider["api"] == "openai-responses"
+    assert provider["api"] == "openai-completions"
     assert provider["baseUrl"] == "https://relay.example.com/v1"
     assert provider["apiKey"] == "sk-openai"
     assert provider["models"][0]["id"] == "gpt-5.4"
@@ -578,7 +578,7 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
     models_path = Path(exports["MMS_PI_MODELS_JSON"])
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-c"]
-    assert provider["api"] == "openai-responses"
+    assert provider["api"] == "openai-completions"
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
     settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
@@ -623,11 +623,11 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     assert set(payload["providers"]) == {
         "mms-newapi-personal-tokyo-anthropic",
-        "mms-newapi-personal-tokyo-responses",
+        "mms-newapi-personal-tokyo-openai",
     }
     assert exports["MMS_PI_PROVIDER"] == "mms-newapi-personal-tokyo-anthropic"
     anthropic_models = payload["providers"]["mms-newapi-personal-tokyo-anthropic"]["models"]
-    openai_models = payload["providers"]["mms-newapi-personal-tokyo-responses"]["models"]
+    openai_models = payload["providers"]["mms-newapi-personal-tokyo-openai"]["models"]
     assert [item["id"] for item in anthropic_models] == ["qwen3.6-plus"]
     assert [item["id"] for item in openai_models] == ["gpt-5.4"]
     assert anthropic_models[0]["reasoning"] is True
@@ -635,6 +635,46 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
     assert anthropic_models[0]["maxTokens"] == 65_536
     assert openai_models[0]["input"] == ["text", "image"]
     assert openai_models[0]["maxTokens"] == 128_000
+
+
+def test_pi_gpt_without_declared_responses_uses_openai_chat(monkeypatch):
+    import mms_launchers
+
+    runtime = {
+        "id": "relay-a",
+        "openai_base_url": "https://relay.example.com/v1",
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "protocols": ["anthropic_messages", "openai_chat_completions"],
+    }
+    monkeypatch.setattr(mms_launchers, "_probe_models", lambda *_args, **_kwargs: {"models": ["gpt-5.6-luna"]})
+
+    variants = mms_launchers._pi_protocol_variants(runtime)
+    selected, _caps = mms_launchers._pi_pick_protocol(runtime, "gpt-5.6-luna")
+    payload, provider_ref = mms_launchers._pi_build_models_payload(runtime, "gpt-5.6-luna")
+
+    assert [variant["protocol"] for variant in variants] == [
+        "anthropic_messages",
+        "openai_chat_completions",
+    ]
+    assert selected["protocol"] == "openai_chat_completions"
+    assert payload["providers"][provider_ref]["api"] == "openai-completions"
+    assert payload["providers"][provider_ref]["models"][0]["input"] == ["text", "image"]
+
+
+def test_pi_explicit_responses_alias_preserves_responses_transport():
+    import mms_launchers
+
+    runtime = {
+        "id": "responses-relay",
+        "openai_base_url": "https://relay.example.com/v1",
+        "protocols": ["openai-responses"],
+    }
+
+    variants = mms_launchers._pi_protocol_variants(runtime)
+    selected, _caps = mms_launchers._pi_pick_protocol(runtime, "gpt-5.6-luna")
+
+    assert [variant["protocol"] for variant in variants] == ["responses"]
+    assert selected["api"] == "openai-responses"
 
 
 def test_pi_qwen38_dual_protocol_prefers_openai(monkeypatch, tmp_path):

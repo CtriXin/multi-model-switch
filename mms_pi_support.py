@@ -777,6 +777,38 @@ def _pi_openai_base_url(runtime):
     return base_url
 
 
+def _pi_declared_protocols(runtime):
+    """Return canonical Pi protocols explicitly declared by the runtime."""
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw_protocols = runtime.get("protocols") or []
+    if isinstance(raw_protocols, str):
+        raw_protocols = [raw_protocols]
+    if not isinstance(raw_protocols, (list, tuple, set)):
+        return []
+
+    aliases = {
+        "anthropic": "anthropic_messages",
+        "anthropic_messages": "anthropic_messages",
+        "messages": "anthropic_messages",
+        "claude_messages": "anthropic_messages",
+        "response": "responses",
+        "responses": "responses",
+        "openai_responses": "responses",
+        "openai_chat": "openai_chat_completions",
+        "openai_chat_completion": "openai_chat_completions",
+        "openai_chat_completions": "openai_chat_completions",
+        "chat_completions": "openai_chat_completions",
+        "chat/completions": "openai_chat_completions",
+    }
+    protocols = []
+    for item in raw_protocols:
+        token = str(item or "").strip().lower().replace("-", "_")
+        protocol = aliases.get(token, token)
+        if protocol in {"anthropic_messages", "responses", "openai_chat_completions"} and protocol not in protocols:
+            protocols.append(protocol)
+    return protocols
+
+
 def _pi_protocol_variant(runtime, protocol):
     runtime = runtime if isinstance(runtime, dict) else {}
     protocol_name = str(protocol or "").strip()
@@ -815,7 +847,7 @@ def _pi_protocol_variant(runtime, protocol):
 
 def _pi_protocol_variants(runtime):
     variants = []
-    for protocol in ("anthropic_messages", "responses", "openai_chat_completions"):
+    for protocol in _pi_declared_protocols(runtime):
         variant = _pi_protocol_variant(runtime, protocol)
         if variant:
             variants.append(variant)
@@ -866,7 +898,7 @@ def _pi_profile_id(runtime, model_name, base_url=""):
 def _pi_pick_protocol(runtime, model_name):
     variants = _pi_protocol_variants(runtime)
     if not variants:
-        raise RuntimeError("Pi runtime requires either an Anthropic or OpenAI base URL")
+        raise RuntimeError("Pi runtime requires a declared protocol with its matching base URL")
     available = {item["protocol"] for item in variants}
     variant_by_protocol = {item["protocol"]: item for item in variants}
     caps = _pi_model_capabilities(runtime, model_name)
@@ -890,6 +922,8 @@ def _pi_pick_protocol(runtime, model_name):
         return variant_by_protocol["openai_chat_completions"], caps
     if "responses" in available and normalized_model.startswith(("gpt-", "o1", "o3", "o4")):
         return variant_by_protocol["responses"], caps
+    if "openai_chat_completions" in available and normalized_model.startswith(("gpt-", "o1", "o3", "o4")):
+        return variant_by_protocol["openai_chat_completions"], caps
     hints = caps.get("protocol_hints") if isinstance(caps.get("protocol_hints"), dict) else {}
     preferred = str(hints.get("preferred_protocol") or "").strip()
     if preferred == "responses":

@@ -17,6 +17,7 @@ MMS 提供一个独立、opt-in 的 Pi committee sidecar。它不经过 OpenCode
 - 不读取 SQLite、legacy route files 或 global OAuth/account state。
 - 每个 worker 使用临时 `HOME`、`XDG_*`、Pi agent/session 目录；任务结束自动删除。
 - API key 通过临时 environment variable 交给 Pi，`models.json` 只保存 `$ENV_NAME` 引用。
+- Pi transport 只从 runtime 显式声明的 `protocols` 导出；填写 OpenAI URL 不会虚构 `Responses` 能力。GPT 在声明 `responses` 时才使用 `openai-responses`，否则优先已声明的 `openai_chat_completions`。
 - 默认工具只有 `read,grep,find,ls`，并关闭 session、context files、extensions、skills、prompt templates 和 themes。
 - Pi 通过仓库已有的 `scripts/pi-cli-wrapper.sh` 启动；首次运行只会把 npm package cache 放到本仓库 `.ai/cache/pi-npx`，不会做 global install。冷缓存下 wrapper 会先用 repo-local install lock 做一次轻量 prewarm，避免多 worker 同时让 `npx` 填充同一个 shared cache。
 - 非 GPT member 只接受 provider id 含 `tokyo` 的 route；缺少可用 Tokyo route 或 Tokyo route 被 Pi runtime 拦截时 fail closed，不会改走 Tencent 或 direct。GPT 保留 bundle 中的 OpenAI route chain，frontier 默认固定为 `gpt-5.5`。
