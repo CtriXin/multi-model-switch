@@ -3423,9 +3423,12 @@ def _is_kimi_k3_claude_env_model(model_name):
     return model == "kimi-k3" or model == "k3" or model.startswith("k3[")
 
 
-def _is_glm_5_2_claude_env_model(model_name):
-    model = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
-    return model == "glm-5.2"
+def _is_non_claude_routed_model(model_name):
+    """桥接场景下真实路由到非 Claude 家族模型的判定（剥 [1m]、取末段）。"""
+    model = _normalized_model_name(model_name)
+    if not model:
+        return False
+    return not _is_claude_family_model_name(model)
 
 
 def _apply_claude_context_env_overrides(env, *, context_window, model_names=()):
@@ -3434,9 +3437,11 @@ def _apply_claude_context_env_overrides(env, *, context_window, model_names=()):
         return env
     env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(window)
     env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(window - 3000, 10000))
+    # 非 Claude 桥接模型 + window>=1M 时，Claude Code 的 [1m] 壳名豁免不生效，
+    # 必须显式给 CLAUDE_CODE_MAX_CONTEXT_TOKENS 才能撑开 autocompact 阈值。
     needs_explicit_context_cap = any(
         _is_kimi_k3_claude_env_model(model)
-        or (window >= 1_000_000 and _is_glm_5_2_claude_env_model(model))
+        or (window >= 1_000_000 and _is_non_claude_routed_model(model))
         for model in model_names
     )
     if needs_explicit_context_cap:
@@ -9889,7 +9894,9 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
         fallback_model=env.get("ANTHROPIC_MODEL")
         or env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
         or "claude-sonnet-4-6",
-        enable_1m=enable_claude_1m,
+        enable_1m=enable_claude_1m or any(
+            _is_non_claude_routed_model(m) for m in _real_models
+        ),
         provider_id=(runtime or {}).get("id"),
     )
 

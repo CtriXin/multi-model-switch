@@ -3687,7 +3687,8 @@ def confirm_tui(
     返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled, caveman_level)。
     action: "" = 启动, "b" = 返回, "q" = 取消
         bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow
-    claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
+    claude_1m_enabled: bool 或 None，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M；
+        None 表示本次未展示 1M 开关（非 Claude 模型），调用方不应覆盖既有 claude_1m_mode
         caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
     caveman_level: "light" / "standard" / "full"，仅 Caveman 开启时有效
     nsr_enabled: bool，仅 claude/codex 且 NSR hook 可用时有效，True 时本次会话开启 NSR hooks
@@ -4007,6 +4008,10 @@ def confirm_tui(
             return _L("OMC · orchestration runtime / team / verify loop", "OMC · orchestration runtime / team / verify loop")
         return _L("关闭", "Off")
 
+    def _initial_claude_1m_default(rt):
+        raw = str((rt or {}).get("claude_1m_mode", "auto")).strip().lower()
+        return raw in {"1", "true", "yes", "on", "enable", "enabled"}
+
     def _initial_disabled_surfaces():
         payload = (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else {}
         payload = payload if isinstance(payload, dict) else {}
@@ -4045,7 +4050,7 @@ def confirm_tui(
         curses.init_pair(6, curses.COLOR_MAGENTA, -1)
 
         bypass_mode = initial_bypass_mode
-        claude_1m_mode = False
+        claude_1m_mode = bool(has_claude_1m and _initial_claude_1m_default(runtime))
         caveman_level = initial_caveman_level
         nsr_mode = bool(has_nsr and nsr_enabled_default)
         agent_pack = default_pack
@@ -4331,7 +4336,7 @@ def confirm_tui(
                 return (
                     "",
                     bypass_mode,
-                    claude_1m_mode,
+                    claude_1m_mode if has_claude_1m else None,
                     _caveman_enabled(),
                     agent_pack,
                     thinking_mode,
@@ -4341,9 +4346,9 @@ def confirm_tui(
                     _normalize_caveman_level(caveman_level),
                 )
             elif key in (ord('b'), ord('B')):
-                return ("b", False, False, False, "none", True, effort_default, {}, False)
+                return ("b", False, None, False, "none", True, effort_default, {}, False)
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False, False, False, "none", True, effort_default, {}, False)
+                return ("q", False, None, False, "none", True, effort_default, {}, False)
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
             elif key in (curses.KEY_LEFT, ord('h'), ord('H')) and len(panels) > 1:

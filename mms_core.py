@@ -13688,7 +13688,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     require_proxy=_claude_bypass_requires_proxy(runtime_runtime),
                 )
         if cli == "claude":
-            runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
+            # claude_1m_enabled 为 None 表示 TUI 未展示 1M 开关（非 Claude 模型），
+            # 保留 provider/account 已声明的 claude_1m_mode（如 auto），不覆盖为 disable。
+            if claude_1m_enabled is not None:
+                runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
             runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
             runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
