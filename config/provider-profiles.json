@@ -97,15 +97,9 @@
         }
       },
       "body_patches": {
-        "openai_chat": {
-          "thinking_on": {
-            "thinking.type": "__delete__"
-          },
+        "responses": {
           "thinking_off": {
-            "thinking.type": "__delete__"
-          },
-          "classify": {
-            "thinking.type": "__delete__"
+            "reasoning": "__delete__"
           }
         }
       },
@@ -120,13 +114,6 @@
         "responses": {
           "base_url": "https://api.openai.com/v1",
           "request_path": "/responses"
-        }
-      },
-      "body_patches": {
-        "responses": {
-          "thinking_off": {
-            "reasoning": "__delete__"
-          }
         }
       },
       "max_output_tokens": {
