@@ -126,7 +126,8 @@ def _spawn_proxy(capture_dir, parent_pid):
     if not script:
         return "", "capture proxy script is missing"
     port = _free_port()
-    os.makedirs(capture_dir, exist_ok=True)
+    os.makedirs(capture_dir, mode=0o700, exist_ok=True)
+    os.chmod(capture_dir, 0o700)
     stdout_path = os.path.join(capture_dir, "proxy.out")
     command = [
         sys.executable,
@@ -139,7 +140,8 @@ def _spawn_proxy(capture_dir, parent_pid):
         str(parent_pid),
     ]
     try:
-        with open(stdout_path, "ab", buffering=0) as stream:
+        fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "ab", buffering=0) as stream:
             subprocess.Popen(
                 command,
                 stdout=stream,
@@ -173,7 +175,8 @@ def apply_capture_proxy(models_path, env, session_home, *, setting=None):
             print(f"[mms] {error}; Pi launch continues without capture", file=sys.stderr)
             return ""
     else:
-        os.makedirs(capture_dir, exist_ok=True)
+        os.makedirs(capture_dir, mode=0o700, exist_ok=True)
+        os.chmod(capture_dir, 0o700)
 
     try:
         payload = json.loads(Path(models_path).read_text(encoding="utf-8"))

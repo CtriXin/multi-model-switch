@@ -228,3 +228,71 @@ def test_proxy_keeps_clean_requests_out_of_the_raw_body_dump(tmp_path):
         proxy.terminate()
         proxy.wait(timeout=10)
         upstream.shutdown()
+
+
+def test_capture_artifacts_are_owner_readable_only(tmp_path):
+    """Privacy: plaintext request bodies must never be world-readable.
+
+    The capture directory carries full plaintext conversations (req-NNNNN.bin,
+    capture.jsonl), so the directory is 0700 and every artifact inside is 0600.
+    """
+    upstream = HTTPServer(("127.0.0.1", 0), _EchoUpstream)
+    _EchoUpstream.received = []
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    upstream_origin = f"http://127.0.0.1:{upstream.server_address[1]}"
+
+    capture_dir = tmp_path / "pi-capture"
+    port = _free_port()
+    script = Path(__file__).resolve().parents[1] / "scripts" / "pi_capture_proxy.py"
+    proxy = subprocess.Popen(
+        [sys.executable, str(script), "--port", str(port), "--log-dir", str(capture_dir)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            pytest.fail("capture proxy never started listening")
+
+        token = mms_pi_capture.encode_origin(upstream_origin)
+        url = f"http://127.0.0.1:{port}{mms_pi_capture.CAPTURE_PATH_PREFIX}/{token}/v1/messages"
+        body = b'{"model":"glm-5.2","messages":[{"role":"user","content":"secret\x00"}]}'
+
+        import urllib.request
+
+        request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            assert response.status == 200
+
+        assert (capture_dir.stat().st_mode & 0o777) == 0o700
+        jsonl = capture_dir / "capture.jsonl"
+        assert jsonl.exists()
+        assert (jsonl.stat().st_mode & 0o777) == 0o600
+        entry = json.loads(jsonl.read_text(encoding="utf-8").splitlines()[0])
+        raw_body = capture_dir / f"req-{entry['index']:05d}.bin"
+        assert raw_body.exists()
+        assert (raw_body.stat().st_mode & 0o777) == 0o600
+    finally:
+        proxy.terminate()
+        proxy.wait(timeout=10)
+        upstream.shutdown()
+
+
+def test_capture_dir_and_routes_are_owner_only(tmp_path):
+    models_path = _write_models(tmp_path)
+    env = {}
+
+    capture_dir = mms_pi_capture.apply_capture_proxy(
+        models_path, env, tmp_path, setting="127.0.0.1:9000"
+    )
+
+    assert (Path(capture_dir).stat().st_mode & 0o777) == 0o700
+    routes = Path(capture_dir) / "routes.json"
+    assert routes.exists()
+    assert (routes.stat().st_mode & 0o777) == 0o600

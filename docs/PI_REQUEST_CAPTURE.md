@@ -66,4 +66,4 @@ python3 scripts/pi_capture_proxy.py --port 41999 --log-dir /tmp/pi-capture
 
 ## 注意
 
-抓包目录里的原始 body 含完整对话内容，请求 header 不落盘（避免记录 API key），但 body 本身是明文，不要外传。
+抓包目录里的原始 body 含完整对话内容，请求 header 不落盘（避免记录 API key），但 body 本身是明文，不要外传。目录与全部产物默认 owner-only（目录 `0700`，文件 `0600`），启动时会强制修正已有目录的权限。

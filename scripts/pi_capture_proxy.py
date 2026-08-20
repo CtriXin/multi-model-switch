@@ -83,11 +83,18 @@ class CaptureHandler(BaseHTTPRequestHandler):
     def _record(self, entry, body=None):
         line = json.dumps(entry, ensure_ascii=False)
         with _COUNTER_LOCK:
-            with open(os.path.join(self.log_dir, "capture.jsonl"), "a", encoding="utf-8") as handle:
+            # Plaintext request metadata; keep it owner-readable only.
+            fd = os.open(
+                os.path.join(self.log_dir, "capture.jsonl"),
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
+            )
+            with os.fdopen(fd, "a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
         if body is not None:
             path = os.path.join(self.log_dir, f"req-{entry['index']:05d}.bin")
-            with open(path, "wb") as handle:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as handle:
                 handle.write(body)
 
     def _read_request_body(self):
@@ -246,7 +253,8 @@ def main(argv=None):
     parser.add_argument("--parent-pid", type=int, default=0)
     args = parser.parse_args(argv)
 
-    os.makedirs(args.log_dir, exist_ok=True)
+    os.makedirs(args.log_dir, mode=0o700, exist_ok=True)
+    os.chmod(args.log_dir, 0o700)
     CaptureHandler.log_dir = args.log_dir
     server = CaptureServer(("127.0.0.1", args.port), CaptureHandler)
     if args.parent_pid:
