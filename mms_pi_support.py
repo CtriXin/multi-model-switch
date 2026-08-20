@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from mms_capability_resolver import resolve_model_capabilities
 from mms_core import _model_supports_vision, _probe_models
 from mms_opencode_config import opencode_config_slug as _opencode_config_slug
+from mms_pi_capture import apply_capture_proxy as apply_pi_capture_proxy
 from mms_provider_profiles import resolve_provider_profile
 from mms_provider_profiles import profile_thinking_capabilities
 from mms_state_io import atomic_write_text
@@ -1341,6 +1342,8 @@ def _pi_gateway_env(runtime, model_info=None):
     session_dir = _pi_session_dir()
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
     settings_path = _write_pi_settings_config(agent_dir)
+    # Opt-in only (MMS_PI_CAPTURE_PROXY); a no-op otherwise. See issue #97.
+    apply_pi_capture_proxy(models_path, env, session_home)
     os.makedirs(session_dir, exist_ok=True)
     _seed_pi_trust_store(agent_dir, os.getcwd())
     env["PI_CODING_AGENT_DIR"] = agent_dir
