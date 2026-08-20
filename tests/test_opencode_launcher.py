@@ -807,6 +807,32 @@ def test_opencode_model_config_uses_runtime_model_capabilities_for_limits_and_vi
         assert "modalities" not in config
 
 
+def test_opencode_model_config_vision_falls_back_to_static_set_without_capability_data(monkeypatch):
+    """Fresh clones / isolated envs carry no capability snapshot (issue #58).
+
+    The attachment decision must not silently depend on local approved-facts
+    files: with no capability data at all it falls back to the static
+    vision-model set, so mimo-v2.5 stays image-capable and text-only models
+    stay text-only. Explicit runtime model_capabilities still win.
+    """
+    import mms_opencode_config
+
+    monkeypatch.setattr(
+        mms_opencode_config,
+        "opencode_model_capabilities",
+        lambda runtime, model_name, *args, **kwargs: {},
+    )
+
+    mimo = mms_opencode_config.opencode_model_config({}, "mimo-v2.5")
+    assert mimo["attachment"] is True
+    assert mimo["modalities"] == {"input": ["text", "image"], "output": ["text"]}
+
+    for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro"):
+        config = mms_opencode_config.opencode_model_config({}, model)
+        assert "attachment" not in config
+        assert "modalities" not in config
+
+
 def test_core_opencode_prefers_mimo_openai_compatible_base_from_anthropic():
     import mms_core
 
