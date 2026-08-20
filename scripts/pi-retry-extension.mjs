@@ -1,32 +1,12 @@
-const TOKYO_PROVIDER_PREFIX = "mms-newapi-personal-tokyo";
+const MMS_PROVIDER_PREFIX = "mms-";
 
-function normalizeTokyoParserString(value) {
-  return value
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, (character) => {
-      return `\\u${character.codePointAt(0).toString(16).padStart(4, "0")}`;
-    })
-    .replace(/\\x([0-9a-f]{2})/gi, (_match, hex) => `\\u00${hex.toLowerCase()}`)
-    .replace(/\\([aev])/gi, (_match, escape) => {
-      const code = { a: "0007", e: "001b", v: "000b" }[escape.toLowerCase()];
-      return `\\u${code}`;
-    })
-    .replace(/\\0(?![0-9])/g, "\\u0000");
-}
-
-function normalizeTokyoParserPayload(value) {
-  if (typeof value === "string") {
-    return normalizeTokyoParserString(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map(normalizeTokyoParserPayload);
-  }
-  if (!value || Object.getPrototypeOf(value) !== Object.prototype) {
-    return value;
-  }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, child]) => [key, normalizeTokyoParserPayload(child)]),
-  );
-}
+// A relay rejecting the request body outright. Observed on more than one MMS
+// route, with the offending byte spread across the whole byte space, so this is
+// transport-level corruption of an otherwise valid request rather than anything
+// the payload can be normalized out of. Keep the signatures narrow: they must
+// only match "the body did not parse", never a genuine validation error.
+const MALFORMED_BODY_SIGNATURE =
+  /invalid character .* in string (literal|escape code)|invalid json/i;
 
 // Responses-API relays that front a pool of upstream accounts encrypt each
 // reasoning item for the account that produced it. When the pool rotates or
@@ -87,14 +67,6 @@ export default function (pi) {
     return messages ? { messages } : undefined;
   });
 
-  pi.on("before_provider_request", (event, ctx) => {
-    const provider = String(ctx.model?.provider || "").trim();
-    if (!provider.startsWith(TOKYO_PROVIDER_PREFIX)) {
-      return;
-    }
-    return normalizeTokyoParserPayload(event.payload);
-  });
-
   pi.on("message_end", (event, ctx) => {
     const message = event.message;
     if (!message || message.role !== "assistant" || message.stopReason !== "error") {
@@ -145,12 +117,7 @@ export default function (pi) {
       };
     }
 
-    // NewAPI intermittently rejects an already-valid Pi request while decoding
-    // tool history. Limit retries to its known parser signatures and provider.
-    if (
-      provider.startsWith(TOKYO_PROVIDER_PREFIX) &&
-      /invalid character .* in string (literal|escape code)/i.test(errorMessage)
-    ) {
+    if (provider.startsWith(MMS_PROVIDER_PREFIX) && MALFORMED_BODY_SIGNATURE.test(errorMessage)) {
       return {
         message: {
           ...message,
