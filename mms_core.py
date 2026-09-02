@@ -678,6 +678,7 @@ MODEL_FAMILIES = [
     {"family": "Claude",  "keywords": ("claude",),                          "category": "Claude 系 ⭐"},
     {"family": "GPT",     "keywords": ("gpt-", "o1-", "o3-", "o4-", "codex-"), "category": "GPT 系"},
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
+    {"family": "Grok",    "keywords": ("grok",),                           "category": "xAI 系"},
     {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
     {"family": "Kimi",    "keywords": ("kimi", "k3", "k2.6-code-preview", "k2.6"), "category": "国产系"},
