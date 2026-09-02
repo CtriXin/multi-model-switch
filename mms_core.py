@@ -679,17 +679,27 @@ MODEL_FAMILIES = [
     {"family": "GPT",     "keywords": ("gpt-", "o1-", "o3-", "o4-", "codex-"), "category": "GPT 系"},
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
     {"family": "Grok",    "keywords": ("grok",),                           "category": "xAI 系"},
+    {"family": "Muse",    "keywords": ("muse",),                           "category": "Muse 系"},
+    {"family": "Inkling", "keywords": ("inkling",),                        "category": "Inkling 系"},
+    {"family": "Nemotron", "keywords": ("nemotron",),                      "category": "NVIDIA 系"},
+    {"family": "Llama",   "keywords": ("llama",),                          "category": "Meta 系"},
+    {"family": "Mistral", "keywords": ("mistral", "mixtral", "codestral"), "category": "Mistral 系"},
+    {"family": "Nova",    "keywords": ("nova-", "amazon-nova"),           "category": "Amazon 系"},
     {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
+    {"family": "Spark",   "keywords": ("spark",),                          "category": "国产系"},
     {"family": "Kimi",    "keywords": ("kimi", "k3", "k4", "k5", "k2.6-code-preview", "k2.6", "k2.7"), "category": "国产系"},
     {"family": "Mimo",    "keywords": ("mimo",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
     {"family": "StepFun", "keywords": ("stepfun", "step-"),                "category": "国产系"},
+    {"family": "Doubao",  "keywords": ("doubao", "seed-", "seedance"),   "category": "国产系"},
+    {"family": "Hunyuan", "keywords": ("hunyuan",),                        "category": "国产系"},
+    {"family": "Ernie",   "keywords": ("ernie",),                          "category": "国产系"},
 ]
 KNOWN_MODEL_FAMILY_NAMES = {entry["family"] for entry in MODEL_FAMILIES}
-DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM", "StepFun"}
-DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "stepfun", "step-", "doubao", "seed", "bailian")
+DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM", "StepFun", "Doubao", "Hunyuan", "Ernie", "Spark"}
+DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "stepfun", "step-", "doubao", "seed", "bailian", "hunyuan", "ernie", "spark", "iflytek")
 
 
 def _infer_model_family(model_name):
