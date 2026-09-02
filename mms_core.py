@@ -681,7 +681,7 @@ MODEL_FAMILIES = [
     {"family": "Grok",    "keywords": ("grok",),                           "category": "xAI 系"},
     {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
-    {"family": "Kimi",    "keywords": ("kimi", "k3", "k2.6-code-preview", "k2.6"), "category": "国产系"},
+    {"family": "Kimi",    "keywords": ("kimi", "k3", "k4", "k5", "k2.6-code-preview", "k2.6", "k2.7"), "category": "国产系"},
     {"family": "Mimo",    "keywords": ("mimo",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
