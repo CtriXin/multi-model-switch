@@ -3,40 +3,50 @@ from pathlib import Path
 import subprocess
 
 
-def test_pi_retry_extension_normalizes_only_tokyo_parser_payloads_and_retries_parser_errors():
+def _run_extension(script):
     extension_path = Path(__file__).resolve().parents[1] / "scripts" / "pi-retry-extension.mjs"
-    script = r"""
-const { default: extension } = await import(process.argv[1]);
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", script, str(extension_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
 
+
+def test_pi_retry_extension_does_not_rewrite_outgoing_payloads():
+    """Control characters are escaped by JSON.stringify before they reach the wire.
+
+    Normalizing them in the payload cannot change what is sent, and rewriting
+    literal escape text corrupts user content, so no request hook may exist.
+    """
+    output = _run_extension(
+        """
+const { default: extension } = await import(process.argv[1]);
+const registered = [];
+extension({ on(name) { registered.push(name); } });
+console.log(JSON.stringify({ registered }));
+"""
+    )
+    assert output["registered"] == ["context", "message_end"]
+
+
+def test_pi_retry_extension_retries_malformed_body_rejections_across_mms_routes():
+    script = """
+const { default: extension } = await import(process.argv[1]);
 const handlers = {};
 extension({ on(name, callback) { handlers[name] = callback; } });
-const parserPayload = {
-  messages: [
-    { role: "tool", content: "actual-control:\u001b[31mred\u001b[0m" },
-    { role: "tool", content: String.raw`legacy-escape:\x1b` },
-    { role: "tool", content: String.raw`legacy-escape-upper:\xAF` },
-    { role: "tool", content: String.raw`legacy-bell:\a` },
-    { role: "tool", content: String.raw`legacy-short:\e` },
-    { role: "tool", content: String.raw`legacy-vtab:\v` },
-    { role: "tool", content: String.raw`legacy-null:\0` },
-    { role: "tool", content: "actual-del:\u007f" },
-    { role: "tool", content: "safe\tline\n" },
-  ],
-};
-const normalizedPayload = handlers.before_provider_request(
-  { payload: parserPayload },
-  { model: { provider: "mms-newapi-personal-tokyo-responses" } },
-);
-const unchangedPayload = handlers.before_provider_request(
-  { payload: parserPayload },
-  { model: { provider: "mms-uscrsopenai" } },
-);
 const cases = [
-  ["mms-newapi-personal-tokyo-responses", "invalid character '\\x1b' in string literal"],
+  ["mms-newapi-personal-tokyo-responses", "invalid character '\\u001b' in string literal"],
   ["mms-newapi-personal-tokyo-anthropic", "invalid character '\\f' in string literal"],
   ["mms-newapi-personal-tokyo-responses", "invalid character '+' in string escape code"],
+  ["mms-uscrsopenai", "invalid character '\\u001b' in string literal"],
+  ["mms-uscrsopenai", "400 \\"Invalid JSON\\""],
+  ["mms-us-cpa-local-codex", "token has been invalidated"],
+  ["mms-us-cpa-local-antigravity", "model_capacity_exhausted"],
   ["mms-newapi-personal-tokyo-responses", "invalid request body"],
-  ["mms-uscrsopenai", "invalid character '\\x1b' in string literal"],
+  ["mms-newapi-personal-tokyo-responses", "model_not_found"],
+  ["openai", "invalid character '\\u001b' in string literal"],
 ];
 const results = cases.map(([provider, errorMessage]) => {
   const result = handlers.message_end(
@@ -45,37 +55,47 @@ const results = cases.map(([provider, errorMessage]) => {
   );
   return result?.message?.errorMessage ?? null;
 });
-console.log(JSON.stringify({ normalizedPayload, unchangedPayload: unchangedPayload ?? null, results }));
+console.log(JSON.stringify({ results }));
 """
+    results = _run_extension(script)["results"]
 
-    result = subprocess.run(
-        ["node", "--input-type=module", "--eval", script, str(extension_path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    parser_retry = "internal_error transient relay parser retry:"
+    auth_retry = "internal_error transient auth retry:"
 
-    output = json.loads(result.stdout)
-    normalized_contents = [item["content"] for item in output["normalizedPayload"]["messages"]]
-    assert normalized_contents == [
-        r"actual-control:\u001b[31mred\u001b[0m",
-        r"legacy-escape:\u001b",
-        r"legacy-escape-upper:\u00af",
-        r"legacy-bell:\u0007",
-        r"legacy-short:\u001b",
-        r"legacy-vtab:\u000b",
-        r"legacy-null:\u0000",
-        r"actual-del:\u007f",
-        "safe\tline\n",
-    ]
-    assert output["unchangedPayload"] is None
+    # Both relays that exhibit the corruption now retry, on either signature.
+    assert results[0].startswith(parser_retry)
+    assert results[1].startswith(parser_retry)
+    assert results[2].startswith(parser_retry)
+    assert results[3].startswith(parser_retry)
+    assert results[4].startswith(parser_retry)
 
-    retry_messages = output["results"]
-    assert retry_messages[0].startswith("internal_error transient relay parser retry:")
-    assert retry_messages[1].startswith("internal_error transient relay parser retry:")
-    assert retry_messages[2].startswith("internal_error transient relay parser retry:")
-    assert retry_messages[3] is None
-    assert retry_messages[4] is None
+    # Pre-existing transient-auth branches are untouched.
+    assert results[5].startswith(auth_retry)
+    assert results[6].startswith(auth_retry)
+
+    # Genuine rejections must still surface instead of being retried away.
+    assert results[7] is None
+    assert results[8] is None
+
+    # Only MMS-managed providers participate.
+    assert results[9] is None
+
+
+def test_pi_retry_extension_ignores_non_error_messages():
+    script = """
+const { default: extension } = await import(process.argv[1]);
+const handlers = {};
+extension({ on(name, callback) { handlers[name] = callback; } });
+const provider = "mms-uscrsopenai";
+const errorMessage = "invalid character '\\u001b' in string literal";
+const results = [
+  handlers.message_end({ message: { role: "assistant", stopReason: "stop", provider, errorMessage } }, { model: { provider } }),
+  handlers.message_end({ message: { role: "user", stopReason: "error", provider, errorMessage } }, { model: { provider } }),
+  handlers.message_end({ message: { role: "assistant", stopReason: "error", provider, errorMessage: "" } }, { model: { provider } }),
+];
+console.log(JSON.stringify({ results: results.map((item) => item ?? null) }));
+"""
+    assert _run_extension(script)["results"] == [None, None, None]
 
 
 def test_pi_retry_extension_drops_poisoned_reasoning_signatures_after_encrypted_content_error():

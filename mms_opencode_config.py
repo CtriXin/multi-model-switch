@@ -389,6 +389,20 @@ def _opencode_model_key(model_name):
     return normalized
 
 
+def _opencode_runtime_model_capability_entry(runtime, model_name):
+    """True when runtime model_capabilities carries an explicit entry for the model."""
+    caps_map = runtime.get("model_capabilities") if isinstance(runtime, dict) else None
+    if not isinstance(caps_map, dict):
+        return False
+    target = _opencode_model_key(model_name)
+    if not target:
+        return False
+    return any(
+        isinstance(value, dict) and _opencode_model_key(key) == target
+        for key, value in caps_map.items()
+    )
+
+
 def _opencode_is_kimi_k3_selector(model_name):
     leaf = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
     return leaf in {"k3", "k3[1m]", "kimi-k3"}
@@ -923,6 +937,19 @@ def opencode_model_config(
             ),
         }
     supports_vision = opencode_capability_bool(runtime, model, "vision", "supports_vision")
+    if supports_vision is None and not _opencode_runtime_model_capability_entry(runtime, model):
+        # Fresh clones and isolated launch envs resolve to conservative_fallback
+        # facts (untrusted) or nothing at all; without a deterministic source the
+        # attachment decision silently depends on local approved-facts files
+        # (issue #58). Fall back to the launcher's static vision-model set, the
+        # same one route selection uses. An explicit runtime model_capabilities
+        # entry always wins: an entry without a vision bool stays text-only.
+        try:
+            from mms_core import _model_supports_vision
+
+            supports_vision = _model_supports_vision(model)
+        except ImportError:
+            pass
     if supports_vision is True or (supports_vision is None and model.lower() in OPENCODE_IMAGE_INPUT_MODELS):
         config["attachment"] = True
         config["modalities"] = {
