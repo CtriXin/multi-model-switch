@@ -299,6 +299,17 @@ _PI_OPENAI_PROFILE_COMPAT = {
         "maxTokensField": "max_tokens",
         "supportsStrictMode": False,
     },
+    # kimi-k3-coding 是为 K3 的 reasoning_effort 分档单独加的 profile（2026-09-02），
+    # 它抢在 kimi-code 之前匹配 k3，但当时没同步补 compat —— K3 于是拿不到
+    # supportsDeveloperRole=False，pi 按 OpenAI 惯例发 role:developer，上游 400
+    # 「role 'developer' is not allowed」。这里补齐；刻意不带 supportsReasoningEffort=False，
+    # 因为这个 profile 存在的目的就是保留 K3 的 effort 分档。
+    "kimi-k3-coding": {
+        "supportsStore": False,
+        "supportsDeveloperRole": False,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": False,
+    },
     "mimo": {
         "requiresReasoningContentOnAssistantMessages": True,
         "supportsDeveloperRole": False,
