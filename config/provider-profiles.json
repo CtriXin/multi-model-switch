@@ -1689,7 +1689,9 @@
         "https://docs.z.ai/scenario-example/develop-tools/claude",
         "https://docs.z.ai/devpack/tool/others",
         "https://docs.z.ai/devpack/tool/claude",
-        "https://docs.z.ai/devpack/latest-model"
+        "https://docs.z.ai/devpack/latest-model",
+        "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
+        "https://docs.bigmodel.cn/cn/guide/capabilities/thinking"
       ],
       "endpoints": {
         "openai_base_url": "https://api.z.ai/api/paas/v4/",
@@ -1817,7 +1819,8 @@
             }
           }
         }
-      }
+      },
+      "effort": null
     },
     "cpa-antigravity-gemini": {
       "label": "CPA Antigravity Gemini",
@@ -1884,6 +1887,94 @@
       },
       "context_windows": {
         "grok-4.6": 500000
+      }
+    },
+    "kimi-k3-coding": {
+      "label": "Kimi K3 Coding (Moonshot)",
+      "match": {
+        "model_prefixes": [
+          "k3",
+          "kimi-k3"
+        ],
+        "require_model_prefix": true
+      },
+      "references": [
+        "https://platform.kimi.ai/docs/guide/use-reasoning-effort",
+        "https://www.kimi.com/code/docs/"
+      ],
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_and_effort",
+        "default_enabled": true,
+        "roundtrip": "reasoning_content",
+        "mode": "always_on",
+        "disable_supported": false
+      },
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "max",
+          "official_default": "max",
+          "recommended_default": "max",
+          "request_default": "max",
+          "allowed": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      },
+      "context_windows": {
+        "k3": 1048576
+      }
+    },
+    "glm-coding-effort": {
+      "label": "GLM 5.2+ Coding (Zhipu)",
+      "match": {
+        "model_prefixes": [
+          "glm-5.2",
+          "glm-5.3"
+        ],
+        "require_model_prefix": true
+      },
+      "references": [
+        "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
+        "https://docs.bigmodel.cn/cn/guide/capabilities/thinking"
+      ],
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_and_effort",
+        "default_enabled": true,
+        "roundtrip": "openai_reasoning_content",
+        "mode": "always_on",
+        "disable_supported": false
+      },
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "max",
+          "official_default": "max",
+          "recommended_default": "max",
+          "request_default": "max",
+          "allowed": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      },
+      "context_windows": {
+        "glm-5.3": 1048576
       }
     }
   }
