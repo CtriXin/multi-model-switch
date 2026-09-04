@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 
-CODEX_MAX_EFFORT_MODEL_PREFIXES = ("gpt-5.6",)
+CODEX_MAX_EFFORT_MODEL_PREFIXES = ("gpt-5.6", "gpt-6")
 
 
 def _model_tokens(model_info: Any) -> list[str]:
