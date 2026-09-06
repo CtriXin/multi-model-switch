@@ -22,7 +22,10 @@
       "references": [
         "https://platform.openai.com/docs/api-reference/responses",
         "https://platform.openai.com/docs/guides/reasoning",
-        "https://platform.openai.com/docs/models"
+        "https://platform.openai.com/docs/models",
+        "https://platform.openai.com/docs/models/gpt-5.6-terra",
+        "https://platform.openai.com/docs/models/gpt-5.6-sol",
+        "https://platform.openai.com/docs/models/gpt-5.6-luna"
       ],
       "endpoints": {
         "openai_base_url": "https://api.openai.com/v1",
@@ -123,7 +126,10 @@
         "gpt-5.4-mini": 1000000,
         "gpt-5.5": 1000000,
         "gpt-5-pro": 1000000,
-        "gpt-6-astra": 1050000
+        "gpt-6-astra": 1050000,
+        "gpt-5.6-terra": 1050000,
+        "gpt-5.6-sol": 1050000,
+        "gpt-5.6-luna": 1050000
       },
       "api_formats": {
         "responses": {
@@ -134,7 +140,10 @@
       "max_output_tokens": {
         "gpt-5.4": 128000,
         "gpt-5.5": 128000,
-        "gpt-6-astra": 128000
+        "gpt-6-astra": 128000,
+        "gpt-5.6-terra": 128000,
+        "gpt-5.6-sol": 128000,
+        "gpt-5.6-luna": 128000
       },
       "supports_vision": {
         "gpt-5": true,
@@ -292,7 +301,8 @@
       },
       "references": [
         "https://help.aliyun.com/zh/model-studio/deep-thinking",
-        "https://help.aliyun.com/zh/model-studio/compatibility-with-openai-responses-api"
+        "https://help.aliyun.com/zh/model-studio/compatibility-with-openai-responses-api",
+        "https://openrouter.ai/api/v1/models"
       ],
       "endpoints": {
         "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -383,6 +393,18 @@
           "base_url": "https://dashscope.aliyuncs.com/apps/anthropic",
           "request_path": "/v1/messages"
         }
+      },
+      "context_windows": {
+        "qwen3.8-max": 1000000,
+        "qwen3.8-max-preview": 1000000,
+        "qwen3.8-flash": 1000000,
+        "qwen3.7-max": 1000000
+      },
+      "max_output_tokens": {
+        "qwen3.8-max": 131072,
+        "qwen3.8-max-preview": 131072,
+        "qwen3.8-flash": 131072,
+        "qwen3.7-max": 131072
       }
     },
     "qwen-chat-template": {
@@ -869,7 +891,8 @@
         "https://platform.minimaxi.com/docs/api-reference/text-anthropic-api",
         "https://platform.minimaxi.com/docs/api-reference/text-openai-api",
         "https://www.minimax.io/models/text/m3",
-        "https://www.minimax.io/blog/minimax-m3"
+        "https://www.minimax.io/blog/minimax-m3",
+        "https://openrouter.ai/api/v1/models"
       ],
       "endpoints": {
         "openai_base_url": "https://api.minimaxi.com/v1",
@@ -947,7 +970,9 @@
         }
       },
       "max_output_tokens": {
-        "minimax-m3": 131072
+        "minimax-m3": 131072,
+        "minimax-m2.7": 131072,
+        "minimax-m2.7-highspeed": 131072
       },
       "supports_vision": {
         "minimax-m3": true
@@ -1996,6 +2021,28 @@
       },
       "context_windows": {
         "glm-5.3": 1048576
+      }
+    },
+    "claude-official": {
+      "label": "Claude Official (Anthropic)",
+      "match": {
+        "model_prefixes": [
+          "claude-opus-4-6",
+          "claude-sonnet-4-6"
+        ],
+        "require_model_prefix": true
+      },
+      "references": [
+        "https://platform.claude.com/docs/en/models/opus-4-6/overview"
+      ],
+      "context_windows": {
+        "claude-opus-4-6": 1000000,
+        "claude-opus-4-6-thinking": 1000000,
+        "claude-sonnet-4-6": 1000000
+      },
+      "max_output_tokens": {
+        "claude-opus-4-6": 128000,
+        "claude-opus-4-6-thinking": 128000
       }
     }
   }
