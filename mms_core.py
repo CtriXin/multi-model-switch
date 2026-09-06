@@ -7749,6 +7749,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
         "details": [],
         "working_url": None,
         "base_source": "remote",
+        "attempts": [],
     }
 
     _ensure_httpx()
@@ -7771,7 +7772,9 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
     else:
         # 尝试 base_url 和 alt_url（/v1 互转），以第一个能返回有效 JSON 的为准
         alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
+        first_exc = None
         last_exc = None
+        attempts = result["attempts"]
         models_endpoint = provider.get("models_endpoint", "/models")
         if models_endpoint == "manual":
             fallback = provider.get("fallback_models") or []
@@ -7812,6 +7815,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                     result["raw_models"] = models
                     result["models"] = models
                     result["working_url"] = try_url
+                    attempts.append({"url": f"{try_url}{models_endpoint}", "status": f"ok ({len(models)} models)"})
                     if try_url != base_url and emit_output:
                         console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
                     if not models:
@@ -7819,7 +7823,14 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                         continue
                     break
                 except Exception as exc:
+                    if first_exc is None:
+                        first_exc = exc
                     last_exc = exc
+                    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                    attempts.append({
+                        "url": f"{try_url}{models_endpoint}",
+                        "status": f"HTTP {status_code}" if status_code else type(exc).__name__,
+                    })
             if result["models"] is not None and not result["models"]:
                 result["error_kind"] = "empty_models"
                 result["error"] = "接口返回成功，但模型列表为空"
@@ -7837,13 +7848,19 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                         console.print(f"[dim]该来源不支持 /models 端点，使用内置模型列表 ({len(fallback)} 个模型)[/dim]")
                 else:
                     result["error_kind"] = "request_failed"
-                    result["error"] = f"拉取模型列表失败: {last_exc}"
+                    headline_exc = str(first_exc or last_exc)
+                    if api_key:
+                        headline_exc = headline_exc.replace(api_key, "***")
+                    result["error"] = f"拉取模型列表失败: {headline_exc}"
 
     details = [
         f"provider: {_provider_label(provider)} ({provider_id})",
         f"openai_base_url: {base_url or '(未设置)'}",
         f"protocols: {', '.join(protocols) if protocols else '(未声明)'}",
     ]
+    probe_attempts = result.get("attempts") or []
+    if probe_attempts:
+        details.append("attempts: " + "; ".join(f"{a.get('url')} -> {a.get('status')}" for a in probe_attempts if isinstance(a, dict)))
     if result["error"]:
         details.append(f"error: {result['error']}")
     result["details"] = details

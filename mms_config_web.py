@@ -21,6 +21,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from mms_config_web_assets import _HTML_PAGE
@@ -6123,6 +6124,25 @@ def probe_provider_models(provider: dict[str, Any], *, force_refresh: bool = Fal
     return mms_core._probe_models(provider, emit_output=False, force_refresh=force_refresh)  # noqa: SLF001
 
 
+def _probe_request_path(probe: dict[str, Any], provider: dict[str, Any]) -> str:
+    attempts = probe.get("attempts")
+    if isinstance(attempts, list) and attempts:
+        chosen = None
+        for item in attempts:
+            if not (isinstance(item, dict) and item.get("url")):
+                continue
+            if str(item.get("status", "")).startswith("ok"):
+                chosen = item
+                break
+            if chosen is None:
+                chosen = item
+        if chosen:
+            parsed_path = urlparse(str(chosen["url"])).path
+            if parsed_path:
+                return parsed_path
+    return provider.get("models_endpoint") or "/models"
+
+
 def test_provider_models(
     cfg: dict[str, Any],
     payload: dict[str, Any],
@@ -6163,7 +6183,7 @@ def test_provider_models(
                 "schema": "cache_transport_evidence.v1",
                 "provider_id": provider.get("id"),
                 "request_url": probe.get("working_url") or provider.get("openai_base_url") or provider.get("anthropic_base_url") or "",
-                "request_path": provider.get("models_endpoint") or "/models",
+                "request_path": _probe_request_path(probe, provider),
                 "protocol": "openai_chat_completions" if "openai_chat_completions" in provider.get("protocols", []) else "anthropic_messages",
             },
         }
