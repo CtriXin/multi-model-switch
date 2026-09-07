@@ -120,3 +120,11 @@ WebUI 是发现、理解和默认偏好草稿；TUI 是最终单次启动确认�
 ## 交互参考
 
 这一版更接近 MCP Inspector / Smithery 这类管理中心的信息层级：先显示可筛选能力和状态，把来源路径、协议细节或 CLI 细节折叠起来。
+
+## Pi 全局规则到达
+
+`mmf → pi` 使用每次启动的隔离 `PI_CODING_AGENT_DIR`。新隔离目录只从真实 `~/.pi/agent/` 复制首个存在的 `AGENTS.override.md`、`AGENTS.md`、`AGENTS.MD`，顺序与 Pi 的 AGENTS 选择一致；没有这些文件就保留原生无全局规则的行为。读取失败显式报错，不假装规则已加载。
+
+复制的是单个文本快照，不是到全局文件的 symlink；会话内修改不会回写宿主。已有隔离会话的 AGENTS 保留，宿主变更在下一次 fresh launch 生效。项目及祖先 AGENTS 仍由 Pi 自己按目录读取，不把全局政策提升到项目合同之上。auth、settings、SYSTEM、Claude 状态都不在此 allowlist，模型/source/effort 与现有 config 隔离不变。
+
+skills overlay 与 AGENTS 是两条独立路径。目录里有 SKILL.md 或宿主存在 AGENTS，不等于本会话已采用。`tests/test_pi_launcher.py` 的 policy 回归通过实际安装的 Pi `loadProjectContextFiles` 验证全局 + 项目内容；没有 Pi/Node 时明确 skip，不安装、不发模型请求。可用 `MMS_TEST_PI_RESOURCE_LOADER` 指向已安装 loader 做明确验证。

@@ -1325,6 +1325,35 @@ def _pi_link_shared_agent_bin(agent_dir):
         return
 
 
+def _pi_seed_agent_policy(agent_dir):
+    """Snapshot only the user's AGENTS policy into a fresh isolated Pi agentDir.
+
+    Pi discovers global context under PI_CODING_AGENT_DIR, not the real HOME.
+    Preserve an existing session policy and native AGENTS override precedence.
+    Do not link the global file: editing session context must not write home.
+    This allowlist intentionally excludes auth, settings and Claude state.
+    """
+    source_dir = Path(_real_user_path(".pi", "agent"))
+    target_dir = Path(agent_dir)
+    if target_dir.resolve() == source_dir.resolve():
+        raise ValueError("Pi policy requires an isolated agent directory")
+    names = ("AGENTS.override.md", "AGENTS.md", "AGENTS.MD")
+    if any((target_dir / name).is_file() for name in names):
+        return
+    for name in names:
+        source = source_dir / name
+        if source.is_file():
+            # An unreadable configured policy is an explicit startup error,
+            # not a silently policy-free launch or a global-account fallback.
+            try:
+                content = source.read_text(encoding="utf-8")
+                target_dir.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(str(target_dir / name), content, mode=0o600)
+            except (OSError, UnicodeError) as error:
+                raise RuntimeError(f"Cannot load Pi agent policy: {source}") from error
+            return
+
+
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     launchers = _launchers_module()
@@ -1349,6 +1378,7 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_SOFT_HOME"] = "1"
 
     agent_dir = os.path.join(session_home, ".pi", "agent")
+    _pi_seed_agent_policy(agent_dir)
     _pi_link_shared_agent_bin(agent_dir)
     session_dir = _pi_session_dir()
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
