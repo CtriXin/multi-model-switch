@@ -1718,3 +1718,133 @@ def test_preset_export_runtime_passes_pi_model_info(monkeypatch):
     assert captured["cli"] == "pi"
     assert captured["runtime"]["id"] == "relay-c"
     assert captured["model_info"] == {"model": "gpt-5.4"}
+
+
+@pytest.fixture
+def isolated_policy_gateway(monkeypatch, tmp_path):
+    """Exercise the real Pi gateway boundary without credentials or a model call."""
+    import mms_pi_support as pi
+
+    real_home = tmp_path / 'real-home'
+    real_home.mkdir()
+    gateway = tmp_path / 'isolated-gateway'
+    project = tmp_path / 'project-outside-home'
+    project.mkdir()
+    (project / 'AGENTS.md').write_text('Project scope: preserve this local contract.\n')
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(pi, '_real_user_path', lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(pi, '_pi_gateway_root', lambda: str(gateway))
+    monkeypatch.setattr(pi, '_pi_effective_selected_model', lambda runtime, model: model)
+    for name in (
+        '_cleanup_stale_sessions', '_inject_real_home_hints', '_inject_host_capability_hints',
+        '_inject_selected_model_name', '_set_session_home_hint',
+        '_apply_runtime_network_profile', '_apply_runtime_locale_profile',
+        '_apply_runtime_ip_stack_profile', '_install_session_command_wrappers',
+        '_install_session_packet_env', 'apply_pi_capture_proxy',
+    ):
+        monkeypatch.setattr(pi, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(pi, '_write_pi_models_config', lambda agent_dir, runtime, model: (
+        str(Path(agent_dir) / 'models.json'), 'synthetic-provider'))
+    monkeypatch.setattr(pi, '_write_pi_settings_config', lambda agent_dir: str(Path(agent_dir) / 'settings.json'))
+    monkeypatch.setattr(pi._launchers_module(), '_pi_wrapper_path', lambda: '/synthetic/pi')
+    return pi, real_home, project
+
+
+def _installed_pi_context_loader():
+    """Discover only an existing installation; never npx/install or start Pi."""
+    import shutil
+
+    override = os.environ.get('MMS_TEST_PI_RESOURCE_LOADER')
+    if override:
+        assert Path(override).is_file(), 'Explicit Pi resource-loader path is missing'
+        return Path(override)
+    binary = shutil.which('pi')
+    if binary:
+        for parent in Path(binary).resolve().parents:
+            loader = parent / 'dist/core/resource-loader.js'
+            if loader.is_file():
+                return loader
+    pytest.skip('Native Pi context loader not installed; no download attempted')
+
+
+def _read_native_pi_context(project, agent_dir):
+    import shutil
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is not installed; native Pi context probe not run')
+    loader = _installed_pi_context_loader()
+    script = f"""
+        import {{ loadProjectContextFiles }} from {json.dumps(loader.as_uri())};
+        const rows = loadProjectContextFiles({{
+            cwd: process.argv[1], agentDir: process.argv[2]
+        }});
+        process.stdout.write(JSON.stringify(rows));
+    """
+    result = subprocess.run([node, '--input-type=module', '-e', script, str(project), str(agent_dir)],
+                            text=True, capture_output=True, timeout=20, check=True)
+    return json.loads(result.stdout)
+
+
+def test_pi_isolated_gateway_loads_global_policy_and_project_context(isolated_policy_gateway):
+    pi, real_home, project = isolated_policy_gateway
+    global_dir = real_home / '.pi/agent'
+    global_dir.mkdir(parents=True)
+    policy_path = os.environ.get('MMS_TEST_GLOBAL_POLICY')
+    policy = (Path(policy_path).read_text() if policy_path else
+              'Global policy: preserve unrelated work; complete only the requested delivery boundary.\n')
+    (global_dir / 'AGENTS.md').write_text(policy)
+    # Deliberately adjacent auth/config must not be inherited by the policy loader.
+    (global_dir / 'auth.json').write_text('{"synthetic_secret":"never-copy"}')
+    (global_dir / 'settings.json').write_text('{"synthetic_setting":"never-copy"}')
+
+    env = pi._pi_gateway_env({'model': 'synthetic-model'})
+    isolated = Path(env['PI_CODING_AGENT_DIR'])
+    assert isolated != global_dir
+    rows = _read_native_pi_context(project, isolated)
+    assert [(Path(row['path']).name, row['content']) for row in rows] == [
+        ('AGENTS.md', policy), ('AGENTS.md', (project / 'AGENTS.md').read_text())]
+    assert not (isolated / 'auth.json').exists()
+    assert not (isolated / 'settings.json').exists()
+    assert not (isolated / 'AGENTS.md').is_symlink()
+    (isolated / 'AGENTS.md').write_text('Session-local edit\n')
+    assert (global_dir / 'AGENTS.md').read_text() == policy
+    pi._pi_gateway_env({'model': 'synthetic-model'})
+    assert (isolated / 'AGENTS.md').read_text() == 'Session-local edit\n'
+
+
+def test_pi_policy_missing_is_optional_and_global_override_wins(isolated_policy_gateway):
+    pi, real_home, project = isolated_policy_gateway
+    first = pi._pi_gateway_env({'model': 'synthetic-model'})
+    assert not (Path(first['PI_CODING_AGENT_DIR']) / 'AGENTS.md').exists()
+    global_dir = real_home / '.pi/agent'
+    global_dir.mkdir(parents=True)
+    (global_dir / 'AGENTS.md').write_text('Superseded global default\n')
+    (global_dir / 'AGENTS.override.md').write_text('Explicit global override\n')
+    second = pi._pi_gateway_env({'model': 'synthetic-model'})
+    isolated = Path(second['PI_CODING_AGENT_DIR'])
+    rows = _read_native_pi_context(project, isolated)
+    assert rows[0]['content'] == 'Explicit global override\n'
+    assert len(rows) == 2
+    assert not (isolated / 'AGENTS.md').exists()
+
+
+def test_pi_policy_copy_fails_explicitly_and_cannot_target_global(isolated_policy_gateway, monkeypatch):
+    pi, real_home, project = isolated_policy_gateway
+    global_dir = real_home / '.pi/agent'
+    global_dir.mkdir(parents=True)
+    source = global_dir / 'AGENTS.md'
+    source.write_text('Keep this source unchanged\n')
+    with pytest.raises(ValueError, match='isolated agent directory'):
+        pi._pi_seed_agent_policy(global_dir)
+    assert source.read_text() == 'Keep this source unchanged\n'
+    original_read = Path.read_text
+
+    def deny_policy(path, *args, **kwargs):
+        if path == source:
+            raise PermissionError('synthetic unreadable policy')
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', deny_policy)
+    with pytest.raises(RuntimeError, match='Cannot load Pi agent policy'):
+        pi._pi_gateway_env({'model': 'synthetic-model'})

@@ -79,9 +79,17 @@ _QUICK_PYTEST_TARGETS = [
     "tests/test_nsr_bundled_wrapper.py",
     "tests/test_pi_launcher.py::test_glint_pi_bridge_requires_glint_pane_and_managed_extension",
     "tests/test_pi_launcher.py::test_launch_pi_adds_glint_bridge_as_explicit_extension",
+    "tests/test_pi_launcher.py::test_pi_isolated_gateway_loads_global_policy_and_project_context",
+    "tests/test_pi_launcher.py::test_pi_policy_missing_is_optional_and_global_override_wins",
+    "tests/test_pi_launcher.py::test_pi_policy_copy_fails_explicitly_and_cannot_target_global",
 ]
 
 _SCENARIO_MATRIX = [
+    {
+        "id": "pi-isolated-global-policy",
+        "state": "fresh isolated Pi agentDir, host AGENTS policy, project outside real HOME",
+        "coverage": "native Pi context loader receives global policy plus project context; auth is not inherited and session edits do not write home",
+    },
     {
         "id": "fresh-mmf-preview-root",
         "state": "empty HOME, no MMS env",
