@@ -1221,7 +1221,7 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
                 {
                     "hooks": [
                         {"type": "command", "command": "/tmp/keep-session-start.sh"},
-                        {"type": "command", "command": "/tmp/nsr-claude-hook.sh"},
+                        {"type": "command", "command": "/Users/me/.mms/hooks/nsr-claude-hook.sh"},
                         {"type": "command", "command": "/Users/me/.codex/skills/looop/hooks/session-start.sh"},
                     ]
                 }
@@ -1248,29 +1248,8 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
         for item in group.get("hooks", [])
     ]
     assert "/tmp/keep-session-start.sh" in enabled_commands
-    assert enabled_commands.count(mms_launchers._NSR_CLAUDE_HOOK) >= 2
-    assert mms_launchers._NSR_CLAUDE_HOOK in [
-        item["command"]
-        for group in enabled_hooks["Stop"]
-        for item in group["hooks"]
-    ]
-    assert mms_launchers._NSR_CLAUDE_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("SessionStart", [])
-        for item in group.get("hooks", [])
-    ]
-    assert mms_launchers._NSR_CLAUDE_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("UserPromptSubmit", [])
-        for item in group.get("hooks", [])
-    ]
-    for noisy_event in ("PermissionRequest", "PreToolUse", "PostToolUse"):
-        assert mms_launchers._NSR_CLAUDE_HOOK not in [
-            item["command"]
-            for group in enabled_hooks.get(noisy_event, [])
-            for item in group.get("hooks", [])
-        ]
-    assert not any("/tmp/nsr-claude-hook.sh" == command or "looop" in command for command in enabled_commands)
+    assert mms_launchers._NSR_CLAUDE_HOOK not in enabled_commands
+    assert not any("nsr-" in command or "looop" in command or "bugloop" in command for command in enabled_commands)
 
 
 def test_build_codex_session_hooks_respects_session_nsr_toggle():
@@ -1283,7 +1262,7 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
                     "matcher": "startup|resume",
                     "hooks": [
                         {"type": "command", "command": "/tmp/keep.sh"},
-                        {"type": "command", "command": "/tmp/nsr-codex-hook.sh"},
+                        {"type": "command", "command": "/Users/me/.mms/hooks/nsr-codex-hook.sh"},
                         {"type": "command", "command": "/tmp/bugloop-nightly-fix.sh"},
                     ],
                 }
@@ -1310,32 +1289,11 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
         for item in group.get("hooks", [])
     ]
     assert "/tmp/keep.sh" in enabled_commands
-    assert enabled_commands.count(mms_launchers._NSR_CODEX_HOOK) >= 2
-    assert mms_launchers._NSR_CODEX_HOOK in [
-        item["command"]
-        for group in enabled_hooks["Stop"]
-        for item in group["hooks"]
-    ]
-    assert mms_launchers._NSR_CODEX_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("SessionStart", [])
-        for item in group.get("hooks", [])
-    ]
-    assert mms_launchers._NSR_CODEX_HOOK not in [
-        item["command"]
-        for group in enabled_hooks.get("UserPromptSubmit", [])
-        for item in group.get("hooks", [])
-    ]
-    for noisy_event in ("PermissionRequest", "PreToolUse", "PostToolUse"):
-        assert mms_launchers._NSR_CODEX_HOOK not in [
-            item["command"]
-            for group in enabled_hooks.get(noisy_event, [])
-            for item in group.get("hooks", [])
-        ]
-    assert not any("/tmp/nsr-codex-hook.sh" == command or "bugloop" in command for command in enabled_commands)
+    assert mms_launchers._NSR_CODEX_HOOK not in enabled_commands
+    assert not any("nsr-" in command or "looop" in command or "bugloop" in command for command in enabled_commands)
 
 
-def test_builtin_nsr_hook_injects_active_context(monkeypatch, tmp_path):
+def test_builtin_nsr_hook_leaves_old_active_context_untouched(monkeypatch, tmp_path):
     state_home = tmp_path / "nsr"
     session_dir = state_home / "sessions" / "session-a"
     session_dir.mkdir(parents=True)
@@ -1365,38 +1323,18 @@ def test_builtin_nsr_hook_injects_active_context(monkeypatch, tmp_path):
     )
 
     assert result.returncode == 0
-    payload = json.loads(result.stdout)
-    assert payload["continue"] is True
-    assert "Finish release" in payload["hookSpecificOutput"]["additionalContext"]
-    assert "Run tests" in payload["hookSpecificOutput"]["additionalContext"]
-    assert (session_dir / "events.jsonl").read_text(encoding="utf-8").strip()
-
-    first_stop = subprocess.run(
-        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
-        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        check=False,
-    )
-    assert first_stop.returncode == 0
-    assert json.loads(first_stop.stdout)["decision"] == "block"
-
-    repeated_stop = subprocess.run(
-        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
-        input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a"}),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        check=False,
-    )
-    assert repeated_stop.returncode == 0
-    assert json.loads(repeated_stop.stdout)["continue"] is True
-    state = json.loads((session_dir / "state.json").read_text(encoding="utf-8"))
-    assert state["loop"]["status"] == "blocked"
-    assert "infinite hook loop" in state["quality"]["blocker"]
+    assert json.loads(result.stdout) == {}
+    assert not (session_dir / "events.jsonl").exists()
+    for active in (False, True):
+        stopped = subprocess.run(
+            ["python3", "hooks/nsr-builtin-hook.py", "claude"],
+            input=json.dumps({"hook_event_name": "Stop", "session_id": "session-a", "stop_hook_active": active}),
+            text=True, capture_output=True, env=env, check=True,
+        )
+        assert json.loads(stopped.stdout) == {}
+    state = json.loads((session_dir / "state.json").read_text())
+    assert state["loop"]["status"] == "running"
+    assert not (session_dir / "events.jsonl").exists()
 
 
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
@@ -1533,10 +1471,10 @@ def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
     )
 
     assert result.stdout == ""
-    assert "[map] Index up to date." in result.stderr
+    assert result.stderr == ""
 
 
-def test_codegraph_hook_auto_registers_missing_index(tmp_path):
+def test_codegraph_hook_does_not_register_missing_index(tmp_path):
     repo = tmp_path / "repo"
     bin_dir = tmp_path / "bin"
     log_path = tmp_path / "codegraph.log"
@@ -1577,13 +1515,11 @@ def test_codegraph_hook_auto_registers_missing_index(tmp_path):
 
     assert result.stdout == ""
     assert result.stderr == ""
-    assert log_path.read_text(encoding="utf-8").splitlines() == [
-        f"init {repo}",
-        f"index {repo}",
-    ]
+    assert not log_path.exists()
+    assert not (repo / ".codegraph").exists()
 
 
-def test_codegraph_hook_syncs_existing_index(tmp_path):
+def test_codegraph_hook_leaves_existing_index_untouched(tmp_path):
     repo = tmp_path / "repo"
     bin_dir = tmp_path / "bin"
     log_path = tmp_path / "codegraph.log"
@@ -1623,7 +1559,8 @@ def test_codegraph_hook_syncs_existing_index(tmp_path):
         check=True,
     )
 
-    assert log_path.read_text(encoding="utf-8").strip() == f"sync {repo}"
+    assert not log_path.exists()
+    assert (repo / ".codegraph").is_dir()
 
 
 def test_rtk_hook_is_silent_when_dependencies_are_missing(tmp_path):

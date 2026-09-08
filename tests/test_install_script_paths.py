@@ -93,9 +93,9 @@ def _install_handover_vendor_fixture(home: Path) -> Path:
     return handover_target
 
 
-def test_cleanup_legacy_global_session_hooks_removes_stale_nsr_and_read_once_dupes(tmp_path):
+def test_installer_hook_cleanup_only_plans_and_preserves_read_once(tmp_path):
     script = INSTALL_SCRIPT.read_text(encoding="utf-8")
-    cleanup_py = _extract_python_heredoc_after(script, "cleanup_legacy_global_session_hooks()")
+    body = _extract_shell_function_body(script, "cleanup_legacy_global_session_hooks")
     claude_settings = tmp_path / ".claude" / "settings.json"
     codex_hooks = tmp_path / ".codex" / "hooks.json"
     claude_settings.parent.mkdir(parents=True)
@@ -159,35 +159,26 @@ def test_cleanup_legacy_global_session_hooks_removes_stale_nsr_and_read_once_dup
         encoding="utf-8",
     )
 
+    before = {path: path.read_bytes() for path in (claude_settings, codex_hooks)}
+    env = dict(os.environ, REAL_HOME=str(tmp_path), SOURCE_DIR=str(ROOT_DIR))
     completed = subprocess.run(
-        ["python3", "-", str(claude_settings), str(codex_hooks)],
-        input=cleanup_py,
-        text=True,
-        capture_output=True,
-        check=True,
+        ["bash", "-c", '_python_bin() { command -v python3; }\nrun_cleanup() {\n' + body + '\n}\nrun_cleanup'],
+        text=True, capture_output=True, check=True, env=env,
     )
+    report = json.loads(completed.stdout)
+    assert sum(len(item["removed"]) for item in report["files"]) == 2
+    assert all(path.read_bytes() == content for path, content in before.items())
 
-    assert "CLEANED:" in completed.stdout
-    cleaned_claude = json.loads(claude_settings.read_text(encoding="utf-8"))
-    cleaned_codex = json.loads(codex_hooks.read_text(encoding="utf-8"))
-    claude_commands = [
-        hook["command"]
-        for groups in cleaned_claude["hooks"].values()
-        for group in groups
-        for hook in group.get("hooks", [])
-    ]
-    codex_commands = [
-        hook["command"]
-        for groups in cleaned_codex.get("hooks", {}).values()
-        for group in groups
-        for hook in group.get("hooks", [])
-    ]
-    assert all("nsr-" not in command for command in claude_commands + codex_commands)
-    assert "node /external/openpets hook" in claude_commands
-    assert claude_commands.count(f"READ_ONCE_DIFF=1 /bin/bash {tmp_path}/.claude/read-once/hook.sh") == 1
-    assert claude_commands.count(f"/bin/bash {tmp_path}/.claude/read-once/compact.sh") == 1
-    assert not any(command == f"READ_ONCE_DIFF=1 {tmp_path}/.claude/read-once/hook.sh" for command in claude_commands)
-    assert not any(command == f"{tmp_path}/.claude/read-once/compact.sh" for command in claude_commands)
+    # An optional read-only plan must not become an installer prerequisite.
+    claude_settings.write_text("invalid JSON")
+    failed_plan = subprocess.run(
+        ["bash", "-ec", '_python_bin() { command -v python3; }\nrun_cleanup() {\n' + body + '\n}\nrun_cleanup'],
+        text=True, capture_output=True, env=env,
+    )
+    assert failed_plan.returncode == 0
+    assert "settings left unchanged" in failed_plan.stderr
+    assert claude_settings.read_text() == "invalid JSON"
+    assert codex_hooks.read_bytes() == before[codex_hooks]
 
 
 def test_install_check_prefers_explicit_real_home(tmp_path):
@@ -621,16 +612,14 @@ def test_install_script_updates_chinese_optional_copy():
     assert "NSR payload 也随 channel 内建" in text
 
 
-def test_install_script_codegraph_auto_registers_missing_index():
+def test_install_script_codegraph_remains_explicit():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     hook_text = (ROOT_DIR / "hooks" / "claude-codegraph-auto-index.sh").read_text(encoding="utf-8")
     readme_text = (ROOT_DIR / "README.zh-CN.md").read_text(encoding="utf-8")
-
-    assert "自动 init/index" in text
+    assert "CodeGraph 仅显式执行" in text
     assert "codegraph init -i" in readme_text
-    assert '"$CODEGRAPH_BIN" init "$repo_root"' in hook_text
-    assert '"$CODEGRAPH_BIN" index "$repo_root"' in hook_text
-    assert '"$CODEGRAPH_BIN" sync' in hook_text
+    assert "exit 0" in hook_text
+    assert "CODEGRAPH_BIN" not in hook_text
 
 
 def test_install_script_installs_brainkeeper_shortcuts_and_archive_fallback():
