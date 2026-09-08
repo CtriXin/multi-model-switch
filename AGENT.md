@@ -15,6 +15,13 @@ This file is the shared rule source for Codex, Claude, and other coding agents i
 - Tool-specific files such as `CLAUDE.md` should only contain the loader line and truly tool-specific notes.
 - When shared behavior changes, update this file first.
 
+## Current Task And Automatic Hook Boundary
+
+- New work uses the original Stride task for requirements, evidence, validation and follow-up. Archived state-core/mommy records are historical compatibility, not a required intake or done gate.
+- Record results once in that task; a separate local release-note or issue ledger is not required. Preserve existing historical records.
+- NSR Stop/compact, Map auto-index and CodeGraph auto-index hooks are retired. Keep explicit tools available; do not reinstall automatic registrations or delete user markers/indexes.
+- Existing MMS session registrations may use shared wrappers. Retired wrappers remain no-op compatibility entries; do not rewrite generated MMS configs to clean them up.
+
 ## Commit Identity
 
 For every agent-created commit, follow:

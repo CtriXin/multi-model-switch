@@ -60,11 +60,11 @@ def test_bundled_nsr_wrapper_noops_non_stop_events_when_active(tmp_path):
     claude_result = _run_wrapper(repo, {"hook_event_name": "PreCompact", "cwd": str(repo)}, host="claude")
 
     assert json.loads(codex_result.stdout) == {}
-    assert json.loads(claude_result.stdout) == {"continue": True}
+    assert json.loads(claude_result.stdout) == {}
     assert not (repo / ".loop_state_mms_test.json").exists()
 
 
-def test_bundled_nsr_wrapper_delegates_stop_loop_and_disables_after_allow(tmp_path):
+def test_bundled_nsr_wrapper_preserves_marker_without_continuing(tmp_path):
     repo = _init_repo(tmp_path)
     status = subprocess.run(["python3", str(NSRCTL), "enable", str(repo)], check=True, capture_output=True, text=True)
     marker = Path(status.stdout.strip().split(": ", 1)[1])
@@ -73,7 +73,8 @@ def test_bundled_nsr_wrapper_delegates_stop_loop_and_disables_after_allow(tmp_pa
     second = _run_wrapper(repo, {"hook_event_name": "Stop", "cwd": str(repo)})
 
     assert first.returncode == 0
-    assert json.loads(first.stdout)["decision"] == "block"
+    assert json.loads(first.stdout) == {}
     assert second.returncode == 0
     assert json.loads(second.stdout) == {}
-    assert not marker.exists()
+    assert marker.exists()
+    assert not (repo / ".loop_state_mms_test.json").exists()

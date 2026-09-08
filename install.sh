@@ -266,7 +266,7 @@ optional_nsr_commands_installed() {
 }
 
 optional_map_installed() {
-    [ -x "$REAL_HOME/.claude/hooks/map-auto-index.sh" ]
+    [ -f "${MAP_INSTALL_DIR:-$REAL_HOME/.local/share/map}/dist/cli/map.js" ]
 }
 
 optional_codegraph_installed() {
@@ -355,7 +355,7 @@ print_bundled_session_asset_status() {
             web-access) label="web-access"; path="$assets_root/skills/web-access"; mode="$(t "默认可用" "available by default")" ;;
             weber) label="weber"; path="$assets_root/skills/weber"; mode="$(t "默认可用" "available by default")" ;;
             agent-browser) label="agent-browser"; path="$assets_root/skills/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
-            nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-stop-wrapper.py"; mode="$(t "默认注入；/nsr 启用后走内置新版 loop payload" "injected by default; /nsr enables the bundled rewritten loop payload")" ;;
+            nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-stop-wrapper.py"; mode="$(t "显式 /nsr 手动工作；自动 hook 已退休" "explicit /nsr manual work; automatic hooks retired")" ;;
         esac
         if bundled_session_asset_present "$asset"; then
             echo "✓ $label: $path ($mode)"
@@ -467,9 +467,9 @@ $(t "说明:" "Notes:")
   - $(t "--install-brainkeeper-context 会全量安装/更新 BrainKeeper context pack：BrainKeeper MCP、Claude 的 /distill /cz /cr、token hooks、bk/brainkeeper 命令；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude /distill /cz /cr commands, token hooks, and bk/brainkeeper commands; by default it pins the MMS-tested BrainKeeper tag")
   - $(t "--brainkeeper-ref 可覆盖 BrainKeeper 安装版本，例如 v2.4.1 / main" "--brainkeeper-ref overrides the BrainKeeper install ref, for example v2.4.1 / main")
   - $(t "旧参数 --install-mindkeeper-context / --mindkeeper-ref 仍兼容，但已 deprecated" "Legacy --install-mindkeeper-context / --mindkeeper-ref remain compatible but are deprecated")
-  - $(t "--install-map 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs the project-structure Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
+  - $(t "--install-map 只安装显式 Map CLI，不注册自动 hook" "--install-map installs the explicit Map CLI without automatic hooks")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
-  - $(t "--install-codegraph 会通过 npm 安装 CodeGraph CLI/MCP，用于 symbol/call graph 代码索引；MMS session hook 会在 git repo 中自动 init/index，已有索引则 sync" "--install-codegraph installs the CodeGraph CLI/MCP via npm for symbol/call-graph code indexing; MMS session hooks auto init/index git repos and sync existing indexes")
+  - $(t "--install-codegraph 安装显式 CodeGraph CLI/MCP，不自动建索引" "--install-codegraph installs explicit CodeGraph CLI/MCP without automatic indexing")
   - $(t "--codegraph-package 可覆盖 npm 包规格，例如 @colbymchenry/codegraph@0.7.6" "--codegraph-package overrides the npm package spec, for example @colbymchenry/codegraph@0.7.6")
   # --install-read-once removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
   - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令，用于长日志/测试输出/diff 的 ref+snippet 收纳" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command for long logs/test output/diff refs and snippets")
@@ -477,7 +477,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供；NSR payload 随 channel 内建，默认注入，/nsr 命令会自动安装；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, and token-saver ship as bundled MMS session assets; the NSR payload ships with each channel, is injected by default, and /nsr commands are auto-installed; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
+  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供；NSR 工具随 channel 内建，/nsr 命令会自动安装，自动 hook 已退休；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, and token-saver ship as bundled MMS session assets; NSR tools ship with each channel and /nsr commands are auto-installed; automatic hooks are retired; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -637,21 +637,21 @@ prompt_optional_install_choices() {
             else
                 echo "可选 Claude hook"
             fi
-            note_optional_pack_detected " Map 自动索引" "Map auto-index"
+            note_optional_pack_detected " Map CLI" "Map CLI"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional Claude hook"
             echo "  Map builds a lightweight project-structure map so Claude can orient in a repo faster."
             echo "  The SessionStart hook refreshes the structure index automatically."
             echo "  By default MMS reuses an existing Node.js 18+ runtime when available; otherwise Map is skipped unless you explicitly ask for --ensure-node22."
-            if confirm_from_tty "Install Map plus the Claude SessionStart auto-index hook? [y/N]: " "n"; then
+            if confirm_from_tty "Install Map CLI for explicit use? [y/N]: " "n"; then
                 INSTALL_MAP=1
             fi
         else
             echo "可选 Claude hook"
             echo "  Map 会建立轻量项目结构地图，让 Claude 更快理解 repo。"
-            echo "  SessionStart hook 会在会话启动时自动刷新结构索引。"
+    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
             echo "  默认优先复用现有 Node.js 18+；如果没有合适版本，会先跳过 Map，除非你显式要求 --ensure-node22。"
-            if confirm_from_tty "是否安装 Map 并启用 Claude 启动自动索引 hook？[y/N]: " "n"; then
+            if confirm_from_tty "是否安装显式 Map CLI？[y/N]: " "n"; then
                 INSTALL_MAP=1
             fi
         fi
@@ -669,7 +669,7 @@ prompt_optional_install_choices() {
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional code intelligence"
             echo "  CodeGraph installs a local CLI/MCP server for symbol search, callers/callees, and code context."
-            echo "  MMS session hooks auto-register git repos with CodeGraph, then sync existing .codegraph/ indexes."
+    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
             echo "  It uses npm and may fall back to MMS-managed nvm Node.js 22 without changing your default Node."
             if confirm_from_tty "Install CodeGraph CLI? [y/N]: " "n"; then
                 INSTALL_CODEGRAPH=1
@@ -677,7 +677,7 @@ prompt_optional_install_choices() {
         else
             echo "可选代码索引"
             echo "  CodeGraph 会安装本机 CLI/MCP server，用于 symbol search、callers/callees 和代码上下文检索。"
-            echo "  MMS session hook 会自动为 git repo 注册 CodeGraph；已有 .codegraph/ 时只做 sync。"
+            echo "  按当前任务需要显式运行 CodeGraph；不会在 SessionStart 建立或同步索引。"
             echo "  它使用 npm；必要时会临时用 MMS-managed nvm Node.js 22，不会修改你的默认 Node。"
             if confirm_from_tty "是否安装 CodeGraph CLI？[y/N]: " "n"; then
                 INSTALL_CODEGRAPH=1
@@ -811,13 +811,13 @@ prompt_optional_install_choices() {
         echo "Bundled session mode"
         echo "  Caveman, TOON, token-saver, and the Web automation bundle ship inside MMS as pinned session assets."
         echo "  Web automation bundle = weber router + web-access logged-in Chrome + agent-browser headless CLI."
-        echo "  NSR ships as a channel-pinned payload too: MMS injects the Stop hook, and /nsr enables the loop."
+        echo "  NSR ships as a channel-pinned payload too: /nsr provides an explicit bounded manual work loop; automatic Stop hooks are retired."
         echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config; installer only adds the /nsr command docs."
     else
         echo "内建 session 模式"
         echo "  Caveman、TOON、token-saver 和 Web automation bundle 会随 MMS 一起作为内建 session 资产提供。"
         echo "  Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。"
-        echo "  NSR payload 也随 channel 内建：MMS 默认注入 Stop hook，/nsr 后才启用 loop。"
+        echo "  NSR payload 也随 channel 内建：/nsr 提供显式、有界的手动工作循环；自动 Stop hook 已退休。"
         echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置；安装器只补 /nsr 命令文档。"
     fi
 
@@ -1778,137 +1778,13 @@ repair_managed_claude_settings() {
 }
 
 cleanup_legacy_global_session_hooks() {
-    local py_output=""
-
-    py_output="$("$(_python_bin)" - "$REAL_HOME/.claude/settings.json" "$REAL_HOME/.codex/hooks.json" <<'PY'
-import json
-import shutil
-import sys
-from datetime import datetime
-from pathlib import Path
-
-
-def normalize(value):
-    return " ".join(str(value or "").strip().split())
-
-
-def is_legacy_global_nsr(command):
-    text = normalize(command).lower()
-    if "multi-model-switch" not in text:
-        return False
-    return any(
-        marker in text
-        for marker in (
-            "nsr-claude-hook.sh",
-            "nsr-codex-hook.sh",
-            "nsr-builtin-hook.py",
-        )
-    )
-
-
-def read_once_key(command):
-    text = normalize(command)
-    prefix = ""
-    if text.startswith("READ_ONCE_DIFF=1 "):
-        prefix = "READ_ONCE_DIFF=1 "
-        text = text[len(prefix):]
-    bash_wrapped = False
-    if text.startswith("/bin/bash "):
-        bash_wrapped = True
-        text = text[len("/bin/bash "):]
-    if ".claude/read-once/" not in text:
-        return "", False
-    if not (text.endswith("/hook.sh") or text.endswith("/compact.sh")):
-        return "", False
-    return prefix + text, bash_wrapped
-
-
-def cleanup_file(path):
-    if not path.exists():
-        return
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    if not isinstance(data, dict):
-        return
-    hooks = data.get("hooks")
-    if not isinstance(hooks, dict):
-        return
-
-    removed = 0
-    for event_name, groups in list(hooks.items()):
-        if not isinstance(groups, list):
-            continue
-        cleaned_groups = []
-        for group in groups:
-            if not isinstance(group, dict):
-                cleaned_groups.append(group)
-                continue
-            hook_items = group.get("hooks")
-            if not isinstance(hook_items, list):
-                cleaned_groups.append(group)
-                continue
-            matcher = str(group.get("matcher") or "").strip()
-            kept_hooks = []
-            read_once_bash_keys = set()
-            read_once_seen = set()
-            for hook in hook_items:
-                if not isinstance(hook, dict):
-                    continue
-                key, bash_wrapped = read_once_key(hook.get("command"))
-                if key and bash_wrapped:
-                    read_once_bash_keys.add(key)
-            for hook in hook_items:
-                if not isinstance(hook, dict):
-                    kept_hooks.append(hook)
-                    continue
-                command = hook.get("command")
-                if is_legacy_global_nsr(command):
-                    removed += 1
-                    continue
-                read_once_canonical, read_once_bash = read_once_key(command)
-                if read_once_canonical:
-                    if (not read_once_bash and read_once_canonical in read_once_bash_keys) or read_once_canonical in read_once_seen:
-                        removed += 1
-                        continue
-                    read_once_seen.add(read_once_canonical)
-                kept_hooks.append(hook)
-            if kept_hooks:
-                cleaned = dict(group)
-                cleaned["hooks"] = kept_hooks
-                cleaned_groups.append(cleaned)
-        if cleaned_groups:
-            hooks[event_name] = cleaned_groups
-        else:
-            hooks.pop(event_name, None)
-
-    if not removed:
-        return
-    backup = path.with_name(f"{path.name}.bak-mms-hook-cleanup-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
-    shutil.copy2(path, backup)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"CLEANED:{path}:{removed}:{backup}")
-
-
-for raw in sys.argv[1:]:
-    cleanup_file(Path(raw))
-PY
-)"
-
-    if [ -n "$py_output" ]; then
-        echo "$py_output" | while IFS= read -r line; do
-            case "$line" in
-                CLEANED:*)
-                    cleaned_path="${line#CLEANED:}"
-                    cleaned_count="${cleaned_path#*:}"
-                    cleaned_path="${cleaned_path%%:*}"
-                    cleaned_count="${cleaned_count%%:*}"
-                    echo "• $(t "已清理旧全局 session hook" "Cleaned legacy global session hooks"): $cleaned_path ($cleaned_count)"
-                    ;;
-            esac
-        done
-    fi
+    # Read-only plan. Global registration changes require explicit review/CAS.
+    "$(_python_bin)" "$SOURCE_DIR/mms_hook_retirement.py" \
+        --file "$REAL_HOME/.claude/settings.json" \
+        --file "$REAL_HOME/.codex/hooks.json" || {
+        echo "Optional retired-hook cleanup plan unavailable; settings left unchanged." >&2
+        return 0
+    }
 }
 
 _python_bin() {
@@ -3256,63 +3132,19 @@ run_map_installer() {
 }
 
 install_optional_map() {
-    local hook_source="$SOURCE_DIR/hooks/claude-map-auto-index.sh"
-    local claude_dir="$REAL_HOME/.claude"
-    local hook_dir="$claude_dir/hooks"
-    local hook_target="$hook_dir/map-auto-index.sh"
-    local map_install_dir="${MAP_INSTALL_DIR:-$REAL_HOME/.local/share/map}"
-    local map_session_start_hook="$map_install_dir/dist/hooks/session-start.js"
-    local node_label=""
-    node_label="$(node_version_label || true)"
-
-    echo ""
-    echo "$(t "正在安装 Map auto-index..." "Installing Map auto-index...")"
-    echo "⚠ $(t "这个可选包会安装 Map，并修改 ~/.claude/settings.json 和 ~/.claude/hooks/。" "This optional pack installs Map and updates ~/.claude/settings.json plus ~/.claude/hooks/.")"
-
+    echo "$(t "正在安装 Map CLI（显式使用，不注册自动 hook）" "Installing Map CLI for explicit use; no automatic hook registration")"
     if ! node_meets_min_major 18; then
-        if [ -n "$node_label" ]; then
-            echo "⚠ $(t "检测到本机 Node 版本不足，跳过 Map 安装，不影响 MMS 主功能" "Detected an insufficient local Node.js version; skipping Map install without affecting core MMS"): $node_label"
-        else
-            echo "⚠ $(t "未检测到可用 Node.js，跳过 Map 安装，不影响 MMS 主功能" "No usable Node.js detected; skipping Map install without affecting core MMS")"
-        fi
-        echo "  $(t "如需安装 Map，优先复用现有 Node.js 18+ / 22；只有你明确愿意时再执行 --ensure-node22。" "To install Map later, prefer an existing Node.js 18+ / 22; only use --ensure-node22 when you explicitly want that fallback.")"
+        echo "$(t "未找到 Node.js 18+，跳过可选 Map 安装" "Node.js 18+ unavailable; skipping optional Map install")"
         return 0
     fi
-
-    run_map_installer || true
-
-    if [ ! -f "$map_session_start_hook" ]; then
-        echo "⚠ $(t "未检测到 Map 的 SessionStart hook 构建产物，跳过 Claude hook 注入" "Map SessionStart hook build output not found, skipping Claude hook enablement"): $map_session_start_hook"
-        return 1
-    fi
-
-    if [ ! -f "$hook_source" ]; then
-        echo "⚠ $(t "找不到 Map hook 模板，跳过" "Map hook template not found, skipping"): $hook_source"
-        return 1
-    fi
-
-    mkdir -p "$hook_dir"
-    cp "$hook_source" "$hook_target"
-    chmod +x "$hook_target"
-
-    append_claude_hook_command \
-        "$claude_dir/settings.json" \
-        "SessionStart" \
-        "" \
-        "/bin/bash $hook_target" \
-        "$hook_target" \
-        "bash $hook_target" \
-        "/bin/bash $hook_target"
-
-    echo "✓ $(t "已启用 Claude Map auto-index hook" "Claude Map auto-index hook enabled")"
-    return 0
+    run_map_installer
 }
 
 install_optional_codegraph() {
     echo ""
     echo "$(t "正在安装 CodeGraph..." "Installing CodeGraph...")"
     echo "⚠ $(t "这个可选包会通过 npm 安装 CodeGraph CLI；不写 ~/.config/mms，也不修改 Claude/Codex 全局配置。" "This optional pack installs the CodeGraph CLI via npm; it does not write ~/.config/mms or change global Claude/Codex config.")"
-    echo "  $(t "MMS 启动的 session 已带 CodeGraph auto-register hook；未初始化的 git repo 会自动 init/index，已有 .codegraph/ 则 sync。" "MMS-launched sessions already include the CodeGraph auto-register hook; uninitialized git repos auto init/index, and existing .codegraph/ repos sync.")"
+    echo "  $(t "CodeGraph 仅显式执行；SessionStart 不自动 init/index/sync。" "CodeGraph runs explicitly; SessionStart does not init/index/sync.")"
 
     npm_global_install_with_nvm_fallback "CodeGraph CLI" "$CODEGRAPH_PACKAGE_SPEC" || true
 
@@ -3329,13 +3161,13 @@ install_optional_codegraph() {
 print_codegraph_init_hint() {
     if [ "$INSTALL_LANG" = "en" ]; then
         echo "  CodeGraph session behavior:"
-        echo "    MMS sessions auto run codegraph init/index for an uninitialized git repo, and codegraph sync when .codegraph/ exists."
+        echo "    Run codegraph init/index or sync explicitly for the current task repository."
         echo "  Prompt for an LLM to initialize all repos now:"
         echo "    Find every git repo under this workspace, run 'codegraph init -i' when .codegraph is missing and 'codegraph sync' when it exists, skip node_modules/vendor/build dirs, and report failures."
         echo "  Tip: keep .codegraph/ local and do not commit it unless your repo intentionally tracks indexes."
     else
         echo "  CodeGraph session 行为："
-        echo "    MMS session 会在未初始化的 git repo 自动执行 codegraph init/index；已有 .codegraph/ 时执行 codegraph sync。"
+        echo "    按当前任务需要显式运行 codegraph init/index 或 sync。"
         echo "  让 LLM 立刻一键初始化全部 repo 的指令："
         echo "    找出当前工作区下所有 git repo；没有 .codegraph 就执行 'codegraph init -i'，已有 .codegraph 就执行 'codegraph sync'；跳过 node_modules/vendor/build 目录；最后汇总失败列表。"
         echo "  提醒：.codegraph/ 建议保持本地，不要提交，除非项目明确要追踪索引。"
@@ -3695,7 +3527,7 @@ print_dry_run_plan() {
     echo "• $(t "会安装/修复 offduty/onduty（handover continuity）到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "would install/repair offduty/onduty (handover continuity) into Claude/Codex/OpenCode global skill dirs and clean legacy command symlinks")"
     echo "• $(t "会安装/修复 /nsr 命令到 Claude/Codex/OpenCode（不写全局 hooks/config）" "would install/repair /nsr commands for Claude/Codex/OpenCode without global hooks/config writes")"
     [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
-    [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map auto-index" "would install Map auto-index"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
+    [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map CLI" "would install Map CLI"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
     [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
     [ "$INSTALL_TOKEN_SAVER" -eq 1 ] && echo "• $(t "会安装 Token Saver skill/命令" "would install Token Saver skill/commands")"
     [ "$INSTALL_TOON" -eq 1 ] && echo "• $(t "会安装 TOON skill/命令" "would install TOON skill/command")"
@@ -3848,94 +3680,21 @@ write_builtin_nsr_command_file() {
     fi
 
     tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-nsr-command.XXXXXX")"
-    if [ "$mode" = "opencode" ]; then
-        cat > "$tmp_file" <<EOF
+    cat > "$tmp_file" <<EOF
 <!-- $marker -->
 # /nsr
 
-Run the current task with NSR discipline in OpenCode.
+Use the current task as a bounded manual work loop when explicitly requested.
 
-Important: OpenCode does not expose the Claude/Codex Stop-hook \`decision=block\` protocol. Use this command as a manual loop contract: keep working until done or a brake trips.
+1. Keep the user objective, success criteria, current evidence and unresolved work in the original task.
+2. Implement one useful slice, then run relevant checks and inspect the actual result.
+3. Continue while useful work remains within the authorized scope. Stop on completion, repeated no-progress, a real blocker, user pause or a decision requiring the owner.
+4. Report what ran, what remains unknown and the next concrete action.
 
-## Procedure
-
-1. Treat the user text after \`/nsr\` as the objective.
-2. State success criteria and brakes:
-   - max continuation attempts;
-   - no-change/stall detection by inspecting git status/diff;
-   - validation command, if known;
-   - red-test retry limit.
-3. Work in bounded slices. After each slice, inspect git status/diff and run validation.
-4. If validation is green and success criteria are met, stop.
-5. If no files change across repeated attempts, tests stay red after the retry limit, or a high-risk decision appears, stop and ask.
-6. Before any agent-created commit, run:
-
-\`\`\`bash
-python3 "$MMS_HOME/hooks/nsr-commit-gate.py" --repo "\$PWD"
-\`\`\`
-
-If the gate blocks, do not auto-commit; explain the blocked paths and ask if needed.
+Automatic Stop/compact hooks are retired. This command does not enable repo markers,
+register hooks, send another prompt, or delete existing NSR state. Explicit local
+nsrctl and diagnostic tools remain available when requested; they are not task gates.
 EOF
-    else
-        cat > "$tmp_file" <<EOF
-<!-- $marker -->
-# /nsr
-
-Run the current task in NSR (Non-Stop-Run) mode: keep working until the goal is done or a brake trips.
-
-## Activation
-
-1. Treat the user text after \`/nsr\` as the objective.
-2. Enable NSR for this repo before continuing:
-
-\`\`\`bash
-python3 "$MMS_HOME/hooks/nsrctl.py" enable "\$PWD"
-\`\`\`
-
-3. State the objective and the brakes you will use.
-4. Continue implementing without repeated confirmation until one of these happens:
-   - success criteria are met and validation passes;
-   - \`LOOP_MAX_STEPS\` continuation limit;
-   - \`LOOP_MAX_NO_CHANGE\` no-change/stall limit;
-   - \`LOOP_TEST_CMD\` red reaches \`LOOP_MAX_RED\`;
-   - a high-risk human decision is required.
-
-## Defaults
-
-- Stop hook wrapper: \`$MMS_HOME/hooks/nsr-stop-wrapper.py\`.
-- Core hook: \`$MMS_HOME/hooks/nsr-loop-hook.py\`.
-- Safety gate: \`$MMS_HOME/hooks/nsr-commit-gate.py\`.
-- State file: \`.loop_state.json\`.
-
-Useful env vars when launching the CLI:
-
-\`\`\`bash
-LOOP_TEST_CMD="pytest -q"
-LOOP_MAX_STEPS=30
-LOOP_MAX_NO_CHANGE=3
-LOOP_MAX_RED=5
-LOOP_TEST_SHELL=1   # only when the test command needs shell syntax
-\`\`\`
-
-## Commit Safety
-
-Before any agent-created commit, run:
-
-\`\`\`bash
-python3 "$MMS_HOME/hooks/nsr-commit-gate.py" --repo "\$PWD"
-\`\`\`
-
-If it blocks, do not auto-commit; explain the blocked paths and ask if needed.
-
-## Closeout
-
-When done or blocked, the Stop hook normally disables NSR automatically. If manual cleanup is needed:
-
-\`\`\`bash
-python3 "$MMS_HOME/hooks/nsrctl.py" disable "\$PWD"
-\`\`\`
-EOF
-    fi
 
     mv "$tmp_file" "$target"
     chmod 644 "$target"
@@ -4201,15 +3960,15 @@ if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
 fi
 
 if [ "$INSTALL_MAP" -eq 1 ]; then
-    echo "• $(t "附带安装 Map auto-index" "Optional Map auto-index"): on"
-    echo "  $(t "会安装 Map，并写入 Claude 的 SessionStart hook。" "This installs Map and writes the Claude SessionStart hook.")"
+    echo "• $(t "附带安装 Map CLI" "Optional Map CLI"): on"
+    echo "  $(t "会安装显式 Map CLI，不写入 SessionStart hook。" "This installs the explicit Map CLI without SessionStart hooks.")"
     echo "  $(t "Map 版本" "Map ref"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
     echo "  $(t "默认优先复用现有 Node.js 18+；若版本不足则跳过，不会自动改你的默认 Node。" "By default MMS reuses an existing Node.js 18+ and skips Map when unavailable; it does not auto-change your default Node.")"
 fi
 
 if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
     echo "• $(t "附带安装 CodeGraph CLI" "Optional CodeGraph CLI"): on"
-    echo "  $(t "会通过 npm 安装 codegraph；MMS session hook 会自动 init/index 未初始化的 git repo，已有索引则 sync。" "This installs codegraph via npm; MMS session hooks auto init/index uninitialized git repos and sync existing indexes.")"
+    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
     echo "  $(t "CodeGraph npm 包" "CodeGraph npm package"): $CODEGRAPH_PACKAGE_SPEC"
 fi
 
@@ -4241,7 +4000,7 @@ if [ "$INSTALL_OMC" -eq 1 ]; then
 fi
 
 echo "• $(t "内建 session assets" "Bundled session assets"): on"
-echo "  $(t "安装后会自带 Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR channel payload；全部按 session 注入，不改全局 hooks/config，安装器只补 /nsr 命令文档。" "Install includes Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR channel payload; all are injected per session without changing global hooks/config, and the installer only adds /nsr command docs.")"
+echo "  $(t "安装后会自带 Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR channel payload；工具按 session 暴露，NSR/Map/CodeGraph 不注册自动 hook，不改全局 hooks/config，安装器只补 /nsr 命令文档。" "Install includes Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR channel payload; tools are exposed per session; NSR/Map/CodeGraph do not register automatic hooks or change global hooks/config, and the installer only adds /nsr command docs.")"
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
@@ -4464,12 +4223,12 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "  $(t "内建：offduty/onduty（handover continuity）未自动安装完成；可重新运行安装器或检查 vendor/handover。" "Built-in: offduty/onduty (handover continuity) was not fully auto-installed; rerun the installer or check vendor/handover.")"
     fi
     if [ "$NSR_COMMAND_INSTALL_STATUS" = "installed" ]; then
-        echo "  $(t "内建：/nsr 命令已安装到 Claude/Codex/OpenCode；Claude/Codex 通过内置 Stop hook 启用新版 loop，OpenCode 使用手动 loop contract。" "Built-in: /nsr commands installed for Claude/Codex/OpenCode; Claude/Codex enable the rewritten loop through the bundled Stop hook, while OpenCode uses the manual loop contract.")"
+        echo "  $(t "内建：/nsr 命令已安装到 Claude/Codex/OpenCode；各 host 使用显式手动 loop contract，自动 Stop hook 已退休。" "Built-in: /nsr commands installed for Claude/Codex/OpenCode; hosts use an explicit manual loop contract; automatic Stop hooks are retired.")"
     else
         echo "  $(t "内建：/nsr 命令未全部自动安装；已有自定义命令已保留，可重跑安装器修复缺失项。" "Built-in: /nsr commands were not all auto-installed; custom commands were preserved, and rerunning the installer can repair missing entries.")"
     fi
     echo ""
-    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR payload 会随 MMS 一起提供；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR payload ship with MMS; all are injected per session without global hooks/config writes.")"
+    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR payload 会随 MMS 一起提供；工具按 session 暴露，NSR/Map/CodeGraph 不注册自动 hook，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR payload ship with MMS; tools are exposed per session; NSR/Map/CodeGraph do not register automatic hooks without global hooks/config writes.")"
     echo "  $(t "LLM 修改 MMS 前指南:" "LLM editing guide:") $MMS_HOME/docs/LLM_OPERATION_GUIDE.md"
     echo ""
 
@@ -4487,7 +4246,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
 
     if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
-        echo "  $(t "CodeGraph CLI 可选安装已执行；MMS session start hook 会自动 init/index 未初始化的 git repo，已有索引则 sync。" "CodeGraph CLI optional install ran; MMS session start hooks auto init/index uninitialized git repos and sync existing indexes.")"
+    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
         print_codegraph_init_hint
         echo ""
     fi

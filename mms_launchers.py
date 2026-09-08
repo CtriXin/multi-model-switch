@@ -1,5 +1,6 @@
 """MMS 启动器：按 provider 或账号档案启动 CLI。"""
 
+from mms_hook_retirement import is_retired_automatic_hook
 from contextlib import contextmanager
 import copy
 import inspect
@@ -4150,6 +4151,8 @@ def _is_headroom_hook_command(command_text):
 
 
 def _is_retired_personal_policy_hook_command(command_text):
+    if is_retired_automatic_hook(command_text):
+        return True
     command_text = str(command_text or "").strip().lower()
     if not command_text:
         return False
@@ -4601,43 +4604,12 @@ def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_
 
 
 def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
-    hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
-    if not enable_nsr or not _nsr_available_for_cli("claude"):
-        return hooks_data
-    for event_name, matcher in (
-        ("PreCompact", ""),
-        ("PostCompact", ""),
-        ("Stop", ""),
-    ):
-        hooks_data = _append_shell_command_hook(
-            hooks_data,
-            event_name,
-            _NSR_CLAUDE_HOOK,
-            matcher=matcher,
-            timeout=10,
-            status_message="Loading NSR",
-        )
-    return hooks_data
+    # Legacy toggle remains parseable; automatic continuation is retired.
+    return _filter_hook_commands(hooks_data, lambda command: _is_legacy_loop_hook_command(command) or is_retired_automatic_hook(command))
 
 
 def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
-    hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
-    if not enable_nsr or not _nsr_available_for_cli("codex"):
-        return hooks_data
-    for event_name, matcher in (
-        ("PreCompact", ""),
-        ("PostCompact", ""),
-        ("Stop", ""),
-    ):
-        hooks_data = _append_shell_command_hook(
-            hooks_data,
-            event_name,
-            _NSR_CODEX_HOOK,
-            matcher=matcher,
-            timeout=10,
-            status_message="Loading NSR",
-        )
-    return hooks_data
+    return _filter_hook_commands(hooks_data, lambda command: _is_legacy_loop_hook_command(command) or is_retired_automatic_hook(command))
 
 
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False, caveman_level="light"):

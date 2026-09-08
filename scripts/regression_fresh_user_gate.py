@@ -64,6 +64,8 @@ _PYTEST_TARGETS = [
     "tests/test_reset_mms_install.py",
     "tests/test_install_script_paths.py",
     "tests/test_nsr_bundled_wrapper.py",
+    "tests/test_hook_retirement.py",
+    "tests/test_owned_superset_hook.py",
     "tests/test_pi_launcher.py",
     "tests/test_mms_installer_runtime.py",
     "tests/test_command_smoke.py",
@@ -77,6 +79,8 @@ _QUICK_PYTEST_TARGETS = [
     "tests/test_mms_resume_command.py::test_handle_resume_command_passes_claude_resume_args_and_project",
     "tests/test_install_script_paths.py",
     "tests/test_nsr_bundled_wrapper.py",
+    "tests/test_hook_retirement.py",
+    "tests/test_owned_superset_hook.py",
     "tests/test_pi_launcher.py::test_glint_pi_bridge_requires_glint_pane_and_managed_extension",
     "tests/test_pi_launcher.py::test_launch_pi_adds_glint_bridge_as_explicit_extension",
     "tests/test_pi_launcher.py::test_pi_isolated_gateway_loads_global_policy_and_project_context",
@@ -111,9 +115,9 @@ _SCENARIO_MATRIX = [
         "coverage": "install plan is repeatable and does not write during --dry-run",
     },
     {
-        "id": "nsr-low-noise-hooks",
-        "state": "NSR enabled for Claude/Codex session hooks",
-        "coverage": "NSR stays on Stop/compact hooks, bundled payload no-ops non-Stop events, and is absent from high-frequency tool hooks",
+        "id": "retired-automatic-hooks",
+        "state": "old NSR toggles/markers and managed NSR/Map/CodeGraph registrations",
+        "coverage": "automatic wrappers no-op without reading stdin/state; managed merge does not revive them; explicit tools remain available",
     },
     {
         "id": "resume-explicit-only",
@@ -320,12 +324,9 @@ def _smoke_nsr_low_noise_hook_matrix() -> None:
         "codex": (mms_launchers._build_codex_session_hooks({}, enable_nsr=True), mms_launchers._NSR_CODEX_HOOK),
     }
     for cli, (payload, hook_path) in payloads.items():
-        for event_name in ("PermissionRequest", "PreToolUse", "PostToolUse"):
+        for event_name in ("PermissionRequest", "PreToolUse", "PostToolUse", "PreCompact", "PostCompact", "Stop"):
             if hook_path in _hook_commands(payload, event_name):
                 raise SystemExit(f"{cli} NSR still attached to noisy {event_name} hook")
-        for event_name in ("PreCompact", "PostCompact", "Stop"):
-            if hook_path not in _hook_commands(payload, event_name):
-                raise SystemExit(f"{cli} NSR missing required {event_name} hook")
 
 
 def _print_scenarios() -> None:

@@ -207,13 +207,17 @@ caveman_level = "light" # light | standard | full
 | token-saver | 内建 | 长日志/测试输出/diff 存 ref + snippet；`token-gain` / `mms-gain` 看节省估算 |
 | TOON | 内建 | 压缩 agent-facing JSON / status / handoff |
 | Web automation bundle | 内建 | `weber` router + `web-access` 登录态 Chrome + `agent-browser` headless |
-| NSR | 内建 channel payload，默认注入 | Claude/Codex session-local Stop hook；安装器同时安装 `/nsr` 命令；`/nsr` 后启用新版 NSR loop |
+| NSR | 显式 `/nsr` 手动工作循环 | 沿用原 task 推进；不注册 Stop/compact hook、不跨 session 续跑 |
 | ECC / OMC | 可选安装 | Claude agent pack；启动确认页显式选择 |
 | Figma / Pilot MCP | 检测到也默认关闭 | 需要时用 `MMS_ENABLE_MCP_FIGMA=1` / `MMS_ENABLE_MCP_PILOT=1` 显式开启 |
 
 xmem 改为 global-only：MMS / MMF 不再 bundle、安装或注入 xmem skill/hook/plugin；如果全局 agent 目录里有 xmem，就由全局版本自己生效，避免 dev channel 复制出低版本。
 
-NSR 现在不是旧的大 runtime，也不再依赖某台机器上的 `/Users/xin/.nsr`。`install.sh --channel stable|dev|canary` 会把对应 channel 的 `nsr-stop-wrapper.py`、`nsr-loop-hook.py`、`nsrctl.py` 和 `nsr-commit-gate.py` 一起复制到 `~/.mms/hooks/`。MMS 默认只注入轻量 Stop-hook wrapper：普通会话未启用时直接放行，不会强行续跑；在 Claude / Codex 里使用 `/nsr <任务>` 后，当前 repo 会启用新版 loop，让 agent 继续推进直到完成或撞上步数、空转、测试红灯等刹车。OpenCode 目前只提供 `/nsr` 手动规则，不自动接管 idle/stop。
+NSR、Map、CodeGraph 的自动 hook 已退出默认路径。旧 `nsr-*-hook`、`nsr-stop-wrapper.py`、Map/CodeGraph auto-index wrapper 保留为 no-op，不读取或删除现有 marker，不同步索引。显式 `/nsr`、`nsrctl`、Map 与 CodeGraph CLI 仍可使用。MMS 在合并旧 managed hooks 后也过滤自有退休入口；旧 runtime 的 NSR toggle 不会恢复自动 hook。
+
+安装器只提供全局注册的只读清理计划。需要清理已存在注册时，使用 [`mms_hook_retirement.py`](mms_hook_retirement.py) 明确指定 `--file`；默认只输出 locator/hash。`--apply` 另要求审阅时 SHA256 和私有 backup 目录，且只删除精确自有入口。它不处理 MMS generated session/config；旧 session 可通过激活 shared no-op wrapper 停止自动行为。
+
+全局 Superset terminal 注册可使用 `hooks/owned-superset-notify.sh`：先检查原 app 已使用的 `SUPERSET_TAB_ID`，无 owner 时不读取 stdin、不通知；有 owner 时委托原 `~/.superset/hooks/notify.sh`，保留 app 的直接 Mastra 路径。此 wrapper 不证明 app 上游模板已修改；app 升级若重建全局注册，需要重新检查精确命令。
 
 Figma 和 Pilot MCP 不再默认注入；即使检测到已安装 plugin/server，也需要用 `MMS_ENABLE_MCP_FIGMA=1`、`MMS_ENABLE_FIGMA_MCP=1`、`MMS_ENABLE_MCP_PILOT=1` 或 `MMS_ENABLE_PILOT_MCP=1` 显式 opt-in。
 
@@ -228,7 +232,7 @@ bash install.sh --install-toon
 CodeGraph 初始化提示：
 
 ```text
-找出当前工作区下所有 git repo；没有 .codegraph 就执行 codegraph init -i，已有 .codegraph 就执行 codegraph sync；跳过 node_modules/vendor/build；最后汇总失败列表。
+仅针对当前任务需要的 repo 显式执行 codegraph init -i / codegraph index，已有索引需要刷新时执行 codegraph sync。
 ```
 
 ## 安全原则

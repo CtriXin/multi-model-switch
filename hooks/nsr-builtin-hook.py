@@ -315,6 +315,11 @@ def _handle(host: str, request: dict[str, Any]) -> dict[str, Any]:
 
 def main(argv: list[str]) -> int:
     host = _clean(argv[1] if len(argv) > 1 else "") or _clean(os.environ.get("MMS_NSR_HOST")) or "unknown"
+    # Only the explicitly opted-in experimental OpenCode adapter remains.
+    # Retired Claude/Codex automatic registrations must not read or mutate state.
+    if host != "opencode":
+        print("{}")
+        return 0
     _json_response(_handle(host, _load_request()), host=host)
     return 0
 
