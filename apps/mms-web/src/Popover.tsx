@@ -11,7 +11,7 @@ export function Popover({
 }: {
   label: ReactNode;
   title: string;
-  children: ReactNode | ((close: () => void) => ReactNode);
+  children: ReactNode | ((close: () => void, open: boolean) => ReactNode);
   className?: string;
   wide?: boolean;
 }) {
@@ -58,7 +58,7 @@ export function Popover({
         }
       >
         {typeof children === "function"
-          ? children(() => panel.current?.hidePopover())
+          ? children(() => panel.current?.hidePopover(), open)
           : children}
       </div>
     </>

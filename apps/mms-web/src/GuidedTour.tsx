@@ -9,8 +9,8 @@ const content: Record<TourStep, StepContent> = {
   welcome: { target: ['textarea[aria-label="任务内容"]', '#mms-help-button'], title: "第一次用 AI？从这里开始", body: "把 AI 当作可以反复沟通的助手：告诉它你想做什么，它会回答，也能帮你处理文件。接下来，我们就在这个页面一起试一次。", tip: "亮起的地方可以直接点击。随时可以跳过，再点 ? 回来。" },
   connection: { target: ['[data-guide="connect"]'], title: "先让助手连接一个模型", body: "模型是负责回答你的 AI。点击亮起的「连接服务」，按提示填入服务商给你的 API 地址和 API Key，再选择模型并保存。", tip: "API Key 是服务商给你的连接密钥。没有这些信息时，可以先熟悉页面，之后再配置。" },
   workspace: { target: ['[data-guide="workspace"]', '.home-intro select'], title: "这次在哪个文件夹里工作？", body: "点这里输入项目名，就能查找最近用过的文件夹；也可以浏览电脑上的其他目录。你让 AI 读文件、写文章或改代码时，它会从这个位置开始。", tip: "只是聊天也要先选一个文件夹。已有会话保留原路径；换项目时新建会话再选。" },
-  model: { target: ['.studio-popover:popover-open .model-picker-trigger', '.task-settings-trigger'], title: "选择帮你回答的模型", body: "点亮起的模型名称，再打开「模型与通道」选择。模型可以理解为不同的助手；通道是连接它的服务。第一次先选一个可用模型就够了。", tip: "以后也能在这里换模型，已有对话会保留。确认选择后回来，继续下一步。" },
-  effort: { target: ['.studio-popover:popover-open [data-guide="effort"]', '.task-settings-trigger'], title: "effort：让它想得更深，还是更快？", body: "这里的「思考强度」就是 effort。简单问答可以选较低档，复杂分析再提高。第一次保留默认值也可以。", tip: "只显示当前模型支持的档位。高档通常更慢、用量更多，不保证回答一定更好。不能调整时，以这里的状态说明为准。" },
+  model: { target: ['.studio-popover:popover-open .quick-model-list', '.task-settings-trigger'], title: "选择帮你回答的模型", body: "点亮起的模型名称，在列表里搜索并点击一个模型即可。Pilot 会使用已设置的默认通道，需要时再展开「通道与高级选项」。", tip: "以后也能在这里换模型，已有对话会保留。点选就会生效，不会自动发送消息。" },
+  effort: { target: ['.studio-popover:popover-open [data-guide="effort"]', '.task-settings-trigger'], title: "effort：让它想得更深，还是更快？", body: "展开「通道与高级选项」，这里的「思考强度」就是 effort。简单问答可以选较低档，复杂分析再提高；第一次保留默认值即可。", tip: "只显示当前模型支持的档位。高档通常更慢、用量更多，不保证回答一定更好。不能调整时，以这里的状态说明为准。" },
   compose: { target: ['textarea[aria-label="任务内容"]'], title: "像和人说话一样，写下你的想法", body: "不用学特殊命令。说清楚「我想做什么、现在有什么、希望得到什么」就行。也可以先填入下面的简单示例，看看 AI 怎样回应。", tip: "示例会追加到已有草稿后面。你可以修改，填入不会自动发送。" },
   send: { target: ['button[aria-label="发送任务"]'], title: "准备好了？点这个箭头发送", body: "确认文件夹和模型后，点击亮起的发送箭头。AI 会开始回复；你可以继续补充要求，不必一次就问得完美。", tip: "发送可能产生所选服务的用量。灰色箭头表示还没准备好，查看输入框下方的原因。" },
   reply: { target: ['.conversation-turn:last-child', '.current-activity', 'textarea[aria-label="任务内容"]'], title: "回复会出现在这里", body: "等待 AI 回答后，可以继续问「说得简单一点」「给个例子」，或补充你的要求。结果不符合预期也没关系，接着沟通就好。", tip: "你已经认识基本操作。附件、Skills 和成果等功能，可以需要时再学。" },
@@ -55,6 +55,10 @@ export function GuidedTour({ step, move, close, help, example, modelReady, confi
       // Real dialogs (connection, file picker, model choice) own focus while open.
       const paused = !!document.querySelector('dialog[open]:not([data-guide-dialog="settings"])');
       const menu = document.querySelector('.studio-popover:popover-open');
+      if (step === "effort") {
+        const advanced = menu?.querySelector<HTMLDetailsElement>('[data-guide="model-advanced"]');
+        if (advanced && !advanced.open) advanced.open = true;
+      }
       if (paused) layer.current?.hidePopover();
       else if (layer.current) {
         if (menu !== lastMenu && layer.current.matches(':popover-open')) layer.current.hidePopover();
