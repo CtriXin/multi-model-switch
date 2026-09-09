@@ -139,9 +139,27 @@
   gap: 2px;
   opacity: 0;
   pointer-events: none;
-  background: var(--soft);
   border-radius: 6px;
   padding: 0 2px;
+  isolation: isolate;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+/* A plate behind the buttons, so a long folder name slides under a clean
+   surface instead of colliding with the icons. */
+.workspace-row-actions::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+.workspace-group:hover .workspace-row-actions::after {
+  background: var(--soft);
+}
+.workspace-row-actions > * {
+  position: relative;
+  z-index: 1;
 }
 .workspace-group:hover .workspace-row-actions,
 .workspace-row-actions:focus-within,
@@ -165,6 +183,7 @@
 }
 .workspace-tools .icon-button {
   opacity: 0;
+  transition: opacity var(--duration-base) var(--ease-out);
 }
 .session-nav:hover .workspace-tools .icon-button,
 .workspace-tools:focus-within .icon-button,
@@ -172,7 +191,8 @@
 .workspace-tools .add-workspace {
   opacity: 1;
 }
-/* The row menu overlays the session button so the list keeps one column. */
+/* The row menu takes over the slot the status dot occupies, rather than
+   floating over the title, so the truncation point never moves on hover. */
 .session-row {
   position: relative;
 }
@@ -181,17 +201,25 @@
   top: 50%;
   right: 6px;
   transform: translateY(-50%);
-  opacity: 0;
-  pointer-events: none;
-  background: var(--soft);
+  visibility: hidden;
   border-radius: 6px;
   padding: 3px;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 .session-row:hover .session-row-menu,
-.session-row-menu:focus,
+.session-row:focus-within .session-row-menu,
 .session-row-menu[aria-expanded="true"] {
-  opacity: 1;
-  pointer-events: auto;
+  visibility: visible;
+}
+/* The menu would cover the dot anyway; yielding the slot keeps it readable.
+   The row's own phase label still states that it is waiting. */
+.session-row:hover .attention-dot,
+.session-row:has(.session-row-menu[aria-expanded="true"]) .attention-dot {
+  visibility: hidden;
+}
+.session-row-menu[aria-expanded="true"] {
+  background: var(--soft);
+  color: var(--ink);
 }
 .session-row-time {
   margin: 4px 11px 2px;
@@ -212,6 +240,22 @@
 }
 .load-more-sessions:hover {
   background: var(--soft);
+}
+.load-more-sessions,
+.session-row-menu,
+.workspace-heading {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.load-more-sessions:focus-visible,
+.workspace-heading:focus-visible,
+.session-row-menu:focus-visible,
+.workspace-row-actions .icon-button:focus-visible,
+.workspace-tools .icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.filter-option.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 /* Vendor marks sit inside the existing monogram badge; the inline tint comes
    from the family so a long model list is scannable by colour. */
@@ -259,6 +303,13 @@
 }
 .filter-option:disabled {
   opacity: 0.45;
+}
+.filter-option,
+.content-option {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.filter-option:hover:disabled {
+  background: transparent;
 }
 .session-link {
   padding: 10px 10px 10px 17px;

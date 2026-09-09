@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, type ComponentProps } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { useEffect, useState, type ComponentProps } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { EventView } from "./components";
 import { ToolGroup } from "./ToolEvent";
 import type { SessionEvent } from "./types";
@@ -61,12 +61,10 @@ function Turn({events, completed, forced, report, ...props}: Props & {
   </section>;
 }
 
-export function Transcript(props: Props) {
-  const [forced, setForced] = useState<{collapsed: boolean; revision: number} | null>(null);
-  const [turnStates, setTurnStates] = useState<Record<string, boolean>>({});
-  const report = useCallback((id: string, collapsed: boolean) => {
-    setTurnStates(old => old[id] === collapsed ? old : {...old, [id]: collapsed});
-  }, []);
+export function Transcript({forced, report, ...props}: Props & {
+  forced: {collapsed: boolean; revision: number} | null;
+  report: (id: string, collapsed: boolean) => void;
+}) {
   const events = props.detail.events.filter(e => e.id !== "n-web-mode" &&
     !(e.kind === "notice" && e.text === "会话已通过 MMS 启动路径创建") &&
     !(e.kind === "assistant" && !e.text.trim() && !e.thinking?.trim()));
@@ -83,19 +81,5 @@ export function Transcript(props: Props) {
     {!!pending.length && <section className="pending-messages" aria-label="未执行的消息">
       {pending.map(event => <div key={event.id}><small>{event.status === "queued" ? "排队中，尚未执行" : event.status === "cancelled" ? "已取消，未执行" : "发送失败，未执行"}</small><EventView {...props} event={event} /></div>)}
     </section>}
-    {events.some(e => e.kind === "tool" || e.thinking) && (() => {
-      const shown = turns.map(turn => turnStates[turn[0].id]).filter(v => v !== undefined);
-      // Anything still open means the useful action is to close it.
-      const collapseNext = shown.some(collapsed => !collapsed);
-      return <div className="transcript-process-actions" aria-label="过程显示">
-        <button
-          aria-expanded={collapseNext}
-          onClick={() => setForced({collapsed: collapseNext, revision: (forced?.revision || 0) + 1})}
-        >
-          {collapseNext ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
-          {collapseNext ? "收起全部过程" : "展开全部过程"}
-        </button>
-      </div>;
-    })()}
   </>;
 }

@@ -22,6 +22,7 @@ export function SettingsPage({
   cjkFont, setCjkFont,
   fontSize, setFontSize,
   boldText, setBoldText,
+  selectToCopy, setSelectToCopy,
   requestNavigation, editStateChanged,
 }: {
   data: Bootstrap;
@@ -49,6 +50,8 @@ export function SettingsPage({
   setFontSize: (value: number) => void;
   boldText: boolean;
   setBoldText: (on: boolean) => void;
+  selectToCopy: boolean;
+  setSelectToCopy: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState("models");
   return (
@@ -122,6 +125,19 @@ export function SettingsPage({
               </button>
             </div>
           </div>
+          <label className="preference-row">
+            <div>
+              <h2>选择即复制</h2>
+              <p>选中对话里的文字后自动复制。会覆盖剪贴板里原有的内容；输入框中的选择不受影响。默认关闭。</p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="选择即复制"
+              checked={selectToCopy}
+              onChange={(e) => setSelectToCopy(e.target.checked)}
+            />
+          </label>
           <div className="preference-row">
             <div>
               <h2>字体</h2>

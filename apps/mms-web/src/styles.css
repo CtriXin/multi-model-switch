@@ -17,6 +17,9 @@
   --muted: oklch(48% 0.012 154);
   --line: oklch(89.5% 0.008 154);
   --soft: oklch(95.7% 0.005 154);
+  --duration-fast: 0.12s;
+  --duration-base: 0.16s;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --accent: oklch(45% 0.12 154);
   --accent-hover: oklch(38% 0.11 154);
   --selected: oklch(92.5% 0.024 154);
@@ -1923,11 +1926,23 @@ dialog::backdrop {
   cursor: pointer;
 }
 .composer-tools button:hover,
-.session-workbar button:hover,
-.runtime-strip button:hover,
-.message-actions button:hover {
+.session-workbar button:hover:not(:disabled),
+.runtime-strip button:hover:not(:disabled),
+.message-actions button:hover:not(:disabled) {
   background: var(--soft);
   color: var(--ink);
+}
+.session-workbar button,
+.runtime-strip button,
+.message-actions button {
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+/* The transcript-wide process toggle lives here so it stays reachable while
+   the conversation scrolls. */
+.process-toggle-all[aria-expanded="false"] {
+  color: var(--muted);
 }
 .composer-tools > span {
   margin-left: auto;

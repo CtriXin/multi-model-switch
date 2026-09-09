@@ -177,6 +177,14 @@ export function App() {
   const [artifactId, setArtifactId] = useState("");
   const [atBottom, setAtBottom] = useState(true);
   const [autoCollapseProcess, setAutoCollapseProcess] = useState(() => readSetting("mms-web-auto-collapse-process", true));
+  const [processForced, setProcessForced] = useState<{
+    collapsed: boolean;
+    revision: number;
+  } | null>(null);
+  const [processTurns, setProcessTurns] = useState<Record<string, boolean>>({});
+  const reportProcessTurn = useCallback((id: string, collapsed: boolean) => {
+    setProcessTurns((old) => (old[id] === collapsed ? old : { ...old, [id]: collapsed }));
+  }, []);
   const [accent, setAccent] = useState(() =>
     readSetting("mms-web-accent", "indigo"),
   );
@@ -194,6 +202,9 @@ export function App() {
   );
   const [boldText, setBoldText] = useState(() =>
     readSetting("mms-web-bold-text", false),
+  );
+  const [selectToCopy, setSelectToCopy] = useState(() =>
+    readSetting("mms-web-select-to-copy", false),
   );
   const [favorites, setFavorites] = useState<string[]>(() => {
     const value = readSetting<unknown>("mms-web-favorites", []);
@@ -254,6 +265,33 @@ export function App() {
     if (id) openSession(id);
     // Recover the same conversation on a browser refresh.
   }, []);
+  useEffect(() => {
+    saveSetting("mms-web-select-to-copy", selectToCopy);
+    if (!selectToCopy) return;
+    // Copy on mouseup: that event is a user gesture, which is what the
+    // clipboard write needs. Selections made inside a field are left alone,
+    // because there the user is usually editing rather than quoting.
+    const copy = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      const node = selection.anchorNode;
+      const element =
+        node instanceof Element ? node : (node?.parentElement ?? null);
+      if (element?.closest("input, textarea, [contenteditable='true']")) return;
+      const text = selection.toString();
+      if (!text.trim()) return;
+      void navigator.clipboard?.writeText(text).catch(() => {
+        // A browser that refuses the write should not break selecting text.
+      });
+    };
+    document.addEventListener("mouseup", copy);
+    return () => document.removeEventListener("mouseup", copy);
+  }, [selectToCopy]);
+  useEffect(() => {
+    // Turn ids are per session; carrying them over would make the toggle lie.
+    setProcessForced(null);
+    setProcessTurns({});
+  }, [selectedId]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     saveSetting("mms-web-theme", theme);
@@ -1394,6 +1432,8 @@ export function App() {
             setFontSize={setFontSize}
             boldText={boldText}
             setBoldText={setBoldText}
+            selectToCopy={selectToCopy}
+            setSelectToCopy={setSelectToCopy}
             presetId={presetId}
             selectPreset={selectTaskPreset}
             workspaceId={workspaceId}
@@ -1466,6 +1506,8 @@ export function App() {
                     <div className="conversation-content">
                       <Transcript
                         key={detail.session.id}
+                        forced={processForced}
+                        report={reportProcessTurn}
                         autoCollapseProcess={autoCollapseProcess}
                         disconnected={
                           !connected || statusesStale || !!sessionError
@@ -1538,6 +1580,32 @@ export function App() {
                       <FolderOpen size={14} />
                       {detail.session.cwd?.split("/").pop() || "工作文件"}
                     </button>
+                    {detail.events.some((e) => e.kind === "tool" || e.thinking) &&
+                      (() => {
+                        // Anything still open means the useful action is to close it.
+                        const collapseNext = Object.values(processTurns).some(
+                          (collapsed) => !collapsed,
+                        );
+                        return (
+                          <button
+                            className="process-toggle-all"
+                            aria-expanded={collapseNext}
+                            onClick={() =>
+                              setProcessForced({
+                                collapsed: collapseNext,
+                                revision: (processForced?.revision || 0) + 1,
+                              })
+                            }
+                          >
+                            {collapseNext ? (
+                              <ChevronsDownUp size={14} />
+                            ) : (
+                              <ChevronsUpDown size={14} />
+                            )}
+                            {collapseNext ? "收起全部过程" : "展开全部过程"}
+                          </button>
+                        );
+                      })()}
                     <SessionMenu
                       detail={detail}
                       action={runAction}
