@@ -7,7 +7,7 @@ from test_mms_web_interactions import native, local_app, settle
 
 
 def configure(app, name, models, key='test-owned-key', provider_id=None):
-    url = app.catalog._credentials_values()['MMS_PROVIDER_LOCAL_VISION_BASE_URL']
+    url = next(p for p in app.get(['model-settings'])['providers'] if p['id'] == 'local-vision')['connection']['openaiBaseUrl']
     payload = {'service': {'name': name, 'baseUrl': url, 'apiKey': key, 'models': models, 'protocol': 'openai'}}
     if provider_id: payload['service']['id'] = provider_id
     preview = app.post(['configuration', 'preview'], payload)

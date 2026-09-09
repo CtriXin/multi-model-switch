@@ -54,6 +54,7 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_standalone_settings.py",
     "tests/test_claude_hardening_regressions.py",
     "tests/test_claude_isolation.py",
     "tests/test_codex_history_growth.py",

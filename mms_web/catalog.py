@@ -278,7 +278,7 @@ class CatalogService:
         if self._config_root is None:
             return ""
         digest = hashlib.sha256()
-        for name in ("config.toml", "credentials.sh"):
+        for name in ("config.toml", "credentials.sh", "generated/model-registry.latest-approved.json"):
             digest.update(name.encode("utf-8"))
             digest.update(b"\0")
             try:
@@ -319,7 +319,7 @@ class CatalogService:
         root = self._require_config_root()
         if payload.get("command") == "resolve-launch":
             from .runtime import snapshot_config
-            root = snapshot_config(root, self._state_root)
+            root = snapshot_config(root, self._state_root, published_credentials_only=self._local_setup())
             payload = {**payload, "config_root": str(root)}
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -400,6 +400,7 @@ class CatalogService:
                 {"code": "CONFIG_MISSING", "message": "config root 下缺少 config.toml 或文件不可读"}
             )
         bundle = self._load_bundle(diagnostics)
+        cfg = self._published_config(cfg, bundle)
         payloads = bundle.get("payloads") or {}
         router_routes = (payloads.get("router") or {}).get("routes") or {}
         lineup_routes = (payloads.get("lineup") or {}).get("routes") or {}
@@ -470,6 +471,8 @@ class CatalogService:
             return leaves
 
         def _provider_has_key(provider_id: str) -> bool:
+            if self._local_setup() and bundle:
+                return any(leaf.get("api_key") for leaf in _provider_leaves(provider_id))
             prefix = re.sub(r"[^A-Za-z0-9]+", "_", provider_id).upper().strip("_") or "DEFAULT"
             return bool(credentials.get(f"MMS_PROVIDER_{prefix}_API_KEY")
                         or any(leaf.get("api_key") for leaf in _provider_leaves(provider_id)))
@@ -479,7 +482,7 @@ class CatalogService:
             configured = (credentials.get(f"MMS_PROVIDER_{prefix}_BASE_URL")
                           or credentials.get(f"MMS_PROVIDER_{prefix}_OPENAI_BASE_URL")
                           or credentials.get(f"MMS_PROVIDER_{prefix}_ANTHROPIC_BASE_URL"))
-            if configured:
+            if configured and not (self._local_setup() and bundle):
                 return configured
             return next((leaf.get("openai_base_url") or leaf.get("anthropic_base_url")
                          for leaf in _provider_leaves(provider_id)
@@ -576,7 +579,9 @@ class CatalogService:
                 ),
                 "available": available,
                 "favorite": overlay_favorite,
-                "verified": True,
+                # Registry approval verifies saved configuration, not a
+                # generation request or this service's model capabilities.
+                "verified": not self._local_setup(),
             }
             if route_role:
                 entry["routeRole"] = route_role
@@ -641,7 +646,9 @@ class CatalogService:
                 if model_id in seen_model_ids:
                     continue
                 seen_model_ids.add(model_id)
-                can_try = bool(self._local_setup() and not bundle and entry.get("enabled", True)
+                can_try = bool(self._local_setup() and not bundle
+                               and not (self._config_root / "generated/model-registry.latest-approved.json").exists()
+                               and entry.get("enabled", True)
                                and _provider_has_key(provider_id) and _provider_base_url(provider_id))
                 models.append(
                     {
@@ -839,6 +846,20 @@ class CatalogService:
                 status=409,
             )
 
+    def _published_config(self, cfg: dict, bundle: dict) -> dict:
+        if not self._local_setup() or not bundle:
+            return cfg
+        payloads = bundle.get("payloads") or {}
+        profiles = (payloads.get("profile") or {}).get("profiles") or {}
+        providers = []
+        for pid, profile in profiles.items():
+            models = []
+            for name, route in (payloads.get("router") or {}).get("routes", {}).items():
+                if any(leaf and leaf.get("provider_id") == pid for leaf in [route.get("primary"), *route.get("fallbacks", [])]):
+                    models.append(name)
+            providers.append({**profile, "id": pid, "fallback_models": models})
+        return {**cfg, "providers": providers}
+
     def _validate_service_payload(self, payload: dict) -> tuple[str, str, str, list[str], list[str]]:
         service = payload.get("service")
         if not isinstance(payload, dict) or not isinstance(service, dict):
@@ -884,7 +905,9 @@ class CatalogService:
             raise WebError("INVALID_PROTOCOL", "请选择支持的服务类型。", 400)
         name, base_url, api_key, models, warnings = self._validate_service_payload(payload)
 
-        cfg = self._raw_config()
+        bundle = self._load_bundle([])
+        published = self._local_setup() and bool(bundle)
+        cfg = self._published_config(self._raw_config(), bundle)
         providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
         providers_by_id = {
             str(item.get("id") or "").strip(): item
@@ -906,6 +929,12 @@ class CatalogService:
         credentials = self._credentials_values()
 
         def _current_credential(field: str) -> str:
+            if published:
+                for route in (bundle.get("payloads", {}).get("router", {}).get("routes", {})).values():
+                    for leaf in [route.get("primary"), *route.get("fallbacks", [])]:
+                        if leaf and leaf.get("provider_id") == provider_id:
+                            return str(leaf.get(field.lower()) or "")
+                return ""
             prefix = re.sub(r"[^A-Za-z0-9]+", "_", provider_id).upper().strip("_") or "DEFAULT"
             return credentials.get(f"MMS_PROVIDER_{prefix}_{field}", "")
 
@@ -927,7 +956,7 @@ class CatalogService:
             entry = providers_by_id[provider_id]
             if name and entry.get("name") != name:
                 changes.append({"label": "Name", "before": str(entry.get("name") or ""), "after": name})
-            if base_url:
+            if base_url and not published:
                 current_url = _current_credential("BASE_URL")
                 if current_url != base_url:
                     changes.append({"label": "Base URL", "before": _mask_url(current_url), "after": _mask_url(base_url)})
@@ -1046,6 +1075,7 @@ class CatalogService:
                             "providerId": record.get("providerId"),
                             "service": record.get("service"),
                             "expectedRevision": record.get("revision"),
+                            "standalone": self._local_setup(),
                         }
                     )
                 except WebError as exc:

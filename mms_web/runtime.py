@@ -36,13 +36,15 @@ def private_json(path: Path, payload) -> None:
             os.unlink(temporary)
 
 
-def snapshot_config(source: Path, state_root: Path) -> Path:
+def snapshot_config(source: Path, state_root: Path, *, published_credentials_only: bool = False) -> Path:
     destination = require_private_root(state_root) / "runtimes" / uuid.uuid4().hex
     destination.mkdir(parents=True, mode=0o700)
     names = {"config.toml", "override.toml", "preferences.toml", "credentials.sh", "model-policy.json"}
     # Never copy accounts, global auth, history or existing runtime directories.
     manifest = source / "generated/model-registry.latest-approved.json"
     if manifest.is_file():
+        if published_credentials_only:
+            names.discard("credentials.sh")
         data = json.loads(manifest.read_text(encoding="utf-8"))
         names.add("generated/model-registry.latest-approved.json")
         for entry in data.get("files", {}).values():
