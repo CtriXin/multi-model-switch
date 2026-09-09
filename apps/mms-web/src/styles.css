@@ -2286,10 +2286,14 @@ dialog::backdrop {
 }
 .session-workbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 4px;
+}
+/* The folder name takes the slack, so every control after it sits together
+   on the right whether or not the process toggle is present. */
+.session-workbar > button:first-child {
+  margin-right: auto;
 }
 .session-workbar > button {
   overflow: hidden;
