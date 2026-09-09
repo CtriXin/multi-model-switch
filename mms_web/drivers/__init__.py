@@ -1,4 +1,4 @@
-"""Rich harness drivers for MMS Web sessions."""
+"""Rich harness drivers for MMS Pilot sessions."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""MMS Web session service (API v1, Agent B contract).
+"""MMS Pilot session service (API v1, Agent B contract).
 
 Owns web-launched rich sessions: session ids, event sequences, thread-safe
 snapshots, persistence, requestId idempotency, and process lifecycle for the

@@ -4128,14 +4128,17 @@ fi
 
 cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
 [ -f "$SOURCE_DIR/mms-web" ] && cp "$SOURCE_DIR/mms-web" "$MMS_HOME/"
-[ -f "$SOURCE_DIR/MMS Web.command" ] && cp "$SOURCE_DIR/MMS Web.command" "$MMS_HOME/"
-copy_dir_safely "$SOURCE_DIR/mms_web" "$MMS_HOME/mms_web" "MMS Web 服务" "MMS Web service"
-copy_dir_safely "$SOURCE_DIR/mms_web_static" "$MMS_HOME/mms_web_static" "MMS Web 页面" "MMS Web client"
+[ -f "$SOURCE_DIR/MMS Pilot.command" ] && cp "$SOURCE_DIR/MMS Pilot.command" "$MMS_HOME/"
+# The Finder shortcut was named "MMS Web.command" before the client was named
+# MMS Pilot. Leaving both would put two identical launchers in ~/.mms.
+rm -f "$MMS_HOME/MMS Web.command"
+copy_dir_safely "$SOURCE_DIR/mms_web" "$MMS_HOME/mms_web" "MMS Pilot 服务" "MMS Pilot service"
+copy_dir_safely "$SOURCE_DIR/mms_web_static" "$MMS_HOME/mms_web_static" "MMS Pilot 页面" "MMS Pilot client"
 mkdir -p "$MMS_HOME/docs/reference/model-capability-calibration"
 if [ -f "$SOURCE_DIR/docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json" ]; then
     cp "$SOURCE_DIR/docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json" "$MMS_HOME/docs/reference/model-capability-calibration/"
 fi
-copy_dir_safely "$SOURCE_DIR/docs/mms-web" "$MMS_HOME/docs/mms-web" "MMS Web 使用文档" "MMS Web documentation"
+copy_dir_safely "$SOURCE_DIR/docs/mms-web" "$MMS_HOME/docs/mms-web" "MMS Pilot 使用文档" "MMS Pilot documentation"
 [ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"
 [ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
@@ -4174,7 +4177,7 @@ install_builtin_nsr_commands
 
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/mms-web" ] && chmod +x "$MMS_HOME/mms-web"
-[ -f "$MMS_HOME/MMS Web.command" ] && chmod +x "$MMS_HOME/MMS Web.command"
+[ -f "$MMS_HOME/MMS Pilot.command" ] && chmod +x "$MMS_HOME/MMS Pilot.command"
 [ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"
 [ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"

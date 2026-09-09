@@ -11,7 +11,7 @@ export default function (pi: any) {
     publish(ctx);
   });
   pi.registerCommand("mms-web-plan", {
-    description: "MMS Web 的只读规划开关",
+    description: "MMS Pilot 的只读规划开关",
     handler: async (args: string, ctx: any) => {
       if (args !== "on" && args !== "off") {publish(ctx); return}
       planning = args === "on";

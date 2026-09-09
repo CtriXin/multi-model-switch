@@ -8,9 +8,9 @@ from .server import WebApplication, create_server
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="MMS Web — local conversations powered by MMS and Pi")
+    parser = argparse.ArgumentParser(description="MMS Pilot — local conversations powered by MMS and Pi")
     from mms_version import VERSION
-    parser.add_argument("--version", action="version", version=f"MMS Web {VERSION}")
+    parser.add_argument("--version", action="version", version=f"MMS Pilot {VERSION}")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--config-root", type=Path,
                         help="Explicit MMS root; omitted means no config discovery")
@@ -30,7 +30,7 @@ def main(argv=None):
     app = WebApplication(state_root=root, config_root=args.config_root)
     server = create_server(app, args.static_root, args.port)
     address = f"http://127.0.0.1:{server.server_address[1]}"
-    print(f"MMS Web: {address}", flush=True)
+    print(f"MMS Pilot: {address}", flush=True)
     if args.open:
         webbrowser.open(address)
     def terminate(_signum, _frame):

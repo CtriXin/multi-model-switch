@@ -1,4 +1,4 @@
-# MMS Web：产品方向、技术边界与下一阶段交接
+# MMS Pilot：产品方向、技术边界与下一阶段交接
 
 日期：2026-09-09。维护者：Codex / gpt-6-astra。原开发任务：Stride 855b1bed42aa43bb。
 

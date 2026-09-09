@@ -1,6 +1,6 @@
 # Multi-Model Switch（MMS）
 
-> **MMS 4.0：真实可执行的本地 Web 对话。** 安装 v4 后运行 `mms web --open`。页面随包提供，通过原 MMS 启动器使用 Pi。[安装与使用](docs/mms-web/GETTING-STARTED.md) · [版本说明](docs/mms-web/RELEASE-v4.0.0.md) · [下一阶段交接](docs/mms-web/NEXT-PHASE.md)。当前 Web harness 是 Pi，已有 CLI 启动能力继续保留。
+> **MMS Pilot 是 MMS 的本地 Web 客户端，从 v4 起随安装包分发。** 安装后运行 `mms web --open` 打开。会话仍通过原有 MMS 启动链交给本机 Pi 执行，浏览器只是交互入口。[安装与使用](docs/mms-web/GETTING-STARTED.md) · [功能与边界](docs/mms-web/FEATURES.md) · [首版说明](docs/mms-web/RELEASE-v4.0.0.md) · [产品方向](docs/mms-web/NEXT-PHASE.md)。已有 CLI 启动能力全部保留。
 
 
 [主 README](./README.md) · [English README](./README.en.md)
@@ -22,7 +22,30 @@
 - **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
 - **诊断优先**：在怀疑模型之前，先看 route、协议、cache、API Key、请求路径和 runtime exposure。
 
-MMS Web 是原 launcher 的可视交互入口。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
+MMS Pilot 是原 launcher 的可视交互入口。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
+
+## MMS Pilot：本地 Web 客户端
+
+**产品名固定为 MMS Pilot。** 命令入口不变，仍然是 `mms web`、独立的 `mms-web`，macOS 上还有 `~/.mms/MMS Pilot.command`。旧的 `MMS Web.command` 会在升级时被移除，避免 `~/.mms` 里留下两个一样的启动器。
+
+Pilot 和 `mmf config web` 是两个不同的页面，不要混：
+
+| | 打开方式 | 用来做什么 |
+|---|---|---|
+| MMS Pilot | `mms web --open` | 日常干活：开会话、选模型和通道、管工作文件夹、看执行过程和产出 |
+| 配置 Web UI | `mmf config web` | 配置：加通道、拉模型列表、隐藏噪音模型、生成保存预览并发布 |
+
+Pilot 当前的 harness 是 Pi。Claude、Codex、OpenCode、agy 仍从 MMS CLI 启动，尚未接入 Pilot 的统一会话。
+
+v4 各版累积下来的能力：
+
+- **会话**：连续对话、恢复、停止、分叉、归档、导出，会话内切换模型与通道且保留上下文。
+- **模型能力**：按模型设置默认 effort、上下文长度和能否读图，每一项都标明当前值来自哪里，与 MMF 目录不一致时可以一键填回目录值。
+- **工作区**：侧栏管理工作文件夹的排序、重命名和移除，会话行支持复制 ID、重命名、分叉、导出与归档。
+- **成果与资料**：预览和比较记录下来的产出，管理项目资料并记录每轮实际提交的上下文来源。
+- **外观**：设置是弹窗；主题可跟随系统，主题色、界面/等宽/中文字体和字号都能实时改，只列出本机真的装了的字体。
+
+边界：只监听本机地址，没有远程多用户认证，配置隔离不等于文件系统 sandbox。要给别人用，让对方在自己机器上安装并使用自己的模型服务。
 
 ## 版本通道：Stable / Dev / Canary
 
@@ -36,7 +59,7 @@ MMS Web 是原 launcher 的可视交互入口。`chat`、`discuss` 和高上下�
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
 
-v4.0.0 是本地 Web 的首个大版本。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
+v4.0.0 是 MMS Pilot 的首个大版本，之后 4.x 沿 Dev 继续推进。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
 
 当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。`mmf` / `mmg` 都使用 `~/.config/mms-next` preview DB root。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 
@@ -125,9 +148,9 @@ mmm -> Main worktree          # main 过渡观察入口，默认 ~/.config/mms
 
 启动更新提醒默认只提醒、手动确认更新：`mmg` 每次启动检查，`mmf` / `mmm` 每日检查，`mmd` 每周检查，`mms` 每日只提示 public installed copy。手动运行 `mmf update` / `mmg update` / `mmd update` / `mmm update` 时只允许 clean worktree fast-forward；dirty 或分叉会拒绝。
 
-## Web UI 教程：从通道到模型可见性
+## 配置 Web UI 教程：从通道到模型可见性
 
-Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
+这一节讲的是 `mmf config web` 的配置页面，不是 MMS Pilot。配置 Web UI 是现在最适合做教程的入口，比 TUI 更容易截图和解释。注意：`mmf` / `mmg` 都是 preview DB 入口，所以预览 DB 保存跟 `~/.config/mms-next` workflow 绑定；如果你打开的是 `mms config web`，保存页会显示 `保存配置`，这是 stable/current root 的 legacy audited save；要看到 `写入预览 DB + 发布`，请启动：
 
 ```bash
 mmf config web
@@ -148,6 +171,7 @@ mmf config web
 ## 快速使用
 
 ```bash
+mms web --open              # 打开 MMS Pilot
 mms                         # 交互式启动器
 mms claude                  # 启动 Claude
 mms codex                   # 启动 Codex
@@ -249,7 +273,10 @@ CodeGraph 初始化提示：
 
 ## 更多文档
 
-- [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md)
+- [`docs/mms-web/GETTING-STARTED.md`](docs/mms-web/GETTING-STARTED.md) — MMS Pilot 安装与使用
+- [`docs/mms-web/FEATURES.md`](docs/mms-web/FEATURES.md) — MMS Pilot 功能与交互边界
+- [`docs/mms-web/API.md`](docs/mms-web/API.md) — MMS Pilot 本地 API v1
+- [`docs/WEB_UI_QUICKSTART.md`](docs/WEB_UI_QUICKSTART.md) — 配置 Web UI
 - [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)
 - [`docs/MMS_USER_PREFERENCES.md`](docs/MMS_USER_PREFERENCES.md)
 - [`docs/MODEL_CONFIG_CONTRACT.md`](docs/MODEL_CONFIG_CONTRACT.md)

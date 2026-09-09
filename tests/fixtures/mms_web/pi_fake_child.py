@@ -1,4 +1,4 @@
-"""Task-owned Pi RPC fake child for MMS Web session driver tests.
+"""Task-owned Pi RPC fake child for MMS Pilot session driver tests.
 
 Protocol: strict JSONL over stdin/stdout (LF framing, optional trailing CR).
 Behavior is driven by prompt-message keywords so tests can exercise the real
