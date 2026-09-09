@@ -125,6 +125,10 @@ class WebApplication:
                     shutil.rmtree(root)
         if parts == ["skills"]:
             return self._sessions().skills.snapshot(str(payload.get("workspaceId") or ""))
+        if parts == ["project-materials"]:
+            return self._sessions().materials.snapshot(str(payload.get("workspaceId") or ""))
+        if parts == ["project-materials", "change"]:
+            return self._sessions().materials.change(payload)
         if parts == ["attachments"]:
             return self._sessions().files.upload(payload)
         if parts == ["files", "reference-local"]:

@@ -133,7 +133,7 @@ class _LiveSession:
             "text": str(fields.get("text") or ""),
             "createdAt": now(),
         }
-        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections"):
+        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections", "contextUsage"):
             if fields.get(key) is not None:
                 event[key] = fields[key]
         self.event_index[event_id] = event
@@ -295,6 +295,8 @@ class SessionService(SessionActions):
         self._load_persisted()
         from .files import FileService
         self.files = FileService(catalog, self._state_root)
+        from .project_materials import ProjectMaterials
+        self.materials = ProjectMaterials(catalog, self._state_root)
 
     # -- capabilities --------------------------------------------------
 
@@ -392,6 +394,10 @@ class SessionService(SessionActions):
                 self._resume(session)
             skill_text, selected_skills = self.skills.prepare(payload.get("skills", []), session.meta["workspaceId"])
             suffix += skill_text
+            material_text, materials = self.materials.prepare(session.meta["workspaceId"])
+            suffix += material_text
+            from .project_materials import usage_record
+            context = usage_record(session.meta.get("cwd"), selected_skills, attachments, payload.get("references", []), selected, materials)
             self._check_images(session, images)
             with session.lock:
                 previous_state = session.state
@@ -399,14 +405,16 @@ class SessionService(SessionActions):
                 if session.state not in {"running", "waiting"}:
                     session.state = "running"
                     session.turn_started_at = self._now()
-                event = session.append_event({"kind": "user", "text": text, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "fileSelections": selected}, self._now)
+                event = session.append_event({"kind": "user", "text": text, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "fileSelections": selected, "contextUsage": context}, self._now)
                 if previous_state in {"running", "waiting"}:
                     event["status"] = "queued"
                     session.pending_prompts[event["id"]] = text + suffix
             try:
                 self._send_prompt(session, text + suffix, images=images)
-            except WebError:
+                context["state"] = "submitted" if session.driver else "prepared"
+            except WebError as exc:
                 with session.lock:
+                    context["state"] = "uncertain" if exc.code == "RPC_TIMEOUT" else "failed"
                     session.pending_prompts.pop(event["id"], None)
                     event["status"] = "error"
                     if session.last_sequence == event.get("sequence") and session.state == "running":
@@ -650,6 +658,10 @@ class SessionService(SessionActions):
             raise WebError("INVALID_REQUEST", "prompt 必须是字符串", status=400)
         images, attachments, suffix = self.files.prepare(payload.get("attachments", []), workspace_id, payload.get("references", []))
         suffix += skill_text
+        material_text, materials = self.materials.prepare(workspace_id)
+        suffix += material_text
+        from .project_materials import usage_record
+        context = usage_record(cwd, selected_skills, attachments, payload.get("references", []), [], materials)
         if not title:
             title = _clip(str(prompt or "").strip() or "Pi 会话", 60)
 
@@ -709,9 +721,12 @@ class SessionService(SessionActions):
         )
         if prompt:
             try:
-                live.append_event({"kind": "user", "text": prompt, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", [])}, self._now)
+                event = live.append_event({"kind": "user", "text": prompt, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "contextUsage": context}, self._now)
                 self._send_prompt(live, prompt + suffix, images=images)
+                context["state"] = "submitted" if live.driver else "prepared"
             except WebError as exc:
+                context["state"] = "uncertain" if exc.code == "RPC_TIMEOUT" else "failed"
+                event["status"] = "error"
                 live.append_event({"kind": "notice", "text": exc.message, "status": "error"}, self._now)
         with live.lock:
             live.persist(self._state_dir)
