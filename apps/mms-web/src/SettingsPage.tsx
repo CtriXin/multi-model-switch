@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Sun, Moon, SlidersHorizontal, Palette, ArrowLeft } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { Models } from "./Models";
+import { AppVersion } from "./components";
 
 export function SettingsPage({
   data,
@@ -53,6 +54,7 @@ export function SettingsPage({
           <h1>设置</h1>
           <p>常用偏好，放在一起。</p>
         </div>
+        <AppVersion version={data.appVersion} />
       </header>
       <nav className="settings-tabs" aria-label="设置分类">
         <button

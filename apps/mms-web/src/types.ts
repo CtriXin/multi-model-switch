@@ -180,6 +180,7 @@ export interface Runtime {
 }
 export interface Bootstrap {
   version: "1";
+  appVersion?: string;
   mode: "live" | "preview";
   csrfToken: string;
   capabilities: {

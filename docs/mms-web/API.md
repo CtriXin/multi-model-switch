@@ -198,3 +198,6 @@ Session 增加 `presetId`，assistant event 增加 `modelName`。已有回答保
 - 新 user Event 的 `contextUsage` 含 cwd、state 与 items。items 为 material/skill/reference/attachment/selection，保存实际准备内容的版本/hash及来源元数据。旧事件无该字段时不重建或猜测。显式文件引用记录路径，不能当作实际读取证明。
 - state=`prepared` 表示已准备但没有 native 提交确认；`submitted` 表示 Pi RPC 已接收；明确拒绝为 `failed`，超时或确认前进程断开为 `uncertain`。queued/cancelled 同时由 event.status 表达，不把已排队请求标为本轮已消耗。submitted 也不表示模型已阅读、理解或完成任务。
 - 手动选中的 Skills 记录 native 解析后的 filePath/baseDir、实际正文 sha256、有效入口 sourceRoot、共享/项目来源及同名覆盖路径。原 launcher overlay 选择规则保持不变；多个别名无法唯一对应时明确来源不唯一，不伪造实际自动加载清单。
+
+
+`GET /bootstrap` 的 `version: "1"` 是 API 版本；`appVersion` 来自当前运行服务的 `mms_version.VERSION`，用于 Logo 和设置页显示产品版本。缺失时不猜测产品版本。
