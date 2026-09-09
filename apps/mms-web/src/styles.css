@@ -2356,6 +2356,7 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
 .session-workbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 4px;
 }
@@ -2363,15 +2364,23 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
    on the right whether or not the process toggle is present. */
 .session-workbar > .workbar-folder {
   margin-right: auto;
+  min-width: 0;
+  max-width: 100%;
 }
-.session-workbar > .current-activity {
-  margin-bottom: 0;
-  flex: none;
+.workbar-folder > svg,
+.workbar-folder > span:first-of-type {
+  flex-shrink: 0;
+}
+.workbar-folder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .session-workbar > button {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 75%;
+  max-width: 100%;
   white-space: nowrap;
 }
 .runtime-strip {
