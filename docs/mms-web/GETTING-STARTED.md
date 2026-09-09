@@ -104,3 +104,5 @@ mms web --config-root "$HOME/.config/mms-next" --open
 | 想看完整过程 | 点击展开过程，或关闭自动收起设置 |
 
 版本边界与后续开发见 [下一阶段交接](NEXT-PHASE.md)。
+
+左上角 Logo 旁和设置页顶部均显示当前 MMS 服务版本，便于确认升级是否生效。

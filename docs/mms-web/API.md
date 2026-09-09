@@ -174,3 +174,5 @@ A secret-bearing preview stores the key only in process memory for the pending p
 Session 增加 `presetId`，assistant event 增加 `modelName`。已有回答保持生成时模型标签。用户事件 `status: queued` 表示还未被Pi消费，不作为新执行轮次；收到真实 user message_start后把该事件移至当前执行位置，清空队列/停止/恢复失效队列时标记 `cancelled`。event ID保持稳定；sequence在实际消费时重新排序。
 
 过程折叠是客户端偏好，不删除后端事件。`mms-web-auto-collapse-process` 保存在 localStorage。工具错误、审批/通知在折叠时仍可见；展开后保持事件顺序。GET 返回的是快照，不能把旧快照event数组当作永不变的append-only日志。
+
+`GET /bootstrap` 的 `version: "1"` 是 API 版本；`appVersion` 来自当前运行服务的 `mms_version.VERSION`，用于 Logo 和设置页显示产品版本。缺失时不猜测产品版本。

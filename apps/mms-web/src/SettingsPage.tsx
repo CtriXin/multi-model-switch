@@ -3,7 +3,7 @@ import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette } from "luc
 import type { Bootstrap } from "./types";
 import { Models } from "./Models";
 import { FONT_FAMILIES } from "./App";
-import { Dialog } from "./components";
+import { AppVersion, Dialog } from "./components";
 
 export function SettingsPage({
   data,
@@ -79,6 +79,7 @@ export function SettingsPage({
           <Palette size={16} />
           外观与使用
         </button>
+        <AppVersion version={data.appVersion} />
       </nav>
       {tab === "models" ? (
         <Models

@@ -34,6 +34,10 @@ export const harnessNames: Record<string, string> = {
   agy: "Antigravity",
 };
 export { Status } from "./SessionStatus";
+export function AppVersion({ version }: { version?: string }) {
+  return version ? <span className="app-version" title="当前服务版本" aria-label={`MMS 版本 ${version}`}>v{version}</span> : null;
+}
+
 export function Logo({ small = false }: { small?: boolean }) {
   return (
     <span className={"mms-mark " + (small ? "small" : "")} aria-hidden="true">

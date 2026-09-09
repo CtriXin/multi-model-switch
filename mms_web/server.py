@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from mms_version import VERSION
+
 from .errors import WebError
 
 MAX_BODY = 12 * 1024 * 1024
@@ -86,7 +88,7 @@ class WebApplication:
             if p.get("harness") != "pi" else p for p in snapshot.get("presets", [])
         ]
         return {
-            **snapshot, "version": "1", "mode": "live",
+            **snapshot, "version": "1", "appVersion": VERSION, "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
             "sessions": self.sessions.list_sessions() if self.sessions else [],
         }
