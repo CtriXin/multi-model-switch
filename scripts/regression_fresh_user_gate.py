@@ -68,6 +68,7 @@ _PYTEST_TARGETS = [
     "tests/test_mms_resume_command.py",
     "tests/test_reset_mms_install.py",
     "tests/test_install_script_paths.py",
+    "tests/test_npx_installer_package.py",
     "tests/test_nsr_bundled_wrapper.py",
     "tests/test_hook_retirement.py",
     "tests/test_owned_superset_hook.py",
@@ -83,6 +84,7 @@ _QUICK_PYTEST_TARGETS = [
     "tests/test_claude_hardening_regressions.py::test_claude_gateway_env_does_not_restore_cross_model_resume_pointer_on_new_launch",
     "tests/test_mms_resume_command.py::test_handle_resume_command_passes_claude_resume_args_and_project",
     "tests/test_install_script_paths.py",
+    "tests/test_npx_installer_package.py",
     "tests/test_nsr_bundled_wrapper.py",
     "tests/test_hook_retirement.py",
     "tests/test_owned_superset_hook.py",
@@ -133,6 +135,11 @@ _SCENARIO_MATRIX = [
         "id": "retired-optional-pack-cleanup",
         "state": "upgrade from a version that installed RTK/BrainKeeper/Map/CodeGraph/token-saver/TOON/ops-env-safe/ECC/OMC",
         "coverage": "install unbinds every MMS-written leftover, preserves user-owned lookalikes, backs up Claude settings, and uninstalls no third-party binary",
+    },
+    {
+        "id": "npx-install-entry",
+        "state": "a machine that already has Node.js, using the npx wrapper instead of curl",
+        "coverage": "the published wrapper carries no install logic, pins its source host, verifies the payload, keeps script and sources on one ref, and refuses Windows readably",
     },
     {
         "id": "one-question-install",
