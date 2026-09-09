@@ -60,10 +60,12 @@ export function ChannelModels({
   initialProvider,
   back,
   saved,
+  editStateChanged,
 }: {
   initialProvider: string;
   back: () => void;
   saved: () => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
 }) {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [providerId, setProviderId] = useState(initialProvider);
@@ -90,6 +92,10 @@ export function ChannelModels({
     chosen.some((id) => !original.includes(id)) ||
     Object.keys(efforts).length > 0 ||
     Object.keys(connection).length > 0;
+  useEffect(() => {
+    editStateChanged({dirty, busy: busy === "apply"});
+    return () => editStateChanged({dirty: false, busy: false});
+  }, [dirty, busy, editStateChanged]);
   const ids = [
     ...new Set([
       ...(provider?.models.map((m) => m.id) || []),

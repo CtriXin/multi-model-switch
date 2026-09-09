@@ -177,6 +177,7 @@ def test_native_queue_controls_and_restored_planning(native):
     app.post(["sessions",sid,"control"], {"requestId":"queue-clear","action":"clearQueue"})
     settle(app,sid)
     assert not any("queued-only-marker" in json.dumps(request["messages"]) for request in records)
+    assert next(e for e in app.get(["sessions",sid])["events"] if e.get("text") == "queued-only-marker")["status"] == "cancelled"
     app.post(["sessions",sid,"control"], {"requestId":"retry-on","action":"autoRetry","value":True})
     assert app.get(["sessions",sid,"runtime"])["autoRetryEnabled"] is True
     app.post(["sessions",sid,"control"], {"requestId":"plan-before-restart","action":"plan","value":True})
@@ -185,3 +186,17 @@ def test_native_queue_controls_and_restored_planning(native):
     settle(app,sid)
     assert app.get(["sessions",sid,"runtime"])["planning"] is True
     assert not (Path(workspace["path"]) / "native-plan-probe.txt").exists()
+
+
+def test_native_queued_prompt_begins_after_previous_answer(native):
+    app, workspace, records = native
+    first = app.post(["sessions"], {"requestId":"queue-order-start", "workspaceId":workspace["id"], "presetId":"web:pi:local-vision:gpt-5", "prompt":"slow-queue-marker"})
+    sid = first["session"]["id"]
+    app.post(["sessions",sid,"messages"], {"requestId":"queue-order-next", "text":"second-execution-marker"})
+    detail = settle(app,sid)
+    assert len(records) == 2
+    events = detail["events"]
+    index = next(i for i,e in enumerate(events) if e.get("text") == "second-execution-marker")
+    assert not events[index].get("status")
+    assert any(e["kind"] == "assistant" and e["text"] for e in events[:index])
+    assert any(e["kind"] == "assistant" and e["text"] for e in events[index+1:])

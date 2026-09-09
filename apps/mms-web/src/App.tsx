@@ -93,6 +93,8 @@ export function App() {
   const [presetId, setPresetId] = useState(() =>
     readSetting("mms-web-preset", ""),
   );
+  const [settingsEdit, setSettingsEdit] = useState({dirty: false, busy: false});
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
   const [attention, setAttention] = useState<
@@ -295,7 +297,19 @@ export function App() {
       clearTimeout(timer);
     };
   }, []);
+  function requestNavigation(action: () => void) {
+    if (settingsEdit.busy) {
+      setError("配置正在保存，请等待保存结束后离开。");
+      return;
+    }
+    if (settingsEdit.dirty) {
+      setPendingNavigation(() => action);
+      return;
+    }
+    action();
+  }
   function navigate(next: Page) {
+    requestNavigation(() => {
     setPage(next);
     if (next !== "session")
       history.replaceState(null, "", location.pathname + location.search);
@@ -305,8 +319,10 @@ export function App() {
       setDetail(null);
       currentSelection.current = "";
     }
+    });
   }
   function openSession(id: string) {
+    requestNavigation(() => {
     history.replaceState(null, "", "#session=" + encodeURIComponent(id));
     followOutput.current = true;
     holdPosition.current = false;
@@ -319,6 +335,7 @@ export function App() {
     setNavOpen(false);
     setSearch(false);
     setArtifactId("");
+    });
   }
   async function runAction(
     path: string,
@@ -874,6 +891,8 @@ export function App() {
         )}
         {page === "models" && (
           <SettingsPage
+            requestNavigation={requestNavigation}
+            editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}
             setAutoCollapseProcess={setAutoCollapseProcess}
             presetId={presetId}
@@ -1254,6 +1273,13 @@ export function App() {
           </div>
         </Dialog>
       )}
+      {pendingNavigation && <Dialog title="保留未保存的修改？" close={() => setPendingNavigation(null)}>
+        <p>通道地址、Key、模型或 effort 还有未保存的修改。可以继续编辑，或放弃本次修改后离开。</p>
+        <div className="dialog-actions">
+          <button className="button" onClick={() => setPendingNavigation(null)}>继续编辑</button>
+          <button className="button primary" onClick={() => { const action = pendingNavigation; setPendingNavigation(null); setSettingsEdit({dirty:false,busy:false}); action(); }}>放弃修改并离开</button>
+        </div>
+      </Dialog>}
     </div>
   );
 }

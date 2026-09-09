@@ -92,7 +92,7 @@ class _DriverSink:
 class _LiveSession:
     def __init__(self, meta: dict) -> None:
         self.lock = threading.RLock()
-        self.mutation_lock = threading.Lock()
+        self.mutation_lock = threading.RLock()
         self.meta = meta
         self.secrets: list[str] = []
         if meta.get("runtimeRoot"):
@@ -103,6 +103,8 @@ class _LiveSession:
                                 and len(v) >= 8 and any(x in k.lower() for x in ("api_key", "token", "secret"))]
             except (OSError, ValueError):
                 pass
+        self.pending_prompts: dict[str, str] = {}
+        self.stream_tails: dict[tuple[str, str], str] = {}
         self.events: list[dict] = []
         self.event_index: dict[str, dict] = {}
         self.last_sequence = 0
@@ -218,6 +220,14 @@ class _LiveSession:
             if event.get("kind") == "tool" and event.get("status") == "running":
                 event["status"] = "error"
                 event["text"] += "\n本轮已结束，未收到此工具的完成回报。"
+
+    def cancel_pending(self):
+        with self.lock:
+            for event_id in list(self.pending_prompts):
+                event = self.event_index.get(event_id)
+                if event and event.get("status") == "queued":
+                    event["status"] = "cancelled"
+            self.pending_prompts.clear()
 
     def activity_view(self) -> dict | None:
         if self.state == "waiting":
@@ -366,10 +376,14 @@ class SessionService(SessionActions):
                     session.state = "running"
                     session.turn_started_at = self._now()
                 event = session.append_event({"kind": "user", "text": text, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", [])}, self._now)
+                if previous_state in {"running", "waiting"}:
+                    event["status"] = "queued"
+                    session.pending_prompts[event["id"]] = text + suffix
             try:
                 self._send_prompt(session, text + suffix, images=images)
             except WebError:
                 with session.lock:
+                    session.pending_prompts.pop(event["id"], None)
                     event["status"] = "error"
                     if session.last_sequence == event.get("sequence") and session.state == "running":
                         session.state = previous_state
@@ -434,6 +448,7 @@ class SessionService(SessionActions):
             session.stop_requested = True
             try:
                 driver.abort()
+                session.cancel_pending()
             except DriverClosedError:
                 pass
             except RpcTimeoutError:
@@ -556,8 +571,9 @@ class SessionService(SessionActions):
                 session = self._sessions.get(entry.get("sessionId") or "")
                 if session is not None:
                     with session.lock:
-                        session.request_log[request_id] = fingerprint
-                        session.persist(self._state_dir)
+                        if session.request_log.get(request_id) != fingerprint:
+                            session.request_log[request_id] = fingerprint
+                            session.persist(self._state_dir)
 
     # -- internals: launch ----------------------------------------------
 
@@ -706,7 +722,38 @@ class SessionService(SessionActions):
         if not isinstance(fields, dict):
             return
         with session.lock:
-            fields = redact(copy.deepcopy(fields), session.secrets)
+            if isinstance(fields.get("consumedPrompt"), str):
+                prompt = fields["consumedPrompt"]
+                event_id = next((eid for eid, text in session.pending_prompts.items() if text == prompt), None)
+                if event_id:
+                    session.pending_prompts.pop(event_id, None)
+                    event = session.event_index[event_id]
+                    event.pop("status", None)
+                    session.events.remove(event)
+                    session.last_sequence += 1
+                    event["sequence"] = session.last_sequence
+                    session.events.append(event)
+                    session.persist(self._state_dir)
+                return
+            fields = copy.deepcopy(fields)
+            event_id = str(fields.get("id") or "")
+            existing = session.event_index.get(event_id, {})
+            for name in ("text", "thinking"):
+                tail_key = (event_id, name)
+                if name in fields:
+                    session.stream_tails.pop(tail_key, None)
+                elif name + "Append" in fields:
+                    # Never publish a suffix that could become a known secret
+                    # when the next delta arrives. Tails live in memory only.
+                    value = str(existing.get(name) or "") + session.stream_tails.pop(tail_key, "") + str(fields.pop(name + "Append"))
+                    value = redact(value, session.secrets)
+                    keep = max((n for secret in session.secrets for n in range(1, min(len(secret), len(value) + 1))
+                                if value.endswith(secret[:n])), default=0)
+                    if keep:
+                        session.stream_tails[tail_key] = value[-keep:]
+                        value = value[:-keep]
+                    fields[name] = value
+            fields = redact(fields, session.secrets)
             if fields.get("kind") == "assistant":
                 fields.setdefault("modelName", session.meta.get("modelName", ""))
             if isinstance(fields.get("planning"), bool):
@@ -879,6 +926,9 @@ class SessionService(SessionActions):
                 continue
             live = _LiveSession(dict(meta))
             live.events = [e for e in (payload.get("events") or []) if isinstance(e, dict)]
+            for event in live.events:
+                if event.get("kind") == "user" and event.get("status") == "queued":
+                    event["status"] = "cancelled"
             live.finish_pending_tools()
             live.event_index = {e["id"]: e for e in live.events if e.get("id")}
             live.last_sequence = int(payload.get("lastSequence") or len(live.events) or 0)

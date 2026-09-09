@@ -73,6 +73,10 @@ class SessionActions:
 
     def runtime_view(self, session_id):
         session = self._get(session_id)
+        with session.mutation_lock:
+            return self._runtime_view_locked(session)
+
+    def _runtime_view_locked(self, session):
         cached = session.meta.get("runtimeView", {})
         if not session.alive() or time.monotonic() - getattr(session, "runtime_checked", 0) < 4:
             return {**cached, "alive": session.alive(), "cwd": session.meta.get("cwd"), "cached": not session.alive(), "planning": session.meta.get("planning", False)}
@@ -149,6 +153,8 @@ class SessionActions:
                     set_thinking(self, session, value)
                 else:
                     self._rpc(session, command, 120 if action == "compact" else 8)
+                if action == "clearQueue":
+                    session.cancel_pending()
                 session.meta.setdefault("controlSettings", {})[action] = value
                 session.runtime_checked = 0
                 session.append_event({"kind": "notice", "title": "设置", "text": {"plan": "工作模式已切换", "thinking": f"Thinking 已设置为 {value}", "autoCompaction": "自动压缩设置已更新", "autoRetry": "自动重试设置已更新", "compact": "上下文压缩完成", "clearQueue": "待发送队列已清空"}[action]}, self._now)

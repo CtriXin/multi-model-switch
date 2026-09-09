@@ -112,6 +112,8 @@ def switch_model(service, session_id, payload):
         available = rpc(driver, {"type": "get_available_models"}).get("models", []) if session.alive() else []
         native = session.alive() and route_identity(saved["runtime"]) == route_identity(resolved["runtime"]) and any(
             m.get("id") == target["modelId"] and m.get("provider") == target["provider"] for m in available)
+        old_driver = session.driver
+        previous = rpc(old_driver, {"type": "get_state"}) if native else None
         runtime = copy.deepcopy(resolved["runtime"])
         if native:
             next_root = root
@@ -134,33 +136,53 @@ def switch_model(service, session_id, payload):
                 raise
             except Exception as exc:
                 raise WebError("MODEL_SWITCH_FAILED", "新模型未就绪，原会话和上下文已保留。", 409) from exc
+        from .sessions import _DriverSink, _fingerprint
+        backup = {key: copy.deepcopy(getattr(session, key)) for key in
+                  ("meta", "events", "secrets", "request_log", "last_sequence", "updated_at", "state", "activity", "finalized", "stop_requested")}
+        try:
+            with session.lock:
+                if not native:
+                    session.driver = driver
+                for event in session.events:
+                    if event.get("kind") == "assistant":
+                        event.setdefault("modelName", session.meta.get("modelName", ""))
+                meta = service._build_meta(session_id, "pi", session.meta["workspaceId"], session.meta["title"], resolved["modelInfo"], runtime)
+                session.meta.update({key: meta[key] for key in ("modelName", "providerName", "channel")})
+                session.meta.update(presetId=preset, runtimeRoot=str(next_root))
+                session.secrets.extend(str(v) for k, v in runtime.items() if "key" in k.lower() and isinstance(v, str) and v)
+                session.meta.setdefault("controlSettings", {})["thinking"] = state.get("thinkingLevel")
+                session.meta["runtimeView"] = {}
+                session.runtime_checked = 0
+                session.finalized = False
+                session.stop_requested = False
+                session.state = "idle"
+                session.activity = None
+                session.append_event({"kind": "notice", "title": "模型", "text": f"已切换为 {meta['modelName']} · {meta['channel']}，继续使用当前对话。"}, service._now)
+                # Selection and idempotency are one atomic record. The outer
+                # request scope sees this durable entry and need not save twice.
+                session.request_log[request_id] = _fingerprint(operation)
+                session.persist(service._state_dir)
+        except Exception as exc:
+            with session.lock:
+                for key, value in backup.items():
+                    setattr(session, key, value)
+                session.event_index = {e["id"]: e for e in session.events}
+                session.driver = old_driver
+            if native:
+                try:
+                    original = previous["model"]
+                    apply_native(old_driver, {"provider": original["provider"], "modelId": original["id"]}, previous.get("thinkingLevel"))
+                finally:
+                    private_json(root / "resume.json", saved)
+            else:
+                driver.close(graceful_timeout=0.5)
+            raise WebError("MODEL_SWITCH_FAILED", "无法保存模型切换，原选择和上下文已保留。", 409) from exc
         if not native:
-            old_driver = session.driver
             if old_driver:
                 old_sink = getattr(old_driver, "_sink", None)
                 if old_sink:
                     old_sink.active = False
                 old_driver.close(graceful_timeout=0.5)
-            session.driver = driver
-        with session.lock:
-            for event in session.events:
-                if event.get("kind") == "assistant":
-                    event.setdefault("modelName", session.meta.get("modelName", ""))
-            meta = service._build_meta(session_id, "pi", session.meta["workspaceId"], session.meta["title"], resolved["modelInfo"], runtime)
-            session.meta.update({key: meta[key] for key in ("modelName", "providerName", "channel")})
-            session.meta.update(presetId=preset, runtimeRoot=str(next_root))
-            session.secrets.extend(str(v) for k, v in runtime.items() if "key" in k.lower() and isinstance(v, str) and v)
-            session.meta.setdefault("controlSettings", {})["thinking"] = state.get("thinkingLevel")
-            session.meta["runtimeView"] = {}
-            session.runtime_checked = 0
-            session.finalized = False
-            session.stop_requested = False
-            session.state = "idle"
-            session.activity = None
-            session.append_event({"kind": "notice", "title": "模型", "text": f"已切换为 {meta['modelName']} · {meta['channel']}，继续使用当前对话。"}, service._now)
-            session.persist(service._state_dir)
-        if not native:
-            from .sessions import _DriverSink
             sink.activate(_DriverSink(service, session))
     return service.get_session(session_id)
 

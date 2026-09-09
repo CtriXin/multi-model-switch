@@ -4048,7 +4048,10 @@ cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
 [ -f "$SOURCE_DIR/MMS Web.command" ] && cp "$SOURCE_DIR/MMS Web.command" "$MMS_HOME/"
 copy_dir_safely "$SOURCE_DIR/mms_web" "$MMS_HOME/mms_web" "MMS Web 服务" "MMS Web service"
 copy_dir_safely "$SOURCE_DIR/mms_web_static" "$MMS_HOME/mms_web_static" "MMS Web 页面" "MMS Web client"
-mkdir -p "$MMS_HOME/docs"
+mkdir -p "$MMS_HOME/docs/reference/model-capability-calibration"
+if [ -f "$SOURCE_DIR/docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json" ]; then
+    cp "$SOURCE_DIR/docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json" "$MMS_HOME/docs/reference/model-capability-calibration/"
+fi
 copy_dir_safely "$SOURCE_DIR/docs/mms-web" "$MMS_HOME/docs/mms-web" "MMS Web 使用文档" "MMS Web documentation"
 [ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"
 [ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"

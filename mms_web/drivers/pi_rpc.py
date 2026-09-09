@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
 import threading
 import uuid
 from typing import Callable
@@ -412,6 +413,8 @@ class PiRpcDriver:
             self._active_tools.clear()
             self._open_assistant_id = None
             self._activity(self._turn_outcome)
+        elif etype == "message_start" and (message.get("message") or {}).get("role") == "user":
+            self._sink.upsert_event({"consumedPrompt": _content_text(message["message"].get("content"))})
         elif etype == "message_start" and (message.get("message") or {}).get("role") == "assistant":
             self._open_assistant_id = f"m-{uuid.uuid4().hex[:12]}"
             self._upsert({"id": self._open_assistant_id, "kind": "assistant", "text": ""})

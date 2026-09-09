@@ -72,3 +72,29 @@ def test_cross_channel_same_model_updates_key_and_preserves_context(native, monk
     assert settled['session']['state'] != 'error'
     assert records[-1]['_testAuthorization'] == 'Bearer test-owned-key'
     assert 'new-route-marker' in json.dumps(records[-1]['messages'])
+
+
+@pytest.mark.parametrize("cross_channel", [False, True])
+def test_switch_save_failure_rolls_back_live_and_durable_selection(native, monkeypatch, cross_channel):
+    app, workspace, records = native
+    configure(app, 'Local vision', ['gpt-5', 'gpt-4.1'], provider_id='local-vision')
+    configure(app, 'Second route', ['gpt-5'], key='second-route-test-key')
+    detail = app.post(['sessions'], {'requestId':'rollback-start', 'workspaceId':workspace['id'], 'presetId':'web:pi:local-vision:gpt-5', 'prompt':'rollback-history'})
+    sid=detail['session']['id'];settle(app,sid)
+    session=app.sessions._get(sid);old_driver=session.driver
+    root=Path(session.meta['runtimeRoot']);before=(root/'resume.json').read_bytes()
+    previous_meta=json.loads(json.dumps(session.meta));previous_events=json.loads(json.dumps(session.events))
+    save=session.persist
+    def fail(_): raise OSError('synthetic storage failure')
+    monkeypatch.setattr(session, 'persist', fail)
+    target='web:pi:second-route:gpt-5' if cross_channel else 'web:pi:local-vision:gpt-4.1'
+    with pytest.raises(WebError, match='原选择'):
+        app.post(['sessions',sid,'model'], {'requestId':'rollback-switch','presetId':target})
+    monkeypatch.setattr(session,'persist',save)
+    assert session.driver is old_driver and old_driver.alive()
+    assert session.meta['modelName'] == previous_meta['modelName'] and session.meta['runtimeRoot'] == str(root)
+    assert session.events == previous_events and (root/'resume.json').read_bytes() == before
+    assert app.sessions._rpc(session, {'type':'get_state'})['model']['id'] == 'gpt-5'
+    app.post(['sessions',sid,'messages'], {'requestId':'after-failed-switch','text':'continue-original'})
+    settle(app,sid)
+    assert records[-1]['_testAuthorization'] == 'Bearer test-owned-key'

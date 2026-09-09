@@ -18,6 +18,7 @@ export function SettingsPage({
   workspaceId,
   effortChanged,
   autoCollapseProcess, setAutoCollapseProcess,
+  requestNavigation, editStateChanged,
 }: {
   data: Bootstrap;
   favorites: string[];
@@ -32,6 +33,8 @@ export function SettingsPage({
   selectPreset: (id: string) => void;
   workspaceId: string;
   effortChanged: (id: string) => void;
+  requestNavigation: (action: () => void) => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
   autoCollapseProcess: boolean;
   setAutoCollapseProcess: (on: boolean) => void;
 }) {
@@ -54,14 +57,14 @@ export function SettingsPage({
       <nav className="settings-tabs" aria-label="设置分类">
         <button
           className={tab === "models" ? "active" : ""}
-          onClick={() => setTab("models")}
+          onClick={() => requestNavigation(() => setTab("models"))}
         >
           <SlidersHorizontal size={16} />
           模型与通道
         </button>
         <button
           className={tab === "general" ? "active" : ""}
-          onClick={() => setTab("general")}
+          onClick={() => requestNavigation(() => setTab("general"))}
         >
           <Palette size={16} />
           外观与使用
@@ -77,6 +80,7 @@ export function SettingsPage({
           change={selectPreset}
           workspaceId={workspaceId}
           effortChanged={effortChanged}
+          editStateChanged={editStateChanged}
         />
       ) : (
         <section className="general-settings">

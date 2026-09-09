@@ -83,7 +83,7 @@ export interface SessionEvent {
   kind: "user" | "assistant" | "tool" | "approval" | "notice";
   text: string;
   title?: string;
-  status?: "running" | "done" | "error";
+  status?: "running" | "done" | "error" | "queued" | "cancelled";
   approvalId?: string;
   decision?: "allow" | "deny";
   method?: "confirm" | "select" | "input" | "editor";

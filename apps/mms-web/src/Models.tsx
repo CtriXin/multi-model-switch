@@ -14,6 +14,7 @@ export function Models({
   change,
   workspaceId,
   effortChanged,
+  editStateChanged,
 }: {
   data: Bootstrap;
   favorites: string[];
@@ -23,6 +24,7 @@ export function Models({
   change: (id: string) => void;
   workspaceId: string;
   effortChanged: (id: string) => void;
+  editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
 }) {
   const [manage, setManage] = useState(false);
   const [add, setAdd] = useState(false);
@@ -43,6 +45,7 @@ export function Models({
           initialProvider={active?.providerId || ""}
           back={() => setManage(false)}
           saved={refresh}
+          editStateChanged={editStateChanged}
         />
       </div>
     );
