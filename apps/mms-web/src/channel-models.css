@@ -102,6 +102,33 @@
 .capability-reset:hover {
   background: var(--soft);
 }
+/* Batch capability fill. The chips sit above the table because they change
+   many rows at once; the per-row reset stays inside its own row. */
+.channel-capability-refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.channel-capability-refresh .capability-refresh {
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.channel-capability-refresh .capability-refresh:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+.channel-capability-refresh .capability-refresh:disabled {
+  opacity: 0.55;
+}
 .channel-model-table-head {
   padding: 10px 12px;
   color: var(--muted);
