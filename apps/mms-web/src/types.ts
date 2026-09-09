@@ -99,19 +99,35 @@ export interface SessionEvent {
   nativeTimestamp?: number;
   attachments?: Attachment[];
   references?: string[];
+  fileSelections?: { path: string; revision: number; quote?: string; region?: ImageRegion }[];
   usage?: Record<string, unknown>;
 }
 export interface Artifact {
   id: string;
   name: string;
-  kind: "markdown" | "text" | "diff";
-  content: string;
-  path?: string;
+  kind: "markdown" | "text" | "csv" | "html" | "image";
+  path: string;
+  sha256: string;
+  revision: number;
+  versionCount: number;
+  status: "current" | "changed" | "missing" | "unavailable";
+  source: string;
+  demoContent?: string;
+}
+export interface ImageRegion { x: number; y: number; width: number; height: number }
+export interface FileSelection {
+  artifactId: string;
+  path: string;
+  revision: number;
+  sha256: string;
+  quote?: string;
+  region?: ImageRegion;
 }
 export interface SessionDetail {
   session: Session;
   events: SessionEvent[];
   artifacts: Artifact[];
+  artifactNotice?: string;
   runtime?: Runtime;
 }
 export interface Attachment {

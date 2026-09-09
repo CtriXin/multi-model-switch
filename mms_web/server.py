@@ -160,7 +160,7 @@ class WebApplication:
                 raise WebError("CAPABILITY_UNAVAILABLE", "当前会话路径尚未就绪，未启动模型。", 409)
             return service.launch(payload)
         if len(parts) == 3 and parts[0] == "sessions":
-            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model"}
+            methods = {"messages": "send", "stop": "stop", "control": "control", "manage": "manage", "fork": "fork", "model": "switch_model", "artifacts": "artifact"}
             if parts[2] in methods:
                 return getattr(self._sessions(), methods[parts[2]])(parts[1], payload)
         if len(parts) == 4 and parts[0] == "sessions" and parts[2] == "approvals":
@@ -207,15 +207,16 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             ):
                 raise WebError("INVALID_CSRF", "页面连接已失效，请刷新后重试。", 403)
 
-        def _send(self, status: int, body: bytes, content_type: str):
+        def _send(self, status: int, body: bytes, content_type: str, *, preview=False):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("X-Frame-Options", "DENY")
-            self.send_header("Content-Security-Policy",
+            self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")
+            from .artifact_preview import PREVIEW_CSP
+            self.send_header("Content-Security-Policy", PREVIEW_CSP if preview else
                              "default-src 'self'; script-src 'self'; style-src 'self'; "
                              "img-src 'self' data:; connect-src 'self'; "
                              "object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
@@ -244,7 +245,16 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                 self._check_origin()
                 path = unquote(urlsplit(self.path).path)
                 if path.startswith("/api/"):
-                    return self._json(200, app.get(self._parts()))
+                    parts = self._parts()
+                    if len(parts) == 6 and parts[0] == "sessions" and parts[2] == "artifacts" and parts[4] == "preview":
+                        if not parts[5].isdigit():
+                            raise WebError("INVALID_REVISION", "成果版本无效。", 400)
+                        item = app._sessions().artifact(parts[1], {"id": parts[3], "revision": int(parts[5])})
+                        if item["kind"] != "html":
+                            raise WebError("PREVIEW_UNAVAILABLE", "这个成果不是 HTML。", 400)
+                        from .artifact_preview import offline_html
+                        return self._send(200, offline_html(item["content"]), "text/html; charset=utf-8", preview=True)
+                    return self._json(200, app.get(parts))
                 file = (root / (path.lstrip("/") or "index.html")).resolve()
                 if not file.is_relative_to(root) or not file.is_file():
                     raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Web。", 404)

@@ -90,7 +90,7 @@ class _DriverSink:
 
 
 class _LiveSession:
-    def __init__(self, meta: dict) -> None:
+    def __init__(self, meta: dict, state_root: Path | None = None) -> None:
         self.lock = threading.RLock()
         self.mutation_lock = threading.RLock()
         self.meta = meta
@@ -118,6 +118,8 @@ class _LiveSession:
         self.request_log: dict[str, str] = {}
         self.finalized = False
         self.updated_at = meta.get("updatedAt") or _now_iso()
+        from .artifact_history import ArtifactHistory
+        self.artifact_history = ArtifactHistory(state_root, meta, self.secrets) if state_root else None
 
     # -- events --------------------------------------------------------
 
@@ -131,7 +133,7 @@ class _LiveSession:
             "text": str(fields.get("text") or ""),
             "createdAt": now(),
         }
-        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills"):
+        for key in ("title", "status", "approvalId", "decision", "arguments", "method", "options", "placeholder", "prefill", "answer", "thinking", "nativeTimestamp", "modelName", "usage", "attachments", "references", "skills", "fileSelections"):
             if fields.get(key) is not None:
                 event[key] = fields[key]
         self.event_index[event_id] = event
@@ -211,7 +213,8 @@ class _LiveSession:
         return {
             "session": self.session_view(),
             "events": [copy.deepcopy(event) for event in self.events],
-            "artifacts": collect_artifacts(self.meta, self.events),
+            "artifacts": self.artifact_history.list(self.events) if self.artifact_history else collect_artifacts(self.meta, self.events),
+            "artifactNotice": self.artifact_history.note if self.artifact_history else "",
             "runtime": self.meta.get("runtimeView", {}),
         }
 
@@ -325,11 +328,22 @@ class SessionService(SessionActions):
             detail["runtime"] = runtime
             return detail
 
+    def artifact(self, session_id: str, payload: dict) -> dict:
+        session = self._get(session_id)
+        for key in ("revision", "compare"):
+            if key in payload and (type(payload[key]) is not int or payload[key] < 0):
+                raise WebError("INVALID_REVISION", "成果版本无效。", 400)
+        with session.lock:
+            return session.artifact_history.read(str(payload.get("id") or ""), session.events,
+                                                 payload.get("revision"), payload.get("compare"))
+
     # -- mutations -----------------------------------------------------
 
     def launch(self, payload: dict) -> dict:
         self._require_open()
         payload = self._object_payload(payload)
+        if payload.get("fileSelections"):
+            raise WebError("INVALID_SELECTION", "请在成果所属会话中发送选段修改。", 400)
         request_id = self._validate_request_id(payload.get("requestId"))
         op_payload = {
             "op": "launch",
@@ -358,14 +372,24 @@ class SessionService(SessionActions):
         text = payload.get("text") or ("请查看附件。" if payload.get("attachments") else "")
         if not isinstance(text, str) or not text.strip():
             raise WebError("INVALID_REQUEST", "请输入消息内容。", 400)
-        op_payload = {"op": "send", "sessionId": session.meta["id"], "text": text, "skills": payload.get("skills", []), "attachments": payload.get("attachments", []), "references": payload.get("references", [])}
+        op_payload = {"op": "send", "sessionId": session.meta["id"], "text": text, "skills": payload.get("skills", []), "attachments": payload.get("attachments", []), "references": payload.get("references", []), "fileSelections": payload.get("fileSelections", [])}
         with session.mutation_lock, self._request_scope(request_id, op_payload, session) as replay:
             if replay is not None:
                 with replay.lock:
                     return replay.detail_view()
+            selections = payload.get("fileSelections", [])
+            if not isinstance(selections, list) or len(selections) > 4:
+                raise WebError("INVALID_SELECTION", "每条消息最多引用 4 个成果选段。", 400)
+            selected, selection_text = [], ""
+            with session.lock:
+                for item in selections:
+                    clean, section = session.artifact_history.selection(item, session.events)
+                    selected.append(clean)
+                    selection_text += section
+            images, attachments, suffix = self.files.prepare(payload.get("attachments", []), session.meta["workspaceId"], payload.get("references", []))
+            suffix += selection_text
             if not session.alive():
                 self._resume(session)
-            images, attachments, suffix = self.files.prepare(payload.get("attachments", []), session.meta["workspaceId"], payload.get("references", []))
             skill_text, selected_skills = self.skills.prepare(payload.get("skills", []), session.meta["workspaceId"])
             suffix += skill_text
             self._check_images(session, images)
@@ -375,7 +399,7 @@ class SessionService(SessionActions):
                 if session.state not in {"running", "waiting"}:
                     session.state = "running"
                     session.turn_started_at = self._now()
-                event = session.append_event({"kind": "user", "text": text, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", [])}, self._now)
+                event = session.append_event({"kind": "user", "text": text, "skills": selected_skills, "attachments": attachments, "references": payload.get("references", []), "fileSelections": selected}, self._now)
                 if previous_state in {"running", "waiting"}:
                     event["status"] = "queued"
                     session.pending_prompts[event["id"]] = text + suffix
@@ -637,7 +661,7 @@ class SessionService(SessionActions):
             from .runtime import private_json
             private_json(Path(runtime["_webConfigRoot"]) / "resume.json",
                          {"modelInfo": model_info, "runtime": runtime, "cwd": cwd})
-        live = _LiveSession(meta)
+        live = _LiveSession(meta, self._state_root)
         live.state = "running" if prompt else "idle"
 
         sink = _DriverSink(self, live)
@@ -770,7 +794,10 @@ class SessionService(SessionActions):
                         fields["text"] = fields.get("text", "") + "\n图片超过预览限制或格式不支持。"
             if isinstance(fields.get("queue"), list):
                 session.meta["queue"] = fields["queue"]
-            session.upsert_event(fields, self._now)
+            event = session.upsert_event(fields, self._now)
+            if session.artifact_history:
+                session.artifact_history.secrets = session.secrets
+                session.artifact_history.observe(event, self._now())
             session.persist(self._state_dir)
 
     def _apply_proto_state(self, session: _LiveSession, state: str) -> None:
@@ -924,7 +951,7 @@ class SessionService(SessionActions):
             meta = payload.get("session")
             if not isinstance(meta, dict) or not meta.get("id"):
                 continue
-            live = _LiveSession(dict(meta))
+            live = _LiveSession(dict(meta), self._state_root)
             live.events = [e for e in (payload.get("events") or []) if isinstance(e, dict)]
             for event in live.events:
                 if event.get("kind") == "user" and event.get("status") == "queued":

@@ -11,8 +11,8 @@ MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.0.1/install.sh -o /tmp/mms-install-v4.sh
-bash /tmp/mms-install-v4.sh --ref v4.0.1 --install-cli pi --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.1.0/install.sh -o /tmp/mms-install-v4.sh
+bash /tmp/mms-install-v4.sh --ref v4.1.0 --install-cli pi --write-shell-rc
 ```
 
 关闭终端后重新打开，运行：
@@ -75,7 +75,7 @@ mms web --config-root "$HOME/.config/mms-next" --open
 - 过程与结果：工具按组展示，支持展开参数和输出；最后回答保留在外面。每轮可收起/展开过程，底部可收起/展开全部。设置 → 外观与使用 →「完成后自动收起过程」控制默认行为，设置保存在当前浏览器。
 - 状态：运行中、思考、工具执行、等待回答、错误、本轮完成分别显示。完成提示和未读高亮帮助你发现新结果。
 - 长对话：右侧提问导航 hover 展开，点击回到自己的某次提问；离开底部后可返回最新消息。复制等次要操作在 hover/键盘聚焦时出现，触屏上可直接操作。
-- 成果与历史：查看生成文件、Markdown 和文本结果，搜索/重命名/归档会话，导出对话，或从可分支的位置继续。
+- 成果与历史：查看 Markdown、文本、CSV 表格、图片和静态 HTML；选择已记录版本、比较差异或下载。原文件变化/删除会明确提示。会话继续支持搜索、重命名、归档、导出和分支。
 - 工作方式：「只读规划」限制当前提供给 Pi 的工具；「执行任务」允许实际改文件和运行命令。仍需理解任务将操作哪些本地文件。
 
 ## 别人怎么使用
@@ -104,3 +104,12 @@ mms web --config-root "$HOME/.config/mms-next" --open
 | 想看完整过程 | 点击展开过程，或关闭自动收起设置 |
 
 版本边界与后续开发见 [下一阶段交接](NEXT-PHASE.md)。
+
+
+### 修改成果的一部分
+
+打开右侧「成果」，选择文件。在「原文 / 选段修改」中选中文字，再点「引用选段」；图片可以拖选区域并点「引用选区」。片段会进入当前会话输入框，写下修改要求并发送，AI 才开始处理。文件已经变化时，需要打开当前文件重新选择。
+
+修改完成后可选择新旧版本查看差异。这里保存的是成果版本，不会自动回滚工作目录；对话分支也不等于文件回滚。旧会话没有历史快照时只能展示当前文件，首次使用本功能后的成果才开始记录版本。
+
+HTML 是静态预览，脚本、外部资源和跳转均停用；需要原文件时使用下载。CSV 表格最多显示 200 行和 50 列，原文和下载不裁剪。每会话最多记录 40 个成果、每文件 20 个版本、共 64 MB；达到上限会提示并保留旧版本。PDF/Office 暂不提供内嵌预览，可通过工作文件路径使用本机应用打开。

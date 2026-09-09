@@ -65,7 +65,8 @@ export const previewDetails: Record<string, SessionDetail> = {
         name: "首次使用流程.md",
         kind: "markdown",
         path: "docs/first-run.md",
-        content:
+        sha256: "", revision: 0, versionCount: 0, status: "current", source: "demo",
+        demoContent:
           "# 从想法到第一个任务\n\n让第一次使用，在一个页面里完成。\n\n## 01 · 连接模型服务\n\n选择已有服务，或填入自己的 API Key。已知服务自动带出地址，只显示常用模型。\n\n## 02 · 选择工作文件夹\n\n告诉 AI 在哪里工作。解释将要访问的范围，并记住最近使用的文件夹。\n\n## 03 · 开始工作\n\n用自己的话描述任务。第一次使用推荐组合，之后记住上次的选择。\n\n---\n\n### 验收方式\n\n找一位从未使用终端的同事，观察是否能独立完成首次任务，并打开生成的文件。\n\n> 这是用于界面评审的示例文档，没有写入项目。",
       },
     ],
@@ -98,7 +99,8 @@ export const previewDetails: Record<string, SessionDetail> = {
         id: "feedback",
         name: "产品反馈.md",
         kind: "markdown",
-        content:
+        path: "产品反馈.md", sha256: "", revision: 0, versionCount: 0, status: "current", source: "demo",
+        demoContent:
           "# 本周产品反馈\n\n## 上手\n\n- 希望记住上次使用的模型组合。\n- 第一次设置不知道哪些字段必须填写。\n\n## 体验\n\n- 多个任务一起运行时，希望先看到需要确认的任务。\n\n## 稳定性\n\n- 连接失败时，需要知道下一步如何恢复。\n\n> 界面预览数据。",
       },
     ],

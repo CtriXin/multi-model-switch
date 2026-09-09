@@ -18,7 +18,6 @@ import { messageAnchor } from "./ConversationOutline";
 import { MessageActions } from "./SessionTools";
 import { AttachmentView } from "./MessageMedia";
 import type {
-  Artifact,
   Preset,
   SessionDetail,
   SessionEvent,
@@ -302,6 +301,10 @@ export function EventView({
             ))}
           </div>
         )}
+        {event.fileSelections?.map((selection, index) => <blockquote className="message-file-selection" key={index}>
+          <strong>{selection.path} · {selection.revision ? `v${selection.revision}` : "当前文件"}</strong>
+          <p>{selection.quote || "图片中的选定区域"}</p>
+        </blockquote>)}
         <RichText text={event.text} repair={event.kind === "assistant"} />
         {event.text && (
           <MessageActions
@@ -397,36 +400,5 @@ function Interaction({
         </>
       )}
     </section>
-  );
-}
-
-export function ArtifactView({ artifact }: { artifact: Artifact }) {
-  function download() {
-    const url = URL.createObjectURL(
-      new Blob([artifact.content], { type: "text/plain;charset=utf-8" }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = artifact.name.split(/[\\/]/).pop() || "result.txt";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-  return (
-    <>
-      <div className="artifact-toolbar">
-        <FileText size={15} />
-        <span>{artifact.name}</span>
-        <button className="text-button" onClick={download}>
-          下载
-        </button>
-      </div>
-      <div className="artifact-content">
-        {artifact.kind === "markdown" ? (
-          <RichText text={artifact.content} />
-        ) : (
-          <pre className={artifact.kind}>{artifact.content}</pre>
-        )}
-      </div>
-    </>
   );
 }
