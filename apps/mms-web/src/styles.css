@@ -1,7 +1,14 @@
 :root {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+  /* Overridden from the appearance settings; the literal stack is the default. */
+  font-family: var(
+    --app-font,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif
+  );
   color-scheme: light;
   --bg: oklch(98.3% 0.003 154);
   --surface: oklch(100% 0 0);
@@ -47,7 +54,8 @@
 }
 body {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-font-size, 14px);
+  font-weight: var(--app-font-weight, 400);
   color: var(--ink);
   background: var(--bg);
 }

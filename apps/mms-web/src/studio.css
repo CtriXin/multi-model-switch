@@ -213,6 +213,39 @@
 .load-more-sessions:hover {
   background: var(--soft);
 }
+/* Vendor marks sit inside the existing monogram badge; the inline tint comes
+   from the family so a long model list is scannable by colour. */
+.vendor-mark {
+  display: block;
+}
+.model-monogram-text {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+.font-options {
+  display: grid;
+  gap: 10px;
+  min-width: 260px;
+}
+.font-options label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.font-options label > span:first-child {
+  flex: 1;
+}
+.font-options input[type="range"] {
+  width: 110px;
+}
+.font-options output {
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .workspace-notice {
   margin: 0 5px 10px;
   padding: 6px 8px;

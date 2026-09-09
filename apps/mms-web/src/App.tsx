@@ -84,6 +84,32 @@ function saveSetting(key: string, value: unknown) {
     /* Storage may be unavailable in private browsing. */
   }
 }
+// Appearance fonts. The CJK choice is appended ahead of the generic family so
+// it only fills glyphs the main face is missing, which is what a fallback is.
+const FONT_STACKS: Record<string, string[]> = {
+  system: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', 'sans-serif'],
+  sans: ['"Inter"', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+  serif: ['"Iowan Old Style"', 'Georgia', '"Songti SC"', 'serif'],
+  mono: ['"SF Mono"', '"JetBrains Mono"', 'Menlo', 'Consolas', 'monospace'],
+};
+const CJK_FALLBACKS: Record<string, string[]> = {
+  system: [],
+  pingfang: ['"PingFang SC"'],
+  noto: ['"Noto Sans SC"', '"Source Han Sans SC"'],
+  yahei: ['"Microsoft YaHei"'],
+};
+
+export function fontStack(family: string, cjk: string) {
+  const base = FONT_STACKS[family] || FONT_STACKS.system;
+  const fallback = CJK_FALLBACKS[cjk] || [];
+  return [...base.slice(0, -1), ...fallback, base[base.length - 1]].join(", ");
+}
+
+export function clampFontSize(value: unknown) {
+  const size = Math.round(Number(value));
+  return Number.isFinite(size) ? Math.min(20, Math.max(12, size)) : 14;
+}
+
 export function App() {
   const [data, setData] = useState<Bootstrap>(empty);
   const [loading, setLoading] = useState(true);
@@ -157,6 +183,18 @@ export function App() {
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     readSetting("mms-web-theme", "light"),
   );
+  const [fontFamily, setFontFamily] = useState(() =>
+    readSetting("mms-web-font-family", "system"),
+  );
+  const [cjkFont, setCjkFont] = useState(() =>
+    readSetting("mms-web-cjk-font", "system"),
+  );
+  const [fontSize, setFontSize] = useState(() =>
+    readSetting("mms-web-font-size", 14),
+  );
+  const [boldText, setBoldText] = useState(() =>
+    readSetting("mms-web-bold-text", false),
+  );
   const [favorites, setFavorites] = useState<string[]>(() => {
     const value = readSetting<unknown>("mms-web-favorites", []);
     return Array.isArray(value)
@@ -224,6 +262,16 @@ export function App() {
     document.documentElement.dataset.accent = accent;
     saveSetting("mms-web-accent", accent);
   }, [accent]);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--app-font", fontStack(fontFamily, cjkFont));
+    root.style.setProperty("--app-font-size", `${clampFontSize(fontSize)}px`);
+    root.style.setProperty("--app-font-weight", boldText ? "600" : "400");
+    saveSetting("mms-web-font-family", fontFamily);
+    saveSetting("mms-web-cjk-font", cjkFont);
+    saveSetting("mms-web-font-size", clampFontSize(fontSize));
+    saveSetting("mms-web-bold-text", boldText);
+  }, [fontFamily, cjkFont, fontSize, boldText]);
   useEffect(() => {
     const media = matchMedia("(max-width: 1200px)");
     const collapse = () => {
@@ -1338,6 +1386,14 @@ export function App() {
             editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}
             setAutoCollapseProcess={setAutoCollapseProcess}
+            fontFamily={fontFamily}
+            setFontFamily={setFontFamily}
+            cjkFont={cjkFont}
+            setCjkFont={setCjkFont}
+            fontSize={clampFontSize(fontSize)}
+            setFontSize={setFontSize}
+            boldText={boldText}
+            setBoldText={setBoldText}
             presetId={presetId}
             selectPreset={selectTaskPreset}
             workspaceId={workspaceId}

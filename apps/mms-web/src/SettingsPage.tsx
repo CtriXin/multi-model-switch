@@ -18,6 +18,10 @@ export function SettingsPage({
   workspaceId,
   effortChanged,
   autoCollapseProcess, setAutoCollapseProcess,
+  fontFamily, setFontFamily,
+  cjkFont, setCjkFont,
+  fontSize, setFontSize,
+  boldText, setBoldText,
   requestNavigation, editStateChanged,
 }: {
   data: Bootstrap;
@@ -37,6 +41,14 @@ export function SettingsPage({
   editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
   autoCollapseProcess: boolean;
   setAutoCollapseProcess: (on: boolean) => void;
+  fontFamily: string;
+  setFontFamily: (value: string) => void;
+  cjkFont: string;
+  setCjkFont: (value: string) => void;
+  fontSize: number;
+  setFontSize: (value: number) => void;
+  boldText: boolean;
+  setBoldText: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState("models");
   return (
@@ -108,6 +120,63 @@ export function SettingsPage({
                 <Moon size={16} />
                 深色
               </button>
+            </div>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>字体</h2>
+              <p>影响整个页面，保存在当前浏览器。</p>
+            </div>
+            <div className="font-options">
+              <label>
+                <span>字体</span>
+                <select
+                  aria-label="界面字体"
+                  value={fontFamily}
+                  onChange={(e) => setFontFamily(e.target.value)}
+                >
+                  <option value="system">跟随系统</option>
+                  <option value="sans">无衬线</option>
+                  <option value="serif">衬线</option>
+                  <option value="mono">等宽</option>
+                </select>
+              </label>
+              <label>
+                <span>中文字体兜底</span>
+                <select
+                  aria-label="中文字体兜底"
+                  value={cjkFont}
+                  onChange={(e) => setCjkFont(e.target.value)}
+                >
+                  <option value="system">跟随系统</option>
+                  <option value="pingfang">苹方</option>
+                  <option value="noto">思源黑体</option>
+                  <option value="yahei">微软雅黑</option>
+                </select>
+              </label>
+              <label>
+                <span>字体大小</span>
+                <input
+                  type="range"
+                  min={12}
+                  max={20}
+                  step={1}
+                  aria-label="字体大小"
+                  value={fontSize}
+                  onChange={(e) => setFontSize(Number(e.target.value))}
+                />
+                <output>{fontSize} px</output>
+              </label>
+              <label>
+                <span>加粗正文</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label="加粗正文"
+                  checked={boldText}
+                  onChange={(e) => setBoldText(e.target.checked)}
+                />
+              </label>
             </div>
           </div>
           <div className="preference-row">

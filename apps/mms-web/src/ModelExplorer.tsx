@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { Model, Preset } from "./types";
 import { request } from "./api";
+import { VendorMark, vendorTint } from "./VendorMark";
 
 export interface LaunchFacts {
   model: {
@@ -247,11 +248,19 @@ export function ModelExplorer({
                 )
               }
             >
-              <span className="model-monogram">
-                {(
-                  models.find((m) => m.id === ps[0].modelId)?.family ||
-                  ps[0].name
-                ).slice(0, 2)}
+              <span
+                className="model-monogram"
+                style={{
+                  background: vendorTint(
+                    models.find((m) => m.id === ps[0].modelId)?.family,
+                    ps[0].name,
+                  ),
+                }}
+              >
+                <VendorMark
+                  family={models.find((m) => m.id === ps[0].modelId)?.family}
+                  name={ps[0].name}
+                />
               </span>
               <span>
                 <strong>{ps[0].name}</strong>
