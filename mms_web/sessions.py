@@ -398,7 +398,7 @@ class SessionService(SessionActions):
             material_text, materials = self.materials.prepare(session.meta["workspaceId"])
             suffix += material_text
             from .project_materials import usage_record
-            context = usage_record(session.meta.get("cwd"), selected_skills, attachments, payload.get("references", []), selected, materials)
+            context = usage_record(session.meta.get("cwd"), selected_skills, attachments, payload.get("references", []), selected, materials, payload.get("skillInvocation"))
             context["promptSha256"] = prompt_hash(text + suffix)
             self._check_images(session, images)
             with session.lock:
@@ -643,6 +643,8 @@ class SessionService(SessionActions):
         cwd = str(resolved.get("cwd") or "") or str(self._state_root)
         skill_text, selected_skills = self.skills.prepare(payload.get("skills", []), workspace_id)
         options = resolved.get("launchOptions") or {}
+        from .recipe_requirements import validate_requirements
+        validate_requirements(payload.get("recipeRequirements"), options.get("model") or {}, selected_skills)
         effort = payload.get("thinkingLevel") or options.get("defaultThinkingLevel")
         if effort and options and effort not in options.get("supportedThinkingLevels", []):
             raise WebError("EFFORT_UNSUPPORTED", "这条通道不支持所选 effort，请重新选择。", 409)
@@ -663,7 +665,7 @@ class SessionService(SessionActions):
         material_text, materials = self.materials.prepare(workspace_id)
         suffix += material_text
         from .project_materials import usage_record
-        context = usage_record(cwd, selected_skills, attachments, payload.get("references", []), [], materials)
+        context = usage_record(cwd, selected_skills, attachments, payload.get("references", []), [], materials, payload.get("skillInvocation"))
         context["promptSha256"] = prompt_hash(prompt + suffix)
         if not title:
             title = _clip(str(prompt or "").strip() or "Pi 会话", 60)

@@ -96,6 +96,10 @@ def test_native_project_materials_and_explicit_sources_follow_each_request(local
         invoked = [e for e in invoked_detail["events"] if e["kind"] == "user"][-1]["contextUsage"]
         assert invoked["consumed"] is True
         assert any(s["name"] == "context-guide" and s.get("invoked") and s.get("proof") == "skill_command" for s in invoked["native"]["skills"])
+        app.post(["sessions", sid, "messages"], {"requestId": "web-skill-command", "text": "Use the selected guide", "skills": [skill["id"]], "skillInvocation": skill["id"]})
+        web_invoked = [e for e in settle(app, sid)["events"] if e["kind"] == "user"][-1]["contextUsage"]
+        assert web_invoked["items"][0]["invoked"] is True
+        assert web_invoked["items"][0]["proof"] == "web_skill_command"
         # Old submitted source records survive an edit, disable and process restart.
         state = app.state_root
         app.close()

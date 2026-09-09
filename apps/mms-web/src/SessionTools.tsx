@@ -10,7 +10,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { request } from "./api";
-import { shareRecipe } from "./Recipe";
+import { RecipeExport } from "./Recipe";
 import { ContextEvidence } from "./ContextEvidence";
 import type { SessionDetail } from "./types";
 
@@ -50,12 +50,14 @@ export function SessionMenu({
 }) {
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [rename, setRename] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [name, setName] = useState("");
   const path = "/sessions/" + detail.session.id;
   const active = ["running", "waiting"].includes(detail.session.state);
   const lastUser = [...detail.events].reverse().find((e) => e.kind === "user");
   return (
     <div className="session-menu-wrap">
+      {sharing && <RecipeExport detail={detail} close={() => setSharing(false)} />}
       {rename && (
         <form
           className="rename-form"
@@ -122,8 +124,8 @@ export function SessionMenu({
             </button>
           )}
           <button
-            onClick={() => shareRecipe(detail)}
-            title="保存首条任务文字、模型偏好和模式。不会自动附带连接凭据、附件或后续对话；任务文字按原样保存。"
+            onClick={() => setSharing(true)}
+            title="编辑目标、示例和需求，检查导出内容后下载模板。"
           >
             <Copy size={14} />
             保存为任务模板

@@ -8,7 +8,7 @@ export interface UsageItem {
   loadState?: "referenced" | "loaded" | "loading" | "failed";
   invoked?: boolean; proof?: string; toolEventId?: string; partial?: boolean;
 }
-export interface NativeSource { name?: string; path: string; source?: string; sha256?: string; state?: string; listed?: boolean; invoked?: boolean; loadState?: string; proof?: string; toolEventId?: string; partial?: boolean }
+export interface NativeSource { sourcePath?: string; name?: string; path: string; source?: string; sha256?: string; state?: string; listed?: boolean; invoked?: boolean; loadState?: string; proof?: string; toolEventId?: string; partial?: boolean }
 export interface NativeEvidence { version: number; available: boolean; truncated: boolean; rules: NativeSource[]; skills: NativeSource[]; systemPromptSha256?: string }
 export interface ContextRecord { state: "prepared" | "submitted" | "failed" | "uncertain"; cwd?: string; items: UsageItem[]; consumed?: boolean; native?: NativeEvidence }
 export function loadLabel(item: { loadState?: string; invoked?: boolean; partial?: boolean }, selected = false) {

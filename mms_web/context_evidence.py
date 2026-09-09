@@ -32,7 +32,7 @@ def clean_evidence(value):
         for row in rows[:200]:
             if not isinstance(row, dict) or not isinstance(row.get("path"), str):
                 continue
-            item = {k: row[k][:2048] for k in ("path", "name", "source") if isinstance(row.get(k), str)}
+            item = {k: row[k][:2048] for k in ("path", "name", "source", "sourcePath") if isinstance(row.get(k), str)}
             if isinstance(row.get("sha256"), str) and _HASH.fullmatch(row["sha256"]):
                 item["sha256"] = row["sha256"]
             if key == "rules":
@@ -66,6 +66,8 @@ def consume_prompt(session, prompt):
     for item in usage.get("items", []):
         if item.get("kind") in {"skill", "material", "selection"}:
             item["loadState"] = "loaded"
+            if item.get("invocationRequested"):
+                item.update(invoked=True, proof="web_skill_command")
         else:
             item["loadState"] = "referenced"
     session.meta["activeContextEvent"] = event["id"]
@@ -94,7 +96,7 @@ def observe_read(session, event):
         return
     items = usage.get("items", []) + usage.get("native", {}).get("skills", [])
     for item in items:
-        source = item.get("filePath") or item.get("path")
+        source = item.get("sourcePath") or item.get("filePath") or item.get("path")
         if not isinstance(source, str):
             continue
         try:

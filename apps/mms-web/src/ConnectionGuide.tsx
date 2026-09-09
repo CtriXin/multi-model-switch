@@ -31,7 +31,8 @@ export function ConnectionGuide({ step, close, back, busy, manual }: {
       const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
       const offset = viewport?.offsetTop || 0;
       const cw = Math.min(320, width - 24), ch = card.current?.offsetHeight || 220;
-      const docked = width < 980;
+      const dialog = host.closest("dialog")?.getBoundingClientRect();
+      const docked = !dialog || (width - dialog.right < cw + 24 && dialog.left < cw + 24);
       host.style.setProperty("--setup-coach-space", docked ? `${ch + 28}px` : "0px");
       if (target && target !== targetBefore) {
         target.scrollIntoView({ block: "nearest", behavior: "instant" });
@@ -46,10 +47,9 @@ export function ConnectionGuide({ step, close, back, busy, manual }: {
         if (body) body.scrollTop += r.bottom - top + 20;
         r = target?.getBoundingClientRect();
       }
-      const dialog = host.closest("dialog")?.getBoundingClientRect();
-      const left = docked ? (width - cw) / 2 : Math.min(width - cw - 12, (dialog?.right || width / 2) + 16);
+      const left = docked ? (width - cw) / 2 : width - dialog!.right >= cw + 24 ? dialog!.right + 16 : Math.max(12, dialog!.left - cw - 16);
       const value = { x: Math.max(4, (r?.left || 4) - 4), y: Math.max(offset + 4, (r?.top || offset + 4) - 4),
-        w: Math.min((r?.width || 0) + 8, width - 8), h: Math.max(0, Math.min((r?.bottom || 0) + 4, top - (docked ? 12 : -height)) - Math.max(offset + 4, (r?.top || offset + 4) - 4)),
+        w: Math.min((r?.width || 0) + 8, width - 8), h: Math.max(0, Math.min((r?.bottom || 0) + 4, docked ? top - 12 : offset + height - 4) - Math.max(offset + 4, (r?.top || offset + 4) - 4)),
         left, top, blocked: !next || next.disabled, docked };
       setLayout(old => JSON.stringify(old) === JSON.stringify(value) ? old : value);
       timer = setTimeout(update, 100);

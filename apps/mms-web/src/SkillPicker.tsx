@@ -12,12 +12,13 @@ export interface Skill {
   title?: string;
   example?: string;
 }
-export function SkillPicker({ skills, selected, toggle, close, error, example }: {
+export function SkillPicker({ skills, selected, toggle, close, error, example, locked = false }: {
   skills: Skill[];
   selected: string[];
   toggle: (id: string) => void;
   close: () => void;
   error?: string;
+  locked?: boolean;
   example: (skill: Skill) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -45,13 +46,13 @@ export function SkillPicker({ skills, selected, toggle, close, error, example }:
         {shown.map(s => <div className="skill-result-row" key={s.id}>
           <button type="button" className={"skill-option " + (selected.includes(s.id) ? "selected" : "")}
             onClick={() => toggle(s.id)} aria-pressed={selected.includes(s.id)}
-            disabled={selected.length >= 20 && !selected.includes(s.id)}>
+            disabled={locked || (selected.length >= 20 && !selected.includes(s.id))}>
             <span className="skill-icon">{selected.includes(s.id) ? <Check size={18} /> : <BookOpen size={18} />}</span>
             <span><strong>{s.title || s.name}<small>{selected.includes(s.id) ? "已选中" : "可用"} · {s.source}{s.starter ? " · 无需安装" : s.manualOnly ? " · 手动调用" : ""}</small></strong>
               <p>{s.description}</p></span>
           </button>
           {s.example && <button type="button" className="text-button skill-example"
-            disabled={selected.length >= 20 && !selected.includes(s.id)} onClick={() => example(s)}
+            disabled={locked || (selected.length >= 20 && !selected.includes(s.id))} onClick={() => example(s)}
             aria-label={`试试${s.title || s.name}`}>用示例填入草稿</button>}
         </div>)}
         {!shown.length && <p className="empty-results">{filter === "selected" && !query ? "还没有选择能力，也可以直接对话。" : "没有匹配的能力。可以换个说法，或直接在对话中描述需要的帮助。"}</p>}

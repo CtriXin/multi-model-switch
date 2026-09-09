@@ -21,9 +21,9 @@ export function ContextEvidence({ detail }: { detail: SessionDetail }) {
         {native.rules.map((s, i) => <div className="context-source" key={i}><strong>已加载 · {s.path.split("/").at(-1)}</strong><p>{s.path}</p><small>{s.source} · {s.sha256?.slice(0, 12)}</small></div>)}
         {!native.rules.length && <p>Pi 没有报告自动载入规则文件。</p>}
       </details>
-      <details><summary>Pi 可用 Skills · {native.skills.length}</summary>
-        {native.skills.map((s, i) => <div className="context-source" key={i}><strong>{s.name}</strong><p>{s.invoked ? loadLabel(s) : s.listed ? "可用 · 仅介绍进入目录，正文未确认加载" : "可用 · 未加入自动选择目录"}</p><p>{s.path}</p><small>{s.source}{s.toolEventId ? ` · 工具记录 ${s.toolEventId}` : ""}</small></div>)}
-        {!native.skills.length && <p>Pi 没有报告可用的原生 Skills。</p>}
+      <details><summary>Pi Skills · {native.skills.length} 可用 · {native.skills.filter(s => s.invoked).length} 已调用</summary><div className="context-catalog">
+        {native.skills.map((s, i) => <div className="context-source" key={i}><strong>{s.name}</strong><p>{s.invoked ? loadLabel(s) : s.listed ? "可用 · 仅介绍进入目录，正文未确认加载" : "可用 · 未加入自动选择目录"}</p><p>{s.path}</p>{s.sourcePath && s.sourcePath !== s.path && <p>实际文件 · {s.sourcePath}</p>}<small>{s.source}{s.toolEventId ? ` · 工具记录 ${s.toolEventId}` : ""}</small></div>)}
+        {!native.skills.length && <p>Pi 没有报告可用的原生 Skills。</p>}</div>
       </details>
       {native.truncated && <p role="status">来源过多，当前各展示前 200 项，记录不完整。</p>}
       <p className="section-note">加载不代表模型遵循了内容。调用只记录明确的 Skill 命令与 read 工具；通过脚本或其他工具间接读取的内容暂不能可靠归因。</p>

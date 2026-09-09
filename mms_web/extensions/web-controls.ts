@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 /** Optional Web session controls. Disabled by default; no host configuration writes. */
 export default function (pi: any) {
   let planning = false;
   const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+  const realPath = (path: string) => { try { return realpathSync(path); } catch { return path; } };
   const skillInputs: { name: string; hash: string }[] = [];
   pi.on("input", async (event: any) => {
     const name = /^\/skill:([^\s]+)(?: |$)/.exec(event.text)?.[1];
@@ -45,7 +47,7 @@ export default function (pi: any) {
       systemPromptSha256: hash(event.systemPrompt), truncated: rules.length > 200 || skills.length > 200,
       rules: rules.slice(0, 200).map((r: any) => ({path: String(r.path).slice(0, 2048), sha256: hash(r.content), source: "Pi contextFiles"})),
       skills: skills.slice(0, 200).map((s: any) => ({name: s.name, path: String(s.filePath).slice(0, 2048),
-        source: s.sourceInfo?.scope || "Pi skills", listed: !s.disableModelInvocation && event.systemPrompt.includes(s.filePath),
+        sourcePath: realPath(s.filePath).slice(0, 2048), source: s.sourceInfo?.scope || "Pi skills", listed: !s.disableModelInvocation && event.systemPrompt.includes(s.filePath),
         invoked: !!source && command === s})),
     }), "info");
     if (planning) return {systemPrompt:event.systemPrompt + "\n当前用户选择了只读规划模式。先阅读必要资料并给出方案；不要写入文件、执行 shell 或调用其他会产生副作用的工具。只有用户通过 Web 控件切换到执行模式后才能执行。"};
