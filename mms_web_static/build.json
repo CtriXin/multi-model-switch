@@ -1,11 +1,11 @@
 {
-  "version": "4.8.0",
-  "sourceSha256": "e70cc3d51667261a2ee4167057c123e9b4b942bcce834914f3e4ac84485d93db",
+  "version": "4.8.1",
+  "sourceSha256": "727a25e47b7e8ab07725973aafec91020f2fbe84c92696b09c18e9eea59faefb",
   "files": {
-    "assets/index-BFv7el0G.css": "10c9b86dd3ec705461ced16ac862ad38716ae0dc0a7c60693a828064f931bfa5",
-    "assets/index-BGsOjeR1.js": "cbbb9bb27f16f6398c8edb5fea1384bfcef1b2ef7321ac8591e1dd60f048ba3f",
+    "assets/index-BN9q6EiA.css": "30249e3fb780d7d226e79539888ae93b9ea34c70cdcc4437586c31abb8c55c6f",
+    "assets/index-KjWDJ0a1.js": "ae59444c68f68959955fb383f639d2d3631aed10cdab236d888aa4ee5bdf3cc0",
     "favicon.svg": "5f1a9ef536d6194a43b9dd37d5fd8ab7d539dd9fb04a1a38f195abd15d2e2b32",
-    "index.html": "116c59c0c864a624bfcd9a403c3d2d6e1de412060c36be8fdd61a2f9b25fba03",
+    "index.html": "9dd4f4ce7a7204f4f949853ca34673b23f52c70779183b841de9eafa3b453c7c",
     "vendor/LICENSE": "add9d7531d1b21646317a8958e38fc727506fa39d24bdecb44154d943c82753a",
     "vendor/README.txt": "04426e93d9a0c832e482d1e1a96f38cb855475eddc4412f939cb1a923986ae1b",
     "vendor/claude.svg": "a3101f3047a119aa11825ad9369510f0c472428c8c52d420e31bc62db44a8364",

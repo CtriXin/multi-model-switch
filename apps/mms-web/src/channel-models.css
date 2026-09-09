@@ -129,6 +129,20 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.capability-review-selection,
+.capability-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.capability-review-selection {
+  justify-content: space-between;
+  font-size: max(11px, .857143rem);
+}
+.capability-selection-warning {
+  color: var(--warn-ink);
+}
 .capability-review-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1.4fr) minmax(8rem, 1.1fr) minmax(0, 1fr);
