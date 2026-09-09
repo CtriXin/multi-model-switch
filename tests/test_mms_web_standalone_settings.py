@@ -161,3 +161,65 @@ def test_generic_connection_update_keeps_protocol_specific_url(local_app):
     app.post(["configuration", "apply"], {"previewId": preview["previewId"], "revision": preview["revision"]})
     after = app.catalog.resolve_launch("web:pi:legacy-a:gpt-5", workspace["id"])["runtime"]
     assert after["openai_base_url"] == before["openai_base_url"]
+
+
+def test_first_connection_loads_bundled_defaults_without_a_generation_call(local_app):
+    """The new-user save can read usable defaults without making users edit them."""
+    app, workspace, _ = local_app
+    before = app.get(["bootstrap"])
+    assert before["capabilities"]["configure"] and not before["services"]
+    with model_service() as (url, requests):
+        service = {"name": "First-use", "baseUrl": url, "apiKey": "setup-fixture-key",
+                   "protocol": "openai", "models": ["MiniMax-M3"]}
+        preview = app.post(["configuration", "preview"], {"service": service})
+        assert "setup-fixture-key" not in json.dumps(preview)
+        assert not app.get(["bootstrap"])["services"]
+        saved = app.post(["configuration", "apply"], {"previewId": preview["previewId"], "revision": preview["revision"]})
+        assert saved["presetIds"] == ["web:pi:first-use:MiniMax-M3"]
+        payload = {"presetId": saved["presetIds"][0], "workspaceId": workspace["id"]}
+        facts = app.post(["launch-options"], payload)
+        assert facts["model"]["id"] == "MiniMax-M3"
+        assert facts["model"]["contextWindow"] == 1_000_000
+        assert facts["defaultThinkingLevel"] in facts["supportedThinkingLevels"]
+        assert facts["capabilitySources"]["context_window_tokens"] == "provider_profile"
+        assert not [r for r in requests if r["method"] == "POST"]
+        state = app.catalog._state_root
+        app.close()
+        restored = WebApplication(state_root=state)
+        try:
+            assert restored.post(["launch-options"], payload) == facts
+            assert restored.get(["bootstrap"])["presets"][0]["available"]
+        finally:
+            restored.close()
+
+
+def test_shutdown_replaces_pi_process_but_history_remains_sendable(local_app):
+    app, workspace, _ = local_app
+    with model_service() as (url, requests):
+        preview = app.post(["configuration", "preview"], {"service": {
+            "name": "Upgrade", "baseUrl": url, "apiKey": "upgrade-fixture-key",
+            "protocol": "openai", "models": ["MiniMax-M3"]}})
+        saved = app.post(["configuration", "apply"], {"previewId": preview["previewId"], "revision": preview["revision"]})
+        sid = app.post(["sessions"], {"requestId": "before-upgrade", "presetId": saved["presetIds"][0],
+            "workspaceId": workspace["id"], "prompt": "before-upgrade-history-marker"})["session"]["id"]
+        before = settle(app, sid)
+        driver = app.sessions._get(sid).driver
+        pid = driver._proc.pid
+        state = app.catalog._state_root
+        app.close()
+        assert not driver.alive()  # Data recovery is not uninterrupted execution.
+        restored = WebApplication(state_root=state)
+        try:
+            recovered = restored.get(["sessions", sid])
+            assert recovered["session"]["state"] == "stopped"
+            assert recovered["session"]["capabilities"]["send"]
+            assert {e["id"] for e in before["events"]}.issubset({e["id"] for e in recovered["events"]})
+            restored.post(["sessions", sid, "messages"], {"requestId": "after-upgrade", "text": "continue-history-marker"})
+            after = settle(restored, sid)
+            assert restored.sessions._get(sid).driver._proc.pid != pid
+            posts = [r for r in requests if r["method"] == "POST"]
+            assert len(posts) == 2 and posts[-1]["body"]["model"] == "MiniMax-M3"
+            assert "before-upgrade-history-marker" in json.dumps(posts[-1]["body"]["messages"])
+            assert any(e.get("text") == "通道连接验证完成。" for e in after["events"])
+        finally:
+            restored.close()

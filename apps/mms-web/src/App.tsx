@@ -44,6 +44,7 @@ import {
   harnessNames,
 } from "./components";
 import { HelpGuide } from "./HelpGuide";
+import { ConnectionDialog } from "./ConnectionDialog";
 import { GuidedTour } from "./GuidedTour";
 import type { TourStep } from "./GuidedTour";
 import type { GuideAction } from "./guide-content";
@@ -201,6 +202,9 @@ export function App() {
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const setupPrompted = useRef(false);
+  const modelReady = data.presets.some(p => p.available);
   const [guideStep, setGuideStep] = useState<TourStep | null>(null);
   const [guideSettingsKey, setGuideSettingsKey] = useState(0);
   const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
@@ -355,6 +359,15 @@ export function App() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+  useEffect(() => {
+    if (loading || !connected || setupPrompted.current) return;
+    setupPrompted.current = true;
+    if (data.presets.some(p => p.available)) return;
+    // Empty installs go straight to the actionable form. Existing/broken
+    // channels keep their settings, rather than asking for a duplicate account.
+    if (!data.services.length && data.capabilities.configure) setSetupOpen(true);
+    else setSettingsOpen(true);
+  }, [loading, connected, data]);
   useEffect(() => {
     if (presetId) saveSetting("mms-web-preset", presetId);
   }, [presetId]);
@@ -611,6 +624,17 @@ export function App() {
       setGuideStep(step);
     });
   }
+  function startIntroduction() {
+    if (modelReady) { beginGuideStep("welcome"); return; }
+    requestNavigation(() => {
+      setGuideOpen(false); setGuideStep(null);
+      if (!data.services.length && data.capabilities.configure) { setSettingsOpen(false); setSetupOpen(true); }
+      else setSettingsOpen(true);
+    });
+  }
+  function connectionCompleted() {
+    void load().then(() => beginGuideStep("welcome"));
+  }
   function guideNavigate(action: GuideAction) {
     const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
     beginGuideStep(steps[action]);
@@ -834,7 +858,7 @@ export function App() {
     page === "session" && atBottom && !sessionError,
     connected && !statusesStale,
   );
-  const tour = guideStep ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
+  const tour = guideStep && modelReady && !setupOpen ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
   return (
     <div className="app-shell" data-page={page}>
       {navOpen && (
@@ -1396,7 +1420,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
-            <HelpGuide ready={!loading} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={() => beginGuideStep("welcome")} />
+            <HelpGuide ready={!loading && connected && modelReady && !setupOpen && !settingsOpen} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} />
             {detail && (
               <Status
                 session={detail.session}
@@ -1545,15 +1569,15 @@ export function App() {
               <div className="input-hint">
                 <span>Enter 发送 · Shift + Enter 换行</span>
               </div>
-              {!data.presets.length && (
+              {!modelReady && (
                 <div className="setup-inline">
                   <Settings2 size={19} />
                   <div>
-                    <strong>连接你的第一个模型</strong>
-                    <p>有了模型服务，就可以开始工作。</p>
+                    <strong>{data.services.length ? "检查模型连接" : "先连接一个模型服务"}</strong>
+                    <p>{data.services.length ? "已有通道暂时不可用，可以在设置中查看原因。" : "填入服务地址和密钥，我们会带你完成其余步骤。"}</p>
                   </div>
-                  <button className="button" onClick={() => navigate("models")}>
-                    前往设置
+                  <button className="button primary" onClick={startIntroduction}>
+                    {data.services.length ? "检查设置" : "开始配置"}
                     <ArrowRight size={14} />
                   </button>
                 </div>
@@ -1612,9 +1636,13 @@ export function App() {
             </div>
           </div>
         )}
+        {setupOpen && <ConnectionDialog data={data} onboarding
+          close={() => setSetupOpen(false)} refresh={() => void load()} select={selectTaskPreset}
+          complete={connectionCompleted} />}
         {settingsOpen && (
           <SettingsPage
             key={guideSettingsKey}
+            connectionCompleted={connectionCompleted}
             tour={tour}
             requestNavigation={requestNavigation}
             editStateChanged={setSettingsEdit}

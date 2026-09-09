@@ -15,7 +15,7 @@ import {
   useLaunchFacts,
 } from "./ModelExplorer";
 
-type Step = "connection" | "models" | "preview" | "saved";
+type Step = "connection" | "credentials" | "models" | "preview" | "saved";
 type Saved = {
   applied: boolean;
   message: string;
@@ -36,11 +36,15 @@ export function ConnectionDialog({
   close,
   refresh,
   select,
+  onboarding = false,
+  complete,
 }: {
   data: Bootstrap;
   close: () => void;
   refresh: () => void;
   select: (id: string) => void;
+  onboarding?: boolean;
+  complete?: () => void;
 }) {
   const [step, setStep] = useState<Step>("connection");
   const [name, setName] = useState("");
@@ -70,7 +74,7 @@ export function ConnectionDialog({
     heading.current?.focus();
   }, [step]);
   const service = () => ({
-    name,
+    name: name.trim() || new URL(url).hostname,
     baseUrl: url.trim().replace(/\/+$/, ""),
     apiKey: key,
     protocol,
@@ -100,7 +104,7 @@ export function ConnectionDialog({
     setError("");
     try {
       await discard();
-      setStep(step === "preview" ? "models" : "connection");
+      setStep(step === "preview" ? "models" : step === "models" ? "credentials" : "connection");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -119,14 +123,15 @@ export function ConnectionDialog({
         controller.signal,
       );
       setModels(result.models);
-      setChosen(chosen.filter((m) => result.models.includes(m)));
+      const retained = chosen.filter((m) => result.models.includes(m));
+      setChosen(retained.length ? retained : result.models.length === 1 ? result.models : []);
       setManual(false);
       setListed(true);
       setStep("models");
     } catch (e) {
       if (!controller.signal.aborted) {
         setError((e as Error).message);
-        setStep("models");
+        // A failed Key/address stays next to the fields that can fix it.
       }
     } finally {
       if (!controller.signal.aborted) setBusy("");
@@ -193,15 +198,15 @@ export function ConnectionDialog({
     );
   return (
     <Dialog
-      title="连接模型服务"
+      title={onboarding ? "欢迎使用 Pilot，先连接 AI" : "连接模型服务"}
       close={() => void dismiss()}
       dismissible={!busy || busy === "discover"}
     >
       <div className="connection-flow" aria-busy={!!busy}>
         <ol className="connection-steps" aria-label="连接进度">
-          {["连接服务", "选择模型", "确认保存"].map((label, i) => {
+          {["服务地址", "连接密钥", "选择模型", "确认保存"].map((label, i) => {
             const current =
-              step === "connection" ? 0 : step === "models" ? 1 : 2;
+              step === "connection" ? 0 : step === "credentials" ? 1 : step === "models" ? 2 : 3;
             return (
               <li
                 key={label}
@@ -222,11 +227,13 @@ export function ConnectionDialog({
         </ol>
         <h3 ref={heading} tabIndex={-1} className="connection-heading">
           {step === "connection"
-            ? "用你已经在用的服务"
+            ? "先填入模型服务的地址"
+            : step === "credentials"
+              ? "再粘贴你的连接密钥"
             : step === "models"
-              ? "只留下你会用的模型"
+              ? "选一个模型，就能开始"
               : step === "preview"
-                ? "这些内容将被保存"
+                ? "确认连接，使用 MMS 模型预设"
                 : "通道已保存"}
         </h3>
         {error && (
@@ -234,125 +241,63 @@ export function ConnectionDialog({
             {error}
           </p>
         )}
-        {step === "connection" && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (protocol === "anthropic" || !discovered) startManual();
-              else void discover();
-            }}
-          >
+        {(step === "connection" || step === "credentials") && (
+          <form onSubmit={e => {
+            e.preventDefault();
+            if (busy) return;
+            if (step === "connection") {
+              if (!name.trim()) {
+                const host = new URL(url).hostname;
+                let candidate = host, suffix = 2;
+                const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+                while (data.services.some(s => s.id === slug(candidate) || s.name === candidate)) candidate = `${host} ${suffix++}`;
+                setName(candidate);
+              }
+              setError(""); setStep("credentials");
+            }
+            else if (protocol === "anthropic" || !discovered) startManual();
+            else void discover();
+          }}>
             <fieldset disabled={!!busy} className="connection-fields">
-              <label className="field">
-                通道名称
-                <input
-                  required
-                  maxLength={100}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="例如：个人账号、公司网关"
-                  autoComplete="off"
-                />
-                <small>同一个模型通过不同服务连接时，用这个名称区分。</small>
-              </label>
-              <label className="field">
-                接口类型
-                <select
-                  value={protocol}
-                  onChange={(e) => {
-                    setProtocol(e.target.value);
-                    setListed(false);
-                    setModels([]);
-                    setChosen([]);
-                  }}
-                >
-                  <option value="openai">OpenAI 兼容</option>
-                  <option value="anthropic">Anthropic 兼容</option>
-                  <option value="dual">双协议网关</option>
-                </select>
-              </label>
-              <label className="field">
-                API 地址
-                <input
-                  required
-                  type="url"
-                  value={url}
-                  onChange={(e) => {
-                    setUrl(e.target.value);
-                    setListed(false);
-                    setModels([]);
-                    setChosen([]);
-                  }}
-                  placeholder="https://api.example.com/v1"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <small>按服务提供的地址填写，包括它要求的 /v1 等路径。</small>
-              </label>
-              <label className="field">
-                API Key
-                <input
-                  required
-                  type="password"
-                  value={key}
-                  onChange={(e) => {
-                    setKey(e.target.value);
-                    setListed(false);
-                    setModels([]);
-                    setChosen([]);
-                  }}
-                  placeholder="粘贴服务提供的密钥"
-                  autoComplete="new-password"
-                  spellCheck={false}
-                />
-              </label>
-              {protocol === "dual" && (
-                <p className="connection-note">
-                  此入口适用于两种协议共用同一个 API 地址与 Key
-                  的网关；不同地址的通道请在 MMF Config Web 中设置。
-                </p>
-              )}
-              {protocol !== "anthropic" && discovered && (
-                <p className="connection-endpoint">
-                  将读取{" "}
-                  <code>
-                    {url.trim().replace(/\/+$/, "") || "API 地址"}/models
-                  </code>
-                </p>
-              )}
-              <button className="button primary full" type="submit">
-                {busy === "discover" ? (
-                  <>
-                    <LoaderCircle size={15} className="connection-spinner" />
-                    正在读取模型…
-                  </>
-                ) : (
-                  <>
-                    {protocol === "anthropic" || !discovered
-                      ? "填写模型名称"
-                      : "读取可用模型"}
-                    <ArrowRight size={15} />
-                  </>
-                )}
-              </button>
-              {protocol !== "anthropic" && discovered && (
-                <button
-                  className="connection-text-button full"
-                  type="button"
-                  onClick={(e) => {
-                    if (e.currentTarget.form?.reportValidity()) startManual();
-                  }}
-                >
-                  我知道模型名称，手动填写
-                </button>
-              )}
+              {step === "connection" ? <>
+                <p className="connection-note">Pilot 通过模型服务回答问题。把服务商提供的 API 地址粘贴到下面。</p>
+                <label className="field">
+                  API 地址
+                  <input required type="url" value={url}
+                    onChange={e => { setUrl(e.target.value.trim()); setListed(false); setModels([]); setChosen([]); }}
+                    placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false} />
+                  <small>使用服务商提供的完整地址，保留 /v1 等路径。</small>
+                </label>
+                <details className="connection-advanced">
+                  <summary>服务名称与接口类型（可选）</summary>
+                  <label className="field">通道名称<input maxLength={100} value={name} onChange={e => setName(e.target.value)} placeholder="不填则使用服务地址的名称" autoComplete="off" /></label>
+                  <label className="field">接口类型<select value={protocol} onChange={e => { setProtocol(e.target.value); setListed(false); setModels([]); setChosen([]); }}>
+                    <option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="dual">双协议网关</option>
+                  </select><small>按服务商的说明选择；没有特别要求时保留默认值。</small></label>
+                  {protocol === "dual" && <p className="connection-note">适用于两种接口共用同一个地址和 Key 的网关。地址不同时，请在通道设置中分别填写。</p>}
+                </details>
+                <button className="button primary full" type="submit">下一步，填写密钥 <ArrowRight size={15} /></button>
+                <button className="connection-text-button full" type="button" onClick={() => void dismiss()}>还没有服务信息，稍后配置</button>
+              </> : <>
+                <p className="connection-route"><span>{url}</span></p>
+                <label className="field">API Key
+                  <input required type="password" value={key} onChange={e => { setKey(e.target.value.trim()); setListed(false); setModels([]); setChosen([]); }} placeholder="粘贴服务提供的密钥" autoComplete="new-password" spellCheck={false} />
+                  <small>通常可以在服务商网站的「API Key」或「密钥管理」中找到。密钥不会保存到浏览器。</small>
+                </label>
+                <p className="connection-note">{protocol === "anthropic" || !discovered ? "下一步填写服务商提供的模型名称。" : "下一步检查连接并读取模型列表，不发送付费对话。"}</p>
+                <div className="connection-footer">
+                  <button className="button" type="button" onClick={() => void goBack()}><ArrowLeft size={14} />修改地址</button>
+                  <button className="button primary" type="submit">{busy === "discover" ? <><LoaderCircle size={15} className="connection-spinner" />正在读取模型…</> : <>{protocol === "anthropic" || !discovered ? "下一步，填写模型" : "连接并读取模型"}<ArrowRight size={15} /></>}</button>
+                </div>
+                {protocol !== "anthropic" && discovered && <button className="connection-text-button full" type="button" onClick={e => { if (e.currentTarget.form?.reportValidity()) startManual(); }}>服务不提供模型列表？手动填写</button>}
+              </>}
             </fieldset>
           </form>
         )}
         {step === "models" && (
           <>
             <p className="connection-route">
-              <strong>{name}</strong>
+              <strong>{name.trim() || new URL(url).hostname}</strong>
               <span>{url}</span>
             </p>
             {!manual && (
@@ -360,9 +305,10 @@ export function ConnectionDialog({
                 {listed && (
                   <p className="connection-note">
                     已读取 {models.length}{" "}
-                    个模型。读取列表不代表已验证对话、图片或 Thinking 能力。
+                    个模型。先勾选一个熟悉的名字，之后随时可以添加。
                   </p>
                 )}
+                {listed && !models.length && <p className="inline-alert">服务返回了空列表。可以返回检查地址和 Key，或手动填写服务商提供的模型名称。</p>}
                 {!!models.length && (
                   <>
                     <label className="picker-search connection-search">
@@ -457,7 +403,7 @@ export function ConnectionDialog({
                 </label>
                 <p className="connection-note">
                   已识别 {selectedModels.length} 个模型 ·
-                  自动去重。模型能力会在保存后按 MMS 的启动设置读取。
+                  自动去重。保存后自动读取 MMS 预设，无需手动填写模型参数。
                 </p>
                 {listed && (
                   <button
@@ -489,7 +435,7 @@ export function ConnectionDialog({
               >
                 {busy === "preview"
                   ? "正在准备…"
-                  : `预览 ${selectedModels.length} 个模型`}
+                  : `下一步，确认 ${selectedModels.length} 个模型`}
                 <ArrowRight size={14} />
               </button>
             </div>
@@ -497,6 +443,7 @@ export function ConnectionDialog({
         )}
         {step === "preview" && preview && (
           <>
+            <p className="connection-note">保存后自动载入 MMS 随版本提供的模型预设，包括思考强度、上下文与识图能力。首次使用先保留预设即可，之后随时能调整。</p>
             <div className="config-changes">
               <div>
                 <strong>接口类型</strong>
@@ -565,7 +512,7 @@ export function ConnectionDialog({
                     正在保存…
                   </>
                 ) : (
-                  "保存通道"
+                  "保存并载入预设"
                 )}
               </button>
             </div>
@@ -574,13 +521,15 @@ export function ConnectionDialog({
         {step === "saved" && saved && (
           <ConnectionReady
             saved={saved}
-            name={name}
+            name={name.trim() || new URL(url).hostname}
             models={selectedModels}
             workspaceId={data.workspaces[0]?.id || "default"}
             done={(id) => {
               if (id) select(id);
               close();
+              if (id) complete?.();
             }}
+            onboarding={onboarding}
           />
         )}
       </div>
@@ -594,28 +543,31 @@ function ConnectionReady({
   models,
   workspaceId,
   done,
+  onboarding,
 }: {
   saved: Saved;
   name: string;
   models: string[];
   workspaceId: string;
   done: (id?: string) => void;
+  onboarding: boolean;
 }) {
   const [selected, setSelected] = useState(
     saved.presetIds?.find((id) => id.startsWith("web:pi:")) || "",
   );
-  const { facts, error } = useLaunchFacts(selected, workspaceId);
+  const [retry, setRetry] = useState(0);
+  const { facts, error } = useLaunchFacts(selected, workspaceId, retry);
   const [effort, setEffort] = useState("");
   return (
     <>
       <p className="connection-note">
         {name} · {models.length}{" "}
-        个模型。现在可以检查默认参数，对话在你发送任务时开始。
+        个模型。下一步可以开始对话，对话会在你点击发送后开始。
       </p>
       {selected ? (
         <>
           <label className="field">
-            查看模型
+            首次对话使用的模型
             <select
               value={selected}
               onChange={(e) => {
@@ -636,47 +588,27 @@ function ConnectionReady({
                 ))}
             </select>
           </label>
-          <div className="connection-effort">
-            <span>默认思考强度</span>
-            {facts ? (
-              <EffortSelect
-                facts={facts}
-                value={effort}
-                change={(v) => {
-                  setEffort(v);
-                  saveRoutePreference(selected, { effort: v });
-                }}
-              />
-            ) : (
-              <span className="muted" role="status">
-                {error || "正在读取启动参数…"}
-              </span>
-            )}
-          </div>
-          <p className="connection-note">
-            默认沿用 MMS
-            的设置。在这里调整会记住当前浏览器对这条模型通道的偏好；其他通道和
-            MMF 全局预设不变。
-          </p>
-          {facts && (
-            <p className="connection-note">
-              当前有效值：{effort || facts.defaultThinkingLevel}
-              {facts.configuredThinkingLevel !== facts.defaultThinkingLevel &&
-                `（MMS 配置为 ${facts.configuredThinkingLevel}，适配器调整为受支持的等级）`}
-            </p>
-          )}
+          {facts ? <>
+            <p className="connection-preset-ready" role="status"><Check size={17} />已载入这个模型的 MMS 预设</p>
+            <p className="connection-note">现在可以直接使用。思考强度和模型能力已按当前通道读取，无需逐项填写。</p>
+            <details className="connection-advanced"><summary>查看或调整模型参数</summary>
+              <p className="connection-note">上下文：{facts.model.contextWindow?.toLocaleString() || "未提供"} tokens · {facts.model.input?.includes("image") ? "可直接读取图片" : "模型不直接读取图片"}</p>
+              <div className="connection-effort"><span>这条通道的思考强度</span><EffortSelect facts={facts} value={effort} change={v => { setEffort(v); saveRoutePreference(selected, { effort: v }); }} /></div>
+              <p className="connection-note">默认沿用 MMS 预设；这里调整后只记住当前浏览器偏好。列表读取成功不等于对话已测试。</p>
+            </details>
+          </> : <p className={error ? "form-error" : "connection-note"} role={error ? "alert" : "status"}>{error || "正在载入模型预设…"}{error && <button type="button" className="connection-text-button" onClick={() => setRetry(v => v + 1)}>重新载入预设</button>}</p>}
         </>
       ) : (
         <p className="inline-alert">
-          配置已保存，但当前模型目录还没有可启动的通道。请在 MMF Config Web
-          中完成目录更新，再刷新本页。
+          配置已保存，当前还没有可启动的通道。关闭后在设置中查看具体原因；暂时不会进入聊天教程。
         </p>
       )}
       <button
         className="button primary full"
-        onClick={() => done(selected || undefined)}
+        disabled={!!selected && !facts}
+        onClick={() => done(facts ? selected : undefined)}
       >
-        {selected ? "完成，查看这条通道" : "完成"}
+        {selected ? onboarding ? "开始使用，带我发第一条消息" : "完成，使用这条通道" : "返回设置"}
         <ArrowRight size={15} />
       </button>
     </>

@@ -245,3 +245,17 @@
   color: var(--muted);
   line-height: 1.7;
 }
+
+/* First-use setup keeps one required decision in view. */
+.connection-steps { gap: 12px; flex-wrap: wrap; }
+.connection-advanced { margin: 0 0 20px; }
+.connection-advanced summary { cursor: pointer; color: var(--muted); font-size: max(11px, .9286rem); padding: 10px 0; }
+.connection-advanced[open] summary { margin-bottom: 10px; }
+.connection-preset-ready { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.connection-preset-ready svg { color: var(--accent); flex-shrink: 0; }
+.connection-footer { flex-wrap: wrap; }
+.connection-flow .form-error button { display: block; }
+@media (max-width: 540px) {
+  .connection-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+  .connection-heading { font-size: 1.2857rem; }
+}
