@@ -15,13 +15,14 @@ export function localFilePaths(value: string): string[] {
           const url = new URL(path);
           if (url.hostname && url.hostname !== "localhost") return "";
           path = decodeURIComponent(url.pathname);
+          return path.startsWith("/") ? path : "";
         } catch {
           return "";
         }
       }
       // A pasted /help or /thinking high remains a command, not a file reference.
       return path.startsWith("~/") ||
-        /^\/.*\/[^/]+$/.test(path) ||
+        /^\/.*\/[^/]*$/.test(path) ||
         /^\/[^/]+\.[^/]+$/.test(path)
         ? path
         : "";

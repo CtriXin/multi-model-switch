@@ -3450,3 +3450,14 @@ dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
     opacity: 0.3;
   }
 }
+
+.skill-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.skill-result-row { border-bottom: 1px solid var(--line); padding: 4px 0 10px; }
+.skill-result-row .skill-option { width: 100%; }
+.skill-example { margin: 0 12px 0 50px; white-space: normal; text-align: left; }
+.skill-install-help { margin: 16px 0; color: var(--muted); font-size: .875rem; }
+.skill-install-help summary { cursor: pointer; color: var(--ink); }
+.skill-install-help p { line-height: 1.65; overflow-wrap: anywhere; }
+
+.skill-result-row .skill-option:not(.selected) { border-color: transparent; background: transparent; }
+@media (max-width: 600px) { .skill-footer { flex-wrap: wrap; } .skill-footer .button { margin-left: auto; } }

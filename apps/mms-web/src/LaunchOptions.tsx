@@ -65,11 +65,13 @@ export function ModelPicker({
   );
 }
 
-export function WorkspaceDialog({ close, added }: {
+export function WorkspaceDialog({ close, added, reference, initialQuery = "" }: {
   close: () => void;
-  added: (workspace: Workspace) => void;
+  added?: (workspace: Workspace) => void;
+  reference?: (path: string) => Promise<void>;
+  initialQuery?: string;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<Workspace[]>([]);
   const [choice, setChoice] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -93,7 +95,8 @@ export function WorkspaceDialog({ close, added }: {
     if (busy) return;
     setBusy(true); setError("");
     try {
-      added(workspace.id ? workspace : await mutate<Workspace>("/workspaces", {path: workspace.path}));
+      if (reference) await reference(workspace.path);
+      else added?.(workspace.id ? workspace : await mutate<Workspace>("/workspaces", {path: workspace.path}));
       close();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -104,15 +107,18 @@ export function WorkspaceDialog({ close, added }: {
     try {
       const result = await mutate<{path: string}>("/workspaces/choose", {});
       if (result.path) {
-        added(await mutate<Workspace>("/workspaces", {path: result.path}));
+        if (reference) await reference(result.path);
+        else added?.(await mutate<Workspace>("/workspaces", {path: result.path}));
         close();
       }
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
   return (
-    <Dialog title="找到你的项目" close={() => { if (!busy) close(); }}>
-      <p className="dialog-intro">输入项目名，就能找到常用的工作文件夹。选好后会记住，下次可以直接开始。</p>
+    <Dialog title={reference ? "引用文件夹" : "找到你的项目"} close={() => { if (!busy) close(); }}>
+      <p className="dialog-intro">{reference
+        ? `已识别文件夹${initialQuery ? `「${initialQuery}」` : ""}。选择对应的本地目录，把路径插入正文；不会复制内容或切换工作目录。`
+        : "输入项目名，就能找到常用的工作文件夹。选好后会记住，下次可以直接开始。"}</p>
       <form className="workspace-form" onSubmit={e => { e.preventDefault(); if (!loading && results[choice]) void select(results[choice]); }}>
         <label className="workspace-search-input">
           <Search size={18} />

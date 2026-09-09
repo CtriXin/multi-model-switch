@@ -54,6 +54,7 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_starter_skills.py",
     "tests/test_mms_web_local_files.py",
     "tests/test_mms_web_workspace_search.py",
     "tests/test_mms_web_model_settings.py",
@@ -82,6 +83,7 @@ _PYTEST_TARGETS = [
 ]
 
 _QUICK_PYTEST_TARGETS = [
+    "tests/test_mms_web_starter_skills.py",
     "tests/test_claude_hardening_regressions.py::test_build_claude_session_settings_respects_session_nsr_toggle",
     "tests/test_claude_hardening_regressions.py::test_build_codex_session_hooks_respects_session_nsr_toggle",
     "tests/test_claude_hardening_regressions.py::test_claude_gateway_env_does_not_restore_project_scoped_resume_pointer_on_new_launch",
