@@ -673,6 +673,7 @@ export function Composer({
             <button
               type="button"
               disabled={!workspaceId}
+              data-guide="skills"
               onClick={() => setSkillsOpen(true)}
             >
               <BookOpen size={15} />

@@ -32,8 +32,9 @@ import {
   WorkspacePicker,
   harnessNames,
 } from "./components";
-import { HelpGuide, GuideNudge } from "./HelpGuide";
-import type { GuideDestination } from "./HelpGuide";
+import { HelpGuide } from "./HelpGuide";
+import { GuidedTour } from "./GuidedTour";
+import type { TourStep } from "./GuidedTour";
 import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
 import { ProjectMaterials } from "./ProjectMaterials";
@@ -87,7 +88,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
-  const [guideDestination, setGuideDestination] = useState<GuideDestination | null>(null);
+  const [guideStep, setGuideStep] = useState<TourStep | null>(null);
+  const [guideSettingsKey, setGuideSettingsKey] = useState(0);
   const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -319,7 +321,7 @@ export function App() {
   }
   function navigate(next: Page, after?: () => void) {
     requestNavigation(() => {
-    setGuideDestination(null);
+    setGuideStep(null);
     setPage(next);
     if (next !== "session")
       history.replaceState(null, "", location.pathname + location.search);
@@ -332,35 +334,38 @@ export function App() {
     after?.();
     });
   }
-  function guideHint(target: string, text: string) {
-    setGuideDestination({ target, text, nonce: crypto.randomUUID() });
+  function beginGuideStep(step: TourStep) {
+    const apply = () => { setGuideOpen(false); setGuideStep(step); };
+    if (step !== "artifacts" && step !== "runtime") setPanel(false);
+    if (step !== "model" && step !== "effort") {
+      document.querySelectorAll<HTMLElement>('.studio-popover:popover-open').forEach(el => el.hidePopover());
+    }
+    if (step === "connection" || step === "settings") {
+      navigate("models", () => { setGuideSettingsKey(old => old + 1); apply(); });
+    } else if (step === "workspace" || step === "compose" || (page === "models" && !["finish", "sessions"].includes(step))) {
+      navigate("new", apply);
+    } else {
+      if (step === "artifacts" || step === "runtime") { setPanel(true); setPanelTab(step === "artifacts" ? "artifacts" : "runtime"); }
+      setNavOpen(step === "sessions");
+      apply();
+    }
   }
   function guideNavigate(action: GuideAction) {
-    if (action === "settings") {
-      navigate("models", () => guideHint(".settings-heading", "在模型与通道中管理服务连接和默认值；外观与使用中调整阅读偏好。"));
-    } else if (action === "workspace") {
-      navigate("new", () => guideHint(".home-intro button", "点击这里选择工作文件夹。要换项目，先选好新路径，再发送新任务。"));
-    } else if (action === "artifacts" || action === "runtime") {
-      if (!detail || page !== "session") return;
-      setPanel(true);
-      setPanelTab(action === "artifacts" ? "artifacts" : "runtime");
-      guideHint(".result-panel .panel-tabs button.active", action === "artifacts" ? "在成果侧栏选择文件和版本；选段引用会进入草稿，发送后才执行修改。" : "运行详情显示当前模型、上下文和用量。可用操作以实际状态为准。");
-    } else {
-      const target = action === "model" ? ".task-settings-trigger" : action === "materials" ? ".materials-access" : "textarea[aria-label='任务内容']";
-      const text = action === "model" ? "点击这里选择模型、通道和思考强度。正在执行时，先完成或停止本轮。" : action === "materials" ? "点击项目资料，保存并启用后，会加入这个工作文件夹的后续消息。" : "写下目标和期望结果，检查工作目录、模型与 effort，再点击发送。";
-      if (page === "session" || page === "new") guideHint(target, text);
-      else navigate("new", () => guideHint(target, text));
-    }
+    const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
+    beginGuideStep(steps[action]);
   }
   function guideExample(text: string) {
     navigate("new", () => {
       setGuideRequest({ nonce: crypto.randomUUID(), text });
-      guideHint("textarea[aria-label='任务内容']", "示例已追加到新任务草稿。你可以修改它，检查目录和模型后再发送。");
+      setGuideStep("compose");
     });
   }
+  useEffect(() => {
+    if (guideStep === "send" && page === "session" && detail) setGuideStep("reply");
+  }, [guideStep, page, detail?.session.id]);
   function openSession(id: string) {
     requestNavigation(() => {
-    setGuideDestination(null);
+    setGuideStep(null);
     history.replaceState(null, "", "#session=" + encodeURIComponent(id));
     followOutput.current = true;
     holdPosition.current = false;
@@ -390,6 +395,7 @@ export function App() {
       const result = await mutate<SessionDetail>(path, body);
       if (create) {
         openSession(result.session.id);
+        if (guideStep === "send") setGuideStep("reply");
         setDetail(result);
       } else if (currentSelection.current === originId) setDetail(result);
       setData((old) => ({
@@ -723,7 +729,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
-            <HelpGuide ready={!loading} open={guideOpen} setOpen={setGuideOpen} data={data} hasSession={page === "session" && !!detail} navigate={guideNavigate} example={guideExample} />
+            <HelpGuide ready={!loading} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={() => beginGuideStep("welcome")} />
             {detail && (
               <Status
                 session={detail.session}
@@ -742,7 +748,7 @@ export function App() {
             )}
           </div>
         </header>
-        <GuideNudge destination={guideDestination} close={() => setGuideDestination(null)} reopen={() => setGuideOpen(true)} />
+        {guideStep && <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => { setGuideStep(null); setGuideOpen(true); }} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} />}
         {isPreview && (
           <div className="preview-banner">
             <span>
@@ -935,6 +941,7 @@ export function App() {
         )}
         {page === "models" && (
           <SettingsPage
+            key={guideSettingsKey}
             requestNavigation={requestNavigation}
             editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}
