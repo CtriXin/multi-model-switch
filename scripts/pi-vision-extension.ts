@@ -3,12 +3,13 @@
  *
  * 给「本身不支持图片输入」的主模型补上视觉能力。
  * 主模型按需调用 describe_image 工具 -> 工具内部把图片转发给当前 pi 配置里
- * 已有的 vision 模型（MiniMax-M3 -> kimi-for-coding -> gpt-5.5 优先级降级），
- * 把 vision 模型返回的纯文字回灌给主模型。主模型全程不碰像素。
+ * 任意一个标了能读图的模型，把它返回的纯文字回灌给主模型。主模型全程不碰像素。
+ * 候选池来自实际配置的 vision 能力，没有内置模型名单；每次取用随机排序，
+ * 失败再依次降级。
  *
  * 设计要点：
  *  - 双启动兼容：优先 PI_CODING_AGENT_DIR（mmf 注入），回退 ~/.pi/agent（原生 pi）。
- *  - 零硬编码：base_url / apiKey / 协议全部运行时从当前 pi 的 models.json 动态发现。
+ *  - 零硬编码：模型池、base_url、apiKey、协议全部运行时动态发现。
  *  - 多模态主模型自动不注册：若当前主模型 input 含 image，直接 return，主模型自己用 read 看图。
  *  - 按需：promptGuidelines 明确「只有需要视觉理解才调用」，非图片/文本文件走 read。
  *  - 凭证安全：apiKey 仅在请求头使用，绝不进入工具返回或日志。
@@ -19,8 +20,40 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-// vision 模型优先级（用户指定）：第一个可用即用，失败逐个降级
-const VISION_PRIORITY = ["MiniMax-M3", "kimi-for-coding", "gpt-5.5"];
+// 候选池。mmf 启动时按「这个模型是否真的能读图」算好，通过
+// MMS_PI_VISION_POOL 传进来；原生 pi 直接启动时没有这个变量，就从 models.json
+// 里挑 input 含 image 的模型。两条路都不含写死的模型名。
+function visionPool(models) {
+  const injected = process.env.MMS_PI_VISION_POOL;
+  if (injected) {
+    try {
+      const parsed = JSON.parse(injected);
+      // 空数组是「算过了，本通道没有能读图的模型」，不是「没算」。
+      if (Array.isArray(parsed))
+        return parsed.filter((m) => typeof m === "string" && m.trim());
+    } catch {
+      // 变量损坏时不猜，退回扫描 models.json。
+    }
+  }
+  const found = [];
+  for (const prov of Object.values(models?.providers || {})) {
+    for (const m of Array.isArray(prov.models) ? prov.models : []) {
+      if (m?.id && Array.isArray(m.input) && m.input.includes("image"))
+        found.push(m.id);
+    }
+  }
+  return found;
+}
+
+// 每次识图重新洗牌，让请求分散到池子里的所有模型上。
+function shuffled(items) {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 const MIME_BY_EXT = {
   ".png": "image/png",
@@ -265,28 +298,36 @@ export default async function (pi) {
     return;
   }
 
-  // 当前主模型：env 优先（mmf 注入 PI_MODEL），否则 settings.defaultModel
-  const settings = readJson(settingsFile) || {};
-  const currentModel = process.env.PI_MODEL || settings.defaultModel;
-  if (currentModel) {
-    const input = findModelInput(models, currentModel);
-    // 主模型本身支持 image 输入 -> 它自己能看图，不注册本工具
-    if (input && input.includes("image")) {
-      return;
+  // 主模型是否多模态。mmf 用 --model 启动 pi，扩展看不到这个参数，所以由
+  // mmf 在启动前用统一的能力真值算好结果注入；原生 pi 才退回自己查 models.json。
+  const injectedVision = process.env.MMS_PI_MAIN_MODEL_VISION;
+  if (injectedVision === "1") {
+    // 主模型自己能看图，不注册本工具。
+    return;
+  }
+  if (injectedVision !== "0") {
+    const settings = readJson(settingsFile) || {};
+    const currentModel =
+      process.env.MMS_PI_SELECTED_MODEL || process.env.PI_MODEL || settings.defaultModel;
+    if (currentModel) {
+      const input = findModelInput(models, currentModel);
+      if (input && input.includes("image")) {
+        return;
+      }
     }
   }
 
-  // 构建可用 vision 链（只保留 models.json 里能找到 provider 且有 key 的）
-  const chain = [];
-  for (const m of VISION_PRIORITY) {
+  // 构建候选池（只保留 models.json 里能找到 provider 且有 key 的）
+  const pool = [];
+  for (const m of visionPool(models)) {
     const p = findModelProvider(models, m);
     if (p && p.apiKey) {
       const endpoint = buildEndpoint(p.api, p.baseUrl);
-      if (endpoint) chain.push({ ...p, endpoint });
+      if (endpoint) pool.push({ ...p, endpoint });
     }
   }
-  if (chain.length === 0) {
-    // 没有任何可用 vision 模型，不注册
+  if (pool.length === 0) {
+    // 本通道没有能读图的模型，不注册
     return;
   }
 
@@ -298,7 +339,7 @@ export default async function (pi) {
       "Use this ONLY when you need visual understanding and the current model cannot see images natively. " +
       "Pass a local file path; do not pass URLs. Returns text, not pixels.",
     promptSnippet:
-      "Relay image to a vision model (MiniMax-M3/kimi/gpt) when main model has no image input",
+      "Relay image to a configured vision-capable model when the main model has no image input",
     promptGuidelines: [
       "Call describe_image ONLY for genuine visual content: screenshots, photos, diagrams, charts, UI captures, error popups, sketches.",
       "Do NOT call it for code, plain text, configs, logs, or any file whose content is text — use the read tool instead.",
@@ -335,7 +376,8 @@ export default async function (pi) {
         const mime = MIME_BY_EXT[ext] || "image/png";
 
         const tried = [];
-        for (const v of chain) {
+        // 随机顺序：池子里的模型地位相同，没有内置优先级。
+        for (const v of shuffled(pool)) {
           const r = await callByApi(v.api, v.endpoint, v.apiKey, v.modelId, b64, mime, question);
           if (r.ok) {
             return {
@@ -349,7 +391,7 @@ export default async function (pi) {
           content: [
             {
               type: "text",
-              text: `All vision models failed.\nAttempts:\n${tried.map((t) => "- " + t).join("\n")}`,
+              text: `Every vision-capable model on this channel failed.\nAttempts:\n${tried.map((t) => "- " + t).join("\n")}`,
             },
           ],
           details: { ok: false, tried },

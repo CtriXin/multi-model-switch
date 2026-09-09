@@ -168,6 +168,36 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - Expected healthy state after any repair: gateway `hooks/list` has `0` `untrusted`/`modified` hooks; real `~/.codex` may only be auto-refreshed for MMS-managed hook hashes.
 - Any change to Codex hook generation, hook order, `CODEX_HOME`, or hook trust copy/write-back must run `tests/test_codex_hook_trust_contract.py` plus the targeted Codex hook trust tests.
 
+## Vision Capability Single Truth
+
+模型能不能自己读图，只有一条真值链。改动任何一环之前先读这段。
+
+`_pi_model_input_types()`（`mms_pi_support.py`）的优先级，从高到低：
+
+1. 用户自己设的：`manual_override`、`model_policy`。Web 通道模型页写的就是这一层，必须在所有 harness 生效。
+2. `_PI_MODEL_INPUT_HINTS`。只放 Pi 实测得出的结论，例如某模型经本 runner 走图片实际失败。加条目要写明依据。
+3. curated 数据：`provider_profile`、`approved_facts`。provider profiles 里的 `supports_vision` / `input_modalities` 是常规录入位置。
+4. 名称匹配兜底：`claude-` / `gpt-5` / `gemini-` 前缀、calibration reference、`mms_core._VISION_CAPABLE_MODEL_NAMES`。
+
+不允许的做法：
+
+- 在 `_pi_model_input_types` 里绕过 `caps` 直接查表，那会让用户在 Web 里的设置对 Pi 失效。
+- 把 `conservative_fallback` 当成「这个模型不支持图片」。它的含义是没有任何来源声明过。
+- 新增第五份硬编码 vision 名单。要补数据就写 provider profile。
+
+## Pi Vision Relay Contract
+
+Pi 用 `--model` 启动，扩展看不到这个参数，所以主模型能力由 mmf 在启动前算好注入：
+
+- `MMS_PI_MAIN_MODEL_VISION`：`1` 表示主模型自己能读图，扩展直接不注册 `describe_image`。`0` 表示需要中转。
+- `MMS_PI_VISION_POOL`：JSON 数组，本通道能读图的 models.json wire id。空数组表示算过了，本通道没有能读图的模型，不是「没算」。
+
+候选池就是「当前通道里能力判定为能读图的模型」，跟着用户实际配置走。不允许引入内置模型名单、优先级常量或按名字排序。池子里的模型地位相同，扩展在每次识图时随机排序，失败再依次降级。原生 pi 直接启动时没有注入变量，扩展改为扫描 models.json 里 `input` 含 `image` 的模型，同样不含写死的名字。
+
+唯一的开关是 `config.toml` 的 `[vision_sidecar] enabled`。池子只从当前通道已暴露的模型里取，不往 Pi 的模型列表里加条目。池子为空时 launcher 必须打印可见提示，不允许静默降级。
+
+改这条链路要跑 `tests/test_pi_vision_relay.py`，其中包含一条禁止硬编码模型名的断言。
+
 ## User Preferences And Human Gate
 
 `~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
