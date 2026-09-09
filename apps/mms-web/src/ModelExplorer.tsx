@@ -13,6 +13,8 @@ import {
 import type { Model, Preset } from "./types";
 import { request } from "./api";
 import { VendorMark, vendorTint } from "./VendorMark";
+import { modelKey, selectModelRoute } from "./modelSelection";
+export { modelKey } from "./modelSelection";
 
 export interface LaunchFacts {
   model: {
@@ -83,11 +85,6 @@ export function saveRoutePreference(
   } catch {
     /* Browser storage unavailable: current choice still works. */
   }
-}
-export function modelKey(p: Preset) {
-  return p.modelId.startsWith(p.providerId + ":")
-    ? p.modelId.slice(p.providerId.length + 1)
-    : p.name;
 }
 export function quickPresets(presets: Preset[], favorites: string[]) {
   const prefs = readRoutePreferences();
@@ -241,11 +238,7 @@ export function ModelExplorer({
               }
               onClick={() =>
                 change(
-                  ps.find((p) => p.available && prefs[p.id]?.preferred)?.id ||
-                    ps.find((p) => p.available && favorites.includes(p.modelId))
-                      ?.id ||
-                    ps.find((p) => p.available)?.id ||
-                    ps[0].id,
+                  selectModelRoute(ps, favorites, prefs).id,
                 )
               }
             >

@@ -1,8 +1,8 @@
-import { ChevronDown, ArrowUpRight, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, ArrowUpRight } from "lucide-react";
 import type { Model, Preset, SessionDetail } from "./types";
 import type { LaunchFacts } from "./ModelExplorer";
 import { EffortSelect } from "./ModelExplorer";
-import { ModelPicker } from "./LaunchOptions";
+import { QuickModelMenu } from "./QuickModelMenu";
 import { Popover } from "./Popover";
 
 export function TaskSettings({
@@ -42,33 +42,14 @@ export function TaskSettings({
       label={
         <>
           <span className="task-model-name">{preset?.name || "选择模型"}</span>
-          <span className="task-route-name">{preset?.channel}</span>
-          <span className="task-effort">
-            {effort || facts?.defaultThinkingLevel || "默认"}
-          </span>
           {planning && <span className="task-plan">规划</span>}
           <ChevronDown size={13} />
         </>
       }
     >
-      {(close) => (
-        <>
-          <header>
-            <SlidersHorizontal size={16} />
-            <strong>本次任务</strong>
-          </header>
-          <div className="task-setting-row">
-            <span>模型与通道</span>
-            <ModelPicker
-              presets={presets}
-              models={models}
-              workspaceId={workspaceId}
-              value={value}
-              change={change}
-              favorites={favorites}
-              toggleFavorite={toggleFavorite}
-            />
-          </div>
+      {(close, open) => open ? (
+        <QuickModelMenu presets={presets} models={models} value={value} favorites={favorites}
+          change={change} close={close} notice={planning ? "当前为只读规划模式。" : undefined}>
           <div className="task-setting-row" data-guide="effort">
             <span>思考强度</span>
             {facts ? (
@@ -104,8 +85,8 @@ export function TaskSettings({
             管理模型与偏好
             <ArrowUpRight size={14} />
           </button>
-        </>
-      )}
+        </QuickModelMenu>
+      ) : null}
     </Popover>
   );
 }
@@ -135,32 +116,20 @@ export function SessionSettings({
       label={
         <>
           <span className="task-model-name">{detail.session.modelName}</span>
-          <span className="task-route-name">{detail.session.channel}</span>
-          <span className="task-effort">{r?.thinkingLevel || "默认"}</span>
           {r?.planning && <span className="task-plan">规划</span>}
           <ChevronDown size={13} />
         </>
       }
     >
-      {(close) => (
-        <>
-          <header>
-            <SlidersHorizontal size={16} />
-            <strong>当前会话</strong>
-          </header>
-          <div className="task-setting-row">
-            <span>模型与通道</span>
-            <ModelPicker
-              presets={presets.filter(p => p.harness === "pi")}
-              models={models}
-              workspaceId={detail.session.workspaceId}
-              value={detail.session.presetId || ""}
-              change={(presetId) => void action(`/sessions/${detail.session.id}/model`, {presetId})}
-              favorites={favorites}
-              toggleFavorite={toggleFavorite}
-              disabled={busy || ["running", "waiting"].includes(detail.session.state) || !detail.session.capabilities.send}
-            />
-          </div>
+      {(close, open) => open ? (
+        <QuickModelMenu presets={presets.filter(p => p.harness === "pi")} models={models}
+          value={detail.session.presetId || ""} favorites={favorites} close={close}
+          change={presetId => action(`/sessions/${detail.session.id}/model`, {presetId})}
+          disabled={busy || ["running", "waiting"].includes(detail.session.state) || !detail.session.capabilities.send}
+          notice={busy || ["running", "waiting"].includes(detail.session.state)
+            ? "本轮完成或停止后可切换模型。"
+            : !detail.session.capabilities.send ? "这条会话目前只支持查看。"
+            : r?.planning ? "当前为只读规划模式。" : undefined}>
           <label className="task-setting-row" data-guide="effort">
             <span>思考强度</span>
             <select
@@ -212,8 +181,8 @@ export function SessionSettings({
             上下文、用量与高级参数
             <ArrowUpRight size={14} />
           </button>
-        </>
-      )}
+        </QuickModelMenu>
+      ) : null}
     </Popover>
   );
 }
