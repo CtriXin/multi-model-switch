@@ -1,20 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Archive,
   ArrowDown,
   ArrowRight,
+  ArrowUp,
   ArrowUpRight,
   Check,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Copy,
+  Download,
+  GitBranch,
   CircleAlert,
   Command,
   FileText,
   FolderOpen,
   Inbox,
   Menu,
+  MessageSquarePlus,
   Moon,
+  MoreHorizontal,
   PanelRight,
+  Pencil,
   Plus,
   Search,
+  Trash2,
   Settings2,
   SlidersHorizontal,
   Sun,
@@ -45,6 +56,7 @@ import { useSessionAttention } from "./SessionAttention";
 import { FilesPanel } from "./FilesPanel";
 import { RuntimePanel, SessionMenu, exportConversation } from "./SessionTools";
 import { RecipeImport } from "./Recipe";
+import { VendorMark, vendorTint } from "./VendorMark";
 import type { Recipe } from "./Recipe";
 import { SettingsPage } from "./SettingsPage";
 import { TaskSettings, SessionSettings } from "./TaskSettings";
@@ -79,6 +91,106 @@ function saveSetting(key: string, value: unknown) {
     /* Storage may be unavailable in private browsing. */
   }
 }
+// Appearance fonts. Families mirror Glint's catalogue so the two products
+// offer the same names. Everything is a locally installed face: a webfont
+// would put a network request in the path of a tool that runs offline, and
+// leave the page swapping type whenever that request is slow.
+type FontEntry = { label: string; css: string[]; mono?: boolean; cjk?: boolean };
+
+export const FONT_FAMILIES: Record<string, FontEntry> = {
+  inter: { label: "Inter", css: ['"Inter"'] },
+  helvetica: { label: "Helvetica Neue", css: ['"Helvetica Neue"', "Helvetica"] },
+  jetbrains: { label: "JetBrains Mono", css: ['"JetBrains Mono"'], mono: true },
+  fira: { label: "Fira Code", css: ['"Fira Code"'], mono: true },
+  plex: { label: "IBM Plex Mono", css: ['"IBM Plex Mono"'], mono: true },
+  menlo: { label: "Menlo", css: ["Menlo"], mono: true },
+  monaco: { label: "Monaco", css: ["Monaco"], mono: true },
+  pingfang: { label: "苹方", css: ['"PingFang SC"'], cjk: true },
+  hiragino: { label: "冬青黑体", css: ['"Hiragino Sans GB"'], cjk: true },
+  hansans: {
+    label: "思源黑体",
+    css: ['"Source Han Sans CN"', '"Noto Sans CJK SC"'],
+    cjk: true,
+  },
+  heiti: { label: "黑体", css: ['"Heiti SC"'], cjk: true },
+  yahei: { label: "微软雅黑", css: ['"Microsoft YaHei"'], cjk: true },
+};
+
+const SYSTEM_SANS = [
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"SF Pro Text"',
+];
+const SYSTEM_MONO = ['"SF Mono"', "Menlo"];
+
+/** The family name to probe for, so the picker never offers an absent face. */
+const PROBE_NAME: Record<string, string> = {
+  inter: "Inter",
+  helvetica: "Helvetica Neue",
+  jetbrains: "JetBrains Mono",
+  fira: "Fira Code",
+  plex: "IBM Plex Mono",
+  menlo: "Menlo",
+  monaco: "Monaco",
+  pingfang: "PingFang SC",
+  hiragino: "Hiragino Sans GB",
+  hansans: "Source Han Sans CN",
+  heiti: "Heiti SC",
+  yahei: "Microsoft YaHei",
+};
+
+/** Width-probe font detection: a missing family falls back and measures the
+ *  same as the generic it was paired with. Glint filters its list the same
+ *  way, because a silently substituted font looks like a broken setting. */
+export function detectInstalledFonts(): Record<string, boolean> {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  const found: Record<string, boolean> = {};
+  if (!context) return found;
+  const sample = "MMS 多模型 0123 mmmiiilll";
+  const baselines: Record<string, number> = {};
+  for (const generic of ["monospace", "sans-serif", "serif"]) {
+    context.font = `72px ${generic}`;
+    baselines[generic] = context.measureText(sample).width;
+  }
+  for (const [key, family] of Object.entries(PROBE_NAME)) {
+    found[key] = Object.entries(baselines).some(([generic, width]) => {
+      context.font = `72px "${family}", ${generic}`;
+      return Math.abs(context.measureText(sample).width - width) > 0.5;
+    });
+  }
+  return found;
+}
+
+function withFallback(head: string[], cjk: string, generic: string) {
+  const tail = FONT_FAMILIES[cjk]?.css || [];
+  return [...head, ...tail, generic].join(", ");
+}
+
+export function fontStack(family: string, cjk: string) {
+  if (family === "system_ui") return withFallback(["system-ui"], cjk, "sans-serif");
+  const entry = FONT_FAMILIES[family];
+  const head = entry ? [...entry.css, ...SYSTEM_SANS] : SYSTEM_SANS;
+  return withFallback(head, cjk, "sans-serif");
+}
+
+export function monoStack(mono: string, cjk: string) {
+  const entry = FONT_FAMILIES[mono];
+  const head = entry ? [...entry.css, ...SYSTEM_MONO] : SYSTEM_MONO;
+  return withFallback(head, cjk, "monospace");
+}
+
+export function clampFontSize(value: unknown) {
+  const size = Math.round(Number(value));
+  return Number.isFinite(size) ? Math.min(20, Math.max(12, size)) : 14;
+}
+
+/** Resolve the "follow system" theme choice against the OS setting. */
+export function resolveTheme(choice: string): "light" | "dark" {
+  if (choice === "light" || choice === "dark") return choice;
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 export function App() {
   const [data, setData] = useState<Bootstrap>(empty);
   const [loading, setLoading] = useState(true);
@@ -88,6 +200,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [guideStep, setGuideStep] = useState<TourStep | null>(null);
   const [guideSettingsKey, setGuideSettingsKey] = useState(0);
   const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
@@ -113,6 +226,34 @@ export function App() {
   const [collapsed, setCollapsed] = useState<string[]>(() =>
     readSetting("mms-web-collapsed", []),
   );
+  const [workspaceSort, setWorkspaceSort] = useState<"recent" | "manual">(() =>
+    readSetting<string>("mms-web-workspace-sort", "recent") === "manual"
+      ? "manual"
+      : "recent",
+  );
+  const [workspaceOrder, setWorkspaceOrder] = useState<string[]>(() => {
+    const value = readSetting<unknown>("mms-web-workspace-order", []);
+    return Array.isArray(value)
+      ? value.filter((v) => typeof v === "string")
+      : [];
+  });
+  const [workspaceNotice, setWorkspaceNotice] = useState("");
+  const [renameSession, setRenameSession] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [shownPerWorkspace, setShownPerWorkspace] = useState<
+    Record<string, number>
+  >({});
+  const [renameWorkspace, setRenameWorkspace] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [removeWorkspace, setRemoveWorkspace] = useState<{
+    id: string;
+    name: string;
+    sessions: number;
+  } | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [panel, setPanel] = useState(false);
@@ -123,11 +264,48 @@ export function App() {
   const [selectionRequest, setSelectionRequest] = useState<{ nonce: string; sessionId: string; selection: FileSelection }>();
   const [atBottom, setAtBottom] = useState(true);
   const [autoCollapseProcess, setAutoCollapseProcess] = useState(() => readSetting("mms-web-auto-collapse-process", true));
-  const [accent, setAccent] = useState(() =>
-    readSetting("mms-web-accent", "indigo"),
+  const [processForced, setProcessForced] = useState<{
+    collapsed: boolean;
+    revision: number;
+  } | null>(null);
+  const [processTurns, setProcessTurns] = useState<Record<string, boolean>>({});
+  const reportProcessTurn = useCallback((id: string, collapsed: boolean) => {
+    setProcessTurns((old) => (old[id] === collapsed ? old : { ...old, [id]: collapsed }));
+  }, []);
+  const [accent, setAccent] = useState(() => {
+    const stored = readSetting<string>("mms-web-accent", "indigo");
+    const migrated = stored === "blue" ? "cyan" : stored === "rose" ? "pink" : stored;
+    return ["indigo", "cyan", "pink", "orange", "green"].includes(migrated) ? migrated : "indigo";
+  });
+  const [themeChoice, setThemeChoice] = useState<"light" | "dark" | "system">(
+    () => {
+      const stored = readSetting<string>("mms-web-theme", "light");
+      return stored === "dark" || stored === "system" ? stored : "light";
+    },
   );
-  const [theme, setTheme] = useState<"light" | "dark">(() =>
-    readSetting("mms-web-theme", "light"),
+  const [systemDark, setSystemDark] = useState(
+    () => matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const theme =
+    themeChoice === "system" ? (systemDark ? "dark" : "light") : themeChoice;
+  const [fontFamily, setFontFamily] = useState(() =>
+    readSetting("mms-web-font-family", "system"),
+  );
+  const [monoFont, setMonoFont] = useState(() =>
+    readSetting("mms-web-mono-font", "system"),
+  );
+  const [cjkFont, setCjkFont] = useState(() =>
+    readSetting("mms-web-cjk-font", "system"),
+  );
+  const [installedFonts] = useState(detectInstalledFonts);
+  const [fontSize, setFontSize] = useState(() =>
+    readSetting("mms-web-font-size", 14),
+  );
+  const [boldText, setBoldText] = useState(() =>
+    readSetting("mms-web-bold-text", false),
+  );
+  const [selectToCopy, setSelectToCopy] = useState(() =>
+    readSetting("mms-web-select-to-copy", false),
   );
   const [favorites, setFavorites] = useState<string[]>(() => {
     const value = readSetting<unknown>("mms-web-favorites", []);
@@ -136,6 +314,8 @@ export function App() {
       : [];
   });
   useEffect(() => { saveSetting("mms-web-auto-collapse-process", autoCollapseProcess); }, [autoCollapseProcess]);
+  useEffect(() => { saveSetting("mms-web-workspace-sort", workspaceSort); }, [workspaceSort]);
+  useEffect(() => { saveSetting("mms-web-workspace-order", workspaceOrder); }, [workspaceOrder]);
   const currentSelection = useRef("");
   const mutation = useRef(false);
   const generation = useRef(0);
@@ -187,13 +367,87 @@ export function App() {
     // Recover the same conversation on a browser refresh.
   }, []);
   useEffect(() => {
+    saveSetting("mms-web-select-to-copy", selectToCopy);
+    if (!selectToCopy) return;
+    // Copy on mouseup: that event is a user gesture, which is what the
+    // clipboard write needs. Selections made inside a field are left alone,
+    // because there the user is usually editing rather than quoting.
+    const copy = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      const endpoints = [selection.anchorNode, selection.focusNode].map((node) =>
+        node instanceof Element ? node : (node?.parentElement ?? null),
+      );
+      const conversation = endpoints[0]?.closest(".conversation-content");
+      if (!conversation || endpoints.some((element) =>
+        element?.closest(".conversation-content") !== conversation ||
+        element?.closest("input, textarea, [contenteditable='true']"),
+      )) return;
+      const text = selection.toString();
+      if (!text.trim()) return;
+      void navigator.clipboard?.writeText(text).catch(() => {
+        // A browser that refuses the write should not break selecting text.
+      });
+    };
+    document.addEventListener("mouseup", copy);
+    return () => document.removeEventListener("mouseup", copy);
+  }, [selectToCopy]);
+  useEffect(() => {
+    // Turn ids are per session; carrying them over would make the toggle lie.
+    setProcessForced(null);
+    setProcessTurns({});
+  }, [selectedId]);
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const follow = () => setSystemDark(media.matches);
+    media.addEventListener("change", follow);
+    return () => media.removeEventListener("change", follow);
+  }, []);
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    saveSetting("mms-web-theme", theme);
-  }, [theme]);
+    saveSetting("mms-web-theme", themeChoice);
+  }, [theme, themeChoice]);
   useEffect(() => {
     document.documentElement.dataset.accent = accent;
     saveSetting("mms-web-accent", accent);
   }, [accent]);
+  useEffect(() => {
+    // The tab icon is the same three-bar mark as the sidebar, drawn in the
+    // accent the user picked. A static file would keep showing the old colour.
+    const ink = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent")
+      .trim();
+    if (!ink) return;
+    const bar = (x: number, y: number, h: number) =>
+      `<rect x="${x}" y="${y}" width="4.5" height="${h}" rx="2.25"/>`;
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
+      `<g fill="${ink}" transform="translate(3.7 0) skewX(-13)">` +
+      bar(6.25, 4, 24) +
+      bar(13.75, 8, 16) +
+      bar(21.25, 4, 24) +
+      `</g></svg>`;
+    let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    link.type = "image/svg+xml";
+    link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }, [accent, theme]);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--app-font", fontStack(fontFamily, cjkFont));
+    root.style.setProperty("--font-mono", monoStack(monoFont, cjkFont));
+    root.style.setProperty("--app-font-size", `${clampFontSize(fontSize)}px`);
+    root.style.setProperty("--app-font-weight", boldText ? "600" : "400");
+    saveSetting("mms-web-font-family", fontFamily);
+    saveSetting("mms-web-mono-font", monoFont);
+    saveSetting("mms-web-cjk-font", cjkFont);
+    saveSetting("mms-web-font-size", clampFontSize(fontSize));
+    saveSetting("mms-web-bold-text", boldText);
+  }, [fontFamily, monoFont, cjkFont, fontSize, boldText]);
   useEffect(() => {
     const media = matchMedia("(max-width: 1200px)");
     const collapse = () => {
@@ -322,6 +576,8 @@ export function App() {
   function navigate(next: Page, after?: () => void) {
     requestNavigation(() => {
     setGuideStep(null);
+    setSettingsOpen(next === "models");
+    if (next === "models") { setNavOpen(false); after?.(); return; }
     setPage(next);
     if (next !== "session")
       history.replaceState(null, "", location.pathname + location.search);
@@ -335,20 +591,25 @@ export function App() {
     });
   }
   function beginGuideStep(step: TourStep) {
-    const apply = () => { setGuideOpen(false); setGuideStep(step); };
-    if (step !== "artifacts" && step !== "runtime") setPanel(false);
-    if (step !== "model" && step !== "effort") {
-      document.querySelectorAll<HTMLElement>('.studio-popover:popover-open').forEach(el => el.hidePopover());
-    }
-    if (step === "connection" || step === "settings") {
-      navigate("models", () => { setGuideSettingsKey(old => old + 1); apply(); });
-    } else if (step === "workspace" || step === "compose" || (page === "models" && !["finish", "sessions"].includes(step))) {
-      navigate("new", apply);
-    } else {
-      if (step === "artifacts" || step === "runtime") { setPanel(true); setPanelTab(step === "artifacts" ? "artifacts" : "runtime"); }
+    requestNavigation(() => {
+      setGuideOpen(false);
+      if (step !== "artifacts" && step !== "runtime") setPanel(false);
+      if (step !== "model" && step !== "effort") {
+        document.querySelectorAll<HTMLElement>('.studio-popover:popover-open').forEach(el => el.hidePopover());
+      }
+      const inSettings = step === "connection" || step === "settings";
+      setSettingsOpen(inSettings);
+      if (inSettings) setGuideSettingsKey(old => old + 1);
+      if (step === "workspace" || step === "compose") {
+        setPage("new"); setSelectedId(""); setDetail(null); currentSelection.current = "";
+        history.replaceState(null, "", location.pathname + location.search);
+      }
+      if (step === "artifacts" || step === "runtime") {
+        setPanel(true); setPanelTab(step === "artifacts" ? "artifacts" : "runtime");
+      }
       setNavOpen(step === "sessions");
-      apply();
-    }
+      setGuideStep(step);
+    });
   }
   function guideNavigate(action: GuideAction) {
     const steps: Record<GuideAction, TourStep> = { settings: "settings", workspace: "workspace", model: "model", compose: "compose", materials: "materials", artifacts: "artifacts", runtime: "runtime" };
@@ -384,6 +645,7 @@ export function App() {
     path: string,
     body: Record<string, unknown>,
     create = false,
+    targetId?: string,
   ): Promise<boolean> {
     if (mutation.current) return false;
     generation.current += 1;
@@ -397,7 +659,11 @@ export function App() {
         openSession(result.session.id);
         if (guideStep === "send") setGuideStep("reply");
         setDetail(result);
-      } else if (currentSelection.current === originId) setDetail(result);
+      } else if (
+      currentSelection.current === originId &&
+      (!targetId || targetId === originId)
+    )
+      setDetail(result);
       setData((old) => ({
         ...old,
         sessions: [
@@ -454,6 +720,22 @@ export function App() {
         path: "",
       });
   }
+  const lastEdited = new Map<string, string>();
+  for (const session of data.sessions) {
+    const seen = lastEdited.get(session.workspaceId) || "";
+    if (session.updatedAt > seen)
+      lastEdited.set(session.workspaceId, session.updatedAt);
+  }
+  navWorkspaces.sort((a, b) => {
+    if (workspaceSort === "manual") {
+      // Unordered folders keep their registration order behind ordered ones.
+      const ai = workspaceOrder.indexOf(a.id);
+      const bi = workspaceOrder.indexOf(b.id);
+      if (ai !== bi) return (ai < 0 ? Infinity : ai) - (bi < 0 ? Infinity : bi);
+      return 0;
+    }
+    return (lastEdited.get(b.id) || "").localeCompare(lastEdited.get(a.id) || "");
+  });
   const searchResults = data.sessions.filter((s) =>
     (s.title + " " + s.modelName + " " + s.harness + " " + s.cwd)
       .toLowerCase()
@@ -468,12 +750,91 @@ export function App() {
       return next;
     });
   }
+  function setAllCollapsed(next: boolean) {
+    const ids = next ? navWorkspaces.map((w) => w.id) : [];
+    setCollapsed(ids);
+    saveSetting("mms-web-collapsed", ids);
+  }
+  function moveWorkspace(id: string, delta: number) {
+    // Manual order is per-browser, like the collapse state. Seed it from what
+    // is on screen so the first move does not reshuffle everything else.
+    const order = navWorkspaces.map((w) => w.id);
+    const from = order.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= order.length) return;
+    order.splice(to, 0, ...order.splice(from, 1));
+    setWorkspaceOrder(order);
+    setWorkspaceSort("manual");
+  }
+  async function copyWorkspacePath(path: string) {
+    try {
+      await navigator.clipboard.writeText(path);
+      setWorkspaceNotice("已复制路径");
+    } catch {
+      setWorkspaceNotice("浏览器拒绝了复制，请手动选择路径");
+    }
+  }
+  async function copySessionId(id: string) {
+    try {
+      await navigator.clipboard.writeText(id);
+      setWorkspaceNotice("已复制 Session ID");
+    } catch {
+      setWorkspaceNotice("浏览器拒绝了复制，请手动选择 ID");
+    }
+  }
+  async function exportSession(id: string) {
+    // The sidebar only holds summaries; the export needs the full transcript.
+    try {
+      exportConversation(await getSession(id));
+    } catch (error) {
+      setWorkspaceNotice(
+        error instanceof Error ? error.message : "导出失败，请打开会话后重试",
+      );
+    }
+  }
+  async function submitSessionRename() {
+    if (!renameSession) return;
+    const title = renameSession.title.trim();
+    if (!title) return;
+    if (
+      await runAction(
+        `/sessions/${renameSession.id}/manage`,
+        { title },
+        false,
+        renameSession.id,
+      )
+    )
+      setRenameSession(null);
+  }
+  async function submitWorkspaceRename() {
+    if (!renameWorkspace) return;
+    const name = renameWorkspace.name.trim();
+    if (!name) return;
+    try {
+      await mutate("/workspaces/rename", { id: renameWorkspace.id, name });
+      setRenameWorkspace(null);
+      await load();
+    } catch (error) {
+      setWorkspaceNotice(error instanceof Error ? error.message : "重命名失败");
+    }
+  }
+  async function submitWorkspaceRemove() {
+    if (!removeWorkspace) return;
+    try {
+      await mutate("/workspaces/remove", { id: removeWorkspace.id });
+      setRemoveWorkspace(null);
+      await load();
+    } catch (error) {
+      setWorkspaceNotice(error instanceof Error ? error.message : "移除失败");
+    }
+  }
   const signals = useSessionAttention(
     data.sessions,
     detail,
     page === "session" && atBottom && !sessionError,
     connected && !statusesStale,
   );
+  const tour = guideStep ? <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => requestNavigation(() => { setSettingsOpen(false); setGuideStep(null); setGuideOpen(true); })} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} /> : null;
   return (
     <div className="app-shell" data-page={page}>
       {navOpen && (
@@ -490,10 +851,13 @@ export function App() {
         <button
           className="brand"
           onClick={() => navigate("new")}
-          aria-label="MMS 首页"
+          aria-label="MMS Pilot 首页"
         >
           <Logo />
-          <span>mms</span>
+          <div className="brand-wordmark">
+            <span className="brand-mms">MMS</span>
+            <span className="brand-pilot">PILOT</span>
+          </div>
           <AppVersion version={data.appVersion} />
         </button>
         <div className="sidebar-actions">
@@ -571,15 +935,83 @@ export function App() {
                 </>
               )}
             </Popover>
-            <button
-              type="button"
-              className="icon-button add-workspace"
-              aria-label="添加工作空间"
-              onClick={() => setAddFolder(true)}
-            >
-              <Plus size={15} />
-            </button>
+            <div className="workspace-tools">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={
+                  collapsed.length >= navWorkspaces.length
+                    ? "展开全部工作区"
+                    : "收起全部工作区"
+                }
+                title={
+                  collapsed.length >= navWorkspaces.length
+                    ? "展开全部"
+                    : "收起全部"
+                }
+                onClick={() =>
+                  setAllCollapsed(collapsed.length < navWorkspaces.length)
+                }
+              >
+                {collapsed.length >= navWorkspaces.length ? (
+                  <ChevronsUpDown size={14} />
+                ) : (
+                  <ChevronsDownUp size={14} />
+                )}
+              </button>
+              <Popover
+                title="工作区排序"
+                className="icon-button"
+                label={<MoreHorizontal size={15} />}
+              >
+                {(close) => (
+                  <>
+                    <header>
+                      <strong>工作区排序</strong>
+                    </header>
+                    {(
+                      [
+                        ["manual", "手动排序", "在文件夹菜单里用上移下移调整"],
+                        ["recent", "按最后编辑时间", "最近有新消息的排在前面"],
+                      ] as const
+                    ).map(([mode, label, description]) => (
+                      <button
+                        type="button"
+                        key={mode}
+                        className={
+                          "filter-option " +
+                          (workspaceSort === mode ? "selected" : "")
+                        }
+                        onClick={() => {
+                          setWorkspaceSort(mode);
+                          close();
+                        }}
+                      >
+                        <span>
+                          <strong>{label}</strong>
+                          <small>{description}</small>
+                        </span>
+                        {workspaceSort === mode && <Check size={14} />}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Popover>
+              <button
+                type="button"
+                className="icon-button add-workspace"
+                aria-label="添加工作空间"
+                onClick={() => setAddFolder(true)}
+              >
+                <Plus size={15} />
+              </button>
+            </div>
           </div>
+          {workspaceNotice && (
+            <p className="workspace-notice" role="status">
+              {workspaceNotice}
+            </p>
+          )}
           {loading ? (
             <div className="nav-skeleton">
               <i />
@@ -613,8 +1045,120 @@ export function App() {
                     <span>{w.id === "default" ? "启动目录" : w.name}</span>
                     <span>{sessions.length}</span>
                   </button>
+                  <div className="workspace-row-actions">
+                    <Popover
+                      title={`${w.name} 的操作`}
+                      className="icon-button"
+                      label={<MoreHorizontal size={14} />}
+                    >
+                      {(close) => (
+                        <>
+                          <header>
+                            <strong>{w.id === "default" ? "启动目录" : w.name}</strong>
+                          </header>
+                          <button
+                            type="button"
+                            className="filter-option"
+                            disabled={!w.path}
+                            onClick={() => {
+                              copyWorkspacePath(w.path);
+                              close();
+                            }}
+                          >
+                            <Copy size={14} />
+                            <span>
+                              <strong>复制路径</strong>
+                              <small>{w.path || "这些会话的目录已不在记录里"}</small>
+                            </span>
+                          </button>
+                          {workspaceSort === "manual" && (
+                            <>
+                              <button
+                                type="button"
+                                className="filter-option"
+                                onClick={() => {
+                                  moveWorkspace(w.id, -1);
+                                  close();
+                                }}
+                              >
+                                <ArrowUp size={14} />
+                                <span>
+                                  <strong>上移</strong>
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="filter-option"
+                                onClick={() => {
+                                  moveWorkspace(w.id, 1);
+                                  close();
+                                }}
+                              >
+                                <ArrowDown size={14} />
+                                <span>
+                                  <strong>下移</strong>
+                                </span>
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            className="filter-option"
+                            disabled={w.id === "default" || !w.path}
+                            onClick={() => {
+                              setRenameWorkspace({ id: w.id, name: w.name });
+                              close();
+                            }}
+                          >
+                            <Pencil size={14} />
+                            <span>
+                              <strong>重命名</strong>
+                              <small>只改这里显示的名称，不动文件夹</small>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="filter-option danger"
+                            disabled={w.id === "default" || !w.path}
+                            onClick={() => {
+                              setRemoveWorkspace({
+                                id: w.id,
+                                name: w.name,
+                                sessions: sessions.length,
+                              });
+                              close();
+                            }}
+                          >
+                            <Trash2 size={14} />
+                            <span>
+                              <strong>移除工作区</strong>
+                              <small>
+                                {w.id === "default"
+                                  ? "启动目录不能移除"
+                                  : "只从侧栏移除，文件和会话都保留"}
+                              </small>
+                            </span>
+                          </button>
+                        </>
+                      )}
+                    </Popover>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`在 ${w.name} 新建会话`}
+                      title="在这个目录新建会话"
+                      disabled={!w.path}
+                      onClick={() => {
+                        setWorkspaceId(w.id);
+                        navigate("new");
+                      }}
+                    >
+                      <MessageSquarePlus size={14} />
+                    </button>
+                  </div>
                   {!collapsed.includes(w.id) &&
-                    sessions.map((s) => (
+                    sessions.slice(0, shownPerWorkspace[w.id] ?? 8).map((s) => (
+                      <div className="session-row" key={s.id}>
                       <button
                         className={
                           "session-link " +
@@ -665,7 +1209,130 @@ export function App() {
                           />
                         )}
                       </button>
+                      <Popover
+                        title={`${s.title} 的操作`}
+                        className="icon-button session-row-menu"
+                        label={<MoreHorizontal size={14} />}
+                      >
+                        {(close) => (
+                          <>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                void copySessionId(s.id);
+                                close();
+                              }}
+                            >
+                              <Copy size={14} />
+                              <span>
+                                <strong>复制 Session ID</strong>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                setRenameSession({ id: s.id, title: s.title });
+                                close();
+                              }}
+                            >
+                              <Pencil size={14} />
+                              <span>
+                                <strong>重命名</strong>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              disabled={
+                                busy ||
+                                ["running", "waiting"].includes(s.state)
+                              }
+                              onClick={() => {
+                                void runAction(
+                                  `/sessions/${s.id}/fork`,
+                                  {},
+                                  true,
+                                );
+                                close();
+                              }}
+                            >
+                              <GitBranch size={14} />
+                              <span>
+                                <strong>分叉会话</strong>
+                                <small>
+                                  {["running", "waiting"].includes(s.state)
+                                    ? "执行中不能分叉"
+                                    : "复制到新会话继续，原会话不变"}
+                                </small>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option"
+                              onClick={() => {
+                                void exportSession(s.id);
+                                close();
+                              }}
+                            >
+                              <Download size={14} />
+                              <span>
+                                <strong>导出会话</strong>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="filter-option danger"
+                              disabled={
+                                busy ||
+                                ["running", "waiting"].includes(s.state)
+                              }
+                              onClick={() => {
+                                void runAction(
+                                  `/sessions/${s.id}/manage`,
+                                  { archived: !s.archived },
+                                  false,
+                                  s.id,
+                                );
+                                close();
+                              }}
+                            >
+                              <Archive size={14} />
+                              <span>
+                                <strong>
+                                  {s.archived ? "恢复到列表" : "归档"}
+                                </strong>
+                                <small>
+                                  {["running", "waiting"].includes(s.state)
+                                    ? "执行中不能归档"
+                                    : "从列表收起，内容保留"}
+                                </small>
+                              </span>
+                            </button>
+                            <p className="session-row-time">
+                              {new Date(s.updatedAt).toLocaleString()}
+                            </p>
+                          </>
+                        )}
+                      </Popover>
+                      </div>
                     ))}
+                  {!collapsed.includes(w.id) &&
+                    sessions.length > (shownPerWorkspace[w.id] ?? 8) && (
+                      <button
+                        type="button"
+                        className="load-more-sessions"
+                        onClick={() =>
+                          setShownPerWorkspace((old) => ({
+                            ...old,
+                            [w.id]: (old[w.id] ?? 8) + 20,
+                          }))
+                        }
+                      >
+                        加载更多 {sessions.length - (shownPerWorkspace[w.id] ?? 8)} 个对话
+                      </button>
+                    )}
                 </section>
               );
             })
@@ -748,7 +1415,7 @@ export function App() {
             )}
           </div>
         </header>
-        {guideStep && <GuidedTour step={guideStep} move={beginGuideStep} close={() => setGuideStep(null)} help={() => { setGuideStep(null); setGuideOpen(true); }} example={guideExample} modelReady={data.presets.some(p => p.available)} configure={!!data.capabilities.configure} hasSession={page === "session" && !!detail} />}
+        {!settingsOpen && tour}
         {isPreview && (
           <div className="preview-banner">
             <span>
@@ -839,7 +1506,10 @@ export function App() {
                     {
                       workspaceId,
                       presetId,
-                      title: text.slice(0, 42),
+                      // Mark the cut, or a clipped prompt reads as the whole
+                      // title ending mid-sentence.
+                      title:
+                        text.length > 42 ? text.slice(0, 42) + "…" : text,
                       prompt: text,
                       planMode,
                       thinkingLevel: effort || undefined,
@@ -903,11 +1573,14 @@ export function App() {
                         key={s.id}
                         onClick={() => openSession(s.id)}
                       >
-                        <span className="recent-icon">
+                        <span
+                          className="recent-icon"
+                          style={{ background: vendorTint(undefined, s.modelName) }}
+                        >
                           {s.state === "waiting" ? (
                             <CircleAlert size={19} />
                           ) : (
-                            <FileText size={19} />
+                            <VendorMark name={s.modelName} size={19} />
                           )}
                         </span>
                         <span className="recent-copy">
@@ -939,24 +1612,38 @@ export function App() {
             </div>
           </div>
         )}
-        {page === "models" && (
+        {settingsOpen && (
           <SettingsPage
             key={guideSettingsKey}
+            tour={tour}
             requestNavigation={requestNavigation}
             editStateChanged={setSettingsEdit}
             autoCollapseProcess={autoCollapseProcess}
             setAutoCollapseProcess={setAutoCollapseProcess}
+            fontFamily={fontFamily}
+            setFontFamily={setFontFamily}
+            monoFont={monoFont}
+            setMonoFont={setMonoFont}
+            cjkFont={cjkFont}
+            setCjkFont={setCjkFont}
+            installedFonts={installedFonts}
+            fontSize={clampFontSize(fontSize)}
+            setFontSize={setFontSize}
+            boldText={boldText}
+            setBoldText={setBoldText}
+            selectToCopy={selectToCopy}
+            setSelectToCopy={setSelectToCopy}
             presetId={presetId}
             selectPreset={selectTaskPreset}
             workspaceId={workspaceId}
             effortChanged={(id) => {
               if (id === presetId) setEffortChoice({ id: "", level: "" });
             }}
-            theme={theme}
-            setTheme={setTheme}
+            themeChoice={themeChoice}
+            setThemeChoice={setThemeChoice}
             accent={accent}
             setAccent={setAccent}
-            back={() => navigate("new")}
+            back={() => { setSettingsOpen(false); setGuideStep(null); }}
             data={data}
             favorites={favorites}
             toggleFavorite={favorite}
@@ -1018,6 +1705,8 @@ export function App() {
                     <div className="conversation-content">
                       <Transcript
                         key={detail.session.id}
+                        forced={processForced}
+                        report={reportProcessTurn}
                         autoCollapseProcess={autoCollapseProcess}
                         disconnected={
                           !connected || statusesStale || !!sessionError
@@ -1078,12 +1767,15 @@ export function App() {
               </div>
               {detail && (
                 <div className="session-composer">
-                  <CurrentActivity
-                    session={detail.session}
-                    disconnected={!connected || statusesStale || !!sessionError}
-                  />
                   <div className="session-workbar">
+                    {/* Status and location are both one line of context; keeping
+                        them on separate bands cost a row above the composer. */}
+                    <CurrentActivity
+                      session={detail.session}
+                      disconnected={!connected || statusesStale || !!sessionError}
+                    />
                     <button
+                      className="workbar-folder"
                       title={detail.session.cwd}
                       onClick={() => setFilesOpen(true)}
                     >
@@ -1091,6 +1783,32 @@ export function App() {
                       {detail.session.cwd?.split("/").pop() || "工作文件"}
                     </button>
                     {!isPreview && <ProjectMaterials key={detail.session.workspaceId} workspaceId={detail.session.workspaceId} />}
+                    {detail.events.some((e) => e.kind === "tool" || e.thinking) &&
+                      (() => {
+                        // Anything still open means the useful action is to close it.
+                        const collapseNext = Object.values(processTurns).some(
+                          (collapsed) => !collapsed,
+                        );
+                        return (
+                          <button
+                            className="process-toggle-all"
+                            aria-expanded={collapseNext}
+                            onClick={() =>
+                              setProcessForced({
+                                collapsed: collapseNext,
+                                revision: (processForced?.revision || 0) + 1,
+                              })
+                            }
+                          >
+                            {collapseNext ? (
+                              <ChevronsDownUp size={14} />
+                            ) : (
+                              <ChevronsUpDown size={14} />
+                            )}
+                            {collapseNext ? "收起全部过程" : "展开全部过程"}
+                          </button>
+                        );
+                      })()}
                     <SessionMenu
                       detail={detail}
                       action={runAction}
@@ -1278,6 +1996,108 @@ export function App() {
               workspaceId={detail.session.workspaceId}
             />
           )}
+        </Dialog>
+      )}
+      {renameSession && (
+        <Dialog title="重命名会话" close={() => setRenameSession(null)}>
+          <form
+            className="workspace-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitSessionRename();
+            }}
+          >
+            <label>
+              会话名称
+              <input
+                autoFocus
+                aria-label="会话名称"
+                value={renameSession.title}
+                maxLength={100}
+                autoComplete="off"
+                onChange={(e) =>
+                  setRenameSession({
+                    ...renameSession,
+                    title: e.target.value,
+                  })
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="button primary"
+              disabled={busy || !renameSession.title.trim()}
+            >
+              保存
+            </button>
+          </form>
+        </Dialog>
+      )}
+      {renameWorkspace && (
+        <Dialog title="重命名工作区" close={() => setRenameWorkspace(null)}>
+          <p className="dialog-intro">
+            只改侧栏显示的名称，电脑上的文件夹不变。
+          </p>
+          <form
+            className="workspace-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitWorkspaceRename();
+            }}
+          >
+            <label>
+              工作区名称
+              <input
+                autoFocus
+                aria-label="工作区名称"
+                value={renameWorkspace.name}
+                maxLength={120}
+                autoComplete="off"
+                onChange={(e) =>
+                  setRenameWorkspace({
+                    ...renameWorkspace,
+                    name: e.target.value,
+                  })
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="button primary"
+              disabled={!renameWorkspace.name.trim()}
+            >
+              保存
+            </button>
+          </form>
+        </Dialog>
+      )}
+      {removeWorkspace && (
+        <Dialog title="移除工作区" close={() => setRemoveWorkspace(null)}>
+          <p className="dialog-intro">
+            把「{removeWorkspace.name}」从侧栏移除。文件夹和里面的文件都不会被删除。
+          </p>
+          {removeWorkspace.sessions > 0 && (
+            <p className="muted">
+              这里的 {removeWorkspace.sessions} 个会话会移到「其他工作空间」分组，
+              仍然可以打开和搜索。
+            </p>
+          )}
+          <div className="workspace-form">
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => void submitWorkspaceRemove()}
+            >
+              移除
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => setRemoveWorkspace(null)}
+            >
+              取消
+            </button>
+          </div>
         </Dialog>
       )}
       {addFolder && (

@@ -25,62 +25,33 @@ SOURCE_DIR=""
 SOURCE_TMP_DIR=""
 INSTALL_REF=""
 RESOLVED_INSTALL_REF=""
-INSTALL_CHANNEL="latest-tag"
+INSTALL_CHANNEL="stable"
 REQUESTED_INSTALL_CHANNEL=""
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
 DEV_CHANNEL_REF="${MMS_INSTALL_DEV_REF:-dev}"
 CANARY_CHANNEL_REF="${MMS_INSTALL_CANARY_REF:-canary}"
 DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.3.1}"
-BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
-BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
-# Legacy env names remain accepted by installer aliases and downstream scripts.
-MINDKEEPER_DEFAULT_REF="$BRAINKEEPER_DEFAULT_REF"
-MINDKEEPER_INSTALL_REF="$BRAINKEEPER_INSTALL_REF"
-MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
-MAP_INSTALL_REF="${MAP_INSTALL_REF:-}"
-CODEGRAPH_PACKAGE_SPEC="${CODEGRAPH_PACKAGE_SPEC:-@colbymchenry/codegraph@latest}"
 CLAUDE_CLI_PACKAGE_SPEC="${CLAUDE_CLI_PACKAGE_SPEC:-@anthropic-ai/claude-code@latest}"
 CODEX_CLI_PACKAGE_SPEC="${CODEX_CLI_PACKAGE_SPEC:-@openai/codex@latest}"
 OPENCODE_CLI_PACKAGE_SPEC="${OPENCODE_CLI_PACKAGE_SPEC:-opencode-ai@latest}"
 PI_CLI_PACKAGE_SPEC="${PI_CLI_PACKAGE_SPEC:-@earendil-works/pi-coding-agent@0.85.1}"
-ECC_REPO_URL="${ECC_REPO_URL:-https://github.com/affaan-m/everything-claude-code}"
-ECC_INSTALL_REF="${ECC_INSTALL_REF:-}"
-OMC_REPO_URL="${OMC_REPO_URL:-https://github.com/Yeachan-Heo/oh-my-claudecode}"
-OMC_INSTALL_REF="${OMC_INSTALL_REF:-}"
 NVM_INSTALL_VERSION="${NVM_INSTALL_VERSION:-v0.40.3}"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=11
 BOOTSTRAP_PYTHON_VERSION="${MMS_BOOTSTRAP_PYTHON_VERSION:-3.13}"
 PYTHON_CMD="${MMS_INSTALL_PYTHON:-${MMS_PYTHON:-}}"
 INSTALL_LANG="zh"
-INSTALL_LANG_EXPLICIT=0
-WRITE_SHELL_RC=0
+WRITE_SHELL_RC=1
+INSTALL_CODING_FONTS=1
 RUN_SETUP=0
 ENSURE_NODE22=0
 LAUNCH_AFTER_INSTALL=0
-INSTALL_RTK=0
-INSTALL_RTK_EXPLICIT=0
-INSTALL_BRAINKEEPER_CONTEXT=0
-INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT=0
-INSTALL_MAP=0
-INSTALL_MAP_EXPLICIT=0
-INSTALL_CODEGRAPH=0
-INSTALL_CODEGRAPH_EXPLICIT=0
-# read-once pack removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
-INSTALL_OPS_ENV_SAFE=0
-INSTALL_OPS_ENV_SAFE_EXPLICIT=0
-INSTALL_TOKEN_SAVER=0
-INSTALL_TOKEN_SAVER_EXPLICIT=0
-INSTALL_TOON=0
-INSTALL_TOON_EXPLICIT=0
-INSTALL_ECC=0
-INSTALL_ECC_EXPLICIT=0
-INSTALL_OMC=0
-INSTALL_OMC_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
+CLEANUP_ONLY=0
+LAUNCH_WEB_MODE="ask"
 PRINT_ONLY_VERSION=0
 DRY_RUN=0
 
@@ -213,18 +184,6 @@ resolve_builtin_handover_root() {
     return 1
 }
 
-optional_rtk_installed() {
-    [ -x "$REAL_HOME/.claude/hooks/rtk-rewrite.sh" ]
-}
-
-optional_brainkeeper_context_installed() {
-    [ -f "$REAL_HOME/.claude/commands/distill.md" ] \
-        && [ -f "$REAL_HOME/.claude/commands/cz.md" ] \
-        && [ -x "$REAL_HOME/.claude/hooks/token-monitor-hook.sh" ] \
-        && [ -x "$BIN_DIR/bk" ] \
-        && [ -x "$BIN_DIR/brainkeeper" ]
-}
-
 optional_handover_continuity_installed() {
     local skill_dir
     local command_dir
@@ -277,45 +236,6 @@ optional_nsr_commands_installed() {
         [ -f "$command" ] || return 1
         grep -Fq "Managed by MMS builtin NSR" "$command" || return 1
     done
-}
-
-optional_map_installed() {
-    [ -f "${MAP_INSTALL_DIR:-$REAL_HOME/.local/share/map}/dist/cli/map.js" ]
-}
-
-optional_codegraph_installed() {
-    find_cli_binary codegraph >/dev/null 2>&1
-}
-
-optional_ops_env_safe_installed() {
-    [ -f "$REAL_HOME/.codex/skills/ops-env-safe/SKILL.md" ] \
-        && [ -f "$REAL_HOME/.claude/commands/ops-env-safe.md" ]
-}
-
-optional_token_saver_installed() {
-    [ -f "$REAL_HOME/.codex/skills/token-saver/SKILL.md" ] \
-        && [ -f "$REAL_HOME/.claude/skills/token-saver/SKILL.md" ] \
-        && [ -x "$BIN_DIR/token-saver" ]
-}
-
-optional_toon_installed() {
-    [ -f "$REAL_HOME/.codex/skills/toon/SKILL.md" ] \
-        && [ -f "$REAL_HOME/.claude/skills/toon/SKILL.md" ] \
-        && [ -x "$BIN_DIR/mms-toon" ]
-}
-
-optional_ecc_installed() {
-    local pack_dir="$MMS_HOME/agent-packs/everything-claude-code"
-    [ -f "$pack_dir/hooks/hooks.json" ] \
-        && [ -d "$pack_dir/commands" ] \
-        && [ -d "$pack_dir/skills" ]
-}
-
-optional_omc_installed() {
-    local pack_dir="$MMS_HOME/agent-packs/oh-my-claudecode"
-    [ -f "$pack_dir/hooks/hooks.json" ] \
-        && [ -d "$pack_dir/skills" ] \
-        && [ -f "$pack_dir/.claude-plugin/plugin.json" ]
 }
 
 bundled_session_asset_present() {
@@ -379,55 +299,6 @@ print_bundled_session_asset_status() {
     done
 }
 
-note_optional_pack_detected() {
-    local zh_label="$1"
-    local en_label="$2"
-    if [ "$INSTALL_LANG" = "en" ]; then
-        echo "  ✓ Detected existing ${en_label}; keeping current setup (pass the explicit install flag to reinstall)"
-    else
-        echo "  ✓ 已检测到现有${zh_label}，保留当前配置（如需重装请显式传对应 --install-* 参数）"
-    fi
-}
-
-can_prompt_interactively() {
-    [ -r /dev/tty ] && [ -w /dev/tty ] || return 1
-    { : < /dev/tty > /dev/tty; } 2>/dev/null
-}
-
-read_from_tty() {
-    local prompt="$1"
-    local value=""
-
-    if ! can_prompt_interactively; then
-        return 1
-    fi
-
-    printf "%s" "$prompt" > /dev/tty
-    IFS= read -r value < /dev/tty || return 1
-    printf "%s" "$value"
-}
-
-confirm_from_tty() {
-    local prompt="$1"
-    local default_value="$2"
-    local answer=""
-    local normalized=""
-
-    answer="$(read_from_tty "$prompt")" || return 1
-    normalized="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]' | xargs)"
-    if [ -z "$normalized" ]; then
-        normalized="$default_value"
-    fi
-    case "$normalized" in
-        y|yes)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
 fetch_url_stdout() {
     local url="$1"
     if command -v curl >/dev/null 2>&1; then
@@ -458,7 +329,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--channel stable|dev|canary] [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-token-saver] [--install-toon] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
+  bash install.sh [--channel stable|dev|canary] [--dry-run] [--no-shell-rc] [--no-launch-web] [--launch-web] [--run-setup] [--ensure-node22] [--lang zh|en] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --stable
   bash install.sh --dev
@@ -468,31 +339,25 @@ $(t "用法:" "Usage:")
   bash install.sh --latest-release
   bash install.sh --version
   bash install.sh --check
+  bash install.sh --cleanup-retired-packs
 
 $(t "说明:" "Notes:")
-  - $(t "推荐显式选择 --channel stable|dev|canary；默认远程安装/升级仍兼容旧行为使用最新 semver tag" "Prefer explicit --channel stable|dev|canary; default remote install/upgrade remains backward-compatible and uses the latest semver tag")
+  - $(t "不带参数就是给普通用户的正确安装：stable 通道、写入 shell PATH、装完询问是否打开 MMS Web" "Running it with no arguments is the right install for most people: the stable channel, PATH written to your shell, and a final question offering to open MMS Web")
   - $(t "--stable / --dev / --canary 是 --channel stable|dev|canary 的短别名" "--stable / --dev / --canary are short aliases for --channel stable|dev|canary")
   - $(t "--ref 可指定版本号或分支，例如 v1.2.0 / main / dev / canary" "--ref can pin a specific version or branch, for example v1.2.0 / main / dev / canary")
   - $(t "--version 仅显示当前脚本将安装的版本，不执行安装" "--version prints the version/ref this script would install without installing")
   - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
+  - $(t "--cleanup-retired-packs 只清理已退休可选包留下的 MMS 条目，不安装、不升级；每次正常安装也会自动做这件事" "--cleanup-retired-packs only removes MMS-written leftovers from retired optional packs without installing or upgrading; a normal install does this automatically too")
   - $(t "--dry-run 只显示本次会写入/安装/初始化什么，不创建 venv、不复制文件、不运行 setup" "--dry-run only prints what would be written/installed/initialized; it does not create a venv, copy files, or run setup")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
-  - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
-  - $(t "--install-brainkeeper-context 会全量安装/更新 BrainKeeper context pack：BrainKeeper MCP、Claude 的 /distill /cz /cr、token hooks、bk/brainkeeper 命令；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude /distill /cz /cr commands, token hooks, and bk/brainkeeper commands; by default it pins the MMS-tested BrainKeeper tag")
-  - $(t "--brainkeeper-ref 可覆盖 BrainKeeper 安装版本，例如 v2.4.1 / main" "--brainkeeper-ref overrides the BrainKeeper install ref, for example v2.4.1 / main")
-  - $(t "旧参数 --install-mindkeeper-context / --mindkeeper-ref 仍兼容，但已 deprecated" "Legacy --install-mindkeeper-context / --mindkeeper-ref remain compatible but are deprecated")
-  - $(t "--install-map 只安装显式 Map CLI，不注册自动 hook" "--install-map installs the explicit Map CLI without automatic hooks")
-  - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
-  - $(t "--install-codegraph 安装显式 CodeGraph CLI/MCP，不自动建索引" "--install-codegraph installs explicit CodeGraph CLI/MCP without automatic indexing")
-  - $(t "--codegraph-package 可覆盖 npm 包规格，例如 @colbymchenry/codegraph@0.7.6" "--codegraph-package overrides the npm package spec, for example @colbymchenry/codegraph@0.7.6")
-  # --install-read-once removed 2026-06-12; see installed-skills/AGENTS.md Removed Packs
-  - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令，用于长日志/测试输出/diff 的 ref+snippet 收纳" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command for long logs/test output/diff refs and snippets")
-  - $(t "--install-toon 会安装 Codex/Claude 共用 TOON skill 和本机 mms-toon 命令，用于结构化 JSON/status/handoff 压缩；MMS session 内仍默认内建 TOON" "--install-toon installs the shared Codex/Claude TOON skill plus the local mms-toon command for structured JSON/status/handoff compression; MMS sessions still bundle TOON by default")
-  - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
-  - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
-  - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供；NSR 工具随 channel 内建，/nsr 命令会自动安装，自动 hook 已退休；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, and token-saver ship as bundled MMS session assets; NSR tools ship with each channel and /nsr commands are auto-installed; automatic hooks are retired; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
-  - $(t "--install-cli 可选安装 claude/codex/opencode/pi（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode/pi (comma-separated); CLIs with npm packages are installed through npm")
+  - $(t "安装过程零交互：不询问可选包，也不询问 UI 语言；唯一的提问是装完之后要不要打开 MMS Web" "The install is non-interactive: no optional-pack questions and no UI language prompt; the only question comes after everything is installed and just offers to open MMS Web")
+  - $(t "--launch-web 跳过提问直接打开，--no-launch-web 完全不打开；没有终端时不提问，只打印命令" "--launch-web opens it without asking, --no-launch-web never opens it; with no terminal available nothing is asked and the command is printed instead")
+  - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
+  - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
+  - $(t "内建能力（网页访问、浏览器自动化、省 token 工具、Caveman、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (web access, browser automation, token savers, Caveman, NSR) ship with MMS and only apply inside sessions MMS starts")
+  - $(t "内置命令 offduty/onduty/nsr 会安装到 Claude、Codex、OpenCode，不注册自动 hook，不改全局配置" "The built-in offduty/onduty/nsr commands are installed for Claude, Codex and OpenCode without registering automatic hooks or changing global config")
+  - $(t "--install-cli 可显式指定要补装的 CLI：claude/codex/opencode/pi（逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli explicitly selects which CLIs to install: claude/codex/opencode/pi (comma-separated); CLIs with npm packages are installed through npm")
+  - $(t "默认安装 Fira Code 与 JetBrains Mono 到用户字体目录，供 Web 字体选择使用；已装则跳过，--no-coding-fonts 可关闭" "Fira Code and JetBrains Mono are installed into the user font directory for the Web font picker; already-installed families are skipped, and --no-coding-fonts turns this off")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -550,329 +415,6 @@ parse_install_cli_arg() {
         usage
         exit 1
     fi
-}
-
-prompt_install_language() {
-    local answer=""
-    local normalized=""
-
-    if [ "$INSTALL_LANG_EXPLICIT" -eq 1 ]; then
-        return 0
-    fi
-
-    if ! can_prompt_interactively; then
-        return 0
-    fi
-
-    echo ""
-    echo "Language / 语言"
-    echo "  1) 中文"
-    echo "  2) English"
-    answer="$(read_from_tty 'Choose UI language [1/2, default 1]: ')" || return 0
-    normalized="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]' | xargs)"
-
-    case "$normalized" in
-        2|en|english)
-            INSTALL_LANG="en"
-            ;;
-        *)
-            INSTALL_LANG="zh"
-            ;;
-    esac
-}
-
-prompt_optional_install_choices() {
-    local cli_name=""
-    local cli_command=""
-    local cli_label=""
-    local cli_path=""
-
-    if ! can_prompt_interactively; then
-        return 0
-    fi
-
-    if [ "$INSTALL_RTK_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_rtk_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional enhancement"
-            else
-                echo "可选增强"
-            fi
-            note_optional_pack_detected " RTK 改写" "RTK rewrite"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional enhancement"
-            echo "  RTK rewrite reduces token-heavy Bash commands in Claude sessions."
-            if confirm_from_tty "Install jq + rtk and enable Claude RTK rewrite hook? [y/N]: " "n"; then
-                INSTALL_RTK=1
-            fi
-        else
-            echo "可选增强"
-            echo "  RTK rewrite 可以把 Claude 里的 Bash 命令改写成更省 token 的形式。"
-            if confirm_from_tty "是否安装 jq + rtk 并启用 Claude RTK rewrite hook？[y/N]: " "n"; then
-                INSTALL_RTK=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_brainkeeper_context_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional context tools"
-            else
-                echo "可选上下文工具"
-            fi
-            note_optional_pack_detected " BrainKeeper 上下文包" "BrainKeeper context pack"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional context tools"
-            echo "  Full BrainKeeper context pack: installs/updates the BrainKeeper repo into ~/.local/share/brainkeeper."
-            echo "  Adds BrainKeeper MCP, Claude /distill /cz /cr, token hooks, and bk/brainkeeper commands."
-            echo "  By default MMS pins BrainKeeper to ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}."
-            if confirm_from_tty "Install BrainKeeper context pack for Claude? [y/N]: " "n"; then
-                INSTALL_BRAINKEEPER_CONTEXT=1
-            fi
-        else
-            echo "可选上下文工具"
-            echo "  BrainKeeper 全量 context pack：会把 BrainKeeper 仓库安装/更新到 ~/.local/share/brainkeeper。"
-            echo "  同时添加 BrainKeeper MCP、Claude /distill /cz /cr、token hooks，以及 bk/brainkeeper 命令。"
-            echo "  默认会锁定到 ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}。"
-            if confirm_from_tty "是否安装 BrainKeeper 上下文包（Claude）？[y/N]: " "n"; then
-                INSTALL_BRAINKEEPER_CONTEXT=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_MAP_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_map_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional Claude hook"
-            else
-                echo "可选 Claude hook"
-            fi
-            note_optional_pack_detected " Map CLI" "Map CLI"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional Claude hook"
-            echo "  Map builds a lightweight project-structure map so Claude can orient in a repo faster."
-            echo "  The SessionStart hook refreshes the structure index automatically."
-            echo "  By default MMS reuses an existing Node.js 18+ runtime when available; otherwise Map is skipped unless you explicitly ask for --ensure-node22."
-            if confirm_from_tty "Install Map CLI for explicit use? [y/N]: " "n"; then
-                INSTALL_MAP=1
-            fi
-        else
-            echo "可选 Claude hook"
-            echo "  Map 会建立轻量项目结构地图，让 Claude 更快理解 repo。"
-    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
-            echo "  默认优先复用现有 Node.js 18+；如果没有合适版本，会先跳过 Map，除非你显式要求 --ensure-node22。"
-            if confirm_from_tty "是否安装显式 Map CLI？[y/N]: " "n"; then
-                INSTALL_MAP=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_CODEGRAPH_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_codegraph_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional code intelligence"
-            else
-                echo "可选代码索引"
-            fi
-            note_optional_pack_detected " CodeGraph CLI" "CodeGraph CLI"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional code intelligence"
-            echo "  CodeGraph installs a local CLI/MCP server for symbol search, callers/callees, and code context."
-    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
-            echo "  It uses npm and may fall back to MMS-managed nvm Node.js 22 without changing your default Node."
-            if confirm_from_tty "Install CodeGraph CLI? [y/N]: " "n"; then
-                INSTALL_CODEGRAPH=1
-            fi
-        else
-            echo "可选代码索引"
-            echo "  CodeGraph 会安装本机 CLI/MCP server，用于 symbol search、callers/callees 和代码上下文检索。"
-            echo "  按当前任务需要显式运行 CodeGraph；不会在 SessionStart 建立或同步索引。"
-            echo "  它使用 npm；必要时会临时用 MMS-managed nvm Node.js 22，不会修改你的默认 Node。"
-            if confirm_from_tty "是否安装 CodeGraph CLI？[y/N]: " "n"; then
-                INSTALL_CODEGRAPH=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_TOKEN_SAVER_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_token_saver_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional token saving"
-            else
-                echo "可选省 token 工具"
-            fi
-            note_optional_pack_detected " token-saver" "token-saver"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional token saving"
-            echo "  Token Saver installs a shared Codex/Claude skill and local commands for large-output refs/snippets plus gain stats."
-            echo "  Use it for long logs, test output, broad rg, git diff/show, and noisy diagnostics."
-            echo "  Agents use the low-level commands automatically; users can just say /token-saver or ask to save context."
-            if confirm_from_tty "Install Token Saver for Codex and Claude? [y/N]: " "n"; then
-                INSTALL_TOKEN_SAVER=1
-            fi
-        else
-            echo "可选省 token 工具"
-            echo "  Token Saver 会安装 Codex/Claude 共用 skill 和本机命令，用 ref/snippet 收纳长输出并显示 gain 统计。"
-            echo "  适合长日志、测试输出、大范围 rg、git diff/show 和 noisy diagnostics。"
-            echo "  底层命令由 agent 自动使用；用户只需要说 /token-saver 或“省点 context”。"
-            if confirm_from_tty "是否为 Codex 和 Claude 安装 Token Saver？[y/N]: " "n"; then
-                INSTALL_TOKEN_SAVER=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_TOON_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_toon_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional structured context compression"
-            else
-                echo "可选结构化上下文压缩"
-            fi
-            note_optional_pack_detected " TOON" "TOON"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional structured context compression"
-            echo "  TOON compresses structured JSON/status/handoff packets for model-to-model context."
-            echo "  It installs a Codex/Claude skill plus the local mms-toon command for export-only sessions."
-            echo "  Do not use it for prose, code, raw logs, secrets, or exact API JSON."
-            echo "  MMS-launched sessions already receive TOON as a session-local built-in asset."
-            if confirm_from_tty "Install global TOON skill and mms-toon command? [y/N]: " "n"; then
-                INSTALL_TOON=1
-            fi
-        else
-            echo "可选结构化上下文压缩"
-            echo "  TOON 用来压缩结构化 JSON/status/handoff，方便模型之间传递上下文。"
-            echo "  它会安装 Codex/Claude 共用 skill 和本机 mms-toon 命令，方便 export-only 会话使用。"
-            echo "  不用于 prose、代码、原始日志、secret 或 CLI/API 要求精确的 JSON。"
-            echo "  通过 MMS 启动的 session 已经默认内建 TOON session asset。"
-            if confirm_from_tty "是否安装全局 TOON skill 和 mms-toon 命令？[y/N]: " "n"; then
-                INSTALL_TOON=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_ECC_EXPLICIT" -eq 0 ] || [ "$INSTALL_OMC_EXPLICIT" -eq 0 ]; then
-        local answer=""
-        local normalized=""
-        local ecc_ready=0
-        local omc_ready=0
-
-        optional_ecc_installed && ecc_ready=1 || true
-        optional_omc_installed && omc_ready=1 || true
-
-        echo ""
-        if [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional Claude agent packs"
-            [ "$ecc_ready" -eq 1 ] && note_optional_pack_detected " ECC" "ECC"
-            [ "$omc_ready" -eq 1 ] && note_optional_pack_detected " OMC" "OMC"
-            echo "  ECC: engineering workflow / rules / quality hooks."
-            echo "  OMC: orchestration runtime / team / verify loop."
-            echo "  These are installed under ~/.mms/agent-packs and stay disabled until selected in the launch confirm page."
-            if [ "$ecc_ready" -eq 1 ] && [ "$omc_ready" -eq 1 ]; then
-                :
-            else
-                answer="$(read_from_tty "Install Claude agent packs? [n/ecc/omc/both, default n]: ")" || answer="n"
-            fi
-        else
-            echo "可选 Claude agent packs"
-            [ "$ecc_ready" -eq 1 ] && note_optional_pack_detected " ECC" "ECC"
-            [ "$omc_ready" -eq 1 ] && note_optional_pack_detected " OMC" "OMC"
-            echo "  ECC：工程 workflow / rules / quality hooks。"
-            echo "  OMC：orchestration runtime / team / verify loop。"
-            echo "  它们会安装到 ~/.mms/agent-packs，默认不启用，只在启动确认页选择后注入 session。"
-            if [ "$ecc_ready" -eq 1 ] && [ "$omc_ready" -eq 1 ]; then
-                :
-            else
-                answer="$(read_from_tty "是否安装 Claude agent packs？[n/ecc/omc/both，默认 n]: ")" || answer="n"
-            fi
-        fi
-
-        normalized="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]' | xargs)"
-        [ -z "$normalized" ] && normalized="n"
-        case "$normalized" in
-            e|ecc)
-                if [ "$INSTALL_ECC_EXPLICIT" -eq 0 ] && [ "$ecc_ready" -eq 0 ]; then
-                    INSTALL_ECC=1
-                fi
-                ;;
-            o|omc)
-                if [ "$INSTALL_OMC_EXPLICIT" -eq 0 ] && [ "$omc_ready" -eq 0 ]; then
-                    INSTALL_OMC=1
-                fi
-                ;;
-            b|both|all|agent-packs|agent_packs)
-                if [ "$INSTALL_ECC_EXPLICIT" -eq 0 ] && [ "$ecc_ready" -eq 0 ]; then
-                    INSTALL_ECC=1
-                fi
-                if [ "$INSTALL_OMC_EXPLICIT" -eq 0 ] && [ "$omc_ready" -eq 0 ]; then
-                    INSTALL_OMC=1
-                fi
-                ;;
-            *)
-                :
-                ;;
-        esac
-    fi
-
-    echo ""
-    if [ "$INSTALL_LANG" = "en" ]; then
-        echo "Bundled session mode"
-        echo "  Caveman, TOON, token-saver, and the Web automation bundle ship inside MMS as pinned session assets."
-        echo "  Web automation bundle = weber router + web-access logged-in Chrome + agent-browser headless CLI."
-        echo "  NSR ships as a channel-pinned payload too: /nsr provides an explicit bounded manual work loop; automatic Stop hooks are retired."
-        echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config; installer only adds the /nsr command docs."
-    else
-        echo "内建 session 模式"
-        echo "  Caveman、TOON、token-saver 和 Web automation bundle 会随 MMS 一起作为内建 session 资产提供。"
-        echo "  Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。"
-        echo "  NSR payload 也随 channel 内建：/nsr 提供显式、有界的手动工作循环；自动 Stop hook 已退休。"
-        echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置；安装器只补 /nsr 命令文档。"
-    fi
-
-    if [ "$INSTALL_CLI_EXPLICIT" -eq 1 ]; then
-        return 0
-    fi
-
-    echo ""
-    echo "$(t "可选 CLI 工具" "Optional CLI tools")"
-
-    for cli_name in claude codex opencode; do
-        case "$cli_name" in
-            claude)
-                cli_command="claude"
-                cli_label="Claude Code"
-                ;;
-            codex)
-                cli_command="codex"
-                cli_label="Codex CLI"
-                ;;
-            opencode)
-                cli_command="opencode"
-                cli_label="OpenCode CLI"
-                ;;
-        esac
-
-        if cli_path="$(find_cli_binary "$cli_command" 2>/dev/null)"; then
-            echo "  ✓ $(t "已检测到" "Detected"): $cli_label ($cli_path)"
-            continue
-        fi
-
-        if [ "$INSTALL_LANG" = "en" ]; then
-            if confirm_from_tty "  ${cli_label} not found. Install now? [y/N]: " "n"; then
-                append_csv_item "$cli_name"
-            fi
-        else
-            if confirm_from_tty "  未检测到 ${cli_label}，现在安装吗？[y/N]: " "n"; then
-                append_csv_item "$cli_name"
-            fi
-        fi
-    done
 }
 
 resolve_latest_tag() {
@@ -1441,28 +983,6 @@ ensure_node18_npm_for_optional_pack() {
     return 1
 }
 
-brainkeeper_node_command() {
-    local candidate=""
-    local path_node=""
-
-    path_node="$(command -v node 2>/dev/null || true)"
-    for candidate in \
-        "$REAL_HOME/.nvm/versions/node/"*/bin/node \
-        "/opt/homebrew/bin/node" \
-        "/usr/local/bin/node" \
-        "/usr/bin/node" \
-        "$path_node"; do
-        [ -n "$candidate" ] || continue
-        [ -x "$candidate" ] || continue
-        if "$candidate" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' >/dev/null 2>&1; then
-            printf "%s\n" "$candidate"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
 install_named_cli() {
     local cli_name="$1"
     local cli_path=""
@@ -1515,6 +1035,73 @@ install_named_cli() {
     return 1
 }
 
+# Coding faces the Web UI offers in its font picker. Both are SIL OFL, so they
+# can be redistributed; the picker only lists families that are actually
+# installed, so without these the options simply never appear.
+CODING_FONT_SPECS=(
+    "Fira Code|FiraCode-Regular|https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip|ttf/FiraCode-*.ttf"
+    "JetBrains Mono|JetBrainsMono-Regular|https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip|fonts/ttf/JetBrainsMono-*.ttf"
+)
+
+user_font_dir() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        printf "%s/Library/Fonts" "$REAL_HOME"
+    else
+        printf "%s/.local/share/fonts" "$REAL_HOME"
+    fi
+}
+
+install_coding_fonts() {
+    local font_dir="" spec="" label="" probe="" url="" glob="" tmp="" archive=""
+    local installed=0 failed=0
+
+    if [ "$INSTALL_CODING_FONTS" != "1" ]; then
+        return 0
+    fi
+    font_dir="$(user_font_dir)"
+
+    for spec in "${CODING_FONT_SPECS[@]}"; do
+        IFS='|' read -r label probe url glob <<< "$spec"
+        # Already present, from this installer or from anywhere else.
+        if compgen -G "$font_dir/$probe*.ttf" > /dev/null 2>&1; then
+            continue
+        fi
+        if [ "$DRY_RUN" = "1" ]; then
+            echo "• $(t "将安装编程字体" "would install coding font"): $label -> $font_dir"
+            continue
+        fi
+        tmp="$(mktemp -d)" || { failed=$((failed + 1)); continue; }
+        archive="$tmp/font.zip"
+        if curl -fsSL --max-time 120 "$url" -o "$archive" \
+            && unzip -qo "$archive" -d "$tmp" > /dev/null 2>&1; then
+            mkdir -p "$font_dir"
+            # shellcheck disable=SC2086
+            if cp $tmp/$glob "$font_dir/" 2>/dev/null; then
+                # Keep upstream font license notices alongside the installed fonts.
+                local license_file
+                for license_file in "$tmp/OFL.txt" "$tmp/OFL.md" "$tmp/LICENSE" "$tmp/LICENSE.txt"; do
+                    [ ! -f "$license_file" ] || cp "$license_file" "$font_dir/$probe-LICENSE.txt"
+                done
+                installed=$((installed + 1))
+            else
+                failed=$((failed + 1))
+            fi
+        else
+            failed=$((failed + 1))
+        fi
+        rm -rf "$tmp"
+    done
+
+    if [ "$installed" -gt 0 ]; then
+        command -v fc-cache > /dev/null 2>&1 && fc-cache -f > /dev/null 2>&1
+        echo "✓ $(t "已安装 $installed 组编程字体到 $font_dir" "installed $installed coding font families into $font_dir")"
+    fi
+    if [ "$failed" -gt 0 ]; then
+        echo "⚠ $(t "$failed 组编程字体未安装完成；不影响 MMS，可稍后重试或手动安装。" "$failed coding font families did not install; MMS is unaffected, retry or install them by hand later.")"
+    fi
+    return 0
+}
+
 install_requested_clis() {
     local cli_name=""
 
@@ -1523,12 +1110,88 @@ install_requested_clis() {
     fi
 
     echo ""
-    echo "$(t "正在安装可选 CLI..." "Installing optional CLIs...")"
+    echo "$(t "正在安装所需 CLI..." "Installing required CLIs...")"
 
     IFS=',' read -r -a _requested_cli_items <<< "$INSTALL_CLI_LIST"
     for cli_name in "${_requested_cli_items[@]}"; do
         install_named_cli "$cli_name" || true
     done
+}
+
+cli_label_for() {
+    case "$1" in
+        claude) printf "Claude Code" ;;
+        codex) printf "Codex CLI" ;;
+        opencode) printf "OpenCode CLI" ;;
+        pi) printf "Pi coding agent" ;;
+        *) printf "%s" "$1" ;;
+    esac
+}
+
+# Non-interactive default: pi is required by the pilot web app, and any missing
+# claude/codex/opencode is filled in. Already-installed CLIs are left untouched.
+resolve_default_cli_installs() {
+    local cli_name=""
+    local cli_path=""
+
+    echo ""
+    echo "$(t "检查所需 CLI..." "Checking required CLIs...")"
+
+    for cli_name in pi claude codex opencode; do
+        if cli_path="$(find_cli_binary "$cli_name" 2>/dev/null)"; then
+            echo "  ✓ $(t "已检测到" "Detected"): $(cli_label_for "$cli_name") ($cli_path)"
+            continue
+        fi
+        if [ "$cli_name" != "pi" ] && [ "$INSTALL_CLI_EXPLICIT" -eq 1 ]; then
+            echo "  • $(t "未安装，本次按 --install-cli 跳过" "Not installed; skipped because --install-cli was given"): $(cli_label_for "$cli_name")"
+            continue
+        fi
+        echo "  • $(t "未检测到，将自动安装" "Not found, will install"): $(cli_label_for "$cli_name")"
+        append_csv_item "$cli_name"
+    done
+}
+
+print_cli_install_status() {
+    local cli_name=""
+    local cli_path=""
+
+    for cli_name in pi claude codex opencode; do
+        if cli_path="$(find_cli_binary "$cli_name" 2>/dev/null)"; then
+            echo "✓ $(cli_label_for "$cli_name") $(t "已安装" "installed"): $cli_path"
+        elif [ "$cli_name" = "pi" ]; then
+            echo "• $(cli_label_for "$cli_name") $(t "未安装；pilot web 端需要它，重跑安装器即可补装" "not installed; the pilot web app needs it, rerun the installer to add it")"
+        else
+            echo "• $(cli_label_for "$cli_name") $(t "未安装；重跑安装器会自动补装" "not installed; rerunning the installer adds it")"
+        fi
+    done
+}
+
+# Pi runs through scripts/pi-cli-wrapper.sh, which resolves the agent from a
+# local npx cache. Warm that cache with the same pinned spec used for the global
+# install so the first pilot launch is not blocked on a download.
+warm_pi_runtime_cache() {
+    local cache_dir="${MMS_PI_NPX_CACHE:-$MMS_HOME/.ai/cache/pi-npx}"
+
+    if [ ! -x "$MMS_HOME/scripts/pi-cli-wrapper.sh" ]; then
+        echo "⚠ $(t "找不到 pi wrapper，跳过运行时预热" "pi wrapper not found, skipping runtime warmup"): $MMS_HOME/scripts/pi-cli-wrapper.sh"
+        return 0
+    fi
+
+    if ! command -v npx >/dev/null 2>&1; then
+        echo "⚠ $(t "缺少 npx，跳过 pi 运行时预热；pilot 首次启动时会自行下载" "npx is missing, skipping pi runtime warmup; the first pilot launch will download it")"
+        return 0
+    fi
+
+    echo ""
+    echo "$(t "正在准备 pi 运行环境，第一次会下载，请稍候..." "Preparing the pi runtime; the first run downloads it, please wait...")"
+    mkdir -p "$cache_dir"
+    if NPM_CONFIG_UPDATE_NOTIFIER=false npx -y --cache "$cache_dir" "$PI_CLI_PACKAGE_SPEC" --version >/dev/null 2>&1; then
+        echo "✓ $(t "pi 运行时 cache 已就绪" "pi runtime cache ready"): $cache_dir"
+        return 0
+    fi
+
+    echo "⚠ $(t "pi 运行时预热未成功；pilot 首次启动时会重试下载" "pi runtime warmup did not succeed; the first pilot launch retries the download")"
+    return 0
 }
 
 append_claude_hook_command() {
@@ -2138,10 +1801,43 @@ PY
     sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_META_PATH" | head -n 1
 }
 
+# An explicit --ref pins a version outright, so reporting a channel there would
+# contradict the pinned ref.
+install_channel_label() {
+    if [ -n "$INSTALL_REF" ]; then
+        printf "pinned-ref"
+    else
+        printf "%s" "$INSTALL_CHANNEL"
+    fi
+}
+
 print_planned_version() {
     ensure_install_ref_resolved
     echo "$(t "计划安装版本" "Planned install ref"): ${RESOLVED_INSTALL_REF:-local-source}"
-    echo "$(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
+    echo "$(t "安装通道" "Install channel"): $(install_channel_label)"
+}
+
+# A newcomer running the plain command does not need the channel/ref matrix;
+# one line saying what is being installed is enough. The full overview stays for
+# --version, --check, and anyone who picked a channel or ref explicitly.
+print_install_headline() {
+    local installed_ref=""
+
+    if [ -n "$REQUESTED_INSTALL_CHANNEL" ] || [ -n "$INSTALL_REF" ]; then
+        print_version_overview
+        return 0
+    fi
+
+    ensure_install_ref_resolved
+    installed_ref="$(current_installed_ref || true)"
+    if [ -z "$installed_ref" ]; then
+        echo "$(t "安装最新版本" "Installing the latest version"): ${RESOLVED_INSTALL_REF:-local-source}"
+    elif [ "$installed_ref" = "${RESOLVED_INSTALL_REF:-}" ]; then
+        echo "$(t "已经是最新版本，将重新安装" "Already on the latest version, reinstalling it"): ${installed_ref}"
+    else
+        echo "$(t "升级到最新版本" "Upgrading to the latest version"): ${installed_ref} → ${RESOLVED_INSTALL_REF:-local-source}"
+    fi
+    return 0
 }
 
 print_version_overview() {
@@ -2162,7 +1858,7 @@ print_version_overview() {
     echo "  $(t "版本轨道" "Version track"): $(release_track_label) ($(release_track_version))"
     echo "  $(t "线上最新（latest tag）" "Latest upstream tag (latest tag)"): ${latest_tag_ref:-$(t "未获取" "unavailable")}"
     echo "  $(t "本次准备安装" "Planned install ref"): ${RESOLVED_INSTALL_REF:-local-source}"
-    echo "  $(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
+    echo "  $(t "安装通道" "Install channel"): $(install_channel_label)"
 }
 
 legacy_config_has_route_candidates() {
@@ -2260,23 +1956,7 @@ run_install_check() {
     fi
 
 
-    if optional_brainkeeper_context_installed; then
-        echo "✓ $(t "BrainKeeper context pack 已安装" "BrainKeeper context pack installed"): $REAL_HOME/.local/share/brainkeeper"
-    else
-        echo "• $(t "BrainKeeper context pack 未安装或命令链接不完整（可选）" "BrainKeeper context pack not installed or command wrappers incomplete (optional)"): --install-brainkeeper-context"
-    fi
-
-    if optional_codegraph_installed; then
-        echo "✓ $(t "CodeGraph CLI 已安装" "CodeGraph CLI installed"): $(find_cli_binary codegraph || true)"
-    else
-        echo "• $(t "CodeGraph CLI 未安装（可选）" "CodeGraph CLI not installed (optional)"): --install-codegraph"
-    fi
-
-    if optional_toon_installed; then
-        echo "✓ $(t "TOON 全局 skill/命令已安装" "TOON global skill/command installed"): $BIN_DIR/mms-toon"
-    else
-        echo "• $(t "TOON 全局 skill/命令未安装（可选；MMS session 内建仍可用）" "TOON global skill/command not installed (optional; bundled MMS sessions still work)"): --install-toon"
-    fi
+    print_cli_install_status
 
     print_bundled_session_asset_status
 
@@ -2291,1245 +1971,8 @@ run_install_check() {
     else
         echo "• $(t "/nsr 命令未安装或被自定义覆盖（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "/nsr commands missing or custom-overridden (built-in auto-install; rerun MMS install or upgrade if missing)")"
     fi
-
-    if optional_ecc_installed; then
-        echo "✓ $(t "ECC agent pack 已安装" "ECC agent pack installed"): $MMS_HOME/agent-packs/everything-claude-code"
-    else
-        echo "• $(t "ECC agent pack 未安装（可选）" "ECC agent pack not installed (optional)"): --install-ecc"
-    fi
-
-    if optional_omc_installed; then
-        echo "✓ $(t "OMC agent pack 已安装" "OMC agent pack installed"): $MMS_HOME/agent-packs/oh-my-claudecode"
-    else
-        echo "• $(t "OMC agent pack 未安装（可选）" "OMC agent pack not installed (optional)"): --install-omc"
-    fi
 }
 
-
-enable_rtk_rewrite_hook() {
-    local hook_source="$SOURCE_DIR/hooks/rtk-rewrite.sh"
-    local claude_dir="$REAL_HOME/.claude"
-    local hook_dir="$claude_dir/hooks"
-    local hook_target="$hook_dir/rtk-rewrite.sh"
-
-    if [ ! -f "$hook_source" ]; then
-        echo "⚠ $(t "找不到 RTK hook 模板，跳过" "RTK hook template not found, skipping"): $hook_source"
-        return 1
-    fi
-
-    mkdir -p "$hook_dir"
-    cp "$hook_source" "$hook_target"
-    chmod +x "$hook_target"
-
-    append_claude_hook_command \
-        "$claude_dir/settings.json" \
-        "PreToolUse" \
-        "Bash" \
-        "/bin/bash $hook_target" \
-        "$hook_target" \
-        "bash $hook_target" \
-        "/bin/bash $hook_target"
-
-    echo "✓ $(t "已启用 Claude RTK rewrite hook" "Claude RTK rewrite hook enabled")"
-    return 0
-}
-
-enable_rtk_codex_integration() {
-    if ! command -v codex >/dev/null 2>&1; then
-        echo "⚠ $(t "未检测到 Codex CLI，跳过 Codex 的 RTK 初始化" "Codex CLI not found, skipping Codex RTK init")"
-        return 1
-    fi
-
-    if ! command -v rtk >/dev/null 2>&1; then
-        echo "⚠ $(t "未检测到 rtk，跳过 Codex 的 RTK 初始化" "rtk not found, skipping Codex RTK init")"
-        return 1
-    fi
-
-    run_optional_command \
-        "$(t "Codex RTK 全局初始化" "Codex RTK global init")" \
-        rtk init --codex --global
-}
-
-install_optional_rtk() {
-    echo ""
-    echo "$(t "正在安装 RTK 可选增强..." "Installing optional RTK enhancement...")"
-
-    ensure_brew_package "jq" "jq" "jq" || true
-    ensure_brew_package "rtk" "rtk" "rtk" || true
-
-    if ! command -v jq >/dev/null 2>&1 || ! command -v rtk >/dev/null 2>&1; then
-        echo "⚠ $(t "缺少 jq 或 rtk，跳过 hook 注入" "jq or rtk is missing, skipping hook enablement")"
-        return 1
-    fi
-
-    enable_rtk_rewrite_hook || true
-    enable_rtk_codex_integration || true
-}
-
-brainkeeper_git_available() {
-    local git_bin=""
-
-    git_bin="$(command -v git 2>/dev/null || true)"
-    [ -n "$git_bin" ] || return 1
-
-    if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] \
-        && [ "$git_bin" = "/usr/bin/git" ] \
-        && ! xcode-select -p >/dev/null 2>&1; then
-        return 1
-    fi
-
-    "$git_bin" --version >/dev/null 2>&1
-}
-
-write_brainkeeper_mcp_config() {
-    local settings_path="$REAL_HOME/.claude/settings.json"
-    local server_path="$REAL_HOME/.local/share/brainkeeper/dist/server.js"
-    local node_command=""
-    local py_output=""
-
-    if [ ! -f "$server_path" ]; then
-        echo "⚠ $(t "找不到 BrainKeeper MCP server，跳过 MCP 配置" "BrainKeeper MCP server not found, skipping MCP config"): $server_path"
-        return 1
-    fi
-
-    node_command="$(brainkeeper_node_command || true)"
-    if [ -z "$node_command" ]; then
-        echo "⚠ $(t "找不到 Node.js 18+，跳过 BrainKeeper MCP 配置" "Node.js 18+ not found, skipping BrainKeeper MCP config")"
-        return 1
-    fi
-
-    py_output="$("$(_python_bin)" - "$settings_path" "$server_path" "$node_command" <<'PY'
-import json
-import shutil
-import sys
-from datetime import datetime
-from pathlib import Path
-
-settings_path = Path(sys.argv[1])
-server_path = sys.argv[2]
-node_command = sys.argv[3]
-settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-data = {}
-backup_path = None
-if settings_path.exists():
-    try:
-        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            data = loaded
-    except Exception:
-        backup_path = settings_path.with_name(
-            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        )
-        shutil.copy2(settings_path, backup_path)
-        data = {}
-
-mcp_servers = data.get("mcpServers")
-if not isinstance(mcp_servers, dict):
-    mcp_servers = {}
-data["mcpServers"] = mcp_servers
-
-legacy = mcp_servers.get("mindkeeper")
-legacy_text = json.dumps(legacy, ensure_ascii=False).lower() if legacy else ""
-if legacy and ("mindkeeper" in legacy_text or "brainkeeper" in legacy_text):
-    mcp_servers.pop("mindkeeper", None)
-
-mcp_servers["brainkeeper"] = {
-    "command": node_command,
-    "args": [server_path],
-    "type": "stdio",
-}
-settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-if backup_path is not None:
-    print(f"BACKUP:{backup_path}")
-PY
-)"
-
-    if [ -n "$py_output" ]; then
-        echo "$py_output" | while IFS= read -r line; do
-            case "$line" in
-                BACKUP:*)
-                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
-                    ;;
-            esac
-        done
-    fi
-
-    echo "✓ $(t "已配置 BrainKeeper MCP" "BrainKeeper MCP configured"): $settings_path"
-    return 0
-}
-
-install_brainkeeper_from_archive() {
-    local effective_brainkeeper_ref="$1"
-    local install_dir="$REAL_HOME/.local/share/brainkeeper"
-    local tmp_dir=""
-    local archive_path=""
-    local archive_url=""
-    local extracted_dir=""
-    local new_dir=""
-    local backup_dir=""
-    local status=0
-
-    if ! ensure_node18_npm_for_optional_pack "BrainKeeper"; then
-        return 1
-    fi
-
-    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mms-brainkeeper.XXXXXX")"
-    archive_path="$tmp_dir/brainkeeper.tar.gz"
-
-    case "$effective_brainkeeper_ref" in
-        ""|main)
-            archive_url="https://github.com/CtriXin/brainkeeper/archive/refs/heads/main.tar.gz"
-            ;;
-        v[0-9]*)
-            archive_url="https://github.com/CtriXin/brainkeeper/archive/refs/tags/${effective_brainkeeper_ref}.tar.gz"
-            ;;
-        *)
-            archive_url="https://github.com/CtriXin/brainkeeper/archive/refs/heads/${effective_brainkeeper_ref}.tar.gz"
-            ;;
-    esac
-
-    echo "→ $(t "正在处理 BrainKeeper archive 安装" "Processing BrainKeeper archive install")"
-    echo "  $archive_url"
-    if ! download_url_to_file "$archive_url" "$archive_path"; then
-        echo "⚠ $(t "BrainKeeper archive 下载失败" "BrainKeeper archive download failed"): $archive_url"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-    if ! tar -xzf "$archive_path" -C "$tmp_dir"; then
-        echo "⚠ $(t "BrainKeeper archive 解压失败" "BrainKeeper archive extraction failed")"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    extracted_dir="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-    if [ -z "$extracted_dir" ] || [ ! -f "$extracted_dir/package.json" ]; then
-        echo "⚠ $(t "BrainKeeper archive 结构异常" "BrainKeeper archive has an unexpected structure")"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    new_dir="${install_dir}.new.$$"
-    backup_dir="${install_dir}.bak.$$"
-    rm -rf "$new_dir" "$backup_dir"
-    mv "$extracted_dir" "$new_dir"
-    mkdir -p "$(dirname "$install_dir")"
-    if [ -e "$install_dir" ]; then
-        mv "$install_dir" "$backup_dir"
-    fi
-    if ! mv "$new_dir" "$install_dir"; then
-        [ -e "$backup_dir" ] && mv "$backup_dir" "$install_dir"
-        rm -rf "$tmp_dir" "$new_dir"
-        echo "⚠ $(t "BrainKeeper archive 安装失败，已尝试恢复旧版本" "BrainKeeper archive install failed; attempted to restore previous version")"
-        return 1
-    fi
-
-    (
-        cd "$install_dir"
-        npm install --production --ignore-scripts
-        if [ ! -f "$install_dir/dist/server.js" ] || [ ! -f "$install_dir/dist/cli.js" ]; then
-            npm install --ignore-scripts
-            npx tsc
-        fi
-    ) || status=$?
-
-    if [ "$status" -ne 0 ]; then
-        rm -rf "$install_dir"
-        [ -e "$backup_dir" ] && mv "$backup_dir" "$install_dir"
-        rm -rf "$tmp_dir"
-        echo "⚠ $(t "BrainKeeper 依赖安装或构建失败，已尝试恢复旧版本" "BrainKeeper dependency install or build failed; attempted to restore previous version")"
-        return "$status"
-    fi
-
-    rm -rf "$backup_dir" "$tmp_dir"
-    write_brainkeeper_mcp_config || true
-    echo "✓ $(t "BrainKeeper archive 已安装" "BrainKeeper archive installed"): $install_dir"
-    return 0
-}
-
-run_brainkeeper_installer() {
-    local local_installer=""
-    local effective_brainkeeper_ref="${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
-    local candidate=""
-
-    if ! ensure_node18_npm_for_optional_pack "BrainKeeper"; then
-        return 1
-    fi
-
-    if brainkeeper_git_available; then
-        for candidate in \
-            "$(dirname "$SOURCE_DIR")/brainkeeper/install.sh" \
-            "$SOURCE_DIR/../../../brainkeeper/install.sh" \
-            "$(dirname "$SOURCE_DIR")/mindkeeper/install.sh" \
-            "$SOURCE_DIR/../../../mindkeeper/install.sh"; do
-            if [ -f "$candidate" ]; then
-                local_installer="$candidate"
-                break
-            fi
-        done
-
-        if [ -f "$local_installer" ]; then
-            if run_optional_command \
-                "$(t "BrainKeeper MCP 安装" "BrainKeeper MCP install")" \
-                env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_brainkeeper_ref"; then
-                return 0
-            fi
-        fi
-
-        if run_optional_command \
-            "$(t "BrainKeeper MCP 安装" "BrainKeeper MCP install")" \
-            env HOME="$REAL_HOME" BRAINKEEPER_INSTALL_REF="$effective_brainkeeper_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/brainkeeper/main/install.sh | bash -s -- --ref "$BRAINKEEPER_INSTALL_REF"'; then
-            return 0
-        fi
-
-        echo "⚠ $(t "BrainKeeper git 安装失败，改用 archive fallback。" "BrainKeeper git install failed; trying archive fallback.")"
-    else
-        echo "⚠ $(t "未检测到可用 git/Xcode Command Line Tools，改用 BrainKeeper archive fallback。" "Usable git/Xcode Command Line Tools not found; using BrainKeeper archive fallback.")"
-    fi
-
-    install_brainkeeper_from_archive "$effective_brainkeeper_ref"
-}
-
-write_brainkeeper_distill_command() {
-    local command_dir="$REAL_HOME/.claude/commands"
-    local target="$command_dir/distill.md"
-    local marker="Managed by MMS BrainKeeper context pack"
-    local tmp_file=""
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-distill.XXXXXX")"
-    cat > "$tmp_file" <<'EOF'
-<!-- Managed by MMS BrainKeeper context pack -->
-# /distill — 上下文蒸馏
-
-蒸馏当前工作状态，保存为 thread 文件，支持跨 session 恢复。
-
-## 执行步骤
-
-1. 回顾本次对话，提取 5 类信息：
-
-   - **decisions** — 关键决策（≤5 条）
-   - **changes** — 改了哪些文件
-   - **findings** — 踩坑和重要发现
-   - **next** — 待续事项
-   - **status** — 一句话当前状态
-
-2. 调用 MCP 工具 `brainkeeper.brain_checkpoint`，传入提取的信息。
-
-3. 展示蒸馏回执（仅 1-2 行）。
-
-## 极简写法（最重要！）
-
-**MCP 工具的参数会在终端原样展示，所以必须极度精简，避免文字墙。**
-
-每个字段的写法要求：
-
-- **task**: ≤15 字，如 `"修复计算器5个问题"`
-- **status**: ≤20 字，如 `"全部完成已验证"`
-- **decisions**: 每条 ≤10 字，如 `"隐藏39页到_hidden"`, `"server-side transform全局清理"`
-- **changes**: 每条只写文件名，不要路径和详细描述，如 `"static-server.js"`, `"39 HTML → _hidden/"`
-- **findings**: 每条 ≤15 字，如 `"AI cleanup需两轮regex"`, `"右侧栏关闭模式不一致"`
-- **next**: 每条 ≤12 字，如 `"部署验证"`, `"恢复hidden页需4步"`
-
-**反例（禁止）**:
-```
-"隐藏而非删除39个页面 — 移到 public/_hidden/ 和 content/_hidden/，方便以后恢复"
-```
-**正例（要求）**:
-```
-"39页移到_hidden/暂藏"
-```
-
-## 回执格式
-
-只输出 1-2 行：
-```
-已蒸馏 `dst-20260326-abc123` — {status一句话}
-```
-
-不需要展示决策/变更/发现的详细内容，thread 文件里都有。
-
-## 其他规则
-
-- status 必须让下个 session 立刻知道"从哪续"
-- 蒸馏后不需要 /clear，用户可以继续工作
-- 如果 `brainkeeper.brain_checkpoint` 不可用，可尝试 legacy `mindkeeper.brain_checkpoint`；仍不可用再写入 `~/.sce/threads/`
-EOF
-
-    mkdir -p "$command_dir"
-    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
-        echo "⚠ $(t "检测到已有自定义 Claude /distill，跳过覆盖" "Detected custom Claude /distill, skipping overwrite")"
-        rm -f "$tmp_file"
-        return 1
-    fi
-
-    cp "$tmp_file" "$target"
-    chmod 644 "$target"
-    rm -f "$tmp_file"
-    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /distill"
-    return 0
-}
-
-write_brainkeeper_contextzip_command() {
-    local command_dir="$REAL_HOME/.claude/commands"
-    local target="$command_dir/contextzip.md"
-    local marker="Managed by MMS BrainKeeper context pack"
-    local tmp_file=""
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-contextzip.XXXXXX")"
-    cat > "$tmp_file" <<'EOF'
----
-name: contextzip
-description: '蒸馏当前工作状态并重置 token 计数器。当用户提到 "contextzip"、"cz"、"压缩 context"、"context 满了"、"达到 token 上限" 时使用。也用于手动触发上下文压缩，保存当前进度到 thread 文件。'
----
-
-<!-- Managed by MMS BrainKeeper context pack -->
-# /contextzip — 蒸馏状态 + 重置计数器
-
-## 执行步骤
-
-1. **调用 `brainkeeper.brain_checkpoint`** 蒸馏当前状态：
-   - `repo`: 当前工作目录
-   - `task`: 当前任务（从对话中提取）
-   - `status`: "已压缩 context，准备重置计数器"
-   - `decisions`: 提取对话中的关键决策（≤5 条）
-   - `changes`: 本次对话修改的文件
-   - `findings`: 重要发现/踩坑
-   - `next`: 待续事项
-
-2. **调用 `brainkeeper.brain_token_reset`** 重置 token 计数器
-
-3. **输出回执**（1-2 行）：
-   ```
-   ✅ 已蒸馏到 thread: {threadId}
-   💡 运行 /clear 开始新对话；新 session 输入 /cr 恢复
-   ```
-
-## 极简写法
-
-MCP 参数要精简：
-- `task`: ≤15 字
-- `status`: ≤20 字
-- `decisions/findings/next`: 每条 ≤15 字
-
-## 快捷方式
-
-用户说 `/cz` 时也使用此命令。
-EOF
-
-    mkdir -p "$command_dir"
-    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
-        echo "⚠ $(t "检测到已有自定义 Claude /cz，跳过覆盖" "Detected custom Claude /cz, skipping overwrite")"
-        rm -f "$tmp_file"
-        return 1
-    fi
-
-    cp "$tmp_file" "$target"
-    chmod 644 "$target"
-    rm -f "$tmp_file"
-    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /contextzip"
-    return 0
-}
-
-write_brainkeeper_cz_alias_command() {
-    local command_dir="$REAL_HOME/.claude/commands"
-    local target="$command_dir/cz.md"
-    local marker="Managed by MMS BrainKeeper context pack"
-    local tmp_file=""
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-cz.XXXXXX")"
-    cat > "$tmp_file" <<'EOF'
----
-name: cz
-description: '蒸馏当前工作状态并重置 token 计数器；是 /contextzip 的短命令版本。'
----
-
-<!-- Managed by MMS BrainKeeper context pack -->
-# /cz — 蒸馏状态 + 重置计数器
-
-执行逻辑与 `/contextzip` 相同：
-
-1. 调用 `brainkeeper.brain_checkpoint` 蒸馏当前状态
-2. 调用 `brainkeeper.brain_token_reset` 重置计数器
-3. 输出 1-2 行回执，并提示 `/clear` 后新 session 使用 `/cr` 恢复
-
-## 极简写法
-
-- `task`: ≤15 字
-- `status`: ≤20 字
-- `decisions/findings/next`: 每条 ≤15 字
-EOF
-
-    mkdir -p "$command_dir"
-    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
-        echo "⚠ $(t "检测到已有自定义 Claude /cz alias，跳过覆盖" "Detected custom Claude /cz alias, skipping overwrite")"
-        rm -f "$tmp_file"
-        return 1
-    fi
-
-    cp "$tmp_file" "$target"
-    chmod 644 "$target"
-    rm -f "$tmp_file"
-    return 0
-}
-
-write_brainkeeper_cr_command() {
-    local command_dir="$REAL_HOME/.claude/commands"
-    local target="$command_dir/cr.md"
-    local marker="Managed by MMS BrainKeeper context pack"
-    local tmp_file=""
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-cr.XXXXXX")"
-    cat > "$tmp_file" <<'EOF'
----
-name: cr
-description: '恢复当前 repo 最近的 thread，或恢复指定 thread id（context restore）。'
-argument-hint: [dst-thread-id]
----
-
-<!-- Managed by MMS BrainKeeper context pack -->
-# /cr — 恢复上次进度
-
-## 执行步骤
-
-1. 先解析当前 repo：
-   - 优先运行 `git rev-parse --show-toplevel`
-   - 如果失败，再使用当前工作目录
-
-2. 如果 `$ARGUMENTS` 非空：
-   - 提取其中的 thread id（如 `dst-0407-gpkzox`）
-   - 调用 `brainkeeper.brain_bootstrap`，传入：
-     - `repo`: 上一步解析出的 repo
-     - `task`: `"恢复"`
-     - `thread`: 提取到的 id
-
-3. 如果 `$ARGUMENTS` 为空：
-   - 调用 `brainkeeper.brain_bootstrap`，传入：
-     - `repo`: 上一步解析出的 repo
-     - `task`: `"恢复"`
-
-4. 直接展示 `brainkeeper.brain_bootstrap` 的返回结果，不额外改写。
-EOF
-
-    mkdir -p "$command_dir"
-    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
-        echo "⚠ $(t "检测到已有自定义 Claude /cr，跳过覆盖" "Detected custom Claude /cr, skipping overwrite")"
-        rm -f "$tmp_file"
-        return 1
-    fi
-
-    cp "$tmp_file" "$target"
-    chmod 644 "$target"
-    rm -f "$tmp_file"
-    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /cr"
-    return 0
-}
-
-brainkeeper_hook_source() {
-    local hook_name="$1"
-    local source_dir=""
-    for source_dir in \
-        "$REAL_HOME/.local/share/brainkeeper" \
-        "$REAL_HOME/.local/share/mindkeeper"; do
-        if [ -f "$source_dir/hooks/$hook_name" ]; then
-            printf "%s" "$source_dir/hooks/$hook_name"
-            return 0
-        fi
-    done
-    return 1
-}
-
-enable_brainkeeper_token_monitor_hook() {
-    local hook_source=""
-    local claude_dir="$REAL_HOME/.claude"
-    local hook_dir="$claude_dir/hooks"
-    local hook_target="$hook_dir/token-monitor-hook.sh"
-    local py_output=""
-
-    hook_source="$(brainkeeper_hook_source "token-monitor-hook.sh")"
-
-    if [ ! -f "$hook_source" ]; then
-        echo "⚠ $(t "找不到 token monitor hook 模板，跳过" "Token monitor hook template not found, skipping"): $hook_source"
-        return 1
-    fi
-
-    mkdir -p "$hook_dir"
-    cp "$hook_source" "$hook_target"
-    chmod +x "$hook_target"
-
-    py_output="$("$(_python_bin)" - "$claude_dir/settings.json" "$hook_target" <<'PY'
-import json
-import shutil
-import sys
-from datetime import datetime
-from pathlib import Path
-
-settings_path = Path(sys.argv[1])
-hook_path = sys.argv[2]
-settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-data = {}
-backup_path = None
-
-if settings_path.exists():
-    try:
-        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            data = loaded
-    except Exception:
-        backup_path = settings_path.with_name(
-            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        )
-        shutil.copy2(settings_path, backup_path)
-        data = {}
-
-hooks = data.get("hooks")
-if not isinstance(hooks, dict):
-    hooks = {}
-data["hooks"] = hooks
-
-user_prompt = hooks.get("UserPromptSubmit")
-if not isinstance(user_prompt, list):
-    user_prompt = []
-
-exists = False
-for entry in user_prompt:
-    if not isinstance(entry, dict):
-        continue
-    hook_items = entry.get("hooks")
-    if not isinstance(hook_items, list):
-        continue
-    for hook in hook_items:
-        if not isinstance(hook, dict):
-            continue
-        command = str(hook.get("command") or "").strip()
-        if command in {hook_path, f"bash {hook_path}", f"/bin/bash {hook_path}"}:
-            exists = True
-            break
-    if exists:
-        break
-
-if not exists:
-    user_prompt.append(
-        {
-            "matcher": "",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": f"/bin/bash {hook_path}",
-                }
-            ],
-        }
-    )
-
-hooks["UserPromptSubmit"] = user_prompt
-settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-if backup_path is not None:
-    print(f"BACKUP:{backup_path}")
-PY
-)"
-
-    if [ -n "$py_output" ]; then
-        echo "$py_output" | while IFS= read -r line; do
-            case "$line" in
-                BACKUP:*)
-                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
-                    ;;
-            esac
-        done
-    fi
-
-    echo "✓ $(t "已启用 Claude token monitor hook" "Claude token monitor hook enabled")"
-    return 0
-}
-
-enable_brainkeeper_context_restore_hint_hook() {
-    local hook_source=""
-    local claude_dir="$REAL_HOME/.claude"
-    local hook_dir="$claude_dir/hooks"
-    local hook_target="$hook_dir/claude-context-restore-hint.sh"
-    local py_output=""
-
-    hook_source="$(brainkeeper_hook_source "claude-context-restore-hint.sh")"
-
-    if [ ! -f "$hook_source" ]; then
-        echo "⚠ $(t "找不到 context restore hint hook 模板，跳过" "Context restore hint hook template not found, skipping"): $hook_source"
-        return 1
-    fi
-
-    mkdir -p "$hook_dir"
-    cp "$hook_source" "$hook_target"
-    chmod +x "$hook_target"
-
-    py_output="$("$(_python_bin)" - "$claude_dir/settings.json" "$hook_target" <<'PY'
-import json
-import shutil
-import sys
-from datetime import datetime
-from pathlib import Path
-
-settings_path = Path(sys.argv[1])
-hook_path = sys.argv[2]
-settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-data = {}
-backup_path = None
-
-if settings_path.exists():
-    try:
-        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            data = loaded
-    except Exception:
-        backup_path = settings_path.with_name(
-            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        )
-        shutil.copy2(settings_path, backup_path)
-        data = {}
-
-hooks = data.get("hooks")
-if not isinstance(hooks, dict):
-    hooks = {}
-data["hooks"] = hooks
-
-session_start = hooks.get("SessionStart")
-if not isinstance(session_start, list):
-    session_start = []
-
-exists = False
-for entry in session_start:
-    if not isinstance(entry, dict):
-        continue
-    hook_items = entry.get("hooks")
-    if not isinstance(hook_items, list):
-        continue
-    for hook in hook_items:
-        if not isinstance(hook, dict):
-            continue
-        command = str(hook.get("command") or "").strip()
-        if command in {hook_path, f"bash {hook_path}", f"/bin/bash {hook_path}"}:
-            exists = True
-            break
-    if exists:
-        break
-
-if not exists:
-    session_start.append(
-        {
-            "matcher": "",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": f"/bin/bash {hook_path}",
-                }
-            ],
-        }
-    )
-
-hooks["SessionStart"] = session_start
-settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-if backup_path is not None:
-    print(f"BACKUP:{backup_path}")
-PY
-)"
-
-    if [ -n "$py_output" ]; then
-        echo "$py_output" | while IFS= read -r line; do
-            case "$line" in
-                BACKUP:*)
-                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
-                    ;;
-            esac
-        done
-    fi
-
-    echo "✓ $(t "已启用 Claude context restore hint hook" "Claude context restore hint hook enabled")"
-    return 0
-}
-
-write_brainkeeper_bin_wrapper() {
-    local command_name="$1"
-    local target="$BIN_DIR/$command_name"
-    local cli_path="$REAL_HOME/.local/share/brainkeeper/dist/cli.js"
-    local marker="Managed by MMS BrainKeeper context pack"
-    local tmp_file=""
-
-    if [ ! -f "$cli_path" ]; then
-        echo "⚠ $(t "找不到 BrainKeeper CLI，跳过命令链接" "BrainKeeper CLI not found, skipping command wrapper"): $cli_path"
-        return 1
-    fi
-
-    mkdir -p "$BIN_DIR"
-    if [ -L "$target" ]; then
-        rm -f "$target"
-    elif [ -e "$target" ] && ! grep -Fq "$marker" "$target" 2>/dev/null; then
-        echo "⚠ $(t "检测到已有自定义命令，跳过覆盖" "Detected custom command, skipping overwrite"): $target"
-        return 1
-    fi
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-brainkeeper-bin.XXXXXX")"
-    cat > "$tmp_file" <<'EOF'
-#!/bin/sh
-# Managed by MMS BrainKeeper context pack
-REAL_HOME="${MMS_REAL_HOME:-${REAL_HOME:-${ORIGINAL_HOME:-$HOME}}}"
-case "$REAL_HOME" in
-  */.config/mms/*) REAL_HOME="${REAL_HOME%%/.config/mms/*}" ;;
-esac
-
-CLI_PATH="$REAL_HOME/.local/share/brainkeeper/dist/cli.js"
-if [ ! -f "$CLI_PATH" ]; then
-  printf '%s\n' "BrainKeeper CLI not found: $CLI_PATH" >&2
-  exit 127
-fi
-
-export HOME="$REAL_HOME"
-export MMS_REAL_HOME="$REAL_HOME"
-
-find_brainkeeper_node() {
-  PATH_NODE="$(command -v node 2>/dev/null || true)"
-  for NODE_BIN in "$REAL_HOME/.nvm/versions/node/"*/bin/node /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node "$PATH_NODE"; do
-    [ -n "$NODE_BIN" ] || continue
-    [ -x "$NODE_BIN" ] || continue
-    if "$NODE_BIN" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' >/dev/null 2>&1; then
-      printf '%s\n' "$NODE_BIN"
-      return 0
-    fi
-  done
-  return 1
-}
-
-NODE_BIN="$(find_brainkeeper_node || true)"
-if [ -n "$NODE_BIN" ]; then
-  exec "$NODE_BIN" "$CLI_PATH" "$@"
-fi
-
-printf '%s\n' "Node.js not found; install Node.js 18+ or rerun MMS installer with --install-brainkeeper-context." >&2
-exit 127
-EOF
-    mv "$tmp_file" "$target"
-    chmod 755 "$target"
-    echo "✓ $(t "已安装命令" "Installed command"): $target"
-    return 0
-}
-
-install_optional_brainkeeper_context() {
-    echo ""
-    echo "$(t "正在安装 BrainKeeper context pack..." "Installing BrainKeeper context pack...")"
-
-    echo "⚠ $(t "这个可选包会修改 ~/.claude/settings.json、~/.claude/commands/、~/.claude/hooks/，并写入 ~/.local/bin/bk 与 ~/.local/bin/brainkeeper；若缺少 Node/npm 会尝试用 nvm 准备本次安装环境。" "This optional pack updates ~/.claude/settings.json, ~/.claude/commands/, ~/.claude/hooks/, and writes ~/.local/bin/bk plus ~/.local/bin/brainkeeper; if Node/npm is missing it tries an nvm fallback for this install.")"
-
-    run_brainkeeper_installer || true
-    ensure_brew_package "jq" "jq" "jq" || true
-
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "⚠ $(t "未检测到 jq，token monitor hook 已安装但会保持静默，直到 jq 可用" "jq not found; the token monitor hook is installed but remains inactive until jq is available")"
-    fi
-
-    write_brainkeeper_distill_command || true
-    write_brainkeeper_contextzip_command || true
-    write_brainkeeper_cz_alias_command || true
-    write_brainkeeper_cr_command || true
-    enable_brainkeeper_token_monitor_hook || true
-    enable_brainkeeper_context_restore_hint_hook || true
-    write_brainkeeper_mcp_config || true
-    write_brainkeeper_bin_wrapper "bk" || true
-    write_brainkeeper_bin_wrapper "brainkeeper" || true
-}
-
-run_map_installer() {
-    local local_installer=""
-    local effective_map_ref="${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
-    local_installer="$(dirname "$SOURCE_DIR")/folder-graphy/bin/install.sh"
-    if [ -f "$local_installer" ]; then
-        run_optional_command \
-            "$(t "Map 安装" "Map install")" \
-            env HOME="$REAL_HOME" MAP_INSTALL_REF="$effective_map_ref" bash "$local_installer" --ref "$effective_map_ref"
-        return 0
-    fi
-
-    run_optional_command \
-        "$(t "Map 安装" "Map install")" \
-        env HOME="$REAL_HOME" MAP_INSTALL_REF="$effective_map_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/folder-graphy/main/bin/install.sh | bash -s -- --ref "$MAP_INSTALL_REF"'
-}
-
-install_optional_map() {
-    echo "$(t "正在安装 Map CLI（显式使用，不注册自动 hook）" "Installing Map CLI for explicit use; no automatic hook registration")"
-    if ! node_meets_min_major 18; then
-        echo "$(t "未找到 Node.js 18+，跳过可选 Map 安装" "Node.js 18+ unavailable; skipping optional Map install")"
-        return 0
-    fi
-    run_map_installer
-}
-
-install_optional_codegraph() {
-    echo ""
-    echo "$(t "正在安装 CodeGraph..." "Installing CodeGraph...")"
-    echo "⚠ $(t "这个可选包会通过 npm 安装 CodeGraph CLI；不写 ~/.config/mms，也不修改 Claude/Codex 全局配置。" "This optional pack installs the CodeGraph CLI via npm; it does not write ~/.config/mms or change global Claude/Codex config.")"
-    echo "  $(t "CodeGraph 仅显式执行；SessionStart 不自动 init/index/sync。" "CodeGraph runs explicitly; SessionStart does not init/index/sync.")"
-
-    npm_global_install_with_nvm_fallback "CodeGraph CLI" "$CODEGRAPH_PACKAGE_SPEC" || true
-
-    local codegraph_bin=""
-    codegraph_bin="$(find_cli_binary codegraph || true)"
-    if [ -n "$codegraph_bin" ]; then
-        echo "✓ $(t "CodeGraph 可用" "CodeGraph available"): $codegraph_bin"
-        print_codegraph_init_hint
-    else
-        echo "⚠ $(t "安装后仍未在可搜索路径中找到 codegraph" "codegraph was still not found in searchable paths after install")"
-    fi
-}
-
-print_codegraph_init_hint() {
-    if [ "$INSTALL_LANG" = "en" ]; then
-        echo "  CodeGraph session behavior:"
-        echo "    Run codegraph init/index or sync explicitly for the current task repository."
-        echo "  Prompt for an LLM to initialize all repos now:"
-        echo "    Find every git repo under this workspace, run 'codegraph init -i' when .codegraph is missing and 'codegraph sync' when it exists, skip node_modules/vendor/build dirs, and report failures."
-        echo "  Tip: keep .codegraph/ local and do not commit it unless your repo intentionally tracks indexes."
-    else
-        echo "  CodeGraph session 行为："
-        echo "    按当前任务需要显式运行 codegraph init/index 或 sync。"
-        echo "  让 LLM 立刻一键初始化全部 repo 的指令："
-        echo "    找出当前工作区下所有 git repo；没有 .codegraph 就执行 'codegraph init -i'，已有 .codegraph 就执行 'codegraph sync'；跳过 node_modules/vendor/build 目录；最后汇总失败列表。"
-        echo "  提醒：.codegraph/ 建议保持本地，不要提交，除非项目明确要追踪索引。"
-    fi
-}
-
-write_ops_env_safe_config() {
-    local template_path="$SOURCE_DIR/config/ops-env-safe.template.toml"
-    local target_path="$REAL_HOME/.config/mms/ops-env-safe.toml"
-
-    if [ ! -f "$template_path" ]; then
-        echo "⚠ $(t "找不到 ops-env-safe 配置模板，跳过" "ops-env-safe config template not found, skipping"): $template_path"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$target_path")"
-    if [ -f "$target_path" ]; then
-        echo "✓ $(t "保留现有 ops-env-safe 路径映射" "Keeping existing ops-env-safe path map"): $target_path"
-        return 0
-    fi
-
-    "$(_python_bin)" - "$template_path" "$target_path" "$REAL_HOME" <<'PY'
-from pathlib import Path
-import sys
-
-template_path = Path(sys.argv[1])
-target_path = Path(sys.argv[2])
-real_home = sys.argv[3]
-
-text = template_path.read_text(encoding="utf-8").replace("__REAL_HOME__", real_home)
-target_path.write_text(text, encoding="utf-8")
-PY
-
-    echo "✓ $(t "已写入 ops-env-safe 路径映射模板" "Wrote ops-env-safe path-map template"): $target_path"
-    return 0
-}
-
-install_ops_env_safe_codex_skill() {
-    local source_skill_dir="$SOURCE_DIR/assets/optional-packs/ops-env-safe"
-    local target_skill_dir="$REAL_HOME/.codex/skills/ops-env-safe"
-    local temp_skill_dir="${target_skill_dir}.new.$$"
-    local backup_skill_dir="${target_skill_dir}.bak.$$"
-    local marker="name: ops-env-safe"
-
-    if [ ! -d "$source_skill_dir" ]; then
-        echo "⚠ $(t "找不到 ops-env-safe skill 模板，跳过" "ops-env-safe skill template not found, skipping"): $source_skill_dir"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$target_skill_dir")"
-
-    if [ -f "$target_skill_dir/SKILL.md" ] && ! grep -Fq "$marker" "$target_skill_dir/SKILL.md"; then
-        echo "⚠ $(t "检测到已有自定义 Codex ops-env-safe skill，跳过覆盖" "Detected custom Codex ops-env-safe skill, skipping overwrite")"
-        return 1
-    fi
-
-    rm -rf "$temp_skill_dir" "$backup_skill_dir"
-    cp -R "$source_skill_dir" "$temp_skill_dir"
-    if [ -e "$target_skill_dir" ]; then
-        mv "$target_skill_dir" "$backup_skill_dir"
-    fi
-    if mv "$temp_skill_dir" "$target_skill_dir"; then
-        rm -rf "$backup_skill_dir"
-        echo "✓ $(t "已安装 Codex skill" "Installed Codex skill"): $target_skill_dir"
-        return 0
-    fi
-
-    rm -rf "$temp_skill_dir" "$target_skill_dir"
-    if [ -e "$backup_skill_dir" ]; then
-        mv "$backup_skill_dir" "$target_skill_dir" || true
-    fi
-    echo "⚠ $(t "安装 Codex ops-env-safe skill 失败" "Failed to install Codex ops-env-safe skill")"
-    return 1
-}
-
-write_ops_env_safe_claude_command() {
-    local command_dir="$REAL_HOME/.claude/commands"
-    local target="$command_dir/ops-env-safe.md"
-    local marker="Managed by MMS optional ops-env-safe pack"
-    local tmp_file=""
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-ops-env-safe.XXXXXX")"
-    cat > "$tmp_file" <<'EOF'
----
-name: ops-env-safe
-description: '在隔离会话里只读查看 host path hints，不注入真实 HOME/XDG。'
-argument-hint: [entry-name]
----
-
-<!-- Managed by MMS optional ops-env-safe pack -->
-# /ops-env-safe — path-only host hints
-
-## 执行步骤
-
-1. 优先读取 `MMS_HOST_CONTEXT_JSON` 指向的 session-local context。
-2. 没有 session context 时，读取 `MMS_OPS_ENV_SAFE_CONFIG` 或 `~/.config/mms/ops-env-safe.toml`。
-3. 如果 `$ARGUMENTS` 非空：
-   - 优先匹配 `[paths]` 里的同名 key
-   - 输出该条目的绝对路径和用途
-4. 如果 `$ARGUMENTS` 为空：
-   - 列出已配置的可用 key
-   - 简要说明每个 key 的 path 和 purpose
-
-## 允许的检查
-
-- `test -e`
-- `ls`
-- `stat`
-- `readlink`
-- `command -v`
-
-## 红线
-
-- 不要设置真实 `HOME`
-- 不要设置任何真实 `XDG_*`
-- 不要导出 token / auth env
-- 不要把 path lookup 伪装成“已经可直接执行”
-- 登录态 Chrome 任务必须走配置里的 WebAccess localhost proxy，不要因隔离 `HOME` 自动降级到 isolated browser
-- 如果真正要执行 host 命令，必须明确提示切到单独的非隔离 shell
-EOF
-
-    mkdir -p "$command_dir"
-    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
-        echo "⚠ $(t "检测到已有自定义 Claude /ops-env-safe，跳过覆盖" "Detected custom Claude /ops-env-safe, skipping overwrite")"
-        rm -f "$tmp_file"
-        return 1
-    fi
-
-    cp "$tmp_file" "$target"
-    chmod 644 "$target"
-    rm -f "$tmp_file"
-    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /ops-env-safe"
-    return 0
-}
-
-install_optional_ops_env_safe() {
-    echo ""
-    echo "$(t "正在安装 ops-env-safe..." "Installing ops-env-safe...")"
-    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/ops-env-safe、~/.claude/commands/ops-env-safe.md 和 ~/.config/mms/ops-env-safe.toml。" "This optional pack writes ~/.codex/skills/ops-env-safe, ~/.claude/commands/ops-env-safe.md, and ~/.config/mms/ops-env-safe.toml.")"
-    echo "  $(t "它只提供 path-only host hints，不会注入真实 HOME/XDG，也不会导出 auth secrets。" "It only provides path-only host hints; it does not inject real HOME/XDG or export auth secrets.")"
-
-    write_ops_env_safe_config || true
-    install_ops_env_safe_codex_skill || true
-    write_ops_env_safe_claude_command || true
-}
-
-install_token_saver_skill_link() {
-    local target_skill_dir="$1"
-    local source_skill_dir="$MMS_HOME/vendor/token-saver"
-    local marker="name: token-saver"
-    local backup_skill_dir="${target_skill_dir}.bak.$$"
-
-    if [ ! -f "$source_skill_dir/SKILL.md" ]; then
-        echo "⚠ $(t "找不到 token-saver skill，跳过" "token-saver skill not found, skipping"): $source_skill_dir"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$target_skill_dir")"
-
-    if [ -L "$target_skill_dir" ]; then
-        rm -f "$target_skill_dir"
-        ln -s "$source_skill_dir" "$target_skill_dir"
-        echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
-        return 0
-    fi
-
-    if [ -e "$target_skill_dir" ]; then
-        if [ -f "$target_skill_dir/SKILL.md" ] && grep -Fq "$marker" "$target_skill_dir/SKILL.md"; then
-            rm -rf "$backup_skill_dir"
-            mv "$target_skill_dir" "$backup_skill_dir"
-            ln -s "$source_skill_dir" "$target_skill_dir"
-            rm -rf "$backup_skill_dir"
-            echo "✓ $(t "已替换托管 skill 为 symlink" "Replaced managed skill with symlink"): $target_skill_dir"
-            return 0
-        fi
-        echo "⚠ $(t "检测到已有自定义 token-saver skill，跳过覆盖" "Detected custom token-saver skill, skipping overwrite"): $target_skill_dir"
-        return 1
-    fi
-
-    ln -s "$source_skill_dir" "$target_skill_dir"
-    echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
-    return 0
-}
-
-install_toon_skill_link() {
-    local target_skill_dir="$1"
-    local source_skill_dir="$MMS_HOME/vendor/toon"
-    local marker="name: toon"
-    local backup_skill_dir="${target_skill_dir}.bak.$$"
-
-    if [ ! -f "$source_skill_dir/SKILL.md" ]; then
-        echo "⚠ $(t "找不到 TOON skill，跳过" "TOON skill not found, skipping"): $source_skill_dir"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$target_skill_dir")"
-    if [ -L "$target_skill_dir" ]; then
-        rm -f "$target_skill_dir"
-        ln -s "$source_skill_dir" "$target_skill_dir"
-        echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
-        return 0
-    fi
-
-    if [ -e "$target_skill_dir" ]; then
-        if [ -f "$target_skill_dir/SKILL.md" ] && grep -Fq "$marker" "$target_skill_dir/SKILL.md"; then
-            rm -rf "$backup_skill_dir"
-            mv "$target_skill_dir" "$backup_skill_dir"
-            ln -s "$source_skill_dir" "$target_skill_dir"
-            rm -rf "$backup_skill_dir"
-            echo "✓ $(t "已替换托管 skill 为 symlink" "Replaced managed skill with symlink"): $target_skill_dir"
-            return 0
-        fi
-        echo "⚠ $(t "检测到已有自定义 TOON skill，跳过覆盖" "Detected custom TOON skill, skipping overwrite"): $target_skill_dir"
-        return 1
-    fi
-
-    ln -s "$source_skill_dir" "$target_skill_dir"
-    echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
-    return 0
-}
-
-write_mms_script_wrapper() {
-    local command_name="$1"
-    local source_script="$MMS_HOME/scripts/$command_name"
-    local target="$BIN_DIR/$command_name"
-    local marker="Managed by MMS optional script wrapper"
-    local legacy_token_saver_marker="Managed by MMS optional token-saver pack"
-    local tmp_file=""
-
-    if [ ! -f "$source_script" ]; then
-        echo "⚠ $(t "找不到 MMS 命令脚本，跳过" "MMS command script not found, skipping"): $source_script"
-        return 1
-    fi
-
-    mkdir -p "$BIN_DIR"
-    if [ -L "$target" ]; then
-        rm -f "$target"
-    elif [ -e "$target" ] \
-        && ! grep -Fq "$marker" "$target" 2>/dev/null \
-        && ! grep -Fq "$legacy_token_saver_marker" "$target" 2>/dev/null; then
-        echo "⚠ $(t "检测到已有自定义命令，跳过覆盖" "Detected custom command, skipping overwrite"): $target"
-        return 1
-    fi
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-token-saver.XXXXXX")"
-    cat > "$tmp_file" <<EOF
-#!/bin/sh
-# $marker
-exec "$source_script" "\$@"
-EOF
-    mv "$tmp_file" "$target"
-    chmod 755 "$target"
-    echo "✓ $(t "已安装命令" "Installed command"): $target"
-    return 0
-}
-
-install_token_saver_installed_skills_mirror() {
-    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
-    local source_skill_dir="$MMS_HOME/vendor/token-saver"
-    local target="$mirror_dir/token-saver"
-
-    if [ ! -d "$mirror_dir" ]; then
-        return 0
-    fi
-    if [ -e "$target" ] && [ ! -L "$target" ]; then
-        echo "⚠ $(t "检测到 installed-skills 自定义 token-saver，跳过覆盖" "Detected custom installed-skills token-saver, skipping overwrite"): $target"
-        return 1
-    fi
-    if [ -L "$target" ]; then
-        rm -f "$target"
-    fi
-    ln -s "$source_skill_dir" "$target"
-    echo "✓ $(t "已更新 installed-skills 镜像" "Updated installed-skills mirror"): $target"
-    return 0
-}
-
-install_toon_installed_skills_mirror() {
-    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
-    local source_skill_dir="$MMS_HOME/vendor/toon"
-    local target="$mirror_dir/toon"
-
-    if [ ! -d "$mirror_dir" ]; then
-        return 0
-    fi
-    if [ -e "$target" ] && [ ! -L "$target" ]; then
-        echo "⚠ $(t "检测到 installed-skills 自定义 TOON，跳过覆盖" "Detected custom installed-skills TOON, skipping overwrite"): $target"
-        return 1
-    fi
-    if [ -L "$target" ]; then
-        rm -f "$target"
-    fi
-    ln -s "$source_skill_dir" "$target"
-    echo "✓ $(t "已更新 installed-skills 镜像" "Updated installed-skills mirror"): $target"
-    return 0
-}
-
-install_web_access_canonical_links() {
-    local source_skill_dir="$MMS_HOME/vendor/web-access"
-    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
-    [ -d "$source_skill_dir" ] || return 0
-    mkdir -p "$mirror_dir" "$REAL_HOME/.codex/skills" "$REAL_HOME/.claude/skills" "$REAL_HOME/.agents/skills"
-    local canonical="$mirror_dir/web-access"
-    for target in "$canonical" "$REAL_HOME/.codex/skills/web-access" "$REAL_HOME/.claude/skills/web-access" "$REAL_HOME/.agents/skills/web-access"; do
-        if [ -e "$target" ] && [ ! -L "$target" ]; then
-            echo "⚠ $(t "检测到自定义 web-access，跳过覆盖" "Detected custom web-access, skipping overwrite"): $target"
-            continue
-        fi
-        rm -f "$target"
-        ln -s "$source_skill_dir" "$target"
-    done
-    echo "✓ $(t "已安装统一 web-access 入口" "Installed canonical web-access entrypoints")"
-}
-
-install_optional_token_saver() {
-    echo ""
-    echo "$(t "正在安装 Token Saver..." "Installing Token Saver...")"
-    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/token-saver、~/.claude/skills/token-saver 和 ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon。" "This optional pack writes ~/.codex/skills/token-saver, ~/.claude/skills/token-saver, and ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon.")"
-    echo "  $(t "它不写 ~/.config/mms，也不修改模型、账号、proxy 或 reasoning 配置。" "It does not write ~/.config/mms or change model, account, proxy, or reasoning settings.")"
-
-    install_token_saver_skill_link "$REAL_HOME/.codex/skills/token-saver" || true
-    install_token_saver_skill_link "$REAL_HOME/.claude/skills/token-saver" || true
-    write_mms_script_wrapper "token-saver" || true
-    write_mms_script_wrapper "mms-context" || true
-    write_mms_script_wrapper "token-gain" || true
-    write_mms_script_wrapper "mms-gain" || true
-    write_mms_script_wrapper "mms-toon" || true
-    install_token_saver_installed_skills_mirror || true
-}
-
-install_optional_toon() {
-    echo ""
-    echo "$(t "正在安装 TOON..." "Installing TOON...")"
-    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/toon、~/.claude/skills/toon 和 ~/.local/bin/mms-toon；MMS session 内仍默认内建 TOON。" "This optional pack writes ~/.codex/skills/toon, ~/.claude/skills/toon, and ~/.local/bin/mms-toon; MMS sessions still bundle TOON by default.")"
-    echo "  $(t "它不写 ~/.config/mms，也不修改模型、账号、proxy 或 reasoning 配置。" "It does not write ~/.config/mms or change model, account, proxy, or reasoning settings.")"
-
-    install_toon_skill_link "$REAL_HOME/.codex/skills/toon" || true
-    install_toon_skill_link "$REAL_HOME/.claude/skills/toon" || true
-    write_mms_script_wrapper "mms-toon" || true
-    install_toon_installed_skills_mirror || true
-}
 
 print_dry_run_plan() {
     echo ""
@@ -3540,120 +1983,374 @@ print_dry_run_plan() {
     echo "• $(t "命令目录" "command dir"): $BIN_DIR"
     echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
     echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
-    echo "• $(t "会复制 session assets" "would copy session assets"): Caveman / TOON / token-saver / Web automation bundle / NSR"
+    echo "• $(t "会安装内建能力：网页访问、浏览器自动化、省 token 工具、Caveman、NSR" "would install the built-in tools: web access, browser automation, token savers, Caveman, NSR")"
 
     if [ -n "$INSTALL_CLI_LIST" ]; then
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
     fi
-    [ "$INSTALL_RTK" -eq 1 ] && echo "• $(t "会安装 RTK rewrite hook" "would install RTK rewrite hook")"
-    echo "• $(t "会安装/修复 offduty/onduty（handover continuity）到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "would install/repair offduty/onduty (handover continuity) into Claude/Codex/OpenCode global skill dirs and clean legacy command symlinks")"
-    echo "• $(t "会安装/修复 /nsr 命令到 Claude/Codex/OpenCode（不写全局 hooks/config）" "would install/repair /nsr commands for Claude/Codex/OpenCode without global hooks/config writes")"
-    [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
-    [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map CLI" "would install Map CLI"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
-    [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
-    [ "$INSTALL_TOKEN_SAVER" -eq 1 ] && echo "• $(t "会安装 Token Saver skill/命令" "would install Token Saver skill/commands")"
-    [ "$INSTALL_TOON" -eq 1 ] && echo "• $(t "会安装 TOON skill/命令" "would install TOON skill/command")"
-
-    [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ] && echo "• $(t "会安装 ops-env-safe path hints" "would install ops-env-safe path hints")"
-    [ "$INSTALL_ECC" -eq 1 ] && echo "• $(t "会安装 ECC agent pack" "would install ECC agent pack"): ${ECC_INSTALL_REF:-default}"
-    [ "$INSTALL_OMC" -eq 1 ] && echo "• $(t "会安装 OMC agent pack" "would install OMC agent pack"): ${OMC_INSTALL_REF:-default}"
+    echo "• $(t "会安装内置命令 offduty/onduty/nsr 到 Claude、Codex、OpenCode，不写全局 hooks 或 config" "would install the built-in offduty/onduty/nsr commands for Claude, Codex and OpenCode without writing global hooks or config")"
+    echo "• $(t "会预热 pi 运行时 cache" "would warm the pi runtime cache"): $MMS_HOME/.ai/cache/pi-npx"
+    if [ "$WRITE_SHELL_RC" -eq 1 ]; then
+        echo "• $(t "会把 ~/.local/bin 写入 shell PATH 配置" "would add ~/.local/bin to your shell PATH config")"
+    fi
+    case "$LAUNCH_WEB_MODE" in
+        always) echo "• $(t "会直接后台启动 MMS Web 并打开浏览器" "would start MMS Web in the background and open the browser")" ;;
+        never) echo "• $(t "不会启动 MMS Web" "would not start MMS Web")" ;;
+        *) echo "• $(t "装完会询问是否打开 MMS Web；同意则后台启动并打开浏览器" "would ask whether to open MMS Web and, if accepted, start it in the background and open the browser")" ;;
+    esac
+    echo "• $(t "会清理旧版本装过的 RTK、BrainKeeper、Map、CodeGraph、全局 token-saver/TOON、ops-env-safe、ECC/OMC" "would clean up RTK, BrainKeeper, Map, CodeGraph, the global token-saver/TOON packs, ops-env-safe, and ECC/OMC left by older versions")"
+    echo "  $(t "仅备份移走有 MMS 来源凭据的条目，同名自定义内容和全局配置保留" "Only verified MMS entries are archived; same-name custom content and global settings are preserved")"
+    if [ "$INSTALL_CODING_FONTS" = "1" ]; then
+        echo "• $(t "会把 Fira Code 与 JetBrains Mono 安装到 $(user_font_dir)（已装则跳过，--no-coding-fonts 关闭）" "would install Fira Code and JetBrains Mono into $(user_font_dir); already-installed families are skipped, --no-coding-fonts turns this off")"
+    fi
 
     echo ""
-    echo "✓ $(t "dry-run 完成：未创建 venv，未复制文件，未下载/安装可选包。" "dry-run complete: no venv created, no files copied, no optional packs downloaded/installed.")"
+    echo "✓ $(t "dry-run 完成：未创建 venv，未复制文件，未安装任何 CLI。" "dry-run complete: no venv created, no files copied, no CLI installed.")"
 }
 
-validate_ecc_pack_dir() {
-    local pack_dir="$1"
-    [ -f "$pack_dir/hooks/hooks.json" ] \
-        && [ -d "$pack_dir/commands" ] \
-        && [ -d "$pack_dir/skills" ]
+# ── MMS Web launch ──
+# The installer ends by offering to open MMS Web. The server is started
+# detached so the install process exits immediately; the browser is opened by
+# the server itself. This is the only question the installer ever asks, it is
+# asked after everything is installed, and it never changes what gets installed.
+MMS_WEB_DEFAULT_PORT="${MMS_WEB_PORT_BASE:-8765}"
+MMS_WEB_PORT_SEARCH_LIMIT=20
+
+# `curl | bash` leaves stdin pointing at the script, so the prompt has to talk
+# to the terminal directly. No terminal means no question: we just print how to
+# start MMS Web later.
+web_prompt_available() {
+    [ -r /dev/tty ] && [ -w /dev/tty ] || return 1
+    { : < /dev/tty > /dev/tty; } 2>/dev/null
 }
 
-validate_omc_pack_dir() {
-    local pack_dir="$1"
-    [ -f "$pack_dir/hooks/hooks.json" ] \
-        && [ -d "$pack_dir/skills" ] \
-        && [ -f "$pack_dir/.claude-plugin/plugin.json" ]
+confirm_open_web() {
+    local answer=""
+
+    web_prompt_available || return 1
+    printf "%s" "$(t "现在打开 MMS Web 吗？[Y/n]: " "Open MMS Web now? [Y/n]: ")" > /dev/tty
+    IFS= read -r answer < /dev/tty || return 1
+    answer="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]' | xargs)"
+    case "$answer" in
+        n|no) return 1 ;;
+        *) return 0 ;;
+    esac
 }
 
-install_agent_pack_from_git() {
-    local label="$1"
-    local repo_url="$2"
-    local ref="$3"
-    local target_dir="$4"
-    local validator="$5"
-    local tmp_dir=""
+# Report the port of an MMS Web instance that is already serving, if any.
+running_mms_web_port() {
+    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web/config" <<'PY'
+import hashlib
+import re
+from pathlib import Path
+import http.client
+import sys
 
-    if ! command -v git >/dev/null 2>&1; then
-        echo "⚠ $(t "未检测到 git，跳过 agent pack 安装" "git not found, skipping agent pack install"): $label"
+start = int(sys.argv[1])
+limit = int(sys.argv[2])
+root, config = (Path(p).resolve() for p in sys.argv[3:5])
+version_file = root / "mms_version.py"
+match = re.search(r'VERSION = "([^"]+)"', version_file.read_text()) if version_file.exists() else None
+version = match.group(1) if match else ""
+identity = hashlib.sha256(f"{root}|{config}|{version}".encode()).hexdigest()
+for port in range(start, start + limit):
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=0.4)
+        conn.request("HEAD", "/")
+        response = conn.getresponse()
+    except Exception:
+        continue
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if response.status == 200 and response.getheader("X-MMS-Web-Identity") == identity:
+        print(port)
+        break
+PY
+}
+
+# mms-web binds a fixed port and fails hard when it is taken, so the installer
+# picks a free one instead of letting the last install step die on an OSError.
+find_free_web_port() {
+    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" <<'PY'
+import socket
+import sys
+
+start = int(sys.argv[1])
+limit = int(sys.argv[2])
+for port in range(start, start + limit):
+    with socket.socket() as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+    print(port)
+    break
+PY
+}
+
+open_url_in_browser() {
+    "$(_python_bin)" - "$1" <<'PY'
+import sys
+import webbrowser
+
+webbrowser.open(sys.argv[1])
+PY
+}
+
+wait_for_mms_web() {
+    local port="$1"
+
+    "$(_python_bin)" - "$port" <<'PY'
+import http.client
+import sys
+import time
+
+port = int(sys.argv[1])
+deadline = time.monotonic() + 20
+while time.monotonic() < deadline:
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=0.5)
+        conn.request("HEAD", "/")
+        response = conn.getresponse()
+        healthy = response.status == 200 and str(response.getheader("Server") or "").startswith("MMSWeb")
+        conn.close()
+        if not healthy:
+            time.sleep(0.4)
+            continue
+    except Exception:
+        time.sleep(0.4)
+        continue
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+start_mms_web_detached() {
+    local state_root="${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web"
+    local log_file="$MMS_HOME/logs/mms-web.log"
+    local port=""
+    local running=""
+
+    if [ ! -x "$BIN_DIR/mms-web" ]; then
+        echo "⚠ $(t "找不到 mms-web 命令，跳过打开" "mms-web command not found, skipping launch"): $BIN_DIR/mms-web"
         return 1
     fi
 
-    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mms-agent-pack.XXXXXX")"
-    echo ""
-    echo "→ $(t "正在安装 Claude agent pack" "Installing Claude agent pack"): $label"
-    echo "  $repo_url${ref:+#$ref}"
+    running="$(running_mms_web_port || true)"
+    if [ -n "$running" ]; then
+        echo "✓ $(t "MMS Web 已在运行，直接打开" "MMS Web is already running, opening it"): http://127.0.0.1:$running"
+        open_url_in_browser "http://127.0.0.1:$running" || true
+        return 0
+    fi
 
-    if [ -n "$ref" ]; then
-        if ! git clone --depth 1 --branch "$ref" --single-branch "$repo_url" "$tmp_dir"; then
-            echo "⚠ $(t "下载 agent pack 失败" "Failed to download agent pack"): $label"
-            rm -rf "$tmp_dir"
-            return 1
-        fi
+    port="$(find_free_web_port || true)"
+    if [ -z "$port" ]; then
+        echo "⚠ $(t "找不到可用端口，跳过打开；稍后可手动运行" "No free port found, skipping launch; run it manually later"): mms-web --open"
+        return 1
+    fi
+
+    mkdir -p "$state_root" "$(dirname "$log_file")"
+    nohup "$BIN_DIR/mms-web" \
+        --state-root "$state_root" \
+        --port "$port" \
+        --open \
+        >"$log_file" 2>&1 &
+    local web_pid=$!
+    disown 2>/dev/null || true
+
+    if wait_for_mms_web "$port"; then
+        echo "✓ $(t "MMS Web 已启动" "MMS Web is running"): http://127.0.0.1:$port"
+        echo "  $(t "它在后台运行，安装进程已结束。浏览器没自动打开时手动访问上面的地址。" "It runs in the background and the installer is done. Open the address above manually if the browser did not.")"
+        echo "  $(t "停止:" "Stop it with:") kill $web_pid"
+        return 0
+    fi
+
+    echo "⚠ $(t "MMS Web 启动超时，日志在" "MMS Web did not come up in time, log at"): $log_file"
+    echo "  $(t "可手动运行:" "Run it manually:") mms-web --open"
+    return 1
+}
+
+offer_mms_web() {
+    case "$LAUNCH_WEB_MODE" in
+        never)
+            return 0
+            ;;
+        always)
+            start_mms_web_detached || true
+            return 0
+            ;;
+    esac
+
+    if ! web_prompt_available; then
+        echo "  $(t "打开 Web 端:" "Open the web app:") mms-web --open"
+        return 0
+    fi
+
+    echo ""
+    if confirm_open_web; then
+        start_mms_web_detached || true
     else
-        if ! git clone --depth 1 "$repo_url" "$tmp_dir"; then
-            echo "⚠ $(t "下载 agent pack 失败" "Failed to download agent pack"): $label"
-            rm -rf "$tmp_dir"
-            return 1
-        fi
+        echo "  $(t "以后随时可以运行:" "You can run this any time:") mms-web --open"
     fi
-
-    rm -rf "$tmp_dir/.git"
-    if ! "$validator" "$tmp_dir"; then
-        echo "⚠ $(t "agent pack 结构校验失败，跳过" "Agent pack structure validation failed, skipping"): $label"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$target_dir")"
-    if ! copy_dir_safely "$tmp_dir" "$target_dir" "$label" "$label"; then
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    cat > "$target_dir/.mms-agent-pack-source" <<EOF
-name=$label
-repo=$repo_url
-ref=${ref:-default}
-installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-EOF
-    rm -rf "$tmp_dir"
-    echo "✓ $(t "已安装 Claude agent pack" "Installed Claude agent pack"): $target_dir"
     return 0
 }
 
-install_optional_ecc() {
-    echo ""
-    echo "$(t "正在安装 ECC agent pack..." "Installing ECC agent pack...")"
-    echo "⚠ $(t "这个可选包只写入 ~/.mms/agent-packs/everything-claude-code；不会修改全局 Claude hooks/config。" "This optional pack writes only ~/.mms/agent-packs/everything-claude-code; it does not modify global Claude hooks/config.")"
-    install_agent_pack_from_git \
-        "ECC" \
-        "$ECC_REPO_URL" \
-        "$ECC_INSTALL_REF" \
-        "$MMS_HOME/agent-packs/everything-claude-code" \
-        validate_ecc_pack_dir
+# ── Retired optional packs ──
+# RTK / BrainKeeper / Map / CodeGraph / global token-saver / global TOON /
+# ops-env-safe / ECC / OMC were removed from the installer. Every install
+# unbinds what MMS itself wrote for them, so machines upgrading from an older
+# version stop carrying them. This never touches third-party binaries (rtk,
+# codegraph, brainkeeper, node, jq) and never deletes a file MMS did not write:
+# every target is verified by an MMS marker, an MMS-owned symlink target, or an
+# MMS-owned directory.
+RETIRED_PACK_CLEANUP_COUNT=0
+RETIRED_PACK_BACKUP=""
+
+archive_retired_entry() {
+    local target="$1"
+    [ -n "$RETIRED_PACK_BACKUP" ] || RETIRED_PACK_BACKUP="$(mktemp -d "$MMS_HOME/retired-backup.XXXXXX")"
+    local relative="${target#"$REAL_HOME"/}"
+    mkdir -p "$RETIRED_PACK_BACKUP/$(dirname "$relative")"
+    mv "$target" "$RETIRED_PACK_BACKUP/$relative"
 }
 
-install_optional_omc() {
+_note_retired_removal() {
+    RETIRED_PACK_CLEANUP_COUNT=$((RETIRED_PACK_CLEANUP_COUNT + 1))
+    echo "  - $(t "已移除" "Removed"): $1"
+}
+
+# Delete a file only when it carries one of the given MMS markers.
+remove_retired_marked_file() {
+    local target="$1"
+    shift
+    local marker=""
+
+    [ -f "$target" ] || return 0
+    for marker in "$@"; do
+        if grep -Fq "$marker" "$target" 2>/dev/null; then
+            archive_retired_entry "$target"
+            _note_retired_removal "$target"
+            return 0
+        fi
+    done
+    echo "  • $(t "检测到自定义内容，保留不动" "Custom content detected, left unchanged"): $target"
+    return 0
+}
+
+# Delete a skill entry that is either an MMS-owned symlink or a directory whose
+# SKILL.md carries the MMS-managed marker.
+remove_retired_skill_entry() {
+    local target="$1"
+    local vendor_suffix="$2"
+    local marker="$3"
+    local link_target=""
+
+    if [ -L "$target" ]; then
+        link_target="$(readlink "$target" 2>/dev/null || true)"
+        case "$link_target" in
+            "$MMS_HOME/vendor/$vendor_suffix"|"$MMS_HOME/vendor/$vendor_suffix/")
+                archive_retired_entry "$target"
+                _note_retired_removal "$target"
+                ;;
+            *)
+                echo "  • $(t "非 MMS 链接，保留不动" "Not an MMS link, left unchanged"): $target"
+                ;;
+        esac
+        return 0
+    fi
+
+    [ -d "$target" ] || return 0
+    if [ -f "$target/SKILL.md" ] && grep -Fq "Managed by MMS optional $vendor_suffix pack" "$target/SKILL.md" 2>/dev/null; then
+        archive_retired_entry "$target"
+        _note_retired_removal "$target"
+        return 0
+    fi
+    echo "  • $(t "检测到自定义 skill，保留不动" "Custom skill detected, left unchanged"): $target"
+    return 0
+}
+
+# Delete a directory MMS created inside its own install root.
+remove_retired_mms_dir() {
+    local target="$1"
+
+    [ -d "$target" ] || return 0
+    case "$target" in
+        "$MMS_HOME"/*)
+            archive_retired_entry "$target"
+            _note_retired_removal "$target"
+            ;;
+        *)
+            echo "  • $(t "目录不在 MMS 安装根下，保留不动" "Directory is outside the MMS install root, left unchanged"): $target"
+            ;;
+    esac
+    return 0
+}
+
+# A generic hook filename, MCP key or Skill name does not establish MMS ownership.
+# Leave global settings/hooks and the real config tree for the user's own review.
+cleanup_retired_optional_packs() {
+    local command_dir="$REAL_HOME/.claude/commands"
+    local hook_dir="$REAL_HOME/.claude/hooks"
+    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
+    local wrapper=""
+    local hook_file=""
+
+    RETIRED_PACK_CLEANUP_COUNT=0
+    mkdir -p "$MMS_HOME"
     echo ""
-    echo "$(t "正在安装 OMC agent pack..." "Installing OMC agent pack...")"
-    echo "⚠ $(t "这个可选包只写入 ~/.mms/agent-packs/oh-my-claudecode；不会修改全局 Claude hooks/config。" "This optional pack writes only ~/.mms/agent-packs/oh-my-claudecode; it does not modify global Claude hooks/config.")"
-    install_agent_pack_from_git \
-        "OMC" \
-        "$OMC_REPO_URL" \
-        "$OMC_INSTALL_REF" \
-        "$MMS_HOME/agent-packs/oh-my-claudecode" \
-        validate_omc_pack_dir
+    echo "$(t "正在清理旧版本装过、现在已经不再需要的东西..." "Cleaning up things older versions installed that are no longer needed...")"
+
+    # ~/.local/bin wrappers written by the token-saver / TOON / BrainKeeper packs
+    for wrapper in token-saver mms-context token-gain mms-gain mms-toon; do
+        remove_retired_marked_file "$BIN_DIR/$wrapper" \
+            "Managed by MMS optional script wrapper" \
+            "Managed by MMS optional token-saver pack"
+    done
+    for wrapper in bk brainkeeper; do
+        remove_retired_marked_file "$BIN_DIR/$wrapper" \
+            "Managed by MMS BrainKeeper context pack"
+    done
+
+    # Claude slash commands written by the BrainKeeper / ops-env-safe packs
+    for wrapper in distill contextzip cz cr; do
+        remove_retired_marked_file "$command_dir/$wrapper.md" \
+            "Managed by MMS BrainKeeper context pack"
+    done
+    remove_retired_marked_file "$command_dir/ops-env-safe.md" \
+        "Managed by MMS optional ops-env-safe pack"
+
+    # Global skill links for the packs that are now bundled session assets only
+    remove_retired_skill_entry "$REAL_HOME/.codex/skills/token-saver" "token-saver" "name: token-saver"
+    remove_retired_skill_entry "$REAL_HOME/.claude/skills/token-saver" "token-saver" "name: token-saver"
+    remove_retired_skill_entry "$mirror_dir/token-saver" "token-saver" "name: token-saver"
+    remove_retired_skill_entry "$REAL_HOME/.codex/skills/toon" "toon" "name: toon"
+    remove_retired_skill_entry "$REAL_HOME/.claude/skills/toon" "toon" "name: toon"
+    remove_retired_skill_entry "$mirror_dir/toon" "toon" "name: toon"
+    remove_retired_skill_entry "$REAL_HOME/.codex/skills/ops-env-safe" "ops-env-safe" "name: ops-env-safe"
+
+    # MMS-managed Claude agent packs
+    remove_retired_mms_dir "$MMS_HOME/agent-packs/everything-claude-code"
+    remove_retired_mms_dir "$MMS_HOME/agent-packs/oh-my-claudecode"
+    if [ -d "$MMS_HOME/agent-packs" ] && [ -z "$(ls -A "$MMS_HOME/agent-packs" 2>/dev/null)" ]; then
+        rmdir "$MMS_HOME/agent-packs" 2>/dev/null || true
+    fi
+
+    if [ -n "$RETIRED_PACK_BACKUP" ]; then
+        echo "  $(t "原文件已备份到" "Original entries backed up to"): $RETIRED_PACK_BACKUP"
+    fi
+    echo "  $(t "全局 hooks、MCP 设置及真实配置目录保留，请按需手动检查。" "Global hooks, MCP settings and the real config tree are preserved for manual review.")"
+
+    if [ "$RETIRED_PACK_CLEANUP_COUNT" -eq 0 ]; then
+        echo "✓ $(t "没有需要清理的旧可选包" "No retired optional packs to clean up")"
+    else
+        echo "✓ $(t "已清理旧可选包条目数" "Retired optional pack entries cleaned"): $RETIRED_PACK_CLEANUP_COUNT"
+        echo "  $(t "第三方二进制（rtk / codegraph / brainkeeper / node / jq）未被卸载。" "Third-party binaries (rtk / codegraph / brainkeeper / node / jq) were not uninstalled.")"
+    fi
+
+    return 0
 }
 
 install_builtin_handover_continuity() {
@@ -3661,7 +2358,7 @@ install_builtin_handover_continuity() {
     local installer_script=""
 
     echo ""
-    echo "$(t "正在安装内置 offduty/onduty（handover continuity）..." "Installing built-in offduty/onduty (handover continuity)...")"
+    echo "$(t "正在安装内置命令..." "Installing built-in commands...")"
 
     # Resolve handover root only from the installed MMS vendor pack. If the
     # packaged vendor copy is missing, skip instead of pointing global skills at
@@ -3720,7 +2417,6 @@ EOF
 
     mv "$tmp_file" "$target"
     chmod 644 "$target"
-    echo "✓ $(t "已安装 NSR 命令" "Installed NSR command"): $target"
     return 0
 }
 
@@ -3728,7 +2424,7 @@ install_builtin_nsr_commands() {
     local failures=0
 
     echo ""
-    echo "$(t "正在安装内置 /nsr 命令..." "Installing built-in /nsr commands...")"
+    echo "$(t "正在安装内置命令（续）..." "Installing built-in commands (continued)...")"
 
     write_builtin_nsr_command_file "$REAL_HOME/.agents/commands/nsr.md" "hook" || failures=$((failures + 1))
     write_builtin_nsr_command_file "$REAL_HOME/.claude/commands/nsr.md" "hook" || failures=$((failures + 1))
@@ -3752,6 +2448,18 @@ while [[ $# -gt 0 ]]; do
         --write-shell-rc)
             WRITE_SHELL_RC=1
             ;;
+        --no-coding-fonts)
+            INSTALL_CODING_FONTS=0
+            ;;
+        --no-shell-rc)
+            WRITE_SHELL_RC=0
+            ;;
+        --launch-web)
+            LAUNCH_WEB_MODE="always"
+            ;;
+        --no-launch-web)
+            LAUNCH_WEB_MODE="never"
+            ;;
         --run-setup)
             RUN_SETUP=1
             ;;
@@ -3761,107 +2469,12 @@ while [[ $# -gt 0 ]]; do
         --launch-after-install)
             LAUNCH_AFTER_INSTALL=1
             ;;
-        --install-rtk)
-            INSTALL_RTK=1
-            INSTALL_RTK_EXPLICIT=1
+        --install-rtk|--install-brainkeeper-context|--install-mindkeeper-context|--install-map|--install-codegraph|--install-token-saver|--install-toon|--install-ops-env-safe|--install-ecc|--install-omc|--install-agent-packs)
+            echo "⚠ $(t "该可选包已从安装器移除，本次忽略" "This optional pack was removed from the installer and is ignored"): $1"
             ;;
-        --install-brainkeeper-context)
-            INSTALL_BRAINKEEPER_CONTEXT=1
-            INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT=1
-            ;;
-        --install-mindkeeper-context)
-            INSTALL_BRAINKEEPER_CONTEXT=1
-            INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT=1
-            ;;
-        --brainkeeper-ref)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo "❌ $(t "--brainkeeper-ref 需要一个版本号或分支名" "--brainkeeper-ref requires a tag or branch name")"
-                usage
-                exit 1
-            fi
-            BRAINKEEPER_INSTALL_REF="$1"
-            MINDKEEPER_INSTALL_REF="$BRAINKEEPER_INSTALL_REF"
-            ;;
-        --mindkeeper-ref)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo "❌ $(t "--mindkeeper-ref 需要一个版本号或分支名" "--mindkeeper-ref requires a tag or branch name")"
-                usage
-                exit 1
-            fi
-            BRAINKEEPER_INSTALL_REF="$1"
-            MINDKEEPER_INSTALL_REF="$BRAINKEEPER_INSTALL_REF"
-            ;;
-        --install-map)
-            INSTALL_MAP=1
-            INSTALL_MAP_EXPLICIT=1
-            ;;
-        --map-ref)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo "❌ $(t "--map-ref 需要一个版本号或分支名" "--map-ref requires a tag or branch name")"
-                usage
-                exit 1
-            fi
-            MAP_INSTALL_REF="$1"
-            ;;
-        --install-codegraph)
-            INSTALL_CODEGRAPH=1
-            INSTALL_CODEGRAPH_EXPLICIT=1
-            ;;
-        --codegraph-package)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo "❌ $(t "--codegraph-package 需要 npm 包规格" "--codegraph-package requires an npm package spec")"
-                usage
-                exit 1
-            fi
-            CODEGRAPH_PACKAGE_SPEC="$1"
-            ;;
-        --install-token-saver)
-            INSTALL_TOKEN_SAVER=1
-            INSTALL_TOKEN_SAVER_EXPLICIT=1
-            ;;
-        --install-toon)
-            INSTALL_TOON=1
-            INSTALL_TOON_EXPLICIT=1
-            ;;
-        --install-ops-env-safe)
-            INSTALL_OPS_ENV_SAFE=1
-            INSTALL_OPS_ENV_SAFE_EXPLICIT=1
-            ;;
-        --install-ecc)
-            INSTALL_ECC=1
-            INSTALL_ECC_EXPLICIT=1
-            ;;
-        --ecc-ref)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo "❌ $(t "--ecc-ref 需要一个版本号或分支名" "--ecc-ref requires a tag or branch name")"
-                usage
-                exit 1
-            fi
-            ECC_INSTALL_REF="$1"
-            ;;
-        --install-omc)
-            INSTALL_OMC=1
-            INSTALL_OMC_EXPLICIT=1
-            ;;
-        --omc-ref)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo "❌ $(t "--omc-ref 需要一个版本号或分支名" "--omc-ref requires a tag or branch name")"
-                usage
-                exit 1
-            fi
-            OMC_INSTALL_REF="$1"
-            ;;
-        --install-agent-packs)
-            INSTALL_ECC=1
-            INSTALL_ECC_EXPLICIT=1
-            INSTALL_OMC=1
-            INSTALL_OMC_EXPLICIT=1
+        --brainkeeper-ref|--mindkeeper-ref|--map-ref|--codegraph-package|--ecc-ref|--omc-ref)
+            echo "⚠ $(t "该可选包参数已从安装器移除，本次忽略" "This optional-pack argument was removed from the installer and is ignored"): $1"
+            shift || true
             ;;
         --install-cli)
             shift
@@ -3921,6 +2534,9 @@ while [[ $# -gt 0 ]]; do
         --check)
             CHECK_ONLY=1
             ;;
+        --cleanup-retired-packs)
+            CLEANUP_ONLY=1
+            ;;
         --dry-run)
             DRY_RUN=1
             ;;
@@ -3932,7 +2548,6 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             INSTALL_LANG="$1"
-            INSTALL_LANG_EXPLICIT=1
             ;;
         -h|--help)
             usage
@@ -3957,72 +2572,26 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
     exit 0
 fi
 
-prompt_install_language
-prompt_optional_install_choices
+if [ "$CLEANUP_ONLY" -eq 1 ]; then
+    cleanup_retired_optional_packs
+    exit 0
+fi
+
+resolve_default_cli_installs
 
 echo "===================================="
 echo "  $(t "MMS 一键安装" "MMS one-line installer")"
 echo "===================================="
 echo ""
-print_version_overview
+print_install_headline
 echo ""
 
 if [ -n "$INSTALL_CLI_LIST" ]; then
     echo "• $(t "附带安装 CLI" "Optional CLI install"): $INSTALL_CLI_LIST"
 fi
 
-if [ "$INSTALL_RTK" -eq 1 ]; then
-    echo "• $(t "附带安装 RTK rewrite 增强" "Optional RTK rewrite enhancement"): on"
-fi
-
-if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
-    echo "• $(t "附带安装 BrainKeeper context pack" "Optional BrainKeeper context pack"): on"
-    echo "  $(t "会写入 Claude 的 MCP / 命令 / hook 配置，并安装 bk/brainkeeper 命令；不包含 Hive 能力。" "This writes Claude MCP / command / hook config and installs bk/brainkeeper commands; it does not include Hive features.")"
-    echo "  $(t "BrainKeeper 版本" "BrainKeeper ref"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
-fi
-
-if [ "$INSTALL_MAP" -eq 1 ]; then
-    echo "• $(t "附带安装 Map CLI" "Optional Map CLI"): on"
-    echo "  $(t "会安装显式 Map CLI，不写入 SessionStart hook。" "This installs the explicit Map CLI without SessionStart hooks.")"
-    echo "  $(t "Map 版本" "Map ref"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
-    echo "  $(t "默认优先复用现有 Node.js 18+；若版本不足则跳过，不会自动改你的默认 Node。" "By default MMS reuses an existing Node.js 18+ and skips Map when unavailable; it does not auto-change your default Node.")"
-fi
-
-if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
-    echo "• $(t "附带安装 CodeGraph CLI" "Optional CodeGraph CLI"): on"
-    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
-    echo "  $(t "CodeGraph npm 包" "CodeGraph npm package"): $CODEGRAPH_PACKAGE_SPEC"
-fi
-
-if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
-    echo "• $(t "附带安装 Token Saver" "Optional Token Saver"): on"
-    echo "  $(t "会写入 Codex/Claude skill 和 ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude skills and ~/.local/bin/token-saver/mms-context/token-gain/mms-gain/mms-toon, without writing ~/.config/mms.")"
-fi
-
-if [ "$INSTALL_TOON" -eq 1 ]; then
-    echo "• $(t "附带安装 TOON" "Optional TOON"): on"
-    echo "  $(t "会写入 Codex/Claude TOON skill 和 ~/.local/bin/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude TOON skills and ~/.local/bin/mms-toon, without writing ~/.config/mms.")"
-fi
-
-if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
-    echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
-    echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
-fi
-
-if [ "$INSTALL_ECC" -eq 1 ]; then
-    echo "• $(t "附带安装 ECC agent pack" "Optional ECC agent pack"): on"
-    echo "  $(t "写入 ~/.mms/agent-packs/everything-claude-code，默认不启用，不写全局 Claude 配置。" "Writes ~/.mms/agent-packs/everything-claude-code, disabled by default, without global Claude config writes.")"
-    [ -n "$ECC_INSTALL_REF" ] && echo "  ECC ref: $ECC_INSTALL_REF"
-fi
-
-if [ "$INSTALL_OMC" -eq 1 ]; then
-    echo "• $(t "附带安装 OMC agent pack" "Optional OMC agent pack"): on"
-    echo "  $(t "写入 ~/.mms/agent-packs/oh-my-claudecode，默认不启用，不写全局 Claude 配置。" "Writes ~/.mms/agent-packs/oh-my-claudecode, disabled by default, without global Claude config writes.")"
-    [ -n "$OMC_INSTALL_REF" ] && echo "  OMC ref: $OMC_INSTALL_REF"
-fi
-
-echo "• $(t "内建 session assets" "Bundled session assets"): on"
-echo "  $(t "安装后会自带 Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR channel payload；工具按 session 暴露，NSR/Map/CodeGraph 不注册自动 hook，不改全局 hooks/config，安装器只补 /nsr 命令文档。" "Install includes Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR channel payload; tools are exposed per session; NSR/Map/CodeGraph do not register automatic hooks or change global hooks/config, and the installer only adds /nsr command docs.")"
+echo "• $(t "内建能力" "Built-in tools"): $(t "网页访问、浏览器自动化、省 token 工具等随 MMS 一起安装" "web access, browser automation, token-saving tools and more come with MMS")"
+echo "  $(t "它们只在 MMS 启动的会话里生效，不会改动你已有的全局配置。" "They only apply inside sessions MMS starts, and none of your existing global config is modified.")"
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
@@ -4058,14 +2627,17 @@ fi
 
 cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
 [ -f "$SOURCE_DIR/mms-web" ] && cp "$SOURCE_DIR/mms-web" "$MMS_HOME/"
-[ -f "$SOURCE_DIR/MMS Web.command" ] && cp "$SOURCE_DIR/MMS Web.command" "$MMS_HOME/"
-copy_dir_safely "$SOURCE_DIR/mms_web" "$MMS_HOME/mms_web" "MMS Web 服务" "MMS Web service"
-copy_dir_safely "$SOURCE_DIR/mms_web_static" "$MMS_HOME/mms_web_static" "MMS Web 页面" "MMS Web client"
+[ -f "$SOURCE_DIR/MMS Pilot.command" ] && cp "$SOURCE_DIR/MMS Pilot.command" "$MMS_HOME/"
+# The Finder shortcut was named "MMS Web.command" before the client was named
+# MMS Pilot. Leaving both would put two identical launchers in ~/.mms.
+rm -f "$MMS_HOME/MMS Web.command"
+copy_dir_safely "$SOURCE_DIR/mms_web" "$MMS_HOME/mms_web" "MMS Pilot 服务" "MMS Pilot service"
+copy_dir_safely "$SOURCE_DIR/mms_web_static" "$MMS_HOME/mms_web_static" "MMS Pilot 页面" "MMS Pilot client"
 mkdir -p "$MMS_HOME/docs/reference/model-capability-calibration"
 if [ -f "$SOURCE_DIR/docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json" ]; then
     cp "$SOURCE_DIR/docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json" "$MMS_HOME/docs/reference/model-capability-calibration/"
 fi
-copy_dir_safely "$SOURCE_DIR/docs/mms-web" "$MMS_HOME/docs/mms-web" "MMS Web 使用文档" "MMS Web documentation"
+copy_dir_safely "$SOURCE_DIR/docs/mms-web" "$MMS_HOME/docs/mms-web" "MMS Pilot 使用文档" "MMS Pilot documentation"
 [ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"
 [ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
@@ -4094,6 +2666,9 @@ repair_managed_claude_settings
 cleanup_legacy_global_session_hooks
 write_language_config
 
+# ── 清理已退休的可选包（从旧版本升级的机器）──
+cleanup_retired_optional_packs || true
+
 # ── 内置安装：handover continuity (offduty/onduty) ──
 HANDOVER_CONTINUITY_INSTALL_STATUS="not_run"
 install_builtin_handover_continuity
@@ -4104,7 +2679,7 @@ install_builtin_nsr_commands
 
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/mms-web" ] && chmod +x "$MMS_HOME/mms-web"
-[ -f "$MMS_HOME/MMS Web.command" ] && chmod +x "$MMS_HOME/MMS Web.command"
+[ -f "$MMS_HOME/MMS Pilot.command" ] && chmod +x "$MMS_HOME/MMS Pilot.command"
 [ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"
 [ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
@@ -4119,36 +2694,10 @@ rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmf" ] && rewrite_shebang "$MMS_HOME/mmf" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"
 
-# ── 4.5 可选安装：CLI / RTK ──
+# ── 4.5 安装必需 CLI（pi 必装，缺失的 claude/codex/opencode 自动补装）──
+install_coding_fonts || echo "⚠ Coding fonts unavailable; continuing MMS installation."
 install_requested_clis
-if [ "$INSTALL_RTK" -eq 1 ]; then
-    install_optional_rtk || true
-fi
-if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
-    install_optional_brainkeeper_context || true
-fi
-if [ "$INSTALL_MAP" -eq 1 ]; then
-    install_optional_map || true
-fi
-if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
-    install_optional_codegraph || true
-fi
-if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
-    install_web_access_canonical_links || true
-    install_optional_token_saver || true
-fi
-if [ "$INSTALL_TOON" -eq 1 ]; then
-    install_optional_toon || true
-fi
-if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
-    install_optional_ops_env_safe || true
-fi
-if [ "$INSTALL_ECC" -eq 1 ]; then
-    install_optional_ecc || true
-fi
-if [ "$INSTALL_OMC" -eq 1 ]; then
-    install_optional_omc || true
-fi
+warm_pi_runtime_cache || true
 
 # ── 5. 建立命令入口 ──
 echo ""
@@ -4229,89 +2778,12 @@ if [ -x "$BIN_DIR/mms" ]; then
         else
             echo "  $(t "当前 shell 还未加载 ~/.local/bin；可先运行绝对路径，或重开 Ghostty/iTerm/Terminal tab 后输入 mms。" "Current shell has not loaded ~/.local/bin yet; run the absolute path now, or reopen your Ghostty/iTerm/Terminal tab and type mms.")"
         fi
-        echo ""
-        echo "  $(t "常用命令:" "Common commands:")"
-        echo "    mms              $(t "打开交互启动器" "open the interactive launcher")"
-        echo "    mmf              $(t "打开 preview root 启动器" "open the preview-root launcher")"
-        echo "    mms claude       $(t "直接启动 Claude 入口" "launch the Claude entrypoint")"
-        echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
-        echo "    mms config       $(t "查看/修改配置" "view or edit config")"
-        echo "    mms config web   $(t "打开浏览器配置中心" "open the browser config center")"
-        echo "    mms --export claude  $(t "导出环境变量" "export env vars")"
-        echo ""
-        echo "  $(t "简单上手示例:" "Quick examples:")"
-        echo "    mms config web                      $(t "图形化配置通道、模型、fallback、OpenCode agents" "configure providers, models, fallback, and OpenCode agents in the WebUI")"
-        echo "    mms doctor                          $(t "先看 route / auth / protocol 通不通" "check route / auth / protocol first")"
-        echo "    mms test --provider <id> --cli claude  $(t "验证 Claude 实际链路" "verify the real Claude message path")"
-        echo "    mms test --provider <id> --cli codex   $(t "验证 Codex 实际链路" "verify the real Codex message path")"
-        echo "    mms ls                              $(t "查看可见模型" "list visible models")"
-        echo "    mmf config root                     $(t "确认 preview root" "confirm the preview root")"
-        echo "    mmf preview doctor --json           $(t "查看 config v2 preview 下一步" "show the next config v2 preview action")"
-        echo "    mms migrate config-v2 --json        $(t "只读查看 stable promotion human gate" "review the stable promotion human gate read-only")"
-        echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
-        echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     fi
     echo ""
-    if [ "$HANDOVER_CONTINUITY_INSTALL_STATUS" = "installed" ]; then
-        echo "  $(t "内建：offduty/onduty（handover continuity）已安装到 Claude/Codex/OpenCode 全局 skill 目录，并已清理旧 command symlink，可在任意 session 使用。" "Built-in: offduty/onduty (handover continuity) installed into Claude/Codex/OpenCode global skill dirs, with legacy command symlinks cleaned, usable in any session.")"
-    else
-        echo "  $(t "内建：offduty/onduty（handover continuity）未自动安装完成；可重新运行安装器或检查 vendor/handover。" "Built-in: offduty/onduty (handover continuity) was not fully auto-installed; rerun the installer or check vendor/handover.")"
-    fi
-    if [ "$NSR_COMMAND_INSTALL_STATUS" = "installed" ]; then
-        echo "  $(t "内建：/nsr 命令已安装到 Claude/Codex/OpenCode；各 host 使用显式手动 loop contract，自动 Stop hook 已退休。" "Built-in: /nsr commands installed for Claude/Codex/OpenCode; hosts use an explicit manual loop contract; automatic Stop hooks are retired.")"
-    else
-        echo "  $(t "内建：/nsr 命令未全部自动安装；已有自定义命令已保留，可重跑安装器修复缺失项。" "Built-in: /nsr commands were not all auto-installed; custom commands were preserved, and rerunning the installer can repair missing entries.")"
+    if [ "$HANDOVER_CONTINUITY_INSTALL_STATUS" != "installed" ] || [ "$NSR_COMMAND_INSTALL_STATUS" != "installed" ]; then
+        echo "  $(t "部分内建命令（offduty/onduty、/nsr）未全部安装；已有自定义命令已保留，重跑安装器可修复。" "Some built-in commands (offduty/onduty, /nsr) were not fully installed; custom commands were preserved and rerunning the installer repairs them.")"
     fi
     echo ""
-    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）和 NSR payload 会随 MMS 一起提供；工具按 session 暴露，NSR/Map/CodeGraph 不注册自动 hook，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), and the NSR payload ship with MMS; tools are exposed per session; NSR/Map/CodeGraph do not register automatic hooks without global hooks/config writes.")"
-    echo "  $(t "LLM 修改 MMS 前指南:" "LLM editing guide:") $MMS_HOME/docs/LLM_OPERATION_GUIDE.md"
-    echo ""
-
-    if [ "$INSTALL_RTK" -eq 1 ]; then
-        echo "  $(t "RTK rewrite 已配置到 Claude 的 PreToolUse:Bash。" "RTK rewrite has been wired into Claude PreToolUse:Bash.")"
-        echo "  $(t "如果本机已有或本轮装上了 Codex CLI，也会顺手执行 rtk init --codex --global。" "If Codex CLI is already available or gets installed in this run, the installer also runs rtk init --codex --global.")"
-        echo "  $(t "后续通过 MMS 启动的 Claude session 会自动继承这个 hook。" "Claude sessions launched through MMS will inherit this hook automatically.")"
-        echo ""
-    fi
-
-    if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
-        echo "  $(t "BrainKeeper context pack 已安装：BrainKeeper MCP、Claude /distill /cz /cr、token hooks、bk/brainkeeper 命令。" "BrainKeeper context pack installed: BrainKeeper MCP, Claude /distill /cz /cr, token hooks, and bk/brainkeeper commands.")"
-        echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command；命令入口在 ~/.local/bin。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically; command wrappers live in ~/.local/bin.")"
-        echo ""
-    fi
-
-    if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
-    echo "$(t "索引仅按当前任务需要显式运行；不会注册自动 hook。" "Index explicitly for the current task; no automatic hook is registered.")"
-        print_codegraph_init_hint
-        echo ""
-    fi
-
-    if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
-        echo "  $(t "Token Saver 已安装：Codex/Claude skill、token-saver/mms-context/token-gain/mms-gain/mms-toon 命令。" "Token Saver installed: Codex/Claude skill plus token-saver/mms-context/token-gain/mms-gain/mms-toon commands.")"
-        echo "  $(t "普通 export-only Codex/Claude 会话现在可以靠 skill 自动使用长输出 ref/snippet。" "Plain export-only Codex/Claude sessions can now use long-output refs/snippets through the skill.")"
-        echo ""
-    fi
-
-    if [ "$INSTALL_TOON" -eq 1 ]; then
-        echo "  $(t "TOON 已安装：Codex/Claude skill 和 mms-toon 命令；MMS session 内仍使用内建 session asset。" "TOON installed: Codex/Claude skill plus the mms-toon command; MMS sessions still use the bundled session asset.")"
-        echo ""
-    fi
-
-    if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
-        echo "  $(t "ops-env-safe 已安装：Codex skill、Claude /ops-env-safe 和 path-only 路径映射模板。" "ops-env-safe installed: Codex skill, Claude /ops-env-safe, and a path-only path-map template.")"
-        echo "  $(t "如需自定义宿主路径，请编辑 ~/.config/mms/ops-env-safe.toml；它不会注入真实 HOME/XDG。" "To customize host paths, edit ~/.config/mms/ops-env-safe.toml; it will not inject real HOME/XDG.")"
-        echo ""
-    fi
-
-    if [ "$INSTALL_ECC" -eq 1 ]; then
-        echo "  $(t "ECC agent pack 已安装到 ~/.mms/agent-packs/everything-claude-code；默认关闭，Claude 启动确认页按 X 选择后才注入。" "ECC agent pack installed under ~/.mms/agent-packs/everything-claude-code; it stays off until selected with X on the Claude launch confirm page.")"
-        echo ""
-    fi
-
-    if [ "$INSTALL_OMC" -eq 1 ]; then
-        echo "  $(t "OMC agent pack 已安装到 ~/.mms/agent-packs/oh-my-claudecode；默认关闭，Claude 启动确认页按 X 选择后才注入。" "OMC agent pack installed under ~/.mms/agent-packs/oh-my-claudecode; it stays off until selected with X on the Claude launch confirm page.")"
-        echo ""
-    fi
 
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 1 ]; then
         echo ""
@@ -4335,28 +2807,12 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo ""
         "$BIN_DIR/mms" || true
         DID_LAUNCH=1
-    elif [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
-        echo "  $(t "首次配置请运行（二选一）:" "Run one of these for first-time setup:")"
-        echo "    $BIN_DIR/mms"
-        echo "    $BIN_DIR/mms config web"
-        echo ""
-        echo "  $(t "如需安装完成后立即进入配置向导，可执行:" "To launch setup immediately after install, run:")"
-        echo "    bash install.sh --run-setup"
     fi
 
-    if [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ]; then
-        echo ""
-        if [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
-            echo "  $(t "完成配置后，建议先做预检，再正式启动 CLI:" "After setup, run these preflight checks before launching the real CLI:")"
-        else
-            echo "  $(t "正式启动 CLI 前，建议先做这组预检:" "Before launching the real CLI, run this preflight sequence:")"
-        fi
-        echo "    bash install.sh --check"
-        echo "    mms doctor"
-        echo "    mms doctor full"
-        echo "    mms test --provider <id> --cli claude"
-        echo "    mms test --provider <id> --cli codex"
-        echo "  $(t "含义：--check 看安装是否落好；doctor 看 route/auth/protocol 通不通；test 看实际消息链路。" "Meaning: --check verifies install landing; doctor checks route/auth/protocol reachability; test checks the real message path.")"
+    if [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ] && [ "$DID_LAUNCH" -eq 0 ] && [ "$LAUNCH_AFTER_INSTALL" -eq 0 ]; then
+        echo "  $(t "在 MMS Web 里添加 provider 和 API Key，就可以开始对话。" "Add a provider and API key in MMS Web, then start a conversation.")"
+        echo "  $(t "排查安装问题:" "To diagnose the install:") bash install.sh --check"
+        offer_mms_web
     fi
 
     if [ "$LAUNCH_AFTER_INSTALL" -eq 1 ] && [ "$DID_LAUNCH" -eq 0 ]; then

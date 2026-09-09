@@ -1,10 +1,10 @@
 .channel-models {
   max-width: 960px;
-  padding: 8px 0 32px;
+  padding: 8px 14px 32px 0;
 }
 .channel-models h2 {
   margin: 26px 0 6px;
-  font-size: 22px;
+  font-size: max(11px, 1.5714rem);
   letter-spacing: -0.02em;
 }
 .channel-models-heading,
@@ -39,7 +39,7 @@
   gap: 8px;
   flex: 1;
   max-width: 580px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   color: var(--muted);
 }
 .channel-toolbar select {
@@ -48,7 +48,7 @@
 }
 .channel-list-toolbar {
   margin-bottom: 12px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .channel-search {
@@ -67,15 +67,73 @@
 .channel-model-table-head,
 .channel-model-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 155px;
+  grid-template-columns: minmax(0, 1fr) 190px 155px;
   align-items: center;
   gap: 18px;
+}
+.channel-model-capability {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: max(11px, 0.8571rem);
+  color: var(--muted);
+}
+.channel-model-capability label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.channel-model-capability input[type="number"] {
+  width: 92px;
+  padding: 2px 6px;
+}
+/* Offered only when the row differs from what MMF already knows, so it reads
+   as "put it back" rather than one more thing to decide. */
+.capability-reset {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: max(11px, 0.7857rem);
+  padding: 2px 4px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.capability-reset:hover {
+  background: var(--soft);
+}
+/* Batch capability fill. The chips sit above the table because they change
+   many rows at once; the per-row reset stays inside its own row. */
+.channel-capability-refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: max(11px, 0.857143rem);
+}
+.channel-capability-refresh .capability-refresh {
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--ink);
+  font-size: max(11px, 0.857143rem);
+  padding: 5px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.channel-capability-refresh .capability-refresh:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+.channel-capability-refresh .capability-refresh:disabled {
+  opacity: 0.55;
 }
 .channel-model-table-head {
   padding: 10px 12px;
   color: var(--muted);
   background: var(--soft);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-model-rows {
   max-height: 46vh;
@@ -115,12 +173,12 @@
   gap: 3px;
 }
 .channel-model-name strong {
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
   font-weight: 550;
   overflow-wrap: anywhere;
 }
 .channel-model-name small {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .channel-model-name small:empty {
@@ -128,10 +186,10 @@
 }
 .channel-model-row select {
   width: 100%;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .effort-unavailable {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-manual {
   margin-top: 16px;
@@ -142,20 +200,20 @@
 }
 .channel-scope-note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   line-height: 1.7;
   margin: 18px 0;
 }
 .channel-save {
   padding-top: 18px;
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   color: var(--muted);
 }
 .channel-notice {
   display: flex;
   gap: 10px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
   line-height: 1.6;
   color: var(--ink);
   padding: 12px;
@@ -169,7 +227,7 @@
 }
 .channel-review {
   max-width: 620px;
-  font-size: 14px;
+  font-size: max(11px, 1.0000rem);
 }
 .channel-review p {
   line-height: 1.7;
@@ -177,7 +235,7 @@
 .channel-config-path {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   overflow-wrap: anywhere;
 }
 .channel-review ul {
@@ -195,7 +253,7 @@
   overflow-wrap: anywhere;
 }
 .channel-review li strong {
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
   color: var(--muted);
 }
 .channel-review small {
@@ -218,11 +276,22 @@
     gap: 8px;
     padding-inline: 4px;
   }
+  /* Capability editing drops to its own line before the columns get too thin
+     to read; it is not a control worth cramping the model name for. */
+  .channel-model-table-head span:nth-child(2),
+  .channel-model-row .channel-model-capability {
+    grid-column: 1 / -1;
+  }
+  .channel-model-capability {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
   .channel-models-heading {
     align-items: flex-start;
   }
   .channel-models-heading .button {
-    font-size: 12px;
+    font-size: max(11px, 0.8571rem);
     padding-inline: 8px;
   }
   .channel-toolbar {
@@ -273,7 +342,7 @@
 .channel-connection-fields label {
   display: grid;
   gap: 7px;
-  font-size: 13px;
+  font-size: max(11px, 0.9286rem);
 }
 .channel-connection-fields input {
   width: 100%;
@@ -284,11 +353,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-connection-fields p {
   margin: 0;
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .channel-review li span {
   overflow-wrap: anywhere;

@@ -1,4 +1,4 @@
-# MMS Web
+# MMS Pilot
 
 React / TypeScript client for the local MMS service. The v4 release bundles compiled assets; end users run `mms web --open` without a frontend build.
 

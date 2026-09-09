@@ -118,11 +118,20 @@ class ModelSettings:
             self._check(payload)
             return result
 
+    def refresh(self, payload):
+        # Reads a capability snapshot and returns proposed edits only. The
+        # human still reviews them through preview before anything is written.
+        with self.lock:
+            self._check(payload)
+            result = self.worker({**payload, "action": "refresh"})
+            self._check(payload)
+            return result
+
     def preview(self, payload):
         with self.lock:
             self._check(payload)
             # Do not preserve caller-supplied action/root/confirmation fields.
-            draft = {k: payload.get(k) for k in ("providerId", "models", "efforts", "connection", "revision", "fingerprint")}
+            draft = {k: payload.get(k) for k in ("providerId", "models", "efforts", "visions", "contextWindows", "connection", "revision", "fingerprint")}
             result = self.worker({**draft, "action": "plan"})
             self._check(payload)
             token = uuid.uuid4().hex

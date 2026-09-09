@@ -33,6 +33,7 @@ class WebApplication:
         state_root = require_private_root(state_root)
         if config_root is None:
             config_root = state_root / "config"
+        self.config_root = config_root
         self.state_root = state_root
         self.csrf_token = secrets.token_urlsafe(32)
         self.catalog = _adapter(
@@ -114,7 +115,7 @@ class WebApplication:
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
     def post(self, parts: list[str], payload: dict) -> dict:
-        if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "preview", "apply"}:
+        if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "refresh", "preview", "apply"}:
             return getattr(self._model_settings(), parts[1])(payload)
         if parts == ["launch-options"]:
             import shutil
@@ -150,6 +151,10 @@ class WebApplication:
             if not self.catalog:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
             return self.catalog.add_workspace(payload)
+        if len(parts) == 2 and parts[0] == "workspaces" and parts[1] in {"rename", "remove"}:
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            return getattr(self.catalog, f"{parts[1]}_workspace")(payload)
         if parts == ["configuration", "preview"]:
             return self._catalog().configuration_preview(payload)
         if parts == ["configuration", "discover"]:
@@ -190,6 +195,10 @@ class WebApplication:
 
 def create_server(app: WebApplication, static_root: Path, port: int = 8765):
     root = static_root.resolve()
+    import hashlib
+    from mms_version import VERSION
+    identity = hashlib.sha256((str(Path(__file__).resolve().parent.parent) + "|" +
+                               str(app.config_root.resolve()) + "|" + VERSION).encode()).hexdigest()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MMSWeb/1"
@@ -218,6 +227,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-MMS-Web-Identity", identity)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "SAMEORIGIN" if preview else "DENY")
@@ -227,7 +237,8 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                              "img-src 'self' data:; connect-src 'self'; "
                              "object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":
+                self.wfile.write(body)
 
         def _json(self, status, payload):
             self._send(status, json.dumps(payload, ensure_ascii=False).encode(),
@@ -263,13 +274,16 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                     return self._json(200, app.get(parts))
                 file = (root / (path.lstrip("/") or "index.html")).resolve()
                 if not file.is_relative_to(root) or not file.is_file():
-                    raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Web。", 404)
+                    raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Pilot。", 404)
                 content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
                 self._send(200, file.read_bytes(), content_type)
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
                 self._error(exc)
+
+        def do_HEAD(self):
+            self.do_GET()
 
         def do_POST(self):
             try:

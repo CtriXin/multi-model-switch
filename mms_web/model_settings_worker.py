@@ -107,6 +107,11 @@ def public_rows(rows):
                            "effectiveEffort": effective,
                            "contextWindow": options.get("model", {}).get("contextWindow") or caps.get("context_window_tokens"),
                            "vision": "image" in options.get("model", {}).get("input", []),
+                           "visionSource": options.get("capabilitySources", {}).get("supports_vision", ""),
+                           "contextSource": options.get("capabilitySources", {}).get("context_window_tokens", ""),
+                           "capabilitiesEditable": bool(options),
+                           "catalogVision": options.get("catalog", {}).get("vision"),
+                           "catalogContextWindow": options.get("catalog", {}).get("contextWindow"),
                            "launchOverride": str(runtime.get("reasoning_effort") or "") if runtime else ""})
         from mms_web.channel_connection import public_connection
         result.append({"id": p["id"], "name": p["name"], "models": models,
@@ -114,6 +119,75 @@ def public_rows(rows):
                        "canDiscover": p["models_endpoint"] not in {"manual", "none", "off"}
                        and "openai_chat_completions" in p["protocols"]})
     return result
+
+
+# Which capability snapshot the refresh reads. The Config Web page offers the
+# same three; keep the wire names stable so both pages mean the same thing.
+REFRESH_MODES = {
+    # Approved facts and local calibration snapshots that ship with MMS.
+    "known": {},
+    # OpenRouter's model list, fetched now. A provider catalogue reference,
+    # not the vendor's own statement.
+    "openrouter": {"openrouter_catalog": True},
+    # provider-profiles maintained in this repository, so updating MMS is what
+    # brings newer values in.
+    "official": {"mmf_official_overrides": True},
+}
+# Only the three capabilities this page can actually edit. Asking for more
+# would report changes the user has no control to review or undo here.
+REFRESH_FIELDS = ("vision", "context_window_tokens", "reasoning_effort")
+
+
+def refresh_proposal(known, result):
+    """Map a capability snapshot onto this page's pending edits.
+
+    Returns the same shape the row controls produce, so a refresh goes through
+    the existing preview and save path instead of writing anything itself.
+    """
+    caps = result.get("model_capabilities") or {}
+    sources = result.get("model_sources") or {}
+    visions, contexts, efforts, proposals, skipped = {}, {}, {}, [], []
+    for model in sorted(caps):
+        row = known.get(model)
+        values = caps[model] if isinstance(caps[model], dict) else {}
+        source = sources.get(model) if isinstance(sources.get(model), dict) else {}
+        if row is None:
+            continue
+        if not row.get("capabilitiesEditable"):
+            skipped.append({"model": model, "reason": "这个模型要先保存进通道才能设置能力。"})
+            continue
+        fields = []
+        vision = values.get("vision")
+        if isinstance(vision, bool) and vision != row["vision"]:
+            visions[model] = vision
+            fields.append({"field": "vision", "before": "可读取图片" if row["vision"] else "不可读取图片",
+                           "after": "可读取图片" if vision else "不可读取图片",
+                           "source": str((source.get("vision") or {}).get("source_layer") or "")})
+        context = values.get("context_window_tokens")
+        if isinstance(context, int) and not isinstance(context, bool) and 1024 <= context <= 10_000_000 and context != row["contextWindow"]:
+            contexts[model] = context
+            fields.append({"field": "context", "before": str(row["contextWindow"] or "自动"), "after": str(context),
+                           "source": str((source.get("context_window_tokens") or {}).get("source_layer") or "")})
+        effort = str(values.get("reasoning_effort") or "").strip().lower()
+        # A level this route cannot execute would be clamped at launch, so the
+        # page must not offer it as if it had been applied.
+        if effort and effort in (row.get("effortLevels") or []) and effort != row["effort"]:
+            efforts[model] = effort
+            fields.append({"field": "effort", "before": row["effort"] or "自动", "after": effort,
+                           "source": str((source.get("reasoning_effort") or {}).get("source_layer") or "")})
+        elif effort and effort not in (row.get("effortLevels") or []):
+            skipped.append({"model": model, "reason": f"快照建议的 effort {effort} 不在这条通道能执行的档位里。"})
+        if fields:
+            proposals.append({"model": model, "fields": fields})
+    return {"visions": visions, "contextWindows": contexts, "efforts": efforts,
+            "proposals": proposals, "skipped": skipped[:40],
+            "matched": int(result.get("matched_model_count") or 0),
+            "modelCount": int(result.get("model_count") or 0),
+            "unmatched": list(result.get("unmatched_models") or [])[:40],
+            "warnings": [str(item) for item in (result.get("warnings") or [])][:10],
+            "sources": [{"source": str(item.get("source") or ""), "checkedAt": str(item.get("checked_at") or ""),
+                         "note": str(item.get("note") or "")}
+                        for item in (result.get("catalog_sources") or []) if isinstance(item, dict)]}
 
 
 def draft_for(rows, request, revision):
@@ -138,6 +212,30 @@ def draft_for(rows, request, revision):
         if value != known[model]["effort"]:
             affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
             changes.append({"kind": "effort", "model": model, "before": known[model]["effort"] or "自动", "after": value, "channels": affected})
+    visions = request.get("visions") or {}
+    if not isinstance(visions, dict):
+        raise WebError("INVALID_VISION", "识图设置格式无效。", 400)
+    for model, value in visions.items():
+        if model not in known or not isinstance(value, bool) or not known[model].get("capabilitiesEditable"):
+            raise WebError("INVALID_VISION", "这个模型不能在这里设置识图能力。", 400)
+        if value != known[model]["vision"]:
+            affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
+            changes.append({"kind": "vision", "model": model,
+                            "before": "可读取图片" if known[model]["vision"] else "不可读取图片",
+                            "after": "可读取图片" if value else "不可读取图片", "channels": affected})
+    contexts = request.get("contextWindows") or {}
+    if not isinstance(contexts, dict):
+        raise WebError("INVALID_CONTEXT", "上下文长度格式无效。", 400)
+    for model, value in contexts.items():
+        # A context window the route cannot honour would silently truncate work,
+        # so refuse the value here instead of writing it into policy.
+        if model not in known or not known[model].get("capabilitiesEditable") or not isinstance(value, int) or isinstance(value, bool) or not 1024 <= value <= 10_000_000:
+            raise WebError("INVALID_CONTEXT", "上下文长度需要是 1024 到 10000000 之间的整数。", 400)
+        if value != known[model]["contextWindow"]:
+            affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
+            changes.append({"kind": "context", "model": model,
+                            "before": str(known[model]["contextWindow"] or "自动"),
+                            "after": str(value), "channels": affected})
     for model in sorted(set(selected) - original):
         changes.append({"kind": "add", "model": model})
     for model in sorted(original - set(selected)):
@@ -158,7 +256,15 @@ def draft_for(rows, request, revision):
         target["extra_models"] = []
         target["fallback_models"] = []
     # Capability edits are model-level; never set policy_touched/visible here.
-    target["model_capabilities"] = {c["model"]: {"reasoning_effort": c["after"]} for c in changes if c["kind"] == "effort"}
+    capability_edits = {}
+    for change in changes:
+        if change["kind"] == "effort":
+            capability_edits.setdefault(change["model"], {})["reasoning_effort"] = change["after"]
+        elif change["kind"] == "vision":
+            capability_edits.setdefault(change["model"], {})["vision"] = visions[change["model"]]
+        elif change["kind"] == "context":
+            capability_edits.setdefault(change["model"], {})["context_window_tokens"] = contexts[change["model"]]
+    target["model_capabilities"] = capability_edits
     from mms_web.channel_connection import edit_connection
     connection, connection_changes = edit_connection(target, request.get("connection"))
     target.update(connection)
@@ -182,6 +288,29 @@ def run(request):
         return {"revision": revision, "providers": public_rows(rows)}
     if request.get("revision") != revision:
         raise WebError("CONFIG_STALE", "MMF 配置已更新，请重新加载后再保存。", 409)
+    if action == "refresh":
+        target = next((p for p in rows if p["id"] == request.get("providerId")), None)
+        if target is None:
+            raise WebError("PROVIDER_NOT_FOUND", "这个通道已不存在，请刷新。", 404)
+        mode = str(request.get("mode") or "known")
+        if mode not in REFRESH_MODES:
+            raise WebError("INVALID_REFRESH_MODE", "不认识这个刷新来源。", 400)
+        known = {m["id"]: m for m in public_rows([target])[0]["models"]}
+        requested = request.get("models")
+        models = [m for m in requested if m in known] if isinstance(requested, list) else []
+        models = models or list(known)
+        try:
+            result = web.refresh_model_capability_truth(
+                cfg,
+                {"provider_id": target["id"],
+                 "provider": {"id": target["id"], "models": [{"id": model} for model in models]},
+                 "models": models, "fields": list(REFRESH_FIELDS), **REFRESH_MODES[mode]},
+                config_path=str(root / "config.toml"), command_name="mmf")
+        except Exception:
+            raise WebError("CAPABILITY_REFRESH_FAILED", "读取能力快照失败，配置没有改变。", 502)
+        if not result.get("ok"):
+            raise WebError("CAPABILITY_REFRESH_FAILED", "读取能力快照失败，配置没有改变。", 502)
+        return {"mode": mode, **refresh_proposal(known, result)}
     if action in {"discover", "check"}:
         target = next((p for p in rows if p["id"] == request.get("providerId")), None)
         if not target or not public_rows([target])[0]["canDiscover"]:

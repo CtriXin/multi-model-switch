@@ -1,4 +1,4 @@
-"""Driver building blocks for MMS Web rich sessions.
+"""Driver building blocks for MMS Pilot rich sessions.
 
 Nothing in this package imports MMS core modules at import time. Real-process
 launch goes through ``launch_bridge`` which fails closed until the MMS seam is

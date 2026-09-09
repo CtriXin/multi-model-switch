@@ -19,8 +19,8 @@ const content: Record<TourStep, StepContent> = {
   materials: { target: ['.materials-access'], title: "项目资料：不用每次重新交代", body: "把项目背景、常用要求和约定保存在这里。保存并启用后，它们会加入这个文件夹后续的新消息。", tip: "只影响之后的消息。编辑、停用或删除，不会撤回已经发出的内容；消息下方「本次使用」能核对提交的材料。" },
   artifacts: { target: ['.result-panel .panel-tabs button.active', 'button[aria-label="切换成果侧栏"]'], title: "成果：看看 AI 做出了什么", body: "在这里预览生成的文章、表格、图片或静态网页。还可以查看已记录的版本和差异，下载文件，引用文字选段或图片区域让 AI 修改。", tip: "先有会话才能打开成果。选段先进入草稿，发送后才处理；查看旧版本不会回滚电脑上的文件。" },
   runtime: { target: ['.result-panel .panel-tabs button.active'], title: "过程与运行详情：了解当前状态", body: "在这里看当前模型、上下文和用量。对话中的过程可以展开，查看工具做了什么；待确认的问题需要你在卡片里回答。", tip: "停止会结束本轮执行，已经发生的文件修改不会自动撤销。模型在正文里自报身份可能不准确，请核对运行详情。" },
-  sessions: { target: ['.sidebar-sessions', '.sidebar'], title: "以前的对话都在这里", body: "左侧按工作文件夹收好会话。点标题就能接着聊；上方可以新建、搜索和筛选。当前会话的更多菜单还可重命名、归档、导出或创建分支。", tip: "归档仍保留内容。创建对话分支不会复制或回滚项目文件。" },
-  settings: { target: ['.settings-tabs'], title: "设置：连接服务，调整使用习惯", body: "「模型与通道」管理连接和新会话默认值；「外观与使用」调整主题、强调色和过程折叠。Logo 旁和设置顶部都能看到当前版本。", tip: "设置中的长期默认 effort 用于之后的新会话；已有会话仍可单独调整。" },
+  sessions: { target: ['.sidebar-sessions', '.sidebar'], title: "以前的对话都在这里", body: "左侧按工作文件夹收好会话。点标题就能接着聊；上方可以新建、搜索和筛选。工作文件夹和会话旁的更多菜单可排序、重命名、归档、导出或创建分支。", tip: "移除文件夹只从侧栏隐藏，旧会话仍能继续；归档也保留内容。对话分支不会复制或回滚项目文件。" },
+  settings: { target: ['.settings-tabs'], title: "设置：连接服务，调整使用习惯", body: "「模型与通道」管理连接和新会话默认值；「外观与使用」调整跟随系统的主题、强调色、字体、字号和过程折叠。Logo 旁和设置顶部都能看到当前版本。", tip: "设置中的长期默认 effort 用于之后的新会话；已有会话仍可单独调整。" },
   finish: { target: ['#mms-help-button'], title: "忘了怎么用，随时点 ?", body: "你不用一次记住所有功能。这里可以重新开始悬浮引导，也能搜索功能说明，只了解眼下需要的部分。", tip: "现在可以回到对话，把你的第一个想法交给 AI。" },
 };
 interface Box { x: number; y: number; width: number; height: number }
@@ -53,7 +53,7 @@ export function GuidedTour({ step, move, close, help, example, modelReady, confi
     if (step === "effort" && !document.querySelector('.studio-popover:popover-open [data-guide="effort"]')) document.querySelector<HTMLButtonElement>('.task-settings-trigger')?.click();
     const update = () => {
       // Real dialogs (connection, file picker, model choice) own focus while open.
-      const paused = !!document.querySelector('dialog[open]');
+      const paused = !!document.querySelector('dialog[open]:not([data-guide-dialog="settings"])');
       const menu = document.querySelector('.studio-popover:popover-open');
       if (paused) layer.current?.hidePopover();
       else if (layer.current) {

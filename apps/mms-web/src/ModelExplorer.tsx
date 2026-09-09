@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Check,
+  ChevronDown,
   ChevronRight,
   Search,
   Star,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Model, Preset } from "./types";
 import { request } from "./api";
+import { VendorMark, vendorTint } from "./VendorMark";
 
 export interface LaunchFacts {
   model: {
@@ -247,11 +249,19 @@ export function ModelExplorer({
                 )
               }
             >
-              <span className="model-monogram">
-                {(
-                  models.find((m) => m.id === ps[0].modelId)?.family ||
-                  ps[0].name
-                ).slice(0, 2)}
+              <span
+                className="model-monogram"
+                style={{
+                  background: vendorTint(
+                    models.find((m) => m.id === ps[0].modelId)?.family,
+                    ps[0].name,
+                  ),
+                }}
+              >
+                <VendorMark
+                  family={models.find((m) => m.id === ps[0].modelId)?.family}
+                  name={ps[0].name}
+                />
               </span>
               <span>
                 <strong>{ps[0].name}</strong>
@@ -303,7 +313,7 @@ export function ModelExplorer({
                   </span>
                 </div>
                 <div className="channel-heading">
-                  <h4>选择通道</h4>
+                  <h4>默认通道</h4>
                   <span>{routes.length} 条</span>
                 </div>
                 <div className="channel-list">
@@ -365,7 +375,9 @@ export function ModelExplorer({
                     {error}
                   </p>
                 )}
-                {facts && (
+                <details className="quick-config">
+                  <summary>
+                    {facts && (
                   <div className="route-summary">
                     <span>当前通道默认</span>
                     <strong>
@@ -391,11 +403,12 @@ export function ModelExplorer({
                       </small>
                     )}
                   </div>
-                )}
-                <details className="quick-config">
-                  <summary>
-                    <SlidersHorizontal size={15} />
-                    常用设置
+                    )}
+                    <span className="quick-config-more">
+                      <SlidersHorizontal size={15} />
+                      更多设置
+                      <ChevronDown size={13} />
+                    </span>
                   </summary>
                   <label>
                     通道备注

@@ -1,7 +1,7 @@
-"""MMS Web catalog adapter (Agent A).
+"""MMS Pilot catalog adapter (Agent A).
 
 Provides the model/service/preset/workspace catalog and a preview->apply
-configuration flow for the MMS Web frontend, per docs/mms-web/API.md.
+configuration flow for the MMS Pilot frontend, per docs/mms-web/API.md.
 
 Design boundaries:
 - Catalog reads come from the verified latest-approved bundle
@@ -798,7 +798,7 @@ class CatalogService:
             "models": models,
             "services": services,
             "presets": presets,
-            "workspaces": self._workspaces(),
+            "workspaces": [w for w in self._workspaces() if not w.get("hidden")],
             "diagnostics": diagnostics,
             "revision": self._config_revision(),
         }
@@ -818,6 +818,7 @@ class CatalogService:
                             "id": str(item.get("id") or ""),
                             "name": str(item.get("name") or Path(item["path"]).name),
                             "path": str(item["path"]),
+                            **({"hidden": True} if item.get("hidden") is True else {}),
                         }
                     )
         if not any(item["id"] == "default" for item in workspaces):
@@ -1237,3 +1238,46 @@ class CatalogService:
             items = [w for w in items if w["id"] not in ("default", workspace["id"])]
             private_json(registry, [*items, workspace])
         return workspace
+
+    def rename_workspace(self, payload: dict) -> dict:
+        """Rename one registered workspace. The folder on disk is untouched."""
+        self._require_safe_state_root()
+        workspace_id = str(payload.get("id") or "").strip()
+        name = str(payload.get("name") or "").strip()
+        if not name or len(name) > 120 or any(ord(c) < 32 for c in name):
+            raise WebError("INVALID_WORKSPACE_NAME", "请填写 1 到 120 个字符的名称。", 400)
+        return self._rewrite_workspaces(workspace_id, lambda item: {**item, "name": name})
+
+    def remove_workspace(self, payload: dict) -> dict:
+        """Drop a workspace from the sidebar. Sessions and files are kept."""
+        self._require_safe_state_root()
+        workspace_id = str(payload.get("id") or "").strip()
+        if workspace_id == "default":
+            raise WebError("WORKSPACE_PROTECTED", "启动目录不能移除。", 409)
+        return self._rewrite_workspaces(workspace_id, lambda item: {**item, "hidden": True})
+
+    def _rewrite_workspaces(self, workspace_id: str, change) -> dict:
+        from .runtime import private_json
+
+        if not workspace_id:
+            raise WebError("INVALID_WORKSPACE", "请选择一个工作空间。", 400)
+        registry = self._state_root / "workspaces.json"
+        self._state_root.mkdir(parents=True, exist_ok=True)
+        with open(self._state_root / "workspaces.lock", "a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            items = self._workspaces()
+            if not any(item["id"] == workspace_id for item in items):
+                raise WebError("WORKSPACE_NOT_FOUND", "这个工作空间已不存在，请刷新。", 404)
+            updated = []
+            result = {}
+            for item in items:
+                if item["id"] != workspace_id:
+                    updated.append(item)
+                    continue
+                changed = change(item)
+                if changed is not None:
+                    updated.append(changed)
+                    result = changed
+            # The launch directory is derived, not stored; keep it out of the file.
+            private_json(registry, [item for item in updated if item["id"] != "default"])
+        return result or {"id": workspace_id, "removed": True}

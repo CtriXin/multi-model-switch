@@ -32,7 +32,7 @@
   flex: 1;
 }
 .session-link-copy small {
-  font-size: 11px;
+  font-size: max(11px, 0.7857rem);
   gap: 6px;
 }
 .session-phase {
@@ -62,7 +62,7 @@
   background: var(--accent);
   border-radius: 5px;
   padding: 2px 5px;
-  font-size: 10px;
+  font-size: max(11px, 0.7143rem);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -163,30 +163,43 @@
     opacity: 1;
   }
 }
+/* A pill while something is happening, and nothing at all once it is not:
+   a resting session should not carry a filled banner above the composer. */
 .current-activity {
-  padding: 9px 12px;
-  min-height: 38px;
-  gap: 12px;
-  margin-bottom: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 3px 10px;
+  margin-bottom: 6px;
+  border-radius: 20px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  width: fit-content;
+  max-width: 100%;
 }
 .current-activity.thinking,
 .current-activity.responding,
 .current-activity.running,
 .current-activity.tool {
-  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
 }
 .current-activity .status {
-  font-size: 13px;
+  font-size: max(11px, 0.7857rem);
   font-weight: 600;
 }
 .current-activity .activity-hint {
-  font-size: 12px;
+  font-size: max(11px, 0.7857rem);
+  color: var(--muted);
 }
-.current-activity.completed {
-  padding-left: 5px;
-}
+.current-activity.completed,
+.current-activity.idle,
+.current-activity.stopped,
 .current-activity.closed {
   background: transparent;
+  border-color: transparent;
+  padding-left: 2px;
 }
 .accent-options {
   display: flex;
@@ -201,7 +214,7 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: max(11px, 0.8571rem);
 }
 .accent-options i {
   width: 13px;
@@ -209,14 +222,35 @@
   border-radius: 50%;
   background: #5856d6;
 }
-.accent-options [data-accent="blue"] i {
-  background: #2565ad;
+.accent-options [data-accent="indigo"] i {
+  background: #5e5ce6;
 }
-.accent-options [data-accent="rose"] i {
-  background: #b23d66;
+.accent-options [data-accent="cyan"] i {
+  background: #0a7ea4;
+}
+.accent-options [data-accent="pink"] i {
+  background: #c7365a;
 }
 .accent-options [data-accent="orange"] i {
   background: #a95116;
+}
+.accent-options [data-accent="green"] i {
+  background: #17803d;
+}
+:root[data-theme="dark"] .accent-options [data-accent="indigo"] i {
+  background: #8c8cff;
+}
+:root[data-theme="dark"] .accent-options [data-accent="cyan"] i {
+  background: #64d2ff;
+}
+:root[data-theme="dark"] .accent-options [data-accent="pink"] i {
+  background: #ff6482;
+}
+:root[data-theme="dark"] .accent-options [data-accent="orange"] i {
+  background: #ff9f0a;
+}
+:root[data-theme="dark"] .accent-options [data-accent="green"] i {
+  background: #30d158;
 }
 .accent-options [aria-pressed="true"] {
   border-color: var(--accent);

@@ -31,5 +31,5 @@ if __name__ == "__main__":
         from mms_web.runtime import private_json, require_private_root
         root = require_private_root(Path(os.environ["MMS_CONFIG_ROOT"]))
         private_json(root / "launch-error.json", {"type": type(exc).__name__, "traceback": traceback.format_exc()})
-        print("MMS Web: 启动失败，请检查所选模型服务和本机 Pi 安装。", file=sys.stderr)
+        print("MMS Pilot: 启动失败，请检查所选模型服务和本机 Pi 安装。", file=sys.stderr)
         sys.exit(1)

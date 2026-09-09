@@ -1,42 +1,42 @@
-.help-trigger { font-size: 18px; font-weight: 600; flex: 0 0 36px; }
+.help-trigger { font-size: max(11px, 1.2857rem); font-weight: 600; flex: 0 0 36px; }
 .help-guide { width: min(920px, calc(100vw - 40px)); max-width: none; max-height: min(760px, calc(100dvh - 48px)); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); overflow: hidden; }
 .help-guide[open] { display: flex; flex-direction: column; }
 .help-guide::backdrop { background: rgb(0 0 0 / .32); }
 .guide-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 28px 20px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
-.guide-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
-.guide-header p { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+.guide-header h2 { margin: 0; font-size: max(11px, 1.4286rem); font-weight: 650; }
+.guide-header p { margin: 7px 0 0; color: var(--muted); font-size: max(11px, 0.9286rem); }
 .guide-layout { display: grid; grid-template-columns: 225px minmax(0, 1fr); min-height: 0; height: 540px; }
 .guide-index { overflow-y: auto; padding: 18px 12px; background: var(--soft); border-right: 1px solid var(--line); }
 .guide-search { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; margin: 0 2px 14px; color: var(--muted); }
-.guide-search input { width: 100%; min-width: 0; padding: 10px 0; background: transparent; border: 0; font-size: 12px; }
-.guide-index > button { display: block; width: 100%; min-height: 42px; text-align: left; border: 0; border-radius: 8px; background: transparent; padding: 10px; margin: 3px 0; font-size: 13px; line-height: 1.5; }
+.guide-search input { width: 100%; min-width: 0; padding: 10px 0; background: transparent; border: 0; font-size: max(11px, 0.8571rem); }
+.guide-index > button { display: block; width: 100%; min-height: 42px; text-align: left; border: 0; border-radius: 8px; background: transparent; padding: 10px; margin: 3px 0; font-size: max(11px, 0.9286rem); line-height: 1.5; }
 .guide-index > button:hover { background: var(--surface); }
 .guide-index > button[aria-current] { background: var(--selected); color: var(--accent); font-weight: 600; }
-.guide-index > button span { display: block; font-size: 11px; font-weight: 400; margin-top: 4px; }
-.guide-empty { font-size: 12px; color: var(--muted); line-height: 1.7; padding: 0 9px; }
+.guide-index > button span { display: block; font-size: max(11px, 0.7857rem); font-weight: 400; margin-top: 4px; }
+.guide-empty { font-size: max(11px, 0.8571rem); color: var(--muted); line-height: 1.7; padding: 0 9px; }
 .guide-content { padding: 28px 32px; overflow-y: auto; min-width: 0; overscroll-behavior: contain; }
-.guide-content h3 { font-size: 23px; line-height: 1.4; margin: 0 0 12px; }
-.guide-lead { color: var(--muted); line-height: 1.85; font-size: 14px; margin: 0 0 24px; }
+.guide-content h3 { font-size: max(11px, 1.6429rem); line-height: 1.4; margin: 0 0 12px; }
+.guide-lead { color: var(--muted); line-height: 1.85; font-size: max(11px, 1.0000rem); margin: 0 0 24px; }
 .guide-content .button, .guide-step-footer button, .guide-location-link { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
-.guide-location-link { background: transparent; border: 0; padding: 6px 0; color: var(--accent); font-size: 13px; }
+.guide-location-link { background: transparent; border: 0; padding: 6px 0; color: var(--accent); font-size: max(11px, 0.9286rem); }
 .guide-article section { margin: 0 0 22px; }
-.guide-article h4 { font-size: 15px; margin: 0 0 7px; font-weight: 600; }
-.guide-article p { margin: 0; font-size: 13px; line-height: 1.85; }
-.guide-footnote { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.guide-article h4 { font-size: max(11px, 1.0714rem); margin: 0 0 7px; font-weight: 600; }
+.guide-article p { margin: 0; font-size: max(11px, 0.9286rem); line-height: 1.85; }
+.guide-footnote { font-size: max(11px, 0.8571rem); color: var(--muted); line-height: 1.7; }
 .guide-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 28px; border-top: 1px solid var(--line); flex: 0 0 auto; }
-.guide-footer span { font-size: 12px; color: var(--muted); }
+.guide-footer span { font-size: max(11px, 0.8571rem); color: var(--muted); }
 .guide-footer button { min-height: 36px; }
 @media (max-width: 640px) {
   .help-guide { width: calc(100vw - 16px); max-height: calc(100dvh - 20px); border-radius: 12px; }
   .guide-header { padding: 17px 18px 14px; }
-  .guide-header h2 { font-size: 18px; }
+  .guide-header h2 { font-size: max(11px, 1.2857rem); }
   .guide-layout { display: flex; flex-direction: column; height: min(620px, calc(100dvh - 170px)); }
   .guide-index { flex-shrink: 0; max-height: 150px; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 12px; }
   .guide-search { margin-bottom: 5px; }
-  .guide-index > button { display: inline-block; width: auto; min-height: 36px; margin: 1px 3px 1px 0; padding: 7px 9px; font-size: 12px; }
+  .guide-index > button { display: inline-block; width: auto; min-height: 36px; margin: 1px 3px 1px 0; padding: 7px 9px; font-size: max(11px, 0.8571rem); }
   .guide-index > button span { display: none; }
   .guide-content { padding: 22px 18px; flex: 1; }
-  .guide-content h3 { font-size: 20px; }
+  .guide-content h3 { font-size: max(11px, 1.4286rem); }
   .guide-footer { padding: 8px 18px; }
 }
 
@@ -46,14 +46,14 @@
 .tour-spotlight { position: fixed; border: 2px solid var(--accent); border-radius: 10px; box-shadow: 0 0 0 9999px rgb(15 18 25 / .28); pointer-events: none; }
 .tour-card { position: fixed; box-sizing: border-box; max-height: calc(100dvh - 24px); overflow: auto; pointer-events: auto; border: 1px solid var(--line); border-radius: 14px; padding: 15px 20px 13px; background: var(--surface); color: var(--ink); box-shadow: 0 12px 48px rgb(0 0 0 / .22); outline: none; }
 .tour-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -6px -9px 7px 0; }
-.tour-card > header > span { color: var(--accent); font-size: 12px; font-weight: 600; }
-.tour-card h2 { margin: 0 0 10px; font-size: 18px; line-height: 1.5; }
-.tour-card p { font-size: 13px; line-height: 1.8; margin: 0 0 12px; }
-.tour-card .tour-tip { font-size: 12px; color: var(--muted); }
+.tour-card > header > span { color: var(--accent); font-size: max(11px, 0.8571rem); font-weight: 600; }
+.tour-card h2 { margin: 0 0 10px; font-size: max(11px, 1.2857rem); line-height: 1.5; }
+.tour-card p { font-size: max(11px, 0.9286rem); line-height: 1.8; margin: 0 0 12px; }
+.tour-card .tour-tip { font-size: max(11px, 0.8571rem); color: var(--muted); }
 .tour-card footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; }
 .tour-card footer > button { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; }
 .tour-links { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
-.tour-links button { min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; }
+.tour-links button { min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: max(11px, 0.8571rem); }
 .tour-links button:hover { color: var(--accent); }
 .tour-example { width: 100%; min-height: 40px; }
 .tour-arrow { position: fixed; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; transform: translate(-50%, -50%); }
@@ -62,6 +62,6 @@
 .tour-arrow.left { position: absolute; left: 4px; }
 @media (max-width: 640px) {
   .tour-card { padding: 12px 16px 10px; }
-  .tour-card h2 { font-size: 17px; }
+  .tour-card h2 { font-size: max(11px, 1.2143rem); }
   .tour-card p { line-height: 1.65; }
 }

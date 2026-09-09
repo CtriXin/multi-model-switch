@@ -1,4 +1,4 @@
-# MMS Web API v1
+# MMS Pilot API v1
 
 Owner: 当前 Codex。2026-09-08。状态：真实 Pi Web 集成版。
 
@@ -201,3 +201,9 @@ Session 增加 `presetId`，assistant event 增加 `modelName`。已有回答保
 
 
 `GET /bootstrap` 的 `version: "1"` 是 API 版本；`appVersion` 来自当前运行服务的 `mms_version.VERSION`，用于 Logo 和设置页显示产品版本。缺失时不猜测产品版本。
+
+## 工作空间侧栏管理
+
+`POST /api/v1/workspaces/rename` 接收 `{id, name}`；`POST /api/v1/workspaces/remove` 接收 `{id}`。移除仅标记 Web 工作空间 `hidden: true`，bootstrap 不再列出，但会话、文件引用、Skills 和项目资料仍使用原 ID 解析。重新添加同一路径会恢复相同 ID。启动目录 default 不允许移除。
+
+HTTP HEAD 遵循 GET 的 Host/Origin 校验，仅返回响应头。`X-MMS-Web-Identity` 是安装目录、配置目录和版本的摘要，用于安装器识别可复用实例，不作为认证凭据。

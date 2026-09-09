@@ -35,7 +35,7 @@ def main():
         if TARGET.exists():
             shutil.rmtree(TARGET)
         shutil.copytree(temporary, TARGET)
-    print(f"Packaged MMS Web {manifest['version']} -> {TARGET}")
+    print(f"Packaged MMS Pilot {manifest['version']} -> {TARGET}")
 
 
 if __name__ == "__main__":

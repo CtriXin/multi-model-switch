@@ -1,5 +1,5 @@
-import { useState, type ComponentProps } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { useEffect, useState, type ComponentProps } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { EventView } from "./components";
 import { ToolGroup } from "./ToolEvent";
 import type { SessionEvent } from "./types";
@@ -18,8 +18,9 @@ function ProcessEvents({events, ...props}: Props & {events: SessionEvent[]}) {
     : <EventView key={event.id} {...props} event={event} continuation intermediate />)}</>;
 }
 
-function Turn({events, completed, forced, ...props}: Props & {
+function Turn({events, completed, forced, report, ...props}: Props & {
   events: SessionEvent[]; completed: boolean; forced: {collapsed: boolean; revision: number} | null;
+  report: (id: string, collapsed: boolean) => void;
 }) {
   const [choice, setChoice] = useState<{collapsed: boolean; revision: number} | null>(null);
   const revision = forced?.revision || 0;
@@ -35,6 +36,13 @@ function Turn({events, completed, forced, ...props}: Props & {
   const count = process.filter(e => e.kind === "tool").length;
   const failures = process.filter(e => e.status === "error").length;
   const toggle = () => setChoice({collapsed: !collapsed, revision});
+  // The transcript-wide button names the action, so it needs to know whether
+  // anything is still open, including turns opened one at a time.
+  const turnId = events[0]?.id || "";
+  const hasProcess = !!process.length;
+  useEffect(() => {
+    if (hasProcess) report(turnId, collapsed);
+  }, [report, turnId, collapsed, hasProcess]);
   const controls = <button type="button" className="turn-process-toggle" aria-expanded={!collapsed} onClick={toggle}>
     {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
     {collapsed ? "展开过程" : "收起过程"}
@@ -53,8 +61,10 @@ function Turn({events, completed, forced, ...props}: Props & {
   </section>;
 }
 
-export function Transcript(props: Props) {
-  const [forced, setForced] = useState<{collapsed: boolean; revision: number} | null>(null);
+export function Transcript({forced, report, ...props}: Props & {
+  forced: {collapsed: boolean; revision: number} | null;
+  report: (id: string, collapsed: boolean) => void;
+}) {
   const events = props.detail.events.filter(e => e.id !== "n-web-mode" &&
     !(e.kind === "notice" && e.text === "会话已通过 MMS 启动路径创建") &&
     !(e.kind === "assistant" && !e.text.trim() && !e.thinking?.trim()));
@@ -66,14 +76,10 @@ export function Transcript(props: Props) {
   }
   const active = ["running", "waiting"].includes(props.detail.session.state);
   return <>
-    {turns.map((turn, index) => <Turn key={turn[0].id} {...props} events={turn}
+    {turns.map((turn, index) => <Turn key={turn[0].id} {...props} events={turn} report={report}
       forced={forced} completed={index < turns.length - 1 || !active} />)}
     {!!pending.length && <section className="pending-messages" aria-label="未执行的消息">
       {pending.map(event => <div key={event.id}><small>{event.status === "queued" ? "排队中，尚未执行" : event.status === "cancelled" ? "已取消，未执行" : "发送失败，未执行"}</small><EventView {...props} event={event} /></div>)}
     </section>}
-    {events.some(e => e.kind === "tool" || e.thinking) && <div className="transcript-process-actions" aria-label="过程显示">
-      <button onClick={() => setForced({collapsed: true, revision: (forced?.revision || 0) + 1})}><ChevronsDownUp size={14} />收起全部过程</button>
-      <button onClick={() => setForced({collapsed: false, revision: (forced?.revision || 0) + 1})}><ChevronsUpDown size={14} />展开全部过程</button>
-    </div>}
   </>;
 }

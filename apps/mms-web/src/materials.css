@@ -1,38 +1,38 @@
-.materials-access { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--muted); padding: 7px 0; font: inherit; font-size: 11px; cursor: pointer; }
+.materials-access { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--muted); padding: 7px 0; font: inherit; font-size: max(11px, 0.7857rem); cursor: pointer; }
 .materials-access:hover { color: var(--accent); }
-.materials-access span { color: var(--accent); font-size: 10px; }
+.materials-access span { color: var(--accent); font-size: max(11px, 0.7143rem); }
 dialog:has(.project-materials) { width: min(920px, calc(100vw - 32px)); }
 .project-materials { width: 100%; }
 .recipe-access .materials-access { margin-right: auto; }
 .session-workbar > .materials-access { flex-shrink: 0; margin-left: auto; }
 .session-workbar > button:first-child { min-width: 0; }
-.materials-workspace { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.materials-workspace { font-size: max(11px, 0.7857rem); color: var(--muted); overflow-wrap: anywhere; }
 .materials-toolbar { display: flex; align-items: center; gap: 8px; margin: 18px 0; }
-.materials-toolbar > span { margin-left: auto; font-size: 11px; color: var(--muted); }
-.project-materials button { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.materials-toolbar > span { margin-left: auto; font-size: max(11px, 0.7857rem); color: var(--muted); }
+.project-materials button { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: max(11px, 0.8571rem); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: var(--surface); color: var(--ink); cursor: pointer; }
 .project-materials button:disabled { opacity: .45; cursor: default; }
 .materials-layout.editing { display: grid; grid-template-columns: minmax(190px, .8fr) minmax(280px, 1.4fr); gap: 24px; }
 .materials-list { min-width: 0; }
 .materials-list article { padding: 15px 0; border-top: 1px solid var(--line); }
-.materials-list article > strong { font-size: 13px; font-weight: 550; }
-.materials-list article > p { font-size: 12px; color: var(--muted); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.materials-list article > small { display: block; font-size: 10px; color: var(--muted); margin-bottom: 10px; }
+.materials-list article > strong { font-size: max(11px, 0.9286rem); font-weight: 550; }
+.materials-list article > p { font-size: max(11px, 0.8571rem); color: var(--muted); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.materials-list article > small { display: block; font-size: max(11px, 0.7143rem); color: var(--muted); margin-bottom: 10px; }
 .materials-list article > div { display: flex; gap: 6px; }
 .materials-list article.active > strong { color: var(--accent); }
-.material-enabled { margin-left: 10px; font-size: 10px; color: var(--muted); }
+.material-enabled { margin-left: 10px; font-size: max(11px, 0.7143rem); color: var(--muted); }
 .material-editor { min-width: 0; display: flex; flex-direction: column; gap: 15px; }
-.material-editor > label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+.material-editor > label { display: flex; flex-direction: column; gap: 7px; font-size: max(11px, 0.8571rem); }
 .material-editor input:not([type=checkbox]), .material-editor textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 9px 10px; font: inherit; line-height: 1.6; box-sizing: border-box; }
 .material-editor textarea { min-height: 220px; resize: vertical; }
 .material-editor > .material-toggle { flex-direction: row; align-items: center; }
 .material-editor-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .material-editor-actions button[type=submit] { background: var(--accent); color: white; border-color: var(--accent); }
-.context-usage { margin: 12px 0 3px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 9px; }
+.context-usage { margin: 12px 0 3px; font-size: max(11px, 0.7857rem); color: var(--muted); border-top: 1px solid var(--line); padding-top: 9px; }
 .context-usage summary { cursor: pointer; }
-.context-usage summary > span { margin-left: 10px; font-size: 10px; }
+.context-usage summary > span { margin-left: 10px; font-size: max(11px, 0.7143rem); }
 .context-workspace { overflow-wrap: anywhere; }
 .context-source { padding: 9px 0; border-top: 1px solid var(--line); }
 .context-source strong { display: block; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 .context-source p { margin: 5px 0; overflow-wrap: anywhere; }
-.context-source small { font-size: 10px; }
+.context-source small { font-size: max(11px, 0.7143rem); }
 @media (max-width: 700px) { .project-materials { width: 100%; } .materials-layout.editing { display: flex; flex-direction: column-reverse; } .material-editor textarea { min-height: 180px; } .context-usage summary > span { display: block; margin: 5px 0 0 14px; } }

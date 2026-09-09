@@ -1002,3 +1002,62 @@ def test_launch_rejects_hidden_preset_even_if_api_called_directly(tmp_path):
     with pytest.raises(WebError) as exc:
         service.resolve_launch("daily", "default")
     assert exc.value.code == "CAPABILITY_UNAVAILABLE"
+
+
+def _workspace_service(tmp_path: Path) -> CatalogService:
+    return CatalogService(config_root=None, state_root=tmp_path / "state")
+
+
+def test_rename_workspace_changes_only_the_display_name(tmp_path: Path) -> None:
+    folder = tmp_path / "project"
+    folder.mkdir()
+    service = _workspace_service(tmp_path)
+    added = service.add_workspace({"path": str(folder)})
+
+    renamed = service.rename_workspace({"id": added["id"], "name": "客户资料"})
+
+    assert renamed["name"] == "客户资料"
+    assert renamed["path"] == str(folder.resolve())
+    assert folder.is_dir()
+    stored = {w["id"]: w for w in service._workspaces()}
+    assert stored[added["id"]]["name"] == "客户资料"
+
+
+def test_rename_workspace_rejects_an_empty_name(tmp_path: Path) -> None:
+    folder = tmp_path / "project"
+    folder.mkdir()
+    service = _workspace_service(tmp_path)
+    added = service.add_workspace({"path": str(folder)})
+
+    with pytest.raises(WebError) as error:
+        service.rename_workspace({"id": added["id"], "name": "   "})
+    assert error.value.code == "INVALID_WORKSPACE_NAME"
+
+
+def test_remove_workspace_keeps_the_folder_on_disk(tmp_path: Path) -> None:
+    folder = tmp_path / "project"
+    folder.mkdir()
+    (folder / "notes.md").write_text("keep me", encoding="utf-8")
+    service = _workspace_service(tmp_path)
+    added = service.add_workspace({"path": str(folder)})
+
+    service.remove_workspace({"id": added["id"]})
+
+    assert next(w for w in service._workspaces() if w["id"] == added["id"])["hidden"] is True
+    assert service.add_workspace({"path": str(folder)})["id"] == added["id"]
+    assert not next(w for w in service._workspaces() if w["id"] == added["id"]).get("hidden")
+    assert (folder / "notes.md").read_text(encoding="utf-8") == "keep me"
+
+
+def test_launch_directory_cannot_be_removed(tmp_path: Path) -> None:
+    service = _workspace_service(tmp_path)
+    with pytest.raises(WebError) as error:
+        service.remove_workspace({"id": "default"})
+    assert error.value.code == "WORKSPACE_PROTECTED"
+
+
+def test_unknown_workspace_reports_a_refresh(tmp_path: Path) -> None:
+    service = _workspace_service(tmp_path)
+    with pytest.raises(WebError) as error:
+        service.rename_workspace({"id": "w-missing", "name": "x"})
+    assert error.value.code == "WORKSPACE_NOT_FOUND"

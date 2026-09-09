@@ -222,3 +222,125 @@ def test_reject_unsafe_connection_input(settings, url):
     draft['connection'] = {'openaiBaseUrl': url}
     with pytest.raises(WebError):
         settings.preview(draft)
+
+
+def test_published_vision_setting_reaches_a_new_pi_session(settings, tmp_path):
+    """A vision flag set here must change what the launched Pi session sees."""
+    from mms_web.server import WebApplication
+
+    draft = payload(settings)
+    draft.update(efforts={}, visions={"gpt-5": False})
+    preview = settings.preview(draft)
+    assert preview["changes"] == [{"kind": "vision", "model": "gpt-5", "before": "可读取图片",
+                                   "after": "不可读取图片", "channels": ["channel-a", "channel-b"]}]
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+    rows = settings.read()["providers"]
+    assert all(next(m for m in p["models"] if m["id"] == "gpt-5")["vision"] is False for p in rows)
+
+    app = WebApplication(state_root=tmp_path / "web-vision", config_root=settings.root)
+    project = tmp_path / "project-vision"
+    project.mkdir()
+    try:
+        workspace = app.catalog.add_workspace({"path": str(project)})
+        options = app.post(["launch-options"], {"presetId": "web:pi:channel-a:gpt-5",
+                                                "workspaceId": workspace["id"]})
+        assert "image" not in options["model"]["input"]
+        assert options["capabilitySources"]["supports_vision"] == "model_policy"
+    finally:
+        app.close()
+
+
+def test_published_context_window_reaches_a_new_pi_session(settings, tmp_path):
+    from mms_web.server import WebApplication
+
+    draft = payload(settings)
+    draft.update(efforts={}, contextWindows={"gpt-5": 262144})
+    preview = settings.preview(draft)
+    assert preview["changes"][0]["kind"] == "context"
+    assert preview["changes"][0]["after"] == "262144"
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+    rows = settings.read()["providers"]
+    assert all(next(m for m in p["models"] if m["id"] == "gpt-5")["contextWindow"] == 262144 for p in rows)
+
+    app = WebApplication(state_root=tmp_path / "web-context", config_root=settings.root)
+    project = tmp_path / "project-context"
+    project.mkdir()
+    try:
+        workspace = app.catalog.add_workspace({"path": str(project)})
+        options = app.post(["launch-options"], {"presetId": "web:pi:channel-a:gpt-5",
+                                                "workspaceId": workspace["id"]})
+        assert options["model"]["contextWindow"] == 262144
+    finally:
+        app.close()
+
+
+@pytest.mark.parametrize("bad", [
+    {"visions": {"gpt-5": "yes"}},
+    {"visions": {"unknown-model": True}},
+    {"contextWindows": {"gpt-5": 12}},
+    {"contextWindows": {"gpt-5": 99_000_000}},
+    {"contextWindows": {"gpt-5": True}},
+    {"contextWindows": {"gpt-5": "262144"}},
+])
+def test_reject_unsafe_capability_input(settings, bad):
+    draft = payload(settings)
+    draft.update(efforts={}, **bad)
+    with pytest.raises(WebError):
+        settings.preview(draft)
+
+
+def refresh(service, mode, models=("gpt-5", "gpt-4.1")):
+    snap = service.read()
+    return service.refresh({"fingerprint": snap["fingerprint"], "revision": snap["revision"],
+                            "providerId": "channel-a", "models": list(models), "mode": mode})
+
+
+def test_official_overrides_refresh_only_drafts_until_the_human_saves(settings, tmp_path):
+    """The batch fill must behave like typing in the rows, not like a save."""
+    from mms_web.server import WebApplication
+
+    before = settings.read()
+    result = refresh(settings, "official")
+    # Reading a snapshot is not a write: nothing about the config moved.
+    assert settings.read()["revision"] == before["revision"]
+    assert settings.fingerprint() == before["fingerprint"]
+    assert result["efforts"]["gpt-5"] == "medium"
+    assert next(m for m in before["providers"][0]["models"] if m["id"] == "gpt-5")["effort"] == "low"
+    assert [f["source"] for item in result["proposals"] for f in item["fields"]] == ["official", "official"]
+
+    # The proposal is the same shape the row controls produce, so it goes
+    # through the one existing preview and publish path.
+    draft = payload(settings)
+    draft.update(efforts=result["efforts"], visions=result["visions"],
+                 contextWindows=result["contextWindows"])
+    preview = settings.preview(draft)
+    assert {c["model"]: c["after"] for c in preview["changes"] if c["kind"] == "effort"} == {"gpt-5": "medium", "gpt-4.1": "medium"}
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+
+    app = WebApplication(state_root=tmp_path / "web-refresh", config_root=settings.root)
+    project = tmp_path / "project-refresh"
+    project.mkdir()
+    try:
+        workspace = app.catalog.add_workspace({"path": str(project)})
+        options = app.post(["launch-options"], {"presetId": "web:pi:channel-a:gpt-5",
+                                                "workspaceId": workspace["id"]})
+        assert options["configuredThinkingLevel"] == "medium"
+    finally:
+        app.close()
+
+
+def test_refresh_never_proposes_a_level_this_route_cannot_run(settings):
+    """A clamped effort would report a change the launcher would not honour."""
+    rows = {m["id"]: m for m in settings.read()["providers"][0]["models"]}
+    for mode in ("known", "official"):
+        result = refresh(settings, mode)
+        for model, level in result["efforts"].items():
+            assert level in rows[model]["effortLevels"], (mode, model, level)
+        for model, value in result["contextWindows"].items():
+            assert isinstance(value, int) and 1024 <= value <= 10_000_000
+        assert set(result["visions"]) <= set(rows)
+
+
+def test_refresh_rejects_an_unknown_source(settings):
+    with pytest.raises(WebError, match="刷新来源"):
+        refresh(settings, "somewhere-else")
