@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    rect { fill: #5856d6; }
+    @media (prefers-color-scheme: dark) {
+      rect { fill: #a7a3ff; }
+    }
+  </style>
+  <g transform="skewX(-14) translate(4.5, 0)">
+    <rect x="5" y="4" width="4.5" height="24" rx="2.25" />
+    <rect x="13.5" y="9.5" width="4.5" height="13" rx="2.25" />
+    <rect x="22" y="4" width="4.5" height="24" rx="2.25" />
+  </g>
+</svg>

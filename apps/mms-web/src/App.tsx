@@ -672,10 +672,13 @@ export function App() {
         <button
           className="brand"
           onClick={() => navigate("new")}
-          aria-label="MMS 首页"
+          aria-label="MMS Pilot 首页"
         >
           <Logo />
-          <span>mms</span>
+          <div className="brand-wordmark">
+            <span className="brand-mms">MMS</span>
+            <span className="brand-pilot">PILOT</span>
+          </div>
         </button>
         <div className="sidebar-actions">
           <button className="new-task" onClick={() => navigate("new")}>

@@ -40,26 +40,73 @@
   color: var(--ink);
 }
 .brand {
-  min-height: 86px;
-  padding: 22px;
-  gap: 11px;
-}
-.brand > span:nth-child(2) {
-  font-size: 27px;
-  font-weight: 650;
-  letter-spacing: -1.4px;
-}
-.sidebar .mms-mark {
+  min-height: 56px;
+  padding: 14px 18px;
+  gap: 12px;
+  display: flex;
+  align-items: center;
+  border: 0;
   background: transparent;
-  width: 24px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+  transition: background 120ms ease;
 }
-.sidebar .mms-mark i {
+.brand:hover {
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+.sidebar .brand .mms-mark {
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transform: skewX(-12deg);
+  width: auto;
+  flex-shrink: 0;
+  transition: transform 140ms ease;
+}
+.sidebar .brand:hover .mms-mark {
+  transform: skewX(-12deg) scale(1.04);
+}
+.sidebar .brand .mms-mark i {
+  display: block;
   background: var(--accent);
-  height: 18px;
-  width: 4px;
+  height: 23px;
+  width: 5px;
+  border-radius: 2.5px;
+  transition: background 140ms ease;
 }
-.sidebar .mms-mark i:nth-child(2) {
-  height: 12px;
+.sidebar .brand .mms-mark i:nth-child(2) {
+  height: 14px;
+}
+.brand-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.brand-mms {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  line-height: 1;
+}
+.brand-pilot {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  padding: 2px 7px;
+  border-radius: 5px;
+  line-height: 1.2;
 }
 .sidebar-actions {
   padding: 0 16px 12px;
@@ -149,13 +196,21 @@
 .workspace-row-actions::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: 0 0 0 -26px;
   z-index: 0;
   border-radius: 6px;
   background: transparent;
 }
 .workspace-group:hover .workspace-row-actions::after {
-  background: var(--soft);
+  background: transparent;
+}
+.workspace-group:hover .workspace-heading > span:nth-of-type(1) {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 20px),
+    transparent
+  );
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
 }
 .workspace-row-actions > * {
   position: relative;
@@ -214,8 +269,35 @@
 /* The menu would cover the dot anyway; yielding the slot keeps it readable.
    The row's own phase label still states that it is waiting. */
 .session-row:hover .attention-dot,
-.session-row:has(.session-row-menu[aria-expanded="true"]) .attention-dot {
+.session-row:has(.session-row-menu[aria-expanded="true"]) .attention-dot,
+.session-row:hover .new-reply-badge,
+.session-row:has(.session-row-menu[aria-expanded="true"]) .new-reply-badge {
   visibility: hidden;
+}
+/* Keep the row lit while the cursor is on its menu, which sits outside the
+   button, so the fade below always matches what is painted behind it. */
+.session-row:hover .session-link:not(.selected) {
+  background: var(--soft);
+}
+/* A long title would otherwise collide with the menu, its ellipsis sitting
+   right against the kebab. Fade the text itself rather than covering it with
+   a matching colour: the row background carries alpha, so any painted
+   gradient would be a near miss against it. */
+.session-link-copy {
+  transition: mask-image var(--duration-fast) var(--ease-out);
+}
+.session-row:hover .session-link-copy,
+.session-row:has(.session-row-menu[aria-expanded="true"]) .session-link-copy {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 48px),
+    transparent calc(100% - 18px)
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 48px),
+    transparent calc(100% - 18px)
+  );
 }
 .session-row-menu[aria-expanded="true"] {
   background: var(--soft);
