@@ -158,6 +158,12 @@ export function ChannelModels({
   const [preview, setPreview] = useState<Preview>();
   const [phrase, setPhrase] = useState("");
   const [leave, setLeave] = useState<string | null>(null);
+  const refreshFields = refresh?.proposals.flatMap((item) =>
+    item.fields.map((field) => ({ key: fieldKey(item.model, field), field })),
+  ) || [];
+  const selectedFields = refreshFields.filter(({ key }) => refreshPicks[key]);
+  const selectedOverrides = selectedFields.filter(({ field }) => field.userSet).length;
+  const allRefreshSelected = refreshFields.length > 0 && selectedFields.length === refreshFields.length;
   const provider = snapshot?.providers.find((p) => p.id === providerId);
   const original =
     provider?.models.filter((m) => m.visible).map((m) => m.id) || [];
@@ -309,6 +315,11 @@ export function ChannelModels({
     } finally {
       setBusy("");
     }
+  }
+  function chooseRefresh(mode: "all" | "none" | "default") {
+    setRefreshPicks(Object.fromEntries(refreshFields.map(({ key, field }) => [
+      key, mode === "default" ? proposedByDefault(field) : mode === "all",
+    ])));
   }
   function applyChecked() {
     if (!refresh) return;
@@ -577,11 +588,13 @@ export function ChannelModels({
           <div className="channel-capability-refresh">
             <button
               type="button"
-              className="capability-refresh"
+              className="button primary capability-refresh"
               disabled={!!busy}
+              aria-busy={busy === "refresh"}
               title="对比 MMF 官方数据和本地已知快照，列出与当前配置不一致的地方"
               onClick={() => void checkCapabilities()}
             >
+              <RefreshCw size={16} aria-hidden="true" />
               {busy === "refresh" ? "正在对比…" : "检查最新能力"}
             </button>
             <span className="muted">
@@ -817,11 +830,39 @@ export function ChannelModels({
               </p>
             ) : (
               <>
-                <p className="muted">
-                  勾选要填入的项。填入后仍需检查并保存才会生效。
-                  <strong>你自己设过的值默认不勾</strong>，
-                  只有 OpenRouter 说的也默认不勾。
+                <p className="muted" id="capability-selection-help">
+                  默认选中不会覆盖手动设置的更新；你自己设过的值、仅来自 OpenRouter 的建议默认不选。
+                  全选会包含这些项，填入后仍需“检查并保存”才生效。
                 </p>
+                <div className="capability-review-selection">
+                  <div className="capability-review-actions">
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={!!busy}
+                      aria-describedby="capability-selection-help"
+                      onClick={() => chooseRefresh(allRefreshSelected ? "none" : "all")}
+                    >
+                      {allRefreshSelected ? "取消全选" : "全选"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button subtle"
+                      disabled={!!busy}
+                      onClick={() => chooseRefresh("default")}
+                    >
+                      恢复默认选择
+                    </button>
+                  </div>
+                  <span className="muted" role="status">
+                    已选 {selectedFields.length} / {refreshFields.length} 项
+                    {selectedOverrides > 0 && (
+                      <span className="capability-selection-warning">
+                        ，其中 {selectedOverrides} 项会覆盖手动设置
+                      </span>
+                    )}
+                  </span>
+                </div>
                 <div className="capability-review-rows">
                   {refresh.proposals.map((item) =>
                     item.fields.map((field) => {
@@ -831,6 +872,7 @@ export function ChannelModels({
                           <input
                             type="checkbox"
                             checked={!!refreshPicks[key]}
+                            disabled={!!busy}
                             onChange={(e) =>
                               setRefreshPicks((old) => ({
                                 ...old,
@@ -897,11 +939,11 @@ export function ChannelModels({
               <button
                 className="button primary"
                 disabled={
-                  !Object.values(refreshPicks).some(Boolean) || !!busy
+                  !selectedFields.length || !!busy
                 }
                 onClick={applyChecked}
               >
-                填入选中项
+                填入选中项{selectedFields.length > 0 ? `（${selectedFields.length}）` : ""}
               </button>
             </footer>
           </div>

@@ -1,4 +1,4 @@
-# MMS Pilot 4.6：安装、配置与日常使用
+# MMS Pilot 4.8：安装、配置与日常使用
 
 MMS Pilot 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 会话放进浏览器。AI 仍通过 MMS 原有启动器在本机执行；浏览器是交互入口。v4 首版的实际 Web harness 是 Pi，Claude、Codex、OpenCode 的 CLI 启动能力仍在 MMS 中，暂未成为 Web 会话。
 
@@ -11,10 +11,10 @@ MMS Pilot 把 MMF 日常使用的模型、通道、effort、工作文件夹和 P
 复制这一条命令到终端：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.8.1/install.sh | bash -s -- --ref v4.8.1 --launch-web
 ```
 
-这份稳定版安装入口默认获取最新 stable Release，重复执行可升级。安装过程默认中文，自动设置命令 PATH；完成后只问一次是否打开 MMS Web，同意后在后台启动。没有交互终端时打印打开命令；`--launch-web` 可直接打开，`--no-launch-web` 可禁止打开。已有相同安装、版本和配置空间的 Web 会被复用，其他实例保留并使用新端口。
+上面的命令固定安装 v4.8.1；省略 `--ref` 时获取最新 stable Release，重复执行可升级。安装过程默认中文，自动设置命令 PATH；完成后只问一次是否打开 MMS Web，同意后在后台启动。没有交互终端时打印打开命令；`--launch-web` 可直接打开，`--no-launch-web` 可禁止打开。已有相同安装、版本和配置空间的 Web 会被复用，其他实例保留并使用新端口。
 
 之后随时运行 `mms web --open`；当前终端找不到命令时用 `~/.local/bin/mms web --open`。Web 默认使用自己的配置空间，直接在设置里连接服务即可。高级用户仍可显式指定已有 MMF 配置目录。
 
@@ -39,6 +39,8 @@ macOS 也可以在 Finder 打开 `~/.mms/MMS Pilot.command`。如果从 Finder �
 模型名相同时，先选模型，再比较通道。收藏、通道备注和首选通道用于快速选择。实际运行参数以 MMS 发布的模型能力和所选通道为准，不能单凭模型名字判断图片、上下文或 reasoning 能力。
 
 独立 Web 配置和已批准的 MMF Registry 都可在模型管理中维护可见模型与长期默认 effort。保存前会显示具体差异；独立配置保存在自己的 Web 数据目录，使用相同的 Registry 校验与发布流程。旧独立配置首次保存时会保留其全部通道，之后以已批准目录作为模型与连接来源。模型默认值可能由多条通道共用，保存前会列出受影响通道。新会话及切换模型时采用这些默认值；当前会话的 effort 也可单独调整。
+
+「检查最新能力」会列出当前值、建议值和来源：会覆盖手动设置的项、仅来自 OpenRouter 的建议默认不勾选。可用「全选／取消全选」批量操作，也可「恢复默认选择」；选中数量和手动覆盖数量会实时显示。点击「填入选中项」只修改草稿，仍需「检查并保存」才生效。
 
 普通 `mms web` 默认在独立 Web 数据目录中配置，不需要先做 CLI 配置。高级 `mms config web` 仍保留，负责 Web 尚未覆盖的 Registry、账号、协议等完整配置。
 
