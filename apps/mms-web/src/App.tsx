@@ -1187,7 +1187,10 @@ export function App() {
                         </select>
                       )}
                       <ArtifactView key={`${detail!.session.id}:${artifact.id}`} artifact={artifact} sessionId={detail!.session.id}
-                        onSelect={selection => setSelectionRequest({ nonce: crypto.randomUUID(), sessionId: detail!.session.id, selection })} />
+                        onSelect={selection => {
+                          setSelectionRequest({ nonce: crypto.randomUUID(), sessionId: detail!.session.id, selection });
+                          if (window.matchMedia("(max-width: 1200px)").matches) setPanel(false);
+                        }} />
                       {detail?.artifactNotice && <p className="section-note">{detail.artifactNotice}</p>}
                     </>
                   ) : (
