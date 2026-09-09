@@ -1,4 +1,4 @@
-# MMS 4.2：安装、配置与日常使用
+# MMS 4.4：安装、配置与日常使用
 
 MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 会话放进浏览器。AI 仍通过 MMS 原有启动器在本机执行；浏览器是交互入口。v4 首版的实际 Web harness 是 Pi，Claude、Codex、OpenCode 的 CLI 启动能力仍在 MMS 中，暂未成为 Web 会话。
 
@@ -6,26 +6,19 @@ MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 
 
 支持 macOS、Linux。Windows 暂建议在 WSL2 内运行服务；Windows 原生安装与系统文件选择尚未验收。
 
-需要 Python 3.11+ 和兼容的 Node.js。Pi 0.85.1 要求 Node.js 22.19+，建议使用 Node.js 24 LTS。安装程序准备 MMS 的 Python 环境，`--install-cli pi` 会检查或安装 Pi；已有 Pi 时保留已有版本。发布包带编译好的页面，使用者不需要 npm 构建 Web。
+安装程序会准备 Python 3.11+、兼容的 Node.js 和 Pi，已有 CLI 保留，缺失的 Claude/Codex/OpenCode 会自动补装。发布包自带编译好的页面，使用者不需要构建 Web。
 
-安装指定版本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.2.1/install.sh -o /tmp/mms-install-v4.sh
-bash /tmp/mms-install-v4.sh --ref v4.2.1 --install-cli pi --write-shell-rc
-```
-
-关闭终端后重新打开，运行：
+复制这一条命令到终端：
 
 ```bash
-mms web --open
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
 ```
 
-如果当前终端还找不到 `mms`，可直接运行：
+这份稳定版安装入口默认获取最新 stable Release，重复执行可升级。安装过程默认中文，自动设置命令 PATH；完成后只问一次是否打开 MMS Web，同意后在后台启动。没有交互终端时打印打开命令；`--launch-web` 可直接打开，`--no-launch-web` 可禁止打开。已有相同安装、版本和配置空间的 Web 会被复用，其他实例保留并使用新端口。
 
-```bash
-~/.local/bin/mms web --open
-```
+之后随时运行 `mms web --open`；当前终端找不到命令时用 `~/.local/bin/mms web --open`。Web 默认使用自己的配置空间，直接在设置里连接服务即可。高级用户仍可显式指定已有 MMF 配置目录。
+
+字体安装提供 Fira Code 和 JetBrains Mono，失败不会影响 MMS，`--no-coding-fonts` 可关闭。退休可选包不再安装；可确认 MMS 来源的旧入口会备份移走，自定义同名内容、全局 hooks/MCP 设置与真实配置保留。
 
 macOS 也可以在 Finder 打开 `~/.mms/MMS Web.command`。如果从 Finder 启动时找不到通过 shell 管理器安装的 Node/Pi，先从能运行 `pi` 的终端启动上面的命令。系统文件选择器的交互与 macOS 本机权限有关。
 
@@ -134,3 +127,11 @@ v4.3.0 起，首次打开 Web 会在真实按钮和输入框旁显示悬浮引�
 引导里的「帮我填入一条示例」会保留新任务已有草稿，把示例追加在后面。你可以修改它；只有自己点击发送才会调用模型。引导不会替你改模型、effort、文件或保存连接设置。打开模型选择、Skills 等真实窗口时，引导会暂时让开，关闭后恢复。
 
 基本操作之后，可继续认识附件、Skills、项目资料、成果与版本、运行详情、会话管理和设置，也可以随时跳过。首次提示按浏览器记录，刷新不重复出现；右上角 **?** 随时打开帮助，点「重新开始悬浮引导」再走一遍，也能搜索功能说明并跳到相应控件。已有会话换模型保留上下文；换工作路径要新建会话再选择。
+
+### 整理侧栏与调整阅读习惯
+
+工作文件夹旁的更多菜单可复制路径、重命名、移除、排序和新建会话。移除只隐藏侧栏入口，文件及旧会话保留，旧会话仍可在「其他工作空间」继续；重新添加同一路径可恢复分组。会话菜单支持复制 Session ID、重命名、分叉、导出与归档，长列表可加载更多。
+
+设置以弹窗打开，关闭后回到原会话。外观支持跟随系统、五种强调色、界面和等宽字体、中文字体兜底、12–20 px 字号及加粗。字号同时影响对话、设置、侧栏和引导。选择即复制默认关闭，启用后选中对话文字会覆盖剪贴板。
+
+通道模型管理可编辑图片输入能力和上下文长度，显示事实来源，并在保存前预览影响。纯文本模型的识图辅助候选来自当前通道，热切换与恢复会同步工具状态；模型名字或正文自述均不作为能力证据。

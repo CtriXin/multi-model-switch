@@ -1045,9 +1045,9 @@ CODING_FONT_SPECS=(
 
 user_font_dir() {
     if [ "$(uname -s)" = "Darwin" ]; then
-        printf "%s/Library/Fonts" "$HOME"
+        printf "%s/Library/Fonts" "$REAL_HOME"
     else
-        printf "%s/.local/share/fonts" "$HOME"
+        printf "%s/.local/share/fonts" "$REAL_HOME"
     fi
 }
 
@@ -1077,6 +1077,11 @@ install_coding_fonts() {
             mkdir -p "$font_dir"
             # shellcheck disable=SC2086
             if cp $tmp/$glob "$font_dir/" 2>/dev/null; then
+                # Keep upstream font license notices alongside the installed fonts.
+                local license_file
+                for license_file in "$tmp/OFL.txt" "$tmp/OFL.md" "$tmp/LICENSE" "$tmp/LICENSE.txt"; do
+                    [ ! -f "$license_file" ] || cp "$license_file" "$font_dir/$probe-LICENSE.txt"
+                done
                 installed=$((installed + 1))
             else
                 failed=$((failed + 1))
@@ -2034,7 +2039,7 @@ confirm_open_web() {
 
 # Report the port of an MMS Web instance that is already serving, if any.
 running_mms_web_port() {
-    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "$REAL_HOME/.config/mms" <<'PY'
+    "$(_python_bin)" - "$MMS_WEB_DEFAULT_PORT" "$MMS_WEB_PORT_SEARCH_LIMIT" "$MMS_HOME" "${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web/config" <<'PY'
 import hashlib
 import re
 from pathlib import Path
@@ -2124,7 +2129,7 @@ PY
 }
 
 start_mms_web_detached() {
-    local config_root="$REAL_HOME/.config/mms"
+    local state_root="${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web"
     local log_file="$MMS_HOME/logs/mms-web.log"
     local port=""
     local running=""
@@ -2147,9 +2152,9 @@ start_mms_web_detached() {
         return 1
     fi
 
-    mkdir -p "$config_root" "$(dirname "$log_file")"
+    mkdir -p "$state_root" "$(dirname "$log_file")"
     nohup "$BIN_DIR/mms-web" \
-        --config-root "$config_root" \
+        --state-root "$state_root" \
         --port "$port" \
         --open \
         >"$log_file" 2>&1 &
@@ -2687,7 +2692,7 @@ rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"
 
 # ── 4.5 安装必需 CLI（pi 必装，缺失的 claude/codex/opencode 自动补装）──
-install_coding_fonts
+install_coding_fonts || echo "⚠ Coding fonts unavailable; continuing MMS installation."
 install_requested_clis
 warm_pi_runtime_cache || true
 

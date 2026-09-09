@@ -93,26 +93,26 @@ The main README is Chinese-first. English users can still install with the same 
 ### Stable: recommended for normal users
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel stable --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel stable --write-shell-rc
 ```
 
 ### Dev: recommended for the maintainer's own work machines
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev --write-shell-rc
 ```
 
 ### Canary: only for test machines or experimental sessions
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel canary --write-shell-rc
 ```
 
 Exact pin when needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v3.4.0
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref v3.4.0
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref main
 ```
 
 Channel behavior:
@@ -125,7 +125,7 @@ Channel behavior:
 Fresh-machine install with optional CLI bootstrap:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc --lang en
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev --install-cli claude,codex,opencode --write-shell-rc --lang en
 ```
 
 After install:
@@ -335,7 +335,7 @@ These surfaces are previewed before launch and can be disabled per session when 
 Open a terminal on a new machine and paste one line:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
 ```
 
 No question in the install changes what gets installed: no UI language prompt, no optional packs. It defaults to the stable channel and adds `~/.local/bin` to your shell PATH. The one question comes at the very end and only offers to open MMS Web. Accept it and the browser opens, the server keeps running in the background, and the installer exits. Add a provider and an API key on that page and you can start a conversation.

@@ -1296,3 +1296,6 @@
   .settings-tabs button { font-size: max(12px, .8571rem); }
   .session-workbar { flex-wrap: wrap; row-gap: 6px; }
 }
+
+.appearance-options, .accent-options { flex-wrap: wrap; max-width: 100%; }
+.preference-row > div { min-width: 0; }

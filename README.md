@@ -80,7 +80,7 @@ scripts/cleanup_merged_worktree.sh <branch-or-pr>
 在新电脑上打开终端，粘贴这一条：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash
 ```
 
 装完会问一句要不要打开 MMS Web。回车即可，浏览器自动弹出，服务在后台运行，安装进程随即退出。在页面里添加 provider 和 API Key 就能开始对话。
@@ -92,20 +92,20 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 ```bash
 # 需要最新修复的开发用户
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel dev
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel dev
 
 # 只给测试机
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --channel canary
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --channel canary
 
 # 固定到某个 release 或分支
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v4.2.1
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref main
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref v4.2.1
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --ref main
 
 # 不打开 Web 端，也不改 shell 配置（CI、脚本）
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --no-launch-web --no-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --no-launch-web --no-shell-rc
 
 # 装完直接打开，不询问
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --launch-web
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/install.sh | bash -s -- --launch-web
 ```
 
 </details>

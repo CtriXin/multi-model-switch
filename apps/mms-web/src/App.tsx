@@ -272,9 +272,11 @@ export function App() {
   const reportProcessTurn = useCallback((id: string, collapsed: boolean) => {
     setProcessTurns((old) => (old[id] === collapsed ? old : { ...old, [id]: collapsed }));
   }, []);
-  const [accent, setAccent] = useState(() =>
-    readSetting("mms-web-accent", "indigo"),
-  );
+  const [accent, setAccent] = useState(() => {
+    const stored = readSetting<string>("mms-web-accent", "indigo");
+    const migrated = stored === "blue" ? "cyan" : stored === "rose" ? "pink" : stored;
+    return ["indigo", "cyan", "pink", "orange", "green"].includes(migrated) ? migrated : "indigo";
+  });
   const [themeChoice, setThemeChoice] = useState<"light" | "dark" | "system">(
     () => {
       const stored = readSetting<string>("mms-web-theme", "light");
@@ -373,10 +375,14 @@ export function App() {
     const copy = () => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) return;
-      const node = selection.anchorNode;
-      const element =
-        node instanceof Element ? node : (node?.parentElement ?? null);
-      if (element?.closest("input, textarea, [contenteditable='true']")) return;
+      const endpoints = [selection.anchorNode, selection.focusNode].map((node) =>
+        node instanceof Element ? node : (node?.parentElement ?? null),
+      );
+      const conversation = endpoints[0]?.closest(".conversation-content");
+      if (!conversation || endpoints.some((element) =>
+        element?.closest(".conversation-content") !== conversation ||
+        element?.closest("input, textarea, [contenteditable='true']"),
+      )) return;
       const text = selection.toString();
       if (!text.trim()) return;
       void navigator.clipboard?.writeText(text).catch(() => {

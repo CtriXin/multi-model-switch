@@ -648,8 +648,8 @@ def test_install_script_launches_web_detached_and_configured():
 
     assert "start_mms_web_detached" in text
     assert 'nohup "$BIN_DIR/mms-web"' in text
-    assert '--config-root "$config_root"' in text
-    assert 'config_root="$REAL_HOME/.config/mms"' in text
+    assert '--state-root "$state_root"' in text
+    assert 'state_root="${XDG_DATA_HOME:-$REAL_HOME/.local/share}/mms-web"' in text
     # a fixed port would crash the last install step when it is taken
     assert "find_free_web_port" in text
     assert "running_mms_web_port" in text
@@ -1409,7 +1409,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.send_response(200)
         home = Path(sys.argv[0]).parent.parent.parent
-        identity = hashlib.sha256(f"{home / '.mms'}|{home / '.config/mms'}|".encode()).hexdigest()
+        identity = hashlib.sha256(f"{home / '.mms'}|{home / '.local/share/mms-web/config'}|".encode()).hexdigest()
         self.send_header("X-MMS-Web-Identity", identity)
         self.end_headers()
 
@@ -1434,7 +1434,7 @@ def _run_installer_function(
     env["HOME"] = str(home)
     # keep the test off any MMS Web instance actually running on this machine
     env["MMS_WEB_PORT_BASE"] = str(port_base)
-    for name in ("REAL_HOME", "MMS_REAL_HOME", "ORIGINAL_HOME", "MMS_CONFIG_ROOT"):
+    for name in ("REAL_HOME", "MMS_REAL_HOME", "ORIGINAL_HOME", "MMS_CONFIG_ROOT", "XDG_DATA_HOME"):
         env.pop(name, None)
     return subprocess.run(
         ["bash", str(driver)],
@@ -1462,7 +1462,7 @@ def _stop_fake_mms_web(home: Path) -> None:
     )
 
 
-def test_web_launch_starts_detached_with_a_real_config_root(tmp_path):
+def test_web_launch_starts_detached_with_standalone_config(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     _install_fake_mms_web(home)
@@ -1474,7 +1474,8 @@ def test_web_launch_starts_detached_with_a_real_config_root(tmp_path):
             (home / ".local" / "bin" / "mms-web-argv.json").read_text(encoding="utf-8")
         )
         assert "--open" in argv
-        assert argv[argv.index("--config-root") + 1] == str(home / ".config" / "mms")
+        assert "--config-root" not in argv
+        assert argv[argv.index("--state-root") + 1] == str(home / ".local/share/mms-web")
         # the address printed is the port the server actually got
         port = argv[argv.index("--port") + 1]
         assert f"http://127.0.0.1:{port}" in completed.stdout
@@ -1548,3 +1549,18 @@ def test_web_offer_respects_no_launch_web(tmp_path):
         assert not (home / ".local" / "bin" / "mms-web-argv.json").exists()
     finally:
         _stop_fake_mms_web(home)
+
+
+def test_installer_does_not_reuse_another_homes_web_instance(tmp_path):
+    first_home = tmp_path / 'first'; second_home = tmp_path / 'second'
+    first_home.mkdir(); second_home.mkdir()
+    _install_fake_mms_web(first_home); _install_fake_mms_web(second_home)
+    try:
+        assert _run_installer_function(first_home, 'start_mms_web_detached', port_base=18930).returncode == 0
+        second = _run_installer_function(second_home, 'start_mms_web_detached', port_base=18930)
+        assert second.returncode == 0, second.stderr
+        assert 'already running' not in second.stdout and '已在运行' not in second.stdout
+        argv = json.loads((second_home / '.local/bin/mms-web-argv.json').read_text())
+        assert argv[argv.index('--port') + 1] == '18931'
+    finally:
+        _stop_fake_mms_web(first_home); _stop_fake_mms_web(second_home)
