@@ -1429,7 +1429,10 @@ def _run_installer_function(
     home: Path, snippet: str, *, port_base: int = 18765
 ) -> subprocess.CompletedProcess[str]:
     driver = home / "driver.sh"
-    driver.write_text(_installer_function_source() + "\n" + snippet + "\n", encoding="utf-8")
+    # Reusing an instance opens a URL directly from the installer. Record the
+    # request instead of opening the developer's real browser during tests.
+    browser_stub = '\nopen_url_in_browser() { printf "%s\\n" "$1" >> "$HOME/browser-open-requests.txt"; }\n'
+    driver.write_text(_installer_function_source() + browser_stub + snippet + "\n", encoding="utf-8")
     env = os.environ.copy()
     env["HOME"] = str(home)
     # keep the test off any MMS Web instance actually running on this machine
@@ -1517,6 +1520,8 @@ def test_web_launch_reuses_an_already_running_instance(tmp_path):
         assert second.returncode == 0, second.stderr
         assert "已在运行" in second.stdout or "already running" in second.stdout
         assert not (home / ".local" / "bin" / "mms-web-argv.json").exists()
+        opened = (home / "browser-open-requests.txt").read_text().splitlines()
+        assert len(opened) == 1 and opened[0] in second.stdout
     finally:
         _stop_fake_mms_web(home)
 
