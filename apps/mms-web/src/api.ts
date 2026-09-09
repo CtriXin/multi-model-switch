@@ -39,7 +39,7 @@ export async function request<T>(
   try {
     payload = await response.json();
   } catch {
-    throw new Error("本地服务未返回有效数据，请检查 MMS Web 服务。");
+    throw new Error("本地服务未返回有效数据，请检查 MMS Pilot 服务。");
   }
   if (
     !response.ok &&

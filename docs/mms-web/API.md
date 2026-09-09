@@ -1,4 +1,4 @@
-# MMS Web API v1
+# MMS Pilot API v1
 
 Owner: 当前 Codex。2026-09-08。状态：真实 Pi Web 集成版。
 

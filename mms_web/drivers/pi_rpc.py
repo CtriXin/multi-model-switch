@@ -1,4 +1,4 @@
-"""Pi ``--mode rpc`` rich driver for MMS Web sessions.
+"""Pi ``--mode rpc`` rich driver for MMS Pilot sessions.
 
 Protocol source: official ``pi --mode rpc`` JSONL protocol
 (docs/rpc.md of the installed pi-coding-agent), verified against the installed

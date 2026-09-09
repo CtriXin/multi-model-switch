@@ -1,4 +1,4 @@
-# MMS Web 设计系统
+# MMS Pilot 设计系统
 
 ## 产品方向
 

@@ -1,6 +1,6 @@
 # Multi-Model Switch (MMS)
 
-> **MMS 4.0 — local Web conversations.** Run `mms web --open` after installing v4. The release bundles the frontend and uses the original MMS launcher with Pi. [Install and use](docs/mms-web/GETTING-STARTED.md) · [Release notes](docs/mms-web/RELEASE-v4.0.0.md) · [Roadmap and handoff](docs/mms-web/NEXT-PHASE.md). Web currently supports Pi; existing CLI launchers remain available.
+> **MMS Pilot is the local Web client for MMS, bundled with the release since v4.** Run `mms web --open` after installing. Sessions still run through the original MMS launch chain into Pi on your own machine; the browser is only the interaction surface. [Install and use](docs/mms-web/GETTING-STARTED.md) · [Features and limits](docs/mms-web/FEATURES.md) · [First release](docs/mms-web/RELEASE-v4.0.0.md) · [Product direction](docs/mms-web/NEXT-PHASE.md). Every existing CLI launcher remains available.
 
 
 [简体中文 README](./README.md)
@@ -15,7 +15,7 @@
 
 MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `agy`; Qwen/Kimi/Gemini remain provider models, not standalone CLI launchers.
 
-Scope note: MMS is intentionally launcher-first. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
+Scope note: MMS is intentionally launcher-first. MMS Pilot is its visual entry point. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
 
 It helps you:
 
@@ -25,6 +25,29 @@ It helps you:
 - bridge compatible model providers while preserving protocol semantics
 - inject session-scoped skills and hooks without editing global config
 - diagnose provider, route, cache, and exposed runtime state before blaming a model
+
+## MMS Pilot
+
+**The Web client is named MMS Pilot.** The commands are unchanged: `mms web`, the standalone `mms-web`, and on macOS `~/.mms/MMS Pilot.command`. The older `MMS Web.command` is removed on upgrade so `~/.mms` does not end up with two identical launchers.
+
+MMS Pilot and `mmf config web` are different pages:
+
+| | How to open | What it is for |
+|---|---|---|
+| MMS Pilot | `mms web --open` | Daily work: sessions, model and channel selection, working folders, execution and output |
+| Config Web UI | `mmf config web` | Configuration: add channels, fetch model lists, hide noisy models, preview and publish a save plan |
+
+Pilot's harness is Pi. Claude, Codex, OpenCode and agy still launch from the MMS CLI and are not yet Pilot sessions.
+
+What 4.x has accumulated:
+
+- **Sessions**: continuous conversation, resume, stop, fork, archive, export, and model/channel switching that keeps context.
+- **Model capabilities**: per-model default effort, context length and image support, each labelled with where the current value came from, with a one-click fill-back to the MMF catalogue value when the two disagree.
+- **Workspaces**: reorder, rename and remove working folders from the sidebar; per-session copy id, rename, fork, export and archive.
+- **Artifacts and materials**: preview and compare recorded output, manage project materials, and record the context sources actually submitted each turn.
+- **Appearance**: settings as a dialog; theme can follow the system; accent, interface/mono/CJK fonts and font size apply live, and only fonts actually installed on the machine are offered.
+
+Limits: it listens on the loopback address only, there is no remote multi-user authentication, and config isolation is not a filesystem sandbox. To give someone else access, have them install on their own machine with their own model services.
 
 ## Current Version
 
@@ -138,7 +161,7 @@ mmf config web
 
 Note: `mmf` and `mmg` are preview DB entrypoints. Use `mmf config web` or `mmg config web` for `Write preview DB + publish`; `mms config web` intentionally shows the public installed stable/current legacy save path.
 
-See also: [Release channels](docs/RELEASE_CHANNELS.md) and [Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
+See also: [MMS Pilot getting started](docs/mms-web/GETTING-STARTED.md), [Release channels](docs/RELEASE_CHANNELS.md) and [Config Web UI quickstart](docs/WEB_UI_QUICKSTART.md).
 
 ## Config V2 Preview Root
 
@@ -187,6 +210,12 @@ readiness audit can return `READY_FOR_4_0_HUMAN_GATE`, but it still reports
 smoke are done.
 
 ## Quick Start
+
+Open MMS Pilot:
+
+```bash
+mms web --open
+```
 
 Interactive launch:
 

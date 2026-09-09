@@ -1,7 +1,7 @@
-"""MMS Web catalog adapter (Agent A).
+"""MMS Pilot catalog adapter (Agent A).
 
 Provides the model/service/preset/workspace catalog and a preview->apply
-configuration flow for the MMS Web frontend, per docs/mms-web/API.md.
+configuration flow for the MMS Pilot frontend, per docs/mms-web/API.md.
 
 Design boundaries:
 - Catalog reads come from the verified latest-approved bundle

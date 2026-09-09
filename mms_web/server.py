@@ -274,7 +274,7 @@ def create_server(app: WebApplication, static_root: Path, port: int = 8765):
                     return self._json(200, app.get(parts))
                 file = (root / (path.lstrip("/") or "index.html")).resolve()
                 if not file.is_relative_to(root) or not file.is_file():
-                    raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Web。", 404)
+                    raise WebError("NOT_FOUND", "页面资源不存在。请先构建 MMS Pilot。", 404)
                 content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
                 self._send(200, file.read_bytes(), content_type)
             except (BrokenPipeError, ConnectionResetError):

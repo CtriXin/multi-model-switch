@@ -1,6 +1,6 @@
 # MMS 4.4：安装、配置与日常使用
 
-MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 会话放进浏览器。AI 仍通过 MMS 原有启动器在本机执行；浏览器是交互入口。v4 首版的实际 Web harness 是 Pi，Claude、Codex、OpenCode 的 CLI 启动能力仍在 MMS 中，暂未成为 Web 会话。
+MMS Pilot 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 会话放进浏览器。AI 仍通过 MMS 原有启动器在本机执行；浏览器是交互入口。v4 首版的实际 Web harness 是 Pi，Claude、Codex、OpenCode 的 CLI 启动能力仍在 MMS 中，暂未成为 Web 会话。
 
 ## 安装
 
@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.4.0/i
 
 字体安装提供 Fira Code 和 JetBrains Mono，失败不会影响 MMS，`--no-coding-fonts` 可关闭。退休可选包不再安装；可确认 MMS 来源的旧入口会备份移走，自定义同名内容、全局 hooks/MCP 设置与真实配置保留。
 
-macOS 也可以在 Finder 打开 `~/.mms/MMS Web.command`。如果从 Finder 启动时找不到通过 shell 管理器安装的 Node/Pi，先从能运行 `pi` 的终端启动上面的命令。系统文件选择器的交互与 macOS 本机权限有关。
+macOS 也可以在 Finder 打开 `~/.mms/MMS Pilot.command`。如果从 Finder 启动时找不到通过 shell 管理器安装的 Node/Pi，先从能运行 `pi` 的终端启动上面的命令。系统文件选择器的交互与 macOS 本机权限有关。
 
 独立命令 `mms-web --open` 与 `mms web --open` 都可打开 Web。终端中按 Ctrl+C 停止服务；浏览器关闭只关闭页面。服务重启后，对话保留，继续发送时会恢复 Pi 会话。
 
