@@ -55,3 +55,37 @@ def test_reference_validation_and_picker_cancellation(tmp_path):
         assert result['attachments'][0]['localPath'] == str(path)
     for bad in ['l-../../etc/passwd', 'l-' + 'x' * 32]:
         with pytest.raises(WebError): files.local_attachment(bad)
+
+
+def test_dropped_file_becomes_reusable_project_path_without_inlining(tmp_path):
+    project = tmp_path / 'project'; project.mkdir()
+    catalog = SimpleNamespace(_workspaces=lambda: [{'id': 'project', 'path': str(project)}])
+    files = FileService(catalog, tmp_path / 'state')
+    data = b'{"data":"' + b'x' * (1300 * 1024) + b'"}'
+    payload = {'workspaceId': 'project', 'name': '../../dataset.json', 'data': base64.b64encode(data).decode()}
+    first = files.import_to_workspace(payload)
+    second = files.import_to_workspace(payload)
+    path = Path(first['localPath'])
+    assert path.is_relative_to(project / '.pilot/attachments')
+    assert path.read_bytes() == data and path != Path(second['localPath'])
+    assert path.stat().st_mode & 0o777 == 0o600
+    images, _, prompt = files.prepare([first['id']], 'project', [])
+    assert not images and str(path) in prompt and len(prompt) < 1000
+    # A later session can refer to the same ordinary file after state is reopened.
+    reopened = FileService(catalog, tmp_path / 'later-state')
+    later = reopened.reference_local({'paths': [str(path)]})['attachments'][0]
+    assert reopened.prepare([later['id']], 'project', [])[1][0]['localPath'] == str(path)
+
+
+@pytest.mark.parametrize('part', ['.pilot', 'attachments'])
+def test_dropped_file_cannot_follow_project_symlinks(tmp_path, part):
+    project = tmp_path / 'project'; project.mkdir()
+    outside = tmp_path / 'outside'; outside.mkdir()
+    if part == '.pilot': (project / part).symlink_to(outside, target_is_directory=True)
+    else:
+        (project / '.pilot').mkdir()
+        (project / '.pilot' / part).symlink_to(outside, target_is_directory=True)
+    files = FileService(SimpleNamespace(_workspaces=lambda: [{'id': 'p', 'path': str(project)}]), tmp_path / 'state')
+    with pytest.raises(WebError, match='不能保存附件'):
+        files.import_to_workspace({'workspaceId': 'p', 'name': 'test.txt', 'data': 'aGk='})
+    assert not list(outside.iterdir())

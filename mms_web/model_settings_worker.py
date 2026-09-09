@@ -121,73 +121,103 @@ def public_rows(rows):
     return result
 
 
-# Which capability snapshot the refresh reads. The Config Web page offers the
-# same three; keep the wire names stable so both pages mean the same thing.
-REFRESH_MODES = {
-    # Approved facts and local calibration snapshots that ship with MMS.
-    "known": {},
-    # OpenRouter's model list, fetched now. A provider catalogue reference,
-    # not the vendor's own statement.
-    "openrouter": {"openrouter_catalog": True},
-    # provider-profiles maintained in this repository, so updating MMS is what
-    # brings newer values in.
-    "official": {"mmf_official_overrides": True},
+# Where a capability figure can come from, most trusted first. "official" is
+# the provider-profiles maintained in this repository, so updating MMS is what
+# brings newer values in; "approved" is the approved facts and local
+# calibration snapshots that ship alongside it; "catalog" is OpenRouter, which
+# reports whichever upstream it currently routes to rather than the vendor's
+# own figure, and so never outranks the other two.
+REFRESH_SOURCES = {
+    "official": ({"mmf_official_overrides": True}, "MMF 官方数据", 3),
+    "approved": ({}, "本地已知快照", 2),
+    "catalog": ({"openrouter_catalog": True}, "OpenRouter 目录", 1),
 }
-# Only the three capabilities this page can actually edit. Asking for more
-# would report changes the user has no control to review or undo here.
+# Read without touching the network by default. OpenRouter is fetched only
+# when the human asks for it from inside the review sheet.
+LOCAL_SOURCES = ("official", "approved")
+# A value the user set themselves is never quietly replaced.
+USER_SET_SOURCES = frozenset({"model_policy", "manual_override"})
+# Only the three capabilities this page can edit. Asking for more would report
+# changes the user has no control to review or undo here.
 REFRESH_FIELDS = ("vision", "context_window_tokens", "reasoning_effort")
 
 
-def refresh_proposal(known, result):
-    """Map a capability snapshot onto this page's pending edits.
+def merge_capability_sources(results):
+    """Collapse several snapshots into one value per model and field.
 
-    Returns the same shape the row controls produce, so a refresh goes through
-    the existing preview and save path instead of writing anything itself.
+    `results` is (source key, payload). A more trusted source wins outright;
+    an equally trusted one does not overwrite what is already there.
     """
-    caps = result.get("model_capabilities") or {}
-    sources = result.get("model_sources") or {}
-    visions, contexts, efforts, proposals, skipped = {}, {}, {}, [], []
-    for model in sorted(caps):
+    merged = {}
+    for key, result in results:
+        rank = REFRESH_SOURCES[key][2]
+        caps = result.get("model_capabilities") or {}
+        for model, values in caps.items():
+            if not isinstance(values, dict):
+                continue
+            for field, value in values.items():
+                held = merged.get((model, field))
+                if held is None or rank > held[1]:
+                    merged[(model, field)] = (value, rank, key)
+    return merged
+
+
+def refresh_proposal(known, merged, reports):
+    """Turn merged snapshot values into reviewable rows for this page.
+
+    Every row carries the value now, the value proposed, which source said so,
+    and whether the current value is the user's own setting. Nothing is
+    applied here: the page decides what to fill in and the existing preview
+    still gates the write.
+    """
+    proposals, skipped = [], []
+    by_model = {}
+    for (model, field), (value, _rank, source) in merged.items():
+        by_model.setdefault(model, {})[field] = (value, source)
+    for model in sorted(by_model):
         row = known.get(model)
-        values = caps[model] if isinstance(caps[model], dict) else {}
-        source = sources.get(model) if isinstance(sources.get(model), dict) else {}
         if row is None:
             continue
         if not row.get("capabilitiesEditable"):
             skipped.append({"model": model, "reason": "这个模型要先保存进通道才能设置能力。"})
             continue
+        values = by_model[model]
         fields = []
-        vision = values.get("vision")
+
+        vision, vision_source = values.get("vision", (None, ""))
         if isinstance(vision, bool) and vision != row["vision"]:
-            visions[model] = vision
-            fields.append({"field": "vision", "before": "可读取图片" if row["vision"] else "不可读取图片",
+            fields.append({"field": "vision", "value": vision,
+                           "before": "可读取图片" if row["vision"] else "不可读取图片",
                            "after": "可读取图片" if vision else "不可读取图片",
-                           "source": str((source.get("vision") or {}).get("source_layer") or "")})
-        context = values.get("context_window_tokens")
-        if isinstance(context, int) and not isinstance(context, bool) and 1024 <= context <= 10_000_000 and context != row["contextWindow"]:
-            contexts[model] = context
-            fields.append({"field": "context", "before": str(row["contextWindow"] or "自动"), "after": str(context),
-                           "source": str((source.get("context_window_tokens") or {}).get("source_layer") or "")})
-        effort = str(values.get("reasoning_effort") or "").strip().lower()
-        # A level this route cannot execute would be clamped at launch, so the
-        # page must not offer it as if it had been applied.
-        if effort and effort in (row.get("effortLevels") or []) and effort != row["effort"]:
-            efforts[model] = effort
-            fields.append({"field": "effort", "before": row["effort"] or "自动", "after": effort,
-                           "source": str((source.get("reasoning_effort") or {}).get("source_layer") or "")})
-        elif effort and effort not in (row.get("effortLevels") or []):
-            skipped.append({"model": model, "reason": f"快照建议的 effort {effort} 不在这条通道能执行的档位里。"})
+                           "source": vision_source,
+                           "userSet": row.get("visionSource") in USER_SET_SOURCES})
+
+        context, context_source = values.get("context_window_tokens", (None, ""))
+        if (isinstance(context, int) and not isinstance(context, bool)
+                and 1024 <= context <= 10_000_000 and context != row["contextWindow"]):
+            fields.append({"field": "context", "value": context,
+                           "before": str(row["contextWindow"] or "自动"), "after": str(context),
+                           "source": context_source,
+                           "userSet": row.get("contextSource") in USER_SET_SOURCES})
+
+        effort, effort_source = values.get("reasoning_effort", ("", ""))
+        effort = str(effort or "").strip().lower()
+        levels = row.get("effortLevels") or []
+        if effort and effort in levels and effort != row["effort"]:
+            fields.append({"field": "effort", "value": effort,
+                           "before": row["effort"] or "自动", "after": effort,
+                           "source": effort_source,
+                           # An effort already on the row was chosen here, so
+                           # treat replacing it as overwriting the user.
+                           "userSet": bool(row["effort"]) or row.get("effortPending", False)})
+        elif effort and effort not in levels:
+            skipped.append({"model": model,
+                            "reason": f"快照建议的 effort {effort} 不在这条通道能执行的档位里。"})
         if fields:
             proposals.append({"model": model, "fields": fields})
-    return {"visions": visions, "contextWindows": contexts, "efforts": efforts,
-            "proposals": proposals, "skipped": skipped[:40],
-            "matched": int(result.get("matched_model_count") or 0),
-            "modelCount": int(result.get("model_count") or 0),
-            "unmatched": list(result.get("unmatched_models") or [])[:40],
-            "warnings": [str(item) for item in (result.get("warnings") or [])][:10],
-            "sources": [{"source": str(item.get("source") or ""), "checkedAt": str(item.get("checked_at") or ""),
-                         "note": str(item.get("note") or "")}
-                        for item in (result.get("catalog_sources") or []) if isinstance(item, dict)]}
+    return {"proposals": proposals, "skipped": skipped[:40],
+            "sourceLabels": {key: REFRESH_SOURCES[key][1] for key in REFRESH_SOURCES},
+            "reports": reports}
 
 
 def draft_for(rows, request, revision):
@@ -292,25 +322,50 @@ def run(request):
         target = next((p for p in rows if p["id"] == request.get("providerId")), None)
         if target is None:
             raise WebError("PROVIDER_NOT_FOUND", "这个通道已不存在，请刷新。", 404)
-        mode = str(request.get("mode") or "known")
-        if mode not in REFRESH_MODES:
-            raise WebError("INVALID_REFRESH_MODE", "不认识这个刷新来源。", 400)
+        requested = request.get("sources")
+        keys = [k for k in (requested if isinstance(requested, list) else LOCAL_SOURCES)
+                if k in REFRESH_SOURCES]
+        if not keys:
+            raise WebError("INVALID_REFRESH_SOURCE", "不认识这个能力来源。", 400)
         known = {m["id"]: m for m in public_rows([target])[0]["models"]}
-        requested = request.get("models")
-        models = [m for m in requested if m in known] if isinstance(requested, list) else []
+        wanted = request.get("models")
+        models = [m for m in wanted if m in known] if isinstance(wanted, list) else []
         models = models or list(known)
-        try:
-            result = web.refresh_model_capability_truth(
-                cfg,
-                {"provider_id": target["id"],
-                 "provider": {"id": target["id"], "models": [{"id": model} for model in models]},
-                 "models": models, "fields": list(REFRESH_FIELDS), **REFRESH_MODES[mode]},
-                config_path=str(root / "config.toml"), command_name="mmf")
-        except Exception:
+        # Unsaved edits are also the user's choices. Reuse the save validator,
+        # then compare against what the page currently shows, without writing.
+        if any(request.get(key) for key in ("visions", "contextWindows", "efforts")):
+            draft_for(rows, {**request, "models": models}, revision)
+            for key, field, marker in (("visions", "vision", "visionSource"),
+                                       ("contextWindows", "contextWindow", "contextSource"),
+                                       ("efforts", "effort", "effortPending")):
+                for model, value in (request.get(key) or {}).items():
+                    known[model][field] = value
+                    known[model][marker] = True if field == "effort" else "manual_override"
+        results, reports = [], []
+        for key in keys:
+            flags = REFRESH_SOURCES[key][0]
+            try:
+                result = web.refresh_model_capability_truth(
+                    cfg,
+                    {"provider_id": target["id"],
+                     "provider": {"id": target["id"], "models": [{"id": model} for model in models]},
+                     "models": models, "fields": list(REFRESH_FIELDS), **flags},
+                    config_path=str(root / "config.toml"), command_name="mmf")
+            except Exception:
+                result = {}
+            ok = bool(result.get("ok"))
+            reports.append({"source": key, "label": REFRESH_SOURCES[key][1], "ok": ok,
+                            "matched": int(result.get("matched_model_count") or 0),
+                            "unmatched": len(result.get("unmatched_models") or []),
+                            "warnings": [str(w) for w in (result.get("warnings") or [])][:4]})
+            if ok:
+                results.append((key, result))
+        # Every source failing is a real failure; one failing among several is
+        # reported per source and the rest still stand.
+        if not results:
             raise WebError("CAPABILITY_REFRESH_FAILED", "读取能力快照失败，配置没有改变。", 502)
-        if not result.get("ok"):
-            raise WebError("CAPABILITY_REFRESH_FAILED", "读取能力快照失败，配置没有改变。", 502)
-        return {"mode": mode, **refresh_proposal(known, result)}
+        return {"modelCount": len(models),
+                **refresh_proposal(known, merge_capability_sources(results), reports)}
     if action in {"discover", "check"}:
         target = next((p for p in rows if p["id"] == request.get("providerId")), None)
         if not target or not public_rows([target])[0]["canDiscover"]:

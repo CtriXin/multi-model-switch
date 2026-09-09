@@ -134,6 +134,8 @@ class WebApplication:
             return self._sessions().materials.change(payload)
         if parts == ["attachments"]:
             return self._sessions().files.upload(payload)
+        if parts == ["files", "import"]:
+            return self._sessions().files.import_to_workspace(payload)
         if parts == ["files", "reference-local"]:
             return self._sessions().files.reference_local(payload)
         if parts == ["files", "choose-local"]:
@@ -147,6 +149,11 @@ class WebApplication:
                 raise WebError("FOLDER_PICKER_UNAVAILABLE", "请直接填写电脑上的文件夹路径。", 409)
             result = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "选择 MMS 的工作文件夹")'], capture_output=True, text=True, timeout=120)
             return {"path": result.stdout.strip() if result.returncode == 0 else ""}
+        if parts == ["workspaces", "search"]:
+            if not self.catalog:
+                raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)
+            from .workspace_search import search_workspaces
+            return search_workspaces(self.catalog, payload)
         if parts == ["workspaces"]:
             if not self.catalog:
                 raise WebError("CAPABILITY_UNAVAILABLE", "本地服务尚未连接。", 409)

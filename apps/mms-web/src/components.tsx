@@ -164,6 +164,13 @@ export function WorkspacePicker({
   value: string;
   change: (id: string) => void;
 }) {
+  if (allowAdd) {
+    const selected = workspaces.find(item => item.id === value);
+    return <button type="button" className="workspace-picker" data-guide="workspace"
+      aria-label="查找或切换项目文件夹" title={selected?.path} onClick={() => change("__add__")}>
+      <FolderOpen size={15} /><span>{selected?.name || "查找项目"}</span><ChevronDown size={13} />
+    </button>;
+  }
   return (
     <label className="workspace-picker">
       <FolderOpen size={15} />
@@ -296,7 +303,7 @@ export function EventView({
             <RichText text={event.thinking} repair />
           </details>
         )}
-        {event.attachments?.map((a) => (
+        {event.attachments?.filter(a => !a.localPath || ![a.localPath, JSON.stringify(a.localPath)].some(path => event.text?.includes(path))).map((a) => (
           <AttachmentView key={a.id} attachment={a} />
         ))}
         {!!event.skills?.length && (

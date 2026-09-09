@@ -25,7 +25,8 @@
         "https://platform.openai.com/docs/models",
         "https://platform.openai.com/docs/models/gpt-5.6-terra",
         "https://platform.openai.com/docs/models/gpt-5.6-sol",
-        "https://platform.openai.com/docs/models/gpt-5.6-luna"
+        "https://platform.openai.com/docs/models/gpt-5.6-luna",
+        "https://developers.openai.com/api/docs/models"
       ],
       "endpoints": {
         "openai_base_url": "https://api.openai.com/v1",
@@ -151,7 +152,10 @@
         "gpt-5.4-mini": true,
         "gpt-5.5": true,
         "gpt-5-pro": true,
-        "gpt-6-astra": true
+        "gpt-6-astra": true,
+        "gpt-5.6-luna": true,
+        "gpt-5.6-sol": true,
+        "gpt-5.6-terra": true
       },
       "input_modalities": {
         "gpt-5": [
@@ -175,6 +179,18 @@
           "image"
         ],
         "gpt-6-astra": [
+          "text",
+          "image"
+        ],
+        "gpt-5.6-luna": [
+          "text",
+          "image"
+        ],
+        "gpt-5.6-sol": [
+          "text",
+          "image"
+        ],
+        "gpt-5.6-terra": [
           "text",
           "image"
         ]
@@ -302,7 +318,8 @@
       "references": [
         "https://help.aliyun.com/zh/model-studio/deep-thinking",
         "https://help.aliyun.com/zh/model-studio/compatibility-with-openai-responses-api",
-        "https://openrouter.ai/api/v1/models"
+        "https://openrouter.ai/api/v1/models",
+        "https://help.aliyun.com/en/model-studio/qwen3-8-max"
       ],
       "endpoints": {
         "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -405,6 +422,15 @@
         "qwen3.8-max-preview": 131072,
         "qwen3.8-flash": 131072,
         "qwen3.7-max": 131072
+      },
+      "supports_vision": {
+        "qwen3.8-max": true
+      },
+      "input_modalities": {
+        "qwen3.8-max": [
+          "text",
+          "image"
+        ]
       }
     },
     "qwen-chat-template": {
@@ -1080,7 +1106,8 @@
         "deepseek-v4-pro": 1000000,
         "deepseek-v4-flash": 1000000,
         "deepseek-chat": 1000000,
-        "deepseek-reasoner": 1000000
+        "deepseek-reasoner": 1000000,
+        "deepseek-v4-flash-vision-exp": 1000000
       },
       "model_aliases": {
         "anthropic_messages": {
@@ -1106,7 +1133,25 @@
         "deepseek-v4-pro": 384000,
         "deepseek-v4-flash": 384000,
         "deepseek-chat": 384000,
-        "deepseek-reasoner": 384000
+        "deepseek-reasoner": 384000,
+        "deepseek-v4-flash-vision-exp": 384000
+      },
+      "supports_vision": {
+        "deepseek-v4-flash": false,
+        "deepseek-v4-pro": false,
+        "deepseek-v4-flash-vision-exp": true
+      },
+      "input_modalities": {
+        "deepseek-v4-flash": [
+          "text"
+        ],
+        "deepseek-v4-pro": [
+          "text"
+        ],
+        "deepseek-v4-flash-vision-exp": [
+          "text",
+          "image"
+        ]
       }
     },
     "kimi-code": {
@@ -1132,7 +1177,8 @@
         "https://platform.kimi.com/docs/guide/kimi-k3-quickstart",
         "https://platform.kimi.com/docs/api/models-overview",
         "https://platform.kimi.com/docs/guide/use-thinking-effort",
-        "https://platform.kimi.com/docs/guide/claude-code-kimi"
+        "https://platform.kimi.com/docs/guide/claude-code-kimi",
+        "https://www.kimi.com/code/docs/en/kimi-code/models.html"
       ],
       "endpoints": {
         "openai_base_url": "https://api.kimi.com/coding/v1",
@@ -1178,7 +1224,8 @@
         "k2.6-code-preview": 262144,
         "kimi-k2.7-code": 262144,
         "kimi-for-code": 262144,
-        "k3[1m]": 1048576
+        "k3[1m]": 1048576,
+        "k3-256k": 262144
       },
       "api_formats": {
         "openai_chat": {
@@ -1216,7 +1263,8 @@
         "k2.6": true,
         "k2.6-code-preview": true,
         "kimi-k2.7-code": true,
-        "k3[1m]": true
+        "k3[1m]": true,
+        "k3-256k": true
       },
       "input_modalities": {
         "kimi-k3": [
@@ -1270,6 +1318,10 @@
           "video"
         ],
         "k3[1m]": [
+          "text",
+          "image"
+        ],
+        "k3-256k": [
           "text",
           "image"
         ]
@@ -1525,7 +1577,8 @@
         ]
       },
       "references": [
-        "https://ai.google.dev/gemini-api/docs/thinking"
+        "https://ai.google.dev/gemini-api/docs/thinking",
+        "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview"
       ],
       "endpoints": {
         "openai_base_url": "",
@@ -1737,7 +1790,9 @@
         "https://docs.z.ai/devpack/tool/claude",
         "https://docs.z.ai/devpack/latest-model",
         "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
-        "https://docs.bigmodel.cn/cn/guide/capabilities/thinking"
+        "https://docs.bigmodel.cn/cn/guide/capabilities/thinking",
+        "https://docs.z.ai/guides/llm/glm-5.3.md",
+        "https://docs.z.ai/guides/llm/glm-5.2.md"
       ],
       "endpoints": {
         "openai_base_url": "https://api.z.ai/api/paas/v4/",
@@ -1866,7 +1921,19 @@
           }
         }
       },
-      "effort": null
+      "effort": null,
+      "supports_vision": {
+        "glm-5.2": false,
+        "glm-5.3": false
+      },
+      "input_modalities": {
+        "glm-5.2": [
+          "text"
+        ],
+        "glm-5.3": [
+          "text"
+        ]
+      }
     },
     "cpa-antigravity-gemini": {
       "label": "CPA Antigravity Gemini",
@@ -1946,7 +2013,8 @@
       },
       "references": [
         "https://platform.kimi.ai/docs/guide/use-reasoning-effort",
-        "https://www.kimi.com/code/docs/"
+        "https://www.kimi.com/code/docs/",
+        "https://platform.kimi.ai/docs/guide/kimi-k3-quickstart"
       ],
       "auth_headers": {
         "openai_chat": [
@@ -1977,6 +2045,18 @@
       },
       "context_windows": {
         "k3": 1048576
+      },
+      "max_output_tokens": {
+        "k3": 1048576
+      },
+      "supports_vision": {
+        "k3": true
+      },
+      "input_modalities": {
+        "k3": [
+          "text",
+          "image"
+        ]
       }
     },
     "glm-coding-effort": {
@@ -1990,7 +2070,8 @@
       },
       "references": [
         "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
-        "https://docs.bigmodel.cn/cn/guide/capabilities/thinking"
+        "https://docs.bigmodel.cn/cn/guide/capabilities/thinking",
+        "https://docs.z.ai/guides/llm/glm-5.3.md"
       ],
       "auth_headers": {
         "openai_chat": [
@@ -2020,7 +2101,10 @@
         }
       },
       "context_windows": {
-        "glm-5.3": 1048576
+        "glm-5.3": 1000000
+      },
+      "supports_vision": {
+        "glm-5.3": false
       }
     },
     "claude-official": {
@@ -2033,7 +2117,8 @@
         "require_model_prefix": true
       },
       "references": [
-        "https://platform.claude.com/docs/en/models/opus-4-6/overview"
+        "https://platform.claude.com/docs/en/models/opus-4-6/overview",
+        "https://platform.claude.com/docs/en/models/sonnet-4-6/overview"
       ],
       "context_windows": {
         "claude-opus-4-6": 1000000,
@@ -2042,7 +2127,27 @@
       },
       "max_output_tokens": {
         "claude-opus-4-6": 128000,
-        "claude-opus-4-6-thinking": 128000
+        "claude-opus-4-6-thinking": 128000,
+        "claude-sonnet-4-6": 128000
+      },
+      "supports_vision": {
+        "claude-opus-4-6": true,
+        "claude-opus-4-6-thinking": true,
+        "claude-sonnet-4-6": true
+      },
+      "input_modalities": {
+        "claude-opus-4-6": [
+          "text",
+          "image"
+        ],
+        "claude-opus-4-6-thinking": [
+          "text",
+          "image"
+        ],
+        "claude-sonnet-4-6": [
+          "text",
+          "image"
+        ]
       }
     }
   }

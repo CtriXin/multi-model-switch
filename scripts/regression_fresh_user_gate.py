@@ -54,6 +54,9 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_local_files.py",
+    "tests/test_mms_web_workspace_search.py",
+    "tests/test_mms_web_model_settings.py",
     "tests/test_mms_web_merge_regressions.py",
     "tests/test_pi_vision_relay.py",
     "tests/test_mms_web_project_materials.py",
