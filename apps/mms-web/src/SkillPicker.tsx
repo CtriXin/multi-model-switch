@@ -8,100 +8,62 @@ export interface Skill {
   source: string;
   filePath?: string;
   manualOnly?: boolean;
+  starter?: boolean;
+  title?: string;
+  example?: string;
 }
-export function SkillPicker({
-  skills,
-  selected,
-  toggle,
-  close,
-  error,
-}: {
+export function SkillPicker({ skills, selected, toggle, close, error, example }: {
   skills: Skill[];
   selected: string[];
   toggle: (id: string) => void;
   close: () => void;
   error?: string;
+  example: (skill: Skill) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [onlySelected, setOnlySelected] = useState(false);
-  const shown = skills.filter(
-    (s) =>
-      (!onlySelected || selected.includes(s.id)) &&
-      `${s.name} ${s.description}`.toLowerCase().includes(query.toLowerCase()),
-  );
+  const [filter, setFilter] = useState<"starter" | "all" | "selected">("starter");
+  const shown = skills.filter(s =>
+    (query || filter === "all" || (filter === "selected" ? selected.includes(s.id) : s.starter)) &&
+    `${s.title || ""} ${s.name} ${s.description}`.toLowerCase().includes(query.toLowerCase()));
   return (
-    <Dialog title="为这次任务添加 skills" size="wide" close={close}>
-      <p className="dialog-intro">
-        按需选择，发送时带入指引。其他已安装 skills 仍可由模型按任务发现。
-      </p>
+    <Dialog title="任务助手 · Skills" size="wide" close={close}>
+      <p className="dialog-intro">Skills 是给 AI 的做事指引。先选你想做的事，再补充要求并发送；下面的内置能力无需安装。</p>
       <div className="explorer-search">
         <label className="picker-search">
           <Search size={17} />
-          <input
-            autoFocus
-            aria-label="搜索 skills"
-            placeholder="搜索名字或用途，例如：设计、审查…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <input autoFocus aria-label="搜索 skills" placeholder="想做什么？例如保存进度、检查改动…"
+            value={query} onChange={e => setQuery(e.target.value)} />
         </label>
-        <button
-          type="button"
-          className={"filter-button " + (onlySelected ? "active" : "")}
-          onClick={() => setOnlySelected(!onlySelected)}
-        >
-          已选 {selected.length}
-        </button>
       </div>
-      {error && (
-        <p role="alert" className="inline-alert">
-          {error}
-        </p>
-      )}
+      <div className="skill-filters" aria-label="Skills 范围">
+        {([["starter", "开箱即用"], ["all", "全部能力"], ["selected", `已选 ${selected.length}`]] as const).map(([value, label]) =>
+          <button type="button" key={value} className={"filter-button " + (filter === value ? "active" : "")}
+            aria-pressed={filter === value} onClick={() => { setFilter(value); setQuery(""); }}>{label}</button>)}
+      </div>
+      {error && <p role="alert" className="inline-alert">{error}</p>}
       <div className="skill-results">
-        {shown.map((s) => (
-          <button
-            type="button"
-            key={s.id}
-            className={
-              "skill-option " + (selected.includes(s.id) ? "selected" : "")
-            }
-            onClick={() => toggle(s.id)}
-            aria-pressed={selected.includes(s.id)}
-            disabled={selected.length >= 20 && !selected.includes(s.id)}
-          >
-            <span className="skill-icon">
-              {selected.includes(s.id) ? (
-                <Check size={18} />
-              ) : (
-                <BookOpen size={18} />
-              )}
-            </span>
-            <span>
-              <strong>
-                {s.name}
-                <small>
-                  {s.source}
-                  {s.manualOnly ? " · 手动调用" : ""}
-                </small>
-              </strong>
-              <p>{s.description}</p>
-            </span>
+        {shown.map(s => <div className="skill-result-row" key={s.id}>
+          <button type="button" className={"skill-option " + (selected.includes(s.id) ? "selected" : "")}
+            onClick={() => toggle(s.id)} aria-pressed={selected.includes(s.id)}
+            disabled={selected.length >= 20 && !selected.includes(s.id)}>
+            <span className="skill-icon">{selected.includes(s.id) ? <Check size={18} /> : <BookOpen size={18} />}</span>
+            <span><strong>{s.title || s.name}<small>{s.source}{s.starter ? " · 无需安装" : s.manualOnly ? " · 手动调用" : ""}</small></strong>
+              <p>{s.description}</p></span>
           </button>
-        ))}
-        {!shown.length && (
-          <p className="empty-results">
-            {skills.length
-              ? "没有匹配的 skills。"
-              : "当前 workspace 暂无可用 skills。"}
-          </p>
-        )}
+          {s.example && <button type="button" className="text-button skill-example"
+            disabled={selected.length >= 20 && !selected.includes(s.id)} onClick={() => example(s)}
+            aria-label={`试试${s.title || s.name}`}>用示例填入草稿</button>}
+        </div>)}
+        {!shown.length && <p className="empty-results">{filter === "selected" && !query ? "还没有选择能力，也可以直接对话。" : "没有匹配的能力。可以换个说法，或直接在对话中描述需要的帮助。"}</p>}
       </div>
+      <details className="skill-install-help">
+        <summary>还想添加自己的 skill？</summary>
+        <p>内置能力已随 Pilot 提供。已有的共享和项目 skills 在“全部能力”里，搜索也会一起查找。</p>
+        <p>外部 skill 通常是一个包含 SKILL.md 的文件夹。先检查来源和内容，再放到工作文件夹的 .agents/skills 下，重新打开当前会话即可读取。它只对这个项目生效；带有脚本的 skill 可能需要额外工具。</p>
+      </details>
       <div className="skill-footer">
-        <small>{skills.length} 个可用 · 每次最多选择 20 个</small>
-        <button type="button" className="button primary" onClick={close}>
-          完成{selected.length ? ` · ${selected.length} 个` : ""}
-        </button>
+        <small>选择后随这条消息使用 · 最多 20 个</small>
+        <button type="button" className="button primary" onClick={close}>返回对话{selected.length ? ` · 已选 ${selected.length} 个` : ""}</button>
       </div>
     </Dialog>
   );
