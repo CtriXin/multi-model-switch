@@ -483,6 +483,18 @@
   margin-bottom: 25px;
   background: var(--surface);
 }
+/* The chip is the control; its select is just the mechanism. A ring drawn
+   around the select at 3px offset lands outside the chip's 5px padding and
+   reads as a second box. Draw it on the chip instead, so it follows the shape
+   the user sees, and keep the select reachable by keyboard. */
+.home-intro .workspace-picker:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.home-intro .workspace-picker select:focus-visible,
+.home-intro .workspace-picker select:focus {
+  outline: none;
+}
 .home-intro .workspace-picker select {
   max-width: 260px;
   font-size: 12px;

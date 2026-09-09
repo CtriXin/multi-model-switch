@@ -373,13 +373,12 @@ kbd {
 }
 .session-link-copy strong {
   display: block;
-  line-height: 1.35;
   font-size: 12px;
   font-weight: 450;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 .session-link-copy small {
   display: flex;
@@ -1464,8 +1463,20 @@ dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
 .search-results button:hover {
   background: var(--soft);
 }
+/* A flex child defaults to min-width:auto, so a long title pushed the row
+   wider than the dialog and shoved the arrow out of view. */
 .search-results button > span {
   flex: 1;
+  min-width: 0;
+}
+.search-results button > svg {
+  flex: none;
+}
+.search-results strong,
+.search-results small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .search-results strong {
   display: block;
