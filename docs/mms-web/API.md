@@ -16,8 +16,8 @@ interface Service { id: string; name: string; kind: string; status: 'configured'
 interface Preset { id: string; name: string; description: string; harness: Harness; modelId: string; providerId: string; channel: string; available: boolean; reason?: string }
 interface Session { id: string; title: string; workspaceId: string; harness: Harness; modelName: string; providerName: string; channel: string; state: State; activity?: Activity | null; updatedAt: string; owner: 'web'|'glint'|'external'; capabilities: {send: boolean; stop: boolean; approve: boolean}; summary?: string }
 interface Event { id: string; sequence: number; kind: 'user'|'assistant'|'tool'|'approval'|'notice'; text: string; title?: string; status?: 'running'|'done'|'error'; approvalId?: string; decision?: 'allow'|'deny'; createdAt: string }
-interface Artifact { id: string; name: string; kind: 'markdown'|'text'|'diff'; content: string; path?: string }
-interface SessionDetail { session: Session; events: Event[]; artifacts: Artifact[] }
+interface Artifact { id: string; name: string; kind: 'markdown'|'text'|'csv'|'html'|'image'; path: string; sha256: string; revision: number; versionCount: number; status: 'current'|'changed'|'missing'|'unavailable'; source: 'tool'|'observed'|'legacy' }
+interface SessionDetail { session: Session; events: Event[]; artifacts: Artifact[]; artifactNotice?: string }
 interface Diagnostic { code: string; message: string }
 ```
 
@@ -174,3 +174,16 @@ A secret-bearing preview stores the key only in process memory for the pending p
 Session 增加 `presetId`，assistant event 增加 `modelName`。已有回答保持生成时模型标签。用户事件 `status: queued` 表示还未被Pi消费，不作为新执行轮次；收到真实 user message_start后把该事件移至当前执行位置，清空队列/停止/恢复失效队列时标记 `cancelled`。event ID保持稳定；sequence在实际消费时重新排序。
 
 过程折叠是客户端偏好，不删除后端事件。`mms-web-auto-collapse-process` 保存在 localStorage。工具错误、审批/通知在折叠时仍可见；展开后保持事件顺序。GET 返回的是快照，不能把旧快照event数组当作永不变的append-only日志。
+
+
+## 成果版本与选段修改
+
+成果列表只含元数据，正文按需读取。`write/edit` 成功后保存可预览文件；`bash` 运行前后只观察前 2,000 个可检查文件的变化，来源标记为 `observed`，不宣称该命令独占写入。工具失败不生成成功快照。每会话最多 40 个成果、每文件 20 个版本、去重内容合计 64 MB；达到上限保留旧版本并提示，不自动删除。单份文本最多 1 MiB，图片最多 8 MiB；CSV 表格最多 200 行、50 列，原文和下载保持完整。
+
+- `POST /sessions/:id/artifacts {id, revision?, compare?}` 返回所选版本的正文/图片、`versions`、真实路径、hash、文件当前状态和 `downloadData`。省略 revision 读取最新记录；`0` 读取当前文件且不创建历史版本。compare 指定已记录的正整数版本，返回文本 unified diff 或图片前后版本；diff 超长时明确 `diffTruncated`。
+- `GET /sessions/:id/artifacts/:artifactId/preview/:revision` 仅用于 HTML 静态预览。HTML 白名单清理后使用 iframe sandbox 与响应 CSP sandbox，禁用脚本、网络、表单、导航和源页面访问；允许内联样式与 data 图片。主 API 的 Origin/host 保护不变。原始下载保持原文件字节。约束依据：[MDN iframe sandbox](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe)、[CSP sandbox](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox)。
+- `POST /sessions/:id/messages` 可携带 `fileSelections`，最多 4 个 `{artifactId, revision, sha256, quote? , region?}`。quote 必须来自当前 UTF-8 原文（最多 8,000 字符）；图片 region 为左上起点的 x/y/width/height 比例。发送前重新安全读取路径并验证 hash，路径变化、symlink 或已删除时返回 `FILE_CHANGED`，不会发送到模型。新会话不接受已有成果选段。
+- user Event 保存服务器确认的 path/revision/hash/quote/region。UI 引用只加入当前会话草稿，用户发送后才执行；刷新恢复草稿仍需通过发送时检查。
+- 历史版本位于私有 `state_root/artifacts`，内容以 hash 校验。原文件改变或删除不删除已记录版本。旧会话没有历史快照时，只展示当前可读文件并明确没有版本记录，不重建曾经的文件内容。
+
+读取不跟随工作目录中的 symlink，不开放任意文件 URL，不预览隐藏配置/已知会话凭据。版本是成果内容记录，不是整个工作目录 checkpoint，也没有自动回滚文件操作。

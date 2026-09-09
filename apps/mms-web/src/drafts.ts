@@ -1,10 +1,11 @@
-import type { Attachment } from "./types";
+import type { Attachment, FileSelection } from "./types";
 export interface Draft {
   text: string;
   skills: string[];
   attachments: Attachment[];
   references: string[];
   thumbnails: Record<string, string>;
+  fileSelections?: FileSelection[];
 }
 const key = "mms-web-drafts-v1";
 const ttl = 7 * 24 * 60 * 60 * 1000;
@@ -34,7 +35,11 @@ function stored(): Record<string, Saved> {
             typeof a.mimeType === "string",
         )
       )
-        valid[id] = d;
+        valid[id] = { ...d, fileSelections: Array.isArray(d.fileSelections) ? d.fileSelections.filter(s =>
+          s && typeof s.artifactId === "string" && typeof s.path === "string" && typeof s.sha256 === "string" &&
+          Number.isInteger(s.revision) && s.revision >= 0 &&
+          (typeof s.quote === "string" || (s.region && [s.region.x, s.region.y, s.region.width, s.region.height].every(Number.isFinite)))
+        ).slice(0, 4) : [] };
     }
     return valid;
   } catch {
@@ -55,7 +60,8 @@ export function saveDraft(id: string, draft: Draft): boolean {
       !draft.text &&
       !draft.skills.length &&
       !draft.attachments.length &&
-      !draft.references.length
+      !draft.references.length &&
+      !draft.fileSelections?.length
     )
       delete data[id];
     else {

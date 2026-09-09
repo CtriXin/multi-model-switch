@@ -21,10 +21,9 @@ import {
   ChevronDown,
   X,
 } from "lucide-react";
-import type { Bootstrap, Page, SessionDetail } from "./types";
+import type { Bootstrap, Page, SessionDetail, FileSelection } from "./types";
 import { bootstrap, getSession, listSessions, isPreview, mutate } from "./api";
 import {
-  ArtifactView,
   Composer,
   Dialog,
   Logo,
@@ -32,6 +31,7 @@ import {
   WorkspacePicker,
   harnessNames,
 } from "./components";
+import { ArtifactView } from "./ArtifactView";
 import { Transcript } from "./Transcript";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
@@ -110,6 +110,7 @@ export function App() {
     "artifacts",
   );
   const [artifactId, setArtifactId] = useState("");
+  const [selectionRequest, setSelectionRequest] = useState<{ nonce: string; sessionId: string; selection: FileSelection }>();
   const [atBottom, setAtBottom] = useState(true);
   const [autoCollapseProcess, setAutoCollapseProcess] = useState(() => readSetting("mms-web-auto-collapse-process", true));
   const [accent, setAccent] = useState(() =>
@@ -1047,6 +1048,8 @@ export function App() {
                   </div>
                   <Composer
                     key={detail.session.id}
+                    selectionRequest={selectionRequest?.sessionId === detail.session.id ? selectionRequest : undefined}
+                    selectionHandled={() => setSelectionRequest(undefined)}
                     workspaceId={detail.session.workspaceId}
                     sessionId={detail.session.id}
                     sessionAlive={!!detail.runtime?.alive}
@@ -1183,7 +1186,9 @@ export function App() {
                           ))}
                         </select>
                       )}
-                      <ArtifactView artifact={artifact} />
+                      <ArtifactView key={`${detail!.session.id}:${artifact.id}`} artifact={artifact} sessionId={detail!.session.id}
+                        onSelect={selection => setSelectionRequest({ nonce: crypto.randomUUID(), sessionId: detail!.session.id, selection })} />
+                      {detail?.artifactNotice && <p className="section-note">{detail.artifactNotice}</p>}
                     </>
                   ) : (
                     <div className="panel-empty">
@@ -1194,6 +1199,7 @@ export function App() {
                         <br />
                         可以一边讨论，一边查看。
                       </p>
+                      {detail?.artifactNotice && <p>{detail.artifactNotice}</p>}
                     </div>
                   )
                 ) : (

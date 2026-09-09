@@ -6,6 +6,7 @@ import "./studio.css";
 import "./states.css";
 import "./transcript.css";
 import "./connections.css";
+import "./artifacts.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

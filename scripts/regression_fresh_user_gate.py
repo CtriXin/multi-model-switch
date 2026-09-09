@@ -54,6 +54,8 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_artifact_history.py",
+    "tests/test_mms_web_artifact_flow.py",
     "tests/test_mms_web_standalone_settings.py",
     "tests/test_claude_hardening_regressions.py",
     "tests/test_claude_isolation.py",

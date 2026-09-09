@@ -18,7 +18,7 @@ import { Popover } from "./Popover";
 import { SkillPicker } from "./SkillPicker";
 import type { Skill } from "./SkillPicker";
 import { request } from "./api";
-import type { Attachment } from "./types";
+import type { Attachment, FileSelection } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
 
@@ -26,6 +26,7 @@ export interface MessageExtras {
   skills: string[];
   attachments: string[];
   references: string[];
+  fileSelections: FileSelection[];
 }
 interface CommandItem {
   name: string;
@@ -57,10 +58,14 @@ export function Composer({
   sessionAlive,
   onCommand,
   initialText = "",
+  selectionRequest,
+  selectionHandled,
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
 }: {
   initialText?: string;
+  selectionRequest?: { nonce: string; selection: FileSelection };
+  selectionHandled?: () => void;
   draftKey?: string;
   disabled: boolean;
   reason?: string;
@@ -115,6 +120,7 @@ export function Composer({
     };
   }, [workspaceId]);
   const [text, setText] = useState(draft?.text ?? initialText);
+  const [fileSelections, setFileSelections] = useState<FileSelection[]>(draft?.fileSelections || []);
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>(
     draft?.attachments || [],
@@ -133,9 +139,10 @@ export function Composer({
         attachments,
         references,
         thumbnails,
+        fileSelections,
       }),
     );
-  }, [draftKey, text, selectedSkills, attachments, references, thumbnails]);
+  }, [draftKey, text, selectedSkills, attachments, references, thumbnails, fileSelections]);
   const [uploading, setUploading] = useState(false);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [localFilesBusy, setLocalFilesBusy] = useState(false);
@@ -173,6 +180,17 @@ export function Composer({
   const [choice, setChoice] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
+  const consumedSelection = useRef("");
+  useEffect(() => {
+    if (!selectionRequest || consumedSelection.current === selectionRequest.nonce) return;
+    consumedSelection.current = selectionRequest.nonce;
+    if (fileSelections.length >= 4) setError("最多引用 4 个选段，请先移除已有选段。");
+    else {
+      setFileSelections(old => [...old, selectionRequest.selection]);
+      input.current?.focus();
+    }
+    selectionHandled?.();
+  }, [selectionRequest?.nonce]);
   const dialog = useRef<HTMLDialogElement>(null);
   const lock = useRef(false);
   const uploadLock = useRef(false);
@@ -349,6 +367,7 @@ export function Composer({
           attachments: attachments.map((a) => a.id),
           references,
           skills: outgoingSkills,
+          fileSelections,
         });
         if (ok) {
           discardDraft(draftKey);
@@ -356,6 +375,7 @@ export function Composer({
           setSelectedSkills([]);
           setAttachments([]);
           setReferences([]);
+          setFileSelections([]);
           setThumbnails({});
           setUploadErrors([]);
         }
@@ -702,6 +722,14 @@ export function Composer({
             </button>
           </div>
         )}
+        {!!fileSelections.length && <div className="composer-selections" aria-label="引用的成果选段">
+          {fileSelections.map((selection, index) => <div className="composer-selection" key={index}>
+            <div><strong>{selection.path} · {selection.revision ? `v${selection.revision}` : "当前文件"}</strong>
+              <p>{selection.quote ? selection.quote.slice(0, 180) + (selection.quote.length > 180 ? "…" : "") : "图片中的选定区域"}</p></div>
+            <button type="button" aria-label={`移除选段 ${index + 1}`} onClick={() => setFileSelections(old => old.filter((_, i) => i !== index))}><X size={14} /></button>
+          </div>)}
+          <p className="section-note">写下修改要求，发送后开始处理。文件变化时需要重新选择。</p>
+        </div>}
         {draftLocalOnly && (
           <p className="form-error" role="status">
             浏览器暂时无法保存草稿，刷新前请先复制文字。
