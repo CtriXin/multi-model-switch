@@ -202,6 +202,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
   const [guideOpen, setGuideOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<{ available: boolean; active: boolean }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
   const setupPrompted = useRef(false);
@@ -1371,7 +1373,13 @@ export function App() {
           )}
         </div>
         <div className="sidebar-footer">
-          <button className="settings-entry" onClick={() => navigate("models")}>
+          <button
+            className={
+              "settings-entry" + (updateStatus?.available ? " has-update" : "")
+            }
+            title={updateStatus?.available ? "设置 · 有新版可用" : "设置"}
+            onClick={() => navigate("models")}
+          >
             <Settings2 size={17} />
             <span>设置</span>
           </button>
@@ -1421,7 +1429,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
-            <UpdateCenter ready={!loading && connected} />
+            <UpdateCenter ready={!loading && connected} open={updateOpen} setOpen={setUpdateOpen} onStatus={setUpdateStatus} />
             <HelpGuide ready={!loading && connected && modelReady && !setupOpen && !settingsOpen} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} />
             {detail && (
               <Status
@@ -1644,6 +1652,8 @@ export function App() {
         {settingsOpen && (
           <SettingsPage
             key={guideSettingsKey}
+            openUpdates={() => setUpdateOpen(true)}
+            updateAvailable={!!updateStatus?.available}
             connectionCompleted={connectionCompleted}
             tour={tour}
             requestNavigation={requestNavigation}
