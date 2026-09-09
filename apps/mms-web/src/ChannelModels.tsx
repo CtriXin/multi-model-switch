@@ -25,6 +25,8 @@ type ModelSetting = {
   visionSource?: string;
   contextSource?: string;
   capabilitiesEditable?: boolean;
+  catalogVision?: boolean;
+  catalogContextWindow?: number;
 };
 type Provider = {
   id: string;
@@ -70,7 +72,7 @@ const capabilityOriginLabels: Record<string, string> = {
 
 function capabilityOrigin(model: ModelSetting) {
   const parts = [
-    model.vision ? "可接收图片" : "不可接收图片",
+    model.vision ? "可读取图片" : "不可读取图片",
     model.contextWindow
       ? `${Math.round(model.contextWindow / 1000)}K 上下文`
       : "",
@@ -511,7 +513,7 @@ export function ChannelModels({
                         <label>
                           <input
                             type="checkbox"
-                            aria-label={`${id} 可接收图片`}
+                            aria-label={`${id} 可读取图片`}
                             checked={visions[id] ?? model.vision}
                             disabled={!!busy}
                             onChange={(e) =>
@@ -524,7 +526,7 @@ export function ChannelModels({
                               })
                             }
                           />
-                          <span>可接收图片</span>
+                          <span>可读取图片</span>
                         </label>
                         <label>
                           <span>上下文</span>
@@ -556,6 +558,45 @@ export function ChannelModels({
                             }
                           />
                         </label>
+                        {(() => {
+                          const vision = visions[id] ?? model.vision;
+                          const context = contextWindows[id] ?? model.contextWindow;
+                          const off =
+                            (model.catalogVision !== undefined &&
+                              vision !== model.catalogVision) ||
+                            (model.catalogContextWindow !== undefined &&
+                              context !== model.catalogContextWindow);
+                          if (!off) return null;
+                          return (
+                            <button
+                              type="button"
+                              className="capability-reset"
+                              disabled={!!busy}
+                              title="按 MMF 目录里这个模型的已知能力填回"
+                              onClick={() => {
+                                setVisions((old) => {
+                                  const next = { ...old };
+                                  if (model.catalogVision === undefined) return next;
+                                  if (model.catalogVision === model.vision)
+                                    delete next[id];
+                                  else next[id] = model.catalogVision;
+                                  return next;
+                                });
+                                setContextWindows((old) => {
+                                  const next = { ...old };
+                                  if (model.catalogContextWindow === undefined)
+                                    return next;
+                                  if (model.catalogContextWindow === model.contextWindow)
+                                    delete next[id];
+                                  else next[id] = model.catalogContextWindow;
+                                  return next;
+                                });
+                              }}
+                            >
+                              用 MMF 默认
+                            </button>
+                          );
+                        })()}
                       </div>
                     ) : (
                       <span className="muted">

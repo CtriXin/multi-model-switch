@@ -32,10 +32,32 @@ def public_options(runtime, model):
         sources = pi._pi_model_capabilities(runtime, selected).get("sources") or {}
     except Exception:
         sources = {}
+    # What MMF knows before any user override. Passing an empty policy stops
+    # the resolver reading the policy file, leaving catalogue facts only, which
+    # is what a "put it back" control has to restore.
+    catalog = {}
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        resolved = resolve_model_capabilities(
+            selected,
+            runtime=runtime,
+            provider_id=str(runtime.get("id") or runtime.get("provider_id") or ""),
+            base_url=str(runtime.get("anthropic_base_url") or runtime.get("openai_base_url") or ""),
+            profile_id=str(runtime.get("profile") or runtime.get("provider_profile") or ""),
+            model_policy={},
+        )
+        catalog = {
+            "vision": "image" in pi._pi_model_input_types(selected, caps=resolved),
+            "contextWindow": int(resolved.get("context_window_tokens") or 0) or None,
+        }
+    except Exception:
+        catalog = {}
     return {"model": {k: info[k] for k in ("id", "name", "input", "contextWindow", "maxTokens", "reasoning") if k in info},
             "protocol": entry["protocol"], "supportedThinkingLevels": levels,
             "configuredThinkingLevel": configured, "defaultThinkingLevel": effective,
             "capabilitySources": {k: str(sources.get(k) or "") for k in ("supports_vision", "context_window_tokens")},
+            "catalog": catalog,
             "thinkingLevelMap": info.get("thinkingLevelMap", {})}
 
 

@@ -929,6 +929,24 @@
 }
 .settings-shell .model-explorer {
   min-height: 0;
+  /* Any clipped ancestor between a sticky element and its scrollport cancels
+     the stickiness, so the frame stops clipping and the panes round instead. */
+  overflow: visible;
+}
+.settings-shell .model-groups {
+  border-radius: 14px 0 0 14px;
+}
+.settings-shell .model-detail {
+  border-radius: 0 14px 14px 0;
+}
+/* With one scroller the detail column would slide away while the model list
+   keeps going, leaving the pane you are reading off screen. Pin it instead. */
+.settings-shell .model-detail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
 }
 .general-settings {
   overflow-y: auto;

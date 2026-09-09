@@ -110,6 +110,8 @@ def public_rows(rows):
                            "visionSource": options.get("capabilitySources", {}).get("supports_vision", ""),
                            "contextSource": options.get("capabilitySources", {}).get("context_window_tokens", ""),
                            "capabilitiesEditable": bool(options),
+                           "catalogVision": options.get("catalog", {}).get("vision"),
+                           "catalogContextWindow": options.get("catalog", {}).get("contextWindow"),
                            "launchOverride": str(runtime.get("reasoning_effort") or "") if runtime else ""})
         from mms_web.channel_connection import public_connection
         result.append({"id": p["id"], "name": p["name"], "models": models,
@@ -150,8 +152,8 @@ def draft_for(rows, request, revision):
         if value != known[model]["vision"]:
             affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
             changes.append({"kind": "vision", "model": model,
-                            "before": "可接收图片" if known[model]["vision"] else "不可接收图片",
-                            "after": "可接收图片" if value else "不可接收图片", "channels": affected})
+                            "before": "可读取图片" if known[model]["vision"] else "不可读取图片",
+                            "after": "可读取图片" if value else "不可读取图片", "channels": affected})
     contexts = request.get("contextWindows") or {}
     if not isinstance(contexts, dict):
         raise WebError("INVALID_CONTEXT", "上下文长度格式无效。", 400)

@@ -231,8 +231,8 @@ def test_published_vision_setting_reaches_a_new_pi_session(settings, tmp_path):
     draft = payload(settings)
     draft.update(efforts={}, visions={"gpt-5": False})
     preview = settings.preview(draft)
-    assert preview["changes"] == [{"kind": "vision", "model": "gpt-5", "before": "可接收图片",
-                                   "after": "不可接收图片", "channels": ["channel-a", "channel-b"]}]
+    assert preview["changes"] == [{"kind": "vision", "model": "gpt-5", "before": "可读取图片",
+                                   "after": "不可读取图片", "channels": ["channel-a", "channel-b"]}]
     settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
     rows = settings.read()["providers"]
     assert all(next(m for m in p["models"] if m["id"] == "gpt-5")["vision"] is False for p in rows)
