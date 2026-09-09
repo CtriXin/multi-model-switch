@@ -79,3 +79,12 @@ def test_bundle_integrity_and_matching_version_are_required(tmp_path):
     with pytest.raises(ValueError):validate_bundle(tmp_path,'v8.0.0')
     (public/'index.html').write_text('tampered')
     with pytest.raises(ValueError):validate_bundle(tmp_path,'v9.0.0')
+
+
+def test_insufficient_space_stops_before_creating_a_backup(tmp_path,monkeypatch):
+    root=tmp_path/'state';root.mkdir();(root/'progress').write_text('keep')
+    monkeypatch.setattr('mms_web.update_safety.shutil.disk_usage',lambda _:SimpleNamespace(free=0))
+    with pytest.raises(ValueError,match='space'):
+        backup_state(root,root/'updates/backup')
+    assert (root/'progress').read_text()=='keep'
+    assert not (root/'updates/backup').exists()

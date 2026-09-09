@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Thin forwarder: resolve one source, download its installer, run bash, clean up.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -85,7 +85,7 @@ export async function main(args = process.argv.slice(2)) {
   return runInstaller(plan.script, plan.args);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   try { process.exitCode = await main(); }
   catch (error) { console.error(`mms-install: ${error.message}`); process.exitCode = 1; }
 }

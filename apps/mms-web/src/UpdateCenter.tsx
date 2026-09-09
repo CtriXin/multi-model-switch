@@ -18,6 +18,7 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
   const [pending, setPending] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const initialVersion = useRef<string | undefined>(undefined);
   const phase = data?.operation.phase || "idle";
   useEffect(() => {
     if (!ready || isPreview) return;
@@ -26,7 +27,7 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
     const poll = async () => {
       try {
         const result = await request<UpdateStatus>("/update");
-        if (!stopped) { setData(result); setError(""); }
+        if (!stopped) { initialVersion.current ||= result.currentVersion; setData(result); setError(""); }
       } catch (e) {
         if (!stopped && open) setError(e instanceof Error ? e.message : "暂时无法读取更新状态。");
       } finally {
@@ -50,7 +51,7 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
   const busy = pending || data?.checking;
   return <>
     <button ref={trigger} type="button" className={`update-trigger ${data?.updateAvailable ? "available" : ""}`} aria-label={data?.updateAvailable ? "有新版，查看更新" : "检查更新"} title="版本与更新" onClick={() => setOpen(true)}>
-      <Download size={16} /><span>{activePhases.has(phase) ? "更新中" : data?.updateAvailable ? "有新版" : "更新"}</span>
+      <Download size={16} /><span>{phase === "waiting" ? "等待更新" : activePhases.has(phase) ? "更新中" : data?.updateAvailable ? "有新版" : "更新"}</span>
     </button>
     {open && <dialog ref={dialog} className="update-center" aria-labelledby="update-title" onCancel={e => { e.preventDefault(); setOpen(false); }} onClick={e => { if (e.target === dialog.current) setOpen(false); }}>
       <header><div><h2 id="update-title">版本与更新</h2><p>当前版本 {data ? `v${data.currentVersion}` : "读取中…"}</p></div><button type="button" className="icon-button" aria-label="关闭更新" onClick={() => setOpen(false)}><X size={19} /></button></header>
@@ -65,7 +66,7 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
       </div>
       <footer>
         <p>更新前检查会话并备份记录。有任务执行、等待确认或排队消息时，会等待完成后再更新。</p>
-        <div>{data?.operation.cancellable && <button type="button" className="button" disabled={pending} onClick={() => void act("cancel")}>取消本次更新</button>}{data?.canUpgrade && !activePhases.has(phase) && <button type="button" className="button primary" disabled={busy} onClick={() => void act("start", { target: data.latest.tag })}>更新到 {data.latest.tag}</button>}<button type="button" className="button" onClick={() => setOpen(false)}>关闭</button></div>
+        <div>{data && initialVersion.current && data.currentVersion !== initialVersion.current && <button type="button" className="button primary" onClick={() => location.reload()}>刷新使用新版本</button>}{data?.operation.cancellable && <button type="button" className="button" disabled={pending} onClick={() => void act("cancel")}>取消本次更新</button>}{data?.canUpgrade && !activePhases.has(phase) && <button type="button" className="button primary" disabled={busy} onClick={() => void act("start", { target: data.latest.tag })}>更新到 {data.latest.tag}</button>}<button type="button" className="button" onClick={() => setOpen(false)}>关闭</button></div>
       </footer>
     </dialog>}
   </>;

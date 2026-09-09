@@ -6,6 +6,8 @@ import importlib
 import json
 import mimetypes
 import secrets
+import os
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -36,6 +38,11 @@ class WebApplication:
         self.config_root = config_root
         self.state_root = state_root
         self.csrf_token = secrets.token_urlsafe(32)
+        self.mutation_lock = threading.RLock()
+        self.probation_token = os.environ.get("MMS_WEB_PROBATION", "")
+        self.maintenance = bool(self.probation_token)
+        self.pending_handoff = None
+        self.instance = os.environ.get("MMS_WEB_INSTANCE") or secrets.token_hex(16)
         from .updates import UpdateService
         self.updates = UpdateService(self)
         self.catalog = _adapter(
@@ -97,6 +104,9 @@ class WebApplication:
         }
 
     def get(self, parts: list[str]) -> dict:
+        if parts == ["update", "identity"]:
+            from .update_handoff import path_identity, session_inventory
+            return {"version": VERSION, "processId": os.getpid(), "instance": self.instance, "identity": path_identity(Path(__file__).resolve().parent.parent, self.state_root, self.config_root, Path.cwd()), "sessions": session_inventory(self.sessions)}
         if parts == ["update"]:
             return self.updates.status()
         if parts == ["model-settings"]:
@@ -119,6 +129,28 @@ class WebApplication:
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
     def post(self, parts: list[str], payload: dict) -> dict:
+        with self.mutation_lock:
+            if parts == ["update", "commit"]:
+                if not self.probation_token or not secrets.compare_digest(str(payload.get("token") or ""), self.probation_token):
+                    raise WebError("INVALID_UPDATE_TOKEN", "更新确认无效。", 403)
+                from .runtime import private_json
+                operation_path = self.state_root / "updates/operation.json"
+                from .updates import read_json
+                operation = read_json(operation_path)
+                private_json(operation_path, {**operation, "phase": "complete", "message": f"已更新到 v{VERSION}，会话历史已保留。", "cancellable": False})
+                self.probation_token = ""
+                self.maintenance = False
+                return {"ok": True}
+            if self.maintenance:
+                raise WebError("UPDATE_IN_PROGRESS", "正在验证更新，会话已保留，请稍后再试。", 409)
+            return self._post(parts, payload)
+
+    def _post(self, parts: list[str], payload: dict) -> dict:
+        if parts in (["update", "start"], ["update", "cancel"]):
+            coordinator = self.updates.coordinator
+            if not coordinator:
+                raise WebError("UPDATE_UNAVAILABLE", "当前启动方式尚未启用安全更新。", 409)
+            return coordinator.start(payload) if parts[1] == "start" else coordinator.cancel()
         if parts == ["update", "check"]:
             return self.updates.request_check()
         if parts == ["update", "preferences"]:

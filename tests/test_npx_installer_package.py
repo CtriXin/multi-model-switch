@@ -161,3 +161,11 @@ def test_explicit_ref_named_stable_is_not_changed_to_a_release():
       const plan=await resolveInstaller(['--ref=stable'],async url=>{urls.push(url);return {ok:true,text:async()=> '#!/bin/bash\\nREPO_NAME="multi-model-switch"'};});
       assert.equal(urls.length,1);assert.equal(plan.ref,'stable');
     ''')
+
+
+def test_npm_symlink_bin_executes_the_cli_instead_of_silently_exiting(tmp_path):
+    link=tmp_path/'mms-install'
+    link.symlink_to(ENTRY)
+    result=subprocess.run([shutil.which('node'),str(link),'--channel=bogus'],capture_output=True,text=True)
+    assert result.returncode==1
+    assert '--channel must be' in result.stderr

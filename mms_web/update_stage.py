@@ -40,7 +40,7 @@ def unpack_release(archive: Path, destination: Path):
                 raise ValueError('unsafe archive path')
             if prefix is None:
                 prefix = path.parts[0]
-            if path.parts[0] != prefix or count > 100000:
+            if path.parts[0] != prefix or count > 20000:
                 raise ValueError('invalid archive layout')
             relative = Path(*path.parts[1:])
             # Optional shared agent governance link is not a runtime dependency.
@@ -102,6 +102,8 @@ def stage_release(root: Path, tag: str, *, downloader=download_release, probe=pr
     if not isinstance(tag, str) or not TAG.fullmatch(tag):
         raise ValueError('invalid release tag')
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if shutil.disk_usage(root).free < MAX_DOWNLOAD + MAX_UNPACKED + 128 * 1024 * 1024:
+        raise ValueError('not enough space to prepare a release safely')
     # Every attempt gets its own directory; never overwrite an executing release.
     destination = Path(tempfile.mkdtemp(prefix=tag + '-', dir=root))
     archive, source = destination / 'source.tar.gz', destination / 'source'

@@ -61,6 +61,9 @@ def file_manifest(root: Path):
 
 def backup_state(state: Path, destination: Path):
     before = file_manifest(state)
+    required = sum(item.get('bytes', 0) for item in before.values()) + 16 * 1024 * 1024
+    if shutil.disk_usage(state).free < required:
+        raise ValueError('not enough space for a verified session backup')
     destination.mkdir(parents=True, mode=0o700)
     for item in state.iterdir():
         if item.name == 'updates':
