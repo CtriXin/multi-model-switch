@@ -22,10 +22,13 @@ import { request } from "./api";
 import type { Attachment, FileSelection } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
+import { requiredSkillMatches } from "./recipe-core";
+const noRequiredSkills: string[] = [];
 import { droppedItems } from "./dropped-items";
 import { WorkspaceDialog } from "./LaunchOptions";
 
 export interface MessageExtras {
+  skillInvocation?: string;
   skills: string[];
   attachments: string[];
   references: string[];
@@ -61,6 +64,7 @@ export function Composer({
   sessionAlive,
   onCommand,
   initialText = "",
+  requiredSkillNames = noRequiredSkills,
   selectionRequest,
   selectionHandled,
   guideRequest,
@@ -69,6 +73,7 @@ export function Composer({
   placeholder = "继续补充你的想法…",
 }: {
   initialText?: string;
+  requiredSkillNames?: string[];
   guideRequest?: { nonce: string; text: string };
   guideHandled?: () => void;
   selectionRequest?: { nonce: string; selection: FileSelection };
@@ -97,9 +102,12 @@ export function Composer({
     draft?.skills || [],
   );
   const [skillError, setSkillError] = useState("");
+  const [skillsReady, setSkillsReady] = useState(false);
+  const requiredSkillKey = requiredSkillNames.join("|");
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [folderDrops, setFolderDrops] = useState<string[]>([]);
   function toggleSkill(id: string) {
+    if (lock.current) return;
     setSelectedSkills((old) =>
       old.includes(id)
         ? old.filter((i) => i !== id)
@@ -109,15 +117,18 @@ export function Composer({
   useEffect(() => {
     let cancelled = false;
     setSkills([]);
+    setSkillsReady(false);
     setSkillError("");
     if (workspaceId)
       request<{ skills: Skill[] }>("/skills", { workspaceId })
         .then((d) => {
           if (!cancelled) {
-            setSkills(d.skills);
-            setSelectedSkills((ids) =>
-              ids.filter((id) => d.skills.some((s) => s.id === id)),
-            );
+            setSkills(d.skills); setSkillsReady(true);
+            setSelectedSkills(ids => {
+              const kept = ids.filter(id => d.skills.some(s => s.id === id));
+              const defaults = draft ? [] : requiredSkillMatches(requiredSkillNames, d.skills).ids;
+              return [...new Set([...kept, ...defaults])].slice(0, 20);
+            });
           }
         })
         .catch((e) => {
@@ -126,7 +137,8 @@ export function Composer({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, requiredSkillKey]);
+  const requirementIssues = requiredSkillNames.length ? (skillsReady ? requiredSkillMatches(requiredSkillNames, skills, selectedSkills).issues : [skillError || "正在核对模板所需的 Skills。"]) : [];
   const [text, setText] = useState(() => {
     const original = draft?.text ?? initialText;
     const paths = (draft?.attachments || []).flatMap(a => a.localPath && !original.includes(a.localPath) && !original.includes(JSON.stringify(a.localPath)) ? [JSON.stringify(a.localPath)] : []);
@@ -368,6 +380,7 @@ export function Composer({
     if (
       (!text.trim() && !attachments.some(a => referencedInText(a))) ||
       disabled ||
+      requirementIssues.length > 0 ||
       busy ||
       uploading ||
       localFilesBusy ||
@@ -380,11 +393,13 @@ export function Composer({
     try {
       let outgoing = text.trim();
       let outgoingSkills = selectedSkills;
+      let skillInvocation: string | undefined;
       const skillMatch = outgoing.match(/^\/skill:([^\s]+)(?:\s+([\s\S]*))?$/);
       if (skillMatch) {
         const skill = skills.find((s) => s.name === skillMatch[1]);
         if (!skill) throw new Error("当前 workspace 没有这个 skill。");
         outgoingSkills = [...new Set([...outgoingSkills, skill.id])];
+        skillInvocation = skill.id;
         outgoing = skillMatch[2] || `请使用 ${skill.name} 协助我。`;
       }
       const startsWithFile = localFilePaths(outgoing.split("\n")[0]).length > 0;
@@ -411,6 +426,7 @@ export function Composer({
           attachments: attachments.filter(a => referencedInText(a, outgoing)).map((a) => a.id),
           references,
           skills: outgoingSkills,
+          ...(skillInvocation ? { skillInvocation } : {}),
           fileSelections,
         });
         if (ok) {
@@ -440,6 +456,7 @@ export function Composer({
         <SkillPicker
           skills={skills}
           selected={selectedSkills}
+          locked={submitting || busy}
           toggle={toggleSkill}
           close={() => setSkillsOpen(false)}
           error={skillError}
@@ -553,6 +570,7 @@ export function Composer({
                   type="button"
                   key={s.id}
                   onClick={() => toggleSkill(s.id)}
+                  disabled={submitting || busy}
                   aria-label={"移除 skill " + s.name}
                 >
                   <BookOpen size={13} />
@@ -588,6 +606,7 @@ export function Composer({
             ref={input}
             aria-label="任务内容"
             value={text}
+            readOnly={submitting}
             onChange={(e) => {
               setText(e.target.value);
               setChoice(0);
@@ -735,6 +754,7 @@ export function Composer({
               type="submit"
               disabled={
                 disabled ||
+      requirementIssues.length > 0 ||
                 busy ||
                 submitting ||
                 uploading ||
@@ -753,6 +773,7 @@ export function Composer({
           </div>
         </div>
         {disabled && reason && <p className="composer-reason">{reason}</p>}
+        {requirementIssues.map(issue => <p className="composer-reason" role="status" key={issue}>{issue}</p>)}
         {localFilesBusy && (
           <p className="composer-reason" role="status">
             正在选择本地文件…

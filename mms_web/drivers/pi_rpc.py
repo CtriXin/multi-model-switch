@@ -395,6 +395,16 @@ class PiRpcDriver:
             )
             self._sink.approval_pending(request_id, method, title)
             return
+        if method == "notify" and str(message.get("message", "")).startswith("MMS_WEB_CONTEXT:"):
+            raw = message["message"].split(":", 1)[1]
+            try:
+                from ..context_evidence import clean_evidence
+                value = clean_evidence(json.loads(raw)) if len(raw) <= 512000 else None
+                if value is not None:
+                    self._sink.upsert_event({"nativeContext": value})
+            except (ValueError, TypeError):
+                pass
+            return
         if method == "notify" and str(message.get("message", "")).startswith("MMS_WEB_STATE:"):
             try:
                 state = json.loads(message["message"].split(":", 1)[1])

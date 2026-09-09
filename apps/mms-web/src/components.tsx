@@ -34,8 +34,21 @@ export const harnessNames: Record<string, string> = {
   agy: "Antigravity",
 };
 export { Status } from "./SessionStatus";
-export function AppVersion({ version }: { version?: string }) {
-  return version ? <span className="app-version" title="当前服务版本" aria-label={`MMS 版本 ${version}`}>v{version}</span> : null;
+export function AppVersion({ version, onClick, updateAvailable }: { version?: string; onClick?: () => void; updateAvailable?: boolean }) {
+  if (!version) return null;
+  const label = `MMS 版本 ${version}`;
+  // The version is where people look for "what am I running, and is there a
+  // newer one", so it doubles as the entry to the update dialog rather than
+  // a separate control competing for space in the top bar.
+  return onClick ? (
+    <button type="button" className={"app-version" + (updateAvailable ? " has-update" : "")}
+      title={updateAvailable ? "有新版，查看版本与更新" : "版本与更新"}
+      aria-label={updateAvailable ? `${label}，有新版可用` : label} onClick={onClick}>
+      v{version}
+    </button>
+  ) : (
+    <span className="app-version" title="当前服务版本" aria-label={label}>v{version}</span>
+  );
 }
 
 export function Logo({ small = false }: { small?: boolean }) {

@@ -41,6 +41,7 @@ def test_skill_source_tracks_the_winning_entry_not_its_symlink_target(local_app,
 @pytest.mark.skipif(not probe_mms_pi_seam()["available"], reason="compatible Pi required")
 def test_native_project_materials_and_explicit_sources_follow_each_request(local_app, tmp_path):
     app, workspace, root = local_app
+    (root / "AGENTS.md").write_text("PRIVATE_NATIVE_RULE_MARKER: only a fixture rule.\n")
     guide = root / ".agents/skills/context-guide/SKILL.md"
     guide.parent.mkdir(parents=True)
     guide.write_text("---\nname: context-guide\ndescription: Context source fixture\n---\nUse the guide marker as source.\n")
@@ -55,8 +56,15 @@ def test_native_project_materials_and_explicit_sources_follow_each_request(local
         event = next(e for e in detail["events"] if e["kind"] == "user")
         usage = event["contextUsage"]
         assert usage["state"] == "submitted" and usage["cwd"] == str(root)
+        assert usage["consumed"] is True
+        assert usage["native"]["available"] is True
+        assert any(r["path"] == str(root / "AGENTS.md") and r["state"] == "loaded" for r in usage["native"]["rules"])
+        assert "PRIVATE_NATIVE_RULE_MARKER" not in json.dumps(usage["native"])
+        assert any(s["name"] == "context-guide" and not s.get("invoked") for s in usage["native"]["skills"])
         sources = {item["kind"]: item for item in usage["items"]}
         assert set(sources) == {"skill", "reference", "material"}
+        assert sources["skill"]["loadState"] == "loaded" and not sources["skill"].get("invoked")
+        assert sources["reference"]["loadState"] == "referenced"
         assert sources["skill"]["filePath"] == str(guide)
         assert sources["skill"]["sha256"] == hashlib.sha256(guide.read_bytes()).hexdigest()
         assert sources["material"]["revision"] == 1 and sources["reference"]["path"] == "notes.md"
@@ -83,6 +91,15 @@ def test_native_project_materials_and_explicit_sources_follow_each_request(local
         other_detail = settle(app, second["session"]["id"])
         assert "MATERIAL_ALPHA" not in last_user()
         assert next(e for e in other_detail["events"] if e["kind"] == "user")["contextUsage"]["items"] == []
+        app.post(["sessions", sid, "messages"], {"requestId": "native-skill-command", "text": "/skill:context-guide Explain this fixture"})
+        invoked_detail = settle(app, sid)
+        invoked = [e for e in invoked_detail["events"] if e["kind"] == "user"][-1]["contextUsage"]
+        assert invoked["consumed"] is True
+        assert any(s["name"] == "context-guide" and s.get("invoked") and s.get("proof") == "skill_command" for s in invoked["native"]["skills"])
+        app.post(["sessions", sid, "messages"], {"requestId": "web-skill-command", "text": "Use the selected guide", "skills": [skill["id"]], "skillInvocation": skill["id"]})
+        web_invoked = [e for e in settle(app, sid)["events"] if e["kind"] == "user"][-1]["contextUsage"]
+        assert web_invoked["items"][0]["invoked"] is True
+        assert web_invoked["items"][0]["proof"] == "web_skill_command"
         # Old submitted source records survive an edit, disable and process restart.
         state = app.state_root
         app.close()
