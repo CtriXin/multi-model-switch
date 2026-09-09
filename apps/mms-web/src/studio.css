@@ -424,6 +424,24 @@
 .settings-entry:hover {
   color: var(--accent);
 }
+/* A waiting update badges the control people already use instead of adding a
+   second thing to the top bar. The mark sits on the icon, not in the row: the
+   connection state next to it is already a 6px accent dot, and two loose dots
+   in one footer would read as two status lights. */
+.settings-entry {
+  position: relative;
+}
+.settings-entry.has-update::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+}
 .attention-banner {
   display: flex;
   align-items: center;
@@ -1276,6 +1294,11 @@
 .brand > .app-version { margin-left: 2px; font-size: max(11px, 0.7857rem); }
 /* Settings is a sheet now; the version rides the tab row it replaced. */
 .settings-tabs > .app-version { margin-left: auto; align-self: center; }
+/* The version doubles as the entry to version and updates. */
+button.app-version { border: 0; background: transparent; padding: 4px 7px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--muted); }
+button.app-version:hover { background: var(--soft); color: var(--ink); }
+button.app-version.has-update { color: var(--accent); }
+button.app-version.has-update::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 
 /* Settings, help and the tour share one inset and font scale on small screens. */
 @media (max-width: 640px) {

@@ -13,8 +13,13 @@ type UpdateStatus = {
 };
 
 const activePhases = new Set(["preparing", "waiting", "backing-up", "restarting"]);
-export function UpdateCenter({ ready }: { ready: boolean }) {
-  const [open, setOpen] = useState(false);
+export function UpdateCenter({ ready, open, setOpen, onStatus }: {
+  ready: boolean;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  /** Lets the shell badge its own controls without owning the polling. */
+  onStatus?: (status: { available: boolean; active: boolean }) => void;
+}) {
   const [data, setData] = useState<UpdateStatus>();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -40,6 +45,9 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
     void poll();
     return () => { stopped = true; clearTimeout(timer); };
   }, [ready, open, phase]);
+  const available = !!data?.updateAvailable;
+  const active = activePhases.has(phase);
+  useEffect(() => { onStatus?.({ available, active }); }, [available, active, onStatus]);
   useEffect(() => {
     if (!open) return;
     dialog.current?.showModal();
@@ -52,10 +60,13 @@ export function UpdateCenter({ ready }: { ready: boolean }) {
     finally { setPending(false); }
   }
   const busy = pending || data?.checking;
+  // At rest there is nothing to act on, so the top bar shows nothing. The
+  // version label in settings is the way in; this control appears only when
+  // an update is waiting or one is running, which is when it earns the space.
   return <>
-    <button ref={trigger} type="button" className={`update-trigger ${data?.updateAvailable ? "available" : ""}`} aria-label={data?.updateAvailable ? "有新版，查看更新" : "检查更新"} title="版本与更新" onClick={() => setOpen(true)}>
-      <Download size={16} /><span>{phase === "waiting" ? "等待更新" : activePhases.has(phase) ? "更新中" : data?.updateAvailable ? "有新版" : "更新"}</span>
-    </button>
+    {(available || active) && <button ref={trigger} type="button" className={`update-trigger ${available ? "available" : ""}`} aria-label={available ? "有新版，查看更新" : "查看更新进度"} title="版本与更新" onClick={() => setOpen(true)}>
+      <Download size={16} /><span>{phase === "waiting" ? "等待更新" : active ? "更新中" : "有新版"}</span>
+    </button>}
     {open && <dialog ref={dialog} className="update-center" aria-labelledby="update-title" onCancel={e => { e.preventDefault(); setOpen(false); }} onClick={e => { if (e.target === dialog.current) setOpen(false); }}>
       <header><div><h2 id="update-title">版本与更新</h2><p>当前版本 {data ? `v${data.currentVersion}` : "读取中…"}</p></div><button type="button" className="icon-button" aria-label="关闭更新" onClick={() => setOpen(false)}><X size={19} /></button></header>
       <div className="update-body">

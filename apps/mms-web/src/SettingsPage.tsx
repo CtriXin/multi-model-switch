@@ -6,6 +6,8 @@ import { FONT_FAMILIES } from "./App";
 import { AppVersion, Dialog } from "./components";
 
 export function SettingsPage({
+  openUpdates,
+  updateAvailable,
   connectionCompleted,
   tour,
   data,
@@ -31,6 +33,8 @@ export function SettingsPage({
   selectToCopy, setSelectToCopy,
   requestNavigation, editStateChanged,
 }: {
+  openUpdates: () => void;
+  updateAvailable: boolean;
   connectionCompleted: () => void;
   tour?: ReactNode;
   data: Bootstrap;
@@ -83,7 +87,7 @@ export function SettingsPage({
           <Palette size={16} />
           外观与使用
         </button>
-        <AppVersion version={data.appVersion} />
+        <AppVersion version={data.appVersion} onClick={openUpdates} updateAvailable={updateAvailable} />
       </nav>
       {tab === "models" ? (
         <Models
