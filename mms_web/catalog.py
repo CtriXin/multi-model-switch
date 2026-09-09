@@ -905,7 +905,9 @@ class CatalogService:
             raise WebError("INVALID_PROTOCOL", "请选择支持的服务类型。", 400)
         name, base_url, api_key, models, warnings = self._validate_service_payload(payload)
 
-        cfg = self._published_config(self._raw_config(), self._load_bundle([]))
+        bundle = self._load_bundle([])
+        published = self._local_setup() and bool(bundle)
+        cfg = self._published_config(self._raw_config(), bundle)
         providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
         providers_by_id = {
             str(item.get("id") or "").strip(): item
@@ -927,6 +929,12 @@ class CatalogService:
         credentials = self._credentials_values()
 
         def _current_credential(field: str) -> str:
+            if published:
+                for route in (bundle.get("payloads", {}).get("router", {}).get("routes", {})).values():
+                    for leaf in [route.get("primary"), *route.get("fallbacks", [])]:
+                        if leaf and leaf.get("provider_id") == provider_id:
+                            return str(leaf.get(field.lower()) or "")
+                return ""
             prefix = re.sub(r"[^A-Za-z0-9]+", "_", provider_id).upper().strip("_") or "DEFAULT"
             return credentials.get(f"MMS_PROVIDER_{prefix}_{field}", "")
 
@@ -948,7 +956,7 @@ class CatalogService:
             entry = providers_by_id[provider_id]
             if name and entry.get("name") != name:
                 changes.append({"label": "Name", "before": str(entry.get("name") or ""), "after": name})
-            if base_url:
+            if base_url and not published:
                 current_url = _current_credential("BASE_URL")
                 if current_url != base_url:
                     changes.append({"label": "Base URL", "before": _mask_url(current_url), "after": _mask_url(base_url)})

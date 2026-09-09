@@ -11,8 +11,8 @@ MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.0.0/install.sh -o /tmp/mms-install-v4.sh
-bash /tmp/mms-install-v4.sh --ref v4.0.0 --install-cli pi --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.0.1/install.sh -o /tmp/mms-install-v4.sh
+bash /tmp/mms-install-v4.sh --ref v4.0.1 --install-cli pi --write-shell-rc
 ```
 
 关闭终端后重新打开，运行：

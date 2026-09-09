@@ -101,8 +101,15 @@ def apply_connection(root: Path, request: dict) -> dict:
     if created or (models and target.get("models_endpoint") == "manual"):
         target.update(fallback_models=models, models=[{"id": m, "visible": True} for m in models])
     base = service["baseUrl"]
+    previous = next((p for p in cfg.get("providers", []) if p.get("id") == pid), {})
+    credentials = mms_core.load_provider_credentials(pid) if not revision and not created else {}
     for field, protocol in (("openai_base_url", "openai_chat_completions"),
                             ("anthropic_base_url", "anthropic_messages")):
+        # The generic connection form promises to preserve protocol-specific
+        # addresses. Published addresses are explicit; edit them through the
+        # channel settings form, which previews each protocol separately.
+        if not created and (revision or credentials.get(field) or previous.get(field) or previous.get("default_" + field)):
+            continue
         if protocol in target["protocols"]:
             target[field] = base
             target[field + "_source"] = "config"

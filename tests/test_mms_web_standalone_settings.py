@@ -143,3 +143,21 @@ def test_corrupt_standalone_bundle_does_not_fall_back_to_legacy(local_app):
             app.get(["model-settings"])
         assert error.value.code == "INVALID_BUNDLE"
         assert tree_hash(app.catalog.config_root) == before
+
+
+def test_generic_connection_update_keeps_protocol_specific_url(local_app):
+    app, workspace, _ = local_app
+    app.catalog._run_worker({"command": "apply-config", "config_root": str(app.catalog.config_root),
+        "providerId": "legacy-a", "service": {"name": "Legacy", "baseUrl": "http://127.0.0.1:12340/v1",
+        "apiKey": "fixture-key", "protocol": "openai", "models": ["gpt-5"]}})
+    path = app.catalog.config_root / "credentials.sh"
+    path.write_text(path.read_text() + "\nexport MMS_PROVIDER_LEGACY_A_OPENAI_BASE_URL='http://127.0.0.1:12342/v1'\n")
+    save_effort(app, "legacy-a", "low")
+    before = app.catalog.resolve_launch("web:pi:legacy-a:gpt-5", workspace["id"])["runtime"]
+    assert before["openai_base_url"] == "http://127.0.0.1:12342/v1"
+    preview = app.post(["configuration", "preview"], {"service": {
+        "id": "legacy-a", "name": "Renamed A", "baseUrl": "http://127.0.0.1:12340/v1", "apiKey": ""}})
+    assert any("保留" in warning for warning in preview["warnings"])
+    app.post(["configuration", "apply"], {"previewId": preview["previewId"], "revision": preview["revision"]})
+    after = app.catalog.resolve_launch("web:pi:legacy-a:gpt-5", workspace["id"])["runtime"]
+    assert after["openai_base_url"] == before["openai_base_url"]

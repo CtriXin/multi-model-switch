@@ -232,8 +232,8 @@ export function ChannelModels({
       await load();
       setNotice(
         result.runtimeReady
-          ? "已保存到 MMF。新会话会读取新配置；单独设置的 Web effort 优先于 MMF 默认值。"
-          : "已保存到 MMF。部分通道仍缺少连接信息；已就绪的通道可以继续使用。",
+          ? "设置已保存。新会话会读取新配置；单独设置的会话 effort 优先于模型默认值。"
+          : "设置已保存。部分通道仍缺少连接信息；已就绪的通道可以继续使用。",
       );
     } catch (e) {
       setError((e as Error).message);
@@ -300,7 +300,7 @@ export function ChannelModels({
       )}
       {busy === "load" && (
         <p role="status" className="muted">
-          正在读取 MMF 已保存的模型配置…
+          正在读取已保存的模型配置…
         </p>
       )}
       {snapshot && (
@@ -559,7 +559,7 @@ export function ChannelModels({
             通道的可用档位展示；其他 harness 按各自能力处理。
           </p>
           <footer className="channel-save">
-            <span>{dirty ? "有未保存的修改" : "与 MMF 已保存的配置一致"}</span>
+            <span>{dirty ? "有未保存的修改" : "与已保存的配置一致"}</span>
             <button
               className="button primary"
               disabled={!dirty || !!busy}
@@ -638,7 +638,7 @@ export function ChannelModels({
       )}
       {leave !== null && (
         <Dialog title="有尚未保存的修改" close={() => setLeave(null)}>
-          <p>离开后将丢弃本页修改。MMF 已保存的配置不会改变。</p>
+          <p>离开后将丢弃本页修改。已保存的配置不会改变。</p>
           <div className="channel-leave">
             <button className="button" onClick={() => setLeave(null)}>
               继续编辑
