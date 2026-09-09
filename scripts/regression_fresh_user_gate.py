@@ -137,6 +137,11 @@ _SCENARIO_MATRIX = [
         "coverage": "install unbinds every MMS-written leftover, preserves user-owned lookalikes, backs up Claude settings, and uninstalls no third-party binary",
     },
     {
+        "id": "retired-builtin-commands",
+        "state": "a machine where an older version wrote offduty/onduty/handover and /nsr into all five agent homes",
+        "coverage": "a new install writes none of them and takes back the 20 entries MMS wrote, while same-named user files and foreign symlinks survive",
+    },
+    {
         "id": "one-question-install",
         "state": "installer run with no arguments, with and without a terminal",
         "coverage": "nothing that changes the install is asked; stable channel and shell PATH are the defaults; the only question offers to open MMS Web, which starts detached with a real config root, falls back off a taken port, reuses a running instance, and is skipped without a terminal",
