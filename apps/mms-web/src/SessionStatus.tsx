@@ -107,7 +107,7 @@ export function CurrentActivity({
     compacting: "正在整理上下文…",
     retrying: "正在自动重试…",
     completed: "本轮执行完成",
-    closed: "会话已就绪",
+    closed: session.capabilities.send ? "发送消息可继续本次对话" : "仍可查看历史记录",
     stopped: "本轮已停止",
     error: "查看上方错误详情后再继续",
     disconnected: "连接恢复后更新；保留最近内容",
