@@ -30,6 +30,7 @@ dialog:has(.project-materials) { width: min(920px, calc(100vw - 32px)); }
 .context-usage { margin: 12px 0 3px; font-size: max(11px, 0.7857rem); color: var(--muted); border-top: 1px solid var(--line); padding-top: 9px; }
 .context-usage summary { cursor: pointer; }
 .context-usage summary > span { margin-left: 10px; font-size: max(11px, 0.7143rem); }
+.context-delivery-status { margin: 8px 0 3px; font-size: max(11px, 0.7857rem); color: var(--muted); }
 .context-workspace { overflow-wrap: anywhere; }
 .context-source { padding: 9px 0; border-top: 1px solid var(--line); }
 .context-source strong { display: block; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
