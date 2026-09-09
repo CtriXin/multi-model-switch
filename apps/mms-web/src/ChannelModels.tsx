@@ -54,18 +54,29 @@ type Change = {
   after?: string;
   channels?: string[];
 };
+type RefreshField = {
+  field: "vision" | "context" | "effort";
+  value: boolean | number | string;
+  before: string;
+  after: string;
+  source: string;
+  /** The current value is the user's own setting, so replacing it is not a
+   *  correction and must not happen without them saying so. */
+  userSet: boolean;
+};
 type Refresh = {
-  mode: string;
-  visions: Record<string, boolean>;
-  contextWindows: Record<string, number>;
-  efforts: Record<string, string>;
-  proposals: { model: string; fields: { field: string }[] }[];
-  skipped: { model: string; reason: string }[];
-  matched: number;
   modelCount: number;
-  unmatched: string[];
-  warnings: string[];
-  sources: { source: string; checkedAt: string; note: string }[];
+  proposals: { model: string; fields: RefreshField[] }[];
+  skipped: { model: string; reason: string }[];
+  sourceLabels: Record<string, string>;
+  reports: {
+    source: string;
+    label: string;
+    ok: boolean;
+    matched: number;
+    unmatched: number;
+    warnings: string[];
+  }[];
 };
 type Preview = {
   previewId: string;
@@ -75,19 +86,22 @@ type Preview = {
   writeSummary: string;
 };
 
-const refreshSources: [string, string, string][] = [
-  ["known", "用本地已知快照刷新", "随 MMS 分发的已批准事实与本地标定快照"],
-  [
-    "openrouter",
-    "从 OpenRouter catalog 快速匹配",
-    "现在联网读取 OpenRouter 的模型表。它是通道目录参考，不是厂商官方口径",
-  ],
-  [
-    "official",
-    "应用 MMF 官方覆盖",
-    "仓库维护的 provider-profiles，更新 MMS 就会带来更新的值",
-  ],
-];
+const fieldLabels: Record<string, string> = {
+  vision: "识图",
+  context: "上下文",
+  effort: "默认 effort",
+};
+
+/** A row is proposed by default unless taking it would overwrite the user's
+ *  own setting, or the only source saying so is the provider catalogue. */
+function proposedByDefault(field: RefreshField) {
+  return !field.userSet && field.source !== "catalog";
+}
+
+function fieldKey(model: string, field: RefreshField) {
+  return `${model}:${field.field}`;
+}
+
 
 const capabilityOriginLabels: Record<string, string> = {
   manual_override: "本机覆盖",
@@ -139,6 +153,8 @@ export function ChannelModels({
   const [busy, setBusy] = useState("load");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [refresh, setRefresh] = useState<Refresh>();
+  const [refreshPicks, setRefreshPicks] = useState<Record<string, boolean>>({});
   const [preview, setPreview] = useState<Preview>();
   const [phrase, setPhrase] = useState("");
   const [leave, setLeave] = useState<string | null>(null);
@@ -269,42 +285,61 @@ export function ChannelModels({
       setBusy("");
     }
   }
-  async function refreshCapabilities(mode: string) {
-    setBusy(`refresh:${mode}`);
+  async function checkCapabilities(sources?: string[]) {
+    setBusy(sources ? "refresh:catalog" : "refresh");
     setError("");
     setNotice("");
     try {
       const result = await request<Refresh>("/model-settings/refresh", {
         ...draft(),
-        mode,
+        ...(sources ? { sources } : {}),
       });
-      // The worker only returns values that differ from what is saved, so
-      // merging cannot leave a pending edit equal to the stored value.
-      setVisions((old) => ({ ...old, ...result.visions }));
-      setContextWindows((old) => ({ ...old, ...result.contextWindows }));
-      setEfforts((old) => ({ ...old, ...result.efforts }));
-      const label =
-        refreshSources.find(([key]) => key === mode)?.[1] || "能力快照";
-      const edits = result.proposals.reduce(
-        (total, item) => total + item.fields.length,
-        0,
-      );
-      const parts = [
-        edits
-          ? `${label}：为 ${result.proposals.length} 个模型填入 ${edits} 处改动，尚未保存。`
-          : `${label}：${result.matched} 个模型已匹配，没有需要改的地方。`,
-      ];
-      if (result.unmatched.length)
-        parts.push(`${result.unmatched.length} 个模型在这份快照里没有记录。`);
-      if (result.skipped.length)
-        parts.push(result.skipped[0].reason);
-      if (result.warnings.length) parts.push(result.warnings[0]);
-      setNotice(parts.join(" "));
+      setRefresh(result);
+      const picks: Record<string, boolean> = {};
+      for (const item of result.proposals)
+        for (const field of item.fields) {
+          const key = fieldKey(item.model, field);
+          const previous = refresh?.proposals.find(row => row.model === item.model)?.fields.find(row => row.field === field.field);
+          const unchanged = sources && previous?.value === field.value && previous?.source === field.source && previous?.before === field.before;
+          picks[key] = unchanged && key in refreshPicks ? refreshPicks[key] : proposedByDefault(field);
+        }
+      setRefreshPicks(picks);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy("");
     }
+  }
+  function applyChecked() {
+    if (!refresh) return;
+    const nextVisions: Record<string, boolean> = {};
+    const nextContexts: Record<string, number> = {};
+    const nextEfforts: Record<string, string> = {};
+    for (const item of refresh.proposals)
+      for (const field of item.fields) {
+        if (!refreshPicks[fieldKey(item.model, field)]) continue;
+        if (field.field === "vision")
+          nextVisions[item.model] = field.value as boolean;
+        if (field.field === "context")
+          nextContexts[item.model] = field.value as number;
+        if (field.field === "effort")
+          nextEfforts[item.model] = field.value as string;
+      }
+    const count =
+      Object.keys(nextVisions).length +
+      Object.keys(nextContexts).length +
+      Object.keys(nextEfforts).length;
+    // The worker only reports values that differ from what is saved, so
+    // merging cannot leave a pending edit equal to the stored value.
+    setVisions((old) => ({ ...old, ...nextVisions }));
+    setContextWindows((old) => ({ ...old, ...nextContexts }));
+    setEfforts((old) => ({ ...old, ...nextEfforts }));
+    setRefresh(undefined);
+    setNotice(
+      count
+        ? `已填入 ${count} 处改动，还没有保存。检查后点“检查并保存”。`
+        : "没有选中任何一项，配置没有改变。",
+    );
   }
   async function review() {
     setBusy("preview");
@@ -540,19 +575,18 @@ export function ChannelModels({
             </span>
           </div>
           <div className="channel-capability-refresh">
-            <span className="muted">按已知能力批量填入</span>
-            {refreshSources.map(([mode, label, note]) => (
-              <button
-                key={mode}
-                type="button"
-                className="capability-refresh"
-                disabled={!!busy}
-                title={note}
-                onClick={() => void refreshCapabilities(mode)}
-              >
-                {busy === `refresh:${mode}` ? "正在读取…" : label}
-              </button>
-            ))}
+            <button
+              type="button"
+              className="capability-refresh"
+              disabled={!!busy}
+              title="对比 MMF 官方数据和本地已知快照，列出与当前配置不一致的地方"
+              onClick={() => void checkCapabilities()}
+            >
+              {busy === "refresh" ? "正在对比…" : "检查最新能力"}
+            </button>
+            <span className="muted">
+              先看差异再决定填哪些，不会直接改配置
+            </span>
           </div>
           <div className="channel-model-table">
             <div className="channel-model-table-head">
@@ -773,6 +807,105 @@ export function ChannelModels({
             </button>
           </footer>
         </>
+      )}
+      {refresh && (
+        <Dialog title="最新能力对比" size="wide" dismissible={!busy} close={() => { if (!busy) setRefresh(undefined); }}>
+          <div className="capability-review">
+            {refresh.proposals.length === 0 ? (
+              <p className="muted">
+                这条通道的 {refresh.modelCount} 个模型和已知数据一致，没有需要改的地方。
+              </p>
+            ) : (
+              <>
+                <p className="muted">
+                  勾选要填入的项。填入后仍需检查并保存才会生效。
+                  <strong>你自己设过的值默认不勾</strong>，
+                  只有 OpenRouter 说的也默认不勾。
+                </p>
+                <div className="capability-review-rows">
+                  {refresh.proposals.map((item) =>
+                    item.fields.map((field) => {
+                      const key = fieldKey(item.model, field);
+                      return (
+                        <label className="capability-review-row" key={key}>
+                          <input
+                            type="checkbox"
+                            checked={!!refreshPicks[key]}
+                            onChange={(e) =>
+                              setRefreshPicks((old) => ({
+                                ...old,
+                                [key]: e.target.checked,
+                              }))
+                            }
+                          />
+                          <span className="capability-review-model">
+                            <strong>{item.model}</strong>
+                            <small>{fieldLabels[field.field]}</small>
+                          </span>
+                          <span className="capability-review-change">
+                            <span className="muted">{field.before}</span>
+                            <span aria-hidden="true">→</span>
+                            <span>{field.after}</span>
+                          </span>
+                          <span className="capability-review-source">
+                            <span className={`source-chip source-${field.source}`}>
+                              {refresh.sourceLabels[field.source] || field.source}
+                            </span>
+                            {field.userSet && (
+                              <span className="source-chip source-user">
+                                会覆盖你设置的值
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      );
+                    }),
+                  )}
+                </div>
+              </>
+            )}
+            {refresh.skipped.length > 0 && (
+              <p className="muted">{refresh.skipped[0].reason}</p>
+            )}
+            <ul className="capability-review-reports">
+              {refresh.reports.map((report) => (
+                <li key={report.source}>
+                  {report.label}：
+                  {report.ok
+                    ? `匹配 ${report.matched} 个，${report.unmatched} 个没有记录`
+                    : "读取失败"}
+                  {report.warnings[0] ? ` · ${report.warnings[0]}` : ""}
+                </li>
+              ))}
+            </ul>
+            <footer>
+              {!refresh.reports.some((r) => r.source === "catalog") && (
+                <button
+                  className="button"
+                  disabled={!!busy}
+                  title="联网读取 OpenRouter。它报的是它选中的上游的限额，不是厂商口径，所以查到的项默认不勾"
+                  onClick={() =>
+                    void checkCapabilities(["official", "approved", "catalog"])
+                  }
+                >
+                  {busy === "refresh:catalog" ? "正在读取…" : "也查 OpenRouter"}
+                </button>
+              )}
+              <button className="button" disabled={!!busy} onClick={() => setRefresh(undefined)}>
+                取消
+              </button>
+              <button
+                className="button primary"
+                disabled={
+                  !Object.values(refreshPicks).some(Boolean) || !!busy
+                }
+                onClick={applyChecked}
+              >
+                填入选中项
+              </button>
+            </footer>
+          </div>
+        </Dialog>
       )}
       {preview && (
         <Dialog
