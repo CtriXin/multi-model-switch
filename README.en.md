@@ -324,53 +324,35 @@ MMS can expose capabilities per session without writing global hooks/config.
 | Web automation bundle | bundled in `~/.mms/vendor` | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
 | `Caveman` | bundled in `~/.mms/vendor` | compact communication mode; only active when enabled by preference or launch confirmation |
 | `NSR` | built-in channel payload, default hook injection | session-local Stop hook for Claude/Codex; installer also adds `/nsr` commands; `/nsr` enables the loop |
-| `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
-| `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
+| `ECC` | MMS-managed pack, no longer installed by the installer | Claude engineering workflow / rules / quality hooks |
+| `OMC` | MMS-managed pack, no longer installed by the installer | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `Figma` / `auto-github-contributor` | detected when installed | optional MCP/contribution surfaces; Pilot and Figma MCP stay disabled unless explicitly enabled with `MMS_ENABLE_MCP_PILOT=1` or `MMS_ENABLE_MCP_FIGMA=1` |
 
 These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Figma and Pilot MCP servers are default-off even when detected; opt in with `MMS_ENABLE_MCP_FIGMA=1`, `MMS_ENABLE_FIGMA_MCP=1`, `MMS_ENABLE_MCP_PILOT=1`, or `MMS_ENABLE_PILOT_MCP=1`. Passive skills (`CodeGraph`, `token-saver`, `TOON`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions. `NSR` is copied with the selected install channel into `~/.mms/hooks/`; MMS injects its lightweight Stop-hook wrapper by default, and `/nsr` opts the current repo into the rewritten loop. It can be disabled from the launch confirmation screen or with `nsr_mode = "disable"` in `preferences.toml`. Heavier active behavior packs (`ECC`, `OMC`) still require explicit selection. OpenCode receives session-local Caveman / CodeGraph / token-saver / TOON / web-access / weber skills plus the manual `/nsr` command, and RTK is added through the session-local plugin directory when `rtk` exists.
 
-## Optional Installer Packs
+## Installer Scope
 
-Install global optional packs only when you want them available outside MMS-managed sessions:
-
-```bash
-bash install.sh --install-rtk
-bash install.sh --install-brainkeeper-context
-bash install.sh --install-map
-bash install.sh --install-codegraph
-bash install.sh --install-token-saver
-bash install.sh --install-toon
-bash install.sh --install-ops-env-safe
-```
-
-Add `--dry-run` to preview the install plan without writing files, for example `bash install.sh --install-codegraph --dry-run`.
-
-`--install-brainkeeper-context` installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. The installed runtime lives at `~/.local/share/brainkeeper`; when a sibling BrainKeeper repo exists, the installer reuses its `install.sh`, but the active install still syncs into that directory. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
-
-`--install-map` installs the project-structure Map and enables the Claude SessionStart auto-index hook. It helps Claude orient in a repo faster by refreshing a lightweight directory/file map. This is a global Claude hook; use `--map-ref` to pin the version.
-
-`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. MMS also injects a passive CodeGraph-first skill so agents prefer graph discovery before broad file reads. MMS no longer adds a default SessionStart auto-register hook for CodeGraph; run indexing explicitly when a repo needs it. Use `--codegraph-package` to override the npm package spec. To initialize everything immediately, ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
-
-> `--install-read-once` **REMOVED 2026-06-12** — the optional Read token-saver pack (PreToolUse Read hook + PostCompact compact hook) was retired because a stale hook binary could leak control characters into the API payload and trigger 400 `invalid character` errors. See `installed-skills/AGENTS.md` → Removed Packs for the full audit trail. If you need Read token saving, use the `--install-token-saver` pack plus RTK's read interception.
-
-`--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. `token-gain` / `mms-gain` / `token-saver gain` show estimated saved chars and gain percentage for stored refs, and a normal shell falls back to the most recent non-empty MMS session store when the current repo store is empty. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
-
-`--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for structured JSON/status/handoff compression in export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default. Do not use TOON for prose, code, raw logs, secrets, or exact CLI/API JSON.
-
-`--install-ops-env-safe` is an advanced-only path hint pack: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so export-only or special isolated sessions can inspect known host paths. Normal MMS sessions already receive real-HOME path hints and session host context, so most users do not need it. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
-
-Legacy `--install-mindkeeper-context` and `--mindkeeper-ref` still work as deprecated aliases for BrainKeeper installs.
-
-Install MMS-managed Claude agent packs without touching global Claude config:
+Open a terminal on a new machine and paste one line:
 
 ```bash
-bash install.sh --install-ecc
-bash install.sh --install-omc
-bash install.sh --install-agent-packs
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
 ```
 
-Most day-to-day MMS sessions do not need global hook installation; the launcher can inject bundled or MMS-managed session assets directly.
+No question in the install changes what gets installed: no UI language prompt, no optional packs. It defaults to the stable channel and adds `~/.local/bin` to your shell PATH. The one question comes at the very end and only offers to open MMS Web. Accept it and the browser opens, the server keeps running in the background, and the installer exits. Add a provider and an API key on that page and you can start a conversation.
+
+Use `--launch-web` to open it without asking, `--no-launch-web` to skip it, and `--no-shell-rc` to leave your shell config alone.
+
+`pi` is mandatory because the pilot web app depends on it. It is installed globally from a pinned npm spec, and its runtime cache under `~/.mms/.ai/cache/pi-npx` is warmed during the install so the first pilot launch does not wait on a download. Missing `claude` / `codex` / `opencode` are installed automatically; already-installed CLIs are left untouched. Pass `--install-cli claude,codex` to control that list explicitly, and add `--dry-run` to preview the plan without writing files.
+
+The optional global packs are gone. RTK, BrainKeeper, Map, CodeGraph, global token-saver, global TOON, ops-env-safe, ECC, and OMC no longer have installer paths. Their `--install-*` and `--*-ref` flags print a notice and are ignored, so older scripts keep working.
+
+Machines upgrading from an older version are unbound from those packs during the install. It removes the MMS-written RTK hook, the BrainKeeper commands and MCP entry, Map/CodeGraph auto-index registrations, the global token-saver/TOON skill links and `~/.local/bin` wrappers, the ops-env-safe skill and path map, and the ECC/OMC packs under `~/.mms/agent-packs`. Only entries carrying an MMS marker or pointing into an MMS directory are touched, `~/.claude/settings.json` is backed up before any write, and no third-party binary (rtk, codegraph, brainkeeper, node, jq) is uninstalled. To run the cleanup on its own:
+
+```bash
+bash install.sh --cleanup-retired-packs
+```
+
+`token-saver`, `TOON`, `web-access`, `weber`, `agent-browser`, `Caveman`, and the NSR payload still ship as bundled session assets and remain available in MMS-launched sessions without any global installation.
 
 ## Cleanup And Reset
 
