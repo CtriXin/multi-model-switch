@@ -172,72 +172,6 @@ ensure_install_ref_resolved() {
     fi
 }
 
-resolve_builtin_handover_root() {
-    local candidate
-    for candidate in \
-        "$MMS_HOME/vendor/handover"; do
-        if [ -f "$candidate/scripts/install_global_commands.py" ]; then
-            (cd "$candidate" 2>/dev/null && pwd -P)
-            return 0
-        fi
-    done
-    return 1
-}
-
-optional_handover_continuity_installed() {
-    local skill_dir
-    local command_dir
-    local handover_root
-    local expected_handover
-    local expected_offduty
-    local expected_onduty
-
-    handover_root="$(resolve_builtin_handover_root || true)"
-    [ -n "$handover_root" ] || return 1
-    expected_handover="$handover_root"
-    expected_offduty="$handover_root/aliases/offduty"
-    expected_onduty="$handover_root/aliases/onduty"
-
-    for skill_dir in \
-        "$REAL_HOME/.agents/skills" \
-        "$REAL_HOME/.claude/skills" \
-        "$REAL_HOME/.codex/skills" \
-        "$REAL_HOME/.config/opencode/skills" \
-        "$REAL_HOME/.opencode/skills"; do
-        [ -L "$skill_dir/handover" ] || return 1
-        [ -L "$skill_dir/offduty" ] || return 1
-        [ -L "$skill_dir/onduty" ] || return 1
-        [ "$(readlink "$skill_dir/handover")" = "$expected_handover" ] || return 1
-        [ "$(readlink "$skill_dir/offduty")" = "$expected_offduty" ] || return 1
-        [ "$(readlink "$skill_dir/onduty")" = "$expected_onduty" ] || return 1
-        [ -x "$skill_dir/offduty/offduty" ] || return 1
-        [ -x "$skill_dir/onduty/onduty" ] || return 1
-    done
-
-    for command_dir in \
-        "$REAL_HOME/.agents/commands" \
-        "$REAL_HOME/.claude/commands" \
-        "$REAL_HOME/.codex/commands" \
-        "$REAL_HOME/.config/opencode/commands" \
-        "$REAL_HOME/.opencode/commands"; do
-        [ ! -e "$command_dir/offduty.md" ] && [ ! -L "$command_dir/offduty.md" ] || return 1
-        [ ! -e "$command_dir/onduty.md" ] && [ ! -L "$command_dir/onduty.md" ] || return 1
-    done
-}
-
-optional_nsr_commands_installed() {
-    local command
-    for command in \
-        "$REAL_HOME/.agents/commands/nsr.md" \
-        "$REAL_HOME/.claude/commands/nsr.md" \
-        "$REAL_HOME/.codex/commands/nsr.md" \
-        "$REAL_HOME/.config/opencode/commands/nsr.md" \
-        "$REAL_HOME/.opencode/commands/nsr.md"; do
-        [ -f "$command" ] || return 1
-        grep -Fq "Managed by MMS builtin NSR" "$command" || return 1
-    done
-}
-
 bundled_session_asset_present() {
     local asset="$1"
     local assets_root="$MMS_HOME/assets/session-assets"
@@ -355,7 +289,6 @@ $(t "说明:" "Notes:")
   - $(t "MMS Web 在后台运行，安装进程随即退出；PATH 默认写入 shell 配置，--no-shell-rc 可关闭" "MMS Web runs in the background and the installer exits right after; PATH is written to your shell config by default and --no-shell-rc turns that off")
   - $(t "pi 是必装项，pilot web 端依赖它；缺失的 claude/codex/opencode 会自动补装，已安装的不会被改动" "pi is mandatory because the pilot web app depends on it; missing claude/codex/opencode are installed automatically while existing ones are left untouched")
   - $(t "内建能力（网页访问、浏览器自动化、省 token 工具、Caveman、NSR）随 MMS 一起安装，只在 MMS 启动的会话里生效" "Built-in tools (web access, browser automation, token savers, Caveman, NSR) ship with MMS and only apply inside sessions MMS starts")
-  - $(t "内置命令 offduty/onduty/nsr 会安装到 Claude、Codex、OpenCode，不注册自动 hook，不改全局配置" "The built-in offduty/onduty/nsr commands are installed for Claude, Codex and OpenCode without registering automatic hooks or changing global config")
   - $(t "--install-cli 可显式指定要补装的 CLI：claude/codex/opencode/pi（逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli explicitly selects which CLIs to install: claude/codex/opencode/pi (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "默认安装 Fira Code 与 JetBrains Mono 到用户字体目录，供 Web 字体选择使用；已装则跳过，--no-coding-fonts 可关闭" "Fira Code and JetBrains Mono are installed into the user font directory for the Web font picker; already-installed families are skipped, and --no-coding-fonts turns this off")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
@@ -1959,18 +1892,6 @@ run_install_check() {
     print_cli_install_status
 
     print_bundled_session_asset_status
-
-    if optional_handover_continuity_installed; then
-        echo "✓ $(t "offduty/onduty skill 已安装（handover continuity）" "offduty/onduty skills installed (handover continuity)")"
-    else
-        echo "• $(t "offduty/onduty skill 未安装（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "offduty/onduty skills not installed (built-in auto-install; rerun MMS install or upgrade if missing)")"
-    fi
-
-    if optional_nsr_commands_installed; then
-        echo "✓ $(t "/nsr 命令已安装（NSR）" "/nsr commands installed (NSR)")"
-    else
-        echo "• $(t "/nsr 命令未安装或被自定义覆盖（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "/nsr commands missing or custom-overridden (built-in auto-install; rerun MMS install or upgrade if missing)")"
-    fi
 }
 
 
@@ -1988,7 +1909,6 @@ print_dry_run_plan() {
     if [ -n "$INSTALL_CLI_LIST" ]; then
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
     fi
-    echo "• $(t "会安装内置命令 offduty/onduty/nsr 到 Claude、Codex、OpenCode，不写全局 hooks 或 config" "would install the built-in offduty/onduty/nsr commands for Claude, Codex and OpenCode without writing global hooks or config")"
     echo "• $(t "会预热 pi 运行时 cache" "would warm the pi runtime cache"): $MMS_HOME/.ai/cache/pi-npx"
     if [ "$WRITE_SHELL_RC" -eq 1 ]; then
         echo "• $(t "会把 ~/.local/bin 写入 shell PATH 配置" "would add ~/.local/bin to your shell PATH config")"
@@ -1998,7 +1918,7 @@ print_dry_run_plan() {
         never) echo "• $(t "不会启动 MMS Web" "would not start MMS Web")" ;;
         *) echo "• $(t "装完会询问是否打开 MMS Web；同意则后台启动并打开浏览器" "would ask whether to open MMS Web and, if accepted, start it in the background and open the browser")" ;;
     esac
-    echo "• $(t "会清理旧版本装过的 RTK、BrainKeeper、Map、CodeGraph、全局 token-saver/TOON、ops-env-safe、ECC/OMC" "would clean up RTK, BrainKeeper, Map, CodeGraph, the global token-saver/TOON packs, ops-env-safe, and ECC/OMC left by older versions")"
+    echo "• $(t "会清理旧版本装过的可选包，以及写进各 agent 目录的 offduty/onduty/nsr" "would clean up the optional packs older versions installed, plus the offduty/onduty/nsr entries written into each agent home")"
     echo "  $(t "仅备份移走有 MMS 来源凭据的条目，同名自定义内容和全局配置保留" "Only verified MMS entries are archived; same-name custom content and global settings are preserved")"
     if [ "$INSTALL_CODING_FONTS" = "1" ]; then
         echo "• $(t "会把 Fira Code 与 JetBrains Mono 安装到 $(user_font_dir)（已装则跳过，--no-coding-fonts 关闭）" "would install Fira Code and JetBrains Mono into $(user_font_dir); already-installed families are skipped, --no-coding-fonts turns this off")"
@@ -2272,6 +2192,32 @@ remove_retired_skill_entry() {
     return 0
 }
 
+# Archive only the exact skill link written by the retired installer.
+# A custom target under MMS_HOME is not proof of ownership.
+remove_retired_mms_symlink() {
+    local target="$1"
+    local link_target=""
+    local expected="$MMS_HOME/vendor/handover"
+    case "${target##*/}" in
+        offduty|onduty) expected="$expected/aliases/${target##*/}" ;;
+        handover) ;;
+        *) return 0 ;;
+    esac
+
+    [ -L "$target" ] || return 0
+    link_target="$(readlink "$target" 2>/dev/null || true)"
+    case "$link_target" in
+        "$expected")
+            archive_retired_entry "$target"
+            _note_retired_removal "$target"
+            ;;
+        *)
+            echo "  • $(t "非 MMS 链接，保留不动" "Not an MMS link, left unchanged"): $target"
+            ;;
+    esac
+    return 0
+}
+
 # Delete a directory MMS created inside its own install root.
 remove_retired_mms_dir() {
     local target="$1"
@@ -2296,7 +2242,8 @@ cleanup_retired_optional_packs() {
     local hook_dir="$REAL_HOME/.claude/hooks"
     local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
     local wrapper=""
-    local hook_file=""
+    local agent_dir=""
+    local skill=""
 
     RETIRED_PACK_CLEANUP_COUNT=0
     mkdir -p "$MMS_HOME"
@@ -2338,6 +2285,22 @@ cleanup_retired_optional_packs() {
         rmdir "$MMS_HOME/agent-packs" 2>/dev/null || true
     fi
 
+    # offduty / onduty / handover and the /nsr command used to be written into
+    # every agent host's global directory. They are no longer installed, so an
+    # install also takes back what MMS itself wrote there.
+    for agent_dir in \
+        "$REAL_HOME/.agents" \
+        "$REAL_HOME/.claude" \
+        "$REAL_HOME/.codex" \
+        "$REAL_HOME/.config/opencode" \
+        "$REAL_HOME/.opencode"; do
+        for skill in handover offduty onduty; do
+            remove_retired_mms_symlink "$agent_dir/skills/$skill"
+        done
+        remove_retired_marked_file "$agent_dir/commands/nsr.md" \
+            "Managed by MMS builtin NSR"
+    done
+
     if [ -n "$RETIRED_PACK_BACKUP" ]; then
         echo "  $(t "原文件已备份到" "Original entries backed up to"): $RETIRED_PACK_BACKUP"
     fi
@@ -2348,96 +2311,6 @@ cleanup_retired_optional_packs() {
     else
         echo "✓ $(t "已清理旧可选包条目数" "Retired optional pack entries cleaned"): $RETIRED_PACK_CLEANUP_COUNT"
         echo "  $(t "第三方二进制（rtk / codegraph / brainkeeper / node / jq）未被卸载。" "Third-party binaries (rtk / codegraph / brainkeeper / node / jq) were not uninstalled.")"
-    fi
-
-    return 0
-}
-
-install_builtin_handover_continuity() {
-    local handover_root=""
-    local installer_script=""
-
-    echo ""
-    echo "$(t "正在安装内置命令..." "Installing built-in commands...")"
-
-    # Resolve handover root only from the installed MMS vendor pack. If the
-    # packaged vendor copy is missing, skip instead of pointing global skills at
-    # a developer checkout or temporary installer source directory.
-    handover_root="$(resolve_builtin_handover_root || true)"
-
-    if [ -z "$handover_root" ]; then
-        HANDOVER_CONTINUITY_INSTALL_STATUS="missing_source"
-        echo "⚠ $(t "未找到 vendor/handover，跳过 offduty/onduty skill 安装；请确认 MMS vendor 目录完整" "vendor/handover not found, skipping offduty/onduty skill install; verify the MMS vendor directory is complete")"
-        return 0
-    fi
-
-    installer_script="$handover_root/scripts/install_global_commands.py"
-
-    if HOME="$REAL_HOME" "$(_python_bin)" "$installer_script"; then
-        HANDOVER_CONTINUITY_INSTALL_STATUS="installed"
-        echo "✓ $(t "offduty/onduty skill 已安装（handover continuity）" "offduty/onduty skills installed (handover continuity)")"
-    else
-        HANDOVER_CONTINUITY_INSTALL_STATUS="partial"
-        echo "⚠ $(t "offduty/onduty skill 安装未完全成功，可重试或稍后手动安装" "offduty/onduty skill install did not fully succeed; retry or install manually later")"
-    fi
-
-    return 0
-}
-
-write_builtin_nsr_command_file() {
-    local target="$1"
-    local mode="$2"
-    local marker="Managed by MMS builtin NSR"
-    local tmp_file=""
-
-    mkdir -p "$(dirname "$target")"
-    if [ -f "$target" ] \
-        && ! grep -Fq "$marker" "$target" 2>/dev/null \
-        && ! { grep -Fq "# /nsr" "$target" 2>/dev/null && grep -Fq "Non-Stop-Run" "$target" 2>/dev/null && grep -Fq "nsrctl.py" "$target" 2>/dev/null; }; then
-        echo "⚠ $(t "检测到已有自定义 /nsr，跳过覆盖" "Detected custom /nsr command, skipping overwrite"): $target"
-        return 1
-    fi
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-nsr-command.XXXXXX")"
-    cat > "$tmp_file" <<EOF
-<!-- $marker -->
-# /nsr
-
-Use the current task as a bounded manual work loop when explicitly requested.
-
-1. Keep the user objective, success criteria, current evidence and unresolved work in the original task.
-2. Implement one useful slice, then run relevant checks and inspect the actual result.
-3. Continue while useful work remains within the authorized scope. Stop on completion, repeated no-progress, a real blocker, user pause or a decision requiring the owner.
-4. Report what ran, what remains unknown and the next concrete action.
-
-Automatic Stop/compact hooks are retired. This command does not enable repo markers,
-register hooks, send another prompt, or delete existing NSR state. Explicit local
-nsrctl and diagnostic tools remain available when requested; they are not task gates.
-EOF
-
-    mv "$tmp_file" "$target"
-    chmod 644 "$target"
-    return 0
-}
-
-install_builtin_nsr_commands() {
-    local failures=0
-
-    echo ""
-    echo "$(t "正在安装内置命令（续）..." "Installing built-in commands (continued)...")"
-
-    write_builtin_nsr_command_file "$REAL_HOME/.agents/commands/nsr.md" "hook" || failures=$((failures + 1))
-    write_builtin_nsr_command_file "$REAL_HOME/.claude/commands/nsr.md" "hook" || failures=$((failures + 1))
-    write_builtin_nsr_command_file "$REAL_HOME/.codex/commands/nsr.md" "hook" || failures=$((failures + 1))
-    write_builtin_nsr_command_file "$REAL_HOME/.config/opencode/commands/nsr.md" "opencode" || failures=$((failures + 1))
-    write_builtin_nsr_command_file "$REAL_HOME/.opencode/commands/nsr.md" "opencode" || failures=$((failures + 1))
-
-    if [ "$failures" -eq 0 ]; then
-        NSR_COMMAND_INSTALL_STATUS="installed"
-        echo "✓ $(t "/nsr 命令已安装" "/nsr commands installed")"
-    else
-        NSR_COMMAND_INSTALL_STATUS="partial"
-        echo "⚠ $(t "/nsr 命令部分安装；已有自定义命令已保留" "/nsr commands partially installed; custom commands were preserved")"
     fi
 
     return 0
@@ -2669,14 +2542,6 @@ write_language_config
 # ── 清理已退休的可选包（从旧版本升级的机器）──
 cleanup_retired_optional_packs || true
 
-# ── 内置安装：handover continuity (offduty/onduty) ──
-HANDOVER_CONTINUITY_INSTALL_STATUS="not_run"
-install_builtin_handover_continuity
-
-# ── 内置安装：NSR slash commands ──
-NSR_COMMAND_INSTALL_STATUS="not_run"
-install_builtin_nsr_commands
-
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/mms-web" ] && chmod +x "$MMS_HOME/mms-web"
 [ -f "$MMS_HOME/MMS Pilot.command" ] && chmod +x "$MMS_HOME/MMS Pilot.command"
@@ -2778,10 +2643,6 @@ if [ -x "$BIN_DIR/mms" ]; then
         else
             echo "  $(t "当前 shell 还未加载 ~/.local/bin；可先运行绝对路径，或重开 Ghostty/iTerm/Terminal tab 后输入 mms。" "Current shell has not loaded ~/.local/bin yet; run the absolute path now, or reopen your Ghostty/iTerm/Terminal tab and type mms.")"
         fi
-    fi
-    echo ""
-    if [ "$HANDOVER_CONTINUITY_INSTALL_STATUS" != "installed" ] || [ "$NSR_COMMAND_INSTALL_STATUS" != "installed" ]; then
-        echo "  $(t "部分内建命令（offduty/onduty、/nsr）未全部安装；已有自定义命令已保留，重跑安装器可修复。" "Some built-in commands (offduty/onduty, /nsr) were not fully installed; custom commands were preserved and rerunning the installer repairs them.")"
     fi
     echo ""
 

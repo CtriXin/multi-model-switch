@@ -83,14 +83,18 @@ class FileService:
     def reference_local(self, payload: dict) -> dict:
         paths = payload.get("paths")
         if not isinstance(paths, list) or not paths or len(paths) > 8:
-            raise WebError("INVALID_FILES", "请选择 1 到 8 个本地文件。", 400)
+            raise WebError("INVALID_FILES", "请选择 1 到 8 个本地文件或文件夹。", 400)
         # Resolve every choice before creating any metadata. Never copy file contents.
         selected = []
+        directories = []
         for value in paths:
             if not isinstance(value, str) or not Path(value).expanduser().is_absolute():
                 raise WebError("INVALID_FILE_PATH", "请使用文件的完整本地路径，例如 /Users/…/data.json。", 400)
             try:
                 path = Path(value).expanduser().resolve(strict=True)
+                if path.is_dir():
+                    directories.append(str(path))
+                    continue
                 if not path.is_file():
                     raise OSError()
                 with path.open("rb") as stream:
@@ -108,7 +112,7 @@ class FileService:
             folder.mkdir(mode=0o700)
             private_json(folder / "meta.json", item)
             items.append(item)
-        return {"attachments": items}
+        return {"attachments": items, **({"directories": list(dict.fromkeys(directories))} if directories else {})}
 
     def choose_local(self, payload: dict) -> dict:
         if sys.platform != "darwin":

@@ -89,3 +89,25 @@ def test_dropped_file_cannot_follow_project_symlinks(tmp_path, part):
     with pytest.raises(WebError, match='不能保存附件'):
         files.import_to_workspace({'workspaceId': 'p', 'name': 'test.txt', 'data': 'aGk='})
     assert not list(outside.iterdir())
+
+
+def test_directory_reference_is_a_path_without_copy_or_workspace_change(tmp_path):
+    directory = tmp_path / 'project with spaces'; directory.mkdir()
+    nested = directory / 'nested'; nested.mkdir()
+    (nested / 'private.txt').write_text('not copied')
+    path = tmp_path / 'file.txt'; path.write_text('file')
+    files = FileService(None, tmp_path / 'state')
+    result = files.reference_local({'paths': [str(directory) + '/', str(path), str(directory)]})
+    assert result['directories'] == [str(directory)]
+    assert [a['localPath'] for a in result['attachments']] == [str(path)]
+    assert not list(files.root.rglob('private.txt'))
+    assert not (directory / '.pilot').exists()
+    assert (nested / 'private.txt').read_text() == 'not copied'
+    assert files.prepare([result['attachments'][0]['id']], '', [])[1][0]['localPath'] == str(path)
+
+
+def test_directory_and_missing_file_are_validated_before_metadata(tmp_path):
+    files = FileService(None, tmp_path / 'state')
+    with pytest.raises(WebError):
+        files.reference_local({'paths': [str(tmp_path), str(tmp_path / 'missing')]})
+    assert not files.root.exists()

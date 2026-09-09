@@ -54,6 +54,7 @@ _PY_COMPILE_TARGETS = [
 ]
 
 _PYTEST_TARGETS = [
+    "tests/test_mms_web_starter_skills.py",
     "tests/test_mms_web_local_files.py",
     "tests/test_mms_web_workspace_search.py",
     "tests/test_mms_web_model_settings.py",
@@ -82,6 +83,7 @@ _PYTEST_TARGETS = [
 ]
 
 _QUICK_PYTEST_TARGETS = [
+    "tests/test_mms_web_starter_skills.py",
     "tests/test_claude_hardening_regressions.py::test_build_claude_session_settings_respects_session_nsr_toggle",
     "tests/test_claude_hardening_regressions.py::test_build_codex_session_hooks_respects_session_nsr_toggle",
     "tests/test_claude_hardening_regressions.py::test_claude_gateway_env_does_not_restore_project_scoped_resume_pointer_on_new_launch",
@@ -138,6 +140,11 @@ _SCENARIO_MATRIX = [
         "id": "retired-optional-pack-cleanup",
         "state": "upgrade from a version that installed RTK/BrainKeeper/Map/CodeGraph/token-saver/TOON/ops-env-safe/ECC/OMC",
         "coverage": "install unbinds every MMS-written leftover, preserves user-owned lookalikes, backs up Claude settings, and uninstalls no third-party binary",
+    },
+    {
+        "id": "retired-builtin-commands",
+        "state": "a machine where an older version wrote offduty/onduty/handover and /nsr into all five agent homes",
+        "coverage": "a new install writes none of them and takes back the 20 entries MMS wrote, while same-named user files and foreign symlinks survive",
     },
     {
         "id": "one-question-install",

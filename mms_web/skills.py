@@ -8,6 +8,7 @@ from pathlib import Path
 from .drivers.launch_bridge import pi_runtime
 from .errors import WebError
 from .runtime import real_home
+from .starter_skills import starter_skills
 
 
 def effective_paths(cwd, home):
@@ -78,6 +79,9 @@ class SkillCatalog:
                 skill.update({key: matches[0][key] for key in ("source", "sourceRoot", "overrides")})
             else:
                 skill.update(source="多个入口" if matches else "来源未确认", sourceRoot="", overrides=[])
+        # Keep custom installed names first for existing slash commands. Built-in
+        # entries have stable, separate IDs and are only injected when selected.
+        result["skills"].extend(starter_skills())
         return result
 
     def prepare(self, ids, workspace_id):

@@ -1,60 +1,25 @@
 ---
 name: offduty
-description: Codex `$offduty` / handoff closeout entry. 下班、换机、fresh session 前，把当前会话自动折叠到 repo-local continuity；不要要求用户填写 task-id/scope/type。
+description: 暂时离开或准备换会话时，保存当前任务的进展和下一步；不会关闭会话或进程。
+disable-model-invocation: true
 ---
 
-# Offduty Alias
+# 保存进度
 
-Use this alias when the user types `$offduty`, `/offduty`, or asks to 下班交接 / 换机续接 / fresh session checkpoint.
+用户明确选择本能力或要求保存进度时使用。用户要求评估或修改这个 skill 时，不执行交接。
 
-## Required Behavior
+## 当前任务优先
 
-1. Do not ask the user for task-id, scope, lane, or type.
-2. Infer actual touched roots before writing anything:
-   - Use this session's tool workdirs, edited file paths, `git -C` / `cd` commands, and explicit repo paths from the chat.
-   - For each candidate, run `git -C <path> rev-parse --show-toplevel` and use the git root when available.
-   - If the session started in repo A but the work happened in repo B or C, write only to B/C.
-   - If multiple repos/roots were touched, run one offduty per root.
-   - Fall back to cwd only when no actual root can be inferred, and say it was a fallback.
-3. Choose an actual work cwd for each root; usually the repo root or the touched subdirectory.
-4. Infer the concrete task line from current chat, repo docs, git branch, git status, git diff, and recent artifacts for each root.
-5. Preserve useful failed attempts, reversals, validation, risks, exact next action, session id, and model name.
-6. Resolve the helper from the installed skill alias, not from a
-   machine-specific absolute path:
-   - Preferred: use `<directory-containing-this-SKILL.md>/offduty`.
-   - If the skill directory is not visible, find an installed alias wrapper
-     under `${MMS_REAL_HOME:-}`, `${REAL_HOME:-}`, `${ORIGINAL_HOME:-}`, or
-     `$HOME`: `.agents/skills/offduty/offduty`,
-     `.claude/skills/offduty/offduty`, `.codex/skills/offduty/offduty`,
-     `.config/opencode/skills/offduty/offduty`, or
-     `.opencode/skills/offduty/offduty`.
-   - Never run a developer-machine path such as `/Users/xin/...`.
-7. From each actual repo root, run:
+- 用户当前指令与项目规则优先。若已有 Stride 或其他任务记录，沿用同一个任务、实际 workspace、证据与下一步；本 skill 不要求安装 Stride，不另建任务或第二套进度。
+- 没有任务系统时，使用实际工作目录内的 `.agent.local/continuity/`。先读已有记录；只更新自己的任务文件。新记录用 `checkpoints/<时间>-<会话标识>.md` 唯一文件名，内容注明实际路径。旧 active/pickup/lifeboat 只用于找到原任务，不迁移或删除历史。
+- 从对话、工具 workdir、改动文件推断实际工作目录。只对存在的 Git repo 读 status/diff；普通文件夹同样可用。标识或模型信息不知道就注明未知，不编造。
+- 只保存完成事实、验证结果、未完成事项、关键决定、风险、证据路径和下一步。不要复制全部聊天、API Key、环境变量或凭据。
+- 本地进度文件不自动加入 Git，不替用户提交、合并、发布或同步到云端。
+- 不安装全局命令，不启用 hooks，不自动调用 BrainKeeper/BKC、Hive、Moebius、Claude 或其他 Agent。旧 scripts 仅兼容入口，本流程无需调用。
+- 保存的是任务说明与证据，不是进程快照。不得停止会话、结束后台任务、重启 Pilot，或承诺换机后原进程继续运行。
 
-```bash
-"<offduty-skill-dir>/offduty" --root "<actual-repo-root>" --cwd "<actual-work-cwd>"
-```
+## 执行
 
-   This writes `.agent.local/continuity/` plus a lightweight
-   `.agent.local/continuity/lifeboat/*.md/json` capsule and best-effort `bkc`
-   backup when the local session can be resolved. Do not call native resume here.
-
-8. If the current truth, next action, and visible model name are already clear, pass only concise overrides:
-
-```bash
-"<offduty-skill-dir>/offduty" --root "<actual-repo-root>" --cwd "<actual-work-cwd>" --model "<model-name>" --summary "<current truth>" --next-action "<next>"
-```
-
-9. Reply briefly with the written paths per root, plus cwd/session_id/session_hash/model, and tell the user to use `$onduty` or `/onduty` in the target repo fresh session.
-
-## Rules
-
-- Default output is `.agent.local/continuity/`; legacy `.ai/plan` requires `--layout legacy-ai-plan`.
-- For Codex, `$offduty` is the preferred explicit trigger.
-- For Claude/OpenCode, `/offduty` may route through the skill alias; legacy command symlinks are cleaned to avoid duplicate entries.
-- Root ownership follows actual touched repo/root, not the session launch folder.
-- Task ids must stay short; use a concrete task id, not a long summary.
-- Side sessions should not take the active pointer unless the helper decides the task owns main scope.
-- Moebius treats this as a continuity slot; Pilot/Hive/Ant/Executor artifacts are refs, not the source of truth.
-- `bkc` failure is recorded but non-blocking unless `--bkc required` is passed.
-- Use `--bkc off` for deterministic tests; use `--no-lifeboat` only when another capsule is already written.
+1. 根据当前对话和实际文件，核实完成项、验证、未完成项以及最合适的下一步。不要求新手填写 task-id、scope 或模型。
+2. 把这些信息保存到原任务；没有任务记录时写唯一 checkpoint。保留遇到的实际失败及恢复方法，给出原文件引用。
+3. 回读确认保存成功，简短报告保存位置和下次如何继续。保存完成后结束本次回应，不关闭原会话、工具进程或 Pilot。

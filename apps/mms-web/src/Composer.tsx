@@ -22,6 +22,8 @@ import { request } from "./api";
 import type { Attachment, FileSelection } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
+import { droppedItems } from "./dropped-items";
+import { WorkspaceDialog } from "./LaunchOptions";
 
 export interface MessageExtras {
   skills: string[];
@@ -96,6 +98,7 @@ export function Composer({
   );
   const [skillError, setSkillError] = useState("");
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [folderDrops, setFolderDrops] = useState<string[]>([]);
   function toggleSkill(id: string) {
     setSelectedSkills((old) =>
       old.includes(id)
@@ -289,7 +292,7 @@ export function Composer({
     setError("");
     setFilePathHint("");
     try {
-      const result = await request<{ attachments: Attachment[] }>(
+      const result = await request<{ attachments: Attachment[]; directories?: string[] }>(
         paths ? "/files/reference-local" : "/files/choose-local",
         paths ? { paths } : {},
       );
@@ -299,7 +302,7 @@ export function Composer({
       if (attachments.filter(a => referencedInText(a)).length + fresh.length > 8)
         throw new Error("每条消息最多引用 8 个文件，请减少选择。");
       setAttachments((old) => [...old.filter(a => referencedInText(a)), ...fresh]);
-      insertPaths(result.attachments.flatMap(item => item.localPath ? [item.localPath] : []));
+      insertPaths([...result.attachments.flatMap(item => item.localPath ? [item.localPath] : []), ...(result.directories || [])]);
       for (const item of fresh.filter((item) =>
         item.mimeType.startsWith("image/"),
       )) {
@@ -430,6 +433,9 @@ export function Composer({
   }
   return (
     <>
+      {!!folderDrops.length && <WorkspaceDialog key={folderDrops.length}
+        initialQuery={folderDrops[0]} reference={async path => { await addLocalFiles([path]); }}
+        close={() => setFolderDrops(old => old.slice(1))} />}
       {skillsOpen && (
         <SkillPicker
           skills={skills}
@@ -437,6 +443,12 @@ export function Composer({
           toggle={toggleSkill}
           close={() => setSkillsOpen(false)}
           error={skillError}
+          example={(skill) => {
+            setSelectedSkills(old => [...new Set([...old, skill.id])]);
+            setText(old => appendGuidePrompt(old, skill.example || ""));
+            setSkillsOpen(false);
+            requestAnimationFrame(() => input.current?.focus());
+          }}
         />
       )}
       <form
@@ -447,7 +459,7 @@ export function Composer({
         }
         onSubmit={submit}
         onDragEnter={(e) => {
-          if (e.dataTransfer.types.includes("Files")) {
+          if (e.dataTransfer.types.some(type => type === "Files" || type === "text/uri-list")) {
             e.preventDefault();
             dragDepth.current++;
             setDragging(true);
@@ -458,7 +470,7 @@ export function Composer({
           if (--dragDepth.current <= 0) setDragging(false);
         }}
         onDragOver={(e) => {
-          if (e.dataTransfer.types.includes("Files")) {
+          if (e.dataTransfer.types.some(type => type === "Files" || type === "text/uri-list")) {
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
           }
@@ -472,13 +484,18 @@ export function Composer({
               e.dataTransfer.getData("text/plain"),
           );
           if (paths.length) void addLocalFiles(paths);
-          else if (e.dataTransfer.files.length) void upload(Array.from(e.dataTransfer.files));
+          else {
+            const dropped = droppedItems(e.dataTransfer);
+            // Finish ordinary imports before opening a directory picker, so its
+            // input cannot race an upload or overwrite the current draft.
+            void upload(dropped.files).then(() => setFolderDrops(dropped.folders.slice(0, 8)));
+          }
         }}
       >
         {dragging && (
           <div className="drop-overlay">
             <ImagePlus size={28} />
-            引用本地文件
+            引用文件或文件夹
           </div>
         )}
         {(attachments.some(a => !a.localPath) || references.length > 0) && (
@@ -539,7 +556,7 @@ export function Composer({
                   aria-label={"移除 skill " + s.name}
                 >
                   <BookOpen size={13} />
-                  {s.name}
+                  {s.title || s.name}
                   <X size={12} />
                 </button>
               ))}
