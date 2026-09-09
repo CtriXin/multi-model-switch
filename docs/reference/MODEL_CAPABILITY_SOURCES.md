@@ -20,17 +20,37 @@
 | Anthropic | https://platform.claude.com/docs/en/about-claude/models/overview | 全系列上下文、最大输出、默认 effort;单个模型页有 `Input → output` 行说明是否收图 | 2026-09-09 |
 | Anthropic 单模型 | https://platform.claude.com/docs/en/models/opus-4-6/overview<br>https://platform.claude.com/docs/en/models/sonnet-4-6/overview | 旧版模型的完整规格 | 2026-09-09 |
 | OpenAI | https://developers.openai.com/api/docs/models | 上下文、最大输出、是否收图。注意 `platform.openai.com/docs/models` 会 301 到这里 | 2026-09-09 |
-| Google Gemini | https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview | 单模型页有 input/output token limit 和输入模态。总览页 `docs/models` 不带数字 | 2026-09-09 |
+| Google Gemini | 单模型页，把末段换成模型名：<br>https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview<br>https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash<br>https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash | input/output token limit 与输入模态。总览页 `docs/models` 不带数字 | 2026-09-09 |
 | xAI Grok | https://docs.x.ai/docs/models | 各模型上下文。不写最大输出 | 2026-09-09 |
 | DeepSeek | https://api-docs.deepseek.com/quick_start/pricing/ | 上下文、最大输出、哪个变体收图 | 2026-09-09 |
-| Moonshot Kimi 平台 | https://platform.kimi.ai/docs/guide/kimi-k3-quickstart<br>https://platform.kimi.com/docs/api/models-overview | 模型本身的上下文与 `max_completion_tokens` | 2026-09-09 |
+| Moonshot Kimi 平台 | https://platform.kimi.ai/docs/models<br>https://platform.kimi.ai/docs/guide/kimi-k3-quickstart | 前者是全模型列表，后者给 k3 的上下文与 `max_completion_tokens` | 2026-09-09 |
 | Kimi Code | https://www.kimi.com/code/docs/en/kimi-code/models.html | 编码套餐里各模型 id、上下文,以及按档位的限制 | 2026-09-09 |
-| Z.ai GLM | https://docs.z.ai/guides/llm/glm-5.3.md<br>https://docs.z.ai/guides/llm/glm-5.2.md | 单模型上下文、最大输出、输入模态。文档索引在 https://docs.z.ai/llms.txt | 2026-09-09 |
+| Z.ai GLM | https://docs.z.ai/guides/llm/glm-5.3.md<br>https://docs.z.ai/guides/llm/glm-5.2.md<br>https://docs.z.ai/guides/vlm/glm-5.3-flash.md | 单模型上下文、最大输出、输入模态。注意 `guides/llm/` 是纯文本模型，`guides/vlm/` 是收图的。索引在 https://docs.z.ai/llms.txt | 2026-09-09 |
 | 智谱 BigModel | https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3 | GLM-5.3 中文规格。索引在 https://docs.bigmodel.cn/llms.txt | 2026-09-09 |
-| 阿里云百炼 Qwen | https://help.aliyun.com/en/model-studio/qwen3-8-max | 单模型上下文、最大输入、最大输出、输入模态。每个模型一页,把 url 末段换成模型名 | 2026-09-09 |
-| MiniMax | https://platform.minimaxi.com/docs/api-reference/api-overview | 各文本模型上下文。不写最大输出和识图 | 2026-09-09 |
-| 小米 MiMo | https://mimo.mi.com/docs/zh-CN/quick-start/summary/welcome<br>https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro | 在售模型与下线公告;单模型页有上下文 | 2026-09-09 |
-| StepFun | https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash | 单模型上下文与是否收图 | 2026-09-09 |
+| 阿里云百炼 Qwen | https://help.aliyun.com/en/model-studio/qwen3-8-max | 单模型上下文、最大输入、最大输出、输入模态。每个模型一页，把 url 末段换成模型名，例如 `qwen3-8-flash`、`qwen3-7-max` | 2026-09-09 |
+| MiniMax | https://platform.minimaxi.com/docs/api-reference/api-overview<br>https://platform.minimaxi.com/docs/api-reference/text-openai-api | 前者给各模型上下文，后者写明只有 MiniMax-M3 收图。都不写最大输出 | 2026-09-09 |
+| 小米 MiMo | https://mimo.mi.com/docs/zh-CN/quick-start/summary/welcome<br>https://mimo.mi.com/models/zh-CN/mimo-v2.5<br>https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro | 在售模型与下线公告；单模型页有上下文、最大输出、输入模态 | 2026-09-09 |
+| StepFun | https://platform.stepfun.com/docs/zh/guides/models | 全部模型的上下文与是否收图。不写最大输出 | 2026-09-09 |
+
+## 核对覆盖率
+
+不是每个值都核对过。下表记录 2026-09-09 这一轮的实际情况，**没查到的字段一律保持原样，不做推断**。判断某个值可不可信，先看这里。
+
+| 厂商 | 核对到什么程度 | 没查到的 |
+| --- | --- | --- |
+| Anthropic | 全部。4.6 两个 legacy 加当前四个：Opus 5、Sonnet 5、Fable 5.1、Haiku 4.5 | 无 |
+| OpenAI | 只有官方页面还在列的四个：gpt-6-astra、gpt-5.6 的 sol / terra / luna | gpt-5、gpt-5-pro、gpt-5.4、gpt-5.4-mini、gpt-5.5 已从官方页下架，值沿用旧记录 |
+| Google Gemini | gemini-3.1（pro preview 页）、3.5-flash、3.8-flash | gemini-2.5-flash / 2.5-pro / 裸 gemini-3 / gemini-3.5 / 3.1-flash-image |
+| xAI Grok | 全部七个的上下文 | 官方页面不写各模型是否收图，因此一律不记 vision |
+| DeepSeek | V4 三个：flash、pro、flash-vision-exp | deepseek-chat、deepseek-reasoner 已不在官方页 |
+| Moonshot Kimi | k3 全系、k2.6、k2.7-code 及 highspeed、kimi-for-coding 两个 | kimi-k2.5、k2.6-code-preview、kimi-for-code |
+| Z.ai / 智谱 GLM | glm-5.2、glm-5.3、glm-5.3-flash | glm-4.5 / 4.5-air / 4.6 / 4.7 / 5 / 5-turbo / 5.1，官方现已路由到 5.3 系 |
+| 阿里 Qwen | qwen3.8-max、qwen3.8-flash、qwen3.7-max | qwen3.8-max-preview |
+| MiniMax | 全部八个的上下文，以及只有 M3 收图这一条 | 官方不写各模型最大输出 |
+| 小米 MiMo | mimo-v2.5、mimo-v2.5-pro | mimo-v2 全系（2026-06-30 已下线） |
+| StepFun | step-3.7-flash、step-3.5-flash、step-1o-turbo-vision | step-router-v1 不在官方文档里 |
+
+覆盖面有意做得比任何单个中转通道宽：把厂商当前在售的整条产品线都写进来，新模型出现在通道里时就已经有数据，不用等下一轮补。
 
 ## OpenRouter：备选，不是真值
 
@@ -78,5 +98,9 @@ python3 scripts/openrouter_recent_models.py --missing   # 只看 profile 里还�
 **MiMo V2 全系列 2026-06-30 下线。** profile 里的 `mimo-v2-*` 是历史条目。
 
 **「1M」的字面值有两种。** 有的厂商指 1000000,有的指 1048576。以页面上的数字为准;只写了「1M」而没有数字时,沿用该 profile 已有的写法,不要来回改。
+
+**MiniMax 的快照说 M2.7 能读图，官方说不能。** 官方 OpenAI 兼容接口文档写明只有 MiniMax-M3 支持图片输入，其余文本模型都不支持。现在 profile 把这七个显式记为不收图，免得批量对比反复把「能读图」当成待修正项提出来。
+
+**Grok 不记 vision。** x.ai 的模型表只给上下文，没有逐模型写是否收图，所以一个都不记，让它保持未声明。
 
 **上下文写多大不是免费的。** 它参与上下文核算。写成模型的物理上限,对套餐受限的用户会偏乐观;写成保守档,对高档用户会偏小。有分档时记保守档,让用户自己在页面上调高。

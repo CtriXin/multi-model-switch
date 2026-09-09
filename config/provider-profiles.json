@@ -214,7 +214,8 @@
       "references": [
         "https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash",
         "https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash-quickstart",
-        "https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api"
+        "https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api",
+        "https://platform.stepfun.com/docs/zh/guides/models"
       ],
       "endpoints": {
         "openai_base_url": "https://api.stepfun.com/v1",
@@ -269,7 +270,9 @@
         }
       },
       "context_windows": {
-        "step-3.7-flash": 262144
+        "step-3.7-flash": 262144,
+        "step-3.5-flash": 262144,
+        "step-1o-turbo-vision": 32768
       },
       "api_formats": {
         "openai_chat": {
@@ -290,13 +293,22 @@
         }
       },
       "supports_vision": {
-        "step-3.7-flash": true
+        "step-3.7-flash": true,
+        "step-3.5-flash": false,
+        "step-1o-turbo-vision": true
       },
       "input_modalities": {
         "step-3.7-flash": [
           "text",
           "image",
           "video"
+        ],
+        "step-3.5-flash": [
+          "text"
+        ],
+        "step-1o-turbo-vision": [
+          "text",
+          "image"
         ]
       },
       "max_output_tokens": {
@@ -319,7 +331,9 @@
         "https://help.aliyun.com/zh/model-studio/deep-thinking",
         "https://help.aliyun.com/zh/model-studio/compatibility-with-openai-responses-api",
         "https://openrouter.ai/api/v1/models",
-        "https://help.aliyun.com/en/model-studio/qwen3-8-max"
+        "https://help.aliyun.com/en/model-studio/qwen3-8-max",
+        "https://help.aliyun.com/en/model-studio/qwen3-8-flash",
+        "https://help.aliyun.com/en/model-studio/qwen3-7-max"
       ],
       "endpoints": {
         "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -424,12 +438,21 @@
         "qwen3.7-max": 131072
       },
       "supports_vision": {
-        "qwen3.8-max": true
+        "qwen3.8-max": true,
+        "qwen3.8-flash": true,
+        "qwen3.7-max": false
       },
       "input_modalities": {
         "qwen3.8-max": [
           "text",
           "image"
+        ],
+        "qwen3.8-flash": [
+          "text",
+          "image"
+        ],
+        "qwen3.7-max": [
+          "text"
         ]
       }
     },
@@ -495,7 +518,9 @@
       "references": [
         "https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md",
         "https://platform.xiaomimimo.com/static/docs/integration/opencode.md",
-        "https://platform.xiaomimimo.com/static/docs/integration/codex.md"
+        "https://platform.xiaomimimo.com/static/docs/integration/codex.md",
+        "https://mimo.mi.com/models/zh-CN/mimo-v2.5",
+        "https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro"
       ],
       "endpoints": {
         "openai_base_url": "https://api.xiaomimimo.com/v1",
@@ -774,7 +799,9 @@
         "https://platform.xiaomimimo.com/static/docs/usage-guide/passing-back-reasoning_content.md",
         "https://platform.xiaomimimo.com/static/docs/integration/opencode.md",
         "https://platform.xiaomimimo.com/static/docs/integration/codex.md",
-        "https://platform.xiaomimimo.com/static/docs/integration/claudecode.md"
+        "https://platform.xiaomimimo.com/static/docs/integration/claudecode.md",
+        "https://mimo.mi.com/models/zh-CN/mimo-v2.5",
+        "https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro"
       ],
       "endpoints": {
         "openai_base_url": "https://api.xiaomimimo.com/v1",
@@ -1001,13 +1028,41 @@
         "minimax-m2.7-highspeed": 131072
       },
       "supports_vision": {
-        "minimax-m3": true
+        "minimax-m3": true,
+        "minimax-m2": false,
+        "minimax-m2.1": false,
+        "minimax-m2.1-highspeed": false,
+        "minimax-m2.5": false,
+        "minimax-m2.5-highspeed": false,
+        "minimax-m2.7": false,
+        "minimax-m2.7-highspeed": false
       },
       "input_modalities": {
         "minimax-m3": [
           "text",
           "image",
           "video"
+        ],
+        "minimax-m2": [
+          "text"
+        ],
+        "minimax-m2.1": [
+          "text"
+        ],
+        "minimax-m2.1-highspeed": [
+          "text"
+        ],
+        "minimax-m2.5": [
+          "text"
+        ],
+        "minimax-m2.5-highspeed": [
+          "text"
+        ],
+        "minimax-m2.7": [
+          "text"
+        ],
+        "minimax-m2.7-highspeed": [
+          "text"
         ]
       }
     },
@@ -1178,7 +1233,8 @@
         "https://platform.kimi.com/docs/api/models-overview",
         "https://platform.kimi.com/docs/guide/use-thinking-effort",
         "https://platform.kimi.com/docs/guide/claude-code-kimi",
-        "https://www.kimi.com/code/docs/en/kimi-code/models.html"
+        "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+        "https://platform.kimi.ai/docs/models"
       ],
       "endpoints": {
         "openai_base_url": "https://api.kimi.com/coding/v1",
@@ -1225,7 +1281,8 @@
         "kimi-k2.7-code": 262144,
         "kimi-for-code": 262144,
         "k3[1m]": 1048576,
-        "k3-256k": 262144
+        "k3-256k": 262144,
+        "kimi-k2.7-code-highspeed": 262144
       },
       "api_formats": {
         "openai_chat": {
@@ -1249,7 +1306,8 @@
         "kimi-k2.6-code-preview": 32768,
         "k2.6": 32768,
         "k2.6-code-preview": 32768,
-        "k3[1m]": 1048576
+        "k3[1m]": 1048576,
+        "kimi-k2.7-code-highspeed": 32768
       },
       "supports_vision": {
         "kimi-k3": true,
@@ -1264,7 +1322,8 @@
         "k2.6-code-preview": true,
         "kimi-k2.7-code": true,
         "k3[1m]": true,
-        "k3-256k": true
+        "k3-256k": true,
+        "kimi-k2.7-code-highspeed": true
       },
       "input_modalities": {
         "kimi-k3": [
@@ -1322,6 +1381,10 @@
           "image"
         ],
         "k3-256k": [
+          "text",
+          "image"
+        ],
+        "kimi-k2.7-code-highspeed": [
           "text",
           "image"
         ]
@@ -1578,7 +1641,9 @@
       },
       "references": [
         "https://ai.google.dev/gemini-api/docs/thinking",
-        "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview"
+        "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview",
+        "https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash",
+        "https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash"
       ],
       "endpoints": {
         "openai_base_url": "",
@@ -1597,7 +1662,9 @@
         "gemini-2.5-flash": 1048576,
         "gemini-3.5": 1048576,
         "gemini-3.1": 1048576,
-        "gemini-3": 1048576
+        "gemini-3": 1048576,
+        "gemini-3.5-flash": 1048576,
+        "gemini-3.8-flash": 1048576
       },
       "api_formats": {},
       "effort": {},
@@ -1605,7 +1672,9 @@
         "gemini-3.5": 65536,
         "gemini-3.1-flash-image": 32768,
         "gemini-3.1": 65536,
-        "gemini-3": 65536
+        "gemini-3": 65536,
+        "gemini-3.5-flash": 65536,
+        "gemini-3.8-flash": 65536
       },
       "model_overrides": {
         "gemini-2.5": {
@@ -1738,7 +1807,9 @@
       "supports_vision": {
         "gemini-3.5": true,
         "gemini-3.1": true,
-        "gemini-3": true
+        "gemini-3": true,
+        "gemini-3.5-flash": true,
+        "gemini-3.8-flash": true
       },
       "input_modalities": {
         "gemini-3.5": [
@@ -1761,6 +1832,14 @@
           "video",
           "audio",
           "pdf"
+        ],
+        "gemini-3.5-flash": [
+          "text",
+          "image"
+        ],
+        "gemini-3.8-flash": [
+          "text",
+          "image"
         ]
       }
     },
@@ -1792,7 +1871,8 @@
         "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
         "https://docs.bigmodel.cn/cn/guide/capabilities/thinking",
         "https://docs.z.ai/guides/llm/glm-5.3.md",
-        "https://docs.z.ai/guides/llm/glm-5.2.md"
+        "https://docs.z.ai/guides/llm/glm-5.2.md",
+        "https://docs.z.ai/guides/vlm/glm-5.3-flash.md"
       ],
       "endpoints": {
         "openai_base_url": "https://api.z.ai/api/paas/v4/",
@@ -1854,7 +1934,8 @@
         "glm-4.5": 200000,
         "glm-4.5-air": 200000,
         "glm-5.2": 1000000,
-        "glm-5.3": 1000000
+        "glm-5.3": 1000000,
+        "glm-5.3-flash": 1000000
       },
       "api_formats": {
         "openai_chat": {
@@ -1883,7 +1964,8 @@
         "glm-5": 128000,
         "glm-5-turbo": 128000,
         "glm-5.2": 131072,
-        "glm-5.3": 131072
+        "glm-5.3": 131072,
+        "glm-5.3-flash": 131072
       },
       "model_overrides": {
         "glm-5.2": {
@@ -1924,7 +2006,8 @@
       "effort": null,
       "supports_vision": {
         "glm-5.2": false,
-        "glm-5.3": false
+        "glm-5.3": false,
+        "glm-5.3-flash": true
       },
       "input_modalities": {
         "glm-5.2": [
@@ -1932,6 +2015,10 @@
         ],
         "glm-5.3": [
           "text"
+        ],
+        "glm-5.3-flash": [
+          "text",
+          "image"
         ]
       }
     },
@@ -1999,7 +2086,13 @@
         }
       },
       "context_windows": {
-        "grok-4.6": 500000
+        "grok-4.6": 500000,
+        "grok-4.5": 500000,
+        "grok-4.3": 1000000,
+        "grok-build-0.1": 262144,
+        "grok-4.20-0309-reasoning": 1000000,
+        "grok-4.20-0309-non-reasoning": 1000000,
+        "grok-4.20-multi-agent-0309": 1000000
       }
     },
     "kimi-k3-coding": {
@@ -2123,17 +2216,29 @@
       "context_windows": {
         "claude-opus-4-6": 1000000,
         "claude-opus-4-6-thinking": 1000000,
-        "claude-sonnet-4-6": 1000000
+        "claude-sonnet-4-6": 1000000,
+        "claude-opus-5": 1000000,
+        "claude-sonnet-5": 1000000,
+        "claude-fable-5-1": 1000000,
+        "claude-haiku-4-5": 200000
       },
       "max_output_tokens": {
         "claude-opus-4-6": 128000,
         "claude-opus-4-6-thinking": 128000,
-        "claude-sonnet-4-6": 128000
+        "claude-sonnet-4-6": 128000,
+        "claude-opus-5": 128000,
+        "claude-sonnet-5": 128000,
+        "claude-fable-5-1": 128000,
+        "claude-haiku-4-5": 64000
       },
       "supports_vision": {
         "claude-opus-4-6": true,
         "claude-opus-4-6-thinking": true,
-        "claude-sonnet-4-6": true
+        "claude-sonnet-4-6": true,
+        "claude-opus-5": true,
+        "claude-sonnet-5": true,
+        "claude-fable-5-1": true,
+        "claude-haiku-4-5": true
       },
       "input_modalities": {
         "claude-opus-4-6": [
@@ -2145,6 +2250,22 @@
           "image"
         ],
         "claude-sonnet-4-6": [
+          "text",
+          "image"
+        ],
+        "claude-opus-5": [
+          "text",
+          "image"
+        ],
+        "claude-sonnet-5": [
+          "text",
+          "image"
+        ],
+        "claude-fable-5-1": [
+          "text",
+          "image"
+        ],
+        "claude-haiku-4-5": [
           "text",
           "image"
         ]
