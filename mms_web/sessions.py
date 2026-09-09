@@ -315,6 +315,12 @@ class SessionService(SessionActions):
 
     # -- reads ---------------------------------------------------------
 
+    def live_session_count(self) -> int:
+        """Sessions with a running driver. An upgrade restarts the server, so
+        these have to be dealt with before one can start."""
+        with self._lock:
+            return sum(1 for session in self._sessions.values() if session.alive())
+
     def list_sessions(self) -> list[dict]:
         with self._lock:
             sessions = [session.session_view() for session in self._sessions.values()]

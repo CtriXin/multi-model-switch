@@ -29,6 +29,10 @@ def main(argv=None):
         parser.error("Web assets are missing. Reinstall MMS v4, or run npm run build --workspace @mms/web in the source checkout.")
     app = WebApplication(state_root=root, config_root=args.config_root)
     server = create_server(app, args.static_root, args.port)
+    # The upgrade helper restarts the server, so it needs the port that was
+    # actually bound, not the one that was requested.
+    app.upgrade.port = server.server_address[1]
+    app.upgrade.start_background_refresh()
     address = f"http://127.0.0.1:{server.server_address[1]}"
     print(f"MMS Web: {address}", flush=True)
     if args.open:

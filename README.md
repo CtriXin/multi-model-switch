@@ -85,6 +85,8 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 装完会问一句要不要打开 MMS Web。回车即可，浏览器自动弹出，服务在后台运行，安装进程随即退出。在页面里添加 provider 和 API Key 就能开始对话。
 
+后续升级不用回到终端。MMS Web 会在后台每 6 小时查一次最新 release，有新版本时右上角出现角标，点开可以直接升级：它会在后台装好新版本再重启本地服务，页面自动刷新。升级期间有会话在跑会被拦下，请先结束它们。不想让它查版本就设 `MMS_WEB_UPDATE_CHECK=0`，本地源码安装不会收到升级提示。
+
 安装过程不问任何会影响安装内容的问题，默认走 stable 通道并把 `~/.local/bin` 写进 shell PATH。默认 UI 语言是中文，要英文加 `--lang en`。
 
 <details>

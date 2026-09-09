@@ -3319,3 +3319,38 @@ dialog:has(.model-explorer) .dialog-body > header {
     opacity: 0.3;
   }
 }
+
+.update-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.update-badge:hover {
+  border-color: var(--accent);
+}
+.update-versions {
+  display: flex;
+  gap: 28px;
+  margin: 4px 0 14px;
+}
+.update-versions dt {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.update-versions dd {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.update-error {
+  margin-top: 10px;
+  color: var(--danger);
+  font-size: 12px;
+}

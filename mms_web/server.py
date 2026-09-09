@@ -29,9 +29,11 @@ class WebApplication:
     def __init__(self, *, state_root: Path, config_root: Path | None = None):
         from .runtime import require_private_root
         state_root = require_private_root(state_root)
+        real_config_root = config_root is not None
         if config_root is None:
             config_root = state_root / "config"
         self.state_root = state_root
+        self.config_root = config_root
         self.csrf_token = secrets.token_urlsafe(32)
         self.catalog = _adapter(
             "mms_web.catalog", "CatalogService",
@@ -41,6 +43,13 @@ class WebApplication:
             "mms_web.sessions", "SessionService",
             config_root=config_root, state_root=state_root, catalog=self.catalog, real_launch=config_root is not None,
         ) if self.catalog else None
+        from .upgrade import UpgradeService
+        self.upgrade = UpgradeService(
+            state_root=state_root,
+            # An explicit config root is what makes this a real install rather
+            # than a preview, and only a real install can be upgraded.
+            config_root=config_root if real_config_root else None,
+        )
 
     def _model_settings(self):
         if not hasattr(self, "model_settings"):
@@ -89,6 +98,7 @@ class WebApplication:
             **snapshot, "version": "1", "mode": "live",
             "capabilities": capabilities, "csrfToken": self.csrf_token,
             "sessions": self.sessions.list_sessions() if self.sessions else [],
+            "update": self.upgrade.status(),
         }
 
     def get(self, parts: list[str]) -> dict:
@@ -105,6 +115,8 @@ class WebApplication:
                 return self._sessions().runtime_view(parts[1])
             if parts[2] == "commands":
                 return self._sessions().command_catalog(parts[1])
+        if parts == ["update"]:
+            return self.upgrade.status()
         if parts == ["bootstrap"]:
             return self.bootstrap()
         if len(parts) == 2 and parts[0] == "sessions":
@@ -112,6 +124,11 @@ class WebApplication:
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
     def post(self, parts: list[str], payload: dict) -> dict:
+        if parts == ["update", "check"]:
+            return self.upgrade.refresh(force=True)
+        if parts == ["update", "start"]:
+            live = self.sessions.live_session_count() if self.sessions else 0
+            return self.upgrade.start(live_sessions=live)
         if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "preview", "apply"}:
             return getattr(self._model_settings(), parts[1])(payload)
         if parts == ["launch-options"]:

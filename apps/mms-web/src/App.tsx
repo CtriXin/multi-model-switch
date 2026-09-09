@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUpRight,
+  ArrowUpCircle,
   Check,
   ChevronRight,
   CircleAlert,
@@ -21,8 +22,23 @@ import {
   ChevronDown,
   X,
 } from "lucide-react";
-import type { Bootstrap, Page, SessionDetail, FileSelection } from "./types";
-import { bootstrap, getSession, listSessions, isPreview, mutate } from "./api";
+import type {
+  Bootstrap,
+  Page,
+  SessionDetail,
+  FileSelection,
+  UpdateStatus,
+} from "./types";
+import {
+  bootstrap,
+  getSession,
+  listSessions,
+  isPreview,
+  mutate,
+  checkForUpdate,
+  startUpgrade,
+  waitForRestart,
+} from "./api";
 import {
   Composer,
   Dialog,
@@ -95,6 +111,12 @@ export function App() {
     readSetting("mms-web-preset", ""),
   );
   const [settingsEdit, setSettingsEdit] = useState({dirty: false, busy: false});
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [upgradePhase, setUpgradePhase] = useState<
+    "idle" | "starting" | "running" | "failed"
+  >("idle");
+  const [upgradeNote, setUpgradeNote] = useState("");
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
@@ -138,6 +160,7 @@ export function App() {
       const result = await bootstrap(signal);
       if (signal?.aborted) return;
       setData(result);
+      setUpdate(result.update || null);
       setConnected(true);
       setError("");
       setWorkspaceId((old) =>
@@ -177,6 +200,36 @@ export function App() {
     if (id) openSession(id);
     // Recover the same conversation on a browser refresh.
   }, []);
+  const runUpgrade = useCallback(async () => {
+    setUpgradePhase("starting");
+    setUpgradeNote("");
+    try {
+      const result = await startUpgrade();
+      if (!result.started) {
+        setUpgradePhase("failed");
+        setUpgradeNote(result.reason || "升级没有开始。");
+        return;
+      }
+      // The server is about to replace itself, so from here the page can only
+      // watch the port and wait for the new one to answer.
+      setUpgradePhase("running");
+      setConnected(false);
+      if (await waitForRestart()) {
+        location.reload();
+        return;
+      }
+      setUpgradePhase("failed");
+      setUpgradeNote(
+        `新版本没有在预期时间内启动。日志在 ${result.logPath || update?.logPath || "~/.local/share/mms-web/upgrade.log"}`,
+      );
+    } catch (error) {
+      setUpgradePhase("failed");
+      setUpgradeNote(
+        error instanceof Error ? error.message : "升级请求失败，请稍后重试。",
+      );
+    }
+  }, [update]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     saveSetting("mms-web-theme", theme);
@@ -686,6 +739,16 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
+            {update?.updateAvailable && (
+              <button
+                className="update-badge"
+                onClick={() => setUpdateOpen(true)}
+                title={`有新版本 ${update.latest}`}
+              >
+                <ArrowUpCircle size={15} />
+                <span>{update.latest}</span>
+              </button>
+            )}
             {detail && (
               <Status
                 session={detail.session}
@@ -1282,6 +1345,65 @@ export function App() {
           </div>
           <div className="search-footer">
             <Command size={12} /> K 打开搜索 <span>Esc 关闭</span>
+          </div>
+        </Dialog>
+      )}
+      {updateOpen && update && (
+        <Dialog
+          title={upgradePhase === "running" ? "正在升级" : "有新版本"}
+          dismissible={upgradePhase !== "running"}
+          close={() => {
+            if (upgradePhase === "running") return;
+            setUpdateOpen(false);
+            setUpgradePhase("idle");
+            setUpgradeNote("");
+          }}
+        >
+          <dl className="update-versions">
+            <div>
+              <dt>当前版本</dt>
+              <dd>{update.installed.version || update.installed.ref || "未知"}</dd>
+            </div>
+            <div>
+              <dt>最新版本</dt>
+              <dd>{update.latest}</dd>
+            </div>
+          </dl>
+          {upgradePhase === "running" ? (
+            <p role="status">
+              正在安装新版本，本地服务会重启一次。请保持这个页面打开，装好后会自动刷新。
+            </p>
+          ) : (
+            <p>升级会重启本地服务。进行中的会话会被中断，请先确认没有正在跑的任务。</p>
+          )}
+          {upgradePhase === "failed" && (
+            <p className="update-error" role="alert">
+              {upgradeNote}
+            </p>
+          )}
+          {update.blockedReason && upgradePhase === "idle" && (
+            <p className="update-error">{update.blockedReason}</p>
+          )}
+          <div className="dialog-actions">
+            {upgradePhase !== "running" && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setUpdateOpen(false);
+                  setUpgradePhase("idle");
+                  setUpgradeNote("");
+                }}
+              >
+                以后再说
+              </button>
+            )}
+            <button
+              className="button primary"
+              disabled={!update.canUpgrade || upgradePhase !== "idle"}
+              onClick={() => void runUpgrade()}
+            >
+              {upgradePhase === "idle" ? "现在升级" : "升级中…"}
+            </button>
           </div>
         </Dialog>
       )}

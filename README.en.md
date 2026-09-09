@@ -342,6 +342,8 @@ No question in the install changes what gets installed: no UI language prompt, n
 
 Use `--launch-web` to open it without asking, `--no-launch-web` to skip it, and `--no-shell-rc` to leave your shell config alone.
 
+Upgrading does not send you back to the terminal. MMS Web checks for a newer release every six hours in the background and shows a badge in the top right when one exists. Upgrading from there installs the new version, restarts the local server and reloads the page. It refuses while sessions are still running, so end those first. Set `MMS_WEB_UPDATE_CHECK=0` to turn the check off; a source checkout is never prompted to upgrade.
+
 `pi` is mandatory because the pilot web app depends on it. It is installed globally from a pinned npm spec, and its runtime cache under `~/.mms/.ai/cache/pi-npx` is warmed during the install so the first pilot launch does not wait on a download. Missing `claude` / `codex` / `opencode` are installed automatically; already-installed CLIs are left untouched. Pass `--install-cli claude,codex` to control that list explicitly, and add `--dry-run` to preview the plan without writing files.
 
 The optional global packs are gone. RTK, BrainKeeper, Map, CodeGraph, global token-saver, global TOON, ops-env-safe, ECC, and OMC no longer have installer paths. Their `--install-*` and `--*-ref` flags print a notice and are ignored, so older scripts keep working.

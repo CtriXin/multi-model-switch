@@ -1,4 +1,10 @@
-import type { Bootstrap, Session, SessionDetail } from "./types";
+import type {
+  Bootstrap,
+  Session,
+  SessionDetail,
+  UpdateStatus,
+  UpgradeStart,
+} from "./types";
 import { previewBootstrap, previewDetails } from "./preview";
 
 export const isPreview =
@@ -80,6 +86,27 @@ export async function bootstrap(signal?: AbortSignal): Promise<Bootstrap> {
   }
   csrfToken = data.csrfToken;
   return data;
+}
+export async function checkForUpdate(): Promise<UpdateStatus> {
+  return request<UpdateStatus>("/update/check", {});
+}
+export async function startUpgrade(): Promise<UpgradeStart> {
+  return request<UpgradeStart>("/update/start", {});
+}
+/** The server restarts during an upgrade, so a plain fetch is expected to fail
+ *  for a while. Resolves once it answers again. */
+export async function waitForRestart(timeoutMs = 300_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      const response = await fetch("/api/update", { cache: "no-store" });
+      if (response.ok) return true;
+    } catch {
+      // still down; keep waiting
+    }
+  }
+  return false;
 }
 export async function listSessions(signal?: AbortSignal): Promise<Session[]> {
   if (isPreview) return structuredClone(sampleBootstrap.sessions);

@@ -195,6 +195,27 @@ export interface Bootstrap {
   presets: Preset[];
   sessions: Session[];
   diagnostics: { code: string; message: string }[];
+  update?: UpdateStatus;
+}
+export interface UpdateStatus {
+  installed: { ref: string; version: string; channel: string; installedAt: string };
+  latest: string;
+  checkedAt: number;
+  checkEnabled: boolean;
+  comparable: boolean;
+  updateAvailable: boolean;
+  upgradeRunning: boolean;
+  canUpgrade: boolean;
+  blockedReason: string;
+  logPath: string;
+  error: string;
+}
+export interface UpgradeStart {
+  started: boolean;
+  reason?: string;
+  target?: string;
+  port?: number;
+  logPath?: string;
 }
 export interface ConfigPreview {
   revision: string;
