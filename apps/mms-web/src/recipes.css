@@ -1,0 +1,19 @@
+dialog:has(.recipe-dialog) { width: min(760px, calc(100vw - 32px)); }
+.recipe-dialog { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.recipe-dialog label, .recipe-variables label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.recipe-dialog input:not([type=checkbox]), .recipe-dialog textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; background: var(--surface); color: var(--ink); font: inherit; }
+.recipe-dialog textarea { min-height: 100px; resize: vertical; line-height: 1.6; }
+.recipe-dialog textarea[aria-label="模板目标"] { min-height: 130px; }
+.recipe-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.recipe-flags { display: flex; flex-wrap: wrap; gap: 14px; }
+.recipe-flags label { flex-direction: row; align-items: center; }
+.recipe-dialog button, .recipe-loaded button { align-self: flex-start; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 12px; }
+.recipe-dialog button:disabled, .recipe-loaded button:disabled { opacity: .5; }
+.recipe-reviewed { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; }
+.recipe-preview { margin: 0; padding: 12px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; }
+.recipe-requirements { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
+.recipe-variables { display: grid; gap: 10px; }
+.recipe-loaded { text-align: left; padding: 12px 15px; border: 1px solid var(--line); border-radius: 9px; font-size: 12px; line-height: 1.6; }
+.recipe-loaded p { margin: 5px 0; }
+.recipe-loaded button { margin: 4px 8px 0 0; }
+@media (max-width: 600px) { .recipe-fields { grid-template-columns: 1fr; } }

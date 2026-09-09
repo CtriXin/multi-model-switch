@@ -15,12 +15,14 @@ export function SkillPicker({
   toggle,
   close,
   error,
+  locked = false,
 }: {
   skills: Skill[];
   selected: string[];
   toggle: (id: string) => void;
   close: () => void;
   error?: string;
+  locked?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [onlySelected, setOnlySelected] = useState(false);
@@ -68,7 +70,7 @@ export function SkillPicker({
             }
             onClick={() => toggle(s.id)}
             aria-pressed={selected.includes(s.id)}
-            disabled={selected.length >= 20 && !selected.includes(s.id)}
+            disabled={locked || (selected.length >= 20 && !selected.includes(s.id))}
           >
             <span className="skill-icon">
               {selected.includes(s.id) ? (

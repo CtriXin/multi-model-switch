@@ -21,6 +21,8 @@ import { request } from "./api";
 import type { Attachment, FileSelection } from "./types";
 import { FilesPanel } from "./FilesPanel";
 import { localFilePaths } from "./local-file-paths";
+import { requiredSkillMatches } from "./recipe-core";
+const noRequiredSkills: string[] = [];
 
 export interface MessageExtras {
   skills: string[];
@@ -58,12 +60,14 @@ export function Composer({
   sessionAlive,
   onCommand,
   initialText = "",
+  requiredSkillNames = noRequiredSkills,
   selectionRequest,
   selectionHandled,
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
 }: {
   initialText?: string;
+  requiredSkillNames?: string[];
   selectionRequest?: { nonce: string; selection: FileSelection };
   selectionHandled?: () => void;
   draftKey?: string;
@@ -90,8 +94,11 @@ export function Composer({
     draft?.skills || [],
   );
   const [skillError, setSkillError] = useState("");
+  const [skillsReady, setSkillsReady] = useState(false);
+  const requiredSkillKey = requiredSkillNames.join("|");
   const [skillsOpen, setSkillsOpen] = useState(false);
   function toggleSkill(id: string) {
+    if (lock.current) return;
     setSelectedSkills((old) =>
       old.includes(id)
         ? old.filter((i) => i !== id)
@@ -101,15 +108,18 @@ export function Composer({
   useEffect(() => {
     let cancelled = false;
     setSkills([]);
+    setSkillsReady(false);
     setSkillError("");
     if (workspaceId)
       request<{ skills: Skill[] }>("/skills", { workspaceId })
         .then((d) => {
           if (!cancelled) {
-            setSkills(d.skills);
-            setSelectedSkills((ids) =>
-              ids.filter((id) => d.skills.some((s) => s.id === id)),
-            );
+            setSkills(d.skills); setSkillsReady(true);
+            setSelectedSkills((ids) => {
+              const kept = ids.filter(id => d.skills.some(s => s.id === id));
+              const defaults = draft ? [] : requiredSkillMatches(requiredSkillNames, d.skills).ids;
+              return [...new Set([...kept, ...defaults])].slice(0, 20);
+            });
           }
         })
         .catch((e) => {
@@ -118,7 +128,8 @@ export function Composer({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, requiredSkillKey]);
+  const requirementIssues = requiredSkillNames.length ? (skillsReady ? requiredSkillMatches(requiredSkillNames, skills, selectedSkills).issues : [skillError || "正在核对模板所需的 Skills。"]) : [];
   const [text, setText] = useState(draft?.text ?? initialText);
   const [fileSelections, setFileSelections] = useState<FileSelection[]>(draft?.fileSelections || []);
   const [submitting, setSubmitting] = useState(false);
@@ -324,6 +335,7 @@ export function Composer({
     if (
       (!text.trim() && !attachments.length) ||
       disabled ||
+      requirementIssues.length > 0 ||
       busy ||
       uploading ||
       localFilesBusy ||
@@ -393,6 +405,7 @@ export function Composer({
         <SkillPicker
           skills={skills}
           selected={selectedSkills}
+          locked={submitting || busy}
           toggle={toggleSkill}
           close={() => setSkillsOpen(false)}
           error={skillError}
@@ -498,6 +511,7 @@ export function Composer({
                   type="button"
                   key={s.id}
                   onClick={() => toggleSkill(s.id)}
+                  disabled={submitting || busy}
                   aria-label={"移除 skill " + s.name}
                 >
                   <BookOpen size={13} />
@@ -684,6 +698,7 @@ export function Composer({
               type="submit"
               disabled={
                 disabled ||
+                requirementIssues.length > 0 ||
                 busy ||
                 submitting ||
                 uploading ||
@@ -702,6 +717,7 @@ export function Composer({
           </div>
         </div>
         {disabled && reason && <p className="composer-reason">{reason}</p>}
+        {requirementIssues.map(issue => <p className="composer-reason" role="status" key={issue}>{issue}</p>)}
         {localFilesBusy && (
           <p className="composer-reason" role="status">
             正在选择本地文件…

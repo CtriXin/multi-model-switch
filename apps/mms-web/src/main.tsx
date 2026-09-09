@@ -14,3 +14,5 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+import "./recipes.css";

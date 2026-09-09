@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import type { Bootstrap, Page, SessionDetail, FileSelection } from "./types";
-import { bootstrap, getSession, listSessions, isPreview, mutate } from "./api";
+import { bootstrap, getSession, listSessions, isPreview, mutate, request } from "./api";
 import {
   Composer,
   Dialog,
@@ -39,8 +39,11 @@ import { CurrentActivity, sessionStatus } from "./SessionStatus";
 import { useSessionAttention } from "./SessionAttention";
 import { FilesPanel } from "./FilesPanel";
 import { RuntimePanel, SessionMenu, exportConversation } from "./SessionTools";
-import { RecipeImport } from "./Recipe";
-import type { Recipe } from "./Recipe";
+import { RecipeImport, readRecipeDraft, saveRecipeDraft } from "./Recipe";
+import { modelRequirementIssues, requiredSkillMatches } from "./recipe-core";
+import type { Skill } from "./SkillPicker";
+import type { LaunchFacts } from "./ModelExplorer";
+import type { RecipeDraft } from "./Recipe";
 import { SettingsPage } from "./SettingsPage";
 import { TaskSettings, SessionSettings } from "./TaskSettings";
 import { Popover } from "./Popover";
@@ -88,8 +91,11 @@ export function App() {
   const [workspaceId, setWorkspaceId] = useState(() =>
     readSetting("mms-web-workspace", ""),
   );
-  const [recipe, setRecipe] = useState<(Recipe & { key: number }) | null>(null);
-  const [planMode, setPlanMode] = useState(false);
+  const [recipe, setRecipe] = useState<RecipeDraft | null>(readRecipeDraft);
+  const [recipeConfirmed, setRecipeConfirmed] = useState("");
+  const recipeContext = useRef("");
+  useEffect(() => { saveRecipeDraft(recipe); }, [recipe]);
+  const [planMode, setPlanMode] = useState(!!recipe?.recipe.planning);
   const [addFolder, setAddFolder] = useState(false);
   const [presetId, setPresetId] = useState(() =>
     readSetting("mms-web-preset", ""),
@@ -378,6 +384,11 @@ export function App() {
   const workspace = data.workspaces.find((w) => w.id === workspaceId);
   const preset = data.presets.find((p) => p.id === presetId);
   const launchFacts = useLaunchFacts(presetId, workspaceId);
+  const recipeKey = recipe ? [recipe.key, workspaceId, presetId, JSON.stringify(launchFacts.facts?.model)].join("|") : "";
+  recipeContext.current = recipeKey;
+  useEffect(() => { setRecipeConfirmed(""); }, [recipeKey]);
+  const recipeIssues = recipe ? modelRequirementIssues(recipe.recipe, launchFacts.facts?.model) : [];
+  const recipeReady = !recipe || (!recipeIssues.length && recipeConfirmed === recipeKey);
   const [effortChoice, setEffortChoice] = useState<{
     id: string;
     level: string;
@@ -752,28 +763,28 @@ export function App() {
                 {!isPreview && workspaceId && <ProjectMaterials key={workspaceId} workspaceId={workspaceId} />}
                 <RecipeImport
                   loaded={(item) => {
-                    setRecipe({ ...item, key: Date.now() });
-                    setPlanMode(item.planning);
-                    const match = data.presets.find(
-                      (p) => p.available && p.name === item.preferredModel,
-                    );
-                    setPresetId(match?.id || "");
+                    setRecipe(item); setRecipeConfirmed("");
+                    setPlanMode(item.recipe.planning);
                   }}
                 />
               </div>
-              {recipe && (
-                <p className="recipe-loaded" role="status">
-                  已载入「{recipe.title}
-                  」。任务说明已填入草稿，检查内容、工作文件夹和模型后发送。模板不会自动附带附件或连接凭据。
-                </p>
-              )}
+              {recipe && <section className="recipe-loaded">
+                <strong>已载入「{recipe.recipe.title}」</strong>
+                <p>模板模型偏好：{recipe.recipe.preferredModel || "未指定"}。当前使用 {preset?.name || "尚未选择"} · {preset?.channel || ""}；确认后再发送。</p>
+                <p>必需 Skills：{recipe.recipe.requiredSkills.join("、") || "无"}。文件与变量由本次草稿提供。</p>
+                {recipeIssues.map(issue => <p role="status" key={issue}>{issue}</p>)}
+                {recipeReady ? <p role="status">已确认当前模型与工作文件夹。</p> : <button type="button" disabled={!!recipeIssues.length || !preset?.available || !connected} onClick={() => setRecipeConfirmed(recipeKey)}>确认使用当前模型</button>}
+                <button type="button" onClick={() => { setRecipe(null); setRecipeConfirmed(""); }}>退出模板草稿</button>
+              </section>}
               <Composer
                 key={`new:${workspaceId}:${recipe?.key || ""}`}
                 draftKey={`new:${workspaceId}:${recipe?.key || ""}`}
-                initialText={recipe?.prompt}
+                initialText={recipe?.draftPrompt}
+                requiredSkillNames={recipe?.recipe.requiredSkills}
                 workspaceId={workspaceId}
                 disabled={
                   !connected ||
+                  !recipeReady ||
                   !data.capabilities.launch ||
                   !launchFacts.facts ||
                   !presetId ||
@@ -782,25 +793,28 @@ export function App() {
                 reason={
                   !connected
                     ? "连接 MMS 本地服务后即可开始。"
-                    : "请选择可用模型和工作文件夹后开始。"
+                    : !recipeReady ? "请先核对模板需求并确认当前模型。" : "请选择可用模型和工作文件夹后开始。"
                 }
                 busy={busy}
                 placeholder="想做什么？"
-                send={(text, extras) =>
-                  runAction(
-                    "/sessions",
-                    {
-                      workspaceId,
-                      presetId,
-                      title: text.slice(0, 42),
-                      prompt: text,
-                      planMode,
-                      thinkingLevel: effort || undefined,
-                      ...extras,
-                    },
-                    true,
-                  )
-                }
+                send={async (text, extras) => {
+                  if (!recipeReady) return false;
+                  if (recipe) {
+                    const [facts, found] = await Promise.all([
+                      request<LaunchFacts>("/launch-options", { presetId, workspaceId }),
+                      request<{ skills: Skill[] }>("/skills", { workspaceId }),
+                    ]);
+                    if (recipeContext.current !== recipeKey) throw new Error("工作文件夹或模型已经变化，请重新检查后发送。");
+                    const issues = [...modelRequirementIssues(recipe.recipe, facts.model), ...requiredSkillMatches(recipe.recipe.requiredSkills, found.skills, extras.skills).issues];
+                    if (issues.length) throw new Error(issues.join(" "));
+                  }
+                  const ok = await runAction("/sessions", {
+                    workspaceId, presetId, title: text.slice(0, 42), prompt: text,
+                    planMode, thinkingLevel: effort || undefined, ...extras,
+                  }, true);
+                  if (ok && recipe) { setRecipe(null); setRecipeConfirmed(""); }
+                  return ok;
+                }}
               >
                 <TaskSettings
                   presets={data.presets}
