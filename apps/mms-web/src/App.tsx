@@ -1795,20 +1795,21 @@ export function App() {
               </div>
               {detail && (
                 <div className="session-composer">
+                  <CurrentActivity
+                    session={detail.session}
+                    disconnected={!connected || statusesStale || !!sessionError}
+                  />
                   <div className="session-workbar">
-                    {/* Status and location are both one line of context; keeping
-                        them on separate bands cost a row above the composer. */}
-                    <CurrentActivity
-                      session={detail.session}
-                      disconnected={!connected || statusesStale || !!sessionError}
-                    />
                     <button
                       className="workbar-folder"
-                      title={detail.session.cwd}
+                      title={`浏览文件和 Git 变更：${detail.session.cwd || "当前工作文件夹"}`}
+                      aria-label={`浏览 ${detail.session.cwd?.split("/").pop() || "当前项目"} 的文件和变更`}
+                      aria-haspopup="dialog"
                       onClick={() => setFilesOpen(true)}
                     >
                       <FolderOpen size={14} />
-                      {detail.session.cwd?.split("/").pop() || "工作文件"}
+                      <span>文件</span>
+                      <span className="workbar-folder-name">{detail.session.cwd?.split("/").pop() || "当前项目"}</span>
                     </button>
                     {!isPreview && <ProjectMaterials key={detail.session.workspaceId} workspaceId={detail.session.workspaceId} />}
                     {detail.events.some((e) => e.kind === "tool" || e.thinking) &&
