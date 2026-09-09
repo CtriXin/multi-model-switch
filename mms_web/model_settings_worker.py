@@ -121,6 +121,75 @@ def public_rows(rows):
     return result
 
 
+# Which capability snapshot the refresh reads. The Config Web page offers the
+# same three; keep the wire names stable so both pages mean the same thing.
+REFRESH_MODES = {
+    # Approved facts and local calibration snapshots that ship with MMS.
+    "known": {},
+    # OpenRouter's model list, fetched now. A provider catalogue reference,
+    # not the vendor's own statement.
+    "openrouter": {"openrouter_catalog": True},
+    # provider-profiles maintained in this repository, so updating MMS is what
+    # brings newer values in.
+    "official": {"mmf_official_overrides": True},
+}
+# Only the three capabilities this page can actually edit. Asking for more
+# would report changes the user has no control to review or undo here.
+REFRESH_FIELDS = ("vision", "context_window_tokens", "reasoning_effort")
+
+
+def refresh_proposal(known, result):
+    """Map a capability snapshot onto this page's pending edits.
+
+    Returns the same shape the row controls produce, so a refresh goes through
+    the existing preview and save path instead of writing anything itself.
+    """
+    caps = result.get("model_capabilities") or {}
+    sources = result.get("model_sources") or {}
+    visions, contexts, efforts, proposals, skipped = {}, {}, {}, [], []
+    for model in sorted(caps):
+        row = known.get(model)
+        values = caps[model] if isinstance(caps[model], dict) else {}
+        source = sources.get(model) if isinstance(sources.get(model), dict) else {}
+        if row is None:
+            continue
+        if not row.get("capabilitiesEditable"):
+            skipped.append({"model": model, "reason": "这个模型要先保存进通道才能设置能力。"})
+            continue
+        fields = []
+        vision = values.get("vision")
+        if isinstance(vision, bool) and vision != row["vision"]:
+            visions[model] = vision
+            fields.append({"field": "vision", "before": "可读取图片" if row["vision"] else "不可读取图片",
+                           "after": "可读取图片" if vision else "不可读取图片",
+                           "source": str((source.get("vision") or {}).get("source_layer") or "")})
+        context = values.get("context_window_tokens")
+        if isinstance(context, int) and not isinstance(context, bool) and 1024 <= context <= 10_000_000 and context != row["contextWindow"]:
+            contexts[model] = context
+            fields.append({"field": "context", "before": str(row["contextWindow"] or "自动"), "after": str(context),
+                           "source": str((source.get("context_window_tokens") or {}).get("source_layer") or "")})
+        effort = str(values.get("reasoning_effort") or "").strip().lower()
+        # A level this route cannot execute would be clamped at launch, so the
+        # page must not offer it as if it had been applied.
+        if effort and effort in (row.get("effortLevels") or []) and effort != row["effort"]:
+            efforts[model] = effort
+            fields.append({"field": "effort", "before": row["effort"] or "自动", "after": effort,
+                           "source": str((source.get("reasoning_effort") or {}).get("source_layer") or "")})
+        elif effort and effort not in (row.get("effortLevels") or []):
+            skipped.append({"model": model, "reason": f"快照建议的 effort {effort} 不在这条通道能执行的档位里。"})
+        if fields:
+            proposals.append({"model": model, "fields": fields})
+    return {"visions": visions, "contextWindows": contexts, "efforts": efforts,
+            "proposals": proposals, "skipped": skipped[:40],
+            "matched": int(result.get("matched_model_count") or 0),
+            "modelCount": int(result.get("model_count") or 0),
+            "unmatched": list(result.get("unmatched_models") or [])[:40],
+            "warnings": [str(item) for item in (result.get("warnings") or [])][:10],
+            "sources": [{"source": str(item.get("source") or ""), "checkedAt": str(item.get("checked_at") or ""),
+                         "note": str(item.get("note") or "")}
+                        for item in (result.get("catalog_sources") or []) if isinstance(item, dict)]}
+
+
 def draft_for(rows, request, revision):
     provider_id = request.get("providerId")
     rows = copy.deepcopy(rows)
@@ -219,6 +288,29 @@ def run(request):
         return {"revision": revision, "providers": public_rows(rows)}
     if request.get("revision") != revision:
         raise WebError("CONFIG_STALE", "MMF 配置已更新，请重新加载后再保存。", 409)
+    if action == "refresh":
+        target = next((p for p in rows if p["id"] == request.get("providerId")), None)
+        if target is None:
+            raise WebError("PROVIDER_NOT_FOUND", "这个通道已不存在，请刷新。", 404)
+        mode = str(request.get("mode") or "known")
+        if mode not in REFRESH_MODES:
+            raise WebError("INVALID_REFRESH_MODE", "不认识这个刷新来源。", 400)
+        known = {m["id"]: m for m in public_rows([target])[0]["models"]}
+        requested = request.get("models")
+        models = [m for m in requested if m in known] if isinstance(requested, list) else []
+        models = models or list(known)
+        try:
+            result = web.refresh_model_capability_truth(
+                cfg,
+                {"provider_id": target["id"],
+                 "provider": {"id": target["id"], "models": [{"id": model} for model in models]},
+                 "models": models, "fields": list(REFRESH_FIELDS), **REFRESH_MODES[mode]},
+                config_path=str(root / "config.toml"), command_name="mmf")
+        except Exception:
+            raise WebError("CAPABILITY_REFRESH_FAILED", "读取能力快照失败，配置没有改变。", 502)
+        if not result.get("ok"):
+            raise WebError("CAPABILITY_REFRESH_FAILED", "读取能力快照失败，配置没有改变。", 502)
+        return {"mode": mode, **refresh_proposal(known, result)}
     if action in {"discover", "check"}:
         target = next((p for p in rows if p["id"] == request.get("providerId")), None)
         if not target or not public_rows([target])[0]["canDiscover"]:

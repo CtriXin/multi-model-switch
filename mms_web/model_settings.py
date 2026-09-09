@@ -118,6 +118,15 @@ class ModelSettings:
             self._check(payload)
             return result
 
+    def refresh(self, payload):
+        # Reads a capability snapshot and returns proposed edits only. The
+        # human still reviews them through preview before anything is written.
+        with self.lock:
+            self._check(payload)
+            result = self.worker({**payload, "action": "refresh"})
+            self._check(payload)
+            return result
+
     def preview(self, payload):
         with self.lock:
             self._check(payload)

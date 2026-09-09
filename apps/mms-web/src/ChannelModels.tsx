@@ -54,6 +54,19 @@ type Change = {
   after?: string;
   channels?: string[];
 };
+type Refresh = {
+  mode: string;
+  visions: Record<string, boolean>;
+  contextWindows: Record<string, number>;
+  efforts: Record<string, string>;
+  proposals: { model: string; fields: { field: string }[] }[];
+  skipped: { model: string; reason: string }[];
+  matched: number;
+  modelCount: number;
+  unmatched: string[];
+  warnings: string[];
+  sources: { source: string; checkedAt: string; note: string }[];
+};
 type Preview = {
   previewId: string;
   changes: Change[];
@@ -61,6 +74,20 @@ type Preview = {
   confirmPhrase: string;
   writeSummary: string;
 };
+
+const refreshSources: [string, string, string][] = [
+  ["known", "用本地已知快照刷新", "随 MMS 分发的已批准事实与本地标定快照"],
+  [
+    "openrouter",
+    "从 OpenRouter catalog 快速匹配",
+    "现在联网读取 OpenRouter 的模型表。它是通道目录参考，不是厂商官方口径",
+  ],
+  [
+    "official",
+    "应用 MMF 官方覆盖",
+    "仓库维护的 provider-profiles，更新 MMS 就会带来更新的值",
+  ],
+];
 
 const capabilityOriginLabels: Record<string, string> = {
   manual_override: "本机覆盖",
@@ -236,6 +263,43 @@ export function ChannelModels({
       setNotice(
         `拉取到 ${result.models.length} 个模型。新模型需勾选后保存；已选模型不会自动移除。`,
       );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function refreshCapabilities(mode: string) {
+    setBusy(`refresh:${mode}`);
+    setError("");
+    setNotice("");
+    try {
+      const result = await request<Refresh>("/model-settings/refresh", {
+        ...draft(),
+        mode,
+      });
+      // The worker only returns values that differ from what is saved, so
+      // merging cannot leave a pending edit equal to the stored value.
+      setVisions((old) => ({ ...old, ...result.visions }));
+      setContextWindows((old) => ({ ...old, ...result.contextWindows }));
+      setEfforts((old) => ({ ...old, ...result.efforts }));
+      const label =
+        refreshSources.find(([key]) => key === mode)?.[1] || "能力快照";
+      const edits = result.proposals.reduce(
+        (total, item) => total + item.fields.length,
+        0,
+      );
+      const parts = [
+        edits
+          ? `${label}：为 ${result.proposals.length} 个模型填入 ${edits} 处改动，尚未保存。`
+          : `${label}：${result.matched} 个模型已匹配，没有需要改的地方。`,
+      ];
+      if (result.unmatched.length)
+        parts.push(`${result.unmatched.length} 个模型在这份快照里没有记录。`);
+      if (result.skipped.length)
+        parts.push(result.skipped[0].reason);
+      if (result.warnings.length) parts.push(result.warnings[0]);
+      setNotice(parts.join(" "));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -474,6 +538,21 @@ export function ChannelModels({
             <span>
               {chosen.length} 个已选 / {ids.length} 个模型
             </span>
+          </div>
+          <div className="channel-capability-refresh">
+            <span className="muted">按已知能力批量填入</span>
+            {refreshSources.map(([mode, label, note]) => (
+              <button
+                key={mode}
+                type="button"
+                className="capability-refresh"
+                disabled={!!busy}
+                title={note}
+                onClick={() => void refreshCapabilities(mode)}
+              >
+                {busy === `refresh:${mode}` ? "正在读取…" : label}
+              </button>
+            ))}
           </div>
           <div className="channel-model-table">
             <div className="channel-model-table-head">

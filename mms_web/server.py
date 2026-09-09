@@ -115,7 +115,7 @@ class WebApplication:
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
     def post(self, parts: list[str], payload: dict) -> dict:
-        if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "preview", "apply"}:
+        if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "refresh", "preview", "apply"}:
             return getattr(self._model_settings(), parts[1])(payload)
         if parts == ["launch-options"]:
             import shutil

@@ -59,6 +59,10 @@
 
 两条端到端测试证明：在 Web 里改识图或上下文并保存后，新启动的 Pi 会话读到的 `input` 与 `contextWindow` 确实改变，来源为 `model_policy`。
 
+模型表上方新增三个批量填入按钮，与配置 Web UI 的同名按钮共用后端：用本地已知快照刷新（随 MMS 分发的已批准事实与本地标定）、从 OpenRouter catalog 快速匹配（联网，通道目录参考）、应用 MMF 官方覆盖（仓库维护的 provider-profiles，更新 MMS 即带来新值）。
+
+实现走 `mms_config_web.refresh_model_capability_truth`，只请求本页能编辑的三个字段。它是 draft-only 的:结果填进行内待保存状态，仍需预览确认才写入，刷新本身不改任何配置。快照建议的 effort 若不在这条通道能执行的档位里会被丢弃并说明原因，否则启动时会被静默降级。
+
 ---
 
 ## 三、工作区与会话管理
