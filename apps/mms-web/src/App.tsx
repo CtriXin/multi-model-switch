@@ -1441,7 +1441,10 @@ export function App() {
                     {
                       workspaceId,
                       presetId,
-                      title: text.slice(0, 42),
+                      // Mark the cut, or a clipped prompt reads as the whole
+                      // title ending mid-sentence.
+                      title:
+                        text.length > 42 ? text.slice(0, 42) + "…" : text,
                       prompt: text,
                       planMode,
                       thinkingLevel: effort || undefined,

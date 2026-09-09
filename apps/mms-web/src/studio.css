@@ -952,11 +952,20 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  /* The search band sits inside this frame, so the columns must take what is
+     left rather than the frame's full height, or they overhang it by exactly
+     the band and get clipped mid-row. */
+  display: flex;
+  flex-direction: column;
+}
+.settings-shell .model-library .explorer-search {
+  flex: none;
 }
 /* The grid between the frame and the columns carries its own min-height and
    was growing past the frame, which clipped both columns short of their end. */
 .settings-shell .model-library .explorer-columns {
-  height: 100%;
+  flex: 1;
+  height: auto;
   min-height: 0;
 }
 .settings-shell .model-library .model-groups,

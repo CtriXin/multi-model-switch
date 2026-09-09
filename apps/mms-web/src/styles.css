@@ -774,6 +774,7 @@ kbd {
   color: var(--muted);
   width: 25px;
   display: flex;
+  align-items: center;
   justify-content: center;
 }
 .recent-copy {
