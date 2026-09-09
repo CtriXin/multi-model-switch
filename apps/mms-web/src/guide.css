@@ -65,3 +65,14 @@
   .tour-card h2 { font-size: max(11px, 1.2143rem); }
   .tour-card p { line-height: 1.65; }
 }
+
+/* The setup coach shares the tour vocabulary and leaves the real fields live. */
+.connection-guide-toggle { display: block; margin: 0 0 12px auto; font-size: .8571rem; }
+.connection-flow.has-connection-guide { padding-bottom: var(--setup-coach-space, 0px); }
+.setup-tour-card { padding: 14px 17px; max-height: min(300px, 44dvh); box-shadow: 0 3px 8px rgb(0 0 0 / .18); }
+.setup-tour-card h2 { font-size: 1.0714rem; margin-bottom: 8px; }
+.setup-tour-card p { line-height: 1.65; margin-bottom: 8px; }
+.setup-tour-card footer { margin-top: 10px; }
+.setup-tour-layer .tour-spotlight { box-shadow: 0 0 0 9999px rgb(15 18 25 / .18); }
+
+.guide-connection-entry { display: flex; align-items: center; gap: 8px; margin-top: 16px; min-height: 40px; }
