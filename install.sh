@@ -1929,6 +1929,68 @@ print_dry_run_plan() {
 }
 
 # ── MMS Web launch ──
+guard_live_pilot_install() {
+    [ -f "$MMS_HOME/mms_web/__main__.py" ] || return 0
+    # FD 9 stays open in this shell through installation. flock uses the same
+    # open file description in Python, so the exclusive lease survives it.
+    local lock_path=""
+    lock_path="$("$(_python_bin)" - "$MMS_HOME" <<'PY'
+import hashlib, os, stat, sys, tempfile
+from pathlib import Path
+directory = Path(tempfile.gettempdir()) / f'mms-pilot-locks-{os.getuid()}'
+directory.mkdir(mode=0o700, exist_ok=True)
+info = directory.lstat()
+if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+    raise SystemExit('Unsafe Pilot install lock directory')
+path = directory / (hashlib.sha256(str(Path(sys.argv[1]).resolve()).encode()).hexdigest() + '.lock')
+if path.is_symlink():
+    raise SystemExit('Unsafe Pilot install lock file')
+print(path)
+PY
+)" || return 1
+    exec 9>"$lock_path"
+    if ! "$(_python_bin)" - "$MMS_HOME" <<'PY'
+import fcntl, os, subprocess, sys
+from pathlib import Path
+try:
+    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    raise SystemExit(1)
+# Older Pilot releases have no lease. Detect their actual process cwd as well
+# as explicit source paths, without touching any process or conversation.
+root = Path(sys.argv[1]).resolve()
+try:
+    rows = subprocess.check_output(['ps', '-ax', '-o', 'pid=', '-o', 'command='], text=True, timeout=5).splitlines()
+except (OSError, subprocess.SubprocessError):
+    raise SystemExit('Cannot verify running Pilot processes; installation stopped')
+for row in rows:
+    parts = row.strip().split(None, 1)
+    if len(parts) != 2:
+        continue
+    pid, command = parts
+    if not any(word in command for word in ('-m mms_web', '/mms-web', '/mms web')):
+        continue
+    if str(root) + '/' in command:
+        raise SystemExit(1)
+    try:
+        proc_cwd = Path('/proc') / pid / 'cwd'
+        if proc_cwd.exists():
+            cwd = proc_cwd.resolve()
+        else:
+            result = subprocess.run(['lsof', '-a', '-p', pid, '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=3)
+            names = [line[1:] for line in result.stdout.splitlines() if line.startswith('n')]
+            cwd = Path(names[0]).resolve() if names else None
+        if cwd == root:
+            raise SystemExit(1)
+    except (OSError, subprocess.SubprocessError):
+        raise SystemExit('Cannot verify a running Pilot process; installation stopped')
+PY
+    then
+        echo "⚠ $(t "Pilot 正在使用此安装目录，已暂停安装；没有关闭进程或清理会话。请在页面的‘更新’入口完成安全更新，或自行退出服务后再运行本命令。" "Pilot is using this installation. Nothing was stopped or removed. Use Update in Pilot, or exit the service yourself before rerunning this command.")"
+        return 1
+    fi
+}
+
 # The installer ends by offering to open MMS Web. The server is started
 # detached so the install process exits immediately; the browser is opened by
 # the server itself. This is the only question the installer ever asks, it is
@@ -2476,6 +2538,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 # ── 1. 检查 Python3 ──
+guard_live_pilot_install
 ensure_supported_python
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
@@ -2663,6 +2726,9 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "  $(t "以后需要排查时再运行:" "Only run this later when debugging:") $NEXT_MMF_CMD config doctor"
     fi
 
+    # All installation writes have finished; a newly opened Pilot may acquire
+    # its shared runtime lease now.
+    exec 9>&-
     if [ "$PREVIEW_CHANNEL_INSTALL" -eq 0 ] && [ "$RUN_SETUP" -eq 1 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
         echo "$(t "检测到首次使用，启动配置向导..." "First-time setup detected, launching setup wizard...")"
         echo ""

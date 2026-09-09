@@ -1,0 +1,38 @@
+{
+  "name": "@ctrixin/mms",
+  "version": "1.0.0",
+  "description": "One-command installer for MMS (multi-model-switch). Always installs the latest MMS release.",
+  "type": "module",
+  "bin": {
+    "mms-install": "bin/mms-install.mjs"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CtriXin/multi-model-switch.git",
+    "directory": "packages/mms-install"
+  },
+  "homepage": "https://github.com/CtriXin/multi-model-switch#readme",
+  "keywords": [
+    "mms",
+    "multi-model-switch",
+    "installer",
+    "claude",
+    "codex",
+    "opencode"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

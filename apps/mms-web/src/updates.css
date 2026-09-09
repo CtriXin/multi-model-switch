@@ -1,0 +1,23 @@
+.update-trigger { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.update-trigger:hover { background: var(--soft); color: var(--ink); }
+.update-trigger.available { color: var(--accent); }
+.update-center { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); overflow: auto; }
+.update-center::backdrop { background: rgb(0 0 0 / .32); }
+.update-center > header { display: flex; align-items: flex-start; justify-content: space-between; padding: 24px; border-bottom: 1px solid var(--line); }
+.update-center h2 { margin: 0 0 6px; font-size: 20px; }
+.update-center h3 { margin: 0 0 12px; font-size: 15px; }
+.update-center header p, .update-muted { margin: 0; font-size: 13px; color: var(--muted); }
+.update-body { padding: 24px; }
+.update-check-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.update-preference { display: flex; align-items: flex-start; gap: 10px; margin-top: 24px; }
+.update-preference input { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 4px; accent-color: var(--accent); }
+.update-preference small { display: block; margin-top: 4px; color: var(--muted); }
+.update-notes { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.update-notes p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
+.update-notes a { color: var(--accent); font-size: 13px; }
+.update-progress { padding: 12px 0; color: var(--accent); }
+.update-error { color: var(--danger); line-height: 1.6; }
+.update-center footer { padding: 18px 24px; border-top: 1px solid var(--line); }
+.update-center footer p { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0 0 14px; }
+.update-center footer > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+@media (max-width: 540px) { .update-body, .update-center > header, .update-center footer { padding: 18px; } .update-check-row { align-items: flex-start; } }
