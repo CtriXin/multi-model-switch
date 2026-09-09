@@ -13,7 +13,21 @@
 .update-preference input { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 4px; accent-color: var(--accent); }
 .update-preference small { display: block; margin-top: 4px; color: var(--muted); }
 .update-notes { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
-.update-notes p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
+.update-notes-body { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.update-notes-body > :first-child { margin-top: 0; }
+.update-notes-body > :last-child { margin-bottom: 0; }
+.update-notes-body p { margin: 0 0 10px; }
+.update-notes-body ul, .update-notes-body ol { margin: 0 0 10px; padding-left: 20px; }
+.update-notes-body li { margin-bottom: 6px; }
+.update-notes-body li:last-child { margin-bottom: 0; }
+.update-notes-body h1, .update-notes-body h2, .update-notes-body h3, .update-notes-body h4 { font-size: 13px; margin: 14px 0 6px; }
+.update-notes-body strong { font-weight: 600; }
+.update-notes-body code { font-family: var(--font-mono); font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--soft); }
+/* A release note's install command is the one thing a reader copies, so let
+   it scroll on its own rather than wrapping mid-URL. */
+.update-notes-body pre { margin: 0 0 10px; padding: 10px 12px; border-radius: 7px; background: var(--soft); overflow-x: auto; }
+.update-notes-body pre code { padding: 0; background: none; white-space: pre; }
+.update-notes-body a { color: var(--accent); }
 .update-notes a { color: var(--accent); font-size: 13px; }
 .update-progress { padding: 12px 0; color: var(--accent); }
 .update-error { color: var(--danger); line-height: 1.6; }

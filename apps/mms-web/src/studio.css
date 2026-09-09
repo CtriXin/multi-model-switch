@@ -168,9 +168,20 @@
   color: var(--muted);
 }
 .workspace-heading {
-  padding: 5px 8px;
+  /* The right inset is permanently reserved for the hover actions, so the
+     folder name truncates in the same place whether or not they are shown.
+     Fading the name on hover instead left it running under the icons: the
+     fade landed inside the name's own box, which extends past where the
+     buttons begin. */
+  padding: 5px 62px 5px 8px;
   font-size: max(11px, 0.8571rem);
   gap: 7px;
+}
+.workspace-heading > span:nth-of-type(1) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .workspace-heading > span:last-child {
   font-size: max(11px, 0.7143rem);
@@ -198,27 +209,6 @@
   padding: 0 2px;
   isolation: isolate;
   transition: opacity var(--duration-base) var(--ease-out);
-}
-/* A plate behind the buttons, so a long folder name slides under a clean
-   surface instead of colliding with the icons. */
-.workspace-row-actions::after {
-  content: "";
-  position: absolute;
-  inset: 0 0 0 -26px;
-  z-index: 0;
-  border-radius: 6px;
-  background: transparent;
-}
-.workspace-group:hover .workspace-row-actions::after {
-  background: transparent;
-}
-.workspace-group:hover .workspace-heading > span:nth-of-type(1) {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - 20px),
-    transparent
-  );
-  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
 }
 .workspace-row-actions > * {
   position: relative;
