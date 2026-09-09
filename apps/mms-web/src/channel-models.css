@@ -102,15 +102,122 @@
 .capability-reset:hover {
   background: var(--soft);
 }
-/* Batch capability fill. The chips sit above the table because they change
-   many rows at once; the per-row reset stays inside its own row. */
+/* Batch capability check. One control above the table, because a refresh
+   changes many rows at once; the per-row reset stays inside its own row. */
 .channel-capability-refresh {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 12px;
   font-size: 12px;
+}
+/* The review sheet: one line per proposed change, so the source and the
+   overwrite warning are read before anything is filled in. */
+.capability-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.capability-review-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.capability-review-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1.1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--line);
+}
+.capability-review-row:first-child {
+  border-top: 0;
+}
+.capability-review-row:hover {
+  background: var(--soft);
+}
+.capability-review-model {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.capability-review-model strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capability-review-model small {
+  color: var(--muted);
+}
+.capability-review-change {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+}
+.capability-review-change > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capability-review-source {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.source-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.source-chip.source-official {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+/* The catalogue is a routing reference, not the vendor. Its rows are opt-in,
+   and the chip should not read as an endorsement. */
+.source-chip.source-catalog {
+  border: 1px dashed var(--line);
+}
+/* Overwriting the user's own setting is the one thing this sheet must never
+   do quietly, so the warning carries its own colour in both themes. */
+.source-chip.source-user {
+  background: color-mix(in oklab, var(--warn-ink) 16%, transparent);
+  color: var(--warn-ink);
+}
+:root {
+  --warn-ink: oklch(52% 0.14 62);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --warn-ink: oklch(80% 0.13 68);
+  }
+}
+:root[data-theme="dark"] {
+  --warn-ink: oklch(80% 0.13 68);
+}
+.capability-review-reports {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.capability-review footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .channel-capability-refresh .capability-refresh {
   border: 1px solid var(--line);

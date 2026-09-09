@@ -289,30 +289,45 @@ def test_reject_unsafe_capability_input(settings, bad):
         settings.preview(draft)
 
 
-def refresh(service, mode, models=("gpt-5", "gpt-4.1")):
+def refresh(service, sources=None, models=("gpt-5", "gpt-4.1")):
     snap = service.read()
-    return service.refresh({"fingerprint": snap["fingerprint"], "revision": snap["revision"],
-                            "providerId": "channel-a", "models": list(models), "mode": mode})
+    request = {"fingerprint": snap["fingerprint"], "revision": snap["revision"],
+               "providerId": "channel-a", "models": list(models)}
+    if sources is not None:
+        request["sources"] = sources
+    return service.refresh(request)
 
 
-def test_official_overrides_refresh_only_drafts_until_the_human_saves(settings, tmp_path):
-    """The batch fill must behave like typing in the rows, not like a save."""
+def picked(result, wanted=("vision", "context", "effort")):
+    """Collect the proposal the way the page does when a row is checked."""
+    edits = {"visions": {}, "contextWindows": {}, "efforts": {}}
+    key = {"vision": "visions", "context": "contextWindows", "effort": "efforts"}
+    for item in result["proposals"]:
+        for field in item["fields"]:
+            if field["field"] in wanted:
+                edits[key[field["field"]]][item["model"]] = field["value"]
+    return edits
+
+
+def test_capability_review_only_drafts_until_the_human_saves(settings, tmp_path):
+    """The review sheet must behave like typing in the rows, not like a save."""
     from mms_web.server import WebApplication
 
     before = settings.read()
-    result = refresh(settings, "official")
-    # Reading a snapshot is not a write: nothing about the config moved.
+    result = refresh(settings)
+    # Reading snapshots is not a write: nothing about the config moved.
     assert settings.read()["revision"] == before["revision"]
     assert settings.fingerprint() == before["fingerprint"]
-    assert result["efforts"]["gpt-5"] == "medium"
+    proposal = {item["model"]: item["fields"] for item in result["proposals"]}
+    assert proposal["gpt-5"][0]["after"] == "medium"
+    assert proposal["gpt-5"][0]["source"] == "official"
     assert next(m for m in before["providers"][0]["models"] if m["id"] == "gpt-5")["effort"] == "low"
-    assert [f["source"] for item in result["proposals"] for f in item["fields"]] == ["official", "official"]
+    assert [r["source"] for r in result["reports"]] == ["official", "approved"]
 
-    # The proposal is the same shape the row controls produce, so it goes
+    # Checked rows produce the same shape the row controls produce, so they go
     # through the one existing preview and publish path.
     draft = payload(settings)
-    draft.update(efforts=result["efforts"], visions=result["visions"],
-                 contextWindows=result["contextWindows"])
+    draft.update(picked(result))
     preview = settings.preview(draft)
     assert {c["model"]: c["after"] for c in preview["changes"] if c["kind"] == "effort"} == {"gpt-5": "medium", "gpt-4.1": "medium"}
     settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
@@ -329,18 +344,41 @@ def test_official_overrides_refresh_only_drafts_until_the_human_saves(settings, 
         app.close()
 
 
-def test_refresh_never_proposes_a_level_this_route_cannot_run(settings):
+def test_review_flags_a_value_the_user_set_themselves(settings):
+    """Overwriting an explicit setting is opt-in, not the default."""
+    # gpt-5 carries an effort from the fixture policy; gpt-4.1 does not.
+    result = refresh(settings)
+    flags = {item["model"]: [f["userSet"] for f in item["fields"]] for item in result["proposals"]}
+    assert flags["gpt-5"] == [True]
+    assert flags["gpt-4.1"] == [False]
+
+
+def test_catalog_rows_are_marked_as_catalog_not_official(settings):
+    """OpenRouter reports its own routing limits, so it must be labelled."""
+    result = refresh(settings, sources=["catalog"])
+    sources = {f["source"] for item in result["proposals"] for f in item["fields"]}
+    assert sources == {"catalog"}
+    assert [r["source"] for r in result["reports"]] == ["catalog"]
+    # A more trusted source wins when both are asked for.
+    merged = refresh(settings, sources=["official", "approved", "catalog"])
+    efforts = {item["model"]: f["source"]
+               for item in merged["proposals"] for f in item["fields"] if f["field"] == "effort"}
+    assert set(efforts.values()) == {"official"}
+
+
+def test_review_never_proposes_a_level_this_route_cannot_run(settings):
     """A clamped effort would report a change the launcher would not honour."""
     rows = {m["id"]: m for m in settings.read()["providers"][0]["models"]}
-    for mode in ("known", "official"):
-        result = refresh(settings, mode)
-        for model, level in result["efforts"].items():
-            assert level in rows[model]["effortLevels"], (mode, model, level)
-        for model, value in result["contextWindows"].items():
-            assert isinstance(value, int) and 1024 <= value <= 10_000_000
-        assert set(result["visions"]) <= set(rows)
+    for sources in (None, ["catalog"]):
+        result = refresh(settings, sources=sources)
+        for item in result["proposals"]:
+            for field in item["fields"]:
+                if field["field"] == "effort":
+                    assert field["value"] in rows[item["model"]]["effortLevels"]
+                if field["field"] == "context":
+                    assert isinstance(field["value"], int) and 1024 <= field["value"] <= 10_000_000
 
 
 def test_refresh_rejects_an_unknown_source(settings):
-    with pytest.raises(WebError, match="刷新来源"):
-        refresh(settings, "somewhere-else")
+    with pytest.raises(WebError, match="能力来源"):
+        refresh(settings, sources=["somewhere-else"])
