@@ -62,7 +62,7 @@ export function SettingsPage({
 }) {
   const [tab, setTab] = useState("models");
   return (
-    <Dialog title="设置" wide close={() => requestNavigation(back)}>
+    <Dialog title="设置" size="sheet" close={() => requestNavigation(back)}>
     <div className="settings-shell">
       <nav className="settings-tabs" aria-label="设置分类">
         <button

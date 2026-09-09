@@ -50,6 +50,7 @@ import { useSessionAttention } from "./SessionAttention";
 import { FilesPanel } from "./FilesPanel";
 import { RuntimePanel, SessionMenu, exportConversation } from "./SessionTools";
 import { RecipeImport } from "./Recipe";
+import { VendorMark, vendorTint } from "./VendorMark";
 import type { Recipe } from "./Recipe";
 import { SettingsPage } from "./SettingsPage";
 import { TaskSettings, SessionSettings } from "./TaskSettings";
@@ -1504,11 +1505,14 @@ export function App() {
                         key={s.id}
                         onClick={() => openSession(s.id)}
                       >
-                        <span className="recent-icon">
+                        <span
+                          className="recent-icon"
+                          style={{ background: vendorTint(undefined, s.modelName) }}
+                        >
                           {s.state === "waiting" ? (
                             <CircleAlert size={19} />
                           ) : (
-                            <FileText size={19} />
+                            <VendorMark name={s.modelName} size={19} />
                           )}
                         </span>
                         <span className="recent-copy">

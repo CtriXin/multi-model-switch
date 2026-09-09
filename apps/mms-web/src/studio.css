@@ -912,6 +912,24 @@
   margin-top: 2px;
   max-width: 52ch;
 }
+/* Inside the sheet the pane itself scrolls. Nested scrollers left the parts
+   that actually need room, the model list and the channel table, moving
+   inside a few hundred pixels while the sheet stayed still. */
+.settings-shell .settings-page {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+.settings-shell .model-groups,
+.settings-shell .model-detail,
+.settings-shell .channel-model-rows {
+  max-height: none;
+  min-height: 0;
+  overflow: visible;
+}
+.settings-shell .model-explorer {
+  min-height: 0;
+}
 .general-settings {
   overflow-y: auto;
   overflow-x: hidden;

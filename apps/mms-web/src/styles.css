@@ -1395,6 +1395,9 @@ dialog {
   color: var(--ink);
 }
 dialog:has(.dialog-body.wide) {
+  width: min(720px, calc(100% - 32px));
+}
+dialog:has(.dialog-body.sheet) {
   width: min(960px, calc(100% - 32px));
 }
 dialog::backdrop {
@@ -1407,7 +1410,7 @@ dialog::backdrop {
    own scrolling body instead of the page it used to occupy. */
 /* Settings embeds the model explorer, whose own dialog rule zeroes this
    padding. Outrank it here so every band in the sheet shares one inset. */
-dialog:has(.dialog-body.wide) .dialog-body.wide {
+dialog:has(.dialog-body.sheet) .dialog-body.sheet {
   width: 100%;
   height: min(680px, 84vh);
   padding: 18px 24px 16px;
@@ -1415,7 +1418,7 @@ dialog:has(.dialog-body.wide) .dialog-body.wide {
   flex-direction: column;
   min-height: 0;
 }
-dialog:has(.dialog-body.wide) .dialog-body.wide > header {
+dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
   padding: 0;
   margin: 0 0 12px;
   border-bottom: 0;
