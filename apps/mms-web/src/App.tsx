@@ -44,6 +44,7 @@ import {
   harnessNames,
 } from "./components";
 import { HelpGuide } from "./HelpGuide";
+import { UpdateCenter } from "./UpdateCenter";
 import { ConnectionDialog } from "./ConnectionDialog";
 import { GuidedTour } from "./GuidedTour";
 import type { TourStep } from "./GuidedTour";
@@ -1420,6 +1421,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
+            <UpdateCenter ready={!loading && connected} />
             <HelpGuide ready={!loading && connected && modelReady && !setupOpen && !settingsOpen} modelReady={modelReady} open={guideOpen} setOpen={(open) => { if (open) setGuideStep(null); setGuideOpen(open); }} hasSession={page === "session" && !!detail} navigate={guideNavigate} startTour={startIntroduction} />
             {detail && (
               <Status

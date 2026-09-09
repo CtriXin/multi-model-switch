@@ -31,6 +31,7 @@ def main(argv=None):
     server = create_server(app, args.static_root, args.port)
     address = f"http://127.0.0.1:{server.server_address[1]}"
     print(f"MMS Pilot: {address}", flush=True)
+    app.updates.start_scheduler()
     if args.open:
         webbrowser.open(address)
     def terminate(_signum, _frame):

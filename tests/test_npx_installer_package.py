@@ -101,7 +101,7 @@ def _node(source):
 def test_selection_precedence_and_equals_normalization():
     _node('''
       import assert from 'node:assert/strict';
-      assert.deepEqual(parseArgs(['--ref=v4.1.0','--channel=dev','--dry-run']), {selection:'dev',forwarded:['--dry-run']});
+      assert.deepEqual(parseArgs(['--ref=v4.1.0','--channel=dev','--dry-run']), {selection:'dev',forwarded:['--dry-run'],literalRef:false});
       assert.equal(parseArgs(['--dev','--ref','v4.8.0']).selection, 'v4.8.0');
       assert.equal(parseArgs(['--canary','--stable']).selection, 'stable');
       assert.throws(()=>parseArgs(['--channel=bogus']));
@@ -151,4 +151,13 @@ def test_temporary_installer_is_removed_on_every_exit():
         assert.throws(()=>runInstaller('fixture',[],()=>({error:new Error('no bash')}),root));
         assert.deepEqual(readdirSync(root),[]);
       } finally {rmSync(root,{recursive:true,force:true});}
+    ''')
+
+
+def test_explicit_ref_named_stable_is_not_changed_to_a_release():
+    _node('''
+      import assert from 'node:assert/strict';
+      const urls=[];
+      const plan=await resolveInstaller(['--ref=stable'],async url=>{urls.push(url);return {ok:true,text:async()=> '#!/bin/bash\\nREPO_NAME="multi-model-switch"'};});
+      assert.equal(urls.length,1);assert.equal(plan.ref,'stable');
     ''')

@@ -36,6 +36,8 @@ class WebApplication:
         self.config_root = config_root
         self.state_root = state_root
         self.csrf_token = secrets.token_urlsafe(32)
+        from .updates import UpdateService
+        self.updates = UpdateService(self)
         self.catalog = _adapter(
             "mms_web.catalog", "CatalogService",
             config_root=config_root, state_root=state_root,
@@ -95,6 +97,8 @@ class WebApplication:
         }
 
     def get(self, parts: list[str]) -> dict:
+        if parts == ["update"]:
+            return self.updates.status()
         if parts == ["model-settings"]:
             return self._model_settings().read()
         if parts == ["sessions"]:
@@ -115,6 +119,10 @@ class WebApplication:
         raise WebError("NOT_FOUND", "找不到这个接口。", 404)
 
     def post(self, parts: list[str], payload: dict) -> dict:
+        if parts == ["update", "check"]:
+            return self.updates.request_check()
+        if parts == ["update", "preferences"]:
+            return self.updates.preferences(payload)
         if len(parts) == 2 and parts[0] == "model-settings" and parts[1] in {"discover", "check", "refresh", "preview", "apply"}:
             return getattr(self._model_settings(), parts[1])(payload)
         if parts == ["launch-options"]:
@@ -196,6 +204,7 @@ class WebApplication:
         return self.catalog
 
     def close(self):
+        self.updates.close()
         if self.sessions:
             self.sessions.close()
 

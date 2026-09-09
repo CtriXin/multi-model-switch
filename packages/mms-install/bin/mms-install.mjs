@@ -13,6 +13,7 @@ const PAYLOAD_MARKERS = ['REPO_NAME="multi-model-switch"', "#!/bin/bash"];
 
 export function parseArgs(args) {
   let selection = "stable";
+  let literalRef = false;
   const forwarded = [];
   for (let i = 0; i < args.length; i++) {
     let arg = args[i];
@@ -27,13 +28,15 @@ export function parseArgs(args) {
       if (arg === "--channel" && !["stable", "dev", "canary"].includes(value)) throw new Error("--channel must be stable, dev or canary");
       if (arg === "--ref" && (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value) || value.includes(".."))) throw new Error("invalid ref");
       selection = value;
+      literalRef = arg === "--ref";
     } else if (["--stable", "--dev", "--canary", "--main", "--latest-release", "--latest-tag"].includes(arg)) {
+      literalRef = false;
       selection = arg === "--latest-release" ? "stable" : arg.slice(2);
     } else {
       forwarded.push(arg);
     }
   }
-  return { selection, forwarded };
+  return { selection, forwarded, literalRef };
 }
 
 async function fetchPinned(url, fetcher) {
@@ -45,13 +48,13 @@ async function fetchPinned(url, fetcher) {
 }
 
 export async function resolveInstaller(args, fetcher = fetch) {
-  const { selection, forwarded } = parseArgs(args);
+  const { selection, forwarded, literalRef } = parseArgs(args);
   let ref = selection;
-  if (selection === "stable") {
+  if (!literalRef && selection === "stable") {
     const release = await (await fetchPinned(`https://api.github.com/repos/${REPO}/releases/latest`, fetcher)).json();
     ref = release.tag_name;
     if (!TAG.test(ref) || release.draft || release.prerelease) throw new Error("no valid stable MMS release found");
-  } else if (selection === "latest-tag") {
+  } else if (!literalRef && selection === "latest-tag") {
     const tags = await (await fetchPinned(`https://api.github.com/repos/${REPO}/tags?per_page=100`, fetcher)).json();
     ref = tags.map(t => t.name).filter(t => TAG.test(t)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
     if (!ref) throw new Error("no stable MMS tag found");
