@@ -100,6 +100,7 @@ export interface SessionEvent {
   attachments?: Attachment[];
   references?: string[];
   fileSelections?: { path: string; revision: number; quote?: string; region?: ImageRegion }[];
+  contextUsage?: import("./ContextUsage").ContextRecord;
   usage?: Record<string, unknown>;
 }
 export interface Artifact {

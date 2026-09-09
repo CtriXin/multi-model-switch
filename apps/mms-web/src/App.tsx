@@ -32,6 +32,7 @@ import {
   harnessNames,
 } from "./components";
 import { ArtifactView } from "./ArtifactView";
+import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
 import { ConversationOutline } from "./ConversationOutline";
 import { CurrentActivity, sessionStatus } from "./SessionStatus";
@@ -748,6 +749,7 @@ export function App() {
                 <p>写下想法，或引用电脑上的文件。</p>
               </div>
               <div className="recipe-access">
+                {!isPreview && workspaceId && <ProjectMaterials key={workspaceId} workspaceId={workspaceId} />}
                 <RecipeImport
                   loaded={(item) => {
                     setRecipe({ ...item, key: Date.now() });
@@ -1040,6 +1042,7 @@ export function App() {
                       <FolderOpen size={14} />
                       {detail.session.cwd?.split("/").pop() || "工作文件"}
                     </button>
+                    {!isPreview && <ProjectMaterials key={detail.session.workspaceId} workspaceId={detail.session.workspaceId} />}
                     <SessionMenu
                       detail={detail}
                       action={runAction}

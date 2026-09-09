@@ -11,6 +11,10 @@ from .runtime import real_home
 
 
 def effective_paths(cwd, home):
+    return [item["path"] for item in effective_entries(cwd, home)]
+
+
+def effective_entries(cwd, home):
     # Matches mms_pi_support._pi_materialize_skill_overlay: top-level names
     # override global -> repository root -> cwd, with .agents after .pi.
     directories = []
@@ -20,16 +24,20 @@ def effective_paths(cwd, home):
         if (current / ".git").exists() or current.parent == current:
             break
         current = current.parent
-    sources = [(Path(home) / ".agents/skills", False)]
+    sources = [(Path(home) / ".agents/skills", False, "共享")]
     for directory in reversed(directories):
-        sources.extend([(directory / ".pi/skills", True), (directory / ".agents/skills", False)])
+        sources.extend([(directory / ".pi/skills", True, "项目"), (directory / ".agents/skills", False, "项目")])
     entries = {}
-    for root, markdown in sources:
+    for root, markdown, scope in sources:
         if not root.is_dir():
             continue
         for entry in root.iterdir():
             if not entry.name.startswith(".") and not (entry.is_file() and not markdown):
-                entries[entry.name] = str(entry)
+                previous = entries.get(entry.name)
+                if previous and previous["path"] == str(entry):
+                    continue
+                entries[entry.name] = {"path": str(entry), "source": scope, "sourceRoot": str(root),
+                                       "overrides": [*previous["overrides"], previous["path"]] if previous else []}
     return list(entries.values())
 
 
@@ -49,9 +57,11 @@ class SkillCatalog:
         if not module.is_file():
             raise WebError("SKILLS_UNAVAILABLE", "当前 Pi 版本未提供 skills 读取接口。", 409)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        origins = effective_entries(workspace["path"], real_home())
         with tempfile.TemporaryDirectory(dir=self.root, prefix="overlay-") as temporary:
             overlay = Path(temporary)
-            for entry in effective_paths(workspace["path"], real_home()):
+            for origin in origins:
+                entry = origin["path"]
                 (overlay / Path(entry).name).symlink_to(entry)
             result = subprocess.run([node, str(Path(__file__).with_name("skill_catalog.mjs"))],
                 input=json.dumps({"module":str(module), "cwd":workspace["path"], "agentDir":str(self.root), "paths":[str(overlay)]}),
@@ -59,10 +69,15 @@ class SkillCatalog:
         if result.returncode:
             raise WebError("SKILLS_UNAVAILABLE", "无法读取当前 Pi skills，请检查安装。", 409)
         result = json.loads(result.stdout)
-        project = Path(workspace["path"]).resolve()
         for skill in result["skills"]:
             skill["id"] = hashlib.sha256(skill["filePath"].encode()).hexdigest()[:24]
-            skill["source"] = "项目" if Path(skill["filePath"]).is_relative_to(project) else "共享"
+            actual = Path(skill["filePath"]).resolve()
+            matches = [origin for origin in origins if actual == Path(origin["path"]).resolve()
+                       or actual.is_relative_to(Path(origin["path"]).resolve())]
+            if len(matches) == 1:
+                skill.update({key: matches[0][key] for key in ("source", "sourceRoot", "overrides")})
+            else:
+                skill.update(source="多个入口" if matches else "来源未确认", sourceRoot="", overrides=[])
         return result
 
     def prepare(self, ids, workspace_id):
@@ -81,7 +96,8 @@ class SkillCatalog:
                 raise WebError("SKILL_TOO_LARGE", f"{skill['name']} 超过 100 KB，请使用文件引用。", 400)
             body = path.read_text(encoding="utf-8")
             parts.append(f"\n\n用户为本次任务选择 skill：{skill['name']}\nSkill 文件：{path}\n相对路径基准：{skill['baseDir']}\n\n{body}")
-            selected.append({k:skill[k] for k in ("id", "name", "source")})
+            selected.append({**{k:skill[k] for k in ("id", "name", "source", "filePath", "baseDir", "sourceRoot", "overrides")},
+                             "sha256": hashlib.sha256(body.encode()).hexdigest()})
         content = "".join(parts)
         if len(content.encode()) > 200_000:
             raise WebError("SKILLS_TOO_LARGE", "所选 skills 内容过多，请减少选择。", 400)

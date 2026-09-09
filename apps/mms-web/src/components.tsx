@@ -17,6 +17,7 @@ import { ToolEvent } from "./ToolEvent";
 import { messageAnchor } from "./ConversationOutline";
 import { MessageActions } from "./SessionTools";
 import { AttachmentView } from "./MessageMedia";
+import { ContextUsage } from "./ContextUsage";
 import type {
   Preset,
   SessionDetail,
@@ -306,6 +307,7 @@ export function EventView({
           <p>{selection.quote || "图片中的选定区域"}</p>
         </blockquote>)}
         <RichText text={event.text} repair={event.kind === "assistant"} />
+        {event.kind === "user" && <ContextUsage event={event} />}
         {event.text && (
           <MessageActions
             detail={detail}

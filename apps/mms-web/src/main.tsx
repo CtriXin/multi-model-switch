@@ -7,6 +7,7 @@ import "./states.css";
 import "./transcript.css";
 import "./connections.css";
 import "./artifacts.css";
+import "./materials.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

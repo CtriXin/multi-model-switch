@@ -22,7 +22,7 @@ import uuid
 from typing import Callable
 
 from ..errors import WebError
-from .base import DriverClosedError, RpcTimeoutError
+from .base import DriverClosedError, DriverWriteUnconfirmedError, RpcTimeoutError
 
 _DIALOG_METHODS = {"select", "confirm", "input", "editor"}
 _FIRE_AND_FORGET_METHODS = {"notify", "setStatus", "setWidget", "setTitle", "set_editor_text"}
@@ -179,7 +179,7 @@ class PiRpcDriver:
         except (BrokenPipeError, OSError) as exc:
             with self._state_lock:
                 self._pending.pop(request_id, None)
-            raise DriverClosedError(f"pi stdin write failed: {exc.__class__.__name__}") from exc
+            raise DriverWriteUnconfirmedError(f"pi stdin write failed: {exc.__class__.__name__}") from exc
         wait_seconds = self._response_timeout if timeout is None else timeout
         if not pending.event.wait(wait_seconds):
             with self._state_lock:
@@ -288,7 +288,7 @@ class PiRpcDriver:
             pending = list(self._pending.values())
             self._pending.clear()
         for item in pending:
-            item.response = {"type": "response", "success": False, "error": "process exited"}
+            item.response = {"type": "response", "success": False, "error": "process exited", "deliveryUnconfirmed": True}
             item.event.set()
         try:
             exit_code = self._proc.wait(timeout=5)

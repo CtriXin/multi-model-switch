@@ -187,3 +187,14 @@ Session 增加 `presetId`，assistant event 增加 `modelName`。已有回答保
 - 历史版本位于私有 `state_root/artifacts`，内容以 hash 校验。原文件改变或删除不删除已记录版本。旧会话没有历史快照时，只展示当前可读文件并明确没有版本记录，不重建曾经的文件内容。
 
 读取不跟随工作目录中的 symlink，不开放任意文件 URL，不预览隐藏配置/已知会话凭据。版本是成果内容记录，不是整个工作目录 checkpoint，也没有自动回滚文件操作。
+
+
+## 项目资料与每轮来源记录
+
+- `POST /project-materials {workspaceId}` 只读返回 `{workspace, revision, items, limits}`。项目身份由已登记工作目录的 canonical path 决定；同一路径的别名共享资料，其他项目隔离。资料保存在 Web 私有 `state_root/project-materials`，不写 MMS 配置或项目文件。
+- `POST /project-materials/change {workspaceId, revision, confirmed:true, action:"save"|"delete", id?, title?, content?, enabled?}`。保存与编辑必须明确确认；删除需要 id。revision 不匹配返回 `MATERIALS_CHANGED`，客户端应保留草稿，刷新核对后再保存。最多 20 条、单条 UTF-8 正文 20,000 bytes、总正文 80,000 bytes；title 最多 80 字符。文件有跨进程锁与原子写入，权限 0600。
+- 每条资料记录 id/title/content/enabled、单条 revision、sha256、source=`manual`、createdAt/updatedAt/confirmedAt。损坏、来源/hash/预算异常的索引会拒绝读取和覆盖。停用/删除只阻止后续重复注入，已提交的 native 会话历史不撤回。
+- launch/send 在提交消息前读取当前启用资料，将正文作为明确的用户资料加入请求；不能把模型自行生成的文字自动保存为长期资料。
+- 新 user Event 的 `contextUsage` 含 cwd、state 与 items。items 为 material/skill/reference/attachment/selection，保存实际准备内容的版本/hash及来源元数据。旧事件无该字段时不重建或猜测。显式文件引用记录路径，不能当作实际读取证明。
+- state=`prepared` 表示已准备但没有 native 提交确认；`submitted` 表示 Pi RPC 已接收；明确拒绝为 `failed`，超时或确认前进程断开为 `uncertain`。queued/cancelled 同时由 event.status 表达，不把已排队请求标为本轮已消耗。submitted 也不表示模型已阅读、理解或完成任务。
+- 手动选中的 Skills 记录 native 解析后的 filePath/baseDir、实际正文 sha256、有效入口 sourceRoot、共享/项目来源及同名覆盖路径。原 launcher overlay 选择规则保持不变；多个别名无法唯一对应时明确来源不唯一，不伪造实际自动加载清单。
