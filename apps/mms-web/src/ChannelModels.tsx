@@ -39,6 +39,7 @@ type Snapshot = {
   revision: string;
   fingerprint: string;
   configRoot: string;
+  configScope?: "standalone" | "mmf";
   providers: Provider[];
 };
 type Change = {
@@ -441,7 +442,7 @@ export function ChannelModels({
           <div className="channel-model-table">
             <div className="channel-model-table-head">
               <span>在该通道中使用</span>
-              <span>MMF 默认 effort</span>
+              <span>默认 effort</span>
             </div>
             <div className="channel-model-rows">
               {shown.map((id) => {
@@ -553,7 +554,7 @@ export function ChannelModels({
             </button>
           </form>
           <p className="channel-scope-note">
-            模型勾选只影响当前通道。MMF 默认 effort 按模型 ID
+            模型勾选只影响当前通道。默认 effort 按模型 ID
             保存，会影响其他通道的同名模型；下拉框按当前 Pi
             通道的可用档位展示；其他 harness 按各自能力处理。
           </p>
@@ -571,7 +572,7 @@ export function ChannelModels({
       )}
       {preview && (
         <Dialog
-          title="确认保存到 MMF"
+          title={snapshot?.configScope === "standalone" ? "确认保存设置" : "确认保存到 MMF"}
           close={() => setPreview(undefined)}
           dismissible={busy !== "apply"}
         >
@@ -629,7 +630,7 @@ export function ChannelModels({
                 disabled={!!busy || phrase !== preview.confirmPhrase}
                 onClick={() => void apply()}
               >
-                {busy === "apply" ? "正在保存并校验…" : "保存到 MMF"}
+                {busy === "apply" ? "正在保存并校验…" : snapshot?.configScope === "standalone" ? "保存设置" : "保存到 MMF"}
               </button>
             </footer>
           </div>
