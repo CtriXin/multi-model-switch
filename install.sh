@@ -1761,10 +1761,12 @@ print_install_headline() {
 
     ensure_install_ref_resolved
     installed_ref="$(current_installed_ref || true)"
-    if [ -n "$installed_ref" ] && [ "$installed_ref" != "${RESOLVED_INSTALL_REF:-}" ]; then
-        echo "$(t "升级" "Upgrading"): ${installed_ref} → ${RESOLVED_INSTALL_REF:-local-source}"
+    if [ -z "$installed_ref" ]; then
+        echo "$(t "安装最新版本" "Installing the latest version"): ${RESOLVED_INSTALL_REF:-local-source}"
+    elif [ "$installed_ref" = "${RESOLVED_INSTALL_REF:-}" ]; then
+        echo "$(t "已经是最新版本，将重新安装" "Already on the latest version, reinstalling it"): ${installed_ref}"
     else
-        echo "$(t "安装版本" "Installing"): ${RESOLVED_INSTALL_REF:-local-source}"
+        echo "$(t "升级到最新版本" "Upgrading to the latest version"): ${installed_ref} → ${RESOLVED_INSTALL_REF:-local-source}"
     fi
     return 0
 }
