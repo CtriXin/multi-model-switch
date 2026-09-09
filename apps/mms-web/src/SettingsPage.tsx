@@ -1,16 +1,17 @@
 import { useState } from "react";
-import { Sun, Moon, SlidersHorizontal, Palette, ArrowLeft } from "lucide-react";
+import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { Models } from "./Models";
-import { AppVersion } from "./components";
+import { FONT_FAMILIES } from "./App";
+import { AppVersion, Dialog } from "./components";
 
 export function SettingsPage({
   data,
   favorites,
   toggleFavorite,
   refresh,
-  theme,
-  setTheme,
+  themeChoice,
+  setThemeChoice,
   accent,
   setAccent,
   back,
@@ -19,14 +20,21 @@ export function SettingsPage({
   workspaceId,
   effortChanged,
   autoCollapseProcess, setAutoCollapseProcess,
+  fontFamily, setFontFamily,
+  monoFont, setMonoFont,
+  cjkFont, setCjkFont,
+  installedFonts,
+  fontSize, setFontSize,
+  boldText, setBoldText,
+  selectToCopy, setSelectToCopy,
   requestNavigation, editStateChanged,
 }: {
   data: Bootstrap;
   favorites: string[];
   toggleFavorite: (id: string) => void;
   refresh: () => void;
-  theme: "light" | "dark";
-  setTheme: (value: "light" | "dark") => void;
+  themeChoice: "light" | "dark" | "system";
+  setThemeChoice: (value: "light" | "dark" | "system") => void;
   accent: string;
   setAccent: (value: string) => void;
   back: () => void;
@@ -38,24 +46,24 @@ export function SettingsPage({
   editStateChanged: (state: {dirty: boolean; busy: boolean}) => void;
   autoCollapseProcess: boolean;
   setAutoCollapseProcess: (on: boolean) => void;
+  fontFamily: string;
+  setFontFamily: (value: string) => void;
+  monoFont: string;
+  setMonoFont: (value: string) => void;
+  cjkFont: string;
+  setCjkFont: (value: string) => void;
+  installedFonts: Record<string, boolean>;
+  fontSize: number;
+  setFontSize: (value: number) => void;
+  boldText: boolean;
+  setBoldText: (on: boolean) => void;
+  selectToCopy: boolean;
+  setSelectToCopy: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState("models");
   return (
+    <Dialog title="设置" size="sheet" close={() => requestNavigation(back)}>
     <div className="settings-shell">
-      <header className="settings-heading">
-        <button
-          className="icon-button"
-          aria-label="返回工作空间"
-          onClick={back}
-        >
-          <ArrowLeft size={18} />
-        </button>
-        <div>
-          <h1>设置</h1>
-          <p>常用偏好，放在一起。</p>
-        </div>
-        <AppVersion version={data.appVersion} />
-      </header>
       <nav className="settings-tabs" aria-label="设置分类">
         <button
           className={tab === "models" ? "active" : ""}
@@ -71,6 +79,7 @@ export function SettingsPage({
           <Palette size={16} />
           外观与使用
         </button>
+        <AppVersion version={data.appVersion} />
       </nav>
       {tab === "models" ? (
         <Models
@@ -96,22 +105,136 @@ export function SettingsPage({
               <p>保存在当前浏览器，随时可以更换。</p>
             </div>
             <div className="appearance-options">
-              <button
-                aria-pressed={theme === "light"}
-                onClick={() => setTheme("light")}
-              >
-                <Sun size={16} />
-                浅色
-              </button>
-              <button
-                aria-pressed={theme === "dark"}
-                onClick={() => setTheme("dark")}
-              >
-                <Moon size={16} />
-                深色
-              </button>
+              {(
+                [
+                  ["system", "跟随系统", Monitor],
+                  ["light", "浅色", Sun],
+                  ["dark", "深色", Moon],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  aria-pressed={themeChoice === id}
+                  onClick={() => setThemeChoice(id)}
+                >
+                  <Icon size={15} />
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
+          <label className="preference-row">
+            <div>
+              <h2>选择即复制</h2>
+              <p>选中对话里的文字后自动复制。会覆盖剪贴板里原有的内容；输入框中的选择不受影响。默认关闭。</p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="选择即复制"
+              checked={selectToCopy}
+              onChange={(e) => setSelectToCopy(e.target.checked)}
+            />
+          </label>
+          <div className="preference-row">
+            <div>
+              <h2>界面字体</h2>
+              <p>影响整个页面。只列出这台电脑装了的字体。</p>
+            </div>
+            <select
+              aria-label="界面字体"
+              value={fontFamily}
+              onChange={(e) => setFontFamily(e.target.value)}
+            >
+              <option value="system">跟随系统</option>
+              <option value="system_ui">System UI</option>
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => !f.cjk && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>等宽字体</h2>
+              <p>代码块与运行详情使用。</p>
+            </div>
+            <select
+              aria-label="等宽字体"
+              value={monoFont}
+              onChange={(e) => setMonoFont(e.target.value)}
+            >
+              <option value="system">SF Mono</option>
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => f.mono && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="preference-row">
+            <div>
+              <h2>中文字体兜底</h2>
+              <p>主字体缺中日韩字形时使用。</p>
+            </div>
+            <select
+              aria-label="中文字体兜底"
+              value={cjkFont}
+              onChange={(e) => setCjkFont(e.target.value)}
+            >
+              <option value="system">跟随系统</option>
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => f.cjk && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="preference-row font-size-row">
+            <div>
+              <h2>字号</h2>
+              <p>{fontSize} px，改动立即生效。</p>
+            </div>
+            <span className="stepper">
+              <button
+                type="button"
+                aria-label="减小字号"
+                disabled={fontSize <= 12}
+                onClick={() => setFontSize(fontSize - 1)}
+              >
+                <Minus size={13} />
+              </button>
+              <output aria-live="polite">{fontSize}</output>
+              <button
+                type="button"
+                aria-label="增大字号"
+                disabled={fontSize >= 20}
+                onClick={() => setFontSize(fontSize + 1)}
+              >
+                <Plus size={13} />
+              </button>
+            </span>
+          </div>
+          <label className="preference-row">
+            <div>
+              <h2>加粗正文</h2>
+              <p>所有正文用字体的加粗切片渲染。</p>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="加粗正文"
+              checked={boldText}
+              onChange={(e) => setBoldText(e.target.checked)}
+            />
+          </label>
           <div className="preference-row">
             <div>
               <h2>强调色</h2>
@@ -120,9 +243,10 @@ export function SettingsPage({
             <div className="accent-options" role="group" aria-label="强调色">
               {[
                 ["indigo", "靛蓝"],
-                ["blue", "海蓝"],
-                ["rose", "玫瑰"],
+                ["cyan", "青蓝"],
+                ["pink", "品红"],
                 ["orange", "琥珀"],
+                ["green", "翠绿"],
               ].map(([id, name]) => (
                 <button
                   key={id}
@@ -166,5 +290,6 @@ export function SettingsPage({
         </section>
       )}
     </div>
+    </Dialog>
   );
 }

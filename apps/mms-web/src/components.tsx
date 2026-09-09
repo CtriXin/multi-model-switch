@@ -105,11 +105,15 @@ export function Dialog({
   children,
   close,
   dismissible = true,
+  size = "default",
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   dismissible?: boolean;
+  /** "wide" for lists that read badly in a narrow column, "sheet" for the
+   *  settings surface, which holds a full channel table. */
+  size?: "default" | "wide" | "sheet";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -127,7 +131,7 @@ export function Dialog({
         if (dismissible && e.target === ref.current) close();
       }}
     >
-      <section className="dialog-body">
+      <section className={"dialog-body" + (size === "default" ? "" : " " + size)}>
         <header>
           <h2>{title}</h2>
           <button

@@ -222,3 +222,68 @@ def test_reject_unsafe_connection_input(settings, url):
     draft['connection'] = {'openaiBaseUrl': url}
     with pytest.raises(WebError):
         settings.preview(draft)
+
+
+def test_published_vision_setting_reaches_a_new_pi_session(settings, tmp_path):
+    """A vision flag set here must change what the launched Pi session sees."""
+    from mms_web.server import WebApplication
+
+    draft = payload(settings)
+    draft.update(efforts={}, visions={"gpt-5": False})
+    preview = settings.preview(draft)
+    assert preview["changes"] == [{"kind": "vision", "model": "gpt-5", "before": "可读取图片",
+                                   "after": "不可读取图片", "channels": ["channel-a", "channel-b"]}]
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+    rows = settings.read()["providers"]
+    assert all(next(m for m in p["models"] if m["id"] == "gpt-5")["vision"] is False for p in rows)
+
+    app = WebApplication(state_root=tmp_path / "web-vision", config_root=settings.root)
+    project = tmp_path / "project-vision"
+    project.mkdir()
+    try:
+        workspace = app.catalog.add_workspace({"path": str(project)})
+        options = app.post(["launch-options"], {"presetId": "web:pi:channel-a:gpt-5",
+                                                "workspaceId": workspace["id"]})
+        assert "image" not in options["model"]["input"]
+        assert options["capabilitySources"]["supports_vision"] == "model_policy"
+    finally:
+        app.close()
+
+
+def test_published_context_window_reaches_a_new_pi_session(settings, tmp_path):
+    from mms_web.server import WebApplication
+
+    draft = payload(settings)
+    draft.update(efforts={}, contextWindows={"gpt-5": 262144})
+    preview = settings.preview(draft)
+    assert preview["changes"][0]["kind"] == "context"
+    assert preview["changes"][0]["after"] == "262144"
+    settings.apply({"previewId": preview["previewId"], "confirmPhrase": "写入预览DB"})
+    rows = settings.read()["providers"]
+    assert all(next(m for m in p["models"] if m["id"] == "gpt-5")["contextWindow"] == 262144 for p in rows)
+
+    app = WebApplication(state_root=tmp_path / "web-context", config_root=settings.root)
+    project = tmp_path / "project-context"
+    project.mkdir()
+    try:
+        workspace = app.catalog.add_workspace({"path": str(project)})
+        options = app.post(["launch-options"], {"presetId": "web:pi:channel-a:gpt-5",
+                                                "workspaceId": workspace["id"]})
+        assert options["model"]["contextWindow"] == 262144
+    finally:
+        app.close()
+
+
+@pytest.mark.parametrize("bad", [
+    {"visions": {"gpt-5": "yes"}},
+    {"visions": {"unknown-model": True}},
+    {"contextWindows": {"gpt-5": 12}},
+    {"contextWindows": {"gpt-5": 99_000_000}},
+    {"contextWindows": {"gpt-5": True}},
+    {"contextWindows": {"gpt-5": "262144"}},
+])
+def test_reject_unsafe_capability_input(settings, bad):
+    draft = payload(settings)
+    draft.update(efforts={}, **bad)
+    with pytest.raises(WebError):
+        settings.preview(draft)

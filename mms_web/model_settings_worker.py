@@ -107,6 +107,11 @@ def public_rows(rows):
                            "effectiveEffort": effective,
                            "contextWindow": options.get("model", {}).get("contextWindow") or caps.get("context_window_tokens"),
                            "vision": "image" in options.get("model", {}).get("input", []),
+                           "visionSource": options.get("capabilitySources", {}).get("supports_vision", ""),
+                           "contextSource": options.get("capabilitySources", {}).get("context_window_tokens", ""),
+                           "capabilitiesEditable": bool(options),
+                           "catalogVision": options.get("catalog", {}).get("vision"),
+                           "catalogContextWindow": options.get("catalog", {}).get("contextWindow"),
                            "launchOverride": str(runtime.get("reasoning_effort") or "") if runtime else ""})
         from mms_web.channel_connection import public_connection
         result.append({"id": p["id"], "name": p["name"], "models": models,
@@ -138,6 +143,30 @@ def draft_for(rows, request, revision):
         if value != known[model]["effort"]:
             affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
             changes.append({"kind": "effort", "model": model, "before": known[model]["effort"] or "自动", "after": value, "channels": affected})
+    visions = request.get("visions") or {}
+    if not isinstance(visions, dict):
+        raise WebError("INVALID_VISION", "识图设置格式无效。", 400)
+    for model, value in visions.items():
+        if model not in known or not isinstance(value, bool) or not known[model].get("capabilitiesEditable"):
+            raise WebError("INVALID_VISION", "这个模型不能在这里设置识图能力。", 400)
+        if value != known[model]["vision"]:
+            affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
+            changes.append({"kind": "vision", "model": model,
+                            "before": "可读取图片" if known[model]["vision"] else "不可读取图片",
+                            "after": "可读取图片" if value else "不可读取图片", "channels": affected})
+    contexts = request.get("contextWindows") or {}
+    if not isinstance(contexts, dict):
+        raise WebError("INVALID_CONTEXT", "上下文长度格式无效。", 400)
+    for model, value in contexts.items():
+        # A context window the route cannot honour would silently truncate work,
+        # so refuse the value here instead of writing it into policy.
+        if model not in known or not known[model].get("capabilitiesEditable") or not isinstance(value, int) or isinstance(value, bool) or not 1024 <= value <= 10_000_000:
+            raise WebError("INVALID_CONTEXT", "上下文长度需要是 1024 到 10000000 之间的整数。", 400)
+        if value != known[model]["contextWindow"]:
+            affected = [p["name"] for p in rows if any(m["id"] == model for m in p["models"])]
+            changes.append({"kind": "context", "model": model,
+                            "before": str(known[model]["contextWindow"] or "自动"),
+                            "after": str(value), "channels": affected})
     for model in sorted(set(selected) - original):
         changes.append({"kind": "add", "model": model})
     for model in sorted(original - set(selected)):
@@ -158,7 +187,15 @@ def draft_for(rows, request, revision):
         target["extra_models"] = []
         target["fallback_models"] = []
     # Capability edits are model-level; never set policy_touched/visible here.
-    target["model_capabilities"] = {c["model"]: {"reasoning_effort": c["after"]} for c in changes if c["kind"] == "effort"}
+    capability_edits = {}
+    for change in changes:
+        if change["kind"] == "effort":
+            capability_edits.setdefault(change["model"], {})["reasoning_effort"] = change["after"]
+        elif change["kind"] == "vision":
+            capability_edits.setdefault(change["model"], {})["vision"] = visions[change["model"]]
+        elif change["kind"] == "context":
+            capability_edits.setdefault(change["model"], {})["context_window_tokens"] = contexts[change["model"]]
+    target["model_capabilities"] = capability_edits
     from mms_web.channel_connection import edit_connection
     connection, connection_changes = edit_connection(target, request.get("connection"))
     target.update(connection)

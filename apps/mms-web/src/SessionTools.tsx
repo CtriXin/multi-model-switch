@@ -431,7 +431,7 @@ export function MessageActions({
             }
           >
             <GitBranch size={13} />
-            从这里分支
+            从这里开始新会话
           </button>
         )}
         {error && <small role="alert">{error}</small>}

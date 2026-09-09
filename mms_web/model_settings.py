@@ -122,7 +122,7 @@ class ModelSettings:
         with self.lock:
             self._check(payload)
             # Do not preserve caller-supplied action/root/confirmation fields.
-            draft = {k: payload.get(k) for k in ("providerId", "models", "efforts", "connection", "revision", "fingerprint")}
+            draft = {k: payload.get(k) for k in ("providerId", "models", "efforts", "visions", "contextWindows", "connection", "revision", "fingerprint")}
             result = self.worker({**draft, "action": "plan"})
             self._check(payload)
             token = uuid.uuid4().hex

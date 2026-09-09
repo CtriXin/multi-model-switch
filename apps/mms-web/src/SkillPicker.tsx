@@ -30,7 +30,7 @@ export function SkillPicker({
       `${s.name} ${s.description}`.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <Dialog title="为这次任务添加 skills" close={close}>
+    <Dialog title="为这次任务添加 skills" size="wide" close={close}>
       <p className="dialog-intro">
         按需选择，发送时带入指引。其他已安装 skills 仍可由模型按任务发现。
       </p>

@@ -1,6 +1,6 @@
 .channel-models {
   max-width: 960px;
-  padding: 8px 0 32px;
+  padding: 8px 14px 32px 0;
 }
 .channel-models h2 {
   margin: 26px 0 6px;
@@ -67,9 +67,40 @@
 .channel-model-table-head,
 .channel-model-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 155px;
+  grid-template-columns: minmax(0, 1fr) 190px 155px;
   align-items: center;
   gap: 18px;
+}
+.channel-model-capability {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.channel-model-capability label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.channel-model-capability input[type="number"] {
+  width: 92px;
+  padding: 2px 6px;
+}
+/* Offered only when the row differs from what MMF already knows, so it reads
+   as "put it back" rather than one more thing to decide. */
+.capability-reset {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.capability-reset:hover {
+  background: var(--soft);
 }
 .channel-model-table-head {
   padding: 10px 12px;
@@ -217,6 +248,17 @@
     grid-template-columns: minmax(0, 1fr) 125px;
     gap: 8px;
     padding-inline: 4px;
+  }
+  /* Capability editing drops to its own line before the columns get too thin
+     to read; it is not a control worth cramping the model name for. */
+  .channel-model-table-head span:nth-child(2),
+  .channel-model-row .channel-model-capability {
+    grid-column: 1 / -1;
+  }
+  .channel-model-capability {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
   }
   .channel-models-heading {
     align-items: flex-start;

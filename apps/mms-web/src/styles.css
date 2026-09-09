@@ -1,7 +1,14 @@
 :root {
-  font-family:
+  --font-sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono:
+    "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  /* Overridden from the appearance settings; --font-sans is the default. */
+  font-family: var(--app-font, var(--font-sans));
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
   color-scheme: light;
   --bg: oklch(98.3% 0.003 154);
   --surface: oklch(100% 0 0);
@@ -10,6 +17,9 @@
   --muted: oklch(48% 0.012 154);
   --line: oklch(89.5% 0.008 154);
   --soft: oklch(95.7% 0.005 154);
+  --duration-fast: 0.12s;
+  --duration-base: 0.16s;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --accent: oklch(45% 0.12 154);
   --accent-hover: oklch(38% 0.11 154);
   --selected: oklch(92.5% 0.024 154);
@@ -47,7 +57,8 @@
 }
 body {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-font-size, 14px);
+  font-weight: var(--app-font-weight, 400);
   color: var(--ink);
   background: var(--bg);
 }
@@ -57,6 +68,36 @@ textarea,
 select {
   font: inherit;
   color: inherit;
+}
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
+  font-feature-settings: "calt" 1;
+}
+code {
+  font-size: 0.88em;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 5%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ink) 7%, var(--line));
+}
+kbd {
+  font-size: 0.82em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+/* Tabular figures belong where numbers are compared, not in prose. */
+.session-row-time,
+.usage-meter,
+.runtime-strip,
+.channel-model-capability,
+.font-options output,
+time {
+  font-variant-numeric: tabular-nums;
 }
 button {
   cursor: pointer;
@@ -337,7 +378,7 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 .session-link-copy small {
   display: flex;
@@ -368,9 +409,11 @@ kbd {
   background: var(--danger);
 }
 .attention-dot {
-  height: 5px;
-  width: 5px;
+  height: 6px;
+  width: 6px;
   border-radius: 50%;
+  /* A static ring reads as clearly as a pulse and survives reduced motion. */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent);
 }
 .sidebar-empty {
   font-size: 12px;
@@ -731,6 +774,7 @@ kbd {
   color: var(--muted);
   width: 25px;
   display: flex;
+  align-items: center;
   justify-content: center;
 }
 .recent-copy {
@@ -1350,11 +1394,34 @@ dialog {
   background: var(--surface);
   color: var(--ink);
 }
+dialog:has(.dialog-body.wide) {
+  width: min(720px, calc(100% - 32px));
+}
+dialog:has(.dialog-body.sheet) {
+  width: min(960px, calc(100% - 32px));
+}
 dialog::backdrop {
   background: oklch(10% 0.01 154 / 0.35);
 }
 .dialog-body {
   padding: 24px;
+}
+/* Settings holds a channel table, so it gets a workspace-sized sheet with its
+   own scrolling body instead of the page it used to occupy. */
+/* Settings embeds the model explorer, whose own dialog rule zeroes this
+   padding. Outrank it here so every band in the sheet shares one inset. */
+dialog:has(.dialog-body.sheet) .dialog-body.sheet {
+  width: 100%;
+  height: min(680px, 84vh);
+  padding: 18px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+dialog:has(.dialog-body.sheet) .dialog-body.sheet > header {
+  padding: 0;
+  margin: 0 0 12px;
+  border-bottom: 0;
 }
 .dialog-body header {
   display: flex;
@@ -1397,8 +1464,20 @@ dialog::backdrop {
 .search-results button:hover {
   background: var(--soft);
 }
+/* A flex child defaults to min-width:auto, so a long title pushed the row
+   wider than the dialog and shoved the arrow out of view. */
 .search-results button > span {
   flex: 1;
+  min-width: 0;
+}
+.search-results button > svg {
+  flex: none;
+}
+.search-results strong,
+.search-results small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .search-results strong {
   display: block;
@@ -1915,11 +1994,23 @@ dialog::backdrop {
   cursor: pointer;
 }
 .composer-tools button:hover,
-.session-workbar button:hover,
-.runtime-strip button:hover,
-.message-actions button:hover {
+.session-workbar button:hover:not(:disabled),
+.runtime-strip button:hover:not(:disabled),
+.message-actions button:hover:not(:disabled) {
   background: var(--soft);
   color: var(--ink);
+}
+.session-workbar button,
+.runtime-strip button,
+.message-actions button {
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+/* The transcript-wide process toggle lives here so it stays reachable while
+   the conversation scrolls. */
+.process-toggle-all[aria-expanded="false"] {
+  color: var(--muted);
 }
 .composer-tools > span {
   margin-left: auto;
@@ -2263,10 +2354,18 @@ dialog::backdrop {
 }
 .session-workbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 4px;
+}
+/* The folder name takes the slack, so every control after it sits together
+   on the right whether or not the process toggle is present. */
+.session-workbar > .workbar-folder {
+  margin-right: auto;
+}
+.session-workbar > .current-activity {
+  margin-bottom: 0;
+  flex: none;
 }
 .session-workbar > button {
   overflow: hidden;
@@ -2634,10 +2733,13 @@ dialog:has(.model-explorer) {
     0 28px 90px #0d292b35,
     0 3px 12px #0d292b15;
 }
-dialog:has(.model-explorer) .dialog-body {
+/* Direct child only. A plain dialog opened from inside the explorer is still
+   a descendant of it, and the unscoped rule stripped that dialog's padding
+   too, leaving its text flush against the frame. */
+dialog:has(> .dialog-body .model-explorer) > .dialog-body {
   padding: 0;
 }
-dialog:has(.model-explorer) .dialog-body > header {
+dialog:has(> .dialog-body .model-explorer) > .dialog-body > header {
   padding: 18px 24px;
   margin: 0;
   border-bottom: 1px solid var(--line);
@@ -2865,11 +2967,39 @@ dialog:has(.model-explorer) .dialog-body > header {
   font-size: 11px;
 }
 .quick-config summary {
+  display: block;
+  cursor: pointer;
+  color: var(--muted);
+  list-style: none;
+  border-radius: 8px;
+}
+.quick-config summary::-webkit-details-marker {
+  display: none;
+}
+/* The card describes the settings inside, so it opens them. Hover on the
+   whole summary is what tells you it is not a read-only slab. */
+.quick-config summary:hover .route-summary {
+  background: color-mix(in srgb, var(--muted) 10%, var(--surface));
+}
+.quick-config summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.quick-config-more {
   display: flex;
   gap: 8px;
   align-items: center;
-  cursor: pointer;
-  color: var(--muted);
+  padding-top: 12px;
+}
+.quick-config-more svg:last-child {
+  margin-left: auto;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.quick-config[open] .quick-config-more svg:last-child {
+  transform: rotate(180deg);
+}
+.quick-config .route-summary {
+  transition: background var(--duration-fast) var(--ease-out);
 }
 .quick-config label {
   display: flex;

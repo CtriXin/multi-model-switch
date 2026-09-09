@@ -22,6 +22,11 @@ type ModelSetting = {
   effortLevels: string[];
   contextWindow?: number;
   vision: boolean;
+  visionSource?: string;
+  contextSource?: string;
+  capabilitiesEditable?: boolean;
+  catalogVision?: boolean;
+  catalogContextWindow?: number;
 };
 type Provider = {
   id: string;
@@ -43,7 +48,7 @@ type Snapshot = {
   providers: Provider[];
 };
 type Change = {
-  kind: "add" | "remove" | "effort" | "connection";
+  kind: "add" | "remove" | "effort" | "vision" | "context" | "connection";
   model: string;
   before?: string;
   after?: string;
@@ -56,6 +61,27 @@ type Preview = {
   confirmPhrase: string;
   writeSummary: string;
 };
+
+const capabilityOriginLabels: Record<string, string> = {
+  manual_override: "本机覆盖",
+  model_policy: "你设置的",
+  approved_facts: "MMF 目录",
+  provider_profile: "通道预设",
+  conservative_fallback: "未声明，按保守值",
+};
+
+function capabilityOrigin(model: ModelSetting) {
+  const parts = [
+    model.vision ? "可读取图片" : "不可读取图片",
+    model.contextWindow
+      ? `${Math.round(model.contextWindow / 1000)}K 上下文`
+      : "",
+  ].filter(Boolean);
+  const origin =
+    capabilityOriginLabels[model.visionSource || ""] ||
+    capabilityOriginLabels[model.contextSource || ""];
+  return origin ? `${parts.join(" · ")} · 来源 ${origin}` : parts.join(" · ");
+}
 
 export function ChannelModels({
   initialProvider,
@@ -72,6 +98,10 @@ export function ChannelModels({
   const [providerId, setProviderId] = useState(initialProvider);
   const [chosen, setChosen] = useState<string[]>([]);
   const [efforts, setEfforts] = useState<Record<string, string>>({});
+  const [visions, setVisions] = useState<Record<string, boolean>>({});
+  const [contextWindows, setContextWindows] = useState<Record<string, number>>(
+    {},
+  );
   const [connection, setConnection] = useState<Record<string, string>>({});
   const [showConnection, setShowConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState("");
@@ -92,6 +122,8 @@ export function ChannelModels({
     chosen.length !== original.length ||
     chosen.some((id) => !original.includes(id)) ||
     Object.keys(efforts).length > 0 ||
+    Object.keys(visions).length > 0 ||
+    Object.keys(contextWindows).length > 0 ||
     Object.keys(connection).length > 0;
   useEffect(() => {
     editStateChanged({dirty, busy: busy === "apply"});
@@ -112,6 +144,8 @@ export function ChannelModels({
     setProviderId(p?.id || "");
     setChosen(p?.models.filter((m) => m.visible).map((m) => m.id) || []);
     setEfforts({});
+    setVisions({});
+    setContextWindows({});
     setConnection({});
     setShowConnection(false);
     setConnectionResult("");
@@ -153,6 +187,8 @@ export function ChannelModels({
     fingerprint: snapshot?.fingerprint,
     models: chosen,
     efforts,
+    visions,
+    contextWindows,
     connection,
   });
   function editConnection(field: string, value: string) {
@@ -442,6 +478,7 @@ export function ChannelModels({
           <div className="channel-model-table">
             <div className="channel-model-table-head">
               <span>在该通道中使用</span>
+              <span>能力</span>
               <span>默认 effort</span>
             </div>
             <div className="channel-model-rows">
@@ -467,17 +504,105 @@ export function ChannelModels({
                               ? "手工添加，保存后可配置默认值"
                               : remote && !remote.includes(id)
                                 ? "本次拉取未返回，已保留原选择"
-                                : [
-                                    model.vision ? "可接收图片" : "",
-                                    model.contextWindow
-                                      ? `${Math.round(model.contextWindow / 1000)}K 上下文`
-                                      : "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" · ")}
+                                : capabilityOrigin(model)}
                         </small>
                       </span>
                     </label>
+                    {model?.capabilitiesEditable ? (
+                      <div className="channel-model-capability">
+                        <label>
+                          <input
+                            type="checkbox"
+                            aria-label={`${id} 可读取图片`}
+                            checked={visions[id] ?? model.vision}
+                            disabled={!!busy}
+                            onChange={(e) =>
+                              setVisions((old) => {
+                                const next = { ...old };
+                                if (e.target.checked === model.vision)
+                                  delete next[id];
+                                else next[id] = e.target.checked;
+                                return next;
+                              })
+                            }
+                          />
+                          <span>可读取图片</span>
+                        </label>
+                        <label>
+                          <span>上下文</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1024}
+                            max={10000000}
+                            step={1024}
+                            aria-label={`${id} 上下文长度`}
+                            placeholder="自动"
+                            value={
+                              contextWindows[id] ?? model.contextWindow ?? ""
+                            }
+                            disabled={!!busy}
+                            onChange={(e) =>
+                              setContextWindows((old) => {
+                                const next = { ...old };
+                                const value = Number(e.target.value);
+                                if (
+                                  !e.target.value ||
+                                  !Number.isFinite(value) ||
+                                  value === model.contextWindow
+                                )
+                                  delete next[id];
+                                else next[id] = Math.trunc(value);
+                                return next;
+                              })
+                            }
+                          />
+                        </label>
+                        {(() => {
+                          const vision = visions[id] ?? model.vision;
+                          const context = contextWindows[id] ?? model.contextWindow;
+                          const off =
+                            (model.catalogVision !== undefined &&
+                              vision !== model.catalogVision) ||
+                            (model.catalogContextWindow !== undefined &&
+                              context !== model.catalogContextWindow);
+                          if (!off) return null;
+                          return (
+                            <button
+                              type="button"
+                              className="capability-reset"
+                              disabled={!!busy}
+                              title="按 MMF 目录里这个模型的已知能力填回"
+                              onClick={() => {
+                                setVisions((old) => {
+                                  const next = { ...old };
+                                  if (model.catalogVision === undefined) return next;
+                                  if (model.catalogVision === model.vision)
+                                    delete next[id];
+                                  else next[id] = model.catalogVision;
+                                  return next;
+                                });
+                                setContextWindows((old) => {
+                                  const next = { ...old };
+                                  if (model.catalogContextWindow === undefined)
+                                    return next;
+                                  if (model.catalogContextWindow === model.contextWindow)
+                                    delete next[id];
+                                  else next[id] = model.catalogContextWindow;
+                                  return next;
+                                });
+                              }}
+                            >
+                              用 MMF 默认
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <span className="muted">
+                        {model ? "保存后可编辑" : ""}
+                      </span>
+                    )}
                     {model?.effortLevels.length ? (
                       <select
                         aria-label={`${id} MMF 默认 effort`}
@@ -589,11 +714,18 @@ export function ChannelModels({
                         ? "从通道移除"
                         : c.kind === "connection"
                           ? "修改连接"
-                          : "修改默认 effort"}
+                          : c.kind === "vision"
+                            ? "修改识图能力"
+                            : c.kind === "context"
+                              ? "修改上下文长度"
+                              : "修改默认 effort"}
                   </strong>
                   <span>
                     {c.model}
-                    {(c.kind === "effort" || c.kind === "connection") &&
+                    {(c.kind === "effort" ||
+                      c.kind === "connection" ||
+                      c.kind === "vision" ||
+                      c.kind === "context") &&
                       `：${c.before} → ${c.after || "自动（移除覆盖）"}`}
                   </span>
                   {c.channels && (
