@@ -1635,7 +1635,7 @@ def test_pi_tokyo_gemini_high_is_unblocked_after_live_smoke():
     assert "upstream 500" in mms_launchers._pi_model_block_reason(runtime, "gemini-3.1-pro-low")
 
 
-def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
+def test_pi_hints_and_profile_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -1678,7 +1678,8 @@ def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_p
     assert model_by_id["qwen3.6-flash"]["maxTokens"] == 65_536
     assert model_by_id["qwen3.6-flash"]["input"] == ["text", "image"]
     assert model_by_id["qwen3.7-max"]["contextWindow"] == 1_000_000
-    assert model_by_id["qwen3.7-max"]["maxTokens"] == 65_536
+    # The checked-in Qwen 3.7 provider profile now overrides the older builtin hint.
+    assert model_by_id["qwen3.7-max"]["maxTokens"] == 131_072
     assert model_by_id["qwen3.7-max"]["input"] == ["text"]
 
 

@@ -43,6 +43,7 @@ CODEGRAPH_PACKAGE_SPEC="${CODEGRAPH_PACKAGE_SPEC:-@colbymchenry/codegraph@latest
 CLAUDE_CLI_PACKAGE_SPEC="${CLAUDE_CLI_PACKAGE_SPEC:-@anthropic-ai/claude-code@latest}"
 CODEX_CLI_PACKAGE_SPEC="${CODEX_CLI_PACKAGE_SPEC:-@openai/codex@latest}"
 OPENCODE_CLI_PACKAGE_SPEC="${OPENCODE_CLI_PACKAGE_SPEC:-opencode-ai@latest}"
+PI_CLI_PACKAGE_SPEC="${PI_CLI_PACKAGE_SPEC:-@earendil-works/pi-coding-agent@0.85.1}"
 ECC_REPO_URL="${ECC_REPO_URL:-https://github.com/affaan-m/everything-claude-code}"
 ECC_INSTALL_REF="${ECC_INSTALL_REF:-}"
 OMC_REPO_URL="${OMC_REPO_URL:-https://github.com/Yeachan-Heo/oh-my-claudecode}"
@@ -478,7 +479,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
   - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供；NSR 工具随 channel 内建，/nsr 命令会自动安装，自动 hook 已退休；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 目录，并清理旧 command symlink" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, and token-saver ship as bundled MMS session assets; NSR tools ship with each channel and /nsr commands are auto-installed; automatic hooks are retired; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill dirs, and legacy command symlinks are cleaned")
-  - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
+  - $(t "--install-cli 可选安装 claude/codex/opencode/pi（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode/pi (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -520,7 +521,7 @@ parse_install_cli_arg() {
             continue
         fi
         case "$normalized" in
-            claude|codex|opencode)
+            claude|codex|opencode|pi)
                 append_csv_item "$normalized"
                 ;;
             *)
@@ -1457,6 +1458,14 @@ install_named_cli() {
     local package_spec=""
 
     case "$cli_name" in
+        pi)
+            command_name="pi"
+            label="Pi coding agent"
+            package_spec="$PI_CLI_PACKAGE_SPEC"
+            if ! command -v node >/dev/null 2>&1 || ! node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=19)?0:1)' >/dev/null 2>&1; then
+                ensure_nvm_node22 || return 1
+            fi
+            ;;
         claude)
             command_name="claude"
             label="Claude Code"
@@ -4035,6 +4044,12 @@ if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
 fi
 
 cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
+[ -f "$SOURCE_DIR/mms-web" ] && cp "$SOURCE_DIR/mms-web" "$MMS_HOME/"
+[ -f "$SOURCE_DIR/MMS Web.command" ] && cp "$SOURCE_DIR/MMS Web.command" "$MMS_HOME/"
+copy_dir_safely "$SOURCE_DIR/mms_web" "$MMS_HOME/mms_web" "MMS Web 服务" "MMS Web service"
+copy_dir_safely "$SOURCE_DIR/mms_web_static" "$MMS_HOME/mms_web_static" "MMS Web 页面" "MMS Web client"
+mkdir -p "$MMS_HOME/docs"
+copy_dir_safely "$SOURCE_DIR/docs/mms-web" "$MMS_HOME/docs/mms-web" "MMS Web 使用文档" "MMS Web documentation"
 [ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"
 [ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
@@ -4072,6 +4087,8 @@ NSR_COMMAND_INSTALL_STATUS="not_run"
 install_builtin_nsr_commands
 
 chmod +x "$MMS_HOME/mms"
+[ -f "$MMS_HOME/mms-web" ] && chmod +x "$MMS_HOME/mms-web"
+[ -f "$MMS_HOME/MMS Web.command" ] && chmod +x "$MMS_HOME/MMS Web.command"
 [ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"
 [ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
@@ -4082,6 +4099,7 @@ chmod +x "$MMS_HOME/mms"
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
 rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
+[ -f "$MMS_HOME/mms-web" ] && rewrite_shebang "$MMS_HOME/mms-web" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmf" ] && rewrite_shebang "$MMS_HOME/mmf" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"
 
@@ -4122,6 +4140,7 @@ mkdir -p "$BIN_DIR"
 
 # 创建 primary symlink；legacy ccs / mmc 已下线，仅保留 mms / mmf / mmslogs 入口。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
+[ -f "$MMS_HOME/mms-web" ] && ln -sf "$MMS_HOME/mms-web" "$BIN_DIR/mms-web"
 [ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"
 # Remove stale MMS-owned legacy ccs/mmc artifacts from previous installs without touching unrelated user commands.
 rm -f "$MMS_HOME/mmc"

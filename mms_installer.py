@@ -22,12 +22,14 @@ class _LazyConsole:
 console = _LazyConsole()
 
 INSTALL_COMMANDS = {
+    "pi": "npm install -g @earendil-works/pi-coding-agent@0.85.1",
     "claude": "curl -fsSL https://claude.ai/install.sh | sh",
     "codex": "npm install -g @openai/codex@latest",
     "opencode": "curl -fsSL https://opencode.ai/install | bash",
 }
 
 CLI_DESCRIPTIONS = {
+    "pi": "Pi coding agent (Node.js >= 22.19.0)",
     "claude": "Claude Code (Anthropic)",
     "codex": "Codex CLI (OpenAI)",
     "opencode": "OpenCode CLI",

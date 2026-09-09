@@ -2330,12 +2330,6 @@ def _default_reasoning_effort_for_model_info(model_info):
         values.extend(str(v or "") for k, v in model_info.items() if k != "subagent")
     else:
         values.append(str(model_info or ""))
-    for item in values:
-        normalized = str(item or "").strip().lower()
-        if "/" in normalized:
-            normalized = normalized.rsplit("/", 1)[-1]
-        if _model_matches_account_cli("codex", normalized):
-            return _default_gpt_reasoning_effort()
     try:
         from mms_capability_resolver import load_default_model_policy
 
@@ -2364,6 +2358,13 @@ def _default_reasoning_effort_for_model_info(model_info):
                     return "xhigh"
     except Exception:
         pass
+    # Explicit model policy wins; keep the existing GPT fallback when unset.
+    for item in values:
+        normalized = str(item or "").strip().lower()
+        if "/" in normalized:
+            normalized = normalized.rsplit("/", 1)[-1]
+        if _model_matches_account_cli("codex", normalized):
+            return _default_gpt_reasoning_effort()
     return "high"
 
 
@@ -17089,6 +17090,13 @@ def _handle_disabled_legacy_chat_discuss(command):
 
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
+    if argv and argv[0] == "web":
+        from mms_web.__main__ import main as web_main
+        web_args = list(argv[1:])
+        selected_root = os.environ.get("MMS_CONFIG_ROOT", "")
+        if selected_root and os.path.isdir(os.path.expanduser(selected_root)) and "--config-root" not in web_args and not any(a.startswith("--config-root=") for a in web_args):
+            web_args = ["--config-root", selected_root, *web_args]
+        return web_main(web_args)
     if _is_version_request(argv):
         set_language(_resolve_ui_language(None, lang_override))
         _print_version_summary(argv[1:])

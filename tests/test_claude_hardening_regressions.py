@@ -2071,6 +2071,8 @@ def test_overlay_web_access_session_entries_merges_session_and_web_access_skill(
     (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
     (web_access_root / "README.md").write_text("# readme\n", encoding="utf-8")
 
+    # Host canonical skills have precedence; this test owns an empty real HOME.
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(tmp_path.joinpath("real-home", *parts)))
     monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
 
     mms_launchers._overlay_web_access_session_entries(
