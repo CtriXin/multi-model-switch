@@ -1482,3 +1482,17 @@ def test_legacy_modules_remain_importable_until_physical_delete_phase() -> None:
     assert mms_action_bar.run_chat_loop
     assert mms_usage.usage_main
     assert mmc_core.main
+
+
+def test_published_v4_track_preserves_explicit_launcher_channels(monkeypatch):
+    import mms_core
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    meta = {"install_channel": "latest-tag", "installed_ref": "v4.0.0"}
+    track = mms_core._release_track_for_channel(meta)
+    assert track["release_track_version"] == "4.0.0"
+    assert track["release_track_label"] == "4.x Stable"
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    assert mms_core._release_track_for_channel(meta)["release_track"] == "dev"
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmg")
+    assert mms_core._release_track_for_channel(meta)["release_track"] == "canary"

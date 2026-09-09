@@ -164,7 +164,14 @@ release_track_version() {
     case "$(release_track_id)" in
         canary) printf "4.0.0-canary" ;;
         dev) printf "4.0.0-dev" ;;
-        *) printf "3.x-stable" ;;
+        *)
+            local ref="${INSTALL_REF:-$RESOLVED_INSTALL_REF}"
+            if [[ "$ref" =~ ^v(4\.[0-9]+\.[0-9]+)$ ]]; then
+                printf "%s" "${BASH_REMATCH[1]}"
+            else
+                printf "3.x-stable"
+            fi
+            ;;
     esac
 }
 
@@ -172,7 +179,13 @@ release_track_label() {
     case "$(release_track_id)" in
         canary) printf "4.0 Canary Preview" ;;
         dev) printf "4.0 Dev Preview" ;;
-        *) printf "3.x Stable" ;;
+        *)
+            if [ "$(release_track_version)" = "3.x-stable" ]; then
+                printf "3.x Stable"
+            else
+                printf "4.x Stable"
+            fi
+            ;;
     esac
 }
 
