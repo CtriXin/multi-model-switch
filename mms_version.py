@@ -1,2 +1,2 @@
 """Version of the packaged MMS source and Web client."""
-VERSION = "4.5.0"
+VERSION = "4.6.0"

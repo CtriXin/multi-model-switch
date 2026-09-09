@@ -191,3 +191,35 @@ def test_first_connection_loads_bundled_defaults_without_a_generation_call(local
             assert restored.get(["bootstrap"])["presets"][0]["available"]
         finally:
             restored.close()
+
+
+def test_shutdown_replaces_pi_process_but_history_remains_sendable(local_app):
+    app, workspace, _ = local_app
+    with model_service() as (url, requests):
+        preview = app.post(["configuration", "preview"], {"service": {
+            "name": "Upgrade", "baseUrl": url, "apiKey": "upgrade-fixture-key",
+            "protocol": "openai", "models": ["MiniMax-M3"]}})
+        saved = app.post(["configuration", "apply"], {"previewId": preview["previewId"], "revision": preview["revision"]})
+        sid = app.post(["sessions"], {"requestId": "before-upgrade", "presetId": saved["presetIds"][0],
+            "workspaceId": workspace["id"], "prompt": "before-upgrade-history-marker"})["session"]["id"]
+        before = settle(app, sid)
+        driver = app.sessions._get(sid).driver
+        pid = driver._proc.pid
+        state = app.catalog._state_root
+        app.close()
+        assert not driver.alive()  # Data recovery is not uninterrupted execution.
+        restored = WebApplication(state_root=state)
+        try:
+            recovered = restored.get(["sessions", sid])
+            assert recovered["session"]["state"] == "stopped"
+            assert recovered["session"]["capabilities"]["send"]
+            assert {e["id"] for e in before["events"]}.issubset({e["id"] for e in recovered["events"]})
+            restored.post(["sessions", sid, "messages"], {"requestId": "after-upgrade", "text": "continue-history-marker"})
+            after = settle(restored, sid)
+            assert restored.sessions._get(sid).driver._proc.pid != pid
+            posts = [r for r in requests if r["method"] == "POST"]
+            assert len(posts) == 2 and posts[-1]["body"]["model"] == "MiniMax-M3"
+            assert "before-upgrade-history-marker" in json.dumps(posts[-1]["body"]["messages"])
+            assert any(e.get("text") == "通道连接验证完成。" for e in after["events"])
+        finally:
+            restored.close()
