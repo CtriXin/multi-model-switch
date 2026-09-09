@@ -8,7 +8,7 @@ type StepContent = { target: string[]; title: string; body: string; tip?: string
 const content: Record<TourStep, StepContent> = {
   welcome: { target: ['textarea[aria-label="任务内容"]', '#mms-help-button'], title: "第一次用 AI？从这里开始", body: "把 AI 当作可以反复沟通的助手：告诉它你想做什么，它会回答，也能帮你处理文件。接下来，我们就在这个页面一起试一次。", tip: "亮起的地方可以直接点击。随时可以跳过，再点 ? 回来。" },
   connection: { target: ['[data-guide="connect"]'], title: "先让助手连接一个模型", body: "模型是负责回答你的 AI。点击亮起的「连接服务」，按提示填入服务商给你的 API 地址和 API Key，再选择模型并保存。", tip: "API Key 是服务商给你的连接密钥。没有这些信息时，可以先熟悉页面，之后再配置。" },
-  workspace: { target: ['[data-guide="workspace"]', '.home-intro select'], title: "这次在哪个文件夹里工作？", body: "点这里输入项目名，就能查找最近用过的文件夹；也可以浏览电脑上的其他目录。你让 AI 读文件、写文章或改代码时，它会从这个位置开始。", tip: "只是聊天也要先选一个文件夹。已有会话保留原路径；换项目时新建会话再选。" },
+  workspace: { target: ['[data-guide="workspace"]', '.home-intro select'], title: "这次在哪个文件夹里工作？", body: "点这里输入项目名，就能查找最近用过的文件夹；也可以浏览电脑上的其他目录。你让 AI 读文件、写文章或改代码时，它会从这个位置开始。", tip: "已为你选好工作文件夹，普通聊天可以直接继续。换项目时再选择其他目录；已有会话保留原路径。" },
   model: { target: ['.studio-popover:popover-open .model-picker-trigger', '.task-settings-trigger'], title: "选择帮你回答的模型", body: "点亮起的模型名称，再打开「模型与通道」选择。模型可以理解为不同的助手；通道是连接它的服务。第一次先选一个可用模型就够了。", tip: "以后也能在这里换模型，已有对话会保留。确认选择后回来，继续下一步。" },
   effort: { target: ['.studio-popover:popover-open [data-guide="effort"]', '.task-settings-trigger'], title: "effort：让它想得更深，还是更快？", body: "这里的「思考强度」就是 effort。简单问答可以选较低档，复杂分析再提高。第一次保留默认值也可以。", tip: "只显示当前模型支持的档位。高档通常更慢、用量更多，不保证回答一定更好。不能调整时，以这里的状态说明为准。" },
   compose: { target: ['textarea[aria-label="任务内容"]'], title: "像和人说话一样，写下你的想法", body: "不用学特殊命令。说清楚「我想做什么、现在有什么、希望得到什么」就行。也可以先填入下面的简单示例，看看 AI 怎样回应。", tip: "示例会追加到已有草稿后面。你可以修改，填入不会自动发送。" },
@@ -41,9 +41,11 @@ export function GuidedTour({ step, move, close, help, example, modelReady, confi
   const layer = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLElement>(null);
   const [layout, setLayout] = useState<Layout>({ box: null, left: 12, top: 80, side: "none", arrow: 24, paused: false });
-  const index = tourSteps.indexOf(step);
+  const steps = modelReady ? tourSteps.filter(s => s !== "connection") : [...tourSteps];
+  const index = steps.indexOf(step);
+  const firstCount = steps.indexOf("reply") + 1;
   const item = content[step];
-  const more = index >= 8;
+  const more = index >= firstCount;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let previous = "";
@@ -99,19 +101,19 @@ export function GuidedTour({ step, move, close, help, example, modelReady, confi
     return () => document.removeEventListener("keydown", escape);
   }, [close]);
   const last = step === "finish";
-  const next = () => move(tourSteps[index + 1]);
+  const next = () => move(steps[index + 1]);
   const body = step === "connection" && modelReady ? "已经发现可用模型，可以直接继续。如果要连接自己的其他服务，点击亮起的入口，按提示配置。" : step === "connection" && !configure ? "当前模型来自已有 MMF 配置。点击亮起的入口查看来源；有可用模型时可以直接继续。" : item.body;
   return <div ref={layer} popover="manual" className="tour-layer" aria-label="悬浮使用引导">
     {layout.box && <div className="tour-spotlight" aria-hidden="true" style={{ left: layout.box.x, top: layout.box.y, width: layout.box.width, height: layout.box.height }} />}
     <section ref={card} className="tour-card" tabIndex={-1} role="dialog" aria-modal="false" aria-labelledby="tour-title" aria-describedby="tour-body" style={{ left: layout.left, top: layout.top, width: 'min(352px, calc(100vw - 24px))' }}>
       {layout.box && layout.side !== "none" && <i className={`tour-arrow ${layout.side}`} style={layout.side === "left" ? { top: 28 } : { left: layout.arrow }} aria-hidden="true" />}
-      <header><span>{more ? `认识更多功能 · ${index - 7} / 8` : `开始第一条对话 · ${Math.min(index + 1, 8)} / 8`}</span><button type="button" className="icon-button" aria-label="跳过悬浮引导" onClick={close}><X size={16} /></button></header>
+      <header><span>{more ? `认识更多功能 · ${index - firstCount + 1} / 8` : `开始第一条对话 · ${Math.min(index + 1, firstCount)} / ${firstCount}`}</span><button type="button" className="icon-button" aria-label="跳过悬浮引导" onClick={close}><X size={16} /></button></header>
       <h2 id="tour-title">{item.title}</h2><p id="tour-body">{body}</p>
       {item.tip && <p className="tour-tip">{item.tip}</p>}
       {!layout.box && <p className="tour-tip" role="status">{!hasSession && (step === "artifacts" || step === "runtime") ? "开始或打开一条会话后，这个入口就会出现。可以先跳到下一项。" : "当前页面暂未显示这个入口，可以先了解说明或跳到下一步。"}</p>}
       {step === "compose" && <button className="button tour-example" type="button" onClick={() => example(starterPrompt)}>帮我填入一条示例</button>}
       {step === "send" && !modelReady && <button className="text-button" type="button" onClick={() => move("connection")}>还没有可用模型，去连接服务</button>}
-      <footer><button type="button" className="text-button" disabled={index === 0} onClick={() => move(tourSteps[index - 1])}><ArrowLeft size={14} />上一步</button><button type="button" className="button primary" onClick={last || step === "send" ? close : next}>{last ? "知道了" : step === "send" ? "稍后再发" : step === "reply" ? "认识更多功能" : "下一步"}{!last && step !== "send" && <ArrowRight size={14} />}</button></footer>
+      <footer><button type="button" className="text-button" disabled={index === 0} onClick={() => move(steps[index - 1])}><ArrowLeft size={14} />上一步</button><button type="button" className="button primary" onClick={last || step === "send" ? close : next}>{last ? "知道了" : step === "send" ? "稍后再发" : step === "reply" ? "认识更多功能" : "下一步"}{!last && step !== "send" && <ArrowRight size={14} />}</button></footer>
       <div className="tour-links"><button type="button" onClick={close}>先自己试试</button><button type="button" onClick={help}>查功能说明</button></div>
     </section>
   </div>;

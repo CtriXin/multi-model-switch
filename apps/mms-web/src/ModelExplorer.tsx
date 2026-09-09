@@ -37,13 +37,13 @@ export const effortLabels: Record<string, string> = {
   xhigh: "更深入",
   max: "最高",
 };
-export function useLaunchFacts(presetId: string, workspaceId: string) {
+export function useLaunchFacts(presetId: string, workspaceId: string, retry = 0) {
   const [state, setState] = useState<{
     key: string;
     facts?: LaunchFacts;
     error?: string;
   }>({ key: "" });
-  const key = presetId + "|" + workspaceId;
+  const key = presetId + "|" + workspaceId + "|" + retry;
   useEffect(() => {
     let cancelled = false;
     if (!presetId || !workspaceId) return;

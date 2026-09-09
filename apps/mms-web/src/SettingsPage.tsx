@@ -6,6 +6,7 @@ import { FONT_FAMILIES } from "./App";
 import { AppVersion, Dialog } from "./components";
 
 export function SettingsPage({
+  connectionCompleted,
   tour,
   data,
   favorites,
@@ -30,6 +31,7 @@ export function SettingsPage({
   selectToCopy, setSelectToCopy,
   requestNavigation, editStateChanged,
 }: {
+  connectionCompleted: () => void;
   tour?: ReactNode;
   data: Bootstrap;
   favorites: string[];
@@ -85,6 +87,7 @@ export function SettingsPage({
       </nav>
       {tab === "models" ? (
         <Models
+          connectionCompleted={connectionCompleted}
           data={data}
           favorites={favorites}
           toggleFavorite={toggleFavorite}

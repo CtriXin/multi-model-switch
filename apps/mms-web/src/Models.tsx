@@ -6,6 +6,7 @@ import { ChannelModels } from "./ChannelModels";
 import { ConnectionDialog } from "./ConnectionDialog";
 
 export function Models({
+  connectionCompleted,
   data,
   favorites,
   toggleFavorite,
@@ -16,6 +17,7 @@ export function Models({
   effortChanged,
   editStateChanged,
 }: {
+  connectionCompleted: () => void;
   data: Bootstrap;
   favorites: string[];
   toggleFavorite: (id: string) => void;
@@ -28,6 +30,7 @@ export function Models({
 }) {
   const [manage, setManage] = useState(false);
   const [add, setAdd] = useState(false);
+  const [firstConnection, setFirstConnection] = useState(false);
   const [selected, setSelected] = useState(
     value || data.presets.find((p) => p.available)?.id || "",
   );
@@ -62,7 +65,7 @@ export function Models({
               管理通道模型
             </button>
           )}
-          <button data-guide="connect" className="button" onClick={() => setAdd(true)}>
+          <button data-guide="connect" className="button" onClick={() => { setFirstConnection(!data.presets.some(p => p.available)); setAdd(true); }}>
             {data.capabilities.configure ? (
               <Plus size={16} />
             ) : (
@@ -107,6 +110,8 @@ export function Models({
       {add && (
         <ConnectionDialog
           data={data}
+          onboarding={firstConnection}
+          complete={firstConnection ? connectionCompleted : undefined}
           select={select}
           close={() => setAdd(false)}
           refresh={refresh}

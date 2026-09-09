@@ -161,3 +161,33 @@ def test_generic_connection_update_keeps_protocol_specific_url(local_app):
     app.post(["configuration", "apply"], {"previewId": preview["previewId"], "revision": preview["revision"]})
     after = app.catalog.resolve_launch("web:pi:legacy-a:gpt-5", workspace["id"])["runtime"]
     assert after["openai_base_url"] == before["openai_base_url"]
+
+
+def test_first_connection_loads_bundled_defaults_without_a_generation_call(local_app):
+    """The new-user save can read usable defaults without making users edit them."""
+    app, workspace, _ = local_app
+    before = app.get(["bootstrap"])
+    assert before["capabilities"]["configure"] and not before["services"]
+    with model_service() as (url, requests):
+        service = {"name": "First-use", "baseUrl": url, "apiKey": "setup-fixture-key",
+                   "protocol": "openai", "models": ["MiniMax-M3"]}
+        preview = app.post(["configuration", "preview"], {"service": service})
+        assert "setup-fixture-key" not in json.dumps(preview)
+        assert not app.get(["bootstrap"])["services"]
+        saved = app.post(["configuration", "apply"], {"previewId": preview["previewId"], "revision": preview["revision"]})
+        assert saved["presetIds"] == ["web:pi:first-use:MiniMax-M3"]
+        payload = {"presetId": saved["presetIds"][0], "workspaceId": workspace["id"]}
+        facts = app.post(["launch-options"], payload)
+        assert facts["model"]["id"] == "MiniMax-M3"
+        assert facts["model"]["contextWindow"] == 1_000_000
+        assert facts["defaultThinkingLevel"] in facts["supportedThinkingLevels"]
+        assert facts["capabilitySources"]["context_window_tokens"] == "provider_profile"
+        assert not [r for r in requests if r["method"] == "POST"]
+        state = app.catalog._state_root
+        app.close()
+        restored = WebApplication(state_root=state)
+        try:
+            assert restored.post(["launch-options"], payload) == facts
+            assert restored.get(["bootstrap"])["presets"][0]["available"]
+        finally:
+            restored.close()
