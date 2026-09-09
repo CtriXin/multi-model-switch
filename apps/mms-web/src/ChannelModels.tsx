@@ -836,7 +836,7 @@ export function ChannelModels({
                   <div className="capability-review-actions">
                     <button
                       type="button"
-                      className="button"
+                      className="button capability-select-all"
                       disabled={!!busy}
                       aria-describedby="capability-selection-help"
                       onClick={() => chooseRefresh(allRefreshSelected ? "none" : "all")}

@@ -140,6 +140,15 @@
   justify-content: space-between;
   font-size: max(11px, .857143rem);
 }
+.capability-review-actions .capability-select-all {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface));
+  color: var(--accent-hover);
+  font-weight: 650;
+}
+.capability-review-actions .capability-select-all:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 20%, var(--surface));
+}
 .capability-selection-warning {
   color: var(--warn-ink);
 }
