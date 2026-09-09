@@ -1405,18 +1405,20 @@ dialog::backdrop {
 }
 /* Settings holds a channel table, so it gets a workspace-sized sheet with its
    own scrolling body instead of the page it used to occupy. */
-.dialog-body.wide {
-  /* The dialog element owns the width; matching it here would overflow by
-     the border box. */
+/* Settings embeds the model explorer, whose own dialog rule zeroes this
+   padding. Outrank it here so every band in the sheet shares one inset. */
+dialog:has(.dialog-body.wide) .dialog-body.wide {
   width: 100%;
   height: min(680px, 84vh);
-  padding: 20px 24px 18px;
+  padding: 18px 24px 16px;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.dialog-body.wide > header {
-  margin-bottom: 12px;
+dialog:has(.dialog-body.wide) .dialog-body.wide > header {
+  padding: 0;
+  margin: 0 0 12px;
+  border-bottom: 0;
 }
 .dialog-body header {
   display: flex;

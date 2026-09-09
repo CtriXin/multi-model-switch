@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Sun, Moon, Monitor, Minus, Plus, SlidersHorizontal, Palette } from "lucide-react";
 import type { Bootstrap } from "./types";
 import { Models } from "./Models";
+import { FONT_FAMILIES } from "./App";
 import { Dialog } from "./components";
 
 export function SettingsPage({
@@ -146,10 +147,13 @@ export function SettingsPage({
             >
               <option value="system">跟随系统</option>
               <option value="system_ui">System UI</option>
-              {installedFonts.inter && <option value="inter">Inter</option>}
-              {installedFonts.helvetica && (
-                <option value="helvetica">Helvetica Neue</option>
-              )}
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => !f.cjk && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="preference-row">
@@ -163,13 +167,13 @@ export function SettingsPage({
               onChange={(e) => setMonoFont(e.target.value)}
             >
               <option value="system">SF Mono</option>
-              {installedFonts.jetbrains && (
-                <option value="jetbrains">JetBrains Mono</option>
-              )}
-              {installedFonts.fira && <option value="fira">Fira Code</option>}
-              {installedFonts.plex && <option value="plex">IBM Plex Mono</option>}
-              {installedFonts.menlo && <option value="menlo">Menlo</option>}
-              {installedFonts.monaco && <option value="monaco">Monaco</option>}
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => f.mono && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="preference-row">
@@ -183,13 +187,13 @@ export function SettingsPage({
               onChange={(e) => setCjkFont(e.target.value)}
             >
               <option value="system">跟随系统</option>
-              {installedFonts.pingfang && <option value="pingfang">苹方</option>}
-              {installedFonts.hiragino && (
-                <option value="hiragino">冬青黑体</option>
-              )}
-              {installedFonts.hansans && <option value="hansans">思源黑体</option>}
-              {installedFonts.heiti && <option value="heiti">黑体</option>}
-              {installedFonts.yahei && <option value="yahei">微软雅黑</option>}
+              {Object.entries(FONT_FAMILIES)
+                .filter(([key, f]) => f.cjk && installedFonts[key])
+                .map(([key, f]) => (
+                  <option key={key} value={key}>
+                    {f.label}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="preference-row font-size-row">

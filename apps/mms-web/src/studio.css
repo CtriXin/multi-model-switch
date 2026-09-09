@@ -61,29 +61,33 @@
 .brand:hover {
   background: color-mix(in srgb, var(--ink) 3%, transparent);
 }
+/* Shorter, thicker bars with fully round caps, spaced apart, each sheared on
+   its own. Shearing the whole group instead leans the gaps too, which is what
+   made the mark read as three blades. */
 .sidebar .brand .mms-mark {
   background: transparent;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  transform: skewX(-12deg);
+  gap: 3px;
   width: auto;
   flex-shrink: 0;
-  transition: transform 140ms ease;
+  transition: transform 140ms var(--ease-out);
 }
 .sidebar .brand:hover .mms-mark {
-  transform: skewX(-12deg) scale(1.04);
+  transform: scale(1.04);
 }
 .sidebar .brand .mms-mark i {
   display: block;
   background: var(--accent);
-  height: 23px;
-  width: 5px;
-  border-radius: 2.5px;
-  transition: background 140ms ease;
+  height: 18px;
+  width: 4px;
+  /* Half the width, so the caps are half-circles rather than a chamfer. */
+  border-radius: 2px;
+  transform: skew(-13deg);
+  transition: background 140ms var(--ease-out);
 }
 .sidebar .brand .mms-mark i:nth-child(2) {
-  height: 14px;
+  height: 12px;
 }
 .brand-wordmark {
   display: inline-flex;
@@ -283,25 +287,12 @@
 .session-row:hover .session-link:not(.selected) {
   background: var(--soft);
 }
-/* A long title would otherwise collide with the menu, its ellipsis sitting
-   right against the kebab. Fade the text itself rather than covering it with
-   a matching colour: the row background carries alpha, so any painted
-   gradient would be a near miss against it. */
-.session-link-copy {
-  transition: mask-image var(--duration-fast) var(--ease-out);
-}
-.session-row:hover .session-link-copy,
-.session-row:has(.session-row-menu[aria-expanded="true"]) .session-link-copy {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - 48px),
-    transparent calc(100% - 18px)
-  );
-  mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - 48px),
-    transparent calc(100% - 18px)
-  );
+/* The row's right column is reserved for the menu, the way Kimi reserves the
+   slot its timestamp sits in. The title truncates before it, so nothing can
+   overlap in any state and no fade is needed. */
+.session-link .session-link-copy {
+  /* The menu is 24px wide inset 6px from the row edge; reserve both. */
+  padding-right: 30px;
 }
 .session-row-menu[aria-expanded="true"] {
   background: var(--soft);
@@ -414,10 +405,9 @@
 }
 .session-link.selected {
   box-shadow: none;
-  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  outline: none;
-  border-left: 2.5px solid var(--accent);
-  padding-left: 14.5px;
+  background: var(--selected);
+  outline: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: -1px;
 }
 .sidebar-footer {
   padding: 12px 19px;
@@ -830,6 +820,11 @@
   color: var(--muted);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+}
+.settings-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 .settings-tabs button.active {
   color: var(--ink);

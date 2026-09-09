@@ -85,33 +85,39 @@ function saveSetting(key: string, value: unknown) {
   }
 }
 // Appearance fonts. Families mirror Glint's catalogue so the two products
-// offer the same names. The CJK choice is appended ahead of the generic
-// family, so it only fills glyphs the main face is missing.
-const SANS_STACKS: Record<string, string[]> = {
-  system: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', 'sans-serif'],
-  inter: ['"Inter"', '-apple-system', 'sans-serif'],
-  helvetica: ['"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
-  system_ui: ['system-ui', 'sans-serif'],
-};
-const MONO_STACKS: Record<string, string[]> = {
-  system: ['"SF Mono"', 'Menlo', 'monospace'],
-  jetbrains: ['"JetBrains Mono"', '"SF Mono"', 'monospace'],
-  fira: ['"Fira Code"', '"SF Mono"', 'monospace'],
-  plex: ['"IBM Plex Mono"', '"SF Mono"', 'monospace'],
-  menlo: ['Menlo', 'monospace'],
-  monaco: ['Monaco', 'monospace'],
-};
-const CJK_FALLBACKS: Record<string, string[]> = {
-  system: [],
-  pingfang: ['"PingFang SC"'],
-  hiragino: ['"Hiragino Sans GB"'],
-  hansans: ['"Source Han Sans CN"', '"Noto Sans CJK SC"'],
-  heiti: ['"Heiti SC"'],
-  yahei: ['"Microsoft YaHei"'],
+// offer the same names. Everything is a locally installed face: a webfont
+// would put a network request in the path of a tool that runs offline, and
+// leave the page swapping type whenever that request is slow.
+type FontEntry = { label: string; css: string[]; mono?: boolean; cjk?: boolean };
+
+export const FONT_FAMILIES: Record<string, FontEntry> = {
+  inter: { label: "Inter", css: ['"Inter"'] },
+  helvetica: { label: "Helvetica Neue", css: ['"Helvetica Neue"', "Helvetica"] },
+  jetbrains: { label: "JetBrains Mono", css: ['"JetBrains Mono"'], mono: true },
+  fira: { label: "Fira Code", css: ['"Fira Code"'], mono: true },
+  plex: { label: "IBM Plex Mono", css: ['"IBM Plex Mono"'], mono: true },
+  menlo: { label: "Menlo", css: ["Menlo"], mono: true },
+  monaco: { label: "Monaco", css: ["Monaco"], mono: true },
+  pingfang: { label: "苹方", css: ['"PingFang SC"'], cjk: true },
+  hiragino: { label: "冬青黑体", css: ['"Hiragino Sans GB"'], cjk: true },
+  hansans: {
+    label: "思源黑体",
+    css: ['"Source Han Sans CN"', '"Noto Sans CJK SC"'],
+    cjk: true,
+  },
+  heiti: { label: "黑体", css: ['"Heiti SC"'], cjk: true },
+  yahei: { label: "微软雅黑", css: ['"Microsoft YaHei"'], cjk: true },
 };
 
-/** Family names to probe, so the picker never offers a face that is absent. */
-export const FONT_PROBES: Record<string, string> = {
+const SYSTEM_SANS = [
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"SF Pro Text"',
+];
+const SYSTEM_MONO = ['"SF Mono"', "Menlo"];
+
+/** The family name to probe for, so the picker never offers an absent face. */
+const PROBE_NAME: Record<string, string> = {
   inter: "Inter",
   helvetica: "Helvetica Neue",
   jetbrains: "JetBrains Mono",
@@ -140,7 +146,7 @@ export function detectInstalledFonts(): Record<string, boolean> {
     context.font = `72px ${generic}`;
     baselines[generic] = context.measureText(sample).width;
   }
-  for (const [key, family] of Object.entries(FONT_PROBES)) {
+  for (const [key, family] of Object.entries(PROBE_NAME)) {
     found[key] = Object.entries(baselines).some(([generic, width]) => {
       context.font = `72px "${family}", ${generic}`;
       return Math.abs(context.measureText(sample).width - width) > 0.5;
@@ -149,17 +155,22 @@ export function detectInstalledFonts(): Record<string, boolean> {
   return found;
 }
 
-export function fontStack(family: string, mono: string, cjk: string) {
-  void mono;
-  const base = SANS_STACKS[family] || SANS_STACKS.system;
-  const fallback = CJK_FALLBACKS[cjk] || [];
-  return [...base.slice(0, -1), ...fallback, base[base.length - 1]].join(", ");
+function withFallback(head: string[], cjk: string, generic: string) {
+  const tail = FONT_FAMILIES[cjk]?.css || [];
+  return [...head, ...tail, generic].join(", ");
+}
+
+export function fontStack(family: string, cjk: string) {
+  if (family === "system_ui") return withFallback(["system-ui"], cjk, "sans-serif");
+  const entry = FONT_FAMILIES[family];
+  const head = entry ? [...entry.css, ...SYSTEM_SANS] : SYSTEM_SANS;
+  return withFallback(head, cjk, "sans-serif");
 }
 
 export function monoStack(mono: string, cjk: string) {
-  const base = MONO_STACKS[mono] || MONO_STACKS.system;
-  const fallback = CJK_FALLBACKS[cjk] || [];
-  return [...base.slice(0, -1), ...fallback, base[base.length - 1]].join(", ");
+  const entry = FONT_FAMILIES[mono];
+  const head = entry ? [...entry.css, ...SYSTEM_MONO] : SYSTEM_MONO;
+  return withFallback(head, cjk, "monospace");
 }
 
 export function clampFontSize(value: unknown) {
@@ -382,8 +393,33 @@ export function App() {
     saveSetting("mms-web-accent", accent);
   }, [accent]);
   useEffect(() => {
+    // The tab icon is the same three-bar mark as the sidebar, drawn in the
+    // accent the user picked. A static file would keep showing the old colour.
+    const ink = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent")
+      .trim();
+    if (!ink) return;
+    const bar = (x: number, y: number, h: number) =>
+      `<rect x="${x}" y="${y}" width="4.5" height="${h}" rx="2.25"/>`;
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
+      `<g fill="${ink}" transform="translate(3.7 0) skewX(-13)">` +
+      bar(6.25, 4, 24) +
+      bar(13.75, 8, 16) +
+      bar(21.25, 4, 24) +
+      `</g></svg>`;
+    let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    link.type = "image/svg+xml";
+    link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }, [accent, theme]);
+  useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--app-font", fontStack(fontFamily, monoFont, cjkFont));
+    root.style.setProperty("--app-font", fontStack(fontFamily, cjkFont));
     root.style.setProperty("--font-mono", monoStack(monoFont, cjkFont));
     root.style.setProperty("--app-font-size", `${clampFontSize(fontSize)}px`);
     root.style.setProperty("--app-font-weight", boldText ? "600" : "400");
