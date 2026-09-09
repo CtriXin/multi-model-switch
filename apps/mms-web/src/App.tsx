@@ -32,6 +32,9 @@ import {
   WorkspacePicker,
   harnessNames,
 } from "./components";
+import { HelpGuide, GuideNudge } from "./HelpGuide";
+import type { GuideDestination } from "./HelpGuide";
+import type { GuideAction } from "./guide-content";
 import { ArtifactView } from "./ArtifactView";
 import { ProjectMaterials } from "./ProjectMaterials";
 import { Transcript } from "./Transcript";
@@ -83,6 +86,9 @@ export function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("new");
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideDestination, setGuideDestination] = useState<GuideDestination | null>(null);
+  const [guideRequest, setGuideRequest] = useState<{ nonce: string; text: string }>();
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [sessionError, setSessionError] = useState("");
@@ -311,8 +317,9 @@ export function App() {
     }
     action();
   }
-  function navigate(next: Page) {
+  function navigate(next: Page, after?: () => void) {
     requestNavigation(() => {
+    setGuideDestination(null);
     setPage(next);
     if (next !== "session")
       history.replaceState(null, "", location.pathname + location.search);
@@ -322,10 +329,38 @@ export function App() {
       setDetail(null);
       currentSelection.current = "";
     }
+    after?.();
+    });
+  }
+  function guideHint(target: string, text: string) {
+    setGuideDestination({ target, text, nonce: crypto.randomUUID() });
+  }
+  function guideNavigate(action: GuideAction) {
+    if (action === "settings") {
+      navigate("models", () => guideHint(".settings-heading", "在模型与通道中管理服务连接和默认值；外观与使用中调整阅读偏好。"));
+    } else if (action === "workspace") {
+      navigate("new", () => guideHint(".home-intro button", "点击这里选择工作文件夹。要换项目，先选好新路径，再发送新任务。"));
+    } else if (action === "artifacts" || action === "runtime") {
+      if (!detail || page !== "session") return;
+      setPanel(true);
+      setPanelTab(action === "artifacts" ? "artifacts" : "runtime");
+      guideHint(".result-panel .panel-tabs button.active", action === "artifacts" ? "在成果侧栏选择文件和版本；选段引用会进入草稿，发送后才执行修改。" : "运行详情显示当前模型、上下文和用量。可用操作以实际状态为准。");
+    } else {
+      const target = action === "model" ? ".task-settings-trigger" : action === "materials" ? ".materials-access" : "textarea[aria-label='任务内容']";
+      const text = action === "model" ? "点击这里选择模型、通道和思考强度。正在执行时，先完成或停止本轮。" : action === "materials" ? "点击项目资料，保存并启用后，会加入这个工作文件夹的后续消息。" : "写下目标和期望结果，检查工作目录、模型与 effort，再点击发送。";
+      if (page === "session" || page === "new") guideHint(target, text);
+      else navigate("new", () => guideHint(target, text));
+    }
+  }
+  function guideExample(text: string) {
+    navigate("new", () => {
+      setGuideRequest({ nonce: crypto.randomUUID(), text });
+      guideHint("textarea[aria-label='任务内容']", "示例已追加到新任务草稿。你可以修改它，检查目录和模型后再发送。");
     });
   }
   function openSession(id: string) {
     requestNavigation(() => {
+    setGuideDestination(null);
     history.replaceState(null, "", "#session=" + encodeURIComponent(id));
     followOutput.current = true;
     holdPosition.current = false;
@@ -688,6 +723,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-actions">
+            <HelpGuide ready={!loading} open={guideOpen} setOpen={setGuideOpen} data={data} hasSession={page === "session" && !!detail} navigate={guideNavigate} example={guideExample} />
             {detail && (
               <Status
                 session={detail.session}
@@ -706,6 +742,7 @@ export function App() {
             )}
           </div>
         </header>
+        <GuideNudge destination={guideDestination} close={() => setGuideDestination(null)} reopen={() => setGuideOpen(true)} />
         {isPreview && (
           <div className="preview-banner">
             <span>
@@ -773,6 +810,8 @@ export function App() {
                 key={`new:${workspaceId}:${recipe?.key || ""}`}
                 draftKey={`new:${workspaceId}:${recipe?.key || ""}`}
                 initialText={recipe?.prompt}
+                guideRequest={guideRequest}
+                guideHandled={() => setGuideRequest(undefined)}
                 workspaceId={workspaceId}
                 disabled={
                   !connected ||

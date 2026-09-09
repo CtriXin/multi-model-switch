@@ -1,3 +1,4 @@
+import { appendGuidePrompt } from "./guide-content";
 import { readDraft, saveDraft, discardDraft } from "./drafts";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
@@ -60,10 +61,14 @@ export function Composer({
   initialText = "",
   selectionRequest,
   selectionHandled,
+  guideRequest,
+  guideHandled,
   draftKey: providedDraftKey,
   placeholder = "继续补充你的想法…",
 }: {
   initialText?: string;
+  guideRequest?: { nonce: string; text: string };
+  guideHandled?: () => void;
   selectionRequest?: { nonce: string; selection: FileSelection };
   selectionHandled?: () => void;
   draftKey?: string;
@@ -181,6 +186,14 @@ export function Composer({
   const [dismissed, setDismissed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const consumedSelection = useRef("");
+  const consumedGuide = useRef("");
+  useEffect(() => {
+    if (!guideRequest || consumedGuide.current === guideRequest.nonce) return;
+    consumedGuide.current = guideRequest.nonce;
+    setText(old => appendGuidePrompt(old, guideRequest.text));
+    input.current?.focus();
+    guideHandled?.();
+  }, [guideRequest?.nonce]);
   useEffect(() => {
     if (!selectionRequest || consumedSelection.current === selectionRequest.nonce) return;
     consumedSelection.current = selectionRequest.nonce;
