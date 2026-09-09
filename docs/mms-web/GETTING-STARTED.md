@@ -11,8 +11,8 @@ MMS Web 把 MMF 日常使用的模型、通道、effort、工作文件夹和 Pi 
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.2.0/install.sh -o /tmp/mms-install-v4.sh
-bash /tmp/mms-install-v4.sh --ref v4.2.0 --install-cli pi --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v4.2.1/install.sh -o /tmp/mms-install-v4.sh
+bash /tmp/mms-install-v4.sh --ref v4.2.1 --install-cli pi --write-shell-rc
 ```
 
 关闭终端后重新打开，运行：
@@ -122,3 +122,6 @@ HTML 是静态预览，脚本、外部资源和跳转均停用；需要原文件
 自己的消息下方可展开「本次使用」，检查本次加入的项目资料版本、Skills 来源与同名覆盖、附件、文件引用和成果选段。已提交表示 Pi 已接收请求，文件引用不代表模型已经读取。排队、取消、发送失败或结果待确认会单独显示；旧消息没有来源记录时不会补造。
 
 停用或删除资料不会从已发送的会话历史撤回内容。编辑后的新版本只在后续消息生效，历史记录仍显示当时版本。保存遇到冲突时保留当前草稿，刷新列表核对后再保存。资料随 Web 数据目录保存和恢复。
+
+
+左上角 Logo 旁和设置页顶部均显示当前 MMS 服务版本，便于确认升级是否生效。

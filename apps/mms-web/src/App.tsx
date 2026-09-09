@@ -27,6 +27,7 @@ import {
   Composer,
   Dialog,
   Logo,
+  AppVersion,
   Status,
   WorkspacePicker,
   harnessNames,
@@ -452,6 +453,7 @@ export function App() {
         >
           <Logo />
           <span>mms</span>
+          <AppVersion version={data.appVersion} />
         </button>
         <div className="sidebar-actions">
           <button className="new-task" onClick={() => navigate("new")}>

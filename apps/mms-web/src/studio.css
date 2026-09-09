@@ -852,3 +852,7 @@
     transition: none;
   }
 }
+
+.app-version { color: var(--muted); font-size: 12px; font-weight: 400; letter-spacing: 0; white-space: nowrap; }
+.brand > .app-version { margin-left: 2px; font-size: 11px; }
+.settings-heading > .app-version { margin-left: auto; padding-top: 8px; }
