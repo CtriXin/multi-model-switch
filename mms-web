@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Standalone additive MMS Web entry; original mms/mmf commands are unchanged."""
+from mms_runtime import ensure_supported_python
+ensure_supported_python("MMS Web")
+from mms_web.__main__ import main
+main()

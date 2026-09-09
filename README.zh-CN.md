@@ -1,5 +1,8 @@
 # Multi-Model Switch（MMS）
 
+> **MMS 4.0：真实可执行的本地 Web 对话。** 安装 v4 后运行 `mms web --open`。页面随包提供，通过原 MMS 启动器使用 Pi。[安装与使用](docs/mms-web/GETTING-STARTED.md) · [版本说明](docs/mms-web/RELEASE-v4.0.0.md) · [下一阶段交接](docs/mms-web/NEXT-PHASE.md)。当前 Web harness 是 Pi，已有 CLI 启动能力继续保留。
+
+
 [主 README](./README.md) · [English README](./README.en.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -19,7 +22,7 @@
 - **按 session 注入能力包**：Caveman、CodeGraph、token-saver、TOON、Web automation bundle 等能力默认是 session-local，不改你的全局 hook。
 - **诊断优先**：在怀疑模型之前，先看 route、协议、cache、API Key、请求路径和 runtime exposure。
 
-MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
+MMS Web 是原 launcher 的可视交互入口。`chat`、`discuss` 和高上下文 helper 现在只作为 maintenance-only 表面；主线是把本地 coding CLI 启动、路由、隔离和诊断做好。
 
 ## 版本通道：Stable / Dev / Canary
 
@@ -33,7 +36,7 @@ MMS 不是新的 chat 客户端。`chat`、`discuss` 和高上下文 helper 现�
 
 分支约定见 [`docs/RELEASE_CHANNELS.md`](docs/RELEASE_CHANNELS.md)。除非人类明确要求改 release/channel contract，否则不要再重命名、重映射或混用这些关系。当前过渡期：`main` 会和 `dev` 同步一段时间；等 Stable 追到当前能力后，`main` 固定为 Stable/default，不再当日常 Dev 使用。开发过程中发现的 bug 会先修复，再进入 Stable。
 
-当前版本轨道：Stable/Main 是 `3.4.z`；Dev / `mmf` 是 `3.5.z`；Canary / `mmg` 是 `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
+v4.0.0 是本地 Web 的首个大版本。下列 3.x 轨道为此前分支发布历史，不代表 v4 已晋级各分支：Stable/Main `3.4.z`、Dev `3.5.z`、Canary `3.6.z`。`z` 是各 channel 内的 release 计数：单 commit release 就 `z+1`，复合多个已验证 commits 的 release 也只 bump 一次；未 tag 的日常小步 commit 继续用 git hash 追踪。
 
 当前本机维护者命令已固定：`mms` 是 public installed copy，只用于公开版本复现；`mmd` 指 stable worktree；`mmf` 指 dev worktree；`mmg` 指 canary worktree；`mmm` 指 main worktree。`mmf` / `mmg` 都使用 `~/.config/mms-next` preview DB root。重新生成本机命令用 `scripts/link_local_channel_commands.sh`。
 

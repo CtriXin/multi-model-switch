@@ -1129,3 +1129,16 @@ def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):
     assert not (tmp_path / ".config" / "opencode").exists(), (
         ".config/opencode should not be created by --dry-run"
     )
+
+
+def test_published_v4_tag_has_v4_installer_track(tmp_path):
+    env = os.environ.copy()
+    env.update(_version_env_overrides(stable_ref="v4.0.0", latest_tag_ref="v4.0.0"))
+    env["HOME"] = str(tmp_path)
+    completed = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--ref", "v4.0.0", "--version"],
+        cwd=ROOT_DIR, env=env, input=INSTALL_SCRIPT.read_text(),
+        capture_output=True, text=True, check=True,
+    )
+    assert "Planned install ref: v4.0.0" in completed.stdout
+    assert "Version track: 4.x Stable (4.0.0)" in completed.stdout

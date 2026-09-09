@@ -4030,6 +4030,12 @@ def _copy_existing_provider(
             anthropic_base = ""
     else:
         anthropic_base = _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
+    # Approved-bundle providers carry the concrete URL as well as defaults.
+    # Keep that higher-precedence field coherent with an explicit editor change.
+    if "openai_base_url" in provider and "openai_base_url" in provider_payload:
+        provider["openai_base_url"] = openai_base.rstrip("/")
+    if "anthropic_base_url" in provider and "anthropic_base_url" in provider_payload:
+        provider["anthropic_base_url"] = anthropic_base.rstrip("/")
     if openai_base:
         provider["default_openai_base_url"] = openai_base.rstrip("/")
     elif "default_openai_base_url" in provider:
@@ -4247,6 +4253,13 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                     cap_payload["thinking_control"] = control
             if _safe_text(caps.get("reasoning_effort")):
                 cap_payload["reasoning_effort"] = _safe_text(caps.get("reasoning_effort")).lower()
+            elif caps.get("reasoning_effort") == "":
+                # Explicit reset removes only the user's effort override. Other
+                # capability facts and preference fields remain untouched.
+                cap_payload.pop("reasoning_effort", None)
+                entry.pop("reasoning_effort", None)
+                if isinstance(entry.get("capability_sources"), dict):
+                    entry["capability_sources"].pop("reasoning_effort", None)
             if _safe_text(caps.get("official_reasoning_effort")):
                 cap_payload["official_reasoning_effort"] = _safe_text(caps.get("official_reasoning_effort")).lower()
             if _safe_text(caps.get("recommended_reasoning_effort")):

@@ -1,5 +1,8 @@
 # Multi-Model Switch (MMS)
 
+> **MMS 4.0 — local Web conversations.** Run `mms web --open` after installing v4. The release bundles the frontend and uses the original MMS launcher with Pi. [Install and use](docs/mms-web/GETTING-STARTED.md) · [Release notes](docs/mms-web/RELEASE-v4.0.0.md) · [Roadmap and handoff](docs/mms-web/NEXT-PHASE.md). Web currently supports Pi; existing CLI launchers remain available.
+
+
 [简体中文 README](./README.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
